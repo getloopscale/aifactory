@@ -101,16 +101,60 @@ describe('createCheckRun on a 5xx', () => {
     expect(calls.length).toBeGreaterThan(1)
   })
 
-  it('repeats a read that gets a 502, and a write that is not safe to repeat is not', async () => {
+  it('repeats a read that gets a 502', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /pulls/3': [{ status: 502 }, { status: 200, body: { node_id: 'n' } }],
-      'POST /issues/3/comments': { status: 502 },
     })
-    const api = createGithubApi(fetch, async () => {})
-    await api.readPullRequest('o/r', 't', 3).catch(() => undefined)
+    await createGithubApi(fetch, noWait)
+      .readPullRequest('o/r', 't', 3)
+      .catch(() => undefined)
     expect(calls.filter((c) => c.url === '/pulls/3').length).toBeGreaterThan(1)
-    await api.commentOnIssue('o/r', 't', 3, 'hi').catch(() => undefined)
-    expect(calls.filter((c) => c.url === '/issues/3/comments')).toHaveLength(1)
+  })
+
+  it('finds the comment a 502 posted instead of posting it twice', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /issues/3/comments': { status: 502 },
+      'GET /issues/3/comments': { status: 200, body: [{ id: 9, body: 'hi' }] },
+    })
+    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('9')
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
+  })
+
+  it('posts the comment again when the 502 posted nothing', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /issues/3/comments': [{ status: 502 }, { status: 201, body: { id: 4 } }],
+      'GET /issues/3/comments': { status: 200, body: [] },
+    })
+    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('4')
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
+  })
+
+  it('finds the pull request a 502 opened instead of opening it twice', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /pulls': [
+        { status: 200, body: [] },
+        { status: 200, body: [{ number: 5, html_url: 'https://github.com/o/r/pull/5' }] },
+      ],
+      'GET /': { status: 200, body: { default_branch: 'trunk' } },
+      'POST /pulls': { status: 502 },
+    })
+    const opened = await createGithubApi(fetch, noWait).openPullRequest('o/r', 't', {
+      head: 'factory/1',
+      title: 'T',
+      body: 'B',
+    })
+    expect(opened).toMatchObject({ number: 5 })
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
+  })
+
+  it('takes a branch a 502 created as created', async () => {
+    const { fetch } = fakeFetch({
+      'POST /git/refs': [{ status: 502 }, { status: 422 }],
+      'GET /git/ref/heads/workspace': { status: 200, body: { object: { sha: 'abc' } } },
+    })
+    await expect(
+      createGithubApi(fetch, noWait).createBranch('o/r', 't', 'workspace', 'abc'),
+    ).resolves.toBeUndefined()
   })
 
   it('does not repeat a 4xx', async () => {
@@ -1334,7 +1378,7 @@ describe('what integrating through the repository CI needs', () => {
       'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
       'POST https://api.github.com/graphql': { status: 502, body: {} },
     })
-    await expect(createGithubApi(fetch).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
+    await expect(createGithubApi(fetch, noWait).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
       /could not turn auto-merge off on o\/r#12: HTTP 502/,
     )
   })

@@ -382,22 +382,41 @@ export function createGithubApi(
       },
     })
 
+  const pause = (attempt: number) => wait(SERVER_ERROR_RETRY_MS * attempt)
+
   /**
-   * A call to the repository. A 5xx passes on its own, so a read is repeated a few times with a pause, and
-   * the last answer is returned when the tries run out. A write is repeated only when the caller says it is
-   * safe to (`repeat`): a 502 can come after GitHub did the work, and repeating would do it twice.
+   * A call to the repository. A 5xx passes on its own, so the call is repeated a few times with a pause, and
+   * the last answer is returned when the tries run out. Pass `repeat = false` for a write a repeat would
+   * do twice (a 502 can come after GitHub did the work); `recovering` handles those.
    */
   async function call(
     repo: string,
     token: string,
     path: string,
     init: RequestInit = {},
-    repeat = (init.method ?? 'GET') === 'GET',
+    repeat = true,
   ): Promise<Response> {
     for (let attempt = 1; ; attempt += 1) {
       const response = await send(repo, token, path, init)
       if (!repeat || response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) return response
-      await wait(SERVER_ERROR_RETRY_MS * attempt)
+      await pause(attempt)
+    }
+  }
+
+  /**
+   * A write that makes something new. After a 5xx GitHub may have made it, so before each new try
+   * `recover` looks for what the write would have made and, when it is there, that is the answer.
+   */
+  async function recovering<T>(
+    write: () => Promise<Response>,
+    recover: () => Promise<T | undefined>,
+  ): Promise<{ response: Response } | { recovered: T }> {
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await write()
+      if (response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) return { response }
+      await pause(attempt)
+      const recovered = await recover()
+      if (recovered !== undefined) return { recovered }
     }
   }
 
@@ -420,15 +439,21 @@ export function createGithubApi(
     const pull = (await (
       await ensure(await call(repo, token, `/pulls/${number}`), `reading ${repo}#${number}`, [200])
     ).json()) as { node_id: string }
-    const response = await fetchImpl('https://api.github.com/graphql', {
-      method: 'POST',
-      headers: {
-        accept: 'application/vnd.github+json',
-        authorization: `Bearer ${token}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ query, variables: { id: pull.node_id, ...variables } }),
-    })
+    // These mutations set a state (ready, auto-merge on or off), so a repeat does no harm.
+    let response: Response
+    for (let attempt = 1; ; attempt += 1) {
+      response = await fetchImpl('https://api.github.com/graphql', {
+        method: 'POST',
+        headers: {
+          accept: 'application/vnd.github+json',
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ query, variables: { id: pull.node_id, ...variables } }),
+      })
+      if (response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) break
+      await pause(attempt)
+    }
     const result = (await response.json().catch(() => ({}))) as GraphqlAnswer<T>
     if (result.errors?.length) return { why: result.errors.map((e) => e.message).join('; ') }
     if (!response.ok || !result.data) return { why: `HTTP ${response.status}` }
@@ -448,48 +473,43 @@ export function createGithubApi(
     return body.object.sha
   }
 
+  /** The open pull request from a branch, if there is one. */
+  async function openPull(repo: string, token: string, head: string) {
+    const owner = repo.split('/')[0]
+    const open = (await (
+      await ensure(
+        await call(repo, token, `/pulls?state=open&head=${owner}:${encodeURIComponent(head)}`),
+        `listing pull requests of ${repo}`,
+        [200],
+      )
+    ).json()) as { number: number; html_url: string; draft?: boolean; title?: string }[]
+    if (!open[0]) return undefined
+    const { number, html_url: url, draft, title } = open[0]
+    return { number, url, draft, title }
+  }
+
   return {
     async createCheckRun(repo, token, check) {
       await ensure(
         // A second check run with the same result is harmless, so this write may be repeated.
-        await call(
-          repo,
-          token,
-          '/check-runs',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              name: check.name,
-              head_sha: check.headSha,
-              status: 'completed',
-              conclusion: check.conclusion,
-              output: { title: check.title, summary: check.summary },
-            }),
-          },
-          true,
-        ),
+        await call(repo, token, '/check-runs', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: check.name,
+            head_sha: check.headSha,
+            status: 'completed',
+            conclusion: check.conclusion,
+            output: { title: check.title, summary: check.summary },
+          }),
+        }),
         `creating the check run on ${repo}`,
         [201],
       )
     },
 
     async openPullRequest(repo, token, pull) {
-      const owner = repo.split('/')[0]
-      const open = (await (
-        await ensure(
-          await call(
-            repo,
-            token,
-            `/pulls?state=open&head=${owner}:${encodeURIComponent(pull.head)}`,
-          ),
-          `listing pull requests of ${repo}`,
-          [200],
-        )
-      ).json()) as { number: number; html_url: string; draft?: boolean; title?: string }[]
-      if (open[0]) {
-        const { number, html_url: url, draft, title } = open[0]
-        return { number, url, draft, title }
-      }
+      const existing = await openPull(repo, token, pull.head)
+      if (existing) return existing
 
       const base =
         pull.base ??
@@ -498,21 +518,30 @@ export function createGithubApi(
             default_branch: string
           }
         ).default_branch
+      const answer = await recovering(
+        () =>
+          call(
+            repo,
+            token,
+            '/pulls',
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                head: pull.head,
+                base,
+                title: pull.title,
+                body: pull.body,
+                draft: pull.draft ?? false,
+              }),
+            },
+            false,
+          ),
+        // A 502 can come after GitHub opened it: look for the pull request before asking again.
+        () => openPull(repo, token, pull.head),
+      )
+      if ('recovered' in answer) return answer.recovered
       const created = (await (
-        await ensure(
-          await call(repo, token, '/pulls', {
-            method: 'POST',
-            body: JSON.stringify({
-              head: pull.head,
-              base,
-              title: pull.title,
-              body: pull.body,
-              draft: pull.draft ?? false,
-            }),
-          }),
-          `opening a pull request on ${repo}`,
-          [201],
-        )
+        await ensure(answer.response, `opening a pull request on ${repo}`, [201])
       ).json()) as { number: number; html_url: string }
       return { number: created.number, url: created.html_url }
     },
@@ -802,14 +831,13 @@ export function createGithubApi(
     },
 
     async createBranch(repo, token, branch, sha) {
-      await ensure(
-        await call(repo, token, '/git/refs', {
-          method: 'POST',
-          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
-        }),
-        `creating the branch ${branch} of ${repo}`,
-        [201],
-      )
+      const response = await call(repo, token, '/git/refs', {
+        method: 'POST',
+        body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
+      })
+      // A repeat after a 502 that did create it answers 422: the branch is there at the commit, so it is done.
+      if (response.status === 422 && (await branchHead(repo, token, branch)) === sha) return
+      await ensure(response, `creating the branch ${branch} of ${repo}`, [201])
     },
 
     async mergeBranch(repo, token, base, head) {
@@ -837,7 +865,13 @@ export function createGithubApi(
     async mergePullRequest(repo, token, number, sha, merge) {
       const body = JSON.stringify({ sha, ...mergeFields(number, merge) })
       for (let attempt = 1; ; attempt += 1) {
-        const response = await call(repo, token, `/pulls/${number}/merge`, { method: 'PUT', body })
+        const response = await call(
+          repo,
+          token,
+          `/pulls/${number}/merge`,
+          { method: 'PUT', body },
+          false,
+        )
         if (response.status !== 200 && attempt < MERGE_ATTEMPTS) {
           const message = await response
             .clone()
@@ -1061,14 +1095,32 @@ export function createGithubApi(
     },
 
     async commentOnIssue(repo, token, issueNumber, body) {
-      const response = await ensure(
-        await call(repo, token, `/issues/${issueNumber}/comments`, {
-          method: 'POST',
-          body: JSON.stringify({ body }),
-        }),
-        `commenting on ${repo}#${issueNumber}`,
-        [201],
+      const since = new Date(Date.now() - 60_000).toISOString()
+      const answer = await recovering(
+        () =>
+          call(
+            repo,
+            token,
+            `/issues/${issueNumber}/comments`,
+            { method: 'POST', body: JSON.stringify({ body }) },
+            false,
+          ),
+        // A 502 can come after GitHub posted it: look for the same text before posting again.
+        async () => {
+          const listed = await call(
+            repo,
+            token,
+            `/issues/${issueNumber}/comments?per_page=100&since=${encodeURIComponent(since)}`,
+          )
+          if (!listed.ok) return undefined
+          const posted = ((await listed.json()) as { id: number; body?: string }[]).find(
+            (c) => c.body === body,
+          )
+          return posted ? String(posted.id) : undefined
+        },
       )
+      if ('recovered' in answer) return answer.recovered
+      const response = await ensure(answer.response, `commenting on ${repo}#${issueNumber}`, [201])
       return String(((await response.json()) as { id: number }).id)
     },
 
