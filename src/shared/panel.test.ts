@@ -88,6 +88,14 @@ describe('a failure that passes by itself', () => {
   it('is told by the usage limit flag or by an error of the environment', () => {
     expect(retryableFailure({ quota: true })).toBe('quota')
     expect(retryableFailure({ error: 'git push: remote rejected' })).toBe('environment')
+    expect(
+      retryableFailure({
+        error: 'GitHub answered 502 creating the check run on o/r: { "message": "Server Error" }',
+      }),
+    ).toBe('environment')
+    expect(
+      retryableFailure({ error: 'GitHub answered 403 creating the check run on o/r: no' }),
+    ).toBe(null)
     expect(retryableFailure({ error: 'GitHub answered 502' })).toBe('environment')
     expect(retryableFailure({ error: 'Status code 402' })).toBe('environment')
     expect(retryableFailure({ error: 'the agent made no change' })).toBeNull()

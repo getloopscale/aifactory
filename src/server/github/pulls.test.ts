@@ -4,7 +4,9 @@ import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore
 
 type Call = { method: string; url: string; body?: unknown; auth?: string }
 
-function fakeFetch(answers: Record<string, { status: number; body?: unknown }>) {
+type Answer = { status: number; body?: unknown }
+
+function fakeFetch(answers: Record<string, Answer | Answer[]>) {
   const calls: Call[] = []
   const fetch = async (url: string, init: RequestInit = {}) => {
     const method = init.method ?? 'GET'
@@ -15,7 +17,8 @@ function fakeFetch(answers: Record<string, { status: number; body?: unknown }>) 
       body: init.body ? JSON.parse(String(init.body)) : undefined,
       auth: (init.headers as Record<string, string>).authorization,
     })
-    const answer = answers[`${method} ${path.split('?')[0]}`] ?? { status: 404 }
+    const given = answers[`${method} ${path.split('?')[0]}`] ?? { status: 404 }
+    const answer = Array.isArray(given) ? (given.length > 1 ? given.shift()! : given[0]!) : given
     // A 204 has no body, and the Response constructor refuses one.
     return new Response(answer.status === 204 ? null : JSON.stringify(answer.body ?? {}), {
       status: answer.status,
@@ -60,6 +63,50 @@ describe('createCheckRun', () => {
         summary: 's',
       }),
     ).rejects.toThrow(/403.*nope/)
+  })
+})
+
+describe('createCheckRun on a 5xx', () => {
+  const check = {
+    name: 'n',
+    headSha: 'a',
+    conclusion: 'success' as const,
+    title: 't',
+    summary: 's',
+  }
+
+  it('calls again after a 502 and goes on', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /check-runs': [{ status: 502, body: { message: 'Server Error' } }, { status: 201 }],
+    })
+    const pauses: number[] = []
+    await createGithubApi(fetch, async (ms) => void pauses.push(ms)).createCheckRun(
+      'o/r',
+      't',
+      check,
+    )
+    expect(calls).toHaveLength(2)
+    expect(pauses).toHaveLength(1)
+  })
+
+  it('throws the 502 when every try gets it', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /check-runs': { status: 502, body: { message: 'Server Error' } },
+    })
+    await expect(
+      createGithubApi(fetch, async () => {}).createCheckRun('o/r', 't', check),
+    ).rejects.toThrow(/GitHub answered 502 creating the check run on o\/r.*Server Error/)
+    expect(calls.length).toBeGreaterThan(1)
+  })
+
+  it('does not repeat a 4xx', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /check-runs': { status: 422, body: { message: 'bad sha' } },
+    })
+    await expect(
+      createGithubApi(fetch, async () => {}).createCheckRun('o/r', 't', check),
+    ).rejects.toThrow(/422.*bad sha/)
+    expect(calls).toHaveLength(1)
   })
 })
 

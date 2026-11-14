@@ -337,6 +337,9 @@ function mergeFields(number: number, merge: PullRequestMerge): Record<string, st
 /** How many times a merge is asked for when GitHub's answer is one a moment later may change. */
 const MERGE_ATTEMPTS = 4
 const MERGE_RETRY_MS = 3_000
+/** Tries of a call GitHub answers with a 5xx, which passes on its own, and the pause that grows with each. */
+const SERVER_ERROR_ATTEMPTS = 4
+const SERVER_ERROR_RETRY_MS = 2_000
 
 /**
  * A merge refused for a moment: another merge moved the base between the request and the merge (405
@@ -378,6 +381,15 @@ export function createGithubApi(
         ...(init.headers as Record<string, string> | undefined),
       },
     })
+
+  /** Repeats a call while GitHub answers 5xx; the last answer is returned when the tries run out. */
+  async function untilServed(send: () => Promise<Response>): Promise<Response> {
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await send()
+      if (response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) return response
+      await wait(SERVER_ERROR_RETRY_MS * attempt)
+    }
+  }
 
   async function ensure(response: Response, action: string, status: number[]) {
     if (!status.includes(response.status)) {
@@ -429,16 +441,18 @@ export function createGithubApi(
   return {
     async createCheckRun(repo, token, check) {
       await ensure(
-        await call(repo, token, '/check-runs', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: check.name,
-            head_sha: check.headSha,
-            status: 'completed',
-            conclusion: check.conclusion,
-            output: { title: check.title, summary: check.summary },
+        await untilServed(() =>
+          call(repo, token, '/check-runs', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: check.name,
+              head_sha: check.headSha,
+              status: 'completed',
+              conclusion: check.conclusion,
+              output: { title: check.title, summary: check.summary },
+            }),
           }),
-        }),
+        ),
         `creating the check run on ${repo}`,
         [201],
       )
