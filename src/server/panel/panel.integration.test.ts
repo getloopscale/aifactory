@@ -757,6 +757,7 @@ describe('actions', () => {
     /** A rework a person asked for, with its decision, that failed creating its sandbox. */
     async function reworkAtSandbox(issueNumber: number, intake: object | null = null) {
       const id = await seed('failed', { issueNumber, headSha: 'abc' })
+      api.repo('paulo/app').heads.set(`factory/${issueNumber}`, 'abc')
       const [asked] = await getDb()
         .insert(decision)
         .values({ taskId: id, kind: 'request_changes', sha: 'abc', note: 'rename it' })
@@ -795,6 +796,8 @@ describe('actions', () => {
       const { id } = await reworkAtSandbox(91)
       expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
       expect(deleted()).toEqual([])
+      // The branch the new run fetches is still at the commit the failed run started from.
+      expect(api.repo('paulo/app').heads.get('factory/91')).toBe('abc')
       expect(await continuationOf(queued[0].input)).toEqual({ feedback: 'rename it' })
       const [row] = await getDb().select().from(task).where(eq(task.id, id))
       expect(row.headSha).toBe('abc')
@@ -827,6 +830,21 @@ describe('actions', () => {
       expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
     })
 
+    it('does not count repeated sandbox failures of a first run either', async () => {
+      const id = await seed('failed', { issueNumber: 97 }, [
+        { stage: 'intake', detail: { decision: 'retry', note: '' } },
+        { stage: 'sandbox' },
+        { stage: 'failed', detail: outage },
+      ])
+      for (let i = 0; i < 4; i++) {
+        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+        await failAgain(id)
+      }
+      expect(deleted()).toEqual(Array(4).fill('factory/97'))
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.retryAt).not.toBeNull()
+    })
+
     it('keeps the branch of a first run that pushed before the environment failed', async () => {
       const id = await seed('failed', { issueNumber: 95 }, [
         { stage: 'intake', detail: { decision: 'retry', note: '' } },
@@ -836,9 +854,10 @@ describe('actions', () => {
       api.repo('paulo/app').heads.set('factory/95', 'pushed')
       await runDueRetries(deps(), later())
       expect(deleted()).toEqual([])
-      const input = queued[0].input as { feedback?: string }
-      expect(queued[0].input).toMatchObject({ taskId: id })
-      expect(input.feedback).toMatch(/continue from the branch/i)
+      // Nobody asked for anything, so no feedback is made up: the job only continues the branch.
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: id, resume: true }])
+      expect(await continuationOf(queued[0].input)).toEqual({ feedback: '', plain: true })
+      expect(api.repo('paulo/app').heads.get('factory/95')).toBe('pushed')
     })
 
     it('does not count three sandbox failures of a rework as attempts', async () => {
