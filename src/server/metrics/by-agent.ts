@@ -280,7 +280,8 @@ export type ReworkFact = {
  * N-1 that asked for changes, made in the same run: that review is the one charged. Only a rework recorded as
  * started by a review is charged: one that failing checks started (even after a review of the previous
  * attempt asked for changes, or was refuted), one a person sent back, and one recorded without its trigger
- * are charged to nobody. `perReview` is rounds over the reviews that agent and model made.
+ * are charged to nobody, and the review a trigger-less rework answers is left out of the count, since its
+ * outcome is unknown. `perReview` is rounds over the reviews that agent and model made.
  */
 export function reworkByReviewer(
   reviews: ReviewFact[],
@@ -293,10 +294,9 @@ export function reworkByReviewer(
     totals.set(key, t)
     return t
   }
-  for (const r of reviews) of(keyOf(r.reviewer, r.model)).reviews += 1
-  for (const round of rework.filter((r) => r.trigger === 'review')) {
+  const causeOf = (round: ReworkFact) => {
     const run = runsOf(events.get(round.taskId) ?? []).find((r) => inRun(r, round.at))
-    const cause = reviews
+    return reviews
       .filter(
         (r) =>
           r.taskId === round.taskId &&
@@ -308,9 +308,19 @@ export function reworkByReviewer(
       )
       .sort((a, b) => a.at.getTime() - b.at.getTime())
       .at(-1)
+  }
+  // A rework recorded without its trigger may or may not have been this review's, so the review is left out of
+  // the rate rather than counted as one that caused nothing.
+  const unknown = new Set(
+    rework.filter((r) => r.trigger === undefined).flatMap((r) => causeOf(r) ?? []),
+  )
+  for (const r of reviews) if (!unknown.has(r)) of(keyOf(r.reviewer, r.model)).reviews += 1
+  for (const round of rework.filter((r) => r.trigger === 'review')) {
+    const cause = causeOf(round)
     if (cause) of(keyOf(cause.reviewer, cause.model)).reworkRounds += 1
   }
   return [...totals.entries()]
+    .filter(([, t]) => t.reviews > 0)
     .map(([key, t]) => {
       const [reviewer, model] = splitKey(key)
       return { reviewer, model, ...t, perReview: t.reworkRounds / t.reviews }

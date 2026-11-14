@@ -232,11 +232,21 @@ describe('reworkByReviewer', () => {
     ])
   })
 
-  it('charges nobody for a rework recorded without its trigger', () => {
-    const reviews = [fact(1, 'codex', 'changes', 1)]
+  it('leaves out of the rate a review whose rework was recorded without its trigger', () => {
+    // A historical review followed by a rework with no trigger: its outcome is unknown, so it is not counted as zero.
+    const reviews = [fact(1, 'codex', 'changes', 1), fact(2, 'codex', 'approve', 1)]
     expect(
-      reworkByReviewer(reviews, [rework(1, 2, 2, null)], events([1, finished(0)]))[0].reworkRounds,
-    ).toBe(0)
+      reworkByReviewer(
+        reviews,
+        [rework(1, 2, 2, null)],
+        events([1, finished(0)], [2, finished(0)]),
+      ),
+    ).toEqual([{ reviewer: 'codex', model: null, reviews: 1, reworkRounds: 0, perReview: 0 }])
+  })
+
+  it('reports no rate for an agent whose every review has an unknown rework', () => {
+    const reviews = [fact(1, 'codex', 'changes', 1)]
+    expect(reworkByReviewer(reviews, [rework(1, 2, 2, null)], events([1, finished(0)]))).toEqual([])
   })
 
   it('does not charge a rework of a later run to a review of an earlier run', () => {

@@ -296,6 +296,7 @@ describe('the history of the agent settings', () => {
       getDb(),
       { reviewer: 'codex', models: { reviewer: 'gpt-6-luna' } },
       ready,
+      read,
     )
 
     const changes = (await listSettingChanges(getDb())).filter((c) => c.role === 'reviewer')

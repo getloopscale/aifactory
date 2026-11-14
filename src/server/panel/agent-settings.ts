@@ -15,14 +15,15 @@ export async function changeAgentSettings(
   db: Database,
   patch: AgentSettingsPatch,
   env: NodeJS.ProcessEnv = process.env,
+  read?: (path: string) => string,
 ): Promise<AgentSettings> {
   try {
-    await saveChosen(db, patch, env)
+    await saveChosen(db, patch, env, read)
   } catch (error) {
     if (error instanceof SettingRefused) throw new ActionRefused(error.message)
     throw error
   }
-  return agentSettings(db, env)
+  return agentSettings(db, env, read)
 }
 
 /** What changed in the agent settings, oldest first. */
