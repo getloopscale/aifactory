@@ -101,8 +101,10 @@ export async function versionedTags(
 export const packageOfTag = (tag: string) => tag.slice(0, tag.lastIndexOf('@'))
 
 /**
- * The published packages the commit of a task changes, by name: what its merge commit changed against its
- * first parent, read the way a promotion is (`publishedPackagesChanged`).
+ * The packages the commit of a task changes, by name: every named package one of the files its merge
+ * changed against its first parent is under. Whether the package is private or ignored is not asked, since
+ * a later commit of the same promotion may have made it publishable, and what a release lacks is named by
+ * the package alone.
  */
 export async function packagesOfCommit(
   api: GithubApi,
@@ -110,6 +112,13 @@ export async function packagesOfCommit(
   token: string,
   sha: string,
 ): Promise<string[]> {
-  const files = await api.changedFiles(repo, token, `${sha}^`, sha)
-  return publishedPackagesChanged(api, repo, token, { head: sha, files })
+  const files = touchedPaths(await api.changedFiles(repo, token, `${sha}^`, sha))
+  const dirs = packageDirs(await api.filePaths(repo, token, sha))
+  const touched = [...new Set(files.flatMap((file) => enclosingPackages(file, dirs)))]
+  const names: string[] = []
+  for (const dir of touched) {
+    const { name } = parseManifest(await mustRead(api, repo, token, manifestPath(dir), sha), dir)
+    if (name !== undefined) names.push(name)
+  }
+  return names
 }

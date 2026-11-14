@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, or } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
@@ -29,6 +29,11 @@ export type Shipment = {
    * of those packages is not released and its issue stays open.
    */
   missing?: string[]
+  /**
+   * The tags are one release per package (changesets): each task is told, and given a delivery for, the
+   * packages that carry its change, not all of them.
+   */
+  perPackage?: boolean
 }
 
 export type Shipped = {
@@ -59,24 +64,40 @@ export const availableIn = (s: Shipment) =>
     '',
   ].join('\n')
 
-/**
- * The missing packages a task's change is in, or why that could not be told. A commit that cannot be read
- * is held, never released: closing an issue as available is what this guards against.
- */
-async function missingPackagesOf(
+/** The packages a task's change is in, or why that could not be told. */
+type Carried = { names: string[] } | { unread: string }
+
+async function carriedPackages(
   api: GithubApi,
   s: Shipment,
-  missingTags: string[],
   t: typeof task.$inferSelect,
-): Promise<string[]> {
-  const missing = missingTags.map(packageOfTag)
-  if (missing.length === 0) return []
+): Promise<Carried | undefined> {
+  if (!s.perPackage && !s.missing?.length) return undefined
   try {
-    const carried = await packagesOfCommit(api, s.repository, s.token, t.mergedSha!)
-    return carried.filter((name) => missing.includes(name))
+    return { names: await packagesOfCommit(api, s.repository, s.token, t.mergedSha!) }
   } catch (error) {
-    return [`${missing.join(', ')} (its commit could not be read: ${message(error)})`]
+    return { unread: message(error) }
   }
+}
+
+/**
+ * The missing packages a task's change is in. A commit that cannot be read is held, never released:
+ * closing an issue as available is what this guards against.
+ */
+function heldFor(carried: Carried | undefined, owed: string[]): string[] {
+  if (!carried || owed.length === 0) return []
+  const missing = owed.map(packageOfTag)
+  if ('unread' in carried) {
+    return [`${missing.join(', ')} (its commit could not be read: ${carried.unread})`]
+  }
+  return carried.names.filter((name) => missing.includes(name))
+}
+
+/** The tags of the packages that carry a task's change; all of them when none can be told apart. */
+function tagsFor(s: Shipment, carried: Carried | undefined): Shipment['tags'] {
+  if (!s.perPackage || !carried || 'unread' in carried) return s.tags
+  const own = s.tags.filter((tag) => carried.names.includes(packageOfTag(tag.tag)))
+  return own.length > 0 ? own : s.tags
 }
 
 /**
@@ -140,7 +161,15 @@ async function belongs(
   const known = await deps.db
     .select({ id: delivery.id })
     .from(delivery)
-    .where(and(eq(delivery.taskId, t.id), eq(delivery.tag, s.tags[0].tag)))
+    .where(
+      and(
+        eq(delivery.taskId, t.id),
+        inArray(
+          delivery.tag,
+          s.tags.map((tag) => tag.tag),
+        ),
+      ),
+    )
   if (known.length > 0) return false
   if (t.id === s.askedTaskId) return true
   return deps.api.contains(s.repository, s.token, s.promotedSha, t.mergedSha!)
@@ -171,15 +200,17 @@ export async function shipContained(
   const owed = await owedReleases(deps.db, s)
   for (const t of candidates) {
     if (!(await belongs(deps, s, t))) continue
-    const held = await missingPackagesOf(deps.api, s, owed, t)
+    const carried = await carriedPackages(deps.api, s, t)
+    const held = heldFor(carried, owed)
     if (held.length > 0) {
       const error = await explainHold(deps.api, s, t.issueNumber, held, owed)
       shipped.held.push(`#${t.issueNumber}: ${held.join(', ')}`)
       if (error) shipped.issueErrors.push(error)
       continue
     }
+    const own = { ...s, tags: tagsFor(s, carried) }
     await deps.db.insert(delivery).values(
-      s.tags.map((tag) => ({
+      own.tags.map((tag) => ({
         taskId: t.id,
         kind: 'release' as const,
         tag: tag.tag,
@@ -188,11 +219,11 @@ export async function shipContained(
         actor: s.actor,
       })),
     )
-    const issueError = await announce(deps.api, s, t.issueNumber)
+    const issueError = await announce(deps.api, own, t.issueNumber)
     await enterStage(deps.db, t.id, 'released', {
       actor: s.actor,
-      tag: s.tags.map((tag) => tag.tag).join(', '),
-      url: s.tags[0].url,
+      tag: own.tags.map((tag) => tag.tag).join(', '),
+      url: own.tags[0].url,
       mergeSha: s.promotedSha,
       ...s.detail,
       ...(issueError ? { issueError } : {}),

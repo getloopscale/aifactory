@@ -179,6 +179,7 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     publishedBy: "the repository's release workflow",
     detail: { published: 'changesets' },
     missing,
+    perPackage: true,
   })
   const unclosed = unclosedNote(shipped)
   await deps.db

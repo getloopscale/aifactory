@@ -208,7 +208,22 @@ describe('packageOfTag', () => {
 })
 
 describe('packagesOfCommit', () => {
-  it('names the published packages a commit changed against its first parent', async () => {
+  it('names a package that was private when the commit landed, since a later commit may publish it', async () => {
+    const api = new FakeGithub()
+    const tree = {
+      '.changeset/config.json': '{"ignore":["@theokit/agent"]}',
+      'packages/agent/package.json': '{"name":"@theokit/agent","private":true}',
+      'packages/agent/src/a.ts': 'a',
+    }
+    api
+      .repo('o/r')
+      .files('m1^', tree)
+      .files('m1', { ...tree, 'packages/agent/src/a.ts': 'b' })
+
+    expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual(['@theokit/agent'])
+  })
+
+  it('names the packages a commit changed against its first parent', async () => {
     const api = new FakeGithub()
     const tree = { ...theokit, 'packages/ui/src/a.ts': 'a' }
     api
@@ -216,6 +231,10 @@ describe('packagesOfCommit', () => {
       .files('m1^', tree)
       .files('m1', { ...tree, 'packages/ui/src/a.ts': 'b' })
 
-    expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual(['@theokit/ui'])
+    // The root package holds every file, as it does for changesets.
+    expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual([
+      'theokit-monorepo',
+      '@theokit/ui',
+    ])
   })
 })
