@@ -3,6 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { pollAwaitingIntegrations } from '../factory/await-ci'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { releaseModeFromEnv } from '../factory/deps'
+import { readRecipe } from '../factory/recipe'
 import { mainProcessOnly } from '../factory/worker-only'
 import { createPromotionApi } from '../github/promotion-api'
 import { retryAutomatically, sendBackAutomatically } from '../panel/actions'
@@ -35,6 +36,7 @@ export default defineCron('integrate-after-ci', {
       github: deps.github,
       api: deps.api,
       checks: createPromotionApi(),
+      recipe: (repo, token) => readRecipe(repo, token),
       releaseMode: releaseModeFromEnv(process.env),
       sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
       startOver: (taskId) => retryAutomatically(actions, taskId),

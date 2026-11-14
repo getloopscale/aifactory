@@ -2,10 +2,11 @@ import type { FailedRun, PromotionApi } from '../github/promotion-api'
 import type { CheckReport } from '../github/pulls'
 
 import type { FailedReport, ServerEvidence } from './ci-wait'
-import { checkEvidence, logEvidence } from './promotion'
+import { checkEvidence, failedStep, logEvidence } from './promotion'
 
 /** What reading a failed check's evidence takes from GitHub, with a repository-scoped token. */
-export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'>
+export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'> &
+  Partial<Pick<PromotionApi, 'jobAttempt' | 'rerunFailedJobs'>>
 
 /**
  * The lines that say why a check run failed, read on the factory host: the error lines of an Actions job's
@@ -22,6 +23,57 @@ export async function readEvidence(
   return checkEvidence(await api.annotations(repo, token, run.id), run.summary)
 }
 
+/** What became of the rerun of the failed jobs: how many runs are rerunning, and what kept the others from it. */
+export type RerunOutcome = { started: number; problems: string[] }
+
+const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/**
+ * Reruns, once, the failed Actions runs behind the failed required checks whose job is on its first attempt:
+ * a failure that is not of the work (a flaky test) passes on the second attempt. Only the run of a required
+ * check is rerun: a required check with no Actions job, or an unrelated workflow, is left alone, since a rerun
+ * may have side effects. GitHub keeps the count: a rerun raises the run's attempt at once, so a job on its
+ * second attempt is never rerun again, even by another process, and the run in progress is not a failure
+ * (`filter=latest`) until it ends. What GitHub refuses or fails to answer is a problem the caller reports,
+ * per run, so one failure does not keep the others from being rerun. An API without the rerun calls reruns
+ * nothing and says nothing.
+ */
+export async function rerunTransient(
+  api: EvidenceApi,
+  repo: string,
+  token: string,
+  sha: string,
+  reports: CheckReport[],
+): Promise<RerunOutcome> {
+  const outcome: RerunOutcome = { started: 0, problems: [] }
+  const { jobAttempt, rerunFailedJobs } = api
+  if (!jobAttempt || !rerunFailedJobs) return outcome
+  let runs: FailedRun[]
+  try {
+    const names = reports.map((r) => r.name)
+    runs = (await api.failedChecks(repo, token, sha)).filter(
+      (run) => run.actions && names.includes(run.name),
+    )
+  } catch (error) {
+    outcome.problems.push(`listing the failed jobs: ${said(error)}`)
+    return outcome
+  }
+  const tried = new Set<number>()
+  for (const run of runs) {
+    try {
+      const job = await jobAttempt.call(api, repo, token, run.id)
+      if (job.attempt >= 2 || tried.has(job.runId)) continue
+      tried.add(job.runId)
+      const answer = await rerunFailedJobs.call(api, repo, token, job.runId)
+      if (answer.started) outcome.started += 1
+      else outcome.problems.push(answer.refusal)
+    } catch (error) {
+      outcome.problems.push(`rerunning ${run.name}: ${said(error)}`)
+    }
+  }
+  return outcome
+}
+
 const unreadable = (error: unknown): ServerEvidence => ({
   unreadable: error instanceof Error ? error.message : String(error),
 })
@@ -34,7 +86,10 @@ async function evidenceOf(
   run: FailedRun,
 ): Promise<ServerEvidence> {
   try {
-    return { lines: await readEvidence(api, repo, token, run) }
+    if (!run.actions) return { lines: await readEvidence(api, repo, token, run) }
+    const log = await api.jobLog(repo, token, run.id)
+    const step = failedStep(log)
+    return { lines: logEvidence(log), ...(step ? { step } : {}) }
   } catch (error) {
     return unreadable(error)
   }

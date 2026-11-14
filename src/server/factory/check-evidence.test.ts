@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { FailedRun } from '../github/promotion-api'
 import type { CheckReport } from '../github/pulls'
 
-import { attachEvidence, readEvidence, type EvidenceApi } from './check-evidence'
+import { attachEvidence, readEvidence, rerunTransient, type EvidenceApi } from './check-evidence'
 
 const SHA = 'abc1234def'
 const REPO = 'o/r'
@@ -247,5 +247,47 @@ describe('attachEvidence', () => {
     expect(await attachEvidence(api, REPO, 't', SHA, [report('CI')])).toEqual([
       { ...report('CI'), evidence: { unreadable: 'socket hang up' } },
     ])
+  })
+})
+
+describe('rerunTransient', () => {
+  const rerunning = (runs: FailedRun[], attempt: number) => {
+    const reruns: number[] = []
+    const api: EvidenceApi = {
+      failedChecks: async () => runs,
+      jobLog: async () => '',
+      annotations: async () => [],
+      jobAttempt: async (_r, _t, id) => ({ runId: id * 10, attempt }),
+      rerunFailedJobs: async (_r, _t, runId) => (reruns.push(runId), { started: true }),
+    }
+    return { api, reruns }
+  }
+
+  it('reruns the run of a failed required check on its first attempt, once', async () => {
+    const { api, reruns } = rerunning([actionsRun()], 1)
+    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [report('CI')])
+    expect(outcome).toEqual({ started: 1, problems: [] })
+    expect(reruns).toEqual([110])
+  })
+
+  it('never reruns a run already on its second attempt, whoever asks', async () => {
+    const { api, reruns } = rerunning([actionsRun()], 2)
+    expect(await rerunTransient(api, REPO, 'tok', SHA, [report('CI')])).toEqual({
+      started: 0,
+      problems: [],
+    })
+    expect(reruns).toEqual([])
+  })
+
+  it('leaves alone a workflow no required check names, and a check with no Actions job', async () => {
+    const { api, reruns } = rerunning(
+      [
+        actionsRun({ id: 12, name: 'Deploy docs' }),
+        actionsRun({ id: 13, name: 'CI', actions: false }),
+      ],
+      1,
+    )
+    await rerunTransient(api, REPO, 'tok', SHA, [report('CI')])
+    expect(reruns).toEqual([])
   })
 })

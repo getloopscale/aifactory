@@ -3,13 +3,21 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { GithubApi } from '../github/pulls'
+import type { CheckReport, GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
-import { attachEvidence, type EvidenceApi } from './check-evidence'
-import { checksFeedback, decideWaitingIntegration, type WaitingStep } from './ci-wait'
+import { attachEvidence, rerunTransient, type EvidenceApi } from './check-evidence'
+import {
+  checksFeedback,
+  decideWaitingIntegration,
+  evidenceOfNote,
+  type FailedReport,
+  type WaitingStep,
+} from './ci-wait'
 import { createPreRelease, type ReleaseMode } from './deliver'
+import { counterpart } from './doctor'
+import { DEFAULT_CHECKS, type CheckSpec } from './evidence'
 import {
   advancePreRelease,
   describeDelivery,
@@ -17,7 +25,8 @@ import {
   releaseByMode,
   type Handed,
 } from './integration'
-import { loadRepoConfig } from './repo-config'
+import { loadRepoConfig, type RepoConfig } from './repo-config'
+import { withRecipe, type Recipe } from './recipe'
 
 export type AwaitCiDeps = {
   db: Database
@@ -25,6 +34,8 @@ export type AwaitCiDeps = {
   api: GithubApi
   /** Reads the log or annotations of a failed check, so the note carries what the sandbox cannot open. */
   checks: EvidenceApi
+  /** Reads the repository's recipe, so the note knows which checks the factory runs; none means no claim. */
+  recipe?: (repo: string, token: string) => Promise<Recipe | undefined>
   /** The factory's release mode, for a repository that sets none. */
   releaseMode: ReleaseMode | undefined
   now?: () => Date
@@ -37,6 +48,8 @@ export type AwaitCiDeps = {
 export type AwaitCiResult = {
   merged: number[]
   sentBack: number[]
+  /** Tasks whose failed jobs were rerun once, in case the failure was not of the work. */
+  rerun: number[]
   startedOver: number[]
   toPerson: number[]
   waiting: number
@@ -171,6 +184,70 @@ async function toPerson(
   return true
 }
 
+/**
+ * The checks a run of the repository makes: the owner's, else the recipe's, else the default. Undefined when
+ * the recipe cannot be read, so the note claims nothing about a check it cannot compare.
+ */
+async function effectiveChecks(
+  deps: AwaitCiDeps,
+  repo: RepoConfig,
+  repository: string,
+  token: string,
+): Promise<CheckSpec[] | undefined> {
+  if (repo.checks) return repo.checks
+  if (!deps.recipe) return undefined
+  try {
+    return withRecipe(repo, await deps.recipe(repository, token)).checks ?? DEFAULT_CHECKS
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The failed required checks no check of the factory's answers for, marked so the note says it. Only the
+ * owner's own checks are known here: a repository that leaves them to its recipe is not claimed about, and the
+ * changeset check and the install step are the factory's too.
+ */
+function aloneAmong(failed: FailedReport[], checks: CheckSpec[] | undefined): FailedReport[] {
+  if (!checks) return failed
+  const names = [...checks.map((check) => check.name), 'changeset', 'install']
+  return failed.map((r) =>
+    r.notRequired || names.some((name) => counterpart(r.name, name)) ? r : { ...r, alone: true },
+  )
+}
+
+/**
+ * What a failed required check says when it is not of the work, or is: nothing when its failed jobs were
+ * rerun (the next pass sees the second attempt), otherwise the note with what the log says and the step that
+ * exited, and what kept a rerun from being tried.
+ */
+async function readFailure(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  reports: CheckReport[],
+  repo: RepoConfig,
+  result: AwaitCiResult,
+): Promise<string | undefined> {
+  const { row, token, verifiedSha } = w
+  const rerun = await rerunTransient(deps.checks, row.repository, token, verifiedSha, reports)
+  for (const problem of rerun.problems) result.errors.push(`task ${row.id}: ${problem}`)
+  if (rerun.started > 0) {
+    result.rerun.push(row.id)
+    return undefined
+  }
+  const failed = await attachEvidence(deps.checks, row.repository, token, verifiedSha, reports)
+  for (const check of failed) {
+    if (check.evidence && 'unreadable' in check.evidence) {
+      result.unreadEvidence.push(`task ${row.id}: ${check.name}: ${check.evidence.unreadable}`)
+    }
+  }
+  return checksFeedback(
+    verifiedSha,
+    aloneAmong(failed, await effectiveChecks(deps, repo, row.repository, token)),
+    rerun.problems.join('; '),
+  )
+}
+
 async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: AwaitCiResult) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
@@ -212,21 +289,11 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
       return
     case 'send_back': {
-      const failed = await attachEvidence(
-        deps.checks,
-        row.repository,
-        token,
-        verifiedSha,
-        step.reports,
-      )
-      for (const check of failed) {
-        if (check.evidence && 'unreadable' in check.evidence) {
-          result.unreadEvidence.push(`task ${row.id}: ${check.name}: ${check.evidence.unreadable}`)
-        }
-      }
+      const note = await readFailure(deps, w, step.reports, repo, result)
+      if (note === undefined) return
       // Off first: the new commit the agent pushes must not merge before the factory verifies it.
       await deps.api.disableAutoMerge(row.repository, token, number)
-      await deps.sendBack(row.id, checksFeedback(verifiedSha, failed))
+      await deps.sendBack(row.id, note)
       result.sentBack.push(row.id)
       return
     }
@@ -235,8 +302,16 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       await deps.startOver(row.id)
       result.startedOver.push(row.id)
       return
-    case 'person':
-      if (await toPerson(deps, w, step)) result.toPerson.push(row.id)
+    case 'person': {
+      let said = step
+      if (step.reports) {
+        // Checks that still fail get the same rerun and evidence before a person is told.
+        const note = await readFailure(deps, w, step.reports, repo, result)
+        if (note === undefined) return
+        said = { ...step, reason: `${step.reason}\n\n${evidenceOfNote(note)}`.slice(0, 3_000) }
+      }
+      if (await toPerson(deps, w, said)) result.toPerson.push(row.id)
+    }
   }
 }
 
@@ -249,6 +324,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
   const result: AwaitCiResult = {
     merged: [],
     sentBack: [],
+    rerun: [],
     startedOver: [],
     toPerson: [],
     waiting: 0,
