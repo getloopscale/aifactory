@@ -1112,6 +1112,49 @@ describe('health', () => {
     expect(first.textContent).not.toContain('gpt-6.1-sol')
     expect(second.textContent).toContain('gpt-6.1-sol')
   })
+
+  it('says the model of a review is not recorded when no pass of its attempt and run matches', async () => {
+    const pass = {
+      role: 'reviewer' as const,
+      harness: 'codex',
+      model: 'gpt-6.1-terra',
+      effort: null,
+      tokensIn: null,
+      tokensOut: null,
+      costUsd: null,
+      durationMs: 1000,
+      ok: true,
+      quota: false,
+    }
+    const review = (id: number, round: number, at: string) => ({
+      id,
+      round,
+      sha: `sha${id}0000000`,
+      reviewer: 'codex',
+      verdict: 'changes' as const,
+      summary: 'fix',
+      findings: [],
+      at,
+    })
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        timeline: [
+          { id: 1, stage: 'intake', at: '2026-11-04T09:00:00Z', detail: null },
+          { id: 2, stage: 'intake', at: '2026-11-05T09:00:00Z', detail: null },
+        ],
+        reviews: [review(1, 2, '2026-11-04T10:04:00Z'), review(2, 1, '2026-11-05T10:04:00Z')],
+        // Round 1 of the earlier run is the only pass: the first review is of attempt 2, the second of a later run.
+        runs: [{ ...pass, id: 1, attempt: 1, at: '2026-11-04T10:03:00Z' }],
+      }),
+    })
+    renderTask()
+    const reviews = await screen.findByRole('region', { name: 'Reviews' })
+    const [first, second] = within(reviews).getAllByRole('listitem')
+    expect(first.textContent).toContain('not recorded')
+    expect(first.textContent).not.toContain('gpt-6.1-terra')
+    expect(second.textContent).toContain('not recorded')
+    expect(second.textContent).not.toContain('gpt-6.1-terra')
+  })
 })
 
 describe('inbox', () => {

@@ -1006,6 +1006,40 @@ describe('runTask review loop', () => {
     })
   })
 
+  it('records a reviewer pass whose login could not be renewed or was refused again, with its model and effort', async () => {
+    const refusedReviewer = (reauthorize: CodingHarness['reauthorize']): CodingHarness => ({
+      name: 'fake-codex',
+      model: 'gpt-6.1-sol',
+      effort: 'high',
+      egress: async () => [
+        { domain: 'chatgpt.com', headers: { authorization: 'Bearer old-token' } },
+      ],
+      reauthorize,
+      markRefused: async () => {},
+      run: async () => ({ ok: false, summary: 'refused', unauthorized: true }),
+    })
+    const renewalFails = refusedReviewer(async () => {
+      throw new Error('the refresh token was revoked')
+    })
+    const refusedAgain = refusedReviewer(async () => [
+      { domain: 'chatgpt.com', headers: { authorization: 'Bearer new-token' } },
+    ])
+    for (const reviewer of [renewalFails, refusedAgain]) {
+      const id = await seedTask()
+
+      const result = await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+      expect(result.status).not.toBe('done')
+      const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+      expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({
+        harness: 'fake-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        ok: false,
+      })
+    }
+  })
+
   it('sends the work back to the same session, then opens the pull request on the next approval', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()

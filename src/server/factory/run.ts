@@ -489,9 +489,14 @@ export class Run {
     let result: HarnessResult
     try {
       result = await call(this.transcript.sink(role === 'planner' ? 'builder' : role, attempt))
+      if (result.unauthorized && who.reauthorize) {
+        await this.transcript.drain()
+        result = await this.afterRefusal(who, role, attempt, call)
+      }
     } catch (error) {
       await this.transcript.drain()
-      // The agent did not come back (the sandbox died, say). It still ran, and that is on record.
+      // The agent did not come back (the sandbox died, say, or its login could not be renewed). It still ran,
+      // and that is on record.
       await db.insert(agentRun).values({
         taskId,
         role,
@@ -503,10 +508,6 @@ export class Run {
         ok: false,
       })
       throw error
-    }
-    if (result.unauthorized && who.reauthorize) {
-      await this.transcript.drain()
-      result = await this.afterRefusal(who, role, attempt, call)
     }
     await this.transcript.flush()
     this.cost += result.costUsd ?? 0
