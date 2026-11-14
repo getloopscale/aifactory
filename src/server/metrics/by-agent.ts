@@ -179,12 +179,51 @@ async function eventsOf(db: Database): Promise<EventsByTask> {
   return byTask
 }
 
-async function reviewsOf(db: Database): Promise<ReviewFact[]> {
+/** A reviewer pass, as the model of a review is read from it. */
+export type ReviewerPass = {
+  taskId: number
+  harness: string
+  attempt: number
+  model: string | null
+  at: Date
+}
+
+/**
+ * The reviews with the model each ran on. The model is on the pass: the latest pass of the same reviewer, task
+ * and attempt, made in the same run before the review was written. Attempts restart at one in each run, so a
+ * pass of another run is never the review's; a review with no such pass (one from before passes were
+ * recorded) has no model, never one borrowed from an earlier run.
+ */
+export function withModels(
+  rows: Omit<ReviewFact, 'model'>[],
+  passes: ReviewerPass[],
+  events: EventsByTask,
+): ReviewFact[] {
+  return rows.map((r) => {
+    const run = runsOf(events.get(r.taskId) ?? []).find((x) => inRun(x, r.at))
+    const pass = run
+      ? passes
+          .filter(
+            (p) =>
+              p.taskId === r.taskId &&
+              p.harness === r.reviewer &&
+              p.attempt === r.round &&
+              p.at <= r.at &&
+              inRun(run, p.at),
+          )
+          .at(-1)
+      : undefined
+    return { ...r, model: pass?.model ?? null }
+  })
+}
+
+async function reviewsOf(db: Database, events: EventsByTask): Promise<ReviewFact[]> {
   const [rows, passes] = await Promise.all([
     db.select().from(review).orderBy(asc(review.id)),
     db
       .select({
         taskId: agentRun.taskId,
+        harness: agentRun.harness,
         attempt: agentRun.attempt,
         model: agentRun.model,
         at: agentRun.at,
@@ -193,17 +232,17 @@ async function reviewsOf(db: Database): Promise<ReviewFact[]> {
       .where(eq(agentRun.role, 'reviewer'))
       .orderBy(asc(agentRun.id)),
   ])
-  // The model is on the pass: the latest reviewer pass of the same task and attempt made before the review.
-  return rows.map((r) => ({
-    taskId: r.taskId,
-    reviewer: r.reviewer,
-    model:
-      passes.filter((p) => p.taskId === r.taskId && p.attempt === r.round && p.at <= r.at).at(-1)
-        ?.model ?? null,
-    round: r.round,
-    verdict: r.verdict,
-    at: r.at,
-  }))
+  return withModels(
+    rows.map((r) => ({
+      taskId: r.taskId,
+      reviewer: r.reviewer,
+      round: r.round,
+      verdict: r.verdict,
+      at: r.at,
+    })),
+    passes,
+    events,
+  )
 }
 
 /** A build event, as the rework count reads it. */
@@ -316,9 +355,9 @@ async function reworkRoundsOf(db: Database): Promise<ReworkFact[]> {
 
 /** Approval, rework and cost, each split by agent. */
 export async function comparisonByAgent(db: Database): Promise<AgentComparison> {
-  const [events, reviews, passes, rework, rounds] = await Promise.all([
-    eventsOf(db),
-    reviewsOf(db),
+  const events = await eventsOf(db)
+  const [reviews, passes, rework, rounds] = await Promise.all([
+    reviewsOf(db, events),
     db
       .select({
         taskId: agentRun.taskId,

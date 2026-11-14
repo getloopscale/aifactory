@@ -8,6 +8,7 @@ import {
   costByReviewer,
   reworkByBuilder,
   reworkByReviewer,
+  withModels,
   type EventsByTask,
   type PassFact,
   type ReviewFact,
@@ -331,5 +332,36 @@ describe('costByReviewer', () => {
         perDelivery: null,
       },
     ])
+  })
+})
+
+describe('withModels', () => {
+  const row = (hour: number, reviewer = 'codex') => ({
+    taskId: 1,
+    reviewer,
+    round: 1,
+    verdict: 'approve' as const,
+    at: at(hour),
+  })
+  const pass = (hour: number, model: string, harness = 'codex') => ({
+    taskId: 1,
+    harness,
+    attempt: 1,
+    model,
+    at: at(hour),
+  })
+  const twoRuns = events([1, [...finished(0, 'failed'), ...finished(10)]])
+
+  it('gives a review the model of its own pass, in its own run', () => {
+    const passes = [pass(1, 'gpt-6.1-terra'), pass(11, 'gpt-6.1-sol')]
+    const result = withModels([row(1.5), row(11.5)], passes, twoRuns)
+    expect(result.map((r) => r.model)).toEqual(['gpt-6.1-terra', 'gpt-6.1-sol'])
+  })
+
+  it('leaves the model unknown when the run has no pass of that reviewer, whatever an earlier run ran', () => {
+    const result = withModels([row(11.5)], [pass(1, 'gpt-6.1-terra')], twoRuns)
+    expect(result[0].model).toBeNull()
+    const other = withModels([row(1.5)], [pass(1, 'opus', 'claude-code')], twoRuns)
+    expect(other[0].model).toBeNull()
   })
 })

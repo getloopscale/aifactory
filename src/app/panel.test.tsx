@@ -747,6 +747,64 @@ describe('health metrics', () => {
     )
   })
 
+  it('compares the reviewers on approval, rework and the cost of a delivery', async () => {
+    serve({
+      'GET /api/panel/health': report(),
+      'GET /api/panel/metrics': {
+        ...metricsReport,
+        byAgent: {
+          approval: [
+            { reviewer: 'claude-code', model: null, reviews: 4, approved: 3, share: 0.75 },
+            { reviewer: 'codex', model: 'gpt-6.1-sol', reviews: 2, approved: 1, share: 0.5 },
+          ],
+          rework: [],
+          reviewerRework: [
+            {
+              reviewer: 'codex',
+              model: 'gpt-6.1-sol',
+              reviews: 2,
+              reworkRounds: 1,
+              perReview: 0.5,
+            },
+          ],
+          cost: [],
+          reviewerCost: [
+            {
+              agent: 'codex',
+              model: 'gpt-6.1-sol',
+              deliveredRuns: 2,
+              reportedRuns: 0,
+              costUsd: 0,
+              perDelivery: null,
+            },
+            {
+              agent: 'claude-code',
+              model: null,
+              deliveredRuns: 2,
+              reportedRuns: 2,
+              costUsd: 6,
+              perDelivery: 3,
+            },
+          ],
+        },
+      },
+    })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+    const heading = await screen.findByRole('heading', { name: 'By reviewer' })
+    const rows = within(heading.parentElement as HTMLElement).getAllByRole('row')
+    expect(rows[1].textContent).toContain('claude-code')
+    expect(rows[1].textContent).toContain('75% (3/4)')
+    expect(rows[1].textContent).toContain('$3.00 (2/2 runs)')
+    expect(rows[2].textContent).toContain('codex · gpt-6.1-sol')
+    expect(rows[2].textContent).toContain('50% (1/2)')
+    expect(rows[2].textContent).toContain('1 in 2 reviews')
+    expect(rows[2].textContent).toContain('unknown (2 runs)')
+  })
+
   it('says when there is nothing to measure yet', async () => {
     serve({
       'GET /api/panel/health': report(),
