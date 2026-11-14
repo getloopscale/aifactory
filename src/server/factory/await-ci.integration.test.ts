@@ -37,6 +37,7 @@ const gh = {
   logFails: false,
   attempts: {} as Record<number, number>,
   rerunRefusal: undefined as string | undefined,
+  rerunLost: false,
   reruns: [] as number[],
   attemptFails: [] as number[],
 }
@@ -80,6 +81,7 @@ beforeEach(async () => {
     logFails: false,
     attempts: {},
     rerunRefusal: undefined,
+    rerunLost: false,
     reruns: [],
     attemptFails: [],
   })
@@ -101,6 +103,7 @@ const checks: EvidenceApi = {
   rerunFailedJobs: async (_repo, _token, runId) => {
     if (gh.rerunRefusal) return { started: false, refusal: gh.rerunRefusal }
     gh.reruns.push(runId)
+    if (gh.rerunLost) throw new Error('connection reset')
     return { started: true }
   },
 }
@@ -344,6 +347,21 @@ describe('pollAwaitingIntegrations', () => {
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ merged: [id], sentBack: [] })
     expect(sentBack).toEqual([])
     expect(await row(id)).toMatchObject({ mergedSha: 'merge0001', awaitingCiSha: null })
+  })
+
+  it('waits for a rerun whose response was lost instead of sending the work back', async () => {
+    const link = 'https://github.com/paulo/app/actions/runs/431/job/1308'
+    reports({ name: 'CI', state: 'failure', detail: '', url: link })
+    gh.failedRuns = [{ id: 1308, name: 'CI', url: link, summary: '', actions: true }]
+    gh.attempts = { 1308: 1 }
+    gh.rerunLost = true
+    const id = await waitingTask()
+
+    const result = await pollAwaitingIntegrations(deps())
+    expect(result).toMatchObject({ rerun: [id], sentBack: [], toPerson: [], errors: [] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect(gh.reruns).toEqual([13080])
+    expect(sentBack).toEqual([])
   })
 
   it('does not rerun the job of another workflow, even when the required check is an aggregate', async () => {

@@ -376,6 +376,11 @@ describe('recurrenceIsNewIssue', () => {
 })
 
 describe('failedStep', () => {
+  it('shows no command for a failing action step that follows a successful shell step', () => {
+    const log = '##[group]Run pnpm build\nok\n##[group]Run owner/action@v2\n##[error]boom'
+    expect(failedStep(log)).toBeUndefined()
+  })
+
   it('names the script that exited and the command of the step', () => {
     const log = [
       '2026-11-12T10:00:00Z ##[group]Run pnpm quality',

@@ -94,6 +94,7 @@ export async function rerunTransient(
   }
   const tried = new Set<number>()
   for (const run of runs) {
+    let asked = false
     try {
       const job = await jobAttempt.call(api, repo, token, run.id)
       if (job.attempt >= 2 || tried.has(job.runId)) continue
@@ -103,6 +104,7 @@ export async function rerunTransient(
         if (now.getTime() - claimedAt.getTime() < RERUN_WAIT_MS) outcome.started += 1
         continue
       }
+      asked = true
       const answer = await rerunFailedJobs.call(api, repo, token, job.runId)
       if (answer.started) outcome.started += 1
       else {
@@ -110,7 +112,9 @@ export async function rerunTransient(
         await ledger.release(job.runId)
       }
     } catch (error) {
-      outcome.problems.push(`rerunning ${run.name}: ${said(error)}`)
+      // A request whose answer was lost may have been accepted, and the claim stays: the run is pending.
+      if (asked) outcome.started += 1
+      else outcome.problems.push(`rerunning ${run.name}: ${said(error)}`)
     }
   }
   return outcome

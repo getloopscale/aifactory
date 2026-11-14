@@ -315,14 +315,14 @@ describe('rerunTransient', () => {
     expect(reruns).toEqual([])
   })
 
-  it('keeps the claim when the request fails without an answer, and does not ask again', async () => {
+  it('counts a request whose answer was lost as pending, keeps the claim and does not ask again', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
     api.rerunFailedJobs = async () => {
       throw new Error('connection lost')
     }
     const ledger = ledgerOf()
     const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    expect(first.problems).toEqual(['rerunning CI: connection lost'])
+    expect(first).toEqual({ started: 1, problems: [] })
     const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
     expect(second).toEqual({ started: 1, problems: [] })
     expect(reruns).toEqual([])
