@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import { delivery, task } from '../db/schema'
 import type { GithubApi } from '../github/pulls'
 
+import { packageOfTag, packagesOfCommit } from './changed-packages'
 import { releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
 
@@ -23,6 +24,11 @@ export type Shipment = {
   publishedBy?: string
   /** Added to the `released` stage of every task. */
   detail?: Record<string, unknown>
+  /**
+   * Releases (`name@version`) the publication called for and never got. A task whose commit changed one
+   * of those packages is not released and its issue stays open.
+   */
+  missing?: string[]
 }
 
 export type Shipped = {
@@ -31,11 +37,16 @@ export type Shipped = {
   resolved: number[]
   /** Issues that could not be commented on or closed, as `#<number>: <why>`. The release stands. */
   issueErrors: string[]
+  /** Tasks left unreleased because the package that carries their change has no release, as `#<issue>: <packages>`. */
+  held: string[]
 }
 
 /** What a publication's detail adds when issues of the release could not be closed. */
 export const unclosedNote = (shipped: Shipped) =>
-  shipped.issueErrors.length ? `; issues not closed: ${shipped.issueErrors.join('; ')}` : ''
+  (shipped.held.length
+    ? `; issues left open, their package has no release: ${shipped.held.join('; ')}`
+    : '') +
+  (shipped.issueErrors.length ? `; issues not closed: ${shipped.issueErrors.join('; ')}` : '')
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -47,6 +58,46 @@ export const availableIn = (s: Shipment) =>
     `Released by ${s.actor}: the promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\`${s.publishedBy ? `, published by ${s.publishedBy}` : ''}.`,
     '',
   ].join('\n')
+
+/**
+ * The missing packages a task's change is in, or why that could not be told. A commit that cannot be read
+ * is held, never released: closing an issue as available is what this guards against.
+ */
+async function missingPackagesOf(
+  api: GithubApi,
+  s: Shipment,
+  t: typeof task.$inferSelect,
+): Promise<string[]> {
+  const missing = (s.missing ?? []).map(packageOfTag)
+  if (missing.length === 0) return []
+  try {
+    const carried = await packagesOfCommit(api, s.repository, s.token, t.mergedSha!)
+    return carried.filter((name) => missing.includes(name))
+  } catch (error) {
+    return [`${missing.join(', ')} (its commit could not be read: ${message(error)})`]
+  }
+}
+
+/** Tells the issue why it stays open. A failure is returned, as in `announce`. */
+async function explainHold(
+  api: GithubApi,
+  s: Shipment,
+  issueNumber: number,
+  held: string[],
+): Promise<string | undefined> {
+  const body = [
+    `Not available yet: ${held.join(', ')} has no release.`,
+    '',
+    `The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed and the repository's release workflow published the other packages, but it published no release for ${(s.missing ?? []).join(', ')} within the time the factory waits. This issue stays open until that package is published.`,
+    '',
+  ].join('\n')
+  try {
+    await api.commentOnIssue(s.repository, s.token, issueNumber, body)
+    return undefined
+  } catch (error) {
+    return `#${issueNumber}: ${message(error)}`
+  }
+}
 
 /**
  * Comments where the fix is and closes the issue. A failure is returned, not thrown: the release already
@@ -102,9 +153,16 @@ export async function shipContained(
         or(eq(task.stage, 'done'), eq(task.id, s.askedTaskId)),
       ),
     )
-  const shipped: Shipped = { released: [], resolved: [], issueErrors: [] }
+  const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
   for (const t of candidates) {
     if (!(await belongs(deps, s, t))) continue
+    const held = await missingPackagesOf(deps.api, s, t)
+    if (held.length > 0) {
+      const error = await explainHold(deps.api, s, t.issueNumber, held)
+      shipped.held.push(`#${t.issueNumber}: ${held.join(', ')}`)
+      if (error) shipped.issueErrors.push(error)
+      continue
+    }
     await deps.db.insert(delivery).values(
       s.tags.map((tag) => ({
         taskId: t.id,

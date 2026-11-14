@@ -167,6 +167,7 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     result.waiting += 1
     return
   }
+  const missing = 'missing' in read ? read.missing : undefined
   const shipped = await shipContained(deps, {
     repository: p.repository,
     token,
@@ -177,12 +178,14 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     tags,
     publishedBy: "the repository's release workflow",
     detail: { published: 'changesets' },
+    missing,
   })
   const unclosed = unclosedNote(shipped)
   await deps.db
     .update(publication)
     .set({
-      status: 'published',
+      status: missing ? 'partial' : 'published',
+      missing: missing ?? null,
       tags: tags.map((t) => t.tag),
       publishedAt: new Date(),
       detail: `${merged}published ${tags.map((t) => t.tag).join(', ')}${read.complete}${unclosed}`,

@@ -391,6 +391,46 @@ describe('publishing a changesets release', () => {
       expect(closed()).toHaveLength(1)
     })
 
+    it('ends partly published, releases the tasks of the published packages and keeps open the issue of the missing one', async () => {
+      await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      const slack = await seedTask('done', 'slack-merge')
+      const manifests = {
+        'packages/gateway/package.json': '{"name":"@theokit/gateway","version":"0.16.1"}',
+        'packages/slack/package.json': '{"name":"@theokit/gateway-slack","version":"0.5.1"}',
+        '.changeset/config.json': '{}',
+      }
+      for (const [sha, dir] of [
+        ['gw-merge', 'gateway'],
+        ['slack-merge', 'slack'],
+      ]) {
+        repo()
+          .files(`${sha}^`, { ...manifests, [`packages/${dir}/src/a.ts`]: 'a' })
+          .files(sha, { ...manifests, [`packages/${dir}/src/a.ts`]: 'b' })
+      }
+      releasesAre(...ALL.slice(0, 2).map(published))
+
+      await pollPublications(deps(PAST_THE_WAIT))
+
+      const stage = async (id: number) =>
+        (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
+      expect(await stage(slack)).toBe('released')
+      expect(await stage(gateway)).toBe('done')
+      expect(await row()).toMatchObject({
+        status: 'partial',
+        missing: ['@theokit/gateway@0.16.1'],
+      })
+      expect((await row()).detail).toMatch(/issues left open.*@theokit\/gateway/)
+      const issue = async (id: number) =>
+        (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
+      expect(closed()).not.toContain(await issue(gateway))
+      expect(closed()).toContain(await issue(slack))
+      const heldIssue = await issue(gateway)
+      const held = comments().find((c) => c.issue === heldIssue)
+      expect(held?.body).toContain('@theokit/gateway@0.16.1')
+      expect(held?.body).toContain('has no release')
+    })
+
     it('records why it cannot tell the releases apart when GitHub names no merge commit for the merged pull request', async () => {
       await waitingPublication()
       releasesAre(...ALL.map(published))

@@ -249,15 +249,18 @@ export const publication = pgTable('publication', {
   actor: text('actor').notNull(),
   /**
    * `failed` when the release workflow finished without a Version Packages pull request and the factory
-   * could not release the promotion as its own; the reason is in `detail` and on the task.
+   * could not release the promotion as its own; the reason is in `detail` and on the task. `partial` when
+   * a package the Version Packages merge versioned has no release: `missing` names them.
    */
-  status: text('status', { enum: ['waiting', 'published', 'failed'] })
+  status: text('status', { enum: ['waiting', 'published', 'failed', 'partial'] })
     .notNull()
     .default('waiting'),
   /** The Version Packages pull request, once the factory merged it or saw it merged. */
   versionPullRequest: integer('version_pull_request'),
   /** The tags the repository's workflow published, once it did. */
   tags: jsonb('tags').$type<string[]>(),
+  /** The releases (`name@version`) the Version Packages merge called for that never appeared. */
+  missing: jsonb('missing').$type<string[]>(),
   /** What the last look found: what it waits for, or why it cannot go on. */
   detail: text('detail'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),

@@ -2,7 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import { FakeGithub } from '../../test/fake-github'
 
-import { changesetsWaiting, publishedPackagesChanged, versionedTags } from './changed-packages'
+import {
+  changesetsWaiting,
+  packageOfTag,
+  packagesOfCommit,
+  publishedPackagesChanged,
+  versionedTags,
+} from './changed-packages'
 
 /** What a fake GitHub was asked to read, as `ref:path`. */
 const readsOf = (api: FakeGithub) => api.callsTo('readFile').map(([path, ref]) => `${ref}:${path}`)
@@ -191,5 +197,25 @@ describe('versionedTags', () => {
 
     expect(await versionedTags(api, 'o/r', 't', 'vm')).toEqual([])
     expect(reads()).toEqual([])
+  })
+})
+
+describe('packageOfTag', () => {
+  it('is the name before the version, scope included', () => {
+    expect(packageOfTag('@theokit/gateway-agent@0.1.0')).toBe('@theokit/gateway-agent')
+    expect(packageOfTag('plain@1.2.3')).toBe('plain')
+  })
+})
+
+describe('packagesOfCommit', () => {
+  it('names the published packages a commit changed against its first parent', async () => {
+    const api = new FakeGithub()
+    const tree = { ...theokit, 'packages/ui/src/a.ts': 'a' }
+    api
+      .repo('o/r')
+      .files('m1^', tree)
+      .files('m1', { ...tree, 'packages/ui/src/a.ts': 'b' })
+
+    expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual(['@theokit/ui'])
   })
 })

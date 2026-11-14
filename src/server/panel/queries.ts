@@ -13,6 +13,7 @@ import {
   review,
   stageEvent,
   task,
+  publication,
   watch,
 } from '../db/schema'
 import { retryAt } from '../factory/auto-retry'
@@ -365,7 +366,35 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
       })
     }
   }
+  items.push(...(await partialPublications(db)))
   return items.sort((a, b) => a.at.localeCompare(b.at))
+}
+
+/**
+ * Publications that ended with a package unpublished. Nothing else will publish it, so the owner is told
+ * for as long as a finished task of that repository still waits for a release, which is what such a
+ * publication leaves behind.
+ */
+async function partialPublications(db: Database): Promise<InboxItem[]> {
+  const rows = await db.select().from(publication).where(eq(publication.status, 'partial'))
+  const items: InboxItem[] = []
+  for (const p of rows) {
+    const [waiting] = await db
+      .select({ id: task.id })
+      .from(task)
+      .where(and(eq(task.repository, p.repository), eq(task.stage, 'done')))
+      .limit(1)
+    const [owner] = await db.select().from(task).where(eq(task.id, p.taskId))
+    if (!waiting || !owner) continue
+    const [card] = await cards(db, [owner])
+    items.push({
+      task: card,
+      kind: 'publication_partial',
+      summary: `Not published: ${(p.missing ?? []).join(', ')}. The issues of those packages stay open until someone publishes them.`,
+      at: iso(p.publishedAt ?? p.startedAt),
+    })
+  }
+  return items
 }
 
 /**

@@ -96,3 +96,20 @@ export async function versionedTags(
   }
   return tags
 }
+
+/** The package a changesets tag (`name@version`) names. */
+export const packageOfTag = (tag: string) => tag.slice(0, tag.lastIndexOf('@'))
+
+/**
+ * The published packages the commit of a task changes, by name: what its merge commit changed against its
+ * first parent, read the way a promotion is (`publishedPackagesChanged`).
+ */
+export async function packagesOfCommit(
+  api: GithubApi,
+  repo: string,
+  token: string,
+  sha: string,
+): Promise<string[]> {
+  const files = await api.changedFiles(repo, token, `${sha}^`, sha)
+  return publishedPackagesChanged(api, repo, token, { head: sha, files })
+}
