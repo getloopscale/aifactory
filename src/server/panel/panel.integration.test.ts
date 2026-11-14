@@ -750,6 +750,63 @@ describe('actions', () => {
     expect(queued.map((q) => q.input)).toEqual([{ taskId: oldest }, { taskId: middle }])
   })
 
+  describe('an automatic retry after a sandbox outage', () => {
+    const outage = { error: '403: team is blocked: spend_limit', retryAt: 0 }
+    const reworkEvents = (n: number) => [
+      {
+        stage: 'intake',
+        detail: { decision: 'request_changes', note: 'rename it', decisionId: 7 },
+      },
+      ...Array.from({ length: n }, (_, i) => [
+        { stage: 'sandbox' },
+        { stage: 'failed', detail: outage },
+        ...(i < n - 1
+          ? [
+              {
+                stage: 'intake',
+                detail: {
+                  decision: 'request_changes',
+                  note: 'rename it',
+                  decisionId: 7,
+                  automatic: true,
+                  beforeAgent: true,
+                },
+              },
+            ]
+          : []),
+      ]).flat(),
+    ]
+
+    it('keeps the branch and the note of a rework', async () => {
+      const id = await seed('failed', { issueNumber: 91, headSha: 'abc' }, reworkEvents(1))
+      expect(
+        await runDueRetries(deps(), { limit: 5, now: new Date(Date.now() + 3600_000) }),
+      ).toEqual({ started: 1, skipped: 0 })
+      expect(deleted()).toEqual([])
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: id, decisionId: 7 }])
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.headSha).toBe('abc')
+    })
+
+    it('starts a first run over', async () => {
+      const id = await seed('failed', { issueNumber: 92 }, [
+        { stage: 'intake', detail: { decision: 'retry', note: '' } },
+        { stage: 'sandbox' },
+        { stage: 'failed', detail: outage },
+      ])
+      await runDueRetries(deps(), { limit: 5, now: new Date(Date.now() + 3600_000) })
+      expect(deleted()).toEqual(['factory/92'])
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
+    })
+
+    it('does not count three sandbox failures of a rework as attempts', async () => {
+      const id = await seed('failed', { issueNumber: 93 }, reworkEvents(3))
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.retryAt).not.toBeNull()
+      expect(card.retryable).toBe('environment')
+    })
+  })
+
   it('runs again on its own a finished task whose pull request GitHub refused for a conflict with its base', async () => {
     const conflict = (issueNumber: number) =>
       seed(

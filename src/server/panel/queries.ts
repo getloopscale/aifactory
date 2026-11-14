@@ -46,7 +46,7 @@ type TaskRow = typeof task.$inferSelect
  * A person's retry starts the count over.
  */
 export function automaticRunsSincePerson() {
-  return sql<number>`count(*) filter (where ${stageEvent.stage} = 'intake' and ${stageEvent.detail}->>'automatic' = 'true' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0))`
+  return sql<number>`count(*) filter (where ${stageEvent.stage} = 'intake' and ${stageEvent.detail}->>'automatic' = 'true' and (${stageEvent.detail}->>'beforeAgent') is distinct from 'true' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0))`
 }
 
 const iso = (date: Date) => date.toISOString()

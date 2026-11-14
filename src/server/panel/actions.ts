@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
@@ -51,6 +51,7 @@ async function requeue(
   kind: 'request_changes' | 'retry' | 'automatic_retry' | 'automatic_changes',
   note: string,
   sha: string | null,
+  rework?: Rework,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
@@ -68,31 +69,71 @@ async function requeue(
       // Nobody decided this one, so no decision is recorded in anybody's name: the intake says it was the
       // factory's own, and the count of these is what stops it after a few. Changes carry their note to
       // the run as feedback, on the branch the agent already pushed.
-      const changes = kind === 'automatic_changes'
+      const changes = kind === 'automatic_changes' || rework !== undefined
       const [event] = await tx
         .insert(stageEvent)
         .values({
           taskId,
           stage: 'intake',
-          detail: { decision: changes ? 'request_changes' : 'retry', note, automatic: true },
+          detail: {
+            decision: changes ? 'request_changes' : 'retry',
+            note,
+            automatic: true,
+            // A rework that failed before an agent ran did not use up an attempt of the work.
+            ...(rework?.beforeAgent ? { beforeAgent: true } : {}),
+            ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
+          },
         })
         .returning({ id: stageEvent.id })
-      await enqueueRun(
-        changes ? { taskId, feedback: note } : { taskId },
-        `task-${taskId}-auto${event.id}`,
-      )
+      const input = !changes
+        ? { taskId }
+        : rework?.decisionId
+          ? { taskId, decisionId: rework.decisionId }
+          : { taskId, feedback: note }
+      await enqueueRun(input, `task-${taskId}-auto${event.id}`)
       return null
     }
     const [made] = await tx
       .insert(decision)
       .values({ taskId, kind, sha, note })
       .returning({ id: decision.id })
-    await tx
-      .insert(stageEvent)
-      .values({ taskId, stage: 'intake', detail: { decision: kind, note } })
+    await tx.insert(stageEvent).values({
+      taskId,
+      stage: 'intake',
+      detail: {
+        decision: kind,
+        note,
+        ...(kind === 'request_changes' ? { decisionId: made.id } : {}),
+      },
+    })
     await enqueueRun({ taskId, decisionId: made.id }, `task-${taskId}-d${made.id}`)
     return made.id
   })
+}
+
+/** A run that was a rework: what it was sent back for, and whether it failed before any agent ran. */
+type Rework = { note: string; decisionId?: number; beforeAgent: boolean }
+
+/**
+ * Whether the run that failed was a rework (the latest intake was a request for changes). Its branch holds
+ * the work and its note says what to change, so an automatic retry repeats it instead of starting over.
+ */
+async function reworkThatFailed(db: Database, taskId: number): Promise<Rework | undefined> {
+  const events = await db
+    .select({ stage: stageEvent.stage, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(eq(stageEvent.taskId, taskId))
+    .orderBy(desc(stageEvent.id))
+  const failed = events[0]
+  const intakeAt = events.findIndex((e) => e.stage === 'intake')
+  if (failed?.stage !== 'failed' || intakeAt < 0) return undefined
+  const detail = (events[intakeAt].detail ?? {}) as Record<string, unknown>
+  if (detail.decision !== 'request_changes' || typeof detail.note !== 'string') return undefined
+  return {
+    note: detail.note,
+    decisionId: typeof detail.decisionId === 'number' ? detail.decisionId : undefined,
+    beforeAgent: events[1]?.stage === 'sandbox',
+  }
 }
 
 async function load(db: Database, taskId: number) {
@@ -216,9 +257,21 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   const row = await load(deps.db, taskId)
   // A done task whose pull request GitHub refused to merge is not delivered, so it may run again too.
   mustAllow(row, row.stage === 'failed' ? 'retry_due' : 'conflict_rerun')
-  const { token } = await deps.github.installationToken(row.repository)
-  await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
-  await requeue(deps, taskId, [row.stage], 'automatic_retry', '', row.headSha)
+  // A rework repeats on its branch with its note; only a run that never pushed starts over.
+  const rework = row.stage === 'failed' ? await reworkThatFailed(deps.db, taskId) : undefined
+  if (!rework) {
+    const { token } = await deps.github.installationToken(row.repository)
+    await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
+  }
+  await requeue(
+    deps,
+    taskId,
+    [row.stage],
+    'automatic_retry',
+    rework?.note ?? '',
+    row.headSha,
+    rework,
+  )
 }
 
 /**
