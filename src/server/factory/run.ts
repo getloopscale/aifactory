@@ -515,7 +515,7 @@ export class Run {
       role,
       harness: who.name,
       // What the agent says it ran, else what it was told; null when neither is known, never a guess.
-      model: result.model ?? who.model ?? null,
+      model: result.model === undefined ? (who.model ?? null) : result.model,
       effort: who.effort ?? null,
       tokensIn: result.tokensIn ?? null,
       tokensOut: result.tokensOut ?? null,

@@ -45,7 +45,8 @@ describe('parseClaudeResult', () => {
     const run = (modelUsage: object) =>
       parseClaudeResult(0, JSON.stringify({ result: 'x', modelUsage }), '')
     expect(run({ 'claude-opus-4': {} })).toMatchObject({ model: 'claude-opus-4' })
-    expect(run({ a: {}, b: {} })).not.toHaveProperty('model')
+    expect(run({ a: {}, b: {} })).toMatchObject({ model: null })
+    expect(run({})).not.toHaveProperty('model')
     expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('model')
   })
 

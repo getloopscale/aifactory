@@ -37,8 +37,8 @@ export type HarnessResult = {
   ok: boolean
   summary: string
   costUsd?: number
-  /** The model the agent reports it ran, when it reports one. */
-  model?: string
+  /** The model the agent reports it ran. Absent when it says nothing; null when it says several, so none is the pass's. */
+  model?: string | null
   /** Tokens the agent says it read and wrote, when it says. */
   tokensIn?: number
   tokensOut?: number

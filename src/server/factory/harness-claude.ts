@@ -148,10 +148,14 @@ function isResult(line: string): boolean {
   }
 }
 
-/** The model Claude Code reports using, when it reports exactly one. */
-function ranModel(usage: Record<string, unknown> | undefined): string | undefined {
+/**
+ * The model Claude Code reports using: its name when exactly one, null when it reports several (the pass has no
+ * single model, and the configured one is not claimed for it), undefined when it reports none.
+ */
+function ranModel(usage: Record<string, unknown> | undefined): string | null | undefined {
   const names = Object.keys(usage ?? {})
-  return names.length === 1 ? names[0] : undefined
+  if (names.length === 0) return undefined
+  return names.length === 1 ? names[0] : null
 }
 
 export function parseClaudeResult(exitCode: number, stdout: string, stderr: string): HarnessResult {
@@ -178,7 +182,7 @@ export function parseClaudeResult(exitCode: number, stdout: string, stderr: stri
       ok,
       summary,
       costUsd: parsed.total_cost_usd,
-      ...(ranModel(parsed.modelUsage) ? { model: ranModel(parsed.modelUsage) } : {}),
+      ...(ranModel(parsed.modelUsage) !== undefined ? { model: ranModel(parsed.modelUsage) } : {}),
       ...tokenCounts(
         // Input counts what the agent read, cached or not.
         sum(

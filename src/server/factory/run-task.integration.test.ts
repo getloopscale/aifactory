@@ -976,6 +976,18 @@ describe('runTask review loop', () => {
     expect(seen.drafts).toEqual([false])
   })
 
+  it('leaves the model unknown for a pass that reported several, instead of the configured one', async () => {
+    const id = await seedTask()
+    const reviewer = { ...reviewerSaying(verdictJson('approve')), model: 'opus', effort: 'high' }
+    const run = reviewer.run
+    reviewer.run = async (backend, input) => ({ ...(await run(backend, input)), model: null })
+
+    await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+    const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({ model: null, effort: 'high' })
+  })
+
   it('records the model, the effort and the tokens of the reviewer pass on its agent_run row', async () => {
     const id = await seedTask()
     const reviewer = {
