@@ -60,3 +60,20 @@ export async function recentRoundMs(db: Database, repository: string): Promise<n
     .limit(RECENT_ROUNDS)
   return rounds.length === 0 ? undefined : Math.max(...rounds.map((r) => r.ms))
 }
+
+/**
+ * The limits a run of `repository` has: the owner's saved limit, else the one derived from its recent
+ * checks, else `base`. A task's run and an evaluation case both ask here, so they plan the same time.
+ */
+export async function limitsFor(
+  db: Database,
+  repository: string,
+  base: Timeouts,
+  savedMs: number | undefined,
+): Promise<Timeouts> {
+  return resolveTimeouts(
+    base,
+    savedMs,
+    savedMs === undefined ? await recentRoundMs(db, repository) : undefined,
+  )
+}

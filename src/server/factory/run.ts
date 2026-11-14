@@ -1521,7 +1521,8 @@ export class Run {
         attempts: attempt,
         ...(handed ? describeDelivery(handed) : {}),
       },
-      { pullRequestUrl: pull.url },
+      // An interrupted rework pushed a commit nothing verified: the task points at it, so a send-back finds it.
+      { pullRequestUrl: pull.url, ...(outOfTime === undefined ? {} : { headSha: sha }) },
     )
     return {
       status: 'handoff',
@@ -1603,7 +1604,16 @@ export class Run {
   private endedForTime(error: unknown): TimeExhausted | undefined {
     if (error instanceof TimeExhausted) return error
     if (error instanceof Asked || error instanceof QuotaStop) return undefined
-    if (Date.now() - this.startedAt < this.timeouts.sandboxMs) return undefined
+    const now = Date.now()
+    const { deps } = this.c
+    const cap = deps.sandbox.maxSessionMs
+    const runOver = now - this.startedAt >= (deps.timeouts ?? DEFAULT_TIMEOUTS).sandboxMs
+    // A session that ends with no way to renew it takes the sandbox with it; a renewable one is not the run's end.
+    const sessionOver =
+      cap !== undefined &&
+      !(this.sandbox.snapshot && deps.sandbox.restore) &&
+      now - this.sessionStartedAt >= cap
+    if (!runOver && !sessionOver) return undefined
     const said = error instanceof Error ? error.message : String(error)
     return new TimeExhausted(`the sandbox reached its limit: ${said}`)
   }

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULT_TIMEOUTS } from './run'
-import { MAX_RUN_MS, deriveSandboxMs, resolveTimeouts } from './run-limit'
+import type { Database } from '../db'
+import { MAX_RUN_MS, deriveSandboxMs, limitsFor, resolveTimeouts } from './run-limit'
 
 const MIN = 60_000
 
@@ -27,5 +28,12 @@ describe('resolveTimeouts', () => {
       ...DEFAULT_TIMEOUTS,
       sandboxMs: 126 * MIN,
     })
+  })
+})
+
+describe('limitsFor', () => {
+  it("answers the owner's limit without reading the database", async () => {
+    const limits = await limitsFor({} as Database, 'o/r', DEFAULT_TIMEOUTS, 150 * MIN)
+    expect(limits.sandboxMs).toBe(150 * MIN)
   })
 })

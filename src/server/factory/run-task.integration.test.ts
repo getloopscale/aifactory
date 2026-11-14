@@ -4060,11 +4060,36 @@ describe('runTask agent time', () => {
     // What the cut agent had done is committed and pushed, and the draft is opened on that commit.
     expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL, sha: 'abc123def2' })
     expect(pushesOf(sandbox)).toHaveLength(2)
+    const [stored] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(stored).toMatchObject({ stage: 'handoff', headSha: 'abc123def2' })
     expect(sandbox.backend.files.get('/tmp/factory-commit-message.txt')).toContain(
       'unfinished rework',
     )
     expect(seen.drafts).toEqual([true])
     expect(seen.releases).toEqual([])
+  })
+
+  it("does not take a renewable session's hour for the end of a longer run", async () => {
+    const id = await seedTask()
+    const start = Date.now()
+    const sandbox = new FakeSandbox(changed())
+    Object.assign(sandbox, { maxSessionMs: 60 * MIN })
+    const reviewer: CodingHarness = {
+      name: 'fake-reviewer',
+      egress: agentEgress,
+      run: async () => {
+        vi.spyOn(Date, 'now').mockReturnValue(start + 61 * MIN)
+        throw new Error('the review broke')
+      },
+    }
+
+    const result = await runTask(
+      deps(sandbox, { reviewer, timeouts: { sandboxMs: 150 * MIN, agentMs: 45 * MIN } }),
+      id,
+    )
+
+    expect(result).toMatchObject({ status: 'failed' })
+    expect(seen.drafts).toEqual([])
   })
 
   it('hands over a draft when the sandbox reaches its limit during the review', async () => {
