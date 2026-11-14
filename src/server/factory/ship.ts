@@ -1,7 +1,7 @@
 import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { delivery, task } from '../db/schema'
+import { delivery, publication, task } from '../db/schema'
 import type { GithubApi } from '../github/pulls'
 
 import { packageOfTag, packagesOfCommit } from './changed-packages'
@@ -66,9 +66,10 @@ export const availableIn = (s: Shipment) =>
 async function missingPackagesOf(
   api: GithubApi,
   s: Shipment,
+  missingTags: string[],
   t: typeof task.$inferSelect,
 ): Promise<string[]> {
-  const missing = (s.missing ?? []).map(packageOfTag)
+  const missing = missingTags.map(packageOfTag)
   if (missing.length === 0) return []
   try {
     const carried = await packagesOfCommit(api, s.repository, s.token, t.mergedSha!)
@@ -78,17 +79,30 @@ async function missingPackagesOf(
   }
 }
 
+/**
+ * The releases still owed in a repository: the ones this shipment lacks and those of an earlier publication
+ * that ended partly published and has not been completed, so a later release does not close their issues.
+ */
+async function owedReleases(db: Database, s: Shipment): Promise<string[]> {
+  const earlier = await db
+    .select({ missing: publication.missing })
+    .from(publication)
+    .where(and(eq(publication.repository, s.repository), eq(publication.status, 'partial')))
+  return [...new Set([...(s.missing ?? []), ...earlier.flatMap((p) => p.missing ?? [])])]
+}
+
 /** Tells the issue why it stays open. A failure is returned, as in `announce`. */
 async function explainHold(
   api: GithubApi,
   s: Shipment,
   issueNumber: number,
   held: string[],
+  missingTags: string[],
 ): Promise<string | undefined> {
   const body = [
     `Not available yet: ${held.join(', ')} has no release.`,
     '',
-    `The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed and the repository's release workflow published the other packages, but it published no release for ${(s.missing ?? []).join(', ')} within the time the factory waits. This issue stays open until that package is published.`,
+    `The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed and the repository's release workflow published the other packages, but it published no release for ${missingTags.join(', ')} within the time the factory waits. This issue stays open until that package is published.`,
     '',
   ].join('\n')
   try {
@@ -154,11 +168,12 @@ export async function shipContained(
       ),
     )
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
+  const owed = await owedReleases(deps.db, s)
   for (const t of candidates) {
     if (!(await belongs(deps, s, t))) continue
-    const held = await missingPackagesOf(deps.api, s, t)
+    const held = await missingPackagesOf(deps.api, s, owed, t)
     if (held.length > 0) {
-      const error = await explainHold(deps.api, s, t.issueNumber, held)
+      const error = await explainHold(deps.api, s, t.issueNumber, held, owed)
       shipped.held.push(`#${t.issueNumber}: ${held.join(', ')}`)
       if (error) shipped.issueErrors.push(error)
       continue

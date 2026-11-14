@@ -347,26 +347,43 @@ describe('inbox', () => {
     expect(items[1].summary).toBe('A or B?')
   })
 
-  it('names the package a publication left unpublished, for the owner', async () => {
-    const asked = await seed('released', {}, [{ stage: 'released' }])
-    await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
-    await getDb()
-      .insert(publication)
-      .values({
-        taskId: asked,
-        repository: 'paulo/app',
-        releaseBranch: 'main',
-        promotedSha: 'p1',
-        actor: 'human',
-        status: 'partial',
-        missing: ['@theokit/gateway-agent@0.1.0'],
-      })
+  describe('a publication that left a package unpublished', () => {
+    const partial = async (status: 'partial' | 'published') => {
+      const asked = await seed('released', {}, [{ stage: 'released' }])
+      await getDb()
+        .insert(publication)
+        .values({
+          taskId: asked,
+          repository: 'paulo/app',
+          releaseBranch: 'main',
+          promotedSha: 'p1',
+          actor: 'human',
+          status,
+          missing: ['@theokit/gateway-agent@0.1.0'],
+        })
+      return asked
+    }
 
-    const items = await inbox(getDb())
+    it('names the package for the owner, with no task held and none waiting', async () => {
+      const asked = await partial('partial')
 
-    const partial = items.find((i) => i.kind === 'publication_partial')
-    expect(partial?.task.id).toBe(asked)
-    expect(partial?.summary).toContain('@theokit/gateway-agent@0.1.0')
+      const items = await inbox(getDb())
+
+      const item = items.find((i) => i.kind === 'publication_partial')
+      expect(item?.task.id).toBe(asked)
+      expect(item?.summary).toContain('@theokit/gateway-agent@0.1.0')
+    })
+
+    it('stays while another task of the repository is done or released, and goes once published', async () => {
+      await partial('partial')
+      await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
+      await getDb().update(task).set({ stage: 'released' }).where(eq(task.stage, 'done'))
+      expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(true)
+
+      await getDb().update(publication).set({ status: 'published' })
+
+      expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(false)
+    })
   })
 
   it('leaves out an issue delivered as already resolved, which has no pull request to review', async () => {

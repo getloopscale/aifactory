@@ -372,20 +372,15 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
 
 /**
  * Publications that ended with a package unpublished. Nothing else will publish it, so the owner is told
- * for as long as a finished task of that repository still waits for a release, which is what such a
- * publication leaves behind.
+ * until the release workflow's missing releases appear: the `publish-changesets` cron then marks the
+ * publication published and the item goes.
  */
 async function partialPublications(db: Database): Promise<InboxItem[]> {
   const rows = await db.select().from(publication).where(eq(publication.status, 'partial'))
   const items: InboxItem[] = []
   for (const p of rows) {
-    const [waiting] = await db
-      .select({ id: task.id })
-      .from(task)
-      .where(and(eq(task.repository, p.repository), eq(task.stage, 'done')))
-      .limit(1)
     const [owner] = await db.select().from(task).where(eq(task.id, p.taskId))
-    if (!waiting || !owner) continue
+    if (!owner) continue
     const [card] = await cards(db, [owner])
     items.push({
       task: card,

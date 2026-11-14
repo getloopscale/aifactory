@@ -11,6 +11,7 @@ import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
 import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
 
 import { pollPublications } from './publish'
+import { shipContained } from './ship'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -160,6 +161,21 @@ const published = (tag: string): PublishedRelease => ({
   url: `https://github.com/usetheokit/ui/releases/tag/${encodeURIComponent(tag)}`,
   publishedAt: new Date('2026-11-11T12:30:00Z'),
 })
+/** What a commit changes: one file in the package of `dir`, with the manifests the lookup reads. */
+const MANIFESTS = {
+  'packages/gateway/package.json': '{"name":"@theokit/gateway","version":"0.16.1"}',
+  'packages/slack/package.json': '{"name":"@theokit/gateway-slack","version":"0.5.1"}',
+  '.changeset/config.json': '{}',
+}
+const commitIn = (sha: string, dir: 'gateway' | 'slack') => {
+  repo()
+    .files(`${sha}^`, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'a' })
+    .files(sha, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'b' })
+}
+const stageOf = async (id: number) =>
+  (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
+const issueOf = async (id: number) =>
+  (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
 const row = async () => (await getDb().select().from(publication))[0]
 
 describe('publishing a changesets release', () => {
@@ -378,12 +394,14 @@ describe('publishing a changesets release', () => {
     })
 
     it('publishes with what exists after the bounded wait, naming the package with no release', async () => {
-      await waitingPublication()
+      const asked = await waitingPublication()
+      commitIn('m1', 'slack')
       releasesAre(...ALL.slice(0, 2).map(published))
 
       const result = await pollPublications(deps(PAST_THE_WAIT))
 
       expect(result.published).toHaveLength(1)
+      expect(await stageOf(asked)).toBe('released')
       expect([...((await row()).tags ?? [])].sort()).toEqual(ALL.slice(0, 2).sort())
       expect((await row()).detail).toMatch(
         /no release for @theokit\/gateway@0\.16\.1 30 minutes after the Version Packages merge/,
@@ -395,40 +413,70 @@ describe('publishing a changesets release', () => {
       await waitingPublication()
       const gateway = await seedTask('done', 'gw-merge')
       const slack = await seedTask('done', 'slack-merge')
-      const manifests = {
-        'packages/gateway/package.json': '{"name":"@theokit/gateway","version":"0.16.1"}',
-        'packages/slack/package.json': '{"name":"@theokit/gateway-slack","version":"0.5.1"}',
-        '.changeset/config.json': '{}',
-      }
-      for (const [sha, dir] of [
-        ['gw-merge', 'gateway'],
-        ['slack-merge', 'slack'],
-      ]) {
-        repo()
-          .files(`${sha}^`, { ...manifests, [`packages/${dir}/src/a.ts`]: 'a' })
-          .files(sha, { ...manifests, [`packages/${dir}/src/a.ts`]: 'b' })
-      }
+      commitIn('gw-merge', 'gateway')
+      commitIn('slack-merge', 'slack')
       releasesAre(...ALL.slice(0, 2).map(published))
 
       await pollPublications(deps(PAST_THE_WAIT))
 
-      const stage = async (id: number) =>
-        (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
-      expect(await stage(slack)).toBe('released')
-      expect(await stage(gateway)).toBe('done')
+      expect(await stageOf(slack)).toBe('released')
+      expect(await stageOf(gateway)).toBe('done')
       expect(await row()).toMatchObject({
         status: 'partial',
         missing: ['@theokit/gateway@0.16.1'],
       })
       expect((await row()).detail).toMatch(/issues left open.*@theokit\/gateway/)
-      const issue = async (id: number) =>
-        (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
-      expect(closed()).not.toContain(await issue(gateway))
-      expect(closed()).toContain(await issue(slack))
-      const heldIssue = await issue(gateway)
+      expect(closed()).not.toContain(await issueOf(gateway))
+      expect(closed()).toContain(await issueOf(slack))
+      const heldIssue = await issueOf(gateway)
       const held = comments().find((c) => c.issue === heldIssue)
       expect(held?.body).toContain('@theokit/gateway@0.16.1')
       expect(held?.body).toContain('has no release')
+    })
+
+    it('keeps the issue open when a later release carries a task of a package an earlier publication never published', async () => {
+      const asked = await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      commitIn('gw-merge', 'gateway')
+      await getDb()
+        .update(publication)
+        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'] })
+        .where(eq(publication.taskId, asked))
+
+      const shipped = await shipContained(
+        { db: getDb(), api },
+        {
+          repository: REPO,
+          token: 't',
+          promotedSha: 'promoted2',
+          releaseBranch: 'main',
+          askedTaskId: asked,
+          actor: 'human',
+          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
+        },
+      )
+
+      expect(shipped.held).toEqual([`#${await issueOf(gateway)}: @theokit/gateway`])
+      expect(await stageOf(gateway)).toBe('done')
+      expect(closed()).not.toContain(await issueOf(gateway))
+    })
+
+    it('stops holding, and takes the publication as published, once the missing release appears', async () => {
+      const asked = await waitingPublication()
+      await getDb()
+        .update(publication)
+        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'], tags: [ALL[0]] })
+        .where(eq(publication.taskId, asked))
+      releasesAre(...ALL.slice(0, 2).map(published))
+
+      await pollPublications(deps(PAST_THE_WAIT))
+      expect(await row()).toMatchObject({ status: 'partial' })
+
+      releasesAre(...ALL.map(published))
+      await pollPublications(deps(PAST_THE_WAIT))
+
+      expect(await row()).toMatchObject({ status: 'published' })
+      expect((await row()).tags).toContain('@theokit/gateway@0.16.1')
     })
 
     it('records why it cannot tell the releases apart when GitHub names no merge commit for the merged pull request', async () => {
