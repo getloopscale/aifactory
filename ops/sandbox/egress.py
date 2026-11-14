@@ -12,7 +12,8 @@ A connection that did not name the proxy (a child that dropped the environment) 
 listener, where the only name it carries is the SNI of its TLS handshake. That name is checked against the rules,
 and the proxy connects to it, never to the address the client chose: a client cannot get a credential attached
 to a request it sends to some other address by claiming a listed name. A connection with no SNI (plain HTTP, or
-a bare IP) is refused there, since nothing proves where it is going.
+a bare IP) is refused there, since nothing proves where it is going. A name is resolved (the DNS listener)
+only when the rules allow it: an unlisted name is answered REFUSED, so a query carries nothing out.
 """
 import json
 import os
@@ -72,6 +73,15 @@ def server_connect(data):
         data.server.error = "blocked by the factory egress policy"
         return
     data.server.address = (sni, data.server.address[1])
+
+
+def dns_request(flow):
+    """A name is resolved only when the rules allow it, so a query cannot carry data to a name server."""
+    from mitmproxy.net.dns import response_codes
+
+    question = flow.request.question
+    if question is None or rule_for(question.name) is None:
+        flow.response = flow.request.fail(response_codes.REFUSED)
 
 
 def http_connect(flow: http.HTTPFlow):

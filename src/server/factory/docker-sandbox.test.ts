@@ -140,6 +140,10 @@ describe('creating a docker sandbox', () => {
       /container:factory-sbx-\w+ .*ip route replace default via 172\.20\.0\.2/,
     )
     expect(commands.find((c) => c.includes('-e HTTPS_PROXY'))).not.toContain('NET_ADMIN')
+    // The certificate is in the system store too, for a child that dropped the environment.
+    expect(
+      commands.some((c) => c.includes('-u root') && c.includes('update-ca-certificates')),
+    ).toBe(true)
     const resolver = calls.find((c) => c.args.join(' ').endsWith('cat > /etc/resolv.conf'))
     expect(resolver?.input).toBe('nameserver 172.20.0.2\n')
     const hosts = calls.find((c) => c.args.join(' ').endsWith('cat >> /etc/hosts'))

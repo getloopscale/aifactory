@@ -576,7 +576,10 @@ async function pinLocalhost(docker: Docker, name: string) {
   })
 }
 
-/** Makes every tool in the sandbox trust the proxy's CA next to the system's. */
+/**
+ * Makes every tool in the sandbox trust the proxy's CA next to the system's: the bundle the environment names,
+ * and the system store itself, which curl, git and Python read when a child dropped the environment.
+ */
 async function trustProxy(docker: Docker, backend: DockerBackend, name: string, ca: string) {
   await backend.uploadFile('/tmp/factory-ca.pem', ca)
   await must(docker, [
@@ -587,6 +590,15 @@ async function trustProxy(docker: Docker, backend: DockerBackend, name: string, 
     'sh',
     '-c',
     `cat /etc/ssl/certs/ca-certificates.crt /tmp/factory-ca.pem > ${CA_BUNDLE}`,
+  ])
+  await must(docker, [
+    'exec',
+    '-u',
+    'root',
+    name,
+    'sh',
+    '-c',
+    'cp /tmp/factory-ca.pem /usr/local/share/ca-certificates/factory-ca.crt && update-ca-certificates',
   ])
 }
 

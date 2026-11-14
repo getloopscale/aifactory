@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, max, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, lte, max, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { stageEvent, task } from '../db/schema'
@@ -112,26 +112,32 @@ export function configuredProvider(env: NodeJS.ProcessEnv = process.env): string
   return choice === 'vercel' ? 'vercel-sandbox' : choice
 }
 
-/** The provider of the sandbox of the repository's latest task that was delivered, if it recorded one. */
+/**
+ * The provider of the sandbox of the repository's latest delivered task. "Latest" is the task whose `done` event
+ * is the newest: a later `released` of an older task does not make it the latest. The provider is the one of the
+ * task's last sandbox event up to that `done`, so a retry that moved to another provider counts, and a sandbox
+ * the task had after being delivered does not.
+ */
 async function readParity(db: Database, name: string, configured: string): Promise<ParityFacts> {
   const [green] = await db
-    .select({ taskId: stageEvent.taskId })
+    .select({ taskId: stageEvent.taskId, at: stageEvent.at })
     .from(stageEvent)
     .innerJoin(task, eq(task.id, stageEvent.taskId))
-    .where(
-      and(
-        sql`lower(${task.repository}) = lower(${name})`,
-        inArray(stageEvent.stage, ['done', 'released']),
-      ),
-    )
-    .orderBy(desc(stageEvent.at))
+    .where(and(sql`lower(${task.repository}) = lower(${name})`, eq(stageEvent.stage, 'done')))
+    .orderBy(desc(stageEvent.at), desc(stageEvent.id))
     .limit(1)
   if (!green) return { configured }
   const [started] = await db
     .select({ detail: stageEvent.detail })
     .from(stageEvent)
-    .where(and(eq(stageEvent.taskId, green.taskId), eq(stageEvent.stage, 'sandbox')))
-    .orderBy(desc(stageEvent.at))
+    .where(
+      and(
+        eq(stageEvent.taskId, green.taskId),
+        eq(stageEvent.stage, 'sandbox'),
+        lte(stageEvent.at, green.at),
+      ),
+    )
+    .orderBy(desc(stageEvent.at), desc(stageEvent.id))
     .limit(1)
   const provider = (started?.detail as { provider?: unknown } | null | undefined)?.provider
   return typeof provider === 'string'
