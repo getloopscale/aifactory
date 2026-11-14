@@ -79,8 +79,6 @@ async function requeue(
             decision: changes ? 'request_changes' : 'retry',
             note,
             automatic: true,
-            // A rework that failed before an agent ran did not use up an attempt of the work.
-            ...(rework?.beforeAgent ? { beforeAgent: true } : {}),
             ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
           },
         })
@@ -111,29 +109,46 @@ async function requeue(
   })
 }
 
-/** A run that was a rework: what it was sent back for, and whether it failed before any agent ran. */
-type Rework = { note: string; decisionId?: number; beforeAgent: boolean }
+/** Work a failed run left on its branch: what to change, and the decision it came from when a person asked. */
+type Rework = { note: string; decisionId?: number }
+
+/** What a run continues from when it stopped before it finished and had nothing to change. */
+const RESUME_NOTE =
+  'The previous run stopped before it finished, because of the environment. Continue from the branch it pushed.'
 
 /**
- * Whether the run that failed was a rework (the latest intake was a request for changes). Its branch holds
- * the work and its note says what to change, so an automatic retry repeats it instead of starting over.
+ * The work an automatic retry must keep. A run that was a rework (the latest intake was a request for
+ * changes) keeps its note and, for a person's request, its decision, so the prompt is the one the person
+ * caused. A run that pushed a branch keeps it too, even a first run, with a note that says it only continues.
  */
-async function reworkThatFailed(db: Database, taskId: number): Promise<Rework | undefined> {
-  const events = await db
+async function workToKeep(
+  deps: ActionDeps,
+  row: typeof task.$inferSelect,
+  token: string,
+): Promise<Rework | undefined> {
+  const events = await deps.db
     .select({ stage: stageEvent.stage, detail: stageEvent.detail })
     .from(stageEvent)
-    .where(eq(stageEvent.taskId, taskId))
+    .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'intake')))
     .orderBy(desc(stageEvent.id))
-  const failed = events[0]
-  const intakeAt = events.findIndex((e) => e.stage === 'intake')
-  if (failed?.stage !== 'failed' || intakeAt < 0) return undefined
-  const detail = (events[intakeAt].detail ?? {}) as Record<string, unknown>
-  if (detail.decision !== 'request_changes' || typeof detail.note !== 'string') return undefined
-  return {
-    note: detail.note,
-    decisionId: typeof detail.decisionId === 'number' ? detail.decisionId : undefined,
-    beforeAgent: events[1]?.stage === 'sandbox',
+    .limit(1)
+  const detail = (events[0]?.detail ?? {}) as Record<string, unknown>
+  if (detail.decision === 'request_changes' && typeof detail.note === 'string') {
+    let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
+    if (decisionId === undefined && detail.automatic !== true) {
+      // An intake written before it named its decision: the person's latest request is the one.
+      const [asked] = await deps.db
+        .select({ id: decision.id })
+        .from(decision)
+        .where(and(eq(decision.taskId, row.id), eq(decision.kind, 'request_changes')))
+        .orderBy(desc(decision.id))
+        .limit(1)
+      decisionId = asked?.id
+    }
+    return { note: detail.note, decisionId }
   }
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  return head ? { note: RESUME_NOTE } : undefined
 }
 
 async function load(db: Database, taskId: number) {
@@ -257,10 +272,10 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   const row = await load(deps.db, taskId)
   // A done task whose pull request GitHub refused to merge is not delivered, so it may run again too.
   mustAllow(row, row.stage === 'failed' ? 'retry_due' : 'conflict_rerun')
-  // A rework repeats on its branch with its note; only a run that never pushed starts over.
-  const rework = row.stage === 'failed' ? await reworkThatFailed(deps.db, taskId) : undefined
+  // A rework, or a run that pushed, repeats on its branch with its note; only a run that never pushed starts over.
+  const { token } = await deps.github.installationToken(row.repository)
+  const rework = row.stage === 'failed' ? await workToKeep(deps, row, token) : undefined
   if (!rework) {
-    const { token } = await deps.github.installationToken(row.repository)
     await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
   }
   await requeue(
