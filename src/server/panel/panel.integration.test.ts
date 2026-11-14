@@ -776,11 +776,15 @@ describe('actions', () => {
       return { id, decisionId: asked.id }
     }
     /** What the job that was queued would run with, as the job reads it. */
-    async function continuationOf(input: { decisionId?: number; feedback?: string }) {
+    async function continuationOf(input: {
+      decisionId?: number
+      feedback?: string
+      resume?: boolean
+    }) {
       const [decided] = input.decisionId
         ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
         : []
-      return runContinuation(decided, input.feedback)
+      return runContinuation(decided, input.feedback, input.resume)
     }
     const failAgain = async (id: number) => {
       await getDb()
