@@ -98,9 +98,9 @@ function settled(input: WaitingIntegration): WaitingStep | undefined {
   return undefined
 }
 
-/** The failed run of a check, when one of its runs on the commit failed. */
-const failedRun = (reports: CheckReport[], name: string) =>
-  reports.find((r) => r.name === name && r.state === 'failure')
+/** Every run of a check that failed on the commit: two workflows may report the same name. */
+const failedRuns = (reports: CheckReport[], name: string) =>
+  reports.filter((r) => r.name === name && r.state === 'failure')
 
 /**
  * What the required checks say: the ones that failed, and the ones that never reported. A check can run
@@ -111,7 +111,7 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
   const failed: string[] = []
   const silent: string[] = []
   for (const name of input.required) {
-    if (failedRun(input.reports, name)) failed.push(name)
+    if (failedRuns(input.reports, name).length > 0) failed.push(name)
     else if (!input.reports.some((r) => r.name === name)) silent.push(name)
   }
   return { failed, silent }
@@ -151,10 +151,10 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
         kind: 'person',
         reason: `the required checks still fail after ${runs}: ${failed.join(', ')}`,
         stopAutoMerge: true,
-        reports: failed.map((name) => failedRun(input.reports, name)!),
+        reports: failed.flatMap((name) => failedRuns(input.reports, name)),
       }
     }
-    const reports = failed.map((name) => failedRun(input.reports, name)!)
+    const reports = failed.flatMap((name) => failedRuns(input.reports, name))
     return { kind: 'send_back', failed, reports }
   }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {

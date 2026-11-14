@@ -2137,10 +2137,10 @@
         },
         "ci_reruns": {
           "name": "ci_reruns",
-          "type": "text[]",
+          "type": "jsonb",
           "primaryKey": false,
           "notNull": true,
-          "default": "'{}'::text[]"
+          "default": "'{}'::jsonb"
         },
         "cost_usd": {
           "name": "cost_usd",

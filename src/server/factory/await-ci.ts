@@ -208,22 +208,33 @@ async function effectiveChecks(
   }
 }
 
-/** The reruns of a task's failed jobs, kept on the task: one statement claims a run, so only one pass asks. */
-function rerunLedger(deps: AwaitCiDeps, taskId: number): RerunLedger {
+/**
+ * The reruns of a task's failed jobs, kept on the task with when each was claimed: one statement claims a run,
+ * so only one pass asks, and a restart finds the claim and its time.
+ */
+function rerunLedger(deps: AwaitCiDeps, taskId: number, now: Date): RerunLedger {
   const id = (runId: number) => String(runId)
   return {
-    claim: async (runId) =>
-      (
-        await deps.db
-          .update(task)
-          .set({ ciReruns: sql`array_append(${task.ciReruns}, ${id(runId)})` })
-          .where(and(eq(task.id, taskId), sql`NOT (${id(runId)} = ANY(${task.ciReruns}))`))
-          .returning({ id: task.id })
-      ).length > 0,
+    claim: async (runId) => {
+      const claimed = await deps.db
+        .update(task)
+        .set({
+          ciReruns: sql`${task.ciReruns} || jsonb_build_object(${id(runId)}::text, ${now.toISOString()}::text)`,
+        })
+        .where(and(eq(task.id, taskId), sql`NOT jsonb_exists(${task.ciReruns}, ${id(runId)})`))
+        .returning({ id: task.id })
+      if (claimed.length > 0) return undefined
+      const [held] = await deps.db
+        .select({ at: sql<string | null>`${task.ciReruns} ->> ${id(runId)}` })
+        .from(task)
+        .where(eq(task.id, taskId))
+      // A claim released since: it was just refused, so it is looked at as it stands, never asked again here.
+      return held?.at ? new Date(held.at) : new Date(0)
+    },
     release: async (runId) => {
       await deps.db
         .update(task)
-        .set({ ciReruns: sql`array_remove(${task.ciReruns}, ${id(runId)})` })
+        .set({ ciReruns: sql`${task.ciReruns} - ${id(runId)}::text` })
         .where(eq(task.id, taskId))
     },
   }
@@ -255,13 +266,15 @@ async function readFailure(
   result: AwaitCiResult,
 ): Promise<string | undefined> {
   const { row, token, verifiedSha } = w
+  const now = deps.now?.() ?? new Date()
   const rerun = await rerunTransient(
     deps.checks,
     row.repository,
     token,
     verifiedSha,
     reports,
-    rerunLedger(deps, row.id),
+    rerunLedger(deps, row.id, now),
+    now,
   )
   for (const problem of rerun.problems) result.errors.push(`task ${row.id}: ${problem}`)
   if (rerun.started > 0) {

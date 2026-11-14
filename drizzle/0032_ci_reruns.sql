@@ -1,1 +1,1 @@
-ALTER TABLE "task" ADD COLUMN "ci_reruns" text[] DEFAULT '{}'::text[] NOT NULL;
+ALTER TABLE "task" ADD COLUMN "ci_reruns" jsonb DEFAULT '{}'::jsonb NOT NULL;

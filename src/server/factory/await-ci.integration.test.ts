@@ -590,7 +590,47 @@ describe('pollAwaitingIntegrations', () => {
 
     expect(gh.reruns).toEqual([10])
     expect(again).toMatchObject({ rerun: [id], sentBack: [] })
-    expect((await row(id)).ciReruns).toEqual(['10'])
+    expect(Object.keys((await row(id)).ciReruns)).toEqual(['10'])
+  })
+
+  it('reruns both same-named failures and gives each its own log in the note', async () => {
+    const one = 'https://github.com/paulo/app/actions/runs/500/job/1'
+    const two = 'https://github.com/paulo/app/actions/runs/501/job/2'
+    reports(
+      { name: 'CI', state: 'failure', detail: '', url: one },
+      { name: 'CI', state: 'failure', detail: '', url: two },
+    )
+    gh.failedRuns = [
+      { id: 1, name: 'CI', url: one, summary: '', actions: true },
+      { id: 2, name: 'CI', url: two, summary: '', actions: true },
+    ]
+    gh.attempts = { 1: 1, 2: 1 }
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect(gh.reruns).toEqual([10, 20])
+
+    gh.attempts = { 1: 2, 2: 2 }
+    gh.logs = { 1: 'FAIL src/a.test.ts', 2: 'FAIL src/b.test.ts' }
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
+    expect(sentBack[0].note).toContain('FAIL src/a.test.ts')
+    expect(sentBack[0].note).toContain('FAIL src/b.test.ts')
+  })
+
+  it('stops waiting for a rerun claimed long ago, and sends the work back without asking again', async () => {
+    const a = 'https://github.com/paulo/app/actions/runs/500/job/1'
+    reports({ name: 'CI', state: 'failure', detail: '', url: a })
+    gh.failedRuns = [{ id: 1, name: 'CI', url: a, summary: '', actions: true }]
+    gh.logs = { 1: 'FAIL src/a.test.ts' }
+    gh.attempts = { 1: 1 }
+    const id = await waitingTask()
+    await getDb()
+      .update(task)
+      .set({ ciReruns: { '10': new Date(NOW.getTime() - 20 * 60_000).toISOString() } })
+      .where(eq(task.id, id))
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], rerun: [] })
+    expect(gh.reruns).toEqual([])
   })
 
   it('leaves an unrelated failed workflow alone', async () => {

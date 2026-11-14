@@ -257,13 +257,15 @@ describe('attachEvidence', () => {
 })
 
 describe('rerunTransient', () => {
-  const ledgerOf = (): RerunLedger => {
-    const held = new Set<number>()
-    return {
-      claim: async (id) => (held.has(id) ? false : (held.add(id), true)),
-      release: async (id) => void held.delete(id),
-    }
-  }
+  const NOW = new Date('2026-11-14T12:00:00Z')
+  const ledgerOf = (held = new Map<number, Date>()): RerunLedger => ({
+    claim: async (id) => {
+      const at = held.get(id)
+      if (!at) held.set(id, NOW)
+      return at
+    },
+    release: async (id) => void held.delete(id),
+  })
   const rerunning = (runs: FailedRun[], attempt: number) => {
     const reruns: number[] = []
     const api: EvidenceApi = {
@@ -282,14 +284,14 @@ describe('rerunTransient', () => {
 
   it('reruns the run of a failed required check on its first attempt, once', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
-    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf())
+    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(), NOW)
     expect(outcome).toEqual({ started: 1, problems: [] })
     expect(reruns).toEqual([110])
   })
 
   it('never reruns a run already on its second attempt, whoever asks', async () => {
     const { api, reruns } = rerunning([actionsRun()], 2)
-    expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf())).toEqual({
+    expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(), NOW)).toEqual({
       started: 0,
       problems: [],
     })
@@ -299,17 +301,38 @@ describe('rerunTransient', () => {
   it('asks once for repeated passes, and waits while GitHub still shows the first attempt', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
     const ledger = ledgerOf()
-    const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger)
-    const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger)
+    const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
+    const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
     expect([first.started, second.started]).toEqual([1, 1])
     expect(reruns).toEqual([110])
+  })
+
+  it('stops waiting for a claim older than a quarter of an hour, and never asks again (a restart, a lost request)', async () => {
+    const { api, reruns } = rerunning([actionsRun()], 1)
+    const old = new Map([[110, new Date(NOW.getTime() - 16 * 60_000)]])
+    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(old), NOW)
+    expect(outcome).toEqual({ started: 0, problems: [] })
+    expect(reruns).toEqual([])
+  })
+
+  it('keeps the claim when the request fails without an answer, and does not ask again', async () => {
+    const { api, reruns } = rerunning([actionsRun()], 1)
+    api.rerunFailedJobs = async () => {
+      throw new Error('connection lost')
+    }
+    const ledger = ledgerOf()
+    const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
+    expect(first.problems).toEqual(['rerunning CI: connection lost'])
+    const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
+    expect(second).toEqual({ started: 1, problems: [] })
+    expect(reruns).toEqual([])
   })
 
   it('asks once when passes run at the same time', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
     const ledger = ledgerOf()
     const all = await Promise.all(
-      [1, 2, 3].map(() => rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger)),
+      [1, 2, 3].map(() => rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)),
     )
     expect(all.map((o) => o.started)).toEqual([1, 1, 1])
     expect(reruns).toEqual([110])
@@ -319,11 +342,11 @@ describe('rerunTransient', () => {
     const { api } = rerunning([actionsRun()], 1)
     api.rerunFailedJobs = async () => ({ started: false, refusal: 'no' })
     const ledger = ledgerOf()
-    expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger)).toEqual({
+    expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)).toEqual({
       started: 0,
       problems: ['no'],
     })
-    expect(await ledger.claim(110)).toBe(true)
+    expect(await ledger.claim(110)).toBeUndefined()
   })
 
   it('reruns only the job the required check names, not a same-named job of another workflow', async () => {
@@ -331,7 +354,7 @@ describe('rerunTransient', () => {
       [actionsRun({ id: 11, name: 'validate' }), actionsRun({ id: 12, name: 'validate' })],
       1,
     )
-    await rerunTransient(api, REPO, 'tok', SHA, [at(12, 'validate')], ledgerOf())
+    await rerunTransient(api, REPO, 'tok', SHA, [at(12, 'validate')], ledgerOf(), NOW)
     expect(reruns).toEqual([120])
   })
 
@@ -340,7 +363,7 @@ describe('rerunTransient', () => {
       [actionsRun({ id: 11, name: 'validate' }), actionsRun({ id: 12, name: 'validate' })],
       1,
     )
-    await rerunTransient(api, REPO, 'tok', SHA, [report('validate')], ledgerOf())
+    await rerunTransient(api, REPO, 'tok', SHA, [report('validate')], ledgerOf(), NOW)
     expect(reruns).toEqual([])
   })
 
@@ -352,8 +375,30 @@ describe('rerunTransient', () => {
       ],
       1,
     )
-    await rerunTransient(api, REPO, 'tok', SHA, [report('CI')], ledgerOf())
+    await rerunTransient(api, REPO, 'tok', SHA, [report('CI')], ledgerOf(), NOW)
     expect(reruns).toEqual([])
+  })
+})
+
+describe('attachEvidence by job identity', () => {
+  it('attaches the log of the job a report names, not of a same-named job of another workflow', async () => {
+    const api: EvidenceApi = {
+      failedChecks: async () => [
+        actionsRun({ id: 11, name: 'validate' }),
+        actionsRun({ id: 12, name: 'validate' }),
+      ],
+      jobLog: async (_r, _t, id) => `FAIL job ${id}`,
+      annotations: async () => [],
+    }
+    const both = ['11', '12'].map((job) => ({
+      ...report('validate'),
+      url: `https://github.com/o/r/actions/runs/1/job/${job}`,
+    }))
+    const attached = await attachEvidence(api, REPO, 'tok', SHA, both)
+    expect(attached.map((a) => a.evidence)).toEqual([
+      { lines: ['FAIL job 11'] },
+      { lines: ['FAIL job 12'] },
+    ])
   })
 })
 

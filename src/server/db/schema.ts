@@ -86,13 +86,14 @@ export const task = pgTable(
      */
     awaitingCiSha: text('awaiting_ci_sha'),
     /**
-     * The Actions runs the factory asked GitHub to rerun while this task waited for its required checks. A run
-     * is claimed here before the request, in one statement, so concurrent passes and restarts ask once.
+     * The Actions runs the factory asked GitHub to rerun while this task waited for its required checks, by
+     * run id, with when each was claimed. A run is claimed in one statement before the request, so concurrent
+     * passes and restarts ask once; the time bounds how long a pass waits for a rerun whose outcome is unknown.
      */
-    ciReruns: text('ci_reruns')
-      .array()
+    ciReruns: jsonb('ci_reruns')
+      .$type<Record<string, string>>()
       .notNull()
-      .default(sql`'{}'::text[]`),
+      .default(sql`'{}'::jsonb`),
     /** What the run has spent so far, agents included. It grows while the run is going. */
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

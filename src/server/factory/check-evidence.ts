@@ -28,45 +28,50 @@ export type RerunOutcome = { started: number; problems: string[] }
 
 /**
  * Where the reruns asked for are kept, so that one run is asked for once however many passes look at it, and
- * across restarts. `claim` is atomic: it is true for exactly one caller per run. `release` gives a claim back
- * when the request did not reach GitHub, so a later pass may ask again.
+ * across restarts. `claim` is atomic: it answers undefined to exactly one caller per run, and to the others
+ * when the run was first claimed. `release` gives a claim back, and is for a request GitHub refused.
  */
 export type RerunLedger = {
-  claim(runId: number): Promise<boolean>
+  claim(runId: number): Promise<Date | undefined>
   release(runId: number): Promise<void>
 }
+
+/** How long a rerun that was asked for is waited for while GitHub still shows the first attempt. */
+const RERUN_WAIT_MS = 15 * 60_000
 
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 const JOB_ID = /\/job\/(\d+)/
 
 /**
- * The failed Actions runs that are the failed required checks themselves. A report names its job in its link,
- * and a run is that check only when its id is the one the link names. A report whose link names no job is
- * matched by name only when one failed run has that name: with two, nothing says which is required, so
- * neither is rerun. A workflow no required check names is left alone, since a rerun may have side effects.
+ * The failed Actions run that is a check report. A report names its job in its link, and a run is that check
+ * only when its id is the one the link names. A report whose link names no job is matched by name only when
+ * one failed run has that name: with two, nothing says which, so none is taken.
  */
+export function runOf(runs: FailedRun[], report: CheckReport): FailedRun | undefined {
+  const named = runs.filter((run) => run.name === report.name)
+  const job = JOB_ID.exec(report.url)?.[1]
+  if (job) return named.find((run) => String(run.id) === job)
+  return named.length === 1 ? named[0] : undefined
+}
+
+/** The failed Actions runs that are the failed required checks themselves; no other workflow is touched. */
 function requiredRuns(runs: FailedRun[], reports: CheckReport[]): FailedRun[] {
   const actions = runs.filter((run) => run.actions)
-  const picked = new Set<FailedRun>()
-  for (const report of reports) {
-    const job = JOB_ID.exec(report.url)?.[1]
-    const named = actions.filter((run) => run.name === report.name)
-    if (job) {
-      for (const run of named) if (String(run.id) === job) picked.add(run)
-    } else if (named.length === 1) picked.add(named[0])
-  }
-  return [...picked]
+  const picked = reports.map((report) => runOf(actions, report))
+  return [...new Set(picked.filter((run): run is FailedRun => run !== undefined))]
 }
 
 /**
  * Reruns, once, the failed Actions runs behind the failed required checks whose job is on its first attempt:
  * a failure that is not of the work (a flaky test) passes on the second attempt. The request is claimed in the
- * `ledger` first, atomically, so a concurrent pass, a restart or a delayed attempt count on GitHub's side never
- * asks twice; a run already claimed counts as rerunning, and the pass waits for its outcome. A job already on
- * its second attempt is never rerun. What GitHub refuses or fails to answer is a problem the caller reports,
- * per run, so one failure does not keep the others from being rerun. An API without the rerun calls reruns
- * nothing and says nothing.
+ * `ledger` first, atomically, so a concurrent pass or a restart never asks twice. A claim stays when the
+ * request's outcome is unknown (a timeout, a lost connection, a process that stopped): only a refusal GitHub
+ * gave releases it. A run claimed less than a quarter of an hour ago and still on its first attempt counts as
+ * rerunning, and the pass waits; past that, or once GitHub shows the second attempt, the run is looked at as
+ * it stands and is never asked for again. What GitHub refuses or fails to answer is a problem the caller
+ * reports, per run, so one failure does not keep the others from being rerun. An API without the rerun calls
+ * reruns nothing and says nothing.
  */
 export async function rerunTransient(
   api: EvidenceApi,
@@ -75,6 +80,7 @@ export async function rerunTransient(
   sha: string,
   reports: CheckReport[],
   ledger: RerunLedger,
+  now: Date = new Date(),
 ): Promise<RerunOutcome> {
   const outcome: RerunOutcome = { started: 0, problems: [] }
   const { jobAttempt, rerunFailedJobs } = api
@@ -88,16 +94,15 @@ export async function rerunTransient(
   }
   const tried = new Set<number>()
   for (const run of runs) {
-    let claimed: number | undefined
     try {
       const job = await jobAttempt.call(api, repo, token, run.id)
       if (job.attempt >= 2 || tried.has(job.runId)) continue
       tried.add(job.runId)
-      if (!(await ledger.claim(job.runId))) {
-        outcome.started += 1
+      const claimedAt = await ledger.claim(job.runId)
+      if (claimedAt) {
+        if (now.getTime() - claimedAt.getTime() < RERUN_WAIT_MS) outcome.started += 1
         continue
       }
-      claimed = job.runId
       const answer = await rerunFailedJobs.call(api, repo, token, job.runId)
       if (answer.started) outcome.started += 1
       else {
@@ -106,7 +111,6 @@ export async function rerunTransient(
       }
     } catch (error) {
       outcome.problems.push(`rerunning ${run.name}: ${said(error)}`)
-      if (claimed !== undefined) await ledger.release(claimed).catch(() => {})
     }
   }
   return outcome
@@ -206,7 +210,7 @@ export async function attachEvidence(
   }
   const attached: FailedReport[] = []
   for (const report of reports) {
-    const run = runs.find((candidate) => candidate.name === report.name)
+    const run = runOf(runs, report)
     attached.push(run ? { ...report, evidence: await evidenceOf(api, repo, token, run) } : report)
   }
   if (!attached.some(silent)) return attached
