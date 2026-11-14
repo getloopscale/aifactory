@@ -24,6 +24,7 @@ import {
   repairRefusal,
   runsOnTag,
   sandboxItem,
+  sandboxParityItem,
   triedOf,
   triedText,
   unread,
@@ -749,6 +750,35 @@ describe('sandbox', () => {
   })
 })
 
+describe('sandbox parity', () => {
+  const lastGreen = { provider: 'e2b', taskId: 1120 }
+
+  it('warns, naming both providers and linking the task, when the last green run used another one', () => {
+    const item = sandboxParityItem(readOf({ configured: 'docker', lastGreen }))
+    expect(item).toMatchObject({
+      id: 'sandbox_parity',
+      status: 'warn',
+      link: '/tasks/1120',
+      canRepair: false,
+      say: {
+        code: 'sandbox_parity',
+        values: { configured: 'docker', lastGreen: 'e2b', taskId: '1120' },
+      },
+    })
+    expect(item.cause).toContain('The sandbox is docker now')
+    expect(item.cause).toContain('used e2b (task 1120)')
+  })
+
+  it('is fine when the provider is the same, or there is no green run to compare with', () => {
+    expect(sandboxParityItem(readOf({ configured: 'e2b', lastGreen })).status).toBe('ok')
+    expect(sandboxParityItem(readOf({ configured: 'docker' })).status).toBe('ok')
+  })
+
+  it('is unknown when the history could not be read', () => {
+    expectUnknown(sandboxParityItem(down))
+  })
+})
+
 describe('the report', () => {
   const healthy: DoctorFacts = {
     repo: REPO,
@@ -784,6 +814,7 @@ describe('the report', () => {
     }),
     recipe: readOf({ pending: [], url: 'https://github.com/o/r/blob/main/.factory/setup.json' }),
     sandbox: readOf({}),
+    parity: readOf({ configured: 'docker' }),
   }
 
   it('has one item for each diagnosis, in the order they are declared, all fine for a healthy repository', () => {
@@ -801,6 +832,7 @@ describe('the report', () => {
       'publish_mode',
       'recipe',
       'sandbox',
+      'sandbox_parity',
     ])
     expect(items.map((i) => i.status)).toEqual(items.map(() => 'ok'))
     // The sentence of a fine item has a code too, and the code makes the same English sentence.
@@ -834,6 +866,7 @@ describe('the report', () => {
       publish_mode: 'ok',
       recipe: 'ok',
       sandbox: 'ok',
+      sandbox_parity: 'ok',
     })
     expect(items.find((i) => i.id === 'auto_merge')?.cause).toContain('staging requires')
     expect(items.find((i) => i.id === 'ci_silent')?.cause).toContain('staging requires lint')
@@ -854,6 +887,7 @@ describe('the report', () => {
       publish: down,
       recipe: down,
       sandbox: down,
+      parity: down,
     })
     expect(items.map((i) => i.status)).toEqual(items.map(() => 'unknown'))
   })

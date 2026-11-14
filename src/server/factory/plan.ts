@@ -14,7 +14,7 @@ import { jsonObjects } from './review'
 import { ensureBranches, integrationBranch } from './branches'
 import { loadRepoConfig, labelsWithRepoChoice } from './repo-config'
 import { mergeEgress } from './run-support'
-import { createIsolatedSandbox, type IsolatedSandboxProvider } from './sandbox'
+import { createIsolatedSandbox, DEFAULT_EGRESS, type IsolatedSandboxProvider } from './sandbox'
 
 /** More than this is not a plan an owner will read, and each item is a run that costs money. */
 export const MAX_ITEMS = 10
@@ -130,7 +130,7 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
           },
         },
         ...mergeEgress([await agent.egress()]),
-        { domain: 'registry.npmjs.org' },
+        ...DEFAULT_EGRESS,
         ...config.egress.map((domain) => ({ domain })),
       ],
     })

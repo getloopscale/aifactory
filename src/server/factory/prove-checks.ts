@@ -10,7 +10,7 @@ import { runChecks, type CheckResult, type CheckSpec } from './evidence'
 import { withRecipe, type Recipe } from './recipe'
 import type { RepoConfig } from './repo-config'
 import { must } from './run-support'
-import { createIsolatedSandbox, type IsolatedSandboxProvider } from './sandbox'
+import { createIsolatedSandbox, DEFAULT_EGRESS, type IsolatedSandboxProvider } from './sandbox'
 
 /**
  * Proving checks: the checks proposed for a repository are run on the head of its integration branch, in
@@ -132,7 +132,7 @@ export async function proveChecks(
   const limitMs = deps.checkMs ?? DEFAULT_CHECK_MS
   const egress = [
     githubEgress(token),
-    { domain: 'registry.npmjs.org' },
+    ...DEFAULT_EGRESS,
     ...config.egress.map((domain) => ({ domain })),
   ]
   const started = await createIsolatedSandbox(deps.sandbox, {

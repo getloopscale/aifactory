@@ -22,6 +22,7 @@ import {
   type PublishFacts,
   type Read,
   type RecentChecks,
+  type ParityFacts,
   type SandboxFacts,
 } from './doctor'
 import { DEFAULT_CHECKS } from './evidence'
@@ -46,6 +47,8 @@ import { loadRepoConfig, type RepoConfig } from './repo-config'
  */
 export type DoctorSources = {
   db: Database
+  /** Where `FACTORY_SANDBOX` is read; the process environment when absent. */
+  env?: NodeJS.ProcessEnv
   github: Pick<GithubApp, 'installationToken'> & AppEvents & AppAccess
   api: Pick<
     GithubApi,
@@ -101,6 +104,39 @@ type Reader = {
 async function readAccess(github: AppAccess, name: string): Promise<AccessFacts> {
   const granted = await github.installationPermissions(name)
   return { reachable: granted !== undefined, granted: granted ?? {}, needed: APP_PERMISSIONS }
+}
+
+/** The name a provider gives itself in the `sandbox` stage event, for what `FACTORY_SANDBOX` says. */
+export function configuredProvider(env: NodeJS.ProcessEnv = process.env): string {
+  const choice = env.FACTORY_SANDBOX?.trim() || 'vercel'
+  return choice === 'vercel' ? 'vercel-sandbox' : choice
+}
+
+/** The provider of the sandbox of the repository's latest task that was delivered, if it recorded one. */
+async function readParity(db: Database, name: string, configured: string): Promise<ParityFacts> {
+  const [green] = await db
+    .select({ taskId: stageEvent.taskId })
+    .from(stageEvent)
+    .innerJoin(task, eq(task.id, stageEvent.taskId))
+    .where(
+      and(
+        sql`lower(${task.repository}) = lower(${name})`,
+        inArray(stageEvent.stage, ['done', 'released']),
+      ),
+    )
+    .orderBy(desc(stageEvent.at))
+    .limit(1)
+  if (!green) return { configured }
+  const [started] = await db
+    .select({ detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, green.taskId), eq(stageEvent.stage, 'sandbox')))
+    .orderBy(desc(stageEvent.at))
+    .limit(1)
+  const provider = (started?.detail as { provider?: unknown } | null | undefined)?.provider
+  return typeof provider === 'string'
+    ? { configured, lastGreen: { provider, taskId: green.taskId } }
+    : { configured }
 }
 
 /** The latest run the sandbox provider refused, among the last failures, and when a sandbox last started. */
@@ -205,7 +241,10 @@ function factoryCheckNames(reader: Reader, recipe: Recipe | undefined, changeset
   return withChangesetCheck(checks, changesets, reader.integration).map((check) => check.name)
 }
 
-type RepositoryFacts = Omit<DoctorFacts, 'repo' | 'integration' | 'access' | 'events' | 'sandbox'>
+type RepositoryFacts = Omit<
+  DoctorFacts,
+  'repo' | 'integration' | 'access' | 'events' | 'sandbox' | 'parity'
+>
 
 async function readRepository(reader: Reader): Promise<RepositoryFacts> {
   const { api, name, token, config, integration } = reader
@@ -253,16 +292,19 @@ export async function collectFacts(sources: DoctorSources, name: string): Promis
   const { db, github, api } = sources
   const config = await loadRepoConfig(db, name)
   const integration = integrationBranch(config)
-  const [access, events, sandbox, token] = await Promise.all([
+  const [access, events, sandbox, parity, token] = await Promise.all([
     attempt(triedOf('installation', { repo: name }), () => readAccess(github, name)),
     attempt(triedOf('events'), () => github.subscriptions()),
     attempt(triedOf('runs', { repo: name }), () => readSandbox(db, name)),
+    attempt(triedOf('runs', { repo: name }), () =>
+      readParity(db, name, configuredProvider(sources.env)),
+    ),
     attempt(
       triedOf('token', { repo: name }),
       async () => (await github.installationToken(name)).token,
     ),
   ])
-  const local = { repo: name, integration, access, events, sandbox }
+  const local = { repo: name, integration, access, events, sandbox, parity }
   if (!token.read) {
     return {
       ...local,

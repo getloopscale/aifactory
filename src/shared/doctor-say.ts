@@ -20,6 +20,7 @@ export const DOCTOR_SAY_CODES = [
   'recipe_problem',
   'recipe_pending',
   'sandbox_refused',
+  'sandbox_parity',
   'ok_issues',
   'ok_app_access',
   'ok_app_events',
@@ -35,6 +36,7 @@ export const DOCTOR_SAY_CODES = [
   'ok_none',
   'ok_recipe',
   'ok_sandbox',
+  'ok_sandbox_parity',
 ] as const
 
 /** Every thing the doctor tries to read; an item it could not read says which, so the panel can name it. */
@@ -224,6 +226,12 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
     repair: () =>
       'Add credit to the sandbox provider, or fix its key on the server. The task retries itself once the provider accepts.',
   },
+  sandbox_parity: {
+    cause: (v) =>
+      `The sandbox is ${v.configured} now, and the last green run of this repository used ${v.lastGreen} (task ${v.taskId}). The two do not behave the same: a recipe that passes on one can fail on the other.`,
+    repair: () =>
+      'Run the repository once on the configured provider and watch the checks, or set FACTORY_SANDBOX back to the provider of the last green run. A domain a build needs may have to be added to the repository.',
+  },
   ok_issues: { cause: () => 'Issues are on.', repair: () => '' },
   ok_app_access: {
     cause: (v) => `The GitHub App reaches ${v.repo} with every permission it needs.`,
@@ -281,6 +289,10 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   },
   ok_sandbox: {
     cause: () => 'The sandbox provider has not refused the latest run.',
+    repair: () => '',
+  },
+  ok_sandbox_parity: {
+    cause: () => 'The sandbox is the provider the last green run of this repository used.',
     repair: () => '',
   },
 }

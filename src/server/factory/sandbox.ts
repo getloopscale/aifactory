@@ -7,6 +7,21 @@ export type EgressRule = {
   headers?: Record<string, string>
 }
 
+/** What every sandbox may reach whatever the repository says: the package registry. The same for every provider. */
+export const DEFAULT_EGRESS: readonly EgressRule[] = [{ domain: 'registry.npmjs.org' }]
+
+/**
+ * What every provider's sandbox starts with, so a recipe that passes on one passes on the other: CI mode, the
+ * package manager's downloads in the shared cache, and the Node headers from the image (a native module with no
+ * prebuilt binary, node-pty or better-sqlite3, is compiled by node-gyp, which would download them from
+ * nodejs.org, a domain no run allows).
+ */
+export const SHARED_SANDBOX_ENV: Record<string, string> = {
+  CI: 'true',
+  COREPACK_HOME: '/cache/corepack',
+  npm_config_nodedir: '/usr/local',
+}
+
 export type SandboxSpec = {
   /** The only destinations the sandbox can reach. */
   egress: EgressRule[]

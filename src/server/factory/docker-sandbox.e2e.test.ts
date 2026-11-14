@@ -104,6 +104,34 @@ describe('the docker sandbox', () => {
     expect(node.stdout.trim()).not.toBe('200')
   }, 120_000)
 
+  // A child that a test starts with only PATH and HOME has no proxy variable, no CA variable and no
+  // COREPACK_HOME. On E2B the firewall is outside the sandbox, so it still reaches the network; here the
+  // route and the resolver of the sandbox must do the same.
+  const bare = (command: string) => `env -i PATH="$PATH" HOME="$HOME" ${command}`
+
+  it('lets a child with only PATH and HOME fetch an allowed domain, and refuses one that is not', async () => {
+    const fetched = await sh(
+      bare(
+        `node -e "fetch('https://registry.npmjs.org/left-pad').then(r => console.log(r.status), e => console.log('refused'))"`,
+      ),
+    )
+    expect(fetched.stdout.trim()).toBe('200')
+    const refused = await sh(
+      bare(
+        `node -e "fetch('https://example.com').then(r => console.log(r.status), e => console.log('refused'))"`,
+      ),
+    )
+    expect(refused.stdout.trim()).not.toBe('200')
+    const direct = await sh(bare('curl -s -m 8 -k https://1.1.1.1/ -o /dev/null; echo $?'))
+    expect(direct.stdout.trim()).not.toBe('0')
+  }, 120_000)
+
+  it('gives a child that drops the environment the same package manager cache and Node headers', async () => {
+    const cache = await sh(bare('sh -c "readlink -f $HOME/.cache/node/corepack"'))
+    expect(cache.stdout.trim()).toBe('/cache/corepack')
+    expect((await sh('echo $npm_config_nodedir')).stdout.trim()).toBe('/usr/local')
+  })
+
   it('attaches the headers of a rule outside the sandbox, so the secret is never inside it', async () => {
     seen.length = 0
     const reply = await sh(

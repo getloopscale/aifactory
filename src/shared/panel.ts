@@ -466,6 +466,7 @@ export type DoctorItemId =
   | 'publish_mode'
   | 'recipe'
   | 'sandbox'
+  | 'sandbox_parity'
 
 /**
  * What the doctor found about one thing a repository needs. `blocked` stops work, `warn` does not, and

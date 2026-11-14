@@ -23,10 +23,26 @@ class Response:
     @staticmethod
     def make(status, body, headers):
         return status
+class Mode:
+    def __init__(self, type_name):
+        self.type_name = type_name
+class Client:
+    def __init__(self, transparent, sni):
+        self.proxy_mode = Mode("transparent" if transparent else "regular")
+        self.sni = sni
 class HTTPFlow:
-    def __init__(self, host):
+    def __init__(self, host, transparent=False, sni=None):
         self.request = Request(host)
+        self.client_conn = Client(transparent, sni)
         self.response = None
+class Server:
+    def __init__(self, address):
+        self.address = address
+        self.error = None
+class ConnectData:
+    def __init__(self, sni, address=("93.184.216.34", 443)):
+        self.client = Client(True, sni)
+        self.server = Server(address)
 `
 
 /**
@@ -58,8 +74,8 @@ def write(rules):
     tick[0] += 5
     os.utime(next, (tick[0], tick[0]))
     os.rename(next, ${JSON.stringify(file)})
-def send(host):
-    flow = http.HTTPFlow(host)
+def send(host, transparent=False, sni=None):
+    flow = http.HTTPFlow(host, transparent, sni)
     egress.request(flow)
     return flow
 ${steps}
@@ -106,6 +122,39 @@ describe('the egress policy of a sandbox', () => {
     )
 
     expect(out).toBe('None 403')
+  })
+
+  it('connects a connection that named no proxy to the name in its handshake, never to the address it chose', () => {
+    const out = policy(
+      { 'github.com': { headers: { authorization: 'Basic X' } } },
+      [
+        'listed = http.ConnectData("GitHub.com")',
+        'egress.server_connect(listed)',
+        'print(listed.server.address, listed.server.error)',
+        'other = http.ConnectData("evil.example")',
+        'egress.server_connect(other)',
+        'print(other.server.address, other.server.error is not None)',
+        'bare = http.ConnectData(None)',
+        'egress.server_connect(bare)',
+        'print(bare.server.error is not None)',
+      ].join('\n'),
+    )
+
+    expect(out).toBe("('github.com', 443) None\n('93.184.216.34', 443) True\nTrue")
+  })
+
+  it('refuses, on the transparent listener, a request whose Host is not the name of its handshake', () => {
+    const out = policy(
+      { 'github.com': { headers: { authorization: 'Basic X' } } },
+      [
+        'same = send("github.com", True, "github.com")',
+        'print(same.request.headers["authorization"])',
+        'print(send("github.com", True, "registry.npmjs.org").response)',
+        'print(send("github.com", True, None).response)',
+      ].join('\n'),
+    )
+
+    expect(out).toBe('Basic X\n403\n403')
   })
 
   it('names no function after a mitmproxy event it does not mean to handle', () => {
@@ -159,6 +208,6 @@ describe('the egress policy of a sandbox', () => {
       `print(" ".join(sorted(n for n in ${JSON.stringify(events)} if callable(getattr(egress, n, None)))))`,
     )
 
-    expect(out).toBe('http_connect request')
+    expect(out).toBe('http_connect request server_connect')
   })
 })

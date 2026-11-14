@@ -14,7 +14,7 @@ import type {
   SandboxSpec,
   StreamingOptions,
 } from './sandbox'
-import { assertIsolated } from './sandbox'
+import { assertIsolated, SHARED_SANDBOX_ENV } from './sandbox'
 
 /** The exit code the TheoKit backends report for a command that hit its timeout. */
 const TIMED_OUT = 124
@@ -22,9 +22,12 @@ const MAX_OUTPUT = 20 * 1024 * 1024
 
 /** Everything this provider creates carries this label, so what a crash left behind can be found. */
 const LABEL = 'aifactory.sandbox'
-const IMAGE = 'aifactory-sandbox:3'
+const IMAGE = 'aifactory-sandbox:5'
 const PROXY_IMAGE = 'mitmproxy/mitmproxy:11'
 const CA_VOLUME = 'aifactory-mitm-ca'
+const PROXY_PORT = 8080
+const TRANSPARENT_PORT = 8081
+const DNS_PORT = 5353
 const WORKDIR = '/work'
 const USER = 'node'
 const CA_BUNDLE = `/home/${USER}/factory-ca-bundle.pem`
@@ -57,6 +60,7 @@ export function sandboxEnv(proxy: string): Record<string, string> {
     NODE_EXTRA_CA_CERTS: CA_BUNDLE,
     npm_config_cafile: CA_BUNDLE,
     HOME: `/home/${USER}`,
+    ...SHARED_SANDBOX_ENV,
   }
 }
 
@@ -404,8 +408,14 @@ export function proxyArgs(name: string, rulesDir: string): string[] {
     '-v',
     `${resolve(process.cwd(), 'ops/sandbox/egress.py')}:/addons/egress.py:ro`,
     PROXY_IMAGE,
-    '--listen-port',
-    '8080',
+    // Three doors: the proxy a tool names in its environment, the transparent one every connection to a web
+    // port is redirected to (see `routeThroughProxy`), and the resolver a child that names no proxy needs.
+    '--mode',
+    `regular@${PROXY_PORT}`,
+    '--mode',
+    `transparent@${TRANSPARENT_PORT}`,
+    '--mode',
+    `dns@${DNS_PORT}`,
     '-s',
     '/addons/egress.py',
     '--set',
@@ -452,9 +462,69 @@ export function sandboxArgs(
     '--security-opt',
     'no-new-privileges',
     ...(cacheKey ? ['-v', `${cacheVolume(cacheKey)}:/cache`] : []),
-    ...Object.entries(sandboxEnv('http://proxy:8080')).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
+    ...Object.entries(sandboxEnv(`http://proxy:${PROXY_PORT}`)).flatMap(([k, v]) => [
+      '-e',
+      `${k}=${v}`,
+    ]),
     IMAGE,
   ]
+}
+
+/** Runs a script as root in a throwaway container that shares the network of `target`, with the one capability it needs. */
+async function inNetworkOf(docker: Docker, target: string, script: string) {
+  await must(docker, [
+    'run',
+    '--rm',
+    '--network',
+    `container:${target}`,
+    '--user',
+    'root',
+    '--cap-drop',
+    'ALL',
+    '--cap-add',
+    'NET_ADMIN',
+    '--entrypoint',
+    'sh',
+    IMAGE,
+    '-c',
+    script,
+  ])
+}
+
+/** What the proxy's network does with what reaches it from the sandbox: web ports and names go to the proxy's listeners. */
+export function redirectScript(): string {
+  return [
+    `iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-ports ${TRANSPARENT_PORT}`,
+    `iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-ports ${TRANSPARENT_PORT}`,
+    `iptables -t nat -A PREROUTING -p udp --dport 53 -j REDIRECT --to-ports ${DNS_PORT}`,
+  ].join(' && ')
+}
+
+/**
+ * Makes the proxy the sandbox's way out for every process in it, whatever its environment: the route points at
+ * the proxy, whose network redirects web ports and names to its listeners, and the resolver is the proxy's. The
+ * sandbox keeps no capability: the route is set from a helper container that shares its network and is gone
+ * afterwards, and only root could change it.
+ */
+async function routeThroughProxy(docker: Docker, name: string, proxy: string, net: string) {
+  const address = (
+    await must(docker, [
+      'inspect',
+      '-f',
+      `{{(index .NetworkSettings.Networks "${net}").IPAddress}}`,
+      proxy,
+    ])
+  ).trim()
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) throw new Error('the egress proxy has no address')
+  await inNetworkOf(docker, proxy, redirectScript())
+  await inNetworkOf(docker, name, `ip route replace default via ${address}`)
+  await must(docker, ['exec', '-i', '-u', 'root', name, 'sh', '-c', 'cat > /etc/resolv.conf'], {
+    input: Buffer.from(`nameserver ${address}\n`),
+  })
+  // The name the environment gives the proxy no longer goes through Docker's resolver, which the proxy replaced.
+  await must(docker, ['exec', '-i', '-u', 'root', name, 'sh', '-c', 'cat >> /etc/hosts'], {
+    input: Buffer.from(`${address}\tproxy\n`),
+  })
 }
 
 async function waitForProxy(docker: Docker, name: string, sleep: (ms: number) => Promise<void>) {
@@ -466,7 +536,7 @@ async function waitForProxy(docker: Docker, name: string, sleep: (ms: number) =>
       name,
       'bash',
       '-c',
-      'exec 3<>/dev/tcp/proxy/8080',
+      `exec 3<>/dev/tcp/proxy/${PROXY_PORT}`,
     ])
     if (ready.code === 0) return
     await sleep(500)
@@ -576,6 +646,7 @@ export function dockerSandboxProvider(deps: DockerProviderDeps = {}): IsolatedSa
         await must(docker, ['network', 'connect', '--alias', 'proxy', net, proxy])
         await must(docker, sandboxArgs(name, net, env, spec.cacheKey))
         await pinLocalhost(docker, name)
+        await routeThroughProxy(docker, name, proxy, net)
         const backend = new DockerBackend(docker, name)
         await trustProxy(docker, backend, name, cert)
         await waitForProxy(docker, name, sleep)

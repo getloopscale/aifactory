@@ -29,7 +29,7 @@ import type {
   SandboxSpec,
   StreamingOptions,
 } from './sandbox'
-import { assertIsolated } from './sandbox'
+import { assertIsolated, SHARED_SANDBOX_ENV } from './sandbox'
 
 /** The exit code the TheoKit backends report for a command that hit its timeout. */
 const TIMED_OUT = 124
@@ -52,13 +52,8 @@ export const E2B_FREE_SESSION_MS = 60 * 60_000
  */
 export const SANDBOX_ENV: Record<string, string> = {
   HOME: `/home/${USER}`,
-  CI: 'true',
-  COREPACK_HOME: '/cache/corepack',
+  ...SHARED_SANDBOX_ENV,
   NODE_EXTRA_CA_CERTS: '/etc/ssl/certs/ca-certificates.crt',
-  // A native module with no prebuilt binary (better-sqlite3, node-pty) is compiled by node-gyp, which downloads
-  // Node's headers from nodejs.org, a domain no run allows. The image has them: the Docker provider never
-  // noticed, because its shared package cache kept the modules it had built.
-  npm_config_nodedir: '/usr/local',
 }
 
 /**

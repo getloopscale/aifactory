@@ -7,6 +7,12 @@ sandbox, so a credential never exists inside it. There is no catch-all entry.
 The factory replaces the file while the sandbox runs, to renew a credential before it expires, so the file is
 read again whenever it changes. The factory renames a complete file over the old one, so a read never sees
 half of it. A file that cannot be read keeps the rules already loaded: the policy never opens up.
+
+A connection that did not name the proxy (a child that dropped the environment) arrives on the transparent
+listener, where the only name it carries is the SNI of its TLS handshake. That name is checked against the rules,
+and the proxy connects to it, never to the address the client chose: a client cannot get a credential attached
+to a request it sends to some other address by claiming a listed name. A connection with no SNI (plain HTTP, or
+a bare IP) is refused there, since nothing proves where it is going.
 """
 import json
 import os
@@ -54,6 +60,20 @@ def refuse(flow):
     )
 
 
+def transparent(client):
+    return getattr(getattr(client, "proxy_mode", None), "type_name", "") == "transparent"
+
+
+def server_connect(data):
+    if not transparent(data.client):
+        return
+    sni = (data.client.sni or "").lower().rstrip(".")
+    if not sni or rule_for(sni) is None:
+        data.server.error = "blocked by the factory egress policy"
+        return
+    data.server.address = (sni, data.server.address[1])
+
+
 def http_connect(flow: http.HTTPFlow):
     if rule_for(flow.request.host) is None:
         refuse(flow)
@@ -64,5 +84,10 @@ def request(flow: http.HTTPFlow):
     if rule is None:
         refuse(flow)
         return
+    if transparent(flow.client_conn):
+        sni = (flow.client_conn.sni or "").lower().rstrip(".")
+        if sni != flow.request.pretty_host.lower().rstrip("."):
+            refuse(flow)
+            return
     for name, value in (rule.get("headers") or {}).items():
         flow.request.headers[name] = value

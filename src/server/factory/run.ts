@@ -98,6 +98,7 @@ import { labelsWithRepoChoice } from './repo-config'
 import type { Parked, RunResult, RunTaskDeps } from './run-types'
 import {
   createIsolatedSandbox,
+  DEFAULT_EGRESS,
   restoreIsolatedSandbox,
   type IsolatedSandbox,
   type EgressRule,
@@ -385,7 +386,7 @@ export class Run {
       egress: [
         githubEgress(c.token),
         ...agentEgress,
-        { domain: 'registry.npmjs.org' },
+        ...DEFAULT_EGRESS,
         ...c.repo.egress.map((domain) => ({ domain })),
       ],
     }

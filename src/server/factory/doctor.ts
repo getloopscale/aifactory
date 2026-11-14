@@ -79,6 +79,7 @@ export const DOCTOR_ITEMS = [
   'publish_mode',
   'recipe',
   'sandbox',
+  'sandbox_parity',
 ] as const satisfies readonly DoctorItemId[]
 
 /** Whether the App reaches the repository, what its installation was granted and what the factory asks for. */
@@ -129,6 +130,13 @@ export type SandboxFacts = {
   lastStartedAt?: string
 }
 
+export type ParityFacts = {
+  /** The provider the factory is configured to run sandboxes on. */
+  configured: string
+  /** The provider the sandbox of the repository's last green run used, and that task. Nothing before a green run. */
+  lastGreen?: { provider: string; taskId: number }
+}
+
 export type DoctorFacts = {
   repo: string
   /** The branch the factory integrates into. */
@@ -148,6 +156,7 @@ export type DoctorFacts = {
   publish: Read<PublishFacts>
   recipe: Read<RecipeFacts>
   sandbox: Read<SandboxFacts>
+  parity: Read<ParityFacts>
 }
 
 /**
@@ -531,6 +540,26 @@ export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
   )
 }
 
+/**
+ * Whether the configured provider is the one the last green run used. The providers do not behave the same
+ * (a firewall inside or outside the sandbox, the image), so a repository that was green on one has no proof
+ * on the other. With no green run, or one that recorded no provider, there is nothing to compare.
+ */
+export function sandboxParityItem(parity: Read<ParityFacts>): DoctorItem {
+  if (!parity.read) return unknownItem('sandbox_parity', parity)
+  const { configured, lastGreen } = parity.value
+  if (!lastGreen || lastGreen.provider === configured) {
+    return fine('sandbox_parity', 'ok_sandbox_parity')
+  }
+  return problem(
+    'sandbox_parity',
+    'warn',
+    'sandbox_parity',
+    { configured, lastGreen: lastGreen.provider, taskId: String(lastGreen.taskId) },
+    { link: `/tasks/${lastGreen.taskId}` },
+  )
+}
+
 /** The report: one item for each diagnosis, in the order of `DOCTOR_ITEMS`. */
 export function diagnose(facts: DoctorFacts): DoctorItem[] {
   const { repo, integration, required, settings } = facts
@@ -546,6 +575,7 @@ export function diagnose(facts: DoctorFacts): DoctorItem[] {
     publishItem(repo, facts.publish),
     recipeItem(facts.recipe),
     sandboxItem(facts.sandbox),
+    sandboxParityItem(facts.parity),
   ]
 }
 
@@ -563,6 +593,7 @@ const NOT_ITS_TO_REPAIR: Record<Exclude<DoctorItemId, Repairable>, string> = {
   publish_mode: 'the version a release carries is decided in the repository, by a commit',
   recipe: 'the recipe changes by a commit on the default branch, and a domain by your approval',
   sandbox: 'the credit and the key of the sandbox provider are outside the factory',
+  sandbox_parity: 'which sandbox provider the factory runs on is set on the server, by its owner',
 }
 
 /** Why an item cannot be repaired by the factory, or nothing for the ones it repairs. */

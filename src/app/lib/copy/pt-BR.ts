@@ -418,6 +418,12 @@ export const ptBR: Copy = {
         repair: () =>
           'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
       },
+      sandbox_parity: {
+        cause: (v) =>
+          `O sandbox agora é ${v.configured}, e a última execução verde deste repositório usou ${v.lastGreen} (tarefa ${v.taskId}). Os dois não se comportam igual: uma receita que passa em um pode falhar no outro.`,
+        repair: () =>
+          'Rode o repositório uma vez no provedor configurado e acompanhe as verificações, ou volte FACTORY_SANDBOX para o provedor da última execução verde. Um domínio de que a build precisa pode ter de ser adicionado ao repositório.',
+      },
       ok_issues: { cause: () => 'As Issues estão ligadas.', repair: () => '' },
       ok_app_access: {
         cause: (v) => `O GitHub App alcança ${v.repo} com todas as permissões de que precisa.`,
@@ -475,6 +481,10 @@ export const ptBR: Copy = {
       },
       ok_sandbox: {
         cause: () => 'O provedor de sandbox não recusou a última execução.',
+        repair: () => '',
+      },
+      ok_sandbox_parity: {
+        cause: () => 'O sandbox é o provedor que a última execução verde deste repositório usou.',
         repair: () => '',
       },
     },

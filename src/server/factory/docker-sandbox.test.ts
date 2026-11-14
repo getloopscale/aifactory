@@ -10,6 +10,7 @@ import {
   lineSplitter,
   orphanNetworks,
   proxyArgs,
+  redirectScript,
   removeStaleSandboxes,
   sandboxArgs,
   localhostOnIpv4,
@@ -68,6 +69,12 @@ describe('sandboxEnv', () => {
     }
   })
 
+  it('builds native modules against the headers in the image and keeps downloads in the shared cache, as on E2B', () => {
+    expect(env.npm_config_nodedir).toBe('/usr/local')
+    expect(env.COREPACK_HOME).toBe('/cache/corepack')
+    expect(env.CI).toBe('true')
+  })
+
   it('carries no credential of any kind', () => {
     expect(Object.keys(env).filter((k) => /token|key|secret|password/i.test(k))).toEqual([])
   })
@@ -81,6 +88,9 @@ function fakeDocker(over: (args: string[]) => DockerResult | undefined = () => u
   const calls: { args: string[]; input?: string }[] = []
   const docker: Docker = async (args, opts) => {
     calls.push({ args, input: opts?.input?.toString() })
+    if (args[0] === 'inspect' && args.join(' ').includes('NetworkSettings')) {
+      return over(args) ?? ok('172.20.0.2\n')
+    }
     return over(args) ?? (args[0] === 'run' && args.includes('cat') ? ok(CERT) : ok())
   }
   const all = () => calls.map((c) => c.args.join(' '))
@@ -114,6 +124,35 @@ describe('creating a docker sandbox', () => {
     expect(sandboxRun).toContain('-e HTTPS_PROXY=http://proxy:8080')
     expect(sandboxRun).not.toContain('--privileged')
     await sandbox.stop()
+  })
+
+  it('makes the proxy the way out of every process, not only of those that name it', async () => {
+    const { docker, calls, all } = fakeDocker()
+    const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create(spec)
+
+    const commands = all()
+    const helpers = commands.filter((c) => c.startsWith('run --rm --network container:'))
+    expect(helpers).toHaveLength(2)
+    // The redirect is in the proxy's network, the route in the sandbox's; neither leaves a capability behind.
+    expect(helpers[0]).toMatch(/container:factory-px-\w+ .*--cap-add NET_ADMIN/)
+    expect(helpers[0]).toContain('--to-ports 8081')
+    expect(helpers[1]).toMatch(
+      /container:factory-sbx-\w+ .*ip route replace default via 172\.20\.0\.2/,
+    )
+    expect(commands.find((c) => c.includes('-e HTTPS_PROXY'))).not.toContain('NET_ADMIN')
+    const resolver = calls.find((c) => c.args.join(' ').endsWith('cat > /etc/resolv.conf'))
+    expect(resolver?.input).toBe('nameserver 172.20.0.2\n')
+    const hosts = calls.find((c) => c.args.join(' ').endsWith('cat >> /etc/hosts'))
+    expect(hosts?.input).toBe('172.20.0.2\tproxy\n')
+    await sandbox.stop()
+  })
+
+  it('refuses a proxy whose address it cannot read, and cleans up', async () => {
+    const { docker, all } = fakeDocker((args) => (args[0] === 'inspect' ? ok('') : undefined))
+    await expect(dockerSandboxProvider({ docker, sleep: instant }).create(spec)).rejects.toThrow(
+      'the egress proxy has no address',
+    )
+    expect(all().some((c) => c.startsWith('rm -f '))).toBe(true)
   })
 
   it('never puts the value of a credential on a docker command: only the proxy reads it, from a host file', async () => {
@@ -287,7 +326,7 @@ describe('creating a docker sandbox', () => {
     // `kill(pid, 0)` still finds it: a test that checks a subprocess is gone fails for the sandbox's sake.
     const args = sandboxArgs('n', 'net', {})
     expect(args).toContain('--init')
-    expect(args.indexOf('--init')).toBeLessThan(args.indexOf('aifactory-sandbox:3'))
+    expect(args.indexOf('--init')).toBeLessThan(args.indexOf('aifactory-sandbox:5'))
   })
 
   it('gives the proxy no capabilities and a memory limit, and the sandbox no volume at all', () => {
@@ -296,6 +335,18 @@ describe('creating a docker sandbox', () => {
     expect(proxy).toContain('--memory 512m')
     expect(proxy).toContain('/rules-dir:/rules:ro')
     expect(sandboxArgs('n', 'net', {})).not.toContain('-v')
+  })
+
+  it('listens for a tool that names the proxy, for a connection that names nothing, and for names', () => {
+    const proxy = proxyArgs('px', '/rules-dir').join(' ')
+    expect(proxy).toContain('--mode regular@8080 --mode transparent@8081 --mode dns@5353')
+  })
+
+  it('redirects web ports and names to those listeners, so a child with a bare environment has a network', () => {
+    const script = redirectScript()
+    expect(script).toContain('--dport 443 -j REDIRECT --to-ports 8081')
+    expect(script).toContain('--dport 80 -j REDIRECT --to-ports 8081')
+    expect(script).toContain('-p udp --dport 53 -j REDIRECT --to-ports 5353')
   })
 
   it('keeps a repository downloads in a volume of its own, shared only by its sandboxes', () => {
@@ -349,7 +400,7 @@ describe('using a docker sandbox', () => {
     const { docker } = fakeDocker((args) =>
       args.includes('timeout')
         ? { stdout: 'partial', stderr: 'Killed', code: 137 }
-        : args[0] === 'inspect'
+        : args.includes('{{.State.OOMKilled}}')
           ? ok('true\n')
           : undefined,
     )
@@ -366,7 +417,7 @@ describe('using a docker sandbox', () => {
     const { docker } = fakeDocker((args) =>
       args.includes('timeout')
         ? { stdout: '', stderr: '', code: 137 }
-        : args[0] === 'inspect'
+        : args.includes('{{.State.OOMKilled}}')
           ? ok('false\n')
           : undefined,
     )
@@ -381,7 +432,9 @@ describe('using a docker sandbox', () => {
   it('does not ask docker about memory unless the command was killed', async () => {
     const { sandbox, calls } = await run({ stdout: '', stderr: '', code: 1 })
     await sandbox.backend.execute('false')
-    expect(calls.some((c) => c.args[0] === 'inspect')).toBe(false)
+    expect(
+      calls.some((c) => c.args[0] === 'inspect' && !c.args.join(' ').includes('NetworkSettings')),
+    ).toBe(false)
     await sandbox.stop()
   })
 
@@ -498,6 +551,7 @@ describe('reading a command while it runs', () => {
     const calls: string[][] = []
     const docker: Docker = async (args, opts) => {
       calls.push(args)
+      if (args[0] === 'inspect') return ok('172.20.0.2\n')
       if (!args.includes('timeout'))
         return args[0] === 'run' && args.includes('cat') ? ok(CERT) : ok()
       opts?.onStdout?.('one\ntw')
