@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { retryableFailure } from '../../shared/panel'
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
 
 type Call = { method: string; url: string; body?: unknown; auth?: string }
@@ -325,6 +326,32 @@ describe('markReadyForReview', () => {
     await expect(createGithubApi(fetch).markReadyForReview('o/r', 't', 12, 'T')).rejects.toThrow(
       /o\/r#12 ready for review: Resource not accessible by integration/,
     )
+  })
+})
+
+describe('a GraphQL call GitHub keeps failing with a 5xx', () => {
+  it('fails with an error that retryableFailure takes for the environment', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
+      'POST https://api.github.com/graphql': { status: 500 },
+    })
+    const error = await createGithubApi(fetch, noWait)
+      .markReadyForReview('o/r', 't', 12, 'T')
+      .catch((e: Error) => e)
+    expect(error).toBeInstanceOf(Error)
+    expect(retryableFailure({ error: (error as Error).message })).toBe('environment')
+    expect(calls.filter((c) => c.url.includes('graphql')).length).toBeGreaterThan(1)
+  })
+
+  it('does not repeat a revert, which would open a second pull request', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /pulls/12': { status: 200, body: { node_id: 'n' } },
+      'POST https://api.github.com/graphql': { status: 502 },
+    })
+    await expect(
+      createGithubApi(fetch, noWait).revertPullRequest('o/r', 't', 12, { title: 'T', body: 'B' }),
+    ).rejects.toThrow(/GitHub answered 502/)
+    expect(calls.filter((c) => c.url.includes('graphql'))).toHaveLength(1)
   })
 })
 
@@ -873,6 +900,17 @@ describe('the branches of a repository', () => {
     )
   })
 
+  it('keeps the 422 of a first try even when the branch is at the commit', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /git/refs': { status: 422, body: 'Reference already exists' },
+      'GET /git/ref/heads/w': { status: 200, body: { object: { sha: 'sha' } } },
+    })
+    await expect(
+      createGithubApi(fetch, noWait).createBranch('o/r', 'tok', 'w', 'sha'),
+    ).rejects.toThrow(/422/)
+    expect(calls).toHaveLength(1)
+  })
+
   it('creates a branch at a commit', async () => {
     const { fetch, calls } = fakeFetch({ 'POST /git/refs': { status: 201, body: {} } })
     await createGithubApi(fetch).createBranch('o/r', 'tok', 'workspace', 'deadbeef')
@@ -1379,7 +1417,7 @@ describe('what integrating through the repository CI needs', () => {
       'POST https://api.github.com/graphql': { status: 502, body: {} },
     })
     await expect(createGithubApi(fetch, noWait).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
-      /could not turn auto-merge off on o\/r#12: HTTP 502/,
+      /could not turn auto-merge off on o\/r#12: GitHub answered 502/,
     )
   })
 

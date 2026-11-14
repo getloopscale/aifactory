@@ -435,11 +435,13 @@ export function createGithubApi(
     number: number,
     query: string,
     variables: Record<string, unknown> = {},
+    repeat = true,
   ): Promise<{ data?: T; why?: string }> {
     const pull = (await (
       await ensure(await call(repo, token, `/pulls/${number}`), `reading ${repo}#${number}`, [200])
     ).json()) as { node_id: string }
-    // These mutations set a state (ready, auto-merge on or off), so a repeat does no harm.
+    // These mutations set a state (ready, auto-merge on or off), so a repeat does no harm. One that makes
+    // something new passes `repeat = false`.
     let response: Response
     for (let attempt = 1; ; attempt += 1) {
       response = await fetchImpl('https://api.github.com/graphql', {
@@ -451,12 +453,16 @@ export function createGithubApi(
         },
         body: JSON.stringify({ query, variables: { id: pull.node_id, ...variables } }),
       })
-      if (response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) break
+      if (!repeat || response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) break
       await pause(attempt)
     }
     const result = (await response.json().catch(() => ({}))) as GraphqlAnswer<T>
     if (result.errors?.length) return { why: result.errors.map((e) => e.message).join('; ') }
-    if (!response.ok || !result.data) return { why: `HTTP ${response.status}` }
+    if (!response.ok || !result.data)
+      return {
+        why:
+          response.status >= 500 ? `GitHub answered ${response.status}` : `HTTP ${response.status}`,
+      }
     return { data: result.data }
   }
 
@@ -831,12 +837,24 @@ export function createGithubApi(
     },
 
     async createBranch(repo, token, branch, sha) {
-      const response = await call(repo, token, '/git/refs', {
-        method: 'POST',
-        body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
-      })
-      // A repeat after a 502 that did create it answers 422: the branch is there at the commit, so it is done.
-      if (response.status === 422 && (await branchHead(repo, token, branch)) === sha) return
+      const create = () =>
+        send(repo, token, '/git/refs', {
+          method: 'POST',
+          body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
+        })
+      let response = await create()
+      for (
+        let attempt = 1;
+        response.status >= 500 && attempt < SERVER_ERROR_ATTEMPTS;
+        attempt += 1
+      ) {
+        await pause(attempt)
+        // A 5xx may come after GitHub made the branch: if it is there at the commit, it is done.
+        if ((await branchHead(repo, token, branch)) === sha) return
+        response = await create()
+        // A 422 after a 5xx may be the branch the earlier try made.
+        if (response.status === 422 && (await branchHead(repo, token, branch)) === sha) return
+      }
       await ensure(response, `creating the branch ${branch} of ${repo}`, [201])
     },
 
@@ -925,6 +943,7 @@ export function createGithubApi(
         number,
         'mutation($id: ID!, $title: String, $body: String) { revertPullRequest(input: { pullRequestId: $id, title: $title, body: $body }) { revertPullRequest { number url } } }',
         { title: revert.title, body: revert.body },
+        false,
       )
       const made = answer.data?.revertPullRequest?.revertPullRequest
       if (!made) {
