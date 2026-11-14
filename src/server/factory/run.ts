@@ -145,6 +145,9 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 /** The stages that end a run; a task goes through them again when a person sends it back. */
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
+/** The run's time is gone. With work on the branch, the run ends as a draft pull request, not as a failure. */
+export class TimeExhausted extends StageFailure {}
+
 export const DEFAULT_TIMEOUTS: Timeouts = { sandboxMs: 90 * 60_000, agentMs: 45 * 60_000 }
 
 /** The longest the planning turn may take: it reads and writes a plan, it does not build or test. */
@@ -243,7 +246,7 @@ export class Run {
           : { maxSessionMs: cap, renewable: !!this.sandbox.snapshot && !!deps.sandbox.restore },
       )
     } catch (error) {
-      if (error instanceof NoTimeForAgent) throw new StageFailure(error.message)
+      if (error instanceof NoTimeForAgent) throw new TimeExhausted(error.message)
       throw error
     }
   }
@@ -1437,12 +1440,14 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
     counts: number[] = [],
+    ended?: string,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
     const reason =
-      outcome.verdict === 'invalid'
+      ended ??
+      (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
     state.current = 'pr'
     const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,
@@ -1537,13 +1542,37 @@ export class Run {
    * and running out of attempts after green checks hands the work to a person.
    */
   async loop(pushed: string): Promise<RunResult> {
-    let sha = pushed
+    const progress = {
+      sha: pushed,
+      attempt: this.c.resuming?.attempt ?? 1,
+      here: [] as StoredCheck[],
+    }
+    try {
+      return await this.rounds(progress)
+    } catch (error) {
+      if (!(error instanceof TimeExhausted)) throw error
+      // The work is on the branch: a draft pull request keeps it, and a person can send it back with a note.
+      const outcome: ReviewVerdict = {
+        verdict: 'changes',
+        summary: 'The run ended for time before this commit was reviewed.',
+        findings: [],
+      }
+      const reason = `the run ran out of time: ${error.message}`
+      return this.handOver(progress.sha, progress.attempt, progress.here, outcome, [], reason)
+    }
+  }
+
+  private async rounds(progress: { sha: string; attempt: number; here: StoredCheck[] }) {
+    let sha = progress.sha
     const counts = await this.priorCounts()
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
+      progress.attempt = attempt
+      progress.sha = sha
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
       const checked = await this.verify(sha, attempt)
 
+      progress.here = checked.here
       if (!checked.verdict.open) {
         if (!canRework) {
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''

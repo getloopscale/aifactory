@@ -386,6 +386,8 @@ export type RepositoryView = {
   harness: string | null
   reviewer: string | null
   releaseMode: 'manual' | 'trial' | 'auto' | null
+  /** How long a run may last, in minutes; null means the factory derives it from the repository's recent checks. */
+  runLimitMinutes: number | null
   /** The commit of the integration branch the proven checks passed on; null when none was proven. */
   checksProvenSha: string | null
   /** The names of the saved checks that no proof ran: the owner typed them, and the first task tries them. */

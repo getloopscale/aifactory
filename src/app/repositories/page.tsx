@@ -30,6 +30,7 @@ function Settings({
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
+  const [runLimit, setRunLimit] = useState(repo.runLimitMinutes?.toString() ?? '')
   const [message, setMessage] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -47,6 +48,7 @@ function Settings({
         harness: harness || null,
         reviewer: reviewer || null,
         releaseMode: release || null,
+        runLimitMinutes: runLimit.trim() ? Number(runLimit) : null,
       })
       setMessage('Saved.')
       onSaved()
@@ -115,6 +117,20 @@ function Settings({
         <span className="text-muted-foreground">
           Only needed when the default branch is develop, which is where the pre-release goes: name
           main, or the branch your releases use.
+        </span>
+      </label>
+      <label className="block">
+        <span className="text-foreground">Minutes a run may last</span>
+        <Input
+          aria-label="Minutes a run may last"
+          type="number"
+          value={runLimit}
+          placeholder="Empty: the factory sets it from how long your checks took lately"
+          onChange={(e) => setRunLimit(e.target.value)}
+          className="mt-1 w-full"
+        />
+        <span className="text-muted-foreground">
+          Raise it when the checks are slow and a run ends for time before the review is done.
         </span>
       </label>
       <label className="flex items-center gap-2">

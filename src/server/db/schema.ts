@@ -442,6 +442,8 @@ export const repository = pgTable('repository', {
   harness: text('harness'),
   reviewer: text('reviewer'),
   releaseMode: text('release_mode', { enum: ['manual', 'trial', 'auto'] }),
+  /** How long a run may last in this repository, in minutes; absent means the factory derives it. */
+  runLimitMinutes: integer('run_limit_minutes'),
   /** The doctor's last report on the repository, with its time. */
   doctor: jsonb('doctor').$type<DoctorReport>(),
   /** How the repository publishes a release, as the doctor last read it. */

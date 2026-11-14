@@ -18,6 +18,7 @@ import type {
   RepositoryView,
 } from '../../shared/panel'
 
+import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../factory/run-limit'
 import { ActionRefused } from './actions'
 
 /** The label that asks the factory to take an issue. */
@@ -64,6 +65,8 @@ export type RepositoryPatch = {
   harness?: string | null
   reviewer?: string | null
   releaseMode?: 'manual' | 'trial' | 'auto' | null
+  /** How long a run may last, in minutes; `null` clears it, so the factory derives it from recent checks. */
+  runLimitMinutes?: number | null
 }
 
 const CHECK_NAME = /^[a-z0-9][a-z0-9_-]{0,30}$/
@@ -86,6 +89,10 @@ export function patchProblem(patch: RepositoryPatch, agents: string[]): string |
         return `the command of "${check.name}" must be one line of at most 500 characters`
       }
     }
+  }
+  const minutes = patch.runLimitMinutes
+  if (minutes != null && (minutes < MIN_RUN_MINUTES || minutes > MAX_RUN_MINUTES)) {
+    return `a run may last from ${MIN_RUN_MINUTES} to ${MAX_RUN_MINUTES} minutes`
   }
   for (const name of [patch.baseBranch, patch.releaseBranch]) {
     if (name && !validBranch(name)) return `"${name}" is not a branch name`
@@ -144,6 +151,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       harness: row?.harness ?? null,
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
+      runLimitMinutes: row?.runLimitMinutes ?? null,
       checksProvenSha: row?.checksProvenSha ?? null,
       unprovenChecks: unprovenChecks(row?.checks ?? null, row?.checksProven ?? []),
       checksProof: proofView(row?.checksProof ?? null, now),
@@ -265,6 +273,7 @@ export async function saveRepository(
     ...(patch.harness === undefined ? {} : { harness: patch.harness }),
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),
+    ...(patch.runLimitMinutes === undefined ? {} : { runLimitMinutes: patch.runLimitMinutes }),
     updatedAt: new Date(),
   }
   await deps.db

@@ -3975,7 +3975,7 @@ describe('runTask agent time', () => {
     expect(given[0]).toBeGreaterThan(34 * MIN)
   })
 
-  it('fails a rework that has no time left with a message saying so, instead of starting it', async () => {
+  it('hands over a draft pull request when a rework has no time left, instead of starting it', async () => {
     const id = await seedTask()
     const start = Date.now()
     const builder = resumableBuilder()
@@ -3992,17 +3992,71 @@ describe('runTask agent time', () => {
       id,
     )
 
-    expect(result).toMatchObject({ status: 'failed' })
-    expect(builder.resumed).toHaveLength(0)
-    const [failed] = await getDb()
-      .select()
-      .from(stageEvent)
-      .where(eq(stageEvent.taskId, id))
-      .orderBy(desc(stageEvent.id))
-      .limit(1)
-    expect((failed.detail as { error: string }).error).toMatch(
+    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
+    expect(result.status === 'handoff' && result.reason).toMatch(
       /no time left for another agent pass: 31 of the sandbox's 60 minutes/,
     )
+    expect(builder.resumed).toHaveLength(0)
+    // The work is kept as a draft, and the task is in the stage a person sends back from.
+    expect(seen.drafts).toEqual([true])
+    expect(seen.comments[0]).toContain('draft pull request')
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'handoff', pullRequestUrl: PR_URL })
+  })
+
+  it('plans the sandbox and the agent passes against the limit saved for the repository', async () => {
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, runLimitMinutes: 150 })
+    const id = await seedTask()
+    const given: number[] = []
+    const builder: CodingHarness = {
+      ...okHarness,
+      run: async (_backend, input) => {
+        given.push(input.timeoutMs ?? 0)
+        return { ok: true, summary: 'added truncate', costUsd: 0.12 }
+      },
+    }
+    const sandbox = new FakeSandbox(changed())
+
+    await runTask(
+      deps(sandbox, { harness: builder, timeouts: { sandboxMs: 60 * MIN, agentMs: 200 * MIN } }),
+      id,
+    )
+
+    expect(sandbox.specs[0]!.timeoutMs).toBe(150 * MIN)
+    // 150 minutes, 25 kept for the checks and the review.
+    expect(given[0]).toBeLessThanOrEqual(125 * MIN)
+    expect(given[0]).toBeGreaterThan(124 * MIN)
+  })
+
+  it('gives a repository whose rounds of checks took 12 minutes a limit that fits three rounds', async () => {
+    const earlier = await seedTask(8)
+    await getDb()
+      .insert(evidence)
+      .values(
+        [
+          ['install', 4],
+          ['tests', 8],
+        ].map(([name, minutes]) => ({
+          taskId: earlier,
+          name: String(name),
+          command: 'x',
+          sha: 'a'.repeat(40),
+          exitCode: 0,
+          timedOut: false,
+          passed: true,
+          output: '',
+          durationMs: Number(minutes) * MIN,
+        })),
+      )
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+
+    await runTask(deps(sandbox, {}), id)
+
+    // A plan, then three rounds of a build, 12 minutes of checks and a review.
+    expect(sandbox.specs[0]!.timeoutMs).toBe((15 + 3 * (15 + 12 + 10)) * MIN)
   })
 
   it('refuses as before when the provider has a session cap but cannot save a sandbox', async () => {
