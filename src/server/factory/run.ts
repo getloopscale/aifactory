@@ -1101,6 +1101,7 @@ export class Run {
       attempt,
       rework: true,
     })
+    const began = Date.now()
     const result = await this.settle(this.builder, 'builder', attempt, (onEvent) =>
       this.builder.resume!(this.backend, this.sessionId!, {
         onEvent,
@@ -1109,7 +1110,11 @@ export class Run {
         prompt: reworkPrompt({ findings, failedChecks: failed, checks: this.checks }),
       }),
     )
-    if (!result.ok) throw new StageFailure(`the agent did not finish the rework: ${result.summary}`)
+    if (!result.ok) {
+      const message = `the agent did not finish the rework: ${result.summary}`
+      // A pass that used all its time was cut: the pushed work is still on the branch.
+      throw Date.now() - began >= timeoutMs ? new TimeExhausted(message) : new StageFailure(message)
+    }
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(result.summary)
     if (asked) await this.ask(asked, attempt)
@@ -1382,7 +1387,7 @@ export class Run {
         costUsd: this.cost,
         attempts: attempt,
         ...describeIntegration(integrated),
-        ...describeDelivery(handed),
+        ...(handed ? describeDelivery(handed) : {}),
       },
       { pullRequestUrl: pull.url },
     )
@@ -1440,11 +1445,12 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
     counts: number[] = [],
-    ended?: string,
+    /** Set when the run ran out of time: the draft is for a person to send back, and nothing is released. */
+    outOfTime?: string,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
     const reason =
-      ended ??
+      outOfTime ??
       (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
         : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
@@ -1476,7 +1482,8 @@ export class Run {
         outcome.findings.length > 0 ? renderFindings(outcome.findings) : outcome.summary,
       ].join('\n'),
     )
-    const handed = await this.deliver(sha, pull.url, attempt)
+    // Work that was never approved, or never reviewed, gets no pre-release.
+    const handed = outOfTime === undefined ? await this.deliver(sha, pull.url, attempt) : undefined
     await enterStage(
       deps.db,
       taskId,
@@ -1489,7 +1496,7 @@ export class Run {
         findings: outcome.findings,
         costUsd: this.cost,
         attempts: attempt,
-        ...describeDelivery(handed),
+        ...(handed ? describeDelivery(handed) : {}),
       },
       { pullRequestUrl: pull.url },
     )
@@ -1499,7 +1506,7 @@ export class Run {
       sha,
       pullRequestUrl: pull.url,
       reason,
-      preRelease: 'tag' in handed ? handed.tag : undefined,
+      preRelease: handed && 'tag' in handed ? handed.tag : undefined,
     }
   }
 

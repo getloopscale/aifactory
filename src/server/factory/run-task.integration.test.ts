@@ -48,6 +48,7 @@ import { mergeEgress, resumeTask, runTask, type RunTaskDeps } from './run-task'
 import { runContinuation } from './run-support'
 import { requestChanges } from '../panel/actions'
 import { release } from './deliver'
+import { outcome } from './transitions'
 import { pollAnswers } from './waiting'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
@@ -4002,6 +4003,32 @@ describe('runTask agent time', () => {
     expect(seen.comments[0]).toContain('draft pull request')
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ stage: 'handoff', pullRequestUrl: PR_URL })
+    // Work nobody approved is not released, and the task can be sent back with a note.
+    expect(seen.releases).toEqual([])
+    expect(await deliveries(id)).toEqual([])
+    expect(
+      outcome({ stage: 'handoff', headSha: row.headSha, draft: true }, 'request_changes').kind,
+    ).toBe('action')
+  })
+
+  it('hands over a draft when the rework itself is cut at its time limit', async () => {
+    const id = await seedTask()
+    const start = Date.now()
+    const builder = resumableBuilder()
+    builder.resume = async (_backend, _session, input) => {
+      vi.spyOn(Date, 'now').mockReturnValue(start + 40 * MIN + (input.timeoutMs ?? 0))
+      return { ok: false, summary: 'cut by the time limit' }
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
+
+    const result = await runTask(
+      deps(new FakeSandbox(changed()), { harness: builder, reviewer, timeouts }),
+      id,
+    )
+
+    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
+    expect(seen.drafts).toEqual([true])
+    expect(seen.releases).toEqual([])
   })
 
   it('plans the sandbox and the agent passes against the limit saved for the repository', async () => {
