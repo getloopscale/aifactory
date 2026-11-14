@@ -414,8 +414,10 @@ export function proxyArgs(name: string, rulesDir: string): string[] {
     `regular@${PROXY_PORT}`,
     '--mode',
     `transparent@${TRANSPARENT_PORT}`,
+    // The names are answered by the addon before anything is forwarded; the upstream is an address that does
+    // not answer, so a query that got past it would fail and never leave the proxy.
     '--mode',
-    `dns@${DNS_PORT}`,
+    `reverse:dns://127.0.0.1:9@${DNS_PORT}`,
     '-s',
     '/addons/egress.py',
     '--set',

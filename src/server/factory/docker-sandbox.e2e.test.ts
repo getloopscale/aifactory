@@ -97,7 +97,7 @@ describe('the docker sandbox', () => {
       ).stdout.trim(),
     ).not.toBe('0')
     expect(
-      (await sh('curl -s -m 8 --noproxy "*" http://1.1.1.1/ -o /dev/null; echo $?')).stdout.trim(),
+      (await sh('curl -sf -m 8 --noproxy "*" http://1.1.1.1/ -o /dev/null; echo $?')).stdout.trim(),
     ).not.toBe('0')
     const node = await sh(
       `node -e "fetch('https://example.com').then(r => console.log(r.status), e => console.log('refused'))"`,

@@ -343,7 +343,9 @@ describe('creating a docker sandbox', () => {
 
   it('listens for a tool that names the proxy, for a connection that names nothing, and for names', () => {
     const proxy = proxyArgs('px', '/rules-dir').join(' ')
-    expect(proxy).toContain('--mode regular@8080 --mode transparent@8081 --mode dns@5353')
+    expect(proxy).toContain(
+      '--mode regular@8080 --mode transparent@8081 --mode reverse:dns://127.0.0.1:9@5353',
+    )
   })
 
   it('redirects web ports and names to those listeners, so a child with a bare environment has a network', () => {

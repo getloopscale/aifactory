@@ -40,6 +40,12 @@ export async function expectSmallRecipe(sh: Run): Promise<void> {
     'curl, refused',
   ).not.toBe(0)
 
+  // Plain HTTP, which has no SNI: the Host header says where it goes. An allowed host answers (the registry
+  // redirects to https, which is an answer) and an unlisted one is refused, as a refusal or a connection that fails.
+  const code = (url: string) => sh(bare(`curl -s -m 20 -o /dev/null -w "%{http_code}" ${url}`))
+  expect(['200', '301', '308']).toContain((await code('http://registry.npmjs.org/left-pad')).stdout)
+  expect(['000', '403'], 'http, refused').toContain((await code('http://example.com/')).stdout)
+
   // The package manager the repository declares, fetched by a child with no COREPACK_HOME.
   const pnpm = await sh(
     `mkdir -p /tmp/recipe && cd /tmp/recipe && echo '{"packageManager":"pnpm@10.34.1"}' > package.json && ${bare('pnpm --version')}`,

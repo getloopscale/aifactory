@@ -11,8 +11,9 @@ half of it. A file that cannot be read keeps the rules already loaded: the polic
 A connection that did not name the proxy (a child that dropped the environment) arrives on the transparent
 listener, where the only name it carries is the SNI of its TLS handshake. That name is checked against the rules,
 and the proxy connects to it, never to the address the client chose: a client cannot get a credential attached
-to a request it sends to some other address by claiming a listed name. A connection with no SNI (plain HTTP, or
-a bare IP) is refused there, since nothing proves where it is going. A name is resolved (the DNS listener)
+to a request it sends to some other address by claiming a listed name. Plain HTTP has no SNI: it goes to the
+name its Host header gives, which the rules must list, and never to the address the client chose. A connection
+that names nothing (TLS with no SNI, a bare IP) is refused there. A name is resolved (the DNS listener)
 only when the rules allow it: an unlisted name is answered REFUSED, so a query carries nothing out.
 """
 import json
@@ -66,22 +67,56 @@ def transparent(client):
 
 
 def server_connect(data):
+    """Where a transparent connection goes: the name it announced, never the address the client chose."""
     if not transparent(data.client):
         return
     sni = (data.client.sni or "").lower().rstrip(".")
-    if not sni or rule_for(sni) is None:
-        data.server.error = "blocked by the factory egress policy"
+    if sni:
+        if rule_for(sni) is None:
+            data.server.error = "blocked by the factory egress policy"
+            return
+        data.server.address = (sni, data.server.address[1])
         return
-    data.server.address = (sni, data.server.address[1])
+    # No SNI: plain HTTP, whose `request` hook already pointed the connection at the Host it names, or a
+    # connection that names nothing, whose address is an IP no rule lists.
+    if rule_for(data.server.address[0]) is None:
+        data.server.error = "blocked by the factory egress policy"
+
+
+def resolve(name, kind):
+    """The addresses of an allowed name, from the proxy's own resolver; nothing asks any other server."""
+    import ipaddress
+    import socket
+
+    family = socket.AF_INET if kind == "A" else socket.AF_INET6
+    try:
+        found = socket.getaddrinfo(name, None, family, socket.SOCK_STREAM)
+    except OSError:
+        return []
+    return sorted({ipaddress.ip_address(info[4][0]) for info in found}, key=str)
 
 
 def dns_request(flow):
-    """A name is resolved only when the rules allow it, so a query cannot carry data to a name server."""
-    from mitmproxy.net.dns import response_codes
+    """
+    Answers every DNS query itself, before anything is forwarded or resolved: a name the rules do not list is
+    REFUSED and no server is ever asked, so a query cannot carry data to a name server. The listener is a
+    reverse proxy to an address that does not answer (see docker-sandbox.ts), so a query that reached the
+    forwarding step would fail instead of leaving.
+    """
+    from mitmproxy import dns
+    from mitmproxy.net.dns import response_codes, types
 
     question = flow.request.question
     if question is None or rule_for(question.name) is None:
         flow.response = flow.request.fail(response_codes.REFUSED)
+        return
+    kinds = {types.A: "A", types.AAAA: "AAAA"}
+    kind = kinds.get(question.type)
+    answers = []
+    if kind:
+        make = dns.ResourceRecord.A if kind == "A" else dns.ResourceRecord.AAAA
+        answers = [make(question.name, address) for address in resolve(question.name, kind)]
+    flow.response = flow.request.succeed(answers)
 
 
 def http_connect(flow: http.HTTPFlow):
@@ -96,8 +131,18 @@ def request(flow: http.HTTPFlow):
         return
     if transparent(flow.client_conn):
         sni = (flow.client_conn.sni or "").lower().rstrip(".")
-        if sni != flow.request.pretty_host.lower().rstrip("."):
+        host = flow.request.pretty_host.lower().rstrip(".")
+        if sni:
+            if sni != host:
+                refuse(flow)
+                return
+        elif getattr(flow.client_conn, "tls_established", False):
+            # TLS with no SNI: the Host header is the client's word and nothing else says where it goes.
             refuse(flow)
             return
+        else:
+            # Plain HTTP: connect to the name the Host header gives, as the allowlist read it, and not to
+            # the address the client chose, which could be anything.
+            flow.request.host = host
     for name, value in (rule.get("headers") or {}).items():
         flow.request.headers[name] = value
