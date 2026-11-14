@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
@@ -7,7 +7,12 @@ import type { CheckReport, GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
-import { attachEvidence, rerunTransient, type EvidenceApi } from './check-evidence'
+import {
+  attachEvidence,
+  rerunTransient,
+  type EvidenceApi,
+  type RerunLedger,
+} from './check-evidence'
 import {
   checksFeedback,
   decideWaitingIntegration,
@@ -26,7 +31,7 @@ import {
   type Handed,
 } from './integration'
 import { loadRepoConfig, type RepoConfig } from './repo-config'
-import { withRecipe, type Recipe } from './recipe'
+import { parseRecipe, RECIPE_PATH, withRecipe } from './recipe'
 
 export type AwaitCiDeps = {
   db: Database
@@ -34,8 +39,6 @@ export type AwaitCiDeps = {
   api: GithubApi
   /** Reads the log or annotations of a failed check, so the note carries what the sandbox cannot open. */
   checks: EvidenceApi
-  /** Reads the repository's recipe, so the note knows which checks the factory runs; none means no claim. */
-  recipe?: (repo: string, token: string) => Promise<Recipe | undefined>
   /** The factory's release mode, for a repository that sets none. */
   releaseMode: ReleaseMode | undefined
   now?: () => Date
@@ -195,11 +198,34 @@ async function effectiveChecks(
   token: string,
 ): Promise<CheckSpec[] | undefined> {
   if (repo.checks) return repo.checks
-  if (!deps.recipe) return undefined
   try {
-    return withRecipe(repo, await deps.recipe(repository, token)).checks ?? DEFAULT_CHECKS
+    const ref = await deps.api.defaultBranch(repository, token)
+    const text = await deps.api.readFile(repository, token, RECIPE_PATH, ref)
+    const recipe = text === undefined ? undefined : parseRecipe(repository, text)
+    return withRecipe(repo, recipe).checks ?? DEFAULT_CHECKS
   } catch {
     return undefined
+  }
+}
+
+/** The reruns of a task's failed jobs, kept on the task: one statement claims a run, so only one pass asks. */
+function rerunLedger(deps: AwaitCiDeps, taskId: number): RerunLedger {
+  const id = (runId: number) => String(runId)
+  return {
+    claim: async (runId) =>
+      (
+        await deps.db
+          .update(task)
+          .set({ ciReruns: sql`array_append(${task.ciReruns}, ${id(runId)})` })
+          .where(and(eq(task.id, taskId), sql`NOT (${id(runId)} = ANY(${task.ciReruns}))`))
+          .returning({ id: task.id })
+      ).length > 0,
+    release: async (runId) => {
+      await deps.db
+        .update(task)
+        .set({ ciReruns: sql`array_remove(${task.ciReruns}, ${id(runId)})` })
+        .where(eq(task.id, taskId))
+    },
   }
 }
 
@@ -229,7 +255,14 @@ async function readFailure(
   result: AwaitCiResult,
 ): Promise<string | undefined> {
   const { row, token, verifiedSha } = w
-  const rerun = await rerunTransient(deps.checks, row.repository, token, verifiedSha, reports)
+  const rerun = await rerunTransient(
+    deps.checks,
+    row.repository,
+    token,
+    verifiedSha,
+    reports,
+    rerunLedger(deps, row.id),
+  )
   for (const problem of rerun.problems) result.errors.push(`task ${row.id}: ${problem}`)
   if (rerun.started > 0) {
     result.rerun.push(row.id)

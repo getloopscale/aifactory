@@ -376,7 +376,7 @@ describe('pollAwaitingIntegrations', () => {
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
 
     const { note } = sentBack[0]
-    // The factory's checks are not known here (no recipe reader), so nothing is claimed about them.
+    // The factory's checks are not known here (no recipe in the repository), so nothing is claimed about them.
     expect(note).not.toContain('no check of the factory matches it')
     expect(note).toContain('Step that exited: node scripts/check-changesets.mjs')
     expect(note).toContain('.changeset/brave-lions.md')
@@ -390,12 +390,11 @@ describe('pollAwaitingIntegrations', () => {
     gh.failedRuns = [{ id: 1308, name: 'bundle size', url: link, summary: '', actions: true }]
     gh.logs = { 1308: '##[group]Run pnpm size\nERROR: "size" exited with 1.' }
     const id = await waitingTask()
-    const recipe = async () => ({
-      egress: [],
-      checks: [{ name: 'test', command: 'pnpm test' }],
+    repo().files('main', {
+      '.factory/setup.json': '{"checks":[{"name":"test","command":"pnpm test"}]}',
     })
 
-    expect(await pollAwaitingIntegrations(deps({ recipe }))).toMatchObject({ sentBack: [id] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
 
     expect(sentBack[0].note).toContain('no check of the factory matches it')
     expect(sentBack[0].note).toContain('pnpm size')
@@ -406,7 +405,12 @@ describe('pollAwaitingIntegrations', () => {
     repo().required.set('workspace', ['CI', 'Other'])
     reports(
       { name: 'CI', state: 'failure', detail: '', url: a },
-      { name: 'Other', state: 'failure', detail: '', url: a },
+      {
+        name: 'Other',
+        state: 'failure',
+        detail: '',
+        url: 'https://github.com/paulo/app/actions/runs/501/job/2',
+      },
     )
     gh.failedRuns = [
       { id: 1, name: 'CI', url: a, summary: '', actions: true },
@@ -572,6 +576,21 @@ describe('pollAwaitingIntegrations', () => {
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], rerun: [] })
     expect(gh.reruns).toEqual([])
+  })
+
+  it('asks for a rerun once across passes, even while GitHub still shows the first attempt', async () => {
+    const a = 'https://github.com/paulo/app/actions/runs/500/job/1'
+    reports({ name: 'CI', state: 'failure', detail: '', url: a })
+    gh.failedRuns = [{ id: 1, name: 'CI', url: a, summary: '', actions: true }]
+    gh.attempts = { 1: 1 }
+    const id = await waitingTask()
+
+    await Promise.all([pollAwaitingIntegrations(deps()), pollAwaitingIntegrations(deps())])
+    const again = await pollAwaitingIntegrations(deps())
+
+    expect(gh.reruns).toEqual([10])
+    expect(again).toMatchObject({ rerun: [id], sentBack: [] })
+    expect((await row(id)).ciReruns).toEqual(['10'])
   })
 
   it('leaves an unrelated failed workflow alone', async () => {

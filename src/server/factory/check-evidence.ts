@@ -2,7 +2,7 @@ import type { FailedRun, PromotionApi } from '../github/promotion-api'
 import type { CheckReport } from '../github/pulls'
 
 import type { FailedReport, ServerEvidence } from './ci-wait'
-import { checkEvidence, failedStep, logEvidence } from './promotion'
+import { checkEvidence, failedStep, logEvidence, type FailedStep } from './promotion'
 
 /** What reading a failed check's evidence takes from GitHub, with a repository-scoped token. */
 export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'> &
@@ -26,15 +26,45 @@ export async function readEvidence(
 /** What became of the rerun of the failed jobs: how many runs are rerunning, and what kept the others from it. */
 export type RerunOutcome = { started: number; problems: string[] }
 
+/**
+ * Where the reruns asked for are kept, so that one run is asked for once however many passes look at it, and
+ * across restarts. `claim` is atomic: it is true for exactly one caller per run. `release` gives a claim back
+ * when the request did not reach GitHub, so a later pass may ask again.
+ */
+export type RerunLedger = {
+  claim(runId: number): Promise<boolean>
+  release(runId: number): Promise<void>
+}
+
 const said = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+const JOB_ID = /\/job\/(\d+)/
+
+/**
+ * The failed Actions runs that are the failed required checks themselves. A report names its job in its link,
+ * and a run is that check only when its id is the one the link names. A report whose link names no job is
+ * matched by name only when one failed run has that name: with two, nothing says which is required, so
+ * neither is rerun. A workflow no required check names is left alone, since a rerun may have side effects.
+ */
+function requiredRuns(runs: FailedRun[], reports: CheckReport[]): FailedRun[] {
+  const actions = runs.filter((run) => run.actions)
+  const picked = new Set<FailedRun>()
+  for (const report of reports) {
+    const job = JOB_ID.exec(report.url)?.[1]
+    const named = actions.filter((run) => run.name === report.name)
+    if (job) {
+      for (const run of named) if (String(run.id) === job) picked.add(run)
+    } else if (named.length === 1) picked.add(named[0])
+  }
+  return [...picked]
+}
 
 /**
  * Reruns, once, the failed Actions runs behind the failed required checks whose job is on its first attempt:
- * a failure that is not of the work (a flaky test) passes on the second attempt. Only the run of a required
- * check is rerun: a required check with no Actions job, or an unrelated workflow, is left alone, since a rerun
- * may have side effects. GitHub keeps the count: a rerun raises the run's attempt at once, so a job on its
- * second attempt is never rerun again, even by another process, and the run in progress is not a failure
- * (`filter=latest`) until it ends. What GitHub refuses or fails to answer is a problem the caller reports,
+ * a failure that is not of the work (a flaky test) passes on the second attempt. The request is claimed in the
+ * `ledger` first, atomically, so a concurrent pass, a restart or a delayed attempt count on GitHub's side never
+ * asks twice; a run already claimed counts as rerunning, and the pass waits for its outcome. A job already on
+ * its second attempt is never rerun. What GitHub refuses or fails to answer is a problem the caller reports,
  * per run, so one failure does not keep the others from being rerun. An API without the rerun calls reruns
  * nothing and says nothing.
  */
@@ -44,31 +74,39 @@ export async function rerunTransient(
   token: string,
   sha: string,
   reports: CheckReport[],
+  ledger: RerunLedger,
 ): Promise<RerunOutcome> {
   const outcome: RerunOutcome = { started: 0, problems: [] }
   const { jobAttempt, rerunFailedJobs } = api
   if (!jobAttempt || !rerunFailedJobs) return outcome
   let runs: FailedRun[]
   try {
-    const names = reports.map((r) => r.name)
-    runs = (await api.failedChecks(repo, token, sha)).filter(
-      (run) => run.actions && names.includes(run.name),
-    )
+    runs = requiredRuns(await api.failedChecks(repo, token, sha), reports)
   } catch (error) {
     outcome.problems.push(`listing the failed jobs: ${said(error)}`)
     return outcome
   }
   const tried = new Set<number>()
   for (const run of runs) {
+    let claimed: number | undefined
     try {
       const job = await jobAttempt.call(api, repo, token, run.id)
       if (job.attempt >= 2 || tried.has(job.runId)) continue
       tried.add(job.runId)
+      if (!(await ledger.claim(job.runId))) {
+        outcome.started += 1
+        continue
+      }
+      claimed = job.runId
       const answer = await rerunFailedJobs.call(api, repo, token, job.runId)
       if (answer.started) outcome.started += 1
-      else outcome.problems.push(answer.refusal)
+      else {
+        outcome.problems.push(answer.refusal)
+        await ledger.release(job.runId)
+      }
     } catch (error) {
       outcome.problems.push(`rerunning ${run.name}: ${said(error)}`)
+      if (claimed !== undefined) await ledger.release(claimed).catch(() => {})
     }
   }
   return outcome
@@ -77,6 +115,27 @@ export async function rerunTransient(
 const unreadable = (error: unknown): ServerEvidence => ({
   unreadable: error instanceof Error ? error.message : String(error),
 })
+
+/**
+ * The step that failed: its name from the job's metadata (a step has its own name, and an action step has no
+ * `Run` command), with the command the log shows it ran when the log shows one. The log alone is the fallback
+ * when the metadata cannot be read or names no failed step.
+ */
+async function stepOf(
+  api: EvidenceApi,
+  repo: string,
+  token: string,
+  run: FailedRun,
+  log: string,
+): Promise<FailedStep | undefined> {
+  const fromLog = failedStep(log)
+  const named = await api.jobAttempt?.call(api, repo, token, run.id).then(
+    (job) => job.failedStep,
+    () => undefined,
+  )
+  if (!named) return fromLog
+  return { name: named, ...(fromLog?.command ? { command: fromLog.command } : {}) }
+}
 
 /** A check's evidence as the note takes it: what was read, or why it could not be. */
 async function evidenceOf(
@@ -88,7 +147,7 @@ async function evidenceOf(
   try {
     if (!run.actions) return { lines: await readEvidence(api, repo, token, run) }
     const log = await api.jobLog(repo, token, run.id)
-    const step = failedStep(log)
+    const step = await stepOf(api, repo, token, run, log)
     return { lines: logEvidence(log), ...(step ? { step } : {}) }
   } catch (error) {
     return unreadable(error)

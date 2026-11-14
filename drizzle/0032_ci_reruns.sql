@@ -1,0 +1,1 @@
+ALTER TABLE "task" ADD COLUMN "ci_reruns" text[] DEFAULT '{}'::text[] NOT NULL;
