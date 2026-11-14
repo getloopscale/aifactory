@@ -2160,8 +2160,13 @@ describe('runTask waiting for an answer', () => {
       .insert(stageEvent)
       .values({ taskId: id, stage: 'handoff', at: new Date(now - 10_000) })
     let runs = 0
+    let commits = 0
     const sandbox = new FakeSandbox(
       changed((c) => {
+        // The first commit gets a hash of its own: the shared fake gives it the base's, and a review of
+        // the base commit is the review of a "nothing to change" claim, which is not a round.
+        if (c.includes('commit -F')) commits += 1
+        if (c.endsWith('rev-parse HEAD') && commits === 1) return { stdout: 'first111\n' }
         if (!c.endsWith('npm test')) return undefined
         runs += 1
         // Round 2 fails its checks, twice, so it has no review.
