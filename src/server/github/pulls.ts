@@ -370,7 +370,7 @@ export function createGithubApi(
   fetchImpl: FetchLike = (url, init) => fetch(url, init),
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): GithubApi {
-  const call = (repo: string, token: string, path: string, init: RequestInit = {}) =>
+  const send = (repo: string, token: string, path: string, init: RequestInit) =>
     fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
       ...init,
       headers: {
@@ -382,11 +382,21 @@ export function createGithubApi(
       },
     })
 
-  /** Repeats a call while GitHub answers 5xx; the last answer is returned when the tries run out. */
-  async function untilServed(send: () => Promise<Response>): Promise<Response> {
+  /**
+   * A call to the repository. A 5xx passes on its own, so a read is repeated a few times with a pause, and
+   * the last answer is returned when the tries run out. A write is repeated only when the caller says it is
+   * safe to (`repeat`): a 502 can come after GitHub did the work, and repeating would do it twice.
+   */
+  async function call(
+    repo: string,
+    token: string,
+    path: string,
+    init: RequestInit = {},
+    repeat = (init.method ?? 'GET') === 'GET',
+  ): Promise<Response> {
     for (let attempt = 1; ; attempt += 1) {
-      const response = await send()
-      if (response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) return response
+      const response = await send(repo, token, path, init)
+      if (!repeat || response.status < 500 || attempt >= SERVER_ERROR_ATTEMPTS) return response
       await wait(SERVER_ERROR_RETRY_MS * attempt)
     }
   }
@@ -441,8 +451,12 @@ export function createGithubApi(
   return {
     async createCheckRun(repo, token, check) {
       await ensure(
-        await untilServed(() =>
-          call(repo, token, '/check-runs', {
+        // A second check run with the same result is harmless, so this write may be repeated.
+        await call(
+          repo,
+          token,
+          '/check-runs',
+          {
             method: 'POST',
             body: JSON.stringify({
               name: check.name,
@@ -451,7 +465,8 @@ export function createGithubApi(
               conclusion: check.conclusion,
               output: { title: check.title, summary: check.summary },
             }),
-          }),
+          },
+          true,
         ),
         `creating the check run on ${repo}`,
         [201],

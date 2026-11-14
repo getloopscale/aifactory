@@ -22,7 +22,7 @@ import {
   watch,
 } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { ChangedFile, IssueComment } from '../github/pulls'
+import { createGithubApi, type ChangedFile, type IssueComment } from '../github/pulls'
 
 import { retryableFailure } from '../../shared/panel'
 import {
@@ -31,7 +31,7 @@ import {
   readsHistory,
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
-import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
+import { FakeGithub, githubAnswered, type FakePullRequest } from '../../test/fake-github'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { NewNote } from '../knowledge/store'
@@ -450,6 +450,46 @@ describe('runTask', () => {
 
     expect(result).toMatchObject({ status: 'failed', stage: 'pr' })
     expect(await getDb().select().from(evidence).where(eq(evidence.taskId, id))).toHaveLength(1)
+  })
+
+  it('goes on when GitHub answers 502 once creating the check run', async () => {
+    const id = await seedTask()
+    let tries = 0
+    const flaky = createGithubApi(
+      async () => {
+        tries += 1
+        return new Response(tries === 1 ? '{"message":"Server Error"}' : '{}', {
+          status: tries === 1 ? 502 : 201,
+        })
+      },
+      async () => {},
+    )
+    const api = Object.assign(githubApi, { createCheckRun: flaky.createCheckRun })
+
+    const result = await runTask(deps(new FakeSandbox(changed()), { githubApi: api }), id)
+
+    expect(tries).toBe(2)
+    expect(result).toMatchObject({ status: 'done' })
+  })
+
+  it('fails as an environment failure that retries when GitHub keeps answering 502', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'createCheckRun',
+      githubAnswered(502, 'creating the check run on paulo/app', 'Server Error'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    const [failed] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(failed.stage).toBe('failed')
+    expect(retryableFailure(failed.detail as Record<string, unknown>)).toBe('environment')
   })
 
   it('gives the firewall the credentials and the sandbox none of them', async () => {

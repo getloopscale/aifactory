@@ -4,6 +4,8 @@ import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore
 
 type Call = { method: string; url: string; body?: unknown; auth?: string }
 
+const noWait = async () => {}
+
 type Answer = { status: number; body?: unknown }
 
 function fakeFetch(answers: Record<string, Answer | Answer[]>) {
@@ -97,6 +99,18 @@ describe('createCheckRun on a 5xx', () => {
       createGithubApi(fetch, async () => {}).createCheckRun('o/r', 't', check),
     ).rejects.toThrow(/GitHub answered 502 creating the check run on o\/r.*Server Error/)
     expect(calls.length).toBeGreaterThan(1)
+  })
+
+  it('repeats a read that gets a 502, and a write that is not safe to repeat is not', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /pulls/3': [{ status: 502 }, { status: 200, body: { node_id: 'n' } }],
+      'POST /issues/3/comments': { status: 502 },
+    })
+    const api = createGithubApi(fetch, async () => {})
+    await api.readPullRequest('o/r', 't', 3).catch(() => undefined)
+    expect(calls.filter((c) => c.url === '/pulls/3').length).toBeGreaterThan(1)
+    await api.commentOnIssue('o/r', 't', 3, 'hi').catch(() => undefined)
+    expect(calls.filter((c) => c.url === '/issues/3/comments')).toHaveLength(1)
   })
 
   it('does not repeat a 4xx', async () => {
@@ -800,17 +814,19 @@ describe('the branches of a repository', () => {
       'GET /commits/v1': { status: 500, body: 'boom' },
     }).fetch
 
-    await expect(createGithubApi(noCompare).branchAhead('o/r', 't', 'main', 'b')).rejects.toThrow(
-      /500/,
-    )
-    await expect(createGithubApi(noCommit).branchAhead('o/r', 't', 'main', 'b')).rejects.toThrow(
-      /500/,
-    )
+    await expect(
+      createGithubApi(noCompare, noWait).branchAhead('o/r', 't', 'main', 'b'),
+    ).rejects.toThrow(/500/)
+    await expect(
+      createGithubApi(noCommit, noWait).branchAhead('o/r', 't', 'main', 'b'),
+    ).rejects.toThrow(/500/)
   })
 
   it('fails on any other answer when reading a branch', async () => {
     const { fetch } = fakeFetch({ 'GET /git/ref/heads/x': { status: 500, body: 'boom' } })
-    await expect(createGithubApi(fetch).branchHead('o/r', 'tok', 'x')).rejects.toThrow(/500/)
+    await expect(createGithubApi(fetch, noWait).branchHead('o/r', 'tok', 'x')).rejects.toThrow(
+      /500/,
+    )
   })
 
   it('creates a branch at a commit', async () => {
@@ -1425,7 +1441,7 @@ describe('what the doctor reads of a repository', () => {
 
   it('throws when the settings cannot be read', async () => {
     const { fetch } = fakeFetch({ 'GET /': { status: 502 } })
-    await expect(createGithubApi(fetch).repositorySettings('o/r', 't')).rejects.toThrow(
+    await expect(createGithubApi(fetch, noWait).repositorySettings('o/r', 't')).rejects.toThrow(
       /GitHub answered 502 reading o\/r/,
     )
   })
@@ -1435,7 +1451,7 @@ describe('what the doctor reads of a repository', () => {
       'GET /labels/factory': { status: 200, body: { name: 'factory' } },
       'GET /labels/broken': { status: 500 },
     })
-    const api = createGithubApi(fetch)
+    const api = createGithubApi(fetch, noWait)
 
     expect(await api.labelExists('o/r', 't', 'factory')).toBe(true)
     expect(await api.labelExists('o/r', 't', 'good first issue')).toBe(false)
