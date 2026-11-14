@@ -1934,7 +1934,6 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
 
   it('starts a first run that failed at the sandbox over, with a new branch', async () => {
     const id = await seedTask()
-    branchPushed()
     const queued: Queued[] = []
     const deleted: string[] = []
     await runTask(deps(blocked()), id)
