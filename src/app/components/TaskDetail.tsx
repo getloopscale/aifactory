@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 
 import {
-  AGENT_DEFAULT,
   columnOf,
   type ReviewView,
   type RunView,
@@ -275,18 +274,13 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
 }
 
 /**
- * The model and effort a pass ran with, said as one line. The agent's own default is said as such, and a
- * pass from before this was recorded is said to be unknown: it is not claimed to have run on the default.
+ * The model and effort a pass ran with, said as one line. A model or effort that was not recorded is said
+ * to be unknown, never claimed to be the default.
  */
-function modelOf(run: RunView, words: { defaultModel: string; notRecorded: string }): string {
+function modelOf(run: RunView, words: { notRecorded: string }): string {
   if (run.model === null && run.effort === null) return words.notRecorded
-  const model =
-    run.model === null
-      ? words.notRecorded
-      : run.model === AGENT_DEFAULT
-        ? words.defaultModel
-        : run.model
-  const effort = run.effort === null || run.effort === AGENT_DEFAULT ? null : run.effort
+  const model = run.model ?? words.notRecorded
+  const effort = run.effort
   return effort ? `${model} · ${effort}` : model
 }
 
@@ -317,7 +311,7 @@ function modelLine(
   runs: RunView[],
   timeline: TimelineEvent[],
   r: ReviewView,
-  words: { defaultModel: string; notRecorded: string },
+  words: { notRecorded: string },
 ): string {
   const run = reviewRun(runs, timeline, r)
   return ` · ${run ? modelOf(run, words) : words.notRecorded}`

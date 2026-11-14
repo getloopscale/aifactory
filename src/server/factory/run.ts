@@ -1,8 +1,6 @@
 import { type SandboxBackend } from '@theokit/agents/sandbox'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
-import { AGENT_DEFAULT } from '../../shared/panel'
-
 import {
   agentRun,
   changePlan,
@@ -501,8 +499,8 @@ export class Run {
         taskId,
         role,
         harness: who.name,
-        model: who.model ?? AGENT_DEFAULT,
-        effort: who.effort ?? AGENT_DEFAULT,
+        model: who.model ?? null,
+        effort: who.effort ?? null,
         attempt,
         durationMs: Date.now() - started,
         ok: false,
@@ -516,8 +514,9 @@ export class Run {
       taskId,
       role,
       harness: who.name,
-      model: who.model ?? AGENT_DEFAULT,
-      effort: who.effort ?? AGENT_DEFAULT,
+      // What the agent says it ran, else what it was told; null when neither is known, never a guess.
+      model: result.model ?? who.model ?? null,
+      effort: who.effort ?? null,
       tokensIn: result.tokensIn ?? null,
       tokensOut: result.tokensOut ?? null,
       attempt,
@@ -998,6 +997,8 @@ export class Run {
       harness: this.builder.name,
       attempt: 1,
       refuted: true,
+      // The reviewer's verdict sent the builder back, so that reviewer is charged for the pass.
+      trigger: 'review',
     })
     const result = await this.settle(this.builder, 'builder', 1, (onEvent) =>
       this.builder.resume!(this.backend, this.sessionId!, {

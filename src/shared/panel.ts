@@ -119,17 +119,11 @@ export type WatchView = {
   acknowledged: boolean
 }
 
-/**
- * What `agent_run.model` and `.effort` hold for a pass that ran on the agent's own default. A null there is a
- * pass from before the model was recorded: unknown, not the default.
- */
-export const AGENT_DEFAULT = 'default'
-
 export type RunView = {
   id: number
   role: 'builder' | 'planner' | 'reviewer'
   harness: string
-  /** The model and effort the pass ran with, `AGENT_DEFAULT` for the agent's own; null when it was not recorded. */
+  /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
   effort: string | null
   /** Null for an agent that reports no tokens. */

@@ -1,5 +1,6 @@
 import type { AgentComparison, MetricBand, MetricRow, MetricsReport } from '../../shared/panel'
 import { metricValue } from '../lib/format'
+import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 
 const BAND: Record<MetricBand, { label: string; className: string }> = {
@@ -22,6 +23,8 @@ const percent = (share: number) => `${Math.round(share * 100)}%`
 
 /** What the reviewers did, one row for each agent and model that reviewed, so a change of reviewer can be compared. */
 function ByReviewer({ data }: { data: AgentComparison }) {
+  const { t } = useCopy()
+  const w = t.byReviewer
   if (
     data.approval.length === 0 &&
     data.reviewerRework.length === 0 &&
@@ -38,26 +41,26 @@ function ByReviewer({ data }: { data: AgentComparison }) {
   for (const a of data.approval)
     put(a.reviewer, a.model, 'approval', `${percent(a.share)} (${a.approved}/${a.reviews})`)
   for (const r of data.reviewerRework)
-    put(r.reviewer, r.model, 'rework', `${r.reworkRounds} in ${r.reviews} reviews`)
+    put(r.reviewer, r.model, 'rework', w.reworkValue(r.reworkRounds, r.reviews))
   for (const c of data.reviewerCost)
     put(
       c.agent,
       c.model,
       'cost',
       c.perDelivery === null
-        ? `unknown (${c.deliveredRuns} runs)`
-        : `$${c.perDelivery.toFixed(2)} (${c.reportedRuns}/${c.deliveredRuns} runs)`,
+        ? w.unknownCost(c.deliveredRuns)
+        : w.knownCost(c.perDelivery.toFixed(2), c.reportedRuns, c.deliveredRuns),
     )
   return (
     <div className="mt-4">
-      <h3 className="mb-2 text-sm font-semibold">By reviewer</h3>
+      <h3 className="mb-2 text-sm font-semibold">{w.title}</h3>
       <table className="w-full text-left text-sm">
         <thead className="text-xs text-muted-foreground">
           <tr>
-            <th className="py-1 pr-3">Reviewer</th>
-            <th className="py-1 pr-3">Approved on the first review</th>
-            <th className="py-1 pr-3">Rework rounds it asked for</th>
-            <th className="py-1 pr-3">Cost of a delivery it reviewed</th>
+            <th className="py-1 pr-3">{w.reviewer}</th>
+            <th className="py-1 pr-3">{w.approval}</th>
+            <th className="py-1 pr-3">{w.rework}</th>
+            <th className="py-1 pr-3">{w.cost}</th>
           </tr>
         </thead>
         <tbody>

@@ -273,11 +273,13 @@ export type ReworkFact = {
   at: Date
   /** What sent the work back; absent on a build recorded before the trigger was kept, which is charged to nobody. */
   trigger?: 'review' | 'checks'
+  /** A build that answered a reviewer's refusal of a claim that nothing needed changing: it answers the review of its own attempt. */
+  refuted?: boolean
 }
 
 /**
  * The rework rounds each reviewer and model caused. A rework starting attempt N answers the review of attempt
- * N-1 that asked for changes, made in the same run: that review is the one charged. Only a rework recorded as
+ * N-1 that asked for changes (a build that answers a refused claim, `refuted`, answers the review of its own attempt), made in the same run: that review is the one charged. Only a rework recorded as
  * started by a review is charged: one that failing checks started (even after a review of the previous
  * attempt asked for changes, or was refuted), one a person sent back, and one recorded without its trigger
  * are charged to nobody, and the review a trigger-less rework answers is left out of the count, since its
@@ -301,7 +303,7 @@ export function reworkByReviewer(
         (r) =>
           r.taskId === round.taskId &&
           r.verdict === 'changes' &&
-          r.round === round.attempt - 1 &&
+          r.round === (round.refuted ? round.attempt : round.attempt - 1) &&
           r.at <= round.at &&
           run !== undefined &&
           inRun(run, r.at),
@@ -348,12 +350,14 @@ async function reworkRoundsOf(db: Database): Promise<ReworkFact[]> {
     .orderBy(asc(stageEvent.id))
   return events.flatMap((e) => {
     const detail = (e.detail ?? null) as Record<string, unknown> | null
-    return detail?.rework === true && typeof detail.attempt === 'number'
+    return (detail?.rework === true || detail?.refuted === true) &&
+      typeof detail.attempt === 'number'
       ? [
           {
             taskId: e.taskId,
             attempt: detail.attempt,
             at: e.at,
+            ...(detail.refuted === true ? { refuted: true } : {}),
             ...(detail.trigger === 'review' || detail.trigger === 'checks'
               ? { trigger: detail.trigger }
               : {}),

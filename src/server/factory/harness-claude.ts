@@ -148,12 +148,19 @@ function isResult(line: string): boolean {
   }
 }
 
+/** The model Claude Code reports using, when it reports exactly one. */
+function ranModel(usage: Record<string, unknown> | undefined): string | undefined {
+  const names = Object.keys(usage ?? {})
+  return names.length === 1 ? names[0] : undefined
+}
+
 export function parseClaudeResult(exitCode: number, stdout: string, stderr: string): HarnessResult {
   try {
     const parsed = JSON.parse(stdout) as {
       is_error?: boolean
       result?: string
       total_cost_usd?: number
+      modelUsage?: Record<string, unknown>
       usage?: {
         input_tokens?: number
         cache_creation_input_tokens?: number
@@ -171,6 +178,7 @@ export function parseClaudeResult(exitCode: number, stdout: string, stderr: stri
       ok,
       summary,
       costUsd: parsed.total_cost_usd,
+      ...(ranModel(parsed.modelUsage) ? { model: ranModel(parsed.modelUsage) } : {}),
       ...tokenCounts(
         // Input counts what the agent read, cached or not.
         sum(

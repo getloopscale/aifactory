@@ -41,6 +41,14 @@ describe('parseClaudeResult', () => {
     expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('tokensIn')
   })
 
+  it('reads the model Claude reports it ran, when it reports exactly one', () => {
+    const run = (modelUsage: object) =>
+      parseClaudeResult(0, JSON.stringify({ result: 'x', modelUsage }), '')
+    expect(run({ 'claude-opus-4': {} })).toMatchObject({ model: 'claude-opus-4' })
+    expect(run({ a: {}, b: {} })).not.toHaveProperty('model')
+    expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('model')
+  })
+
   it('says which model and effort the agent was told to use', () => {
     const told = claudeCodeHarness(
       { kind: 'api-key', secret: 'k' },

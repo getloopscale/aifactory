@@ -249,6 +249,14 @@ describe('reworkByReviewer', () => {
     expect(reworkByReviewer(reviews, [rework(1, 2, 2, null)], events([1, finished(0)]))).toEqual([])
   })
 
+  it('charges a reviewer who refused a claim that nothing needed changing, when the builder ran again', () => {
+    const reviews = [fact(1, 'codex', 'changes', 1)]
+    const refuted = { taskId: 1, attempt: 1, at: at(2), trigger: 'review' as const, refuted: true }
+    expect(reworkByReviewer(reviews, [refuted], events([1, finished(0)]))).toEqual([
+      { reviewer: 'codex', model: null, reviews: 1, reworkRounds: 1, perReview: 1 },
+    ])
+  })
+
   it('does not charge a rework of a later run to a review of an earlier run', () => {
     const reviews = [fact(1, 'codex', 'changes', 1)]
     const run = events([1, [...finished(0, 'failed'), ...finished(10)]])

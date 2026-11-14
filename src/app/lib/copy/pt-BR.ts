@@ -190,6 +190,17 @@ export const ptBR: Copy = {
     passed: 'passou',
     checkFailed: 'falhou',
   },
+  byReviewer: {
+    title: 'Por revisor',
+    reviewer: 'Revisor',
+    approval: 'Aprovado na primeira revisão',
+    rework: 'Rodadas de retrabalho que pediu',
+    cost: 'Custo de uma entrega que revisou',
+    reworkValue: (rounds: number, reviews: number) => `${rounds} em ${reviews} revisões`,
+    unknownCost: (runs: number) => `desconhecido (${runs} execuções)`,
+    knownCost: (usd: string, reported: number, delivered: number) =>
+      `$${usd} (${reported}/${delivered} execuções)`,
+  },
   time: {
     secondsAgo: (n: number) => `há ${n}s`,
     minutesAgo: (n: number) => `há ${n}min`,
@@ -234,7 +245,6 @@ export const ptBR: Copy = {
     role: 'Papel',
     model: 'Modelo',
     notRecorded: 'não registrado',
-    defaultModel: 'padrão',
     tokens: 'Tokens (entrada / saída)',
     agent: 'Agente',
     attempt: 'Tentativa',

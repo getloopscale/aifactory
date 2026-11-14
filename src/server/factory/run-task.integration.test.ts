@@ -1001,8 +1001,8 @@ describe('runTask review loop', () => {
       tokensOut: 40,
     })
     expect(rows.find((r) => r.role === 'builder')).toMatchObject({
-      model: 'default',
-      effort: 'default',
+      model: null,
+      effort: null,
     })
   })
 

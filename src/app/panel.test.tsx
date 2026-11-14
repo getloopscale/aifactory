@@ -1040,7 +1040,7 @@ describe('health', () => {
     expect(reviews.textContent).toContain('gpt-6.1-sol · medium')
   })
 
-  it('says a pass from before the model was recorded is unknown, and one on the default is the default', async () => {
+  it('says a pass whose model was not recorded is unknown', async () => {
     const run = {
       role: 'builder' as const,
       harness: 'claude-code',
@@ -1057,7 +1057,7 @@ describe('health', () => {
       'GET /api/panel/tasks/5': detail({
         runs: [
           { ...run, id: 1, model: null, effort: null },
-          { ...run, id: 2, model: 'default', effort: 'default' },
+          { ...run, id: 2, model: 'gpt-6.1-sol', effort: 'high' },
         ],
       }),
     })
@@ -1065,8 +1065,7 @@ describe('health', () => {
     const runs = await screen.findByRole('region', { name: 'Executions' })
     const rows = within(runs).getAllByRole('row')
     expect(rows[1].textContent).toContain('not recorded')
-    expect(rows[1].textContent).not.toContain('default')
-    expect(rows[2].textContent).toContain('default')
+    expect(rows[2].textContent).toContain('gpt-6.1-sol · high')
     expect(rows[2].textContent).not.toContain('not recorded')
   })
 
