@@ -834,19 +834,22 @@ describe('actions', () => {
       expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
     })
 
-    it('does not count repeated sandbox failures of a first run either', async () => {
+    it('still limits the automatic retries of a first run that keeps failing at the sandbox', async () => {
       const id = await seed('failed', { issueNumber: 97 }, [
         { stage: 'intake', detail: { decision: 'retry', note: '' } },
         { stage: 'sandbox' },
         { stage: 'failed', detail: outage },
       ])
-      for (let i = 0; i < 4; i++) {
+      let runs = 0
+      for (; runs < 10; runs++) {
+        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+        if (card.retryAt === null) break
         expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
         await failAgain(id)
       }
-      expect(deleted()).toEqual(Array(4).fill('factory/97'))
-      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
-      expect(card.retryAt).not.toBeNull()
+      expect(runs).toBeGreaterThan(0)
+      expect(runs).toBeLessThan(10)
+      expect(deleted()).toEqual(Array(runs).fill('factory/97'))
     })
 
     it('keeps the branch of a first run that pushed before the environment failed', async () => {
