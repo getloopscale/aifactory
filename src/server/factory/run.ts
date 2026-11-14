@@ -888,7 +888,7 @@ export class Run {
    */
   private async checksUnanswered(first: HarnessResult): Promise<RunResult> {
     const { deps, taskId, row, api, branch } = this.c
-    const evidence = evidenceOfNote(this.c.continuation?.feedback ?? '').slice(0, 2_500)
+    const evidence = evidenceOfNote(this.c.continuation?.feedback ?? '')
     const reason =
       "the repository's required checks failed and the agent changed nothing, saying why below" +
       (evidence ? `. What the failed checks reported:\n\n${evidence}` : '')

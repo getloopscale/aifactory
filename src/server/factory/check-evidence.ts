@@ -55,10 +55,21 @@ export function runOf(runs: FailedRun[], report: CheckReport): FailedRun | undef
   return named.length === 1 ? named[0] : undefined
 }
 
+/**
+ * The failed Actions run that is a check report for a rerun: only one whose link names its job. A name alone
+ * does not establish it, since a commit status or a third-party check may share the name of an unrelated job,
+ * and a rerun restarts that job's whole workflow.
+ */
+function jobOf(runs: FailedRun[], report: CheckReport): FailedRun | undefined {
+  const job = report.url.includes('/actions/runs/') ? JOB_ID.exec(report.url)?.[1] : undefined
+  if (!job) return undefined
+  return runs.find((run) => run.name === report.name && String(run.id) === job)
+}
+
 /** The failed Actions runs that are the failed required checks themselves; no other workflow is touched. */
 function requiredRuns(runs: FailedRun[], reports: CheckReport[]): FailedRun[] {
   const actions = runs.filter((run) => run.actions)
-  const picked = reports.map((report) => runOf(actions, report))
+  const picked = reports.map((report) => jobOf(actions, report))
   return [...new Set(picked.filter((run): run is FailedRun => run !== undefined))]
 }
 
@@ -95,9 +106,9 @@ export async function rerunTransient(
     return outcome
   }
   for (const report of reports) {
-    if (!runOf(failed, report)) {
+    if (!jobOf(failed, report)) {
       outcome.problems.push(
-        `${report.name} was not rerun: no Actions job of that name failed on the commit (a status or another kind of check cannot be rerun)`,
+        `${report.name} was not rerun: its link names no failed Actions job of that name (a status, another kind of check or a link without the job cannot be rerun)`,
       )
     }
   }

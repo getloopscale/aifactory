@@ -1875,6 +1875,39 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'Nothing to change.' }
+      },
+    }
+    const filler = Array.from({ length: 60 }, (_, i) => `error filler line number ${i}`).join('\n')
+
+    const result = await runTask(
+      deps(new FakeSandbox(changed()), { harness: builder }),
+      id,
+      undefined,
+      {
+        feedback: `CI failed:\n- CI: u\n\nCI:\n~~~~text\n${filler}\nERROR: "late:step" exited with 1.\n~~~~`,
+        fromChecks: true,
+      },
+    )
+
+    expect(result).toMatchObject({
+      status: 'handoff',
+      reason: expect.stringContaining('ERROR: "late:step" exited with 1.'),
+    })
+  })
+
   it('does not mention a review when nobody sent anything back', async () => {
     const id = await seedTask()
     const prompts: string[] = []

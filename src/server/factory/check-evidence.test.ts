@@ -316,6 +316,15 @@ describe('rerunTransient', () => {
     expect(reruns).toEqual([])
   })
 
+  it('does not rerun an unrelated job that shares the name of a failed status', async () => {
+    const { api, reruns } = rerunning([actionsRun()], 1)
+    const status: CheckReport = { ...report('CI'), url: 'https://ci.example.com/build/9' }
+    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [status], ledgerOf(), NOW)
+    expect(outcome.started).toBe(0)
+    expect(outcome.problems).toEqual([expect.stringContaining('CI was not rerun')])
+    expect(reruns).toEqual([])
+  })
+
   it('says a required check with no Actions job was not rerun', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
     const outcome = await rerunTransient(
