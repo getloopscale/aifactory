@@ -394,8 +394,8 @@ describe('pollAwaitingIntegrations', () => {
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
 
     const { note } = sentBack[0]
-    // The factory's checks are not known here (no recipe in the repository), so nothing is claimed about them.
-    expect(note).not.toContain('no check of the factory matches it')
+    // With no recipe the factory runs its default checks, and none of them has this check's name.
+    expect(note).toContain('no check of the factory matches it')
     expect(note).toContain('Step that exited: node scripts/check-changesets.mjs')
     expect(note).toContain('.changeset/brave-lions.md')
     expect(note).toContain('back-merge origin/workspace first')

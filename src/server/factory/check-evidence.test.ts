@@ -311,7 +311,24 @@ describe('rerunTransient', () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
     const old = new Map([[110, new Date(NOW.getTime() - 16 * 60_000)]])
     const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(old), NOW)
-    expect(outcome).toEqual({ started: 0, problems: [] })
+    expect(outcome.started).toBe(0)
+    expect(outcome.problems).toEqual([expect.stringContaining('was not confirmed')])
+    expect(reruns).toEqual([])
+  })
+
+  it('says a required check with no Actions job was not rerun', async () => {
+    const { api, reruns } = rerunning([actionsRun()], 1)
+    const outcome = await rerunTransient(
+      api,
+      REPO,
+      'tok',
+      SHA,
+      [report('coverage floors')],
+      ledgerOf(),
+      NOW,
+    )
+    expect(outcome.started).toBe(0)
+    expect(outcome.problems).toEqual([expect.stringContaining('coverage floors was not rerun')])
     expect(reruns).toEqual([])
   })
 

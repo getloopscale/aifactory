@@ -86,11 +86,20 @@ export async function rerunTransient(
   const { jobAttempt, rerunFailedJobs } = api
   if (!jobAttempt || !rerunFailedJobs) return outcome
   let runs: FailedRun[]
+  let failed: FailedRun[]
   try {
-    runs = requiredRuns(await api.failedChecks(repo, token, sha), reports)
+    failed = (await api.failedChecks(repo, token, sha)).filter((run) => run.actions)
+    runs = requiredRuns(failed, reports)
   } catch (error) {
     outcome.problems.push(`listing the failed jobs: ${said(error)}`)
     return outcome
+  }
+  for (const report of reports) {
+    if (!runOf(failed, report)) {
+      outcome.problems.push(
+        `${report.name} was not rerun: no Actions job of that name failed on the commit (a status or another kind of check cannot be rerun)`,
+      )
+    }
   }
   const tried = new Set<number>()
   for (const run of runs) {
@@ -102,6 +111,11 @@ export async function rerunTransient(
       const claimedAt = await ledger.claim(job.runId)
       if (claimedAt) {
         if (now.getTime() - claimedAt.getTime() < RERUN_WAIT_MS) outcome.started += 1
+        else {
+          outcome.problems.push(
+            `the rerun of ${run.name} asked for at ${claimedAt.toISOString()} was not confirmed: GitHub still shows the first attempt, so the failure is not known to be after a rerun`,
+          )
+        }
         continue
       }
       asked = true

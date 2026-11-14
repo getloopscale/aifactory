@@ -376,6 +376,11 @@ describe('recurrenceIsNewIssue', () => {
 })
 
 describe('failedStep', () => {
+  it('shows no command when a step of another kind began after the shell step', () => {
+    const log = '##[group]Run pnpm build\nok\n##[group]Post job cleanup\n##[error]boom'
+    expect(failedStep(log)).toBeUndefined()
+  })
+
   it('shows no command for a failing action step that follows a successful shell step', () => {
     const log = '##[group]Run pnpm build\nok\n##[group]Run owner/action@v2\n##[error]boom'
     expect(failedStep(log)).toBeUndefined()

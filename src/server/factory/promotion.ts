@@ -78,6 +78,7 @@ const clean = (raw: string) =>
 export type FailedStep = { name: string; command?: string }
 
 const GROUP_RUN = /^##\[group\]Run (.+)$/
+const GROUP_ANY = /^##\[group\]/
 /** A step that uses an action (`owner/repo@ref`, `./local`) has no shell command to show. */
 const ACTION_USE = /^(\.\/\S*|[\w.-]+\/[\w./-]+@\S+)$/
 const EXITED = /ERROR: "([^"]+)" exited with \d+/
@@ -94,8 +95,9 @@ export function failedStep(log: string): FailedStep | undefined {
     const line = clean(raw)
     const stripped = raw.replace(TIMESTAMP, '').replace(COLORS, '').trim()
     const group = GROUP_RUN.exec(stripped)
-    if (group && !ended) {
-      const used = ACTION_USE.test(group[1].trim())
+    // Any group opens a step of its own: a command is kept only while no other kind of step has begun.
+    if (!ended && GROUP_ANY.test(stripped)) {
+      const used = !group || ACTION_USE.test(group[1].trim())
       command = used ? undefined : group[1].slice(0, MAX_LINE)
     }
     if (raw.includes('##[error]')) ended = true
