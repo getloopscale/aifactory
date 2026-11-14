@@ -112,22 +112,20 @@ describe('createCheckRun on a 5xx', () => {
     expect(calls.filter((c) => c.url === '/pulls/3').length).toBeGreaterThan(1)
   })
 
-  it('finds the comment a 502 posted instead of posting it twice', async () => {
-    const { fetch, calls } = fakeFetch({
-      'POST /issues/3/comments': { status: 502 },
-      'GET /issues/3/comments': { status: 200, body: [{ id: 9, body: 'hi' }] },
-    })
-    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('9')
-    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
+  it('posts a comment once: a 502 may have posted it and no other comment can be told from it', async () => {
+    const { fetch, calls } = fakeFetch({ 'POST /issues/3/comments': { status: 502 } })
+    await expect(
+      createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi'),
+    ).rejects.toThrow(/GitHub answered 502/)
+    expect(calls).toHaveLength(1)
   })
 
-  it('posts the comment again when the 502 posted nothing', async () => {
-    const { fetch, calls } = fakeFetch({
-      'POST /issues/3/comments': [{ status: 502 }, { status: 201, body: { id: 4 } }],
-      'GET /issues/3/comments': { status: 200, body: [] },
-    })
-    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('4')
-    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
+  it('does not repeat a merge of branches or a release that GitHub answers 502', async () => {
+    const merge = fakeFetch({ 'POST /merges': { status: 502 } })
+    await expect(
+      createGithubApi(merge.fetch, noWait).mergeBranch('o/r', 't', 'd', 'x'),
+    ).rejects.toThrow(/502/)
+    expect(merge.calls).toHaveLength(1)
   })
 
   it('finds the pull request a 502 opened instead of opening it twice', async () => {
@@ -341,6 +339,20 @@ describe('a GraphQL call GitHub keeps failing with a 5xx', () => {
     expect(error).toBeInstanceOf(Error)
     expect(retryableFailure({ error: (error as Error).message })).toBe('environment')
     expect(calls.filter((c) => c.url.includes('graphql')).length).toBeGreaterThan(1)
+  })
+
+  it('keeps the 5xx when the body has errors too', async () => {
+    const { fetch } = fakeFetch({
+      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
+      'POST https://api.github.com/graphql': {
+        status: 502,
+        body: { errors: [{ message: 'Something went wrong' }] },
+      },
+    })
+    const error = await createGithubApi(fetch, noWait)
+      .markReadyForReview('o/r', 't', 12, 'T')
+      .catch((e: Error) => e)
+    expect(retryableFailure({ error: (error as Error).message })).toBe('environment')
   })
 
   it('does not repeat a revert, which would open a second pull request', async () => {

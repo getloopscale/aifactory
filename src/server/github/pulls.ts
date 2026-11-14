@@ -385,16 +385,17 @@ export function createGithubApi(
   const pause = (attempt: number) => wait(SERVER_ERROR_RETRY_MS * attempt)
 
   /**
-   * A call to the repository. A 5xx passes on its own, so the call is repeated a few times with a pause, and
-   * the last answer is returned when the tries run out. Pass `repeat = false` for a write a repeat would
-   * do twice (a 502 can come after GitHub did the work); `recovering` handles those.
+   * A call to the repository. A 5xx passes on its own, so a read is repeated a few times with a pause, and
+   * the last answer is returned when the tries run out. A write is repeated only when the caller passes
+   * `repeat = true` (it is harmless twice); a 502 can come after GitHub did the work, so other writes are
+   * sent once, or go through `recovering`.
    */
   async function call(
     repo: string,
     token: string,
     path: string,
     init: RequestInit = {},
-    repeat = true,
+    repeat = (init.method ?? 'GET') === 'GET',
   ): Promise<Response> {
     for (let attempt = 1; ; attempt += 1) {
       const response = await send(repo, token, path, init)
@@ -457,12 +458,12 @@ export function createGithubApi(
       await pause(attempt)
     }
     const result = (await response.json().catch(() => ({}))) as GraphqlAnswer<T>
-    if (result.errors?.length) return { why: result.errors.map((e) => e.message).join('; ') }
-    if (!response.ok || !result.data)
-      return {
-        why:
-          response.status >= 500 ? `GitHub answered ${response.status}` : `HTTP ${response.status}`,
-      }
+    const said = result.errors?.length ? result.errors.map((e) => e.message).join('; ') : undefined
+    if (response.status >= 500) {
+      return { why: `GitHub answered ${response.status}${said ? `: ${said}` : ''}` }
+    }
+    if (said) return { why: said }
+    if (!response.ok || !result.data) return { why: `HTTP ${response.status}` }
     return { data: result.data }
   }
 
@@ -498,16 +499,22 @@ export function createGithubApi(
     async createCheckRun(repo, token, check) {
       await ensure(
         // A second check run with the same result is harmless, so this write may be repeated.
-        await call(repo, token, '/check-runs', {
-          method: 'POST',
-          body: JSON.stringify({
-            name: check.name,
-            head_sha: check.headSha,
-            status: 'completed',
-            conclusion: check.conclusion,
-            output: { title: check.title, summary: check.summary },
-          }),
-        }),
+        await call(
+          repo,
+          token,
+          '/check-runs',
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              name: check.name,
+              head_sha: check.headSha,
+              status: 'completed',
+              conclusion: check.conclusion,
+              output: { title: check.title, summary: check.summary },
+            }),
+          },
+          true,
+        ),
         `creating the check run on ${repo}`,
         [201],
       )
@@ -1114,32 +1121,15 @@ export function createGithubApi(
     },
 
     async commentOnIssue(repo, token, issueNumber, body) {
-      const since = new Date(Date.now() - 60_000).toISOString()
-      const answer = await recovering(
-        () =>
-          call(
-            repo,
-            token,
-            `/issues/${issueNumber}/comments`,
-            { method: 'POST', body: JSON.stringify({ body }) },
-            false,
-          ),
-        // A 502 can come after GitHub posted it: look for the same text before posting again.
-        async () => {
-          const listed = await call(
-            repo,
-            token,
-            `/issues/${issueNumber}/comments?per_page=100&since=${encodeURIComponent(since)}`,
-          )
-          if (!listed.ok) return undefined
-          const posted = ((await listed.json()) as { id: number; body?: string }[]).find(
-            (c) => c.body === body,
-          )
-          return posted ? String(posted.id) : undefined
-        },
+      // Sent once: a 502 can come after GitHub posted it, and the new comment cannot be told from another.
+      const response = await ensure(
+        await call(repo, token, `/issues/${issueNumber}/comments`, {
+          method: 'POST',
+          body: JSON.stringify({ body }),
+        }),
+        `commenting on ${repo}#${issueNumber}`,
+        [201],
       )
-      if ('recovered' in answer) return answer.recovered
-      const response = await ensure(answer.response, `commenting on ${repo}#${issueNumber}`, [201])
       return String(((await response.json()) as { id: number }).id)
     },
 
