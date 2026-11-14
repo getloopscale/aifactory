@@ -146,7 +146,15 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
 /** The run's time is gone. With work on the branch, the run ends as a draft pull request, not as a failure. */
-export class TimeExhausted extends StageFailure {}
+export class TimeExhausted extends StageFailure {
+  constructor(
+    message: string,
+    /** The commit that kept what the interrupted agent had done, when it could be pushed. */
+    readonly pushed?: string,
+  ) {
+    super(message)
+  }
+}
 
 export const DEFAULT_TIMEOUTS: Timeouts = { sandboxMs: 90 * 60_000, agentMs: 45 * 60_000 }
 
@@ -701,6 +709,19 @@ export class Run {
     return this.remoteHead
   }
 
+  /** Pushes what a rework cut for time left in the checkout, unreviewed; nothing when there is none. */
+  private async pushInterrupted(attempt: number): Promise<string | undefined> {
+    try {
+      return await this.commitAndPush(`${this.title}: unfinished rework (attempt ${attempt})`, {
+        attempt,
+        rework: true,
+        interrupted: true,
+      })
+    } catch {
+      return undefined
+    }
+  }
+
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */
   private async firstPass(): Promise<HarnessResult> {
     const { deps, taskId, resuming } = this.c
@@ -1112,8 +1133,10 @@ export class Run {
     )
     if (!result.ok) {
       const message = `the agent did not finish the rework: ${result.summary}`
-      // A pass that used all its time was cut: the pushed work is still on the branch.
-      throw Date.now() - began >= timeoutMs ? new TimeExhausted(message) : new StageFailure(message)
+      if (Date.now() - began < timeoutMs) throw new StageFailure(message)
+      // A pass that used all its time was cut: what it had done is pushed too, so the draft holds it.
+      this.sessionId = result.sessionId ?? this.sessionId
+      throw new TimeExhausted(message, await this.pushInterrupted(attempt))
     }
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(result.summary)
@@ -1557,16 +1580,32 @@ export class Run {
     try {
       return await this.rounds(progress)
     } catch (error) {
-      if (!(error instanceof TimeExhausted)) throw error
+      const ended = this.endedForTime(error)
+      if (!ended) throw error
       // The work is on the branch: a draft pull request keeps it, and a person can send it back with a note.
       const outcome: ReviewVerdict = {
         verdict: 'changes',
         summary: 'The run ended for time before this commit was reviewed.',
         findings: [],
       }
-      const reason = `the run ran out of time: ${error.message}`
-      return this.handOver(progress.sha, progress.attempt, progress.here, outcome, [], reason)
+      const reason = `the run ran out of time: ${ended.message}`
+      const sha = ended.pushed ?? progress.sha
+      // Checks ran on the commit before the interrupted work, so they are not shown for this one.
+      const here = ended.pushed ? [] : progress.here
+      return this.handOver(sha, progress.attempt, here, outcome, [], reason)
     }
+  }
+
+  /**
+   * Whether the run ended because its time was gone: the planner said so, or the sandbox reached its limit
+   * while the checks or the review ran and its backend threw. A question or a quota stop is not time.
+   */
+  private endedForTime(error: unknown): TimeExhausted | undefined {
+    if (error instanceof TimeExhausted) return error
+    if (error instanceof Asked || error instanceof QuotaStop) return undefined
+    if (Date.now() - this.startedAt < this.timeouts.sandboxMs) return undefined
+    const said = error instanceof Error ? error.message : String(error)
+    return new TimeExhausted(`the sandbox reached its limit: ${said}`)
   }
 
   private async rounds(progress: { sha: string; attempt: number; here: StoredCheck[] }) {

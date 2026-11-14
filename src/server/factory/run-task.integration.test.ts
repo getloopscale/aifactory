@@ -1694,6 +1694,38 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(commands.some((c) => c.includes('checkout -b factory/7'))).toBe(false)
   })
 
+  it('sends back a task that ended for time: the new run resumes the draft branch with the note', async () => {
+    const id = await seedTask()
+    const start = Date.now()
+    const first = resumableBuilder()
+    const run = first.run
+    first.run = async (backend, input) => {
+      vi.spyOn(Date, 'now').mockReturnValue(start + 31.5 * 60_000)
+      return run(backend, input)
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
+    const ended = await runTask(
+      deps(new FakeSandbox(changed()), {
+        harness: first,
+        reviewer,
+        timeouts: { sandboxMs: 60 * 60_000, agentMs: 45 * 60_000 },
+      }),
+      id,
+    )
+    vi.restoreAllMocks()
+    expect(ended).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
+    branchPushed()
+    const again = noting()
+
+    const { result, commands } = await sendBackAndRun(id, 'Finish the rework.', {
+      harness: again.builder,
+    })
+
+    expect(result).toMatchObject({ status: 'done', branch: 'factory/7' })
+    expect(again.prompts[0]).toContain('Finish the rework.')
+    expect(commands.some((c) => c.includes('checkout -B factory/7 FETCH_HEAD'))).toBe(true)
+  })
+
   /** A builder that changes a file and keeps the prompts it was given. */
   function noting() {
     const prompts: string[] = []
@@ -4015,18 +4047,42 @@ describe('runTask agent time', () => {
     const id = await seedTask()
     const start = Date.now()
     const builder = resumableBuilder()
+    const sandbox = new FakeSandbox(changed())
     builder.resume = async (_backend, _session, input) => {
+      dirty = true // the interrupted agent had edited the checkout
       vi.spyOn(Date, 'now').mockReturnValue(start + 40 * MIN + (input.timeoutMs ?? 0))
       return { ok: false, summary: 'cut by the time limit' }
     }
     const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
 
-    const result = await runTask(
-      deps(new FakeSandbox(changed()), { harness: builder, reviewer, timeouts }),
-      id,
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer, timeouts }), id)
+
+    // What the cut agent had done is committed and pushed, and the draft is opened on that commit.
+    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL, sha: 'abc123def2' })
+    expect(pushesOf(sandbox)).toHaveLength(2)
+    expect(sandbox.backend.files.get('/tmp/factory-commit-message.txt')).toContain(
+      'unfinished rework',
     )
+    expect(seen.drafts).toEqual([true])
+    expect(seen.releases).toEqual([])
+  })
+
+  it('hands over a draft when the sandbox reaches its limit during the review', async () => {
+    const id = await seedTask()
+    const start = Date.now()
+    const reviewer: CodingHarness = {
+      name: 'fake-reviewer',
+      egress: agentEgress,
+      run: async () => {
+        vi.spyOn(Date, 'now').mockReturnValue(start + 61 * MIN)
+        throw new Error('the sandbox is gone')
+      },
+    }
+
+    const result = await runTask(deps(new FakeSandbox(changed()), { reviewer, timeouts }), id)
 
     expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
+    expect(result.status === 'handoff' && result.reason).toContain('the sandbox reached its limit')
     expect(seen.drafts).toEqual([true])
     expect(seen.releases).toEqual([])
   })
