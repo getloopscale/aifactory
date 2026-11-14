@@ -112,12 +112,41 @@ describe('createCheckRun on a 5xx', () => {
     expect(calls.filter((c) => c.url === '/pulls/3').length).toBeGreaterThan(1)
   })
 
-  it('posts a comment once: a 502 may have posted it and no other comment can be told from it', async () => {
-    const { fetch, calls } = fakeFetch({ 'POST /issues/3/comments': { status: 502 } })
+  it('takes a new comment with the same text that a 502 posted, not an older one', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /issues/3/comments': { status: 502 },
+      'GET /issues/3/comments': [
+        { status: 200, body: [{ id: 5, body: 'hi' }] },
+        {
+          status: 200,
+          body: [
+            { id: 5, body: 'hi' },
+            { id: 9, body: 'hi' },
+          ],
+        },
+      ],
+    })
+    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('9')
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
+  })
+
+  it('posts the comment again when the 502 posted nothing', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /issues/3/comments': [{ status: 502 }, { status: 201, body: { id: 4 } }],
+      'GET /issues/3/comments': { status: 200, body: [{ id: 5, body: 'hi' }] },
+    })
+    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('4')
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
+  })
+
+  it('fails with the 502 after the tries when no new comment shows', async () => {
+    const { fetch } = fakeFetch({
+      'POST /issues/3/comments': { status: 502 },
+      'GET /issues/3/comments': { status: 200, body: [] },
+    })
     await expect(
       createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi'),
     ).rejects.toThrow(/GitHub answered 502/)
-    expect(calls).toHaveLength(1)
   })
 
   it('does not repeat a merge of branches or a release that GitHub answers 502', async () => {
@@ -371,7 +400,7 @@ describe('commentOnIssue', () => {
   it('posts the comment on the issue and throws when GitHub refuses', async () => {
     const ok = fakeFetch({ 'POST /issues/7/comments': { status: 201 } })
     await createGithubApi(ok.fetch).commentOnIssue('o/r', 'tok', 7, 'hello')
-    expect(ok.calls[0]).toMatchObject({
+    expect(ok.calls.find((c) => c.method === 'POST')).toMatchObject({
       method: 'POST',
       url: '/issues/7/comments',
       body: { body: 'hello' },
@@ -686,7 +715,9 @@ describe('pull request state and merge', () => {
   // Each answer in turn, the last one repeated: a merge that GitHub refuses for a moment, then takes.
   function answering(...answers: { status: number; body: unknown }[]) {
     let merges = 0
-    const fetch = async () => {
+    const fetch = async (_url: string, init: RequestInit = {}) => {
+      // The read of the pull request after a 5xx finds it not merged.
+      if (init.method !== 'PUT') return new Response('{}', { status: 200 })
       const answer = answers[Math.min(merges, answers.length - 1)]
       merges += 1
       return new Response(JSON.stringify(answer.body), { status: answer.status })
@@ -1242,6 +1273,65 @@ describe('what integrating through the repository CI needs', () => {
     })
   })
 
+  it('takes auto-merge as on when a 502 hid that it was enabled', async () => {
+    const { fetch } = fakeFetch({
+      'GET /pulls/12': {
+        status: 200,
+        body: { node_id: 'PR_12', auto_merge: { merge_method: 'merge' } },
+      },
+      'POST https://api.github.com/graphql': [
+        { status: 502 },
+        {
+          status: 200,
+          body: { errors: [{ message: 'Pull request Auto merge is already enabled' }] },
+        },
+      ],
+    })
+    await expect(
+      createGithubApi(fetch, noWait).enableAutoMerge('o/r', 't', 12, 'abc'),
+    ).resolves.toBeUndefined()
+  })
+
+  it('still refuses when a 502 came and auto-merge is not on', async () => {
+    const { fetch } = fakeFetch({
+      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12', auto_merge: null } },
+      'POST https://api.github.com/graphql': [
+        { status: 502 },
+        { status: 200, body: { errors: [{ message: 'Pull request is in clean status' }] } },
+      ],
+    })
+    await expect(
+      createGithubApi(fetch, noWait).enableAutoMerge('o/r', 't', 12, 'abc'),
+    ).rejects.toThrow(/clean status/)
+  })
+
+  it('takes a pull request as merged when a 502 hid the merge', async () => {
+    const { fetch, calls } = fakeFetch({
+      'PUT /pulls/9/merge': { status: 502 },
+      'GET /pulls/9': {
+        status: 200,
+        body: { merged: true, merge_commit_sha: 'm1', head: { sha: 'abc' } },
+      },
+    })
+    const done = await createGithubApi(fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
+      method: 'merge',
+    })
+    expect(done).toEqual({ sha: 'm1' })
+    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1)
+  })
+
+  it('merges again after a 502 that merged nothing', async () => {
+    const { fetch } = fakeFetch({
+      'PUT /pulls/9/merge': [{ status: 502 }, { status: 200, body: { sha: 'm2' } }],
+      'GET /pulls/9': { status: 200, body: { merged: false, head: { sha: 'abc' } } },
+    })
+    expect(
+      await createGithubApi(fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
+        method: 'merge',
+      }),
+    ).toEqual({ sha: 'm2' })
+  })
+
   it('turns auto-merge on as a merge commit, pinned to the verified head', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
@@ -1425,7 +1515,10 @@ describe('what integrating through the repository CI needs', () => {
 
   it('throws when auto-merge cannot be turned off', async () => {
     const { fetch } = fakeFetch({
-      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
+      'GET /pulls/12': {
+        status: 200,
+        body: { node_id: 'PR_12', auto_merge: { merge_method: 'merge' } },
+      },
       'POST https://api.github.com/graphql': { status: 502, body: {} },
     })
     await expect(createGithubApi(fetch, noWait).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
