@@ -49,6 +49,17 @@ describe('the new job dialog while it reads the repositories', () => {
     expect(screen.queryByText(en.newJob.loading)).toBeNull()
   })
 
+  it('goes back to loading when the dialog is opened again, instead of showing the last answer', async () => {
+    api.get.mockResolvedValueOnce(none)
+    open()
+    expect(await screen.findByText(en.newJob.enableFirst)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: en.newJob.close }))
+    api.get.mockReturnValue(new Promise(() => {}))
+    fireEvent.click(screen.getByRole('button', { name: en.newJob.open }))
+    expect(await screen.findByText(en.newJob.loading)).toBeTruthy()
+    expect(screen.queryByText(en.newJob.enableFirst)).toBeNull()
+  })
+
   it('shows the error and not the loading text when the list cannot be read', async () => {
     api.get.mockRejectedValue(new Error('GitHub is down'))
     open()

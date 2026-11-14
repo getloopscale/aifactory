@@ -37,6 +37,8 @@ export function NewJob({
     setOpen(next)
     if (next) {
       setMessage(undefined)
+      // The previous answer may be stale: show the loading state until the new one arrives.
+      setRepos(undefined)
       get<RepositoriesView>('/api/panel/repositories')
         .then(setRepos)
         .catch((e: unknown) => setMessage(e instanceof Error ? e.message : String(e)))
