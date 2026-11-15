@@ -770,14 +770,7 @@ describe('runTask', () => {
       )
       expect(git.show(remote, 'kept.txt')).toBe('half done\n')
       expect(git.parentOf(remote)).toBe(git.baseHead)
-      const [failed] = await getDb()
-        .select()
-        .from(stageEvent)
-        .where(eq(stageEvent.taskId, id))
-        .orderBy(desc(stageEvent.id))
-        .limit(1)
-      expect(failed?.stage).toBe('failed')
-      expect(failed?.detail).toMatchObject({ keptSha: remote })
+      expect(result.status === 'failed' && result.error).toContain('send the task back')
     } finally {
       await git.close()
     }
@@ -797,6 +790,24 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'failed', stage: 'push' })
     expect(result.status === 'failed' && result.error).toMatch(/kept in commit \S+ on factory\//)
     expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(true)
+  })
+
+  it('names no commit when the push of a pass cut at its limit fails', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) => (c.includes('push origin') ? { exitCode: 1, stderr: 'rejected' } : undefined)),
+    )
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({ ok: false, timedOut: true, summary: 'claude exited 124' }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result.status).toBe('failed')
+    expect(result.status === 'failed' && result.error).toContain('the work could not be kept')
+    expect(result.status === 'failed' && result.error).not.toContain('kept in commit')
   })
 
   it('pushes nothing when a pass cut at its limit left a clean checkout', async () => {

@@ -6,7 +6,7 @@ import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
 import { withRecipe } from './recipe'
 import { createGithubApi } from '../github/pulls'
 
-import { Asked, KeptWork, QuotaStop, quotaDetail, type Continuation } from './run-support'
+import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
@@ -178,7 +178,6 @@ async function fail(
     failedAt: state.current,
     error: message,
     ...(error instanceof QuotaStop ? quotaDetail(error, new Date()) : {}),
-    ...(error instanceof KeptWork ? { keptSha: error.sha } : {}),
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
   })
   return { status: 'failed', stage: state.current, error: message }

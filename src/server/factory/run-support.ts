@@ -13,16 +13,6 @@ export const COMMIT_MESSAGE = '/tmp/factory-commit-message.txt'
 /** Thrown inside a stage so the run can report which stage failed. */
 export class StageFailure extends Error {}
 
-/** The run failed after it pushed the work a cut pass left: `sha` is on the task's branch. */
-export class KeptWork extends StageFailure {
-  constructor(
-    message: string,
-    readonly sha: string,
-  ) {
-    super(message)
-  }
-}
-
 /** The agent asked a person something and the run is parked: not a failure, and not done. */
 export class Asked extends Error {
   constructor(readonly result: RunResult) {

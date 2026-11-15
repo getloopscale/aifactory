@@ -83,7 +83,6 @@ import {
   resolvedComment,
   Asked,
   QuotaStop,
-  KeptWork,
   StageFailure,
   type Continuation,
   type StoredCheck,
@@ -733,7 +732,9 @@ export class Run {
       const reason = error instanceof Error ? error.message : String(error)
       throw new StageFailure(`${plain}\nthe work could not be kept: ${reason}`)
     }
-    throw new KeptWork(`${plain}\nthe work was kept in commit ${sha} on ${this.c.branch}`, sha)
+    throw new StageFailure(
+      `${plain}\nthe work was kept in commit ${sha} on ${this.c.branch}; send the task back to continue from it`,
+    )
   }
 
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */
