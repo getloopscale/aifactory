@@ -138,7 +138,7 @@ export function checksRule(checks: CheckSpec[] | undefined): string {
     .map((c) => `  - \`${c.command}\``)
     .join(
       '\n',
-    )}\n  Do not run them yourself: they are slow and your pass has a time limit. Run only the tests of the files you touched.\n`
+    )}\n  Do not run them yourself: they are slow and your pass has a time limit. Run only the tests of the files you touched.\n  One exception: when your work changes what a generated, committed file is made from (a check such as \`generated-docs\` compares them), run the generator, and the build it needs, and commit the result.\n`
 }
 
 export function buildPrompt(input: {

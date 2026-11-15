@@ -347,6 +347,7 @@ describe('what the builder is told, at its edges', () => {
     })
     expect(named).toContain('The factory runs these checks on your commit')
     expect(named).toContain('Do not run them yourself')
+    expect(named).toContain('run the generator, and the build it needs')
     expect(named).toContain('  - `pnpm check`')
     expect(
       notResolvedPrompt({

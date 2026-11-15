@@ -285,6 +285,7 @@ describe('buildPrompt', () => {
       '- The factory runs these checks on your commit after your pass, and sends the work back when one fails:\n  - `pnpm test`\n  - `pnpm check`',
     )
     expect(prompt).toContain('Do not run them yourself')
+    expect(prompt).toContain('run the generator, and the build it needs')
   })
 
   it('names no commands when the factory has none to run', () => {
