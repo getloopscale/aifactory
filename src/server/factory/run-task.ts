@@ -9,7 +9,7 @@ import { createGithubApi } from '../github/pulls'
 import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
-import { limitsFor } from './run-limit'
+import { resolveTimeouts } from './run-limit'
 import type { Parked, RunResult, RunTaskDeps } from './run-types'
 import { enterStage } from './stages'
 
@@ -89,13 +89,7 @@ async function execute(
     await refuseWhileBlocked(deps, row.repository, issue, readIssue)
 
     const saved = await loadRepoConfig(db, row.repository)
-    // The owner's limit, else one that fits three rounds of this repository's recent checks.
-    const timeouts = await limitsFor(
-      db,
-      row.repository,
-      deps.timeouts ?? DEFAULT_TIMEOUTS,
-      saved.runLimitMs,
-    )
+    const timeouts = resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, saved.runLimitMs)
     const run = await Run.open({
       deps: { ...deps, timeouts },
       taskId,

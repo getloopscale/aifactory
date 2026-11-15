@@ -22,7 +22,7 @@ export type RepoConfig = {
   harness?: string
   reviewer?: string
   releaseMode?: ReleaseMode
-  /** How long a run may last, in ms; absent means derived from the repository's recent checks. */
+  /** How long a run may last, in ms; absent means the factory's default. */
   runLimitMs?: number
 }
 

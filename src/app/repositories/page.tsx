@@ -125,7 +125,7 @@ function Settings({
           aria-label="Minutes a run may last"
           type="number"
           value={runLimit}
-          placeholder="Empty: the factory sets it from how long your checks took lately"
+          placeholder="Empty: the factory's default (90 minutes)"
           onChange={(e) => setRunLimit(e.target.value)}
           className="mt-1 w-full"
         />

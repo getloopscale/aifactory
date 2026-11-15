@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../factory/run-limit'
+
 const check = z.object({ name: z.string().max(40), command: z.string().max(600) })
 
 /** A list of checks as a request may carry it; `patchProblem` says which ones can be saved. */
@@ -16,5 +18,5 @@ export const repositoryPatchSchema = z.object({
   harness: z.string().max(40).nullable().optional(),
   reviewer: z.string().max(40).nullable().optional(),
   releaseMode: z.enum(['manual', 'trial', 'auto']).nullable().optional(),
-  runLimitMinutes: z.number().int().nullable().optional(),
+  runLimitMinutes: z.number().int().min(MIN_RUN_MINUTES).max(MAX_RUN_MINUTES).nullable().optional(),
 })

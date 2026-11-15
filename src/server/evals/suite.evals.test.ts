@@ -20,7 +20,7 @@ import { integrationBranch } from '../factory/branches'
 import { factoryDeps, githubAppFromEnv } from '../factory/deps'
 import { optionsFor } from '../factory/engine-models'
 import { DEFAULT_TIMEOUTS } from '../factory/run'
-import { limitsFor } from '../factory/run-limit'
+import { resolveTimeouts } from '../factory/run-limit'
 import { labelsWithRepoChoice, loadRepoConfig } from '../factory/repo-config'
 import { effectiveEnv } from '../factory/settings'
 import { fetchIssue } from '../github/issues'
@@ -63,8 +63,8 @@ async function evalDeps(repository: string, issueLabels: string[]) {
     reviewer: chosen ?? builder,
     author: deps.author,
     knowledge,
-    // The time a task of this repository gets: the owner's limit, else what its recent checks need.
-    timeouts: await limitsFor(getDb(), repository, DEFAULT_TIMEOUTS, config.runLimitMs),
+    // The time a task of this repository gets: the owner's limit, else the default.
+    timeouts: resolveTimeouts(DEFAULT_TIMEOUTS, config.runLimitMs),
   }
 }
 

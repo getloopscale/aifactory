@@ -65,7 +65,7 @@ export type RepositoryPatch = {
   harness?: string | null
   reviewer?: string | null
   releaseMode?: 'manual' | 'trial' | 'auto' | null
-  /** How long a run may last, in minutes; `null` clears it, so the factory derives it from recent checks. */
+  /** How long a run may last, in minutes; `null` clears it, so the factory's default applies. */
   runLimitMinutes?: number | null
 }
 

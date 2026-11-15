@@ -145,17 +145,6 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 /** The stages that end a run; a task goes through them again when a person sends it back. */
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
-/** The run's time is gone. With work on the branch, the run ends as a draft pull request, not as a failure. */
-export class TimeExhausted extends StageFailure {
-  constructor(
-    message: string,
-    /** The commit that kept what the interrupted agent had done, when it could be pushed. */
-    readonly pushed?: string,
-  ) {
-    super(message)
-  }
-}
-
 export const DEFAULT_TIMEOUTS: Timeouts = { sandboxMs: 90 * 60_000, agentMs: 45 * 60_000 }
 
 /** The longest the planning turn may take: it reads and writes a plan, it does not build or test. */
@@ -254,7 +243,7 @@ export class Run {
           : { maxSessionMs: cap, renewable: !!this.sandbox.snapshot && !!deps.sandbox.restore },
       )
     } catch (error) {
-      if (error instanceof NoTimeForAgent) throw new TimeExhausted(error.message)
+      if (error instanceof NoTimeForAgent) throw new StageFailure(error.message)
       throw error
     }
   }
@@ -709,19 +698,6 @@ export class Run {
     return this.remoteHead
   }
 
-  /** Pushes what a rework cut for time left in the checkout, unreviewed; nothing when there is none. */
-  private async pushInterrupted(attempt: number): Promise<string | undefined> {
-    try {
-      return await this.commitAndPush(`${this.title}: unfinished rework (attempt ${attempt})`, {
-        attempt,
-        rework: true,
-        interrupted: true,
-      })
-    } catch {
-      return undefined
-    }
-  }
-
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */
   private async firstPass(): Promise<HarnessResult> {
     const { deps, taskId, resuming } = this.c
@@ -1122,7 +1098,6 @@ export class Run {
       attempt,
       rework: true,
     })
-    const began = Date.now()
     const result = await this.settle(this.builder, 'builder', attempt, (onEvent) =>
       this.builder.resume!(this.backend, this.sessionId!, {
         onEvent,
@@ -1131,13 +1106,7 @@ export class Run {
         prompt: reworkPrompt({ findings, failedChecks: failed, checks: this.checks }),
       }),
     )
-    if (!result.ok) {
-      const message = `the agent did not finish the rework: ${result.summary}`
-      if (Date.now() - began < timeoutMs) throw new StageFailure(message)
-      // A pass that used all its time was cut: what it had done is pushed too, so the draft holds it.
-      this.sessionId = result.sessionId ?? this.sessionId
-      throw new TimeExhausted(message, await this.pushInterrupted(attempt))
-    }
+    if (!result.ok) throw new StageFailure(`the agent did not finish the rework: ${result.summary}`)
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(result.summary)
     if (asked) await this.ask(asked, attempt)
@@ -1410,7 +1379,7 @@ export class Run {
         costUsd: this.cost,
         attempts: attempt,
         ...describeIntegration(integrated),
-        ...(handed ? describeDelivery(handed) : {}),
+        ...describeDelivery(handed),
       },
       { pullRequestUrl: pull.url },
     )
@@ -1468,15 +1437,12 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
     counts: number[] = [],
-    /** Set when the run ran out of time: the draft is for a person to send back, and nothing is released. */
-    outOfTime?: string,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
     const reason =
-      outOfTime ??
-      (outcome.verdict === 'invalid'
+      outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`
     state.current = 'pr'
     const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,
@@ -1505,8 +1471,7 @@ export class Run {
         outcome.findings.length > 0 ? renderFindings(outcome.findings) : outcome.summary,
       ].join('\n'),
     )
-    // Work that was never approved, or never reviewed, gets no pre-release.
-    const handed = outOfTime === undefined ? await this.deliver(sha, pull.url, attempt) : undefined
+    const handed = await this.deliver(sha, pull.url, attempt)
     await enterStage(
       deps.db,
       taskId,
@@ -1519,10 +1484,9 @@ export class Run {
         findings: outcome.findings,
         costUsd: this.cost,
         attempts: attempt,
-        ...(handed ? describeDelivery(handed) : {}),
+        ...describeDelivery(handed),
       },
-      // An interrupted rework pushed a commit nothing verified: the task points at it, so a send-back finds it.
-      { pullRequestUrl: pull.url, ...(outOfTime === undefined ? {} : { headSha: sha }) },
+      { pullRequestUrl: pull.url },
     )
     return {
       status: 'handoff',
@@ -1530,7 +1494,7 @@ export class Run {
       sha,
       pullRequestUrl: pull.url,
       reason,
-      preRelease: handed && 'tag' in handed ? handed.tag : undefined,
+      preRelease: 'tag' in handed ? handed.tag : undefined,
     }
   }
 
@@ -1573,62 +1537,13 @@ export class Run {
    * and running out of attempts after green checks hands the work to a person.
    */
   async loop(pushed: string): Promise<RunResult> {
-    const progress = {
-      sha: pushed,
-      attempt: this.c.resuming?.attempt ?? 1,
-      here: [] as StoredCheck[],
-    }
-    try {
-      return await this.rounds(progress)
-    } catch (error) {
-      const ended = this.endedForTime(error)
-      if (!ended) throw error
-      // The work is on the branch: a draft pull request keeps it, and a person can send it back with a note.
-      const outcome: ReviewVerdict = {
-        verdict: 'changes',
-        summary: 'The run ended for time before this commit was reviewed.',
-        findings: [],
-      }
-      const reason = `the run ran out of time: ${ended.message}`
-      const sha = ended.pushed ?? progress.sha
-      // Checks ran on the commit before the interrupted work, so they are not shown for this one.
-      const here = ended.pushed ? [] : progress.here
-      return this.handOver(sha, progress.attempt, here, outcome, [], reason)
-    }
-  }
-
-  /**
-   * Whether the run ended because its time was gone: the planner said so, or the sandbox reached its limit
-   * while the checks or the review ran and its backend threw. A question or a quota stop is not time.
-   */
-  private endedForTime(error: unknown): TimeExhausted | undefined {
-    if (error instanceof TimeExhausted) return error
-    if (error instanceof Asked || error instanceof QuotaStop) return undefined
-    const now = Date.now()
-    const { deps } = this.c
-    const cap = deps.sandbox.maxSessionMs
-    const runOver = now - this.startedAt >= (deps.timeouts ?? DEFAULT_TIMEOUTS).sandboxMs
-    // A session that ends with no way to renew it takes the sandbox with it; a renewable one is not the run's end.
-    const sessionOver =
-      cap !== undefined &&
-      !(this.sandbox.snapshot && deps.sandbox.restore) &&
-      now - this.sessionStartedAt >= cap
-    if (!runOver && !sessionOver) return undefined
-    const said = error instanceof Error ? error.message : String(error)
-    return new TimeExhausted(`the sandbox reached its limit: ${said}`)
-  }
-
-  private async rounds(progress: { sha: string; attempt: number; here: StoredCheck[] }) {
-    let sha = progress.sha
+    let sha = pushed
     const counts = await this.priorCounts()
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
-      progress.attempt = attempt
-      progress.sha = sha
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
       const checked = await this.verify(sha, attempt)
 
-      progress.here = checked.here
       if (!checked.verdict.open) {
         if (!canRework) {
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''

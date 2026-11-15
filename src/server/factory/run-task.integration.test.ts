@@ -48,7 +48,6 @@ import { mergeEgress, resumeTask, runTask, type RunTaskDeps } from './run-task'
 import { runContinuation } from './run-support'
 import { requestChanges } from '../panel/actions'
 import { release } from './deliver'
-import { outcome } from './transitions'
 import { pollAnswers } from './waiting'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
@@ -1692,38 +1691,6 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(commands.some((c) => c.includes('fetch origin factory/7'))).toBe(true)
     expect(commands.some((c) => c.includes('checkout -B factory/7 FETCH_HEAD'))).toBe(true)
     expect(commands.some((c) => c.includes('checkout -b factory/7'))).toBe(false)
-  })
-
-  it('sends back a task that ended for time: the new run resumes the draft branch with the note', async () => {
-    const id = await seedTask()
-    const start = Date.now()
-    const first = resumableBuilder()
-    const run = first.run
-    first.run = async (backend, input) => {
-      vi.spyOn(Date, 'now').mockReturnValue(start + 31.5 * 60_000)
-      return run(backend, input)
-    }
-    const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
-    const ended = await runTask(
-      deps(new FakeSandbox(changed()), {
-        harness: first,
-        reviewer,
-        timeouts: { sandboxMs: 60 * 60_000, agentMs: 45 * 60_000 },
-      }),
-      id,
-    )
-    vi.restoreAllMocks()
-    expect(ended).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
-    branchPushed()
-    const again = noting()
-
-    const { result, commands } = await sendBackAndRun(id, 'Finish the rework.', {
-      harness: again.builder,
-    })
-
-    expect(result).toMatchObject({ status: 'done', branch: 'factory/7' })
-    expect(again.prompts[0]).toContain('Finish the rework.')
-    expect(commands.some((c) => c.includes('checkout -B factory/7 FETCH_HEAD'))).toBe(true)
   })
 
   /** A builder that changes a file and keeps the prompts it was given. */
@@ -3982,136 +3949,6 @@ describe("a project's recipe", () => {
 })
 
 describe('runTask agent time', () => {
-  const MIN = 60_000
-  const timeouts = { sandboxMs: 60 * MIN, agentMs: 45 * MIN }
-
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('cuts the first build so the checks and the review still fit in the sandbox', async () => {
-    const id = await seedTask()
-    const given: number[] = []
-    const builder: CodingHarness = {
-      ...okHarness,
-      run: async (_backend, input) => {
-        given.push(input.timeoutMs ?? 0)
-        return { ok: true, summary: 'added truncate', costUsd: 0.12 }
-      },
-    }
-
-    await runTask(deps(new FakeSandbox(changed()), { harness: builder, timeouts }), id)
-
-    // 60 minutes of sandbox, 25 kept for the checks and the review: at most 35 for the agent, not 45.
-    expect(given).toHaveLength(1)
-    expect(given[0]).toBeLessThanOrEqual(35 * MIN)
-    expect(given[0]).toBeGreaterThan(34 * MIN)
-  })
-
-  it('hands over a draft pull request when a rework has no time left, instead of starting it', async () => {
-    const id = await seedTask()
-    const start = Date.now()
-    const builder = resumableBuilder()
-    const first = builder.run
-    builder.run = async (backend, input) => {
-      // The first build took 38 of the sandbox's 60 minutes.
-      vi.spyOn(Date, 'now').mockReturnValue(start + 31.5 * MIN)
-      return first(backend, input)
-    }
-    const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
-
-    const result = await runTask(
-      deps(new FakeSandbox(changed()), { harness: builder, reviewer, timeouts }),
-      id,
-    )
-
-    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
-    expect(result.status === 'handoff' && result.reason).toMatch(
-      /no time left for another agent pass: 31 of the sandbox's 60 minutes/,
-    )
-    expect(builder.resumed).toHaveLength(0)
-    // The work is kept as a draft, and the task is in the stage a person sends back from.
-    expect(seen.drafts).toEqual([true])
-    expect(seen.comments[0]).toContain('draft pull request')
-    const [row] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(row).toMatchObject({ stage: 'handoff', pullRequestUrl: PR_URL })
-    // Work nobody approved is not released, and the task can be sent back with a note.
-    expect(seen.releases).toEqual([])
-    expect(await deliveries(id)).toEqual([])
-    expect(
-      outcome({ stage: 'handoff', headSha: row.headSha, draft: true }, 'request_changes').kind,
-    ).toBe('action')
-  })
-
-  it('hands over a draft when the rework itself is cut at its time limit', async () => {
-    const id = await seedTask()
-    const start = Date.now()
-    const builder = resumableBuilder()
-    const sandbox = new FakeSandbox(changed())
-    builder.resume = async (_backend, _session, input) => {
-      dirty = true // the interrupted agent had edited the checkout
-      vi.spyOn(Date, 'now').mockReturnValue(start + 40 * MIN + (input.timeoutMs ?? 0))
-      return { ok: false, summary: 'cut by the time limit' }
-    }
-    const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
-
-    const result = await runTask(deps(sandbox, { harness: builder, reviewer, timeouts }), id)
-
-    // What the cut agent had done is committed and pushed, and the draft is opened on that commit.
-    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL, sha: 'abc123def2' })
-    expect(pushesOf(sandbox)).toHaveLength(2)
-    const [stored] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(stored).toMatchObject({ stage: 'handoff', headSha: 'abc123def2' })
-    expect(sandbox.backend.files.get('/tmp/factory-commit-message.txt')).toContain(
-      'unfinished rework',
-    )
-    expect(seen.drafts).toEqual([true])
-    expect(seen.releases).toEqual([])
-  })
-
-  it("does not take a renewable session's hour for the end of a longer run", async () => {
-    const id = await seedTask()
-    const start = Date.now()
-    const sandbox = new FakeSandbox(changed())
-    Object.assign(sandbox, { maxSessionMs: 60 * MIN })
-    const reviewer: CodingHarness = {
-      name: 'fake-reviewer',
-      egress: agentEgress,
-      run: async () => {
-        vi.spyOn(Date, 'now').mockReturnValue(start + 61 * MIN)
-        throw new Error('the review broke')
-      },
-    }
-
-    const result = await runTask(
-      deps(sandbox, { reviewer, timeouts: { sandboxMs: 150 * MIN, agentMs: 45 * MIN } }),
-      id,
-    )
-
-    expect(result).toMatchObject({ status: 'failed' })
-    expect(seen.drafts).toEqual([])
-  })
-
-  it('hands over a draft when the sandbox reaches its limit during the review', async () => {
-    const id = await seedTask()
-    const start = Date.now()
-    const reviewer: CodingHarness = {
-      name: 'fake-reviewer',
-      egress: agentEgress,
-      run: async () => {
-        vi.spyOn(Date, 'now').mockReturnValue(start + 61 * MIN)
-        throw new Error('the sandbox is gone')
-      },
-    }
-
-    const result = await runTask(deps(new FakeSandbox(changed()), { reviewer, timeouts }), id)
-
-    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
-    expect(result.status === 'handoff' && result.reason).toContain('the sandbox reached its limit')
-    expect(seen.drafts).toEqual([true])
-    expect(seen.releases).toEqual([])
-  })
-
   it('plans the sandbox and the agent passes against the limit saved for the repository', async () => {
     await getDb()
       .insert(repository)
@@ -4138,33 +3975,69 @@ describe('runTask agent time', () => {
     expect(given[0]).toBeGreaterThan(124 * MIN)
   })
 
-  it('gives a repository whose rounds of checks took 12 minutes a limit that fits three rounds', async () => {
-    const earlier = await seedTask(8)
-    await getDb()
-      .insert(evidence)
-      .values(
-        [
-          ['install', 4],
-          ['tests', 8],
-        ].map(([name, minutes]) => ({
-          taskId: earlier,
-          name: String(name),
-          command: 'x',
-          sha: 'a'.repeat(40),
-          exitCode: 0,
-          timedOut: false,
-          passed: true,
-          output: '',
-          durationMs: Number(minutes) * MIN,
-        })),
-      )
+  it('uses the default limit for a repository with nothing saved', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())
 
-    await runTask(deps(sandbox, {}), id)
+    await runTask(deps(sandbox, { timeouts: { sandboxMs: 60 * MIN, agentMs: 45 * MIN } }), id)
 
-    // A plan, then three rounds of a build, 12 minutes of checks and a review.
-    expect(sandbox.specs[0]!.timeoutMs).toBe((15 + 3 * (15 + 12 + 10)) * MIN)
+    expect(sandbox.specs[0]!.timeoutMs).toBe(60 * MIN)
+  })
+
+  const MIN = 60_000
+  const timeouts = { sandboxMs: 60 * MIN, agentMs: 45 * MIN }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('cuts the first build so the checks and the review still fit in the sandbox', async () => {
+    const id = await seedTask()
+    const given: number[] = []
+    const builder: CodingHarness = {
+      ...okHarness,
+      run: async (_backend, input) => {
+        given.push(input.timeoutMs ?? 0)
+        return { ok: true, summary: 'added truncate', costUsd: 0.12 }
+      },
+    }
+
+    await runTask(deps(new FakeSandbox(changed()), { harness: builder, timeouts }), id)
+
+    // 60 minutes of sandbox, 25 kept for the checks and the review: at most 35 for the agent, not 45.
+    expect(given).toHaveLength(1)
+    expect(given[0]).toBeLessThanOrEqual(35 * MIN)
+    expect(given[0]).toBeGreaterThan(34 * MIN)
+  })
+
+  it('fails a rework that has no time left with a message saying so, instead of starting it', async () => {
+    const id = await seedTask()
+    const start = Date.now()
+    const builder = resumableBuilder()
+    const first = builder.run
+    builder.run = async (backend, input) => {
+      // The first build took 38 of the sandbox's 60 minutes.
+      vi.spyOn(Date, 'now').mockReturnValue(start + 31.5 * MIN)
+      return first(backend, input)
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding], 'max=0 slips through'))
+
+    const result = await runTask(
+      deps(new FakeSandbox(changed()), { harness: builder, reviewer, timeouts }),
+      id,
+    )
+
+    expect(result).toMatchObject({ status: 'failed' })
+    expect(builder.resumed).toHaveLength(0)
+    const [failed] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect((failed.detail as { error: string }).error).toMatch(
+      /no time left for another agent pass: 31 of the sandbox's 60 minutes/,
+    )
   })
 
   it('refuses as before when the provider has a session cap but cannot save a sandbox', async () => {
