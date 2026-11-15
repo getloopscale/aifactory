@@ -31,6 +31,7 @@ const withoutDatabase = ({ DATABASE_URL: _unused, ...env }) => env
 function deploy({
   busy = '0',
   enabledWorkers = [],
+  tunnelEnabled = false,
   checkFails = false,
   migrateFails = false,
   envFile,
@@ -88,7 +89,11 @@ function deploy({
   // copy the installed unit file as it is at that moment. A unit not seeded there is disabled.
   const state = join(root, 'state')
   mkdirSync(join(state, 'enabled'), { recursive: true })
-  for (const unit of ['aifactory.service', ...enabledWorkers]) {
+  for (const unit of [
+    'aifactory.service',
+    ...enabledWorkers,
+    ...(tunnelEnabled ? ['aifactory-tunnel.service'] : []),
+  ]) {
     writeFileSync(join(state, 'enabled', unit), '')
   }
   const installed = join(home, '.config', 'systemd', 'user', 'aifactory.service')
@@ -97,6 +102,7 @@ function deploy({
     `case "$*" in
 *list-dependencies*) ls ${state}/enabled ;;
 *daemon-reload*) cat ${installed} > ${state}/at-reload 2>/dev/null ;;
+*is-enabled*) for u in "$@"; do :; done; [ -e ${state}/enabled/$u ] ;;
 *" enable "*) for u in "$@"; do case "$u" in *.service|*.timer) touch ${state}/enabled/$u ;; esac; done ;;
 *" disable "*) for u in "$@"; do rm -f ${state}/enabled/$u; done ;;
 *" restart "*) [ -e ${state}/at-restart ] || cat ${installed} > ${state}/at-restart 2>/dev/null ;;
@@ -252,6 +258,22 @@ describe('the deploy script', () => {
     expect(output).toMatch(/cloudflared is not on PATH.*aifactory-tunnel.service was not written/)
     expect(atRestart).toBe(`ExecStart=${join(root, 'run')}\n`)
     expect(systemctl).toContain('systemctl --user restart aifactory.service')
+  })
+
+  it('stops before it writes, builds or restarts when no cloudflared runs and the tunnel is enabled', () => {
+    const installed = 'ExecStart=/gone/cloudflared run\n'
+    const { code, output, tunnel, pnpm, systemctl, atRestart } = deploy({
+      cloudflared: false,
+      tunnelEnabled: true,
+      installedTunnel: installed,
+    })
+
+    expect(code).not.toBe(0)
+    expect(output).toMatch(/cloudflared/)
+    expect(tunnel).toBe(installed)
+    expect(pnpm).toEqual([])
+    expect(systemctl.filter((l) => /daemon-reload|restart/.test(l))).toEqual([])
+    expect(atRestart).toBeUndefined()
   })
 
   it('deploys without a tunnel unit when none is installed and no cloudflared runs', () => {

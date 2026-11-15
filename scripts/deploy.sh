@@ -26,6 +26,9 @@ if [ -f .env.local ]; then
 fi
 export DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/factory}"
 
+# A tunnel unit that is enabled and cannot be rendered (no cloudflared) stops the deploy before anything changes.
+scripts/write-units.sh --check || exit 1
+
 # The check reads tables the release may have changed, so the migrations come first. A failure stops the
 # deploy before anything is built or restarted.
 if ! pnpm db:migrate; then
