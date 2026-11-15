@@ -17,6 +17,13 @@ else
   echo "could not ask the database whether tasks are working; going on" >&2
 fi
 
+# The check reads the repository table, and a release that added a column to it is not applied until the
+# server starts. Apply the migrations first, so the check never reads a schema older than the code.
+if ! DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/factory}" pnpm db:migrate; then
+  echo "the migrations failed (see above); nothing was built or restarted" >&2
+  exit 1
+fi
+
 # When a prompt, an agent or a model changed since evals/baseline.json, the quick cases run again on real
 # agents and must do no worse than the baseline (docs/adr/0008). Nothing changed, nothing runs. It reads the
 # factory's database, which .env.local does not name: the default is the one scripts/run-server.sh uses.

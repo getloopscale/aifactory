@@ -120,14 +120,15 @@ describe('the deploy script', () => {
     const { code, pnpm } = deploy()
 
     expect(code).toBe(0)
-    expect(pnpm).toEqual(['pnpm evals:check', 'pnpm build'])
+    // The migrations come first: the check reads columns a release may have just added.
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build'])
   })
 
   it('builds and restarts nothing when the agents do worse than the baseline', () => {
     const { code, pnpm, systemctl, output } = deploy({ checkFails: true })
 
     expect(code).not.toBe(0)
-    expect(pnpm).toEqual(['pnpm evals:check'])
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check'])
     expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
     expect(output).toMatch(/the agents did worse than the baseline/)
   })
