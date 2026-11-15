@@ -30,7 +30,7 @@ export type ActionDeps = {
     work: (
       tx: Database,
       enqueueRun: (
-        input: { taskId: number; decisionId?: number; feedback?: string; resume?: boolean },
+        input: { taskId: number; decisionId?: number; feedback?: string },
         key: string,
       ) => Promise<void>,
     ) => Promise<T>,
@@ -69,7 +69,7 @@ async function requeue(
       // Nobody decided this one, so no decision is recorded in anybody's name: the intake says it was the
       // factory's own, and the count of these is what stops it after a few. Changes carry their note to
       // the run as feedback, on the branch the agent already pushed.
-      const changes = kind === 'automatic_changes' || (rework !== undefined && !rework.plain)
+      const changes = kind === 'automatic_changes' || rework !== undefined
       const [event] = await tx
         .insert(stageEvent)
         .values({
@@ -84,13 +84,11 @@ async function requeue(
           },
         })
         .returning({ id: stageEvent.id })
-      const input = rework?.plain
-        ? { taskId, resume: true }
-        : !changes
-          ? { taskId }
-          : rework?.decisionId
-            ? { taskId, decisionId: rework.decisionId }
-            : { taskId, feedback: note }
+      const input = !changes
+        ? { taskId }
+        : rework?.decisionId
+          ? { taskId, decisionId: rework.decisionId }
+          : { taskId, feedback: note }
       await enqueueRun(input, `task-${taskId}-auto${event.id}`)
       return null
     }
@@ -113,17 +111,16 @@ async function requeue(
 }
 
 /** Work a failed run left on its branch: what to change, and the decision it came from when a person asked. */
-type Rework = { note: string; decisionId?: number; plain?: boolean }
+type Rework = { note: string; decisionId?: number }
 
 /**
  * The work an automatic retry must keep. A run that was a rework (the latest intake was a request for
  * changes) keeps its note and, for a person's request, its decision, so the prompt is the one the person
- * caused. A run that pushed a branch keeps it too, even a first run, as a plain continuation: nothing was asked for, so no feedback is made up.
+ * caused. Any other run never had work sent back, so it starts over.
  */
 async function workToKeep(
   deps: ActionDeps,
   row: typeof task.$inferSelect,
-  token: string,
 ): Promise<Rework | undefined> {
   const events = await deps.db
     .select({ stage: stageEvent.stage, detail: stageEvent.detail })
@@ -146,8 +143,7 @@ async function workToKeep(
     }
     return { note: detail.note, decisionId }
   }
-  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
-  return head ? { note: '', plain: true } : undefined
+  return undefined
 }
 
 async function load(db: Database, taskId: number) {
@@ -273,7 +269,7 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   mustAllow(row, row.stage === 'failed' ? 'retry_due' : 'conflict_rerun')
   // A rework, or a run that pushed, repeats on its branch with its note; only a run that never pushed starts over.
   const { token } = await deps.github.installationToken(row.repository)
-  const rework = row.stage === 'failed' ? await workToKeep(deps, row, token) : undefined
+  const rework = row.stage === 'failed' ? await workToKeep(deps, row) : undefined
   if (!rework) {
     await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
   }

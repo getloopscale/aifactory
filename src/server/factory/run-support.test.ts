@@ -97,11 +97,6 @@ describe('runContinuation', () => {
     })
   })
 
-  it('only continues the branch when the job says so and nobody asked for anything', () => {
-    expect(runContinuation(undefined, undefined, true)).toEqual({ feedback: '', plain: true })
-    expect(runContinuation(undefined, 'CI failed', true)).toMatchObject({ fromChecks: true })
-  })
-
   it('starts from the beginning for any other decision, or none', () => {
     expect(runContinuation({ kind: 'retry', note: '' }, undefined)).toBeUndefined()
     expect(runContinuation(undefined, undefined)).toBeUndefined()

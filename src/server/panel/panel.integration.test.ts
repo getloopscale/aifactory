@@ -776,15 +776,11 @@ describe('actions', () => {
       return { id, decisionId: asked.id }
     }
     /** What the job that was queued would run with, as the job reads it. */
-    async function continuationOf(input: {
-      decisionId?: number
-      feedback?: string
-      resume?: boolean
-    }) {
+    async function continuationOf(input: { decisionId?: number; feedback?: string }) {
       const [decided] = input.decisionId
         ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
         : []
-      return runContinuation(decided, input.feedback, input.resume)
+      return runContinuation(decided, input.feedback)
     }
     const failAgain = async (id: number) => {
       await getDb()
@@ -850,21 +846,6 @@ describe('actions', () => {
       expect(runs).toBeGreaterThan(0)
       expect(runs).toBeLessThan(10)
       expect(deleted()).toEqual(Array(runs).fill('factory/97'))
-    })
-
-    it('keeps the branch of a first run that pushed before the environment failed', async () => {
-      const id = await seed('failed', { issueNumber: 95 }, [
-        { stage: 'intake', detail: { decision: 'retry', note: '' } },
-        { stage: 'push' },
-        { stage: 'failed', detail: outage },
-      ])
-      api.repo('paulo/app').heads.set('factory/95', 'pushed')
-      await runDueRetries(deps(), later())
-      expect(deleted()).toEqual([])
-      // Nobody asked for anything, so no feedback is made up: the job only continues the branch.
-      expect(queued.map((q) => q.input)).toEqual([{ taskId: id, resume: true }])
-      expect(await continuationOf(queued[0].input)).toEqual({ feedback: '', plain: true })
-      expect(api.repo('paulo/app').heads.get('factory/95')).toBe('pushed')
     })
 
     it('does not count three sandbox failures of a rework as attempts', async () => {
