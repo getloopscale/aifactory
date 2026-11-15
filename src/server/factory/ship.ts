@@ -31,6 +31,9 @@ export type Shipment = {
   missing?: string[]
 }
 
+/** A task a partial publication holds: its issue, and the missing packages that carry its change. */
+export type HeldTask = { taskId: number; issue: number; packages: string[] }
+
 export type Shipped = {
   released: number[]
   /** Tasks resolved with no change whose resolving commit the promotion carries, now released too. */
@@ -38,13 +41,13 @@ export type Shipped = {
   /** Issues that could not be commented on or closed, as `#<number>: <why>`. The release stands. */
   issueErrors: string[]
   /** Tasks left unreleased because the package that carries their change has no release, as `#<issue>: <packages>`. */
-  held: string[]
+  held: HeldTask[]
 }
 
 /** What a publication's detail adds when issues of the release could not be closed. */
 export const unclosedNote = (shipped: Shipped) =>
   (shipped.held.length
-    ? `; issues left open, their package has no release: ${shipped.held.join('; ')}`
+    ? `; issues left open, their package has no release: ${shipped.held.map((h) => `#${h.issue}: ${h.packages.join(', ')}`).join('; ')}`
     : '') +
   (shipped.issueErrors.length ? `; issues not closed: ${shipped.issueErrors.join('; ')}` : '')
 
@@ -66,9 +69,8 @@ async function carriedPackages(
   api: GithubApi,
   s: Shipment,
   t: typeof task.$inferSelect,
-  owed: string[],
 ): Promise<Carried | undefined> {
-  if (owed.length === 0) return undefined
+  if (!s.missing?.length) return undefined
   try {
     return {
       names: await packagesOfCommit(api, s.repository, s.token, t.mergedSha!, s.promotedSha),
@@ -83,7 +85,7 @@ async function carriedPackages(
  * closing an issue as available is what this guards against.
  */
 function heldFor(carried: Carried | undefined, owed: string[]): string[] {
-  if (!carried || owed.length === 0) return []
+  if (!carried) return []
   const missing = owed.map(packageOfTag)
   if ('unread' in carried) {
     return [`${missing.join(', ')} (its commit could not be read: ${carried.unread})`]
@@ -91,16 +93,13 @@ function heldFor(carried: Carried | undefined, owed: string[]): string[] {
   return carried.names.filter((name) => missing.includes(name))
 }
 
-/**
- * The releases still owed in a repository: the ones this shipment lacks and those of an earlier publication
- * that ended partly published, so a later release does not close their issues.
- */
-async function owedReleases(db: Database, s: Shipment): Promise<string[]> {
+/** The tasks the earlier partial publications of a repository hold: their issues stay open for good. */
+async function heldEarlier(db: Database, repository: string): Promise<Set<number>> {
   const earlier = await db
     .select({ missing: publication.missing })
     .from(publication)
-    .where(and(eq(publication.repository, s.repository), eq(publication.status, 'partial')))
-  return [...new Set([...(s.missing ?? []), ...earlier.flatMap((p) => p.missing ?? [])])]
+    .where(and(eq(publication.repository, repository), eq(publication.status, 'partial')))
+  return new Set(earlier.flatMap((p) => (p.missing?.held ?? []).map((h) => h.taskId)))
 }
 
 /** Tells the issue why it stays open. A failure is returned, as in `announce`. */
@@ -180,14 +179,16 @@ export async function shipContained(
       ),
     )
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
-  const owed = await owedReleases(deps.db, s)
+  const owed = s.missing ?? []
+  const earlier = await heldEarlier(deps.db, s.repository)
   for (const t of candidates) {
+    if (earlier.has(t.id)) continue
     if (!(await belongs(deps, s, t))) continue
-    const carried = await carriedPackages(deps.api, s, t, owed)
+    const carried = await carriedPackages(deps.api, s, t)
     const held = heldFor(carried, owed)
     if (held.length > 0) {
       const error = await explainHold(deps.api, s, t.issueNumber, held, owed)
-      shipped.held.push(`#${t.issueNumber}: ${held.join(', ')}`)
+      shipped.held.push({ taskId: t.id, issue: t.issueNumber, packages: held })
       if (error) shipped.issueErrors.push(error)
       continue
     }

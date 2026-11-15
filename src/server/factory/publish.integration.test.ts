@@ -423,7 +423,12 @@ describe('publishing a changesets release', () => {
       expect(await stageOf(gateway)).toBe('done')
       expect(await row()).toMatchObject({
         status: 'partial',
-        missing: ['@theokit/gateway@0.16.1'],
+        missing: {
+          releases: ['@theokit/gateway@0.16.1'],
+          held: [
+            { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
+          ],
+        },
       })
       expect((await row()).detail).toMatch(/issues left open.*@theokit\/gateway/)
       expect(closed()).not.toContain(await issueOf(gateway))
@@ -437,13 +442,24 @@ describe('publishing a changesets release', () => {
       expect(held?.body).toContain('has no release')
     })
 
-    it('keeps the issue open when a later release carries a task of a package an earlier publication never published', async () => {
+    it('keeps open the held task of an earlier partial publication, whatever its package is called now, and holds no other', async () => {
       const asked = await waitingPublication()
       const gateway = await seedTask('done', 'gw-merge')
-      commitIn('gw-merge', 'gateway')
+      const fresh = await seedTask('done', 'fresh-merge')
+      // The package of the held task was renamed since: its commit no longer names the missing one.
+      commitIn('gw-merge', 'slack')
+      commitIn('fresh-merge', 'gateway')
       await getDb()
         .update(publication)
-        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'] })
+        .set({
+          status: 'partial',
+          missing: {
+            releases: ['@theokit/gateway@0.16.1'],
+            held: [
+              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
+            ],
+          },
+        })
         .where(eq(publication.taskId, asked))
 
       const shipped = await shipContained(
@@ -459,9 +475,10 @@ describe('publishing a changesets release', () => {
         },
       )
 
-      expect(shipped.held).toEqual([`#${await issueOf(gateway)}: @theokit/gateway`])
+      expect(shipped.held).toEqual([])
       expect(await stageOf(gateway)).toBe('done')
       expect(closed()).not.toContain(await issueOf(gateway))
+      expect(await stageOf(fresh)).toBe('released')
     })
 
     it('records why it cannot tell the releases apart when GitHub names no merge commit for the merged pull request', async () => {

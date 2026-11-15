@@ -185,7 +185,12 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     .update(publication)
     .set({
       status: missing ? 'partial' : 'published',
-      missing: missing ?? null,
+      missing: missing
+        ? {
+            releases: missing,
+            held: shipped.held,
+          }
+        : null,
       tags: tags.map((t) => t.tag),
       publishedAt: new Date(),
       detail: `${merged}published ${tags.map((t) => t.tag).join(', ')}${read.complete}${unclosed}`,

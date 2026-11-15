@@ -259,8 +259,15 @@ export const publication = pgTable('publication', {
   versionPullRequest: integer('version_pull_request'),
   /** The tags the repository's workflow published, once it did. */
   tags: jsonb('tags').$type<string[]>(),
-  /** The releases (`name@version`) the Version Packages merge called for that never appeared. */
-  missing: jsonb('missing').$type<string[]>(),
+  /**
+   * Set when `partial`: the releases (`name@version`) the Version Packages merge called for that never
+   * appeared, and the tasks held for them. The hold is by task, so a later release or a renamed package
+   * cannot free one.
+   */
+  missing: jsonb('missing').$type<{
+    releases: string[]
+    held: { taskId: number; issue: number; packages: string[] }[]
+  }>(),
   /** What the last look found: what it waits for, or why it cannot go on. */
   detail: text('detail'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),

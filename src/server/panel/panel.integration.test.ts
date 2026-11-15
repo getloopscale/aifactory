@@ -348,7 +348,7 @@ describe('inbox', () => {
   })
 
   describe('a publication that left a package unpublished', () => {
-    const partial = async (status: 'partial' | 'published') => {
+    const partial = async (status: 'partial' | 'published', held: number[] = []) => {
       const asked = await seed('released', {}, [{ stage: 'released' }])
       await getDb()
         .insert(publication)
@@ -359,7 +359,14 @@ describe('inbox', () => {
           promotedSha: 'p1',
           actor: 'human',
           status,
-          missing: ['@theokit/gateway-agent@0.1.0'],
+          missing: {
+            releases: ['@theokit/gateway-agent@0.1.0'],
+            held: held.map((taskId) => ({
+              taskId,
+              issue: 415,
+              packages: ['@theokit/gateway-agent'],
+            })),
+          },
         })
       return asked
     }
@@ -372,6 +379,18 @@ describe('inbox', () => {
       const item = items.find((i) => i.kind === 'publication_partial')
       expect(item?.task.id).toBe(asked)
       expect(item?.summary).toContain('@theokit/gateway-agent@0.1.0')
+    })
+
+    it('names the held task, which is not the task that asked for the publication', async () => {
+      const heldId = await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
+      const asked = await partial('partial', [heldId])
+
+      const items = (await inbox(getDb())).filter((i) => i.kind === 'publication_partial')
+
+      expect(items.map((i) => i.task.id)).toEqual([heldId])
+      expect(items[0].task.id).not.toBe(asked)
+      expect(items[0].summary).toContain('@theokit/gateway-agent@0.1.0')
+      expect(items[0].summary).toContain('#415')
     })
 
     it('stays while another task of the repository is done or released, and goes once published', async () => {

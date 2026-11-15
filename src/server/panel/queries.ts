@@ -378,15 +378,36 @@ async function partialPublications(db: Database): Promise<InboxItem[]> {
   const rows = await db.select().from(publication).where(eq(publication.status, 'partial'))
   const items: InboxItem[] = []
   for (const p of rows) {
-    const [owner] = await db.select().from(task).where(eq(task.id, p.taskId))
-    if (!owner) continue
-    const [card] = await cards(db, [owner])
-    items.push({
-      task: card,
-      kind: 'publication_partial',
-      summary: `Not published: ${(p.missing ?? []).join(', ')}. The issues of those packages stay open until someone publishes them.`,
-      at: iso(p.publishedAt ?? p.startedAt),
-    })
+    const { releases = [], held = [] } = p.missing ?? {}
+    const at = iso(p.publishedAt ?? p.startedAt)
+    const heldTasks = held.length
+      ? await db
+          .select()
+          .from(task)
+          .where(
+            inArray(
+              task.id,
+              held.map((h) => h.taskId),
+            ),
+          )
+      : []
+    // One item per held task, so the owner sees which issues stay open; the requesting task when none is held.
+    const subjects = heldTasks.length
+      ? heldTasks
+      : await db.select().from(task).where(eq(task.id, p.taskId))
+    for (const card of await cards(db, subjects)) {
+      const mine = held.find((h) => h.taskId === card.id)
+      items.push({
+        task: card,
+        kind: 'publication_partial',
+        summary: `Not published: ${releases.join(', ')}.${
+          mine
+            ? ` Issue #${mine.issue} stays open until ${mine.packages.join(', ')} is published.`
+            : ''
+        }`,
+        at,
+      })
+    }
   }
   return items
 }
