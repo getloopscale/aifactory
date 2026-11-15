@@ -52,6 +52,7 @@ async function requeue(
   note: string,
   sha: string | null,
   rework?: Rework,
+  keepBranch = false,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
@@ -107,7 +108,11 @@ async function requeue(
         ...(kind === 'request_changes' ? { decisionId: made.id } : {}),
       },
     })
-    await enqueueRun({ taskId, decisionId: made.id }, `task-${taskId}-d${made.id}`)
+    // The kept work of a pass cut at its limit is continued, not started again.
+    await enqueueRun(
+      { taskId, decisionId: made.id, ...(keepBranch ? { resume: true } : {}) },
+      `task-${taskId}-d${made.id}`,
+    )
     return made.id
   })
 }
@@ -161,6 +166,31 @@ async function workToKeep(
   }
   const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
   return head ? { note: '', plain: true, preAgent } : undefined
+}
+
+/**
+ * A run cut at its time limit pushed what the agent had written and failed naming that commit. That branch
+ * is the work, so a retry continues it instead of deleting it.
+ */
+async function keptTimedOutWork(
+  deps: ActionDeps,
+  row: typeof task.$inferSelect,
+  token: string,
+): Promise<boolean> {
+  if (row.stage !== 'failed') return false
+  const [failed, before] = await deps.db
+    .select({ stage: stageEvent.stage, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(eq(stageEvent.taskId, row.id))
+    .orderBy(desc(stageEvent.id))
+    .limit(2)
+  const pushed = (before?.detail ?? {}) as Record<string, unknown>
+  if (failed?.stage !== 'failed' || before?.stage !== 'push' || pushed.timedOut !== true) {
+    return false
+  }
+  return (
+    (await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)) !== undefined
+  )
 }
 
 async function load(db: Database, taskId: number) {
@@ -233,8 +263,9 @@ export async function retry(
     (stage) => stage !== 'done' || row.stage === 'done',
   )
   const { token } = await deps.github.installationToken(row.repository)
-  await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
-  const decisionId = await requeue(deps, taskId, allowed, 'retry', '', row.headSha)
+  const keep = await keptTimedOutWork(deps, row, token)
+  if (!keep) await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
+  const decisionId = await requeue(deps, taskId, allowed, 'retry', '', row.headSha, undefined, keep)
   return { decisionId }
 }
 

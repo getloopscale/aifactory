@@ -736,6 +736,46 @@ describe('actions', () => {
     expect((await getDb().select().from(decision)).map((d) => d.kind)).toEqual(['retry'])
   })
 
+  it('keeps the branch of a pass cut at its limit on retry, and the next run continues from it', async () => {
+    const id = await seed('failed', { issueNumber: 72 }, [
+      { stage: 'push', detail: { branch: 'factory/72', timedOut: true } },
+      {
+        stage: 'failed',
+        detail: { error: 'the agent did not finish\nthe work was kept in commit c1' },
+      },
+    ])
+    api.repo('paulo/app').heads.set('factory/72', 'c1')
+
+    await retry(deps(), id)
+
+    expect(deleted()).toEqual([])
+    expect(queued).toHaveLength(1)
+    const input = queued[0]!.input as { decisionId: number; resume?: boolean }
+    expect(input.resume).toBe(true)
+    const [made] = await getDb().select().from(decision)
+    expect(runContinuation(made, undefined, input.resume)).toEqual({ feedback: '', plain: true })
+  })
+
+  it('deletes the branch on retry when the failed pass was not cut at its limit, or the branch is gone', async () => {
+    const other = await seed('failed', { issueNumber: 73 }, [
+      { stage: 'push', detail: { branch: 'factory/73' } },
+      { stage: 'failed', detail: { error: 'push refused' } },
+    ])
+    api.repo('paulo/app').heads.set('factory/73', 'c1')
+    await retry(deps(), other)
+    const gone = await seed('failed', { issueNumber: 74 }, [
+      { stage: 'push', detail: { branch: 'factory/74', timedOut: true } },
+      { stage: 'failed', detail: { error: 'x' } },
+    ])
+    await retry(deps(), gone)
+
+    expect(deleted()).toEqual(['factory/73', 'factory/74'])
+    expect(queued.map((q) => (q.input as { resume?: boolean }).resume)).toEqual([
+      undefined,
+      undefined,
+    ])
+  })
+
   it('starts again every task that failed for a reason that passes, and no other', async () => {
     const quota = await seed('failed', { issueNumber: 51 }, [
       { stage: 'failed', detail: { quota: true } },
