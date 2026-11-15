@@ -7,7 +7,7 @@ import { integrationBranch } from '../factory/branches'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
-import { outcome, stagesWhere, type TransitionEvent } from '../factory/transitions'
+import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
 export class ActionRefused extends Error {
@@ -33,6 +33,8 @@ export type ActionDeps = {
         input: { taskId: number; decisionId?: number; feedback?: string; resume?: boolean },
         key: string,
       ) => Promise<void>,
+      /** Removes the run queued under `key` if no worker has taken it; answers whether it did. */
+      dequeueRun?: (key: string) => Promise<boolean>,
     ) => Promise<T>,
   ) => Promise<T>
 }
@@ -170,7 +172,7 @@ async function load(db: Database, taskId: number) {
 }
 
 /** Refuses, with the reason the transition table gives, an event the task's state does not allow. */
-function mustAllow(row: typeof task.$inferSelect, event: TransitionEvent) {
+function mustAllow(row: Facts, event: TransitionEvent) {
   const decided = outcome(row, event)
   if (decided.kind !== 'action') throw new ActionRefused(decided.reason)
 }
@@ -211,6 +213,55 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
     row.headSha,
   )
   return { decisionId }
+}
+
+/**
+ * Withdraws a send-back that has not started: the queued run goes, the task returns to the stage it was
+ * in before the person sent it back, and the decision is recorded as withdrawn. Only a person's own
+ * request for changes can be withdrawn, and only while its run waits in the queue.
+ */
+export async function withdrawSendBack(deps: ActionDeps, taskId: number) {
+  const row = await load(deps.db, taskId)
+  const [latest, before] = await deps.db
+    .select({ stage: stageEvent.stage, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(eq(stageEvent.taskId, taskId))
+    .orderBy(desc(stageEvent.id))
+    .limit(2)
+  const detail = (latest?.detail ?? {}) as Record<string, unknown>
+  const decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
+  const pending =
+    latest?.stage === 'intake' &&
+    detail.decision === 'request_changes' &&
+    detail.automatic !== true &&
+    decisionId !== undefined &&
+    before !== undefined
+  const facts: Facts = { ...row, sendBackPending: pending }
+  mustAllow(facts, 'withdraw_send_back')
+  const back = before!.stage
+  return deps.inTransaction(async (tx, _enqueueRun, dequeueRun) => {
+    const moved = await tx
+      .update(task)
+      .set({ stage: back })
+      .where(and(eq(task.id, taskId), eq(task.stage, 'intake')))
+      .returning({ id: task.id })
+    // A run a worker already took is not withdrawn: the transaction ends here and changes nothing.
+    if (moved.length === 0 || !dequeueRun || !(await dequeueRun(`task-${taskId}-d${decisionId}`))) {
+      throw new ActionRefused(
+        'the run of this send-back already started, so it cannot be withdrawn',
+      )
+    }
+    const [made] = await tx
+      .insert(decision)
+      .values({ taskId, kind: 'withdrawn', sha: row.headSha, note: '' })
+      .returning({ id: decision.id })
+    await tx.insert(stageEvent).values({
+      taskId,
+      stage: back,
+      detail: { decision: 'withdrawn', withdrawnDecisionId: decisionId },
+    })
+    return { decisionId: made.id, stage: back }
+  })
 }
 
 /**

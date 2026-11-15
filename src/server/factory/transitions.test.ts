@@ -44,6 +44,7 @@ describe('the transition table', () => {
     const events: Record<TransitionEvent, true> = {
       approve: true,
       request_changes: true,
+      withdraw_send_back: true,
       retry: true,
       retry_from_finding: true,
       resolve: true,
@@ -66,7 +67,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(21 * 14)
+    expect(pairs).toHaveLength(22 * 14)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -136,6 +137,18 @@ describe('what a person asks for in the panel', () => {
     })
     expect(elsewhere('request_changes')).toEqual([
       refused('only a task with a pull request can be sent back'),
+    ])
+  })
+
+  it('withdraws only a send-back that waits in intake', () => {
+    expect(acting('withdraw_send_back', { sendBackPending: true })).toEqual({
+      intake: 'withdraw_send_back',
+    })
+    expect(outcome({ stage: 'intake' }, 'withdraw_send_back')).toEqual(
+      expect.objectContaining({ kind: 'refused' }),
+    )
+    expect(elsewhere('withdraw_send_back', { sendBackPending: true })).toEqual([
+      refused('only a send-back that has not started can be withdrawn'),
     ])
   })
 

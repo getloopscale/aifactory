@@ -198,7 +198,15 @@ export const decision = pgTable('decision', {
     .notNull()
     .references(() => task.id),
   kind: text('kind', {
-    enum: ['approve', 'request_changes', 'retry', 'release', 'would_release', 'resolve'],
+    enum: [
+      'approve',
+      'request_changes',
+      'withdrawn',
+      'retry',
+      'release',
+      'would_release',
+      'resolve',
+    ],
   }).notNull(),
   /** The head commit when the person decided. */
   sha: text('sha'),

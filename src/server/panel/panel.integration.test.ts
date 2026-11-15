@@ -32,6 +32,7 @@ import {
   type FindingAction,
   releaseTask,
   requestChanges,
+  withdrawSendBack,
   resolveElsewhere,
   retry,
   retryAutomatically,
@@ -420,7 +421,15 @@ describe('actions', () => {
     deleteSnapshot: async (id) => void snapshotsDeleted.push(id),
     inTransaction: (work) =>
       getDb().transaction((tx) =>
-        work(tx as never, async (input, key) => void queued.push({ input, key })),
+        work(
+          tx as never,
+          async (input, key) => void queued.push({ input, key }),
+          async (key) => {
+            const at = queued.findIndex((job) => job.key === key)
+            if (at >= 0) queued.splice(at, 1)
+            return at >= 0
+          },
+        ),
       ),
   })
   beforeEach(() => {
@@ -623,6 +632,43 @@ describe('actions', () => {
     ])
     await expect(requestChanges(deps(), id, 'again')).rejects.toThrow(ActionRefused)
     expect(queued).toHaveLength(1)
+  })
+
+  it('withdraws a send-back that has not started, and then accepts another note', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'failed', detail: {} })
+    await requestChanges(deps(), id, 'wrong note')
+    expect(queued).toHaveLength(1)
+
+    const withdrawn = await withdrawSendBack(deps(), id)
+
+    expect(withdrawn.stage).toBe('failed')
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('failed')
+    expect(queued).toEqual([])
+    const kinds = (await getDb().select().from(decision)).map((d) => d.kind)
+    expect(kinds).toEqual(['request_changes', 'withdrawn'])
+
+    await requestChanges(deps(), id, 'regenerate the docs')
+    expect(queued).toHaveLength(1)
+  })
+
+  it('refuses to withdraw when nothing waits, when it was automatic, or when its run was taken', async () => {
+    const idle = await seed('done', { headSha: 'abc' })
+    await expect(withdrawSendBack(deps(), idle)).rejects.toThrow(ActionRefused)
+
+    const auto = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: auto, stage: 'done', detail: {} })
+    await sendBackAutomatically(deps(), auto, 'CI failed')
+    await expect(withdrawSendBack(deps(), auto)).rejects.toThrow(ActionRefused)
+
+    const taken = await seed('done', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: taken, stage: 'done', detail: {} })
+    await requestChanges(deps(), taken, 'note')
+    queued.length = 0
+    await expect(withdrawSendBack(deps(), taken)).rejects.toThrow(/already started/)
+    const [row] = await getDb().select().from(task).where(eq(task.id, taken))
+    expect(row.stage).toBe('intake')
   })
 
   it('no longer counts a task as resolved once a person sends it back', async () => {

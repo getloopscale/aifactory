@@ -45,18 +45,33 @@ export const inTransactionForPlan: WorkDeps['inTransaction'] = async (work) => {
   }
 }
 
+/** The table `jobBackend()` keeps its jobs in: it is given no other name. */
+const JOBS_TABLE = 'theokit_jobs'
+
 /** The same for the panel: a decision and the `run-task` it starts commit together. */
 export const inTransactionForRun: ActionDeps['inTransaction'] = async (work) => {
   const client = await getPool().connect()
   try {
     return await drizzle(client, { schema }).transaction((tx) =>
-      work(tx as never, async (input, key) => {
-        await jobBackend().enqueueInTransaction(client, {
-          name: 'run-task',
-          input,
-          idempotencyKey: key,
-        })
-      }),
+      work(
+        tx as never,
+        async (input, key) => {
+          await jobBackend().enqueueInTransaction(client, {
+            name: 'run-task',
+            input,
+            idempotencyKey: key,
+          })
+        },
+        async (key) => {
+          // Only a job no worker holds: a lease still running belongs to a run that has started.
+          const removed = await client.query(
+            `DELETE FROM ${JOBS_TABLE} WHERE name = 'run-task' AND idempotency_key = $1
+               AND (locked_until IS NULL OR locked_until < NOW()) RETURNING id`,
+            [key],
+          )
+          return (removed.rowCount ?? 0) > 0
+        },
+      ),
     )
   } finally {
     client.release()

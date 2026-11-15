@@ -325,7 +325,8 @@ export type QuestionView = {
 
 export type DecisionView = {
   id: number
-  kind: 'approve' | 'request_changes' | 'retry' | 'release' | 'would_release' | 'resolve'
+  kind:
+    'approve' | 'request_changes' | 'withdrawn' | 'retry' | 'release' | 'would_release' | 'resolve'
   sha: string | null
   note: string
   at: string
