@@ -28,12 +28,7 @@ export type ServerEvidence = { lines: string[]; step?: FailedStep } | { unreadab
  * is `notRequired` failed on the same commit and is named because a required check (an aggregate job) said
  * only that something it depends on failed.
  */
-export type FailedReport = CheckReport & {
-  evidence?: ServerEvidence
-  notRequired?: true
-  /** No check of the factory's has this name: only running the step's command in the sandbox reproduces it. */
-  alone?: true
-}
+export type FailedReport = CheckReport & { evidence?: ServerEvidence; notRequired?: true }
 
 /** What to do about a task whose pull request waits for the repository's required checks. */
 export type WaitingStep =
@@ -47,7 +42,7 @@ export type WaitingStep =
   | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
   /** The pull request conflicts with its base: the task starts again from the new base. */
   | { kind: 'start_over'; reason: string }
-  | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
+  | { kind: 'person'; reason: string; stopAutoMerge: boolean }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -98,9 +93,9 @@ function settled(input: WaitingIntegration): WaitingStep | undefined {
   return undefined
 }
 
-/** Every run of a check that failed on the commit: two workflows may report the same name. */
-const failedRuns = (reports: CheckReport[], name: string) =>
-  reports.filter((r) => r.name === name && r.state === 'failure')
+/** The failed run of a check, when one of its runs on the commit failed. */
+const failedRun = (reports: CheckReport[], name: string) =>
+  reports.find((r) => r.name === name && r.state === 'failure')
 
 /**
  * What the required checks say: the ones that failed, and the ones that never reported. A check can run
@@ -111,7 +106,7 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
   const failed: string[] = []
   const silent: string[] = []
   for (const name of input.required) {
-    if (failedRuns(input.reports, name).length > 0) failed.push(name)
+    if (failedRun(input.reports, name)) failed.push(name)
     else if (!input.reports.some((r) => r.name === name)) silent.push(name)
   }
   return { failed, silent }
@@ -151,10 +146,9 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
         kind: 'person',
         reason: `the required checks still fail after ${runs}: ${failed.join(', ')}`,
         stopAutoMerge: true,
-        reports: failed.flatMap((name) => failedRuns(input.reports, name)),
       }
     }
-    const reports = failed.flatMap((name) => failedRuns(input.reports, name))
+    const reports = failed.map((name) => failedRun(input.reports, name)!)
     return { kind: 'send_back', failed, reports }
   }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
@@ -173,9 +167,7 @@ const unread = (r: FailedReport) => r.evidence !== undefined && 'unreadable' in 
 const remarks = (r: FailedReport) =>
   (r.notRequired
     ? ' (not a required check: it failed on the same commit, where a required one names no failure of its own)'
-    : '') +
-  (r.alone ? ' (no check of the factory matches it, so the factory never ran it)' : '') +
-  (unread(r) ? ' (the factory could not read its log or annotations)' : '')
+    : '') + (unread(r) ? ' (the factory could not read its log or annotations)' : '')
 
 /** The lines read from the check's log or annotations, when the factory read any. */
 const evidenceLines = (r: FailedReport) =>
@@ -212,15 +204,10 @@ const said = (r: FailedReport) =>
  * server is quoted from it, because the agent's sandbox cannot open the link; one whose evidence could not be
  * read says so, and the reason goes to the factory's log rather than to the agent.
  */
-export function checksFeedback(sha: string, failed: FailedReport[], rerunProblem?: string): string {
+export function checksFeedback(sha: string, failed: FailedReport[]): string {
   const head = [
     `The repository's required checks failed on ${short(sha)}, so the pull request was not merged. Fix what they report:`,
     ...failed.map((r) => `- ${r.name}: ${r.url}${remarks(r)}`),
-    ...(rerunProblem
-      ? [
-          `The factory could not rerun the failed jobs (${rerunProblem.slice(0, 200)}), so a failure that is not of the work may be among these.`,
-        ]
-      : []),
   ].join('\n')
   const told = failed.filter(said)
   // Each report gets an equal share of what is left once its frame (`\n\n<name>:\n` and a fence) is counted.
