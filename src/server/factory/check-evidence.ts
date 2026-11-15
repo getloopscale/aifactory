@@ -136,14 +136,10 @@ export async function attachEvidence(
       attached.push(report)
       continue
     }
+    // The required job is read first: what it says, or why it could not be read, stays in the note.
+    attached.push({ ...report, evidence: await evidenceOf(api, repo, token, run) })
     const workflow = run.actions ? runIdOf(run.url) : undefined
     const siblings = workflow ? await siblingsOf(api, repo, token, runs, workflow, requiredIds) : []
-    if (siblings.length === 0) {
-      attached.push({ ...report, evidence: await evidenceOf(api, repo, token, run) })
-      continue
-    }
-    // The gate is only a name: what failed is in the jobs of its run that failed.
-    attached.push({ ...report, detail: '', evidence: { lines: [] } })
     for (const sibling of siblings) {
       if (extra.has(sibling.id)) continue
       extra.set(sibling.id, {

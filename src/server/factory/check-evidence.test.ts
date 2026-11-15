@@ -225,7 +225,7 @@ describe('attachEvidence', () => {
     expect(failed[1].evidence).toMatchObject({ lines: ['AssertionError: expected 1 to be 2'] })
   })
 
-  it('takes the evidence from the failed sibling and leaves the gate only its name', async () => {
+  it('reads the gate and adds the evidence of the failed sibling of its run', async () => {
     const { api } = fakeApi({
       runs: [
         actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
@@ -236,7 +236,7 @@ describe('attachEvidence', () => {
 
     const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI', 'Job validate failed')])
 
-    expect(failed[0]).toEqual({ ...report('CI'), evidence: { lines: [] } })
+    expect(failed[0]).toMatchObject({ name: 'CI', evidence: { lines: expect.any(Array) } })
     expect(failed[1]).toMatchObject({
       name: 'validate',
       evidence: { lines: ['[doc-coverage] FAIL 99.7% is below the 100% floor'] },
@@ -259,7 +259,7 @@ describe('attachEvidence', () => {
     })
   })
 
-  it('does not read the log of a gate whose run has a failed sibling', async () => {
+  it('keeps the unreadable status of a required job whose run has a failed sibling', async () => {
     const { api, calls } = fakeApi({
       runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 2, name: 'Type tests' })],
       logs: { 2: TYPE_TESTS_LOG },
@@ -268,12 +268,12 @@ describe('attachEvidence', () => {
 
     const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
 
-    expect(failed[0]).toEqual({
-      ...report('CI'),
-      detail: '',
-      evidence: { lines: [] },
+    expect(failed[0]).toMatchObject({
+      name: 'CI',
+      evidence: { unreadable: 'GitHub answered 410 reading job 1' },
     })
-    expect(calls).not.toContain('log o/r t 1')
+    expect(failed[1]).toMatchObject({ name: 'Type tests' })
+    expect(calls).toContain('log o/r t 1')
   })
 
   it('leaves a commit status, which has no check run, with what it said of itself', async () => {
@@ -378,6 +378,21 @@ describe('the step of a failed job, from its metadata', () => {
         failedPosition: 1,
       }),
     ).toEqual({ name: 'Deploy' })
+  })
+
+  it('gives a failed action with no group no command a script printed in a Run group', async () => {
+    const printed = [
+      '##[group]Run pnpm build',
+      'shell: bash',
+      '##[endgroup]',
+      '##[group]Run rm -rf dist',
+      'cleaning',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Deploy', printed.join('\n'), { ranSteps: 2, failedPosition: 1 })).toEqual({
+      name: 'Deploy',
+    })
   })
 
   it('gives a failed docker action no command, even by position', async () => {

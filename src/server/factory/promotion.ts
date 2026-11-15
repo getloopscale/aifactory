@@ -132,10 +132,15 @@ export function failedStep(log: string): FailedStep | undefined {
  */
 export function stepCommands(log: string): (string | undefined)[] {
   const commands: (string | undefined)[] = []
+  const confirmed: boolean[] = []
   let collecting = false
   for (const raw of log.split('\n')) {
     const line = raw.replace(TIMESTAMP, '').replace(COLORS, '').trim()
+    // The runner prints `shell:` under the command of every shell step; a `Run ...` group a script printed
+    // has none, so it is not taken for a step's command.
+    if (/^shell:/.test(line) && collecting) confirmed[confirmed.length - 1] = true
     if (GROUP_STEP.test(line)) {
+      confirmed.push(false)
       const run = GROUP_RUN.exec(line)?.[1].trim()
       const command = run && !ACTION_USE.test(run) ? run.slice(0, SCRIPT_MAX) : undefined
       commands.push(command)
@@ -145,7 +150,7 @@ export function stepCommands(log: string): (string | undefined)[] {
       else commands[commands.length - 1] = `${commands.at(-1)}\n${line}`.slice(0, SCRIPT_MAX)
     }
   }
-  return commands
+  return commands.map((command, i) => (confirmed[i] ? command : undefined))
 }
 
 /**
