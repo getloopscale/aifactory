@@ -308,3 +308,44 @@ describe('the deploy script', () => {
     expect(enabled).toEqual(['aifactory-worker@1.service', 'aifactory.service'])
   })
 })
+
+describe('the install script', () => {
+  it('keeps its behaviour with no cloudflared: it writes every unit, reloads and enables', () => {
+    const root = mkdtempSync(join(tmpdir(), 'install-test-'))
+    homes.push(root)
+    mkdirSync(join(root, 'scripts'))
+    copyFileSync(
+      new URL('./install-services.sh', import.meta.url),
+      join(root, 'scripts', 'install-services.sh'),
+    )
+    mkdirSync(join(root, 'ops', 'systemd'), { recursive: true })
+    writeFileSync(join(root, 'ops', 'systemd', 'aifactory.service'), 'ExecStart=@ROOT@/run\n')
+    writeFileSync(
+      join(root, 'ops', 'systemd', 'aifactory-tunnel.service'),
+      'ExecStart=@CLOUDFLARED@ run\n',
+    )
+    const home = join(root, 'home')
+    const bin = join(root, 'bin')
+    mkdirSync(home)
+    mkdirSync(bin)
+    const calls = join(root, 'calls.log')
+    for (const name of ['systemctl', 'loginctl']) {
+      writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> ${calls}\n`)
+      chmodSync(join(bin, name), 0o755)
+    }
+    const path = process.env.PATH.split(':')
+      .filter((dir) => !existsSync(join(dir, 'cloudflared')))
+      .join(':')
+    const run = spawnSync('bash', [join(root, 'scripts', 'install-services.sh')], {
+      env: { ...process.env, HOME: home, USER: 'owner', PATH: `${bin}:${path}` },
+      encoding: 'utf8',
+    })
+    const units = join(home, '.config', 'systemd', 'user')
+
+    expect(run.status).toBe(0)
+    expect(readdirSync(units).sort()).toEqual(['aifactory-tunnel.service', 'aifactory.service'])
+    const log = readFileSync(calls, 'utf8')
+    expect(log).toMatch(/daemon-reload/)
+    expect(log).toMatch(/enable aifactory.service aifactory-tunnel.service/)
+  })
+})
