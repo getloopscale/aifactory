@@ -136,6 +136,30 @@ describe('listTasks', () => {
     expect(card.attempts).toBe(1)
   })
 
+  it("counts a task's attempts and automatic retries from its own events, whatever other tasks did later", async () => {
+    // The environment failed this task three times, each followed by an automatic retry.
+    const first = await seed('failed', {}, [
+      { stage: 'intake' },
+      { stage: 'verify' },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      { stage: 'intake', detail: { decision: 'retry', automatic: true } },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      { stage: 'intake', detail: { decision: 'retry', automatic: true } },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      { stage: 'intake', detail: { decision: 'retry', automatic: true } },
+      { stage: 'verify' },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+    ])
+    // A person started another task after all of that.
+    await seed('verify', {}, [{ stage: 'intake' }, { stage: 'verify' }])
+
+    const card = (await listTasks(getDb())).find((c) => c.id === first)!
+
+    // Three automatic retries are the limit: it does not run again on its own.
+    expect(card.retryAt).toBeNull()
+    expect(card.attempts).toBe(1)
+  })
+
   it('puts every stage in a column that exists on the board', async () => {
     for (const stage of [
       'intake',

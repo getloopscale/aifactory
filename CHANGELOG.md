@@ -31,6 +31,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A task's attempts and its automatic retries are counted from its own events. The count compared against the latest run a person started on any task, so most tasks showed no automatic retry at all: an environment failure was retried past its limit of three, and the board could show the wrong number of attempts (#89)
 - The new job dialog no longer says "Enable a repository under Repositories first" while the list of repositories is still loading; it says it is reading them, and shows the form or that message once the list arrives (#79)
 - The onboarding no longer marks "Choose a repository" as done while the connection to GitHub is still being checked: a step is done only when every step before it is (#79)
 - With the panel in Brazilian Portuguese, the repository doctor now says what is wrong and how to repair it in Portuguese, on the repositories page and in the onboarding. Each item that is not fine carries the code and the values of its two sentences (`say`), and the English sentences stay in `cause` and `repair` (#80)

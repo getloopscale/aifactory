@@ -1872,8 +1872,13 @@ describe('runTask continuing from a branch a person sent back', () => {
 
   describe('a plain continuation, after a run that pushed and then failed for the environment', () => {
     const pushed = 'f'.repeat(40)
-    const lsRemote = (command: string) =>
-      command.includes('ls-remote') ? { stdout: `${pushed}\trefs/heads/factory/7\n` } : undefined
+    // The branch is on GitHub at `pushed`, and the checkout of it is at that commit too: the shared
+    // fake answers the base's hash for HEAD, which a continuation from a branch never has.
+    const lsRemote = (command: string) => {
+      if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+      if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
+      return undefined
+    }
 
     it('starts from the branch, claims no review or failed check, and goes on from its head when the agent adds nothing', async () => {
       const id = await seedTask()
