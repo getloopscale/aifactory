@@ -1,3 +1,4 @@
+import { MAX_RUN_MINUTES } from '../../shared/panel'
 import { DEFAULT_CHECK_MS, DEFAULT_REVIEW_MS, MIN_AGENT_MS } from './agent-time'
 
 type Timeouts = { sandboxMs: number; agentMs: number; checkMs?: number; reviewMs?: number }
@@ -6,14 +7,12 @@ type Timeouts = { sandboxMs: number; agentMs: number; checkMs?: number; reviewMs
 const STARTUP_MARGIN_MS = 20 * 60_000
 
 /**
- * The least and the most an owner may give a run. The least leaves room for the startup, the time kept for
- * checks and review, and one agent pass worth starting, so a saved value never fails before its first pass.
- * The drain of a deploy waits for the most.
+ * The least an owner may give a run leaves room for the startup, the time kept for checks and review, and one
+ * agent pass worth starting, so a saved value never fails before its first pass. The panel validates against
+ * `MIN_RUN_MINUTES` in `shared/panel.ts`, which a test keeps equal to this.
  */
-export const MIN_RUN_MINUTES = Math.ceil(
-  (STARTUP_MARGIN_MS + DEFAULT_CHECK_MS + DEFAULT_REVIEW_MS + MIN_AGENT_MS) / 60_000,
-)
-export const MAX_RUN_MINUTES = 240
+export const LEAST_RUN_MS = STARTUP_MARGIN_MS + DEFAULT_CHECK_MS + DEFAULT_REVIEW_MS + MIN_AGENT_MS
+/** The most an owner may give a run. The drain of a deploy waits for it. */
 export const MAX_RUN_MS = MAX_RUN_MINUTES * 60_000
 
 /**

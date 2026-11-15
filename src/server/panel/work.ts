@@ -18,7 +18,7 @@ import type {
   RepositoryView,
 } from '../../shared/panel'
 
-import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../factory/run-limit'
+import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 import { ActionRefused } from './actions'
 
 /** The label that asks the factory to take an issue. */

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../factory/run-limit'
+import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 
 const check = z.object({ name: z.string().max(40), command: z.string().max(600) })
 

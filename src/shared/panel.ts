@@ -696,3 +696,10 @@ export type CodexConnection = {
     { connected: false; problem?: string } | { connected: true; email?: string; plan?: string }
   login: CodexLoginState
 }
+
+/**
+ * The least and the most minutes an owner may give a run in a repository. The form and the server both
+ * validate against them; `factory/run-limit.ts` says where the least comes from.
+ */
+export const MIN_RUN_MINUTES = 50
+export const MAX_RUN_MINUTES = 240

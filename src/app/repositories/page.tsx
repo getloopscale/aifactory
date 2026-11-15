@@ -9,7 +9,7 @@ import { ProveChecks, RepositoryDoctor } from '../components/RepositoryDoctor'
 import { put } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
-import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../server/factory/run-limit'
+import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 import { formatChecks, formatDomains, parseChecks, parseDomains } from '../lib/repo-form'
 
 const selectClass =
