@@ -1,5 +1,6 @@
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
+import type { FailedStep } from './promotion'
 import { AUTOMATIC_RETRIES, automaticRunsLeft } from './transitions'
 
 /**
@@ -20,14 +21,17 @@ const FRAME = 18
  * What the factory read on the server about a failed check run: the lines of its log (or its annotations and
  * summary) that say why it failed, or why they could not be read.
  */
-export type ServerEvidence = { lines: string[] } | { unreadable: string }
+export type ServerEvidence = { lines: string[]; step?: FailedStep } | { unreadable: string }
 
 /**
  * A failed check as the note names it. A commit status has no check run, so it has no evidence. A check that
  * is `notRequired` failed on the same commit and is named because a required check (an aggregate job) said
  * only that something it depends on failed.
  */
-export type FailedReport = CheckReport & { evidence?: ServerEvidence; notRequired?: true }
+export type FailedReport = CheckReport & {
+  evidence?: ServerEvidence
+  notRequired?: true
+}
 
 /** What to do about a task whose pull request waits for the repository's required checks. */
 export type WaitingStep =
@@ -41,7 +45,7 @@ export type WaitingStep =
   | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
   /** The pull request conflicts with its base: the task starts again from the new base. */
   | { kind: 'start_over'; reason: string }
-  | { kind: 'person'; reason: string; stopAutoMerge: boolean }
+  | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -92,9 +96,9 @@ function settled(input: WaitingIntegration): WaitingStep | undefined {
   return undefined
 }
 
-/** The failed run of a check, when one of its runs on the commit failed. */
-const failedRun = (reports: CheckReport[], name: string) =>
-  reports.find((r) => r.name === name && r.state === 'failure')
+/** Every run of a check that failed on the commit: two workflows may report the same name. */
+const failedRuns = (reports: CheckReport[], name: string) =>
+  reports.filter((r) => r.name === name && r.state === 'failure')
 
 /**
  * What the required checks say: the ones that failed, and the ones that never reported. A check can run
@@ -105,7 +109,7 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
   const failed: string[] = []
   const silent: string[] = []
   for (const name of input.required) {
-    if (failedRun(input.reports, name)) failed.push(name)
+    if (failedRuns(input.reports, name).length > 0) failed.push(name)
     else if (!input.reports.some((r) => r.name === name)) silent.push(name)
   }
   return { failed, silent }
@@ -145,9 +149,10 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
         kind: 'person',
         reason: `the required checks still fail after ${runs}: ${failed.join(', ')}`,
         stopAutoMerge: true,
+        reports: failed.flatMap((name) => failedRuns(input.reports, name)),
       }
     }
-    const reports = failed.map((name) => failedRun(input.reports, name)!)
+    const reports = failed.flatMap((name) => failedRuns(input.reports, name))
     return { kind: 'send_back', failed, reports }
   }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
@@ -183,7 +188,26 @@ function quote(r: FailedReport, share: number): string {
   return text.replace(/~{3,}/g, '~~')
 }
 
-const said = (r: FailedReport) => evidenceLines(r).length > 0 || r.detail.trim() !== ''
+/** The line that names the step that exited and what it ran, so the builder can run it in the sandbox. */
+function stepLine(r: FailedReport): string {
+  const step = r.evidence && 'lines' in r.evidence ? r.evidence.step : undefined
+  if (!step) return ''
+  const ran = step.command
+    ? step.command !== step.name
+      ? ` (ran: ${step.command})`
+      : ''
+    : ' (the command was not identified)'
+  return `Step that exited: ${step.name}${ran}\n`.replace(/~{3,}/g, '~~')
+}
+
+/** What a note says after its list of checks: the quoted reports, for a handoff to carry the same evidence. */
+export const evidenceOfNote = (note: string): string => {
+  const [, ...quotes] = note.split('\n\n')
+  return quotes.join('\n\n')
+}
+
+const said = (r: FailedReport) =>
+  evidenceLines(r).length > 0 || r.detail.trim() !== '' || stepLine(r) !== ''
 
 /**
  * The feedback a run gets when the repository's required checks failed: every check with its link, and what
@@ -196,11 +220,19 @@ export function checksFeedback(sha: string, failed: FailedReport[]): string {
     `The repository's required checks failed on ${short(sha)}, so the pull request was not merged. Fix what they report:`,
     ...failed.map((r) => `- ${r.name}: ${r.url}${remarks(r)}`),
   ].join('\n')
+  // The reports that say something, in order; when they do not all fit, the last ones are left out (their
+  // names and links stay in the list above) so the first keep their evidence and step.
   const told = failed.filter(said)
-  // Each report gets an equal share of what is left once its frame (`\n\n<name>:\n` and a fence) is counted.
-  const frames = told.reduce((sum, r) => sum + r.name.length + FRAME, 0)
-  const share = Math.floor((NOTE_MAX - head.length - frames) / Math.max(told.length, 1))
+  const shareOf = (list: FailedReport[]) => {
+    const frames = list.reduce((sum, r) => sum + r.name.length + FRAME + stepLine(r).length, 0)
+    return Math.floor((NOTE_MAX - head.length - frames) / Math.max(list.length, 1))
+  }
+  while (told.length > 1 && shareOf(told) < TAIL_MIN) told.pop()
+  const share = shareOf(told)
   if (share < TAIL_MIN) return head.slice(0, NOTE_MAX)
-  const quotes = told.map((r) => `\n\n${r.name}:\n~~~~text\n${quote(r, share)}\n~~~~`)
+  const quotes = told.map((r) => {
+    const text = quote(r, share)
+    return `\n\n${r.name}:\n${stepLine(r)}${text === '' ? '' : `~~~~text\n${text}\n~~~~`}`
+  })
   return head + quotes.join('')
 }

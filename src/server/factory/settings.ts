@@ -203,7 +203,14 @@ export async function saveChosen(
     await tx.execute(sql`select pg_advisory_xact_lock(${SETTINGS_LOCK})`)
     // The time is read now that the lock is held: `now()` is fixed when the transaction starts, so a save that
     // waited here would otherwise be dated before the change it follows.
-    const [{ at }] = (await tx.execute(sql`select clock_timestamp() as at`)).rows as { at: Date }[]
+    // The driver hands a raw query's timestamp over as text: only a column Drizzle maps comes back a Date.
+    const [clock] = (await tx.execute(sql`select clock_timestamp() as at`)).rows as {
+      at: Date | string
+    }[]
+    const at = new Date(clock.at)
+    if (Number.isNaN(at.getTime())) {
+      throw new Error(`the database gave a time that cannot be read: ${String(clock.at)}`)
+    }
     const current = await loadStored(tx)
     const writes = planWrites(current, patch, env, read)
     for (const { key, value, role, field } of writes) {

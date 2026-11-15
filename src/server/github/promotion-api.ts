@@ -34,7 +34,14 @@ export type PromotionApi = {
     repo: string,
     token: string,
     jobId: number,
-  ): Promise<{ runId: number; attempt: number }>
+  ): Promise<{
+    runId: number
+    attempt: number
+    failedStep?: string
+    /** How many steps ran (not skipped), and the position of the failed one among them. */
+    ranSteps?: number
+    failedPosition?: number
+  }>
   jobLog(repo: string, token: string, jobId: number): Promise<string>
   annotations(repo: string, token: string, checkRunId: number): Promise<string[]>
   rerunFailedJobs(repo: string, token: string, runId: number): Promise<RerunAnswer>
@@ -42,6 +49,9 @@ export type PromotionApi = {
 }
 
 /** A run that ended this way says the commit is broken. A cancelled or skipped one says nothing. */
+/** The most pages of check runs read for one commit: a thousand runs. */
+const CHECK_RUN_PAGES = 10
+
 const FAILED = new Set(['failure', 'timed_out', 'startup_failure'])
 
 const refusal = async (response: Response, action: string, repo: string) => {
@@ -91,26 +101,32 @@ export function createPromotionApi(
     },
 
     async failedChecks(repo, token, sha) {
-      const answer = (await (
-        await call(
-          repo,
-          token,
-          `/commits/${sha}/check-runs?filter=latest&per_page=100`,
-          `reading the check runs of ${sha.slice(0, 7)}`,
-          [200],
-        )
-      ).json()) as {
-        check_runs: {
-          id: number
-          name: string
-          status: string
-          conclusion: string | null
-          html_url?: string | null
-          app?: { slug?: string } | null
-          output?: { summary?: string | null } | null
-        }[]
+      type CheckRun = {
+        id: number
+        name: string
+        status: string
+        conclusion: string | null
+        html_url?: string | null
+        app?: { slug?: string } | null
+        output?: { summary?: string | null } | null
       }
-      return answer.check_runs
+      // A commit of a large repository has more than a hundred check runs, and the one that failed may be
+      // on any page. The pages are bounded so a wrong `total_count` cannot make this read for ever.
+      const runs: CheckRun[] = []
+      for (let page = 1; page <= CHECK_RUN_PAGES; page++) {
+        const answer = (await (
+          await call(
+            repo,
+            token,
+            `/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
+            `reading the check runs of ${sha.slice(0, 7)}`,
+            [200],
+          )
+        ).json()) as { total_count?: number; check_runs: CheckRun[] }
+        runs.push(...answer.check_runs)
+        if (answer.check_runs.length < 100 || runs.length >= (answer.total_count ?? 0)) break
+      }
+      return runs
         .filter((run) => run.status === 'completed' && FAILED.has(run.conclusion ?? ''))
         .map((run) => ({
           id: run.id,
@@ -124,8 +140,20 @@ export function createPromotionApi(
     async jobAttempt(repo, token, jobId) {
       const job = (await (
         await call(repo, token, `/actions/jobs/${jobId}`, `reading job ${jobId}`, [200])
-      ).json()) as { run_id: number; run_attempt: number }
-      return { runId: job.run_id, attempt: job.run_attempt }
+      ).json()) as {
+        run_id: number
+        run_attempt: number
+        steps?: { name: string; conclusion: string | null }[]
+      }
+      const ran = (job.steps ?? []).filter((step) => step.conclusion !== 'skipped')
+      const failed = ran.findIndex((step) => FAILED.has(step.conclusion ?? ''))
+      return {
+        runId: job.run_id,
+        attempt: job.run_attempt,
+        ...(failed >= 0
+          ? { failedStep: ran[failed].name, ranSteps: ran.length, failedPosition: failed }
+          : {}),
+      }
     },
 
     async jobLog(repo, token, jobId) {

@@ -19,6 +19,8 @@ import { storageFromUrl } from '../db/config'
 import { integrationBranch } from '../factory/branches'
 import { factoryDeps, githubAppFromEnv } from '../factory/deps'
 import { optionsFor } from '../factory/engine-models'
+import { DEFAULT_TIMEOUTS } from '../factory/run'
+import { resolveTimeouts } from '../factory/run-limit'
 import { labelsWithRepoChoice, loadRepoConfig } from '../factory/repo-config'
 import { effectiveEnv } from '../factory/settings'
 import { fetchIssue } from '../github/issues'
@@ -47,7 +49,8 @@ async function evalDeps(repository: string, issueLabels: string[]) {
   // The environment a task's run reads (job-deps.ts): the agents and models the owner chose in the panel win.
   const deps = factoryDeps(await effectiveEnv(getDb(), env))
   // The agents a task of this repository gets: the issue's labels, then the owner's choice for the repository.
-  const labels = labelsWithRepoChoice(issueLabels, await loadRepoConfig(getDb(), repository))
+  const config = await loadRepoConfig(getDb(), repository)
+  const labels = labelsWithRepoChoice(issueLabels, config)
   const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
   const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
   const knowledge: KnowledgeSource | undefined = deps.knowledge && {
@@ -60,6 +63,8 @@ async function evalDeps(repository: string, issueLabels: string[]) {
     reviewer: chosen ?? builder,
     author: deps.author,
     knowledge,
+    // The time a task of this repository gets: the owner's limit, else the default.
+    timeouts: resolveTimeouts(DEFAULT_TIMEOUTS, config.runLimitMs),
   }
 }
 

@@ -8,7 +8,8 @@ import { createGithubApi } from '../github/pulls'
 
 import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
-import { Run, type RunState } from './run'
+import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
+import { resolveTimeouts } from './run-limit'
 import type { Parked, RunResult, RunTaskDeps } from './run-types'
 import { enterStage } from './stages'
 
@@ -87,16 +88,15 @@ async function execute(
     const issue = await readIssue(row.repository, row.issueNumber, token)
     await refuseWhileBlocked(deps, row.repository, issue, readIssue)
 
+    const saved = await loadRepoConfig(db, row.repository)
+    const timeouts = resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, saved.runLimitMs)
     const run = await Run.open({
-      deps,
+      deps: { ...deps, timeouts },
       taskId,
       row,
       issue,
       // Read from GitHub before any sandbox exists, so nothing the agent does can change it.
-      repo: withRecipe(
-        await loadRepoConfig(db, row.repository),
-        await deps.fetchRecipe?.(row.repository, token),
-      ),
+      repo: withRecipe(saved, await deps.fetchRecipe?.(row.repository, token)),
       token,
       api: deps.githubApi ?? createGithubApi(),
       branch: `factory/${row.issueNumber}`,

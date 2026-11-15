@@ -48,6 +48,12 @@ const GENERIC = [
   /ELIFECYCLE/,
   /ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL/,
   /dependency did not succeed/,
+  // What an aggregate (gate) job says when a job it needs failed: that one did, never which.
+  /\b(one or more|some|any|at least one)\b.*\b(jobs?|checks?|dependenc(y|ies)|needs)\b.*\b(fail|did not succeed|not succeed)/i,
+  /^(the )?(job|workflow|run|build|check)s? (has |have )?failed\.?$/i,
+  /\b(the following|these|those) (jobs?|checks?|needs)\b.*\b(fail|did not succeed|not succeed)/i,
+  /^(the )?jobs? \S+ (has |have )?failed\.?$/i,
+  /\b(required|dependent|upstream) (jobs?|checks?)\b.*\b(fail|did not succeed)/i,
 ]
 
 /** Lines that say what failed: a test, an assertion, a type error, a lint rule. */
@@ -58,15 +64,96 @@ const TELLING = [
   /\berror TS\d+/,
   /^[✖×]/,
   /^\d+:\d+\s+error\s/,
+  /^ERROR: /,
+  /^error [\w-]+: /,
+  /\bE[A-Z]{4,}: /,
+  /\bback-merge\b/i,
+  /^\.?\/?\.changeset\/\S+\.md\b/,
 ]
 
 /** A heading under which knip and similar tools list what they found, one item per line. */
-const LIST_HEADING = /^(Unused|Unlisted|Unresolved|Duplicate) .*\(\d+\)$/
+const LIST_HEADING =
+  /^(Unused|Unlisted|Unresolved|Duplicate) .*\(\d+\)$|^[^:]*\bconsumed\b[^:]*(changesets?|files?)[^:]*:$/i
 const FILE_LINE = /^\/\S+\.\w+$/
 const LINT_ERROR = /^\d+:\d+\s+error\s/
 
 const clean = (raw: string) =>
   raw.replace(TIMESTAMP, '').replace(COLORS, '').replace('##[error]', '').trim()
+
+/** The step of a job that failed: the script that exited (when the log names it) and the command the step ran. */
+export type FailedStep = { name: string; command?: string }
+
+/** The most of a step's script the note carries. */
+const SCRIPT_MAX = 1_000
+const GROUP_RUN = /^##\[group\]Run (.+)$/
+/** The groups the runner opens for a step of its own; any other group is output a script printed. */
+const GROUP_STEP = /^##\[group\](Run |Post |Set up job|Complete job|Initialize containers)/
+/** A step that uses an action (`owner/repo@ref`, `./local`) has no shell command to show. */
+const ACTION_USE = /^(\.\/\S*|docker:\/\/\S+|[\w.-]+\/[\w./-]+@\S+)$/
+const EXITED = /ERROR: "([^"]+)" exited with \d+/
+/** What the runner says when the step's process ends the job; an earlier `##[error]` is a step's own annotation. */
+const FATAL = /##\[error\](Process completed with exit code|The operation was canceled)/
+
+/**
+ * The step that exited, read from an Actions log: the command of the last `Run` step before the line where
+ * the runner reports the failure (the last error line when it reports none), and the script a runner such
+ * as pnpm says exited. A group a script prints inside a step does not end it, and an earlier annotation does
+ * not decide it. The command is kept only while no other kind of step began. Undefined when the log names neither.
+ */
+export function failedStep(log: string): FailedStep | undefined {
+  const lines = log.split('\n').map((raw) => raw.replace(TIMESTAMP, '').replace(COLORS, '').trim())
+  const fatal = lines.findIndex((line) => FATAL.test(line))
+  const end = fatal >= 0 ? fatal : lines.map((line) => line.includes('##[error]')).lastIndexOf(true)
+  let command: string | undefined
+  let script: string | undefined
+  let collecting = false
+  lines.forEach((line, index) => {
+    if (end >= 0 && index > end) return
+    if (GROUP_STEP.test(line)) {
+      const run = GROUP_RUN.exec(line)?.[1].trim()
+      command = run && !ACTION_USE.test(run) ? run : undefined
+      // A script name belongs to the step it was printed in: an earlier step's line does not carry over.
+      script = undefined
+      collecting = command !== undefined
+      if (command) command = command.slice(0, SCRIPT_MAX)
+    } else if (collecting) {
+      // The rest of a multiline script runs up to the `shell:` line the runner prints after it.
+      if (/^(shell|env):|^##\[/.test(line)) collecting = false
+      else command = `${command}\n${line}`.slice(0, SCRIPT_MAX)
+    }
+    if (end < 0 || index <= end) script ??= EXITED.exec(line.replace('##[error]', ''))?.[1]
+  })
+  const name = script ?? command
+  return name ? { name, ...(command ? { command } : {}) } : undefined
+}
+
+/**
+ * The shell command of each step the runner opened a group for, in order (undefined for a step that uses an
+ * action, or any step that has no command). The position of a step among them is how a step of the job's
+ * metadata is tied to its group in the log, whatever the step is called.
+ */
+export function stepCommands(log: string): (string | undefined)[] {
+  const commands: (string | undefined)[] = []
+  const confirmed: boolean[] = []
+  let collecting = false
+  for (const raw of log.split('\n')) {
+    const line = raw.replace(TIMESTAMP, '').replace(COLORS, '').trim()
+    // The runner prints `shell:` under the command of every shell step; a `Run ...` group a script printed
+    // has none, so it is not taken for a step's command.
+    if (/^shell:/.test(line) && collecting) confirmed[confirmed.length - 1] = true
+    if (GROUP_STEP.test(line)) {
+      confirmed.push(false)
+      const run = GROUP_RUN.exec(line)?.[1].trim()
+      const command = run && !ACTION_USE.test(run) ? run.slice(0, SCRIPT_MAX) : undefined
+      commands.push(command)
+      collecting = command !== undefined
+    } else if (collecting) {
+      if (/^(shell|env):|^##\[/.test(line)) collecting = false
+      else commands[commands.length - 1] = `${commands.at(-1)}\n${line}`.slice(0, SCRIPT_MAX)
+    }
+  }
+  return commands.map((command, i) => (confirmed[i] ? command : undefined))
+}
 
 /**
  * The lines of a job's log that say why it failed, read without a model: assertions, failing tests,
