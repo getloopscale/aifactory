@@ -29,6 +29,8 @@ export type Shipment = {
    * of those packages is not released and its issue stays open.
    */
   missing?: string[]
+  /** The tasks `decideHolds` chose, already recorded on the publication. They get a comment, not a release. */
+  held?: HeldTask[]
 }
 
 /** A task a partial publication holds: its issue, and the missing packages that carry its change. */
@@ -93,13 +95,39 @@ function heldFor(carried: Carried | undefined, owed: string[]): string[] {
   return carried.names.filter((name) => missing.includes(name))
 }
 
-/** The tasks the earlier partial publications of a repository hold: their issues stay open for good. */
-async function heldEarlier(db: Database, repository: string): Promise<Set<number>> {
-  const earlier = await db
+/**
+ * The tasks the publications of a repository hold, a partial one or one that recorded its holds and has
+ * not finished: their issues stay open for good, whatever releases come later.
+ */
+export async function heldTasks(db: Database, repository: string): Promise<Map<number, string[]>> {
+  const rows = await db
     .select({ missing: publication.missing })
     .from(publication)
-    .where(and(eq(publication.repository, repository), eq(publication.status, 'partial')))
-  return new Set(earlier.flatMap((p) => (p.missing?.held ?? []).map((h) => h.taskId)))
+    .where(and(eq(publication.repository, repository), isNotNull(publication.missing)))
+  return new Map(
+    rows.flatMap((p) => (p.missing?.held ?? []).map((h) => [h.taskId, h.packages] as const)),
+  )
+}
+
+/**
+ * The tasks a publication that lacks releases holds: those the promotion carries whose commit changed a
+ * missing package, or whose package could not be established. Decided before anything ships, so the
+ * caller can record the holds first.
+ */
+export async function decideHolds(
+  deps: { db: Database; api: GithubApi },
+  s: Shipment,
+): Promise<HeldTask[]> {
+  const owed = s.missing ?? []
+  if (owed.length === 0) return []
+  const already = await heldTasks(deps.db, s.repository)
+  const out: HeldTask[] = []
+  for (const t of await candidatesOf(deps.db, s)) {
+    if (already.has(t.id) || !(await belongs(deps, s, t))) continue
+    const held = heldFor(await carriedPackages(deps.api, s, t), owed)
+    if (held.length > 0) out.push({ taskId: t.id, issue: t.issueNumber, packages: held })
+  }
+  return out
 }
 
 /** Tells the issue why it stays open. A failure is returned, as in `announce`. */
@@ -157,6 +185,18 @@ async function belongs(
   return deps.api.contains(s.repository, s.token, s.promotedSha, t.mergedSha!)
 }
 
+const candidatesOf = (db: Database, s: Shipment) =>
+  db
+    .select()
+    .from(task)
+    .where(
+      and(
+        eq(task.repository, s.repository),
+        isNotNull(task.mergedSha),
+        or(eq(task.stage, 'done'), eq(task.id, s.askedTaskId)),
+      ),
+    )
+
 /**
  * Releases every task whose work is in the promoted commit: the one that asked for the release, and each
  * finished task integrated before it. Each gets a delivery per tag, moves to `released`, and its issue is
@@ -168,30 +208,24 @@ export async function shipContained(
   deps: { db: Database; api: GithubApi },
   s: Shipment,
 ): Promise<Shipped> {
-  const candidates = await deps.db
-    .select()
-    .from(task)
-    .where(
-      and(
-        eq(task.repository, s.repository),
-        isNotNull(task.mergedSha),
-        or(eq(task.stage, 'done'), eq(task.id, s.askedTaskId)),
-      ),
-    )
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
   const owed = s.missing ?? []
-  const earlier = await heldEarlier(deps.db, s.repository)
-  for (const t of candidates) {
-    if (earlier.has(t.id)) continue
-    if (!(await belongs(deps, s, t))) continue
-    const carried = await carriedPackages(deps.api, s, t)
-    const held = heldFor(carried, owed)
-    if (held.length > 0) {
-      const error = await explainHold(deps.api, s, t.issueNumber, held, owed)
-      shipped.held.push({ taskId: t.id, issue: t.issueNumber, packages: held })
+  const now = new Map((s.held ?? []).map((h) => [h.taskId, h]))
+  const earlier = await heldTasks(deps.db, s.repository)
+  for (const t of await candidatesOf(deps.db, s)) {
+    const hold = now.get(t.id)
+    if (hold) {
+      // The task that asked for the release is already `released` when the publication begins: it is
+      // given back, since its package has no release.
+      if (t.stage === 'released') {
+        await enterStage(deps.db, t.id, 'done', { held: hold.packages, missing: owed })
+      }
+      const error = await explainHold(deps.api, s, t.issueNumber, hold.packages, owed)
+      shipped.held.push(hold)
       if (error) shipped.issueErrors.push(error)
       continue
     }
+    if (earlier.has(t.id) || !(await belongs(deps, s, t))) continue
     await deps.db.insert(delivery).values(
       s.tags.map((tag) => ({
         taskId: t.id,

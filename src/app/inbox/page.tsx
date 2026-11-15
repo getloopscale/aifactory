@@ -1,7 +1,11 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
+
+import { Button } from '@usetheo/ui'
 
 import type { InboxItem } from '../../shared/panel'
 import { StageBadge } from '../components/Badges'
+import { post } from '../lib/api'
 import { ago, money } from '../lib/format'
 import { useResource } from '../lib/live'
 
@@ -16,17 +20,27 @@ const KIND: Record<InboxItem['kind'], string> = {
 
 export default function InboxPage() {
   const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
+  const [message, setMessage] = useState<string>()
+  async function handled(id: number) {
+    try {
+      await post(`/api/panel/publications/${id}/handled`)
+      inbox.reload()
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : String(e))
+    }
+  }
   return (
     <>
       <h1 className="mb-4 text-xl font-semibold">Inbox</h1>
+      {message ? <p className="text-sm text-destructive">{message}</p> : null}
       {inbox.error ? <p className="text-sm text-destructive">{inbox.error}</p> : null}
       {inbox.data ? (
         inbox.data.items.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing waits for you.</p>
         ) : (
           <ul className="space-y-2">
-            {inbox.data.items.map(({ task, kind, summary, at }) => (
-              <li key={task.id}>
+            {inbox.data.items.map(({ task, kind, summary, at, publicationId }) => (
+              <li key={`${kind}-${task.id}-${publicationId ?? ''}`}>
                 <Link
                   to={`/tasks/${task.id}`}
                   className="block rounded-lg border border-border bg-card p-4 shadow-sm hover:border-primary/60"
@@ -50,6 +64,16 @@ export default function InboxPage() {
                     <span className="text-xs text-muted-foreground">{money(task.costUsd)}</span>
                   </div>
                 </Link>
+                {publicationId ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-2"
+                    onClick={() => void handled(publicationId)}
+                  >
+                    I handled it
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>

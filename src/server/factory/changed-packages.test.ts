@@ -247,6 +247,20 @@ describe('packagesOfCommit', () => {
     expect(await packagesOfCommit(api, 'o/r', 't', 'm1', 'promoted')).toEqual(['@theokit/new'])
   })
 
+  it('does not name a package a later commit moved to another directory and renamed', async () => {
+    const api = new FakeGithub()
+    const tree = { ...theokit, 'packages/old/package.json': '{"name":"@theokit/old"}' }
+    api
+      .repo('o/r')
+      .files('m1^', { ...tree, 'packages/old/src/a.ts': 'a' })
+      .files('m1', { ...tree, 'packages/old/src/a.ts': 'b' })
+      .files('promoted', { ...theokit, 'packages/new/package.json': '{"name":"@theokit/new"}' })
+
+    await expect(packagesOfCommit(api, 'o/r', 't', 'm1', 'promoted')).rejects.toThrow(
+      /packages\/old.*moved or removed/,
+    )
+  })
+
   it('names the root package only for files no nested package holds', async () => {
     const api = new FakeGithub()
     const tree = { ...theokit, 'packages/ui/src/a.ts': 'a', 'README.md': 'a' }

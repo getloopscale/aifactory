@@ -115,12 +115,9 @@ export async function packagesOfCommit(
 ): Promise<string[]> {
   const files = touchedPaths(await api.changedFiles(repo, token, `${sha}^`, sha))
   // The packages of the commit and of the promoted tree (`layout`): a later task may have created or moved one.
-  const dirs = [
-    ...new Set([
-      ...packageDirs(await api.filePaths(repo, token, sha)),
-      ...packageDirs(layout === sha ? [] : await api.filePaths(repo, token, layout)),
-    ]),
-  ]
+  const atCommit = packageDirs(await api.filePaths(repo, token, sha))
+  const promoted = layout === sha ? atCommit : packageDirs(await api.filePaths(repo, token, layout))
+  const dirs = [...new Set([...atCommit, ...promoted])]
   // A file belongs to the innermost package that holds it, so a nested package's change is not the root's.
   const touched = [
     ...new Set(
@@ -130,6 +127,14 @@ export async function packagesOfCommit(
       }),
     ),
   ]
+  // A package the promoted tree no longer has at that path was moved or removed since: what it is called
+  // there now cannot be told, so the task's package is not established.
+  const gone = touched.filter((dir) => !promoted.includes(dir))
+  if (gone.length > 0) {
+    throw new Error(
+      `${gone.join(', ')} is no package in the promoted tree: it was moved or removed`,
+    )
+  }
   const names: string[] = []
   for (const dir of touched) {
     const path = manifestPath(dir)

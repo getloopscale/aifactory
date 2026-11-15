@@ -15,7 +15,7 @@ import {
   type ReleasesRead,
 } from './changesets'
 import { endWithoutVersionPullRequest, type Ending } from './publication-end'
-import { shipContained, unclosedNote } from './ship'
+import { decideHolds, shipContained, unclosedNote } from './ship'
 import { classify } from './watch'
 
 export type PublishDeps = { db: Database; github: GithubApp; api: GithubApi; now?: () => Date }
@@ -168,7 +168,7 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     return
   }
   const missing = 'missing' in read ? read.missing : undefined
-  const shipped = await shipContained(deps, {
+  const shipment = {
     repository: p.repository,
     token,
     promotedSha: p.promotedSha,
@@ -179,18 +179,23 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     publishedBy: "the repository's release workflow",
     detail: { published: 'changesets' },
     missing,
-  })
+  }
+  // The holds are recorded before any task ships, so a failure part way, or a release that runs meanwhile,
+  // still finds them.
+  const held = missing ? await decideHolds(deps, shipment) : []
+  if (missing) {
+    await deps.db
+      .update(publication)
+      .set({ missing: { releases: missing, held } })
+      .where(eq(publication.id, p.id))
+  }
+  const shipped = await shipContained(deps, { ...shipment, held })
   const unclosed = unclosedNote(shipped)
   await deps.db
     .update(publication)
     .set({
       status: missing ? 'partial' : 'published',
-      missing: missing
-        ? {
-            releases: missing,
-            held: shipped.held,
-          }
-        : null,
+      missing: missing ? { releases: missing, held } : null,
       tags: tags.map((t) => t.tag),
       publishedAt: new Date(),
       detail: `${merged}published ${tags.map((t) => t.tag).join(', ')}${read.complete}${unclosed}`,

@@ -19,7 +19,7 @@ import { PRE_RELEASE_BRANCH, releaseBranchOf } from './branches'
 import { changesetsWaiting, publishedPackagesChanged } from './changed-packages'
 import { usesChangesets } from './changesets'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
-import { shipContained } from './ship'
+import { heldTasks, shipContained } from './ship'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
 
@@ -181,6 +181,11 @@ export async function release(
   if (!row) throw new ReleaseRefused(`task ${taskId} does not exist`)
   const allowed = outcome(row, 'release')
   if (allowed.kind !== 'action') throw new ReleaseRefused(allowed.reason)
+  if ((await heldTasks(deps.db, row.repository)).has(taskId)) {
+    throw new ReleaseRefused(
+      'a package that carries this work was not published: the task stays held until it is',
+    )
+  }
   // Only integrated work with a commit is released.
   const headSha = row.headSha!
   const pre = await latestPreRelease(deps.db, taskId)
