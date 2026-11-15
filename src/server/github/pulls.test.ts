@@ -607,12 +607,40 @@ describe('pull request state and merge', () => {
   }
   const noWait = async () => {}
 
+  it('merges on a second try when another merge moved the base branch a moment before', async () => {
+    const github = answering(
+      {
+        status: 405,
+        body: { message: 'Base branch was modified. Review and try the merge again.' },
+      },
+      { status: 200, body: { sha: 'merge1' } },
+    )
+
+    const merged = await createGithubApi(github.fetch, noWait).mergePullRequest(
+      'o/r',
+      't',
+      9,
+      'abc',
+      { method: 'squash', title: 'T' },
+    )
+
+    expect(merged).toEqual({ sha: 'merge1' })
+    expect(github.merges()).toBe(2)
+  })
+
+  it('gives up after a few tries and says what GitHub answered last', async () => {
+    const github = answering({ status: 405, body: { message: 'Base branch was modified.' } })
+
+    await expect(
+      createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
+        method: 'squash',
+        title: 'T',
+      }),
+    ).rejects.toThrow(/405.*Base branch was modified/)
+    expect(github.merges()).toBe(4)
+  })
+
   it.each([
-    [
-      405,
-      { message: 'Base branch was modified. Review and try the merge again.' },
-      /405.*Base branch/,
-    ],
     [502, { message: 'Bad Gateway' }, /GitHub answered 502 merging o\/r#9/],
     [500, { message: 'Server Error' }, /GitHub answered 500 merging o\/r#9/],
     [405, { message: 'Pull Request has merge conflicts' }, /405.*merge conflicts/],

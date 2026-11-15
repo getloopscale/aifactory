@@ -498,7 +498,9 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
-  it('fails as an environment failure when GitHub answers 5xx advancing the pre-release branch', async () => {
+  // A 5xx after the pull request was merged is outside this change: the work is integrated, so the run is
+  // not failed and repeated. Completing an interrupted delivery has an issue of its own.
+  it('leaves a run whose work is already merged as done when GitHub answers 5xx advancing the pre-release branch', async () => {
     const id = await seedTask()
     githubApi.fail(
       'mergeBranch',
@@ -507,16 +509,10 @@ describe('runTask', () => {
 
     const result = await runTask(deps(new FakeSandbox(changed())), id)
 
-    expect(result).toMatchObject({ status: 'failed' })
-    expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
-    const [last] = await getDb()
-      .select()
-      .from(stageEvent)
-      .where(eq(stageEvent.taskId, id))
-      .orderBy(desc(stageEvent.id))
-      .limit(1)
-    expect(last!.stage).toBe('failed')
-    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+    expect(result).toMatchObject({ status: 'done' })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('done')
+    expect(row.mergedSha).not.toBeNull()
   })
 
   it('fails as an environment failure when a GraphQL mutation answers 5xx turning on auto-merge', async () => {

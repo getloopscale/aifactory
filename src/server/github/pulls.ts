@@ -338,6 +338,16 @@ function mergeFields(number: number, merge: PullRequestMerge): Record<string, st
 const READ_ATTEMPTS = 3
 const READ_RETRY_MS = 2_000
 
+/** How many times a merge is asked for when another merge moved the base a moment before. */
+const MERGE_ATTEMPTS = 4
+const MERGE_RETRY_MS = 3_000
+
+/**
+ * GitHub refused the merge because another one moved the base between the request and the merge. Nothing
+ * was merged, so asking again is safe. A 5xx is not asked again: the merge may have happened.
+ */
+const BASE_MOVED = /base branch was modified/i
+
 /** Conclusions GitHub counts as passing for a required check. */
 const PASSING = new Set(['success', 'neutral', 'skipped'])
 
@@ -812,11 +822,23 @@ export function createGithubApi(
 
     async mergePullRequest(repo, token, number, sha, merge) {
       const body = JSON.stringify({ sha, ...mergeFields(number, merge) })
-      const response = await call(repo, token, `/pulls/${number}/merge`, { method: 'PUT', body })
-      const merged = (await (
-        await ensure(response, `merging ${repo}#${number}`, [200])
-      ).json()) as { sha: string }
-      return { sha: merged.sha }
+      for (let attempt = 1; ; attempt += 1) {
+        const response = await call(repo, token, `/pulls/${number}/merge`, { method: 'PUT', body })
+        if (response.status === 405 && attempt < MERGE_ATTEMPTS) {
+          const message = await response
+            .clone()
+            .text()
+            .catch(() => '')
+          if (BASE_MOVED.test(message)) {
+            await wait(MERGE_RETRY_MS * attempt)
+            continue
+          }
+        }
+        const merged = (await (
+          await ensure(response, `merging ${repo}#${number}`, [200])
+        ).json()) as { sha: string }
+        return { sha: merged.sha }
+      }
     },
 
     async commitChecks(repo, token, sha) {
