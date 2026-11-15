@@ -17,6 +17,8 @@ export default defineJob('run-task', {
     decisionId: z.number().int().positive().optional(),
     /** What to change when the factory itself sent the work back, as for required checks that failed. */
     feedback: z.string().max(4_000).optional(),
+    /** Continue the branch an earlier run pushed before it finished, with nothing to change. */
+    resume: z.boolean().optional(),
   }),
   // A run that fails is recorded as the `failed` stage and goes to a person. Retrying it on its
   // own would spend the agent's budget again on the same issue.
@@ -29,7 +31,7 @@ export default defineJob('run-task', {
       const [decided] = input.decisionId
         ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
         : []
-      const continuation = runContinuation(decided, input.feedback)
+      const continuation = runContinuation(decided, input.feedback, input.resume)
       const result = await runTask(deps, input.taskId, signal, continuation)
       console.log(JSON.stringify({ event: 'task_finished', taskId: input.taskId, ...result }))
     })

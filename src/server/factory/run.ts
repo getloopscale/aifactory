@@ -658,6 +658,11 @@ export class Run {
     ])
   }
 
+  private async hasNothingToCommit(): Promise<boolean> {
+    const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    return pending.stdout.trim() === ''
+  }
+
   /** Commits whatever the agent left in the checkout and pushes it. Returns the new head. */
   private async commitAndPush(message: string, detail: Record<string, unknown>): Promise<string> {
     const { deps, taskId, branch, state } = this.c
@@ -853,7 +858,8 @@ export class Run {
    */
   private async answeredWithNoChange(first: HarnessResult): Promise<RunResult | undefined> {
     const { deps, taskId, row, api, branch, continuation } = this.c
-    if (!continuation || !row.pullRequestUrl || !row.headSha) return undefined
+    // A plain continuation was asked nothing, so leaving the pull request as it is answers nothing.
+    if (!continuation || continuation.plain || !row.pullRequestUrl || !row.headSha) return undefined
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     if (pending.stdout.trim() !== '') return undefined
     if (continuation.fromChecks) return this.checksUnanswered(first)
@@ -1076,6 +1082,10 @@ export class Run {
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)
     if (resolved) return { result: resolved }
+    // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed.
+    if (this.c.continuation?.plain && (await this.hasNothingToCommit())) {
+      return { sha: this.remoteHead }
+    }
     const sha = await this.commitAndPush(this.firstMessage(), {
       costUsd: first.costUsd,
       agentSummary: first.summary.slice(0, 4_000),
