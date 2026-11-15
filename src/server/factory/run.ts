@@ -1293,7 +1293,10 @@ export class Run {
         title: this.title,
       })
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // GitHub failing is the environment's: the run fails and repeats, it is not an integration refusal.
+      if (/^GitHub answered 5\d\d\b/.test(message)) throw error
+      return { error: message }
     }
     await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
     await api.deleteBranch(row.repository, this.c.token, branch).catch(() => {})

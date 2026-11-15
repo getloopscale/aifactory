@@ -81,12 +81,17 @@ describe('a 5xx from GitHub', () => {
       })
     return { fetch, count: () => calls }
   }
-  it('asks a read again', async () => {
-    const { fetch, count } = sequence([502, 200])
-    await createGithubApi(fetch, noWait)
-      .commitChecks('o/r', 't', 'abc')
-      .catch(() => {})
-    expect(count()).toBeGreaterThan(1)
+  it('asks a read again and returns what the second answer says', async () => {
+    let calls = 0
+    const fetch = async () => {
+      calls += 1
+      return calls === 1
+        ? new Response('{"message":"Bad Gateway"}', { status: 502 })
+        : new Response(JSON.stringify({ default_branch: 'trunk' }), { status: 200 })
+    }
+    const settings = await createGithubApi(fetch, noWait).repositorySettings('o/r', 't')
+    expect(calls).toBe(2)
+    expect(JSON.stringify(settings)).toContain('trunk')
   })
 
   it('fails a read that never answers, as an environment failure', async () => {
@@ -602,64 +607,25 @@ describe('pull request state and merge', () => {
   }
   const noWait = async () => {}
 
-  it('merges on a second try when another merge moved the base branch a moment before', async () => {
-    const github = answering(
-      {
-        status: 405,
-        body: { message: 'Base branch was modified. Review and try the merge again.' },
-      },
-      { status: 200, body: { sha: 'merge1' } },
-    )
-
-    const merged = await createGithubApi(github.fetch, noWait).mergePullRequest(
-      'o/r',
-      't',
-      9,
-      'abc',
-      { method: 'squash', title: 'T' },
-    )
-
-    expect(merged).toEqual({ sha: 'merge1' })
-    expect(github.merges()).toBe(2)
-  })
-
-  it('merges on a later try when GitHub answers a server error', async () => {
-    const github = answering(
-      { status: 502, body: { message: 'Bad Gateway' } },
-      { status: 500, body: { message: 'Server Error' } },
-      { status: 200, body: { sha: 'merge1' } },
-    )
-
-    expect(
-      await createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
-        method: 'squash',
-        title: 'T',
-      }),
-    ).toEqual({ sha: 'merge1' })
-    expect(github.merges()).toBe(3)
-  })
-
-  it('gives up after a few tries and says what GitHub answered last', async () => {
-    const github = answering({ status: 405, body: { message: 'Base branch was modified.' } })
+  it.each([
+    [
+      405,
+      { message: 'Base branch was modified. Review and try the merge again.' },
+      /405.*Base branch/,
+    ],
+    [502, { message: 'Bad Gateway' }, /GitHub answered 502 merging o\/r#9/],
+    [500, { message: 'Server Error' }, /GitHub answered 500 merging o\/r#9/],
+    [405, { message: 'Pull Request has merge conflicts' }, /405.*merge conflicts/],
+    [409, { message: 'Head branch was modified' }, /409.*Head branch was modified/],
+  ])('sends the merge once when GitHub answers %i', async (status, body, message) => {
+    const github = answering({ status, body })
 
     await expect(
       createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
         method: 'squash',
         title: 'T',
       }),
-    ).rejects.toThrow(/405.*Base branch was modified/)
-    expect(github.merges()).toBe(4)
-  })
-
-  it('does not try again when the pull request has conflicts, which only new work can fix', async () => {
-    const github = answering({ status: 405, body: { message: 'Pull Request has merge conflicts' } })
-
-    await expect(
-      createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
-        method: 'squash',
-        title: 'T',
-      }),
-    ).rejects.toThrow(/405.*merge conflicts/)
+    ).rejects.toThrow(message)
     expect(github.merges()).toBe(1)
   })
 })

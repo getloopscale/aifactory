@@ -25,6 +25,7 @@ import type { GithubApp } from '../github/app'
 import type { ChangedFile, IssueComment } from '../github/pulls'
 
 import { retryableFailure } from '../../shared/panel'
+import { retryAt } from './auto-retry'
 import {
   divergedRepository,
   PLANNED_CHANGE,
@@ -452,6 +453,49 @@ describe('runTask', () => {
 
     expect(result).toMatchObject({ status: 'failed', stage: 'pr' })
     expect(await getDb().select().from(evidence).where(eq(evidence.taskId, id))).toHaveLength(1)
+  })
+
+  it('fails as an environment failure that retries when GitHub answers 502 creating the check run', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'createCheckRun',
+      new Error('GitHub answered 502 creating the check run on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    const retryable = retryableFailure(last!.detail as Record<string, unknown>)
+    expect(retryable).toBe('environment')
+    expect(
+      retryAt({ retryable, failedAt: new Date('2026-11-13T23:15:00Z'), automaticRetries: 0 }),
+    ).toEqual(new Date('2026-11-13T23:20:00Z'))
+  })
+
+  it('fails as an environment failure when GitHub answers 5xx merging the pull request', async () => {
+    const id = await seedTask()
+    githubApi.fail('mergePullRequest', new Error('GitHub answered 502 merging paulo/app#12: {}'))
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('failed')
+    expect(row.mergedSha).toBeNull()
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
   it('gives the firewall the credentials and the sandbox none of them', async () => {

@@ -8,6 +8,38 @@ const answering = (body: unknown) => async () =>
     headers: { 'content-type': 'application/json' },
   })
 
+describe('reading an issue that GitHub fails to answer', () => {
+  it('asks again after a 502 and returns the issue', async () => {
+    let calls = 0
+    const fetch = async () => {
+      calls += 1
+      return calls === 1
+        ? new Response('Bad Gateway', { status: 502 })
+        : new Response(JSON.stringify({ number: 3, title: 'T', body: 'B', state: 'open' }), {
+            status: 200,
+          })
+    }
+    const issue = await fetchIssue('o/r', 3, 'tok', fetch, async () => {})
+    expect(calls).toBe(2)
+    expect(issue).toMatchObject({ number: 3, title: 'T', state: 'open' })
+  })
+
+  it('fails with the status after the last try, and at once on a 4xx', async () => {
+    let calls = 0
+    const always = (status: number) => async () => {
+      calls += 1
+      return new Response('x', { status })
+    }
+    await expect(fetchIssue('o/r', 3, 'tok', always(502), async () => {})).rejects.toThrow(
+      /GitHub answered 502/,
+    )
+    expect(calls).toBe(3)
+    calls = 0
+    await expect(fetchIssue('o/r', 3, 'tok', always(404), async () => {})).rejects.toThrow(/404/)
+    expect(calls).toBe(1)
+  })
+})
+
 describe('reading an issue', () => {
   it('says whether it is open or closed, so a task can wait for the issues it is blocked by', async () => {
     const issue = { number: 3, title: 'T', body: null, labels: [{ name: 'factory' }] }
