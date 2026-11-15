@@ -246,8 +246,29 @@ describe('the deploy script', () => {
     expect(systemctl).toContain('systemctl --user restart aifactory.service')
   })
 
+  it('renders the tunnel unit with the installed path even when that path no longer runs', () => {
+    const { code, tunnel } = deploy({
+      cloudflared: false,
+      installedTunnel: 'ExecStart=/gone/cloudflared old\n',
+    })
+
+    expect(code).toBe(0)
+    expect(tunnel).toBe('ExecStart=/gone/cloudflared run\n')
+  })
+
+  it('renders an enabled tunnel unit with the installed path and does not stop', () => {
+    const { code, tunnel } = deploy({
+      cloudflared: false,
+      tunnelEnabled: true,
+      installedTunnel: 'ExecStart=/gone/cloudflared old\n',
+    })
+
+    expect(code).toBe(0)
+    expect(tunnel).toBe('ExecStart=/gone/cloudflared run\n')
+  })
+
   it('deploys the other units and keeps the installed tunnel unit when no cloudflared runs', () => {
-    const installed = 'ExecStart=/gone/cloudflared run\n'
+    const installed = 'ExecStart=/usr/bin/other run\n'
     const { code, tunnel, output, systemctl, root, atRestart } = deploy({
       cloudflared: false,
       installedTunnel: installed,
@@ -261,7 +282,7 @@ describe('the deploy script', () => {
   })
 
   it('stops before it writes, builds or restarts when no cloudflared runs and the tunnel is enabled', () => {
-    const installed = 'ExecStart=/gone/cloudflared run\n'
+    const installed = 'ExecStart=/usr/bin/other run\n'
     const { code, output, tunnel, pnpm, systemctl, atRestart } = deploy({
       cloudflared: false,
       tunnelEnabled: true,
