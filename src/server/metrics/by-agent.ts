@@ -19,6 +19,8 @@ export type ReviewFact = {
   model: string | null
   round: number
   verdict: 'approve' | 'changes' | 'invalid'
+  /** The reviewer approved and a guard on the diff overrode it: the stored verdict is `changes`, the reviewer's was approval. */
+  guarded?: boolean
   at: Date
 }
 
@@ -50,7 +52,7 @@ export function approvalByReviewer(
       const key = keyOf(first.reviewer, first.model)
       const t = totals.get(key) ?? { reviews: 0, approved: 0 }
       t.reviews += 1
-      if (first.verdict === 'approve') t.approved += 1
+      if (first.verdict === 'approve' || first.guarded) t.approved += 1
       totals.set(key, t)
     }
   }
@@ -238,6 +240,7 @@ async function reviewsOf(db: Database, events: EventsByTask): Promise<ReviewFact
       reviewer: r.reviewer,
       round: r.round,
       verdict: r.verdict,
+      guarded: r.guarded,
       at: r.at,
     })),
     passes,

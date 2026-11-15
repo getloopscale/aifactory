@@ -240,6 +240,13 @@ describe('reworkByReviewer', () => {
     )
   })
 
+  it('counts as approved a first review the reviewer approved and a guard overrode', () => {
+    const guarded = { ...fact(1, 'codex', 'changes', 1), guarded: true }
+    expect(approvalByReviewer([guarded], events([1, finished(0)]))).toMatchObject([
+      { reviewer: 'codex', reviews: 1, approved: 1, share: 1 },
+    ])
+  })
+
   it('leaves out of the rate a review whose rework was recorded without its trigger', () => {
     // A historical review followed by a rework with no trigger: its outcome is unknown, so it is not counted as zero.
     const reviews = [fact(1, 'codex', 'changes', 1), fact(2, 'codex', 'approve', 1)]

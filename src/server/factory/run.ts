@@ -1253,6 +1253,7 @@ export class Run {
       verdict: merged.verdict,
       summary: merged.summary,
       findings: merged.findings,
+      guarded: blocked,
     })
     return merged
   }

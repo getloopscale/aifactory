@@ -25,6 +25,7 @@ import type { GithubApp } from '../github/app'
 import type { ChangedFile, IssueComment } from '../github/pulls'
 
 import { retryableFailure } from '../../shared/panel'
+import { comparisonByAgent } from '../metrics/by-agent'
 import {
   divergedRepository,
   PLANNED_CHANGE,
@@ -1090,6 +1091,24 @@ describe('runTask review loop', () => {
     expect(seen.pulls).toEqual(['factory/7'])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row.headSha).toBe('abc123def2')
+  })
+
+  it('keeps the reviewer approval on record when a diff guard turns it into changes', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.includes('diff --name-status')
+          ? { stdout: 'M\tsrc/truncate.js\nD\tsrc/truncate.test.js\n' }
+          : undefined,
+      ),
+    )
+
+    await runTask(deps(sandbox, { reviewer: reviewerSaying(verdictJson('approve')) }), id)
+
+    const [row] = await getDb().select().from(review).where(eq(review.taskId, id))
+    expect(row).toMatchObject({ round: 1, verdict: 'changes', guarded: true })
+    const approval = (await comparisonByAgent(getDb())).approval
+    expect(approval).toMatchObject([{ reviewer: 'fake-reviewer', reviews: 1, approved: 1 }])
   })
 
   it('hands the work to a person after three reviews that all ask for changes', async () => {
