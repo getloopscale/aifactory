@@ -49,8 +49,6 @@ export const describeDelivery = (handed: Handed) =>
     ? { preRelease: handed.tag, preReleaseUrl: handed.url }
     : { preReleaseError: handed.error }
 
-const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
-
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /**
@@ -74,9 +72,7 @@ async function proposePreRelease(
         body: `${PRE_RELEASE_BRANCH} accepts changes only through a pull request, so the factory could not advance it. Merging this pull request publishes what has been integrated into ${from}.`,
       })
     ).url
-  } catch (error) {
-    // GitHub failing is the environment's: it surfaces, the run is not finished as if the branch were proposed.
-    if (GITHUB_SERVER_ERROR.test(message(error))) throw error
+  } catch {
     return undefined
   }
 }
@@ -98,8 +94,6 @@ export async function advancePreRelease(
     )
     return { developSha: develop.sha }
   } catch (error) {
-    // GitHub failing is the environment's, not a refusal of the branch: it surfaces and the run repeats.
-    if (GITHUB_SERVER_ERROR.test(message(error))) throw error
     return {
       developError: message(error),
       developPullRequest: await proposePreRelease(

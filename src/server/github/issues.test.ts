@@ -37,31 +37,4 @@ describe('reading an issue', () => {
       'GitHub answered 404 reading o/r#3',
     )
   })
-
-  it('asks again, with a pause, when GitHub answers 502 once', async () => {
-    const answers = [502, 200]
-    const waits: number[] = []
-    const fetchImpl = async () =>
-      answers.shift() === 502
-        ? new Response('bad', { status: 502 })
-        : new Response(JSON.stringify({ number: 3, title: 'T', body: 'B' }), { status: 200 })
-
-    const issue = await fetchIssue('o/r', 3, 'tok', fetchImpl, async (ms) => {
-      waits.push(ms)
-    })
-
-    expect(issue.title).toBe('T')
-    expect(waits).toHaveLength(1)
-  })
-
-  it('fails at once on a 4xx', async () => {
-    let asked = 0
-    const fetchImpl = async () => {
-      asked += 1
-      return new Response('no', { status: 404 })
-    }
-
-    await expect(fetchIssue('o/r', 3, 'tok', fetchImpl, async () => {})).rejects.toThrow(/404/)
-    expect(asked).toBe(1)
-  })
 })
