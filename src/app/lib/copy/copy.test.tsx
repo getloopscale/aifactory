@@ -32,6 +32,15 @@ describe('the dictionaries', () => {
   })
 })
 
+describe('the run limit field', () => {
+  it('has its label, help and error in both languages', () => {
+    expect(en.runLimit.label).toBe('Minutes a run may last')
+    expect(ptBR.runLimit.label).toBe('Minutos que uma execução pode durar')
+    expect(ptBR.runLimit.invalid(30, 240)).toContain('30 a 240')
+    expect(en.runLimit.invalid(30, 240)).toContain('30 to 240')
+  })
+})
+
 describe('the language', () => {
   it('is the stored one first', () => {
     vi.stubGlobal('navigator', { language: 'pt-BR' })

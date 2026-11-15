@@ -111,6 +111,29 @@ const deps = (provider: FakeSandbox, builder: CodingHarness, reviewer: CodingHar
 })
 
 describe('runCase', () => {
+  it("plans the sandbox and the agent's pass against the limits of the repository", async () => {
+    const provider = sandbox()
+    const given: number[] = []
+    const builder = agent('builder', planned(built()))
+    const run = builder.resume!
+    builder.resume = (backend, session, input) => {
+      given.push(input.timeoutMs ?? 0)
+      return run(backend, session, input)
+    }
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const MIN = 60_000
+
+    await runCase(
+      { ...deps(provider, builder, reviewer), timeouts: { sandboxMs: 150 * MIN, agentMs: 200 * MIN } },
+      evalCase,
+    )
+
+    expect(provider.specs[0]!.timeoutMs).toBe(150 * MIN)
+    // 150 minutes less the 25 kept for the checks and the review.
+    expect(given[0]).toBeLessThanOrEqual(125 * MIN)
+    expect(given[0]).toBeGreaterThan(124 * MIN)
+  })
+
   it('passes a case whose checks pass and whose review approves, with its cost and rounds', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built('done', 0.3)))

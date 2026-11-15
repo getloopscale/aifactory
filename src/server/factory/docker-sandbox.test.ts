@@ -97,6 +97,24 @@ const spec = {
 const instant = async () => {}
 
 describe('creating a docker sandbox', () => {
+  it('does not sweep a live sandbox with a longer limit than its own', async () => {
+    const created = new Date(Date.now() - 100 * 60_000)
+      .toISOString()
+      .replace('T', ' ')
+      .replace('Z', ' +0000 UTC')
+    const { docker, all } = fakeDocker((args) => {
+      const line = args.join(' ')
+      if (line.includes('{{.Names}} {{.CreatedAt}}')) return ok(`factory-sbx-long ${created}\n`)
+      return undefined
+    })
+    const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create({
+      ...spec,
+      timeoutMs: 30 * 60_000,
+    })
+    expect(all()).not.toContain('rm -f factory-sbx-long')
+    await sandbox.stop()
+  })
+
   it('makes a network with no way out, a proxy on it, and a sandbox with no capabilities', async () => {
     const { docker, all } = fakeDocker()
     const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create(spec)

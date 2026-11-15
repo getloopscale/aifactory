@@ -4356,6 +4356,41 @@ describe("a project's recipe", () => {
 })
 
 describe('runTask agent time', () => {
+  it('plans the sandbox and the agent passes against the limit saved for the repository', async () => {
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, runLimitMinutes: 150 })
+    const id = await seedTask()
+    const given: number[] = []
+    const builder: CodingHarness = {
+      ...okHarness,
+      run: async (_backend, input) => {
+        given.push(input.timeoutMs ?? 0)
+        return { ok: true, summary: 'added truncate', costUsd: 0.12 }
+      },
+    }
+    const sandbox = new FakeSandbox(changed())
+
+    await runTask(
+      deps(sandbox, { harness: builder, timeouts: { sandboxMs: 60 * MIN, agentMs: 200 * MIN } }),
+      id,
+    )
+
+    expect(sandbox.specs[0]!.timeoutMs).toBe(150 * MIN)
+    // 150 minutes, 25 kept for the checks and the review.
+    expect(given[0]).toBeLessThanOrEqual(125 * MIN)
+    expect(given[0]).toBeGreaterThan(124 * MIN)
+  })
+
+  it('uses the default limit for a repository with nothing saved', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+
+    await runTask(deps(sandbox, { timeouts: { sandboxMs: 60 * MIN, agentMs: 45 * MIN } }), id)
+
+    expect(sandbox.specs[0]!.timeoutMs).toBe(60 * MIN)
+  })
+
   const MIN = 60_000
   const timeouts = { sandboxMs: 60 * MIN, agentMs: 45 * MIN }
 

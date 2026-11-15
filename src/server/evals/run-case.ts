@@ -65,6 +65,8 @@ export type EvalDeps = {
   author: { name: string; email: string }
   /** The knowledge base every agent reads; left out, the agents work without one. */
   knowledge?: KnowledgeSource
+  /** The limits a run of the case's repository has (`resolveTimeouts`); left out, the factory's default. */
+  timeouts?: typeof DEFAULT_TIMEOUTS
 }
 
 /** A case that ended before a verdict: the agent stopped, asked something, or changed nothing. */
@@ -109,7 +111,7 @@ class CaseRun {
     return `GIT_CONFIG_GLOBAL=${GITCONFIG} git -c core.hooksPath=/dev/null -C ${this.repoDir}`
   }
   private get limits() {
-    return fitToSession(DEFAULT_TIMEOUTS, this.deps.sandbox.maxSessionMs)
+    return fitToSession(this.deps.timeouts ?? DEFAULT_TIMEOUTS, this.deps.sandbox.maxSessionMs)
   }
 
   /** Books what an agent pass cost and turns one that did not finish into the end of the case. */
@@ -344,7 +346,7 @@ async function specFor(deps: EvalDeps, c: EvalCase): Promise<SandboxSpec> {
     deps.reviewer.name === deps.builder.name ? [deps.builder] : [deps.builder, deps.reviewer]
   const agentEgress = (await Promise.all(agents.map((a) => a.egress()))).flat()
   return {
-    timeoutMs: fitToSession(DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs).sandboxMs,
+    timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs).sandboxMs,
     cacheKey: c.repository,
     egress: [
       { domain: 'github.com' },
