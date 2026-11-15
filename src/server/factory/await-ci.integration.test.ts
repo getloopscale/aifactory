@@ -592,14 +592,8 @@ describe('pollAwaitingIntegrations', () => {
     gh.attempts = { 2: 1 }
     const id = await waitingTask()
 
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
-      sentBack: [],
-      rerun: [],
-      toPerson: [id],
-    })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], rerun: [] })
     expect(gh.reruns).toEqual([])
-    expect((await row(id)).stage).toBe('handoff')
-    expect(comments()[0].body).toContain('not known whether the failure is of the work')
   })
 
   it('asks for a rerun once across passes, even while GitHub still shows the first attempt', async () => {
@@ -653,8 +647,14 @@ describe('pollAwaitingIntegrations', () => {
       .set({ ciReruns: { '1': new Date(NOW.getTime() - 20 * 60_000).toISOString() } })
       .where(eq(task.id, id))
 
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], rerun: [] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
+      sentBack: [],
+      rerun: [],
+      toPerson: [id],
+    })
     expect(gh.reruns).toEqual([])
+    expect((await row(id)).stage).toBe('handoff')
+    expect(comments()[0].body).toContain('not known whether the failure is of the work')
   })
 
   it('leaves an unrelated failed workflow alone', async () => {
