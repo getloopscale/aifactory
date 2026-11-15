@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
 
+const noWait = async () => {}
+
 type Call = { method: string; url: string; body?: unknown; auth?: string }
 
 function fakeFetch(answers: Record<string, { status: number; body?: unknown }>) {
@@ -60,6 +62,60 @@ describe('createCheckRun', () => {
         summary: 's',
       }),
     ).rejects.toThrow(/403.*nope/)
+  })
+})
+
+describe('a 5xx from GitHub', () => {
+  const check = {
+    name: 'n',
+    headSha: 'a',
+    conclusion: 'success' as const,
+    title: 't',
+    summary: 's',
+  }
+  const sequence = (statuses: number[]) => {
+    let calls = 0
+    const fetch = async () =>
+      new Response('{"message":"Server Error"}', {
+        status: statuses[Math.min(calls++, statuses.length - 1)],
+      })
+    return { fetch, count: () => calls }
+  }
+  it('asks a read again and returns what the second answer says', async () => {
+    let calls = 0
+    const fetch = async () => {
+      calls += 1
+      return calls === 1
+        ? new Response('{"message":"Bad Gateway"}', { status: 502 })
+        : new Response(JSON.stringify({ default_branch: 'trunk' }), { status: 200 })
+    }
+    const settings = await createGithubApi(fetch, noWait).repositorySettings('o/r', 't')
+    expect(calls).toBe(2)
+    expect(JSON.stringify(settings)).toContain('trunk')
+  })
+
+  it('gives up on a read that keeps failing after 3 tries and says GitHub answered 502', async () => {
+    const { fetch, count } = sequence([502])
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /GitHub answered 502/,
+    )
+    expect(count()).toBe(3)
+  })
+
+  it('never asks a write again', async () => {
+    const { fetch, count } = sequence([502, 201])
+    await expect(createGithubApi(fetch, noWait).createCheckRun('o/r', 't', check)).rejects.toThrow(
+      /GitHub answered 502 creating the check run/,
+    )
+    expect(count()).toBe(1)
+  })
+
+  it('does not ask a 4xx again', async () => {
+    const { fetch, count } = sequence([403])
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /GitHub answered 403/,
+    )
+    expect(count()).toBe(1)
   })
 })
 
@@ -572,22 +628,6 @@ describe('pull request state and merge', () => {
     expect(github.merges()).toBe(2)
   })
 
-  it('merges on a later try when GitHub answers a server error', async () => {
-    const github = answering(
-      { status: 502, body: { message: 'Bad Gateway' } },
-      { status: 500, body: { message: 'Server Error' } },
-      { status: 200, body: { sha: 'merge1' } },
-    )
-
-    expect(
-      await createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
-        method: 'squash',
-        title: 'T',
-      }),
-    ).toEqual({ sha: 'merge1' })
-    expect(github.merges()).toBe(3)
-  })
-
   it('gives up after a few tries and says what GitHub answered last', async () => {
     const github = answering({ status: 405, body: { message: 'Base branch was modified.' } })
 
@@ -600,15 +640,20 @@ describe('pull request state and merge', () => {
     expect(github.merges()).toBe(4)
   })
 
-  it('does not try again when the pull request has conflicts, which only new work can fix', async () => {
-    const github = answering({ status: 405, body: { message: 'Pull Request has merge conflicts' } })
+  it.each([
+    [502, { message: 'Bad Gateway' }, /GitHub answered 502 merging o\/r#9/],
+    [500, { message: 'Server Error' }, /GitHub answered 500 merging o\/r#9/],
+    [405, { message: 'Pull Request has merge conflicts' }, /405.*merge conflicts/],
+    [409, { message: 'Head branch was modified' }, /409.*Head branch was modified/],
+  ])('sends the merge once when GitHub answers %i', async (status, body, message) => {
+    const github = answering({ status, body })
 
     await expect(
       createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
         method: 'squash',
         title: 'T',
       }),
-    ).rejects.toThrow(/405.*merge conflicts/)
+    ).rejects.toThrow(message)
     expect(github.merges()).toBe(1)
   })
 })
@@ -753,17 +798,19 @@ describe('the branches of a repository', () => {
       'GET /commits/v1': { status: 500, body: 'boom' },
     }).fetch
 
-    await expect(createGithubApi(noCompare).branchAhead('o/r', 't', 'main', 'b')).rejects.toThrow(
-      /500/,
-    )
-    await expect(createGithubApi(noCommit).branchAhead('o/r', 't', 'main', 'b')).rejects.toThrow(
-      /500/,
-    )
+    await expect(
+      createGithubApi(noCompare, noWait).branchAhead('o/r', 't', 'main', 'b'),
+    ).rejects.toThrow(/500/)
+    await expect(
+      createGithubApi(noCommit, noWait).branchAhead('o/r', 't', 'main', 'b'),
+    ).rejects.toThrow(/500/)
   })
 
   it('fails on any other answer when reading a branch', async () => {
     const { fetch } = fakeFetch({ 'GET /git/ref/heads/x': { status: 500, body: 'boom' } })
-    await expect(createGithubApi(fetch).branchHead('o/r', 'tok', 'x')).rejects.toThrow(/500/)
+    await expect(createGithubApi(fetch, noWait).branchHead('o/r', 'tok', 'x')).rejects.toThrow(
+      /500/,
+    )
   })
 
   it('creates a branch at a commit', async () => {
@@ -1271,8 +1318,8 @@ describe('what integrating through the repository CI needs', () => {
       'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
       'POST https://api.github.com/graphql': { status: 502, body: {} },
     })
-    await expect(createGithubApi(fetch).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
-      /could not turn auto-merge off on o\/r#12: HTTP 502/,
+    await expect(createGithubApi(fetch, noWait).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
+      /GitHub answered 502 changing o\/r#12/,
     )
   })
 
@@ -1378,7 +1425,7 @@ describe('what the doctor reads of a repository', () => {
 
   it('throws when the settings cannot be read', async () => {
     const { fetch } = fakeFetch({ 'GET /': { status: 502 } })
-    await expect(createGithubApi(fetch).repositorySettings('o/r', 't')).rejects.toThrow(
+    await expect(createGithubApi(fetch, noWait).repositorySettings('o/r', 't')).rejects.toThrow(
       /GitHub answered 502 reading o\/r/,
     )
   })
@@ -1388,7 +1435,7 @@ describe('what the doctor reads of a repository', () => {
       'GET /labels/factory': { status: 200, body: { name: 'factory' } },
       'GET /labels/broken': { status: 500 },
     })
-    const api = createGithubApi(fetch)
+    const api = createGithubApi(fetch, noWait)
 
     expect(await api.labelExists('o/r', 't', 'factory')).toBe(true)
     expect(await api.labelExists('o/r', 't', 'good first issue')).toBe(false)

@@ -143,6 +143,9 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
  * needs, not by the hour a token lasts. A first build that adds a package needs more than 25 minutes, and four
  * were cut at 25 on 2026-11-11 (paulohenriquevn/aifactory#23), so a pass may take 45.
  */
+/** GitHub failing: not a refusal of the work, so the run fails and repeats. */
+const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
+
 /** The stages that end a run; a task goes through them again when a person sends it back. */
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
@@ -1304,10 +1307,18 @@ export class Run {
         title: this.title,
       })
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // GitHub failing is the environment's: the run fails and repeats, it is not an integration refusal.
+      if (GITHUB_SERVER_ERROR.test(message)) throw error
+      return { error: message }
     }
     await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
-    await api.deleteBranch(row.repository, this.c.token, branch).catch(() => {})
+    await api.deleteBranch(row.repository, this.c.token, branch).catch((error: unknown) => {
+      // GitHub failing is the environment's and surfaces; any other cleanup failure is left alone.
+      if (GITHUB_SERVER_ERROR.test(error instanceof Error ? error.message : String(error))) {
+        throw error
+      }
+    })
     const advanced = await advancePreRelease(api, {
       repository: row.repository,
       token: this.c.token,
@@ -1345,7 +1356,10 @@ export class Run {
         },
       )
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // GitHub failing is the environment's: the run fails and repeats, it is not a delivery refusal.
+      if (GITHUB_SERVER_ERROR.test(message)) throw error
+      return { error: message }
     }
   }
 

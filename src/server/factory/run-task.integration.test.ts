@@ -25,6 +25,7 @@ import type { GithubApp } from '../github/app'
 import type { ChangedFile, IssueComment } from '../github/pulls'
 
 import { retryableFailure } from '../../shared/panel'
+import { retryAt } from './auto-retry'
 import {
   divergedRepository,
   PLANNED_CHANGE,
@@ -452,6 +453,148 @@ describe('runTask', () => {
 
     expect(result).toMatchObject({ status: 'failed', stage: 'pr' })
     expect(await getDb().select().from(evidence).where(eq(evidence.taskId, id))).toHaveLength(1)
+  })
+
+  it('fails as an environment failure that retries when GitHub answers 502 creating the check run', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'createCheckRun',
+      new Error('GitHub answered 502 creating the check run on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    const retryable = retryableFailure(last!.detail as Record<string, unknown>)
+    expect(retryable).toBe('environment')
+    expect(
+      retryAt({ retryable, failedAt: new Date('2026-11-13T23:15:00Z'), automaticRetries: 0 }),
+    ).toEqual(new Date('2026-11-13T23:20:00Z'))
+  })
+
+  it('fails as an environment failure when GitHub answers 5xx merging the pull request', async () => {
+    const id = await seedTask()
+    githubApi.fail('mergePullRequest', new Error('GitHub answered 502 merging paulo/app#12: {}'))
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('failed')
+    expect(row.mergedSha).toBeNull()
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  // A 5xx after the pull request was merged is outside this change: the work is integrated, so the run is
+  // not failed and repeated. Completing an interrupted delivery has an issue of its own.
+  it('leaves a run whose work is already merged as done when GitHub answers 5xx advancing the pre-release branch', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'mergeBranch',
+      new Error('GitHub answered 502 merging into develop on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('done')
+    expect(row.mergedSha).not.toBeNull()
+  })
+
+  it('fails as an environment failure when a GraphQL mutation answers 5xx turning on auto-merge', async () => {
+    repo().required.set('workspace', ['CI'])
+    const id = await seedTask()
+    githubApi.fail(
+      'enableAutoMerge',
+      new Error('GitHub answered 502 changing paulo/app#12 through GraphQL: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  it('fails as an environment failure when GitHub answers 502 opening the pre-release pull request', async () => {
+    const id = await seedTask()
+    githubApi.fail('mergeBranch', new Error('GitHub answered 409 merging into develop: {}'), {
+      times: 1,
+    })
+    githubApi.fail(
+      'openPullRequest',
+      new Error('GitHub answered 502 opening a pull request on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  it('fails as an environment failure when GitHub answers 502 deleting the merged branch', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'deleteBranch',
+      new Error('GitHub answered 502 deleting factory/7 on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  it('fails as an environment failure when GitHub answers 5xx handing the work over', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'createRelease',
+      new Error('GitHub answered 502 creating the release on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
   it('gives the firewall the credentials and the sandbox none of them', async () => {

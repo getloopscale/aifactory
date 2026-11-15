@@ -44,9 +44,48 @@ function fakeGithub(options: { expiresInMs?: number; installationStatus?: number
 }
 
 const app = (fetch: FetchLike, extra = {}) =>
-  createGithubApp({ appId: '123', privateKey, fetch, ...extra })
+  createGithubApp({ appId: '123', privateKey, fetch, wait: async () => {}, ...extra })
 
 describe('GitHub App installation tokens', () => {
+  it('asks again, with a pause, when GitHub answers 502 looking up the installation', async () => {
+    const github = fakeGithub()
+    let failed = false
+    const waits: number[] = []
+    const fetch: FetchLike = async (url, init) => {
+      if (!failed && url.endsWith('/installation')) {
+        failed = true
+        return new Response('bad', { status: 502 })
+      }
+      return github.fetch(url, init)
+    }
+
+    const minted = await app(fetch, {
+      wait: async (ms: number) => {
+        waits.push(ms)
+      },
+    }).installationToken('paulohenriquevn/aifactory-playground')
+
+    expect(minted.token).toBeTruthy()
+    expect(waits).toHaveLength(1)
+  })
+
+  it('never asks the mint again when GitHub answers 502', async () => {
+    const github = fakeGithub()
+    let mints = 0
+    const fetch: FetchLike = async (url, init) => {
+      if (url.endsWith('/access_tokens')) {
+        mints += 1
+        return new Response('bad', { status: 502 })
+      }
+      return github.fetch(url, init)
+    }
+
+    await expect(app(fetch, { wait: async () => {} }).installationToken('o/a')).rejects.toThrow(
+      /502/,
+    )
+    expect(mints).toBe(1)
+  })
+
   it('always limits the token to the one repository it was asked for', async () => {
     const github = fakeGithub()
     await app(github.fetch).installationToken('paulohenriquevn/aifactory-playground')
@@ -502,6 +541,6 @@ describe('what an installation was granted', () => {
       'GitHub answered 502 reading the installation of o/r',
     )
     await expect(app(fetch).installationPermissions('o/r/x')).rejects.toThrow(/owner\/name/)
-    expect(urls).toHaveLength(1)
+    expect(urls).toHaveLength(3)
   })
 })

@@ -74,9 +74,23 @@ describe('readRecipe', () => {
   })
 
   it('stops the run when GitHub cannot say, instead of running without it', async () => {
-    await expect(readRecipe(REPO, 'tok', answering(502).fetchImpl)).rejects.toThrow(
+    await expect(readRecipe(REPO, 'tok', answering(502).fetchImpl, async () => {})).rejects.toThrow(
       'GitHub answered 502 reading it',
     )
+  })
+
+  it('asks again, with a pause, when GitHub answers 502 once', async () => {
+    const statuses = [502, 200]
+    const waits: number[] = []
+    const fetchImpl = async () =>
+      new Response('{"egress":["pypi.org"]}', { status: statuses.shift() })
+
+    const recipe = await readRecipe(REPO, 'tok', fetchImpl, async (ms) => {
+      waits.push(ms)
+    })
+
+    expect(recipe).toEqual({ egress: ['pypi.org'] })
+    expect(waits).toHaveLength(1)
   })
 })
 
