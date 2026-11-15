@@ -310,6 +310,8 @@ describe('pollAwaitingIntegrations', () => {
     gh.logs = {
       1308: [
         '2026-11-12T10:00:00.0000000Z ##[group]Run pnpm quality',
+        '2026-11-12T10:00:00.0000000Z shell: /usr/bin/bash -e {0}',
+        '2026-11-12T10:00:00.0000000Z ##[endgroup]',
         'error types-dont-import-runtime: packages/sdk/src/types/agent.ts → packages/sdk/src/builtin-tools.ts',
         'ERROR: "quality:depcruise" exited with 1.',
         '2026-11-12T10:00:02.0000000Z ##[error]Process completed with exit code 1.',
