@@ -133,6 +133,26 @@ describe('runPlan', () => {
     })
   })
 
+  it('records the configured planner when the agent call throws', async () => {
+    const id = await newPlan()
+    const harness = Object.assign(
+      agent(() => {
+        throw new Error('sandbox died')
+      }),
+      { model: 'gpt-6.1-terra', effort: 'low' },
+    )
+
+    await runPlan(deps(harness), id)
+
+    const [row] = await getDb().select().from(plan).where(eq(plan.id, id))
+    expect(row).toMatchObject({
+      status: 'failed',
+      agent: 'planner-agent',
+      model: 'gpt-6.1-terra',
+      effort: 'low',
+    })
+  })
+
   it('reads the integration branch, creating it and the pre-release branch when the repository has none', async () => {
     const id = await newPlan()
     const sandbox = new FakeSandbox()
