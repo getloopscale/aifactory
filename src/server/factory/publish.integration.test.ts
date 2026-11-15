@@ -431,42 +431,10 @@ describe('publishing a changesets release', () => {
       const slackIssue = await issueOf(slack)
       const told = comments().find((c) => c.issue === slackIssue)?.body ?? ''
       expect(told).toContain('@theokit/gateway-slack@0.5.1')
-      expect(told).not.toContain('@theokit/gateway-yuanbao')
-      const slackTags = (
-        await getDb().select().from(delivery).where(eq(delivery.taskId, slack))
-      ).map((d) => d.tag)
-      expect(slackTags).toEqual(['@theokit/gateway-slack@0.5.1'])
       const heldIssue = await issueOf(gateway)
       const held = comments().find((c) => c.issue === heldIssue)
       expect(held?.body).toContain('@theokit/gateway@0.16.1')
       expect(held?.body).toContain('has no release')
-    })
-
-    it('tells each issue only the packages that carry its change, and gives each task only those deliveries', async () => {
-      await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      const slack = await seedTask('done', 'slack-merge')
-      commitIn('gw-merge', 'gateway')
-      commitIn('slack-merge', 'slack')
-      releasesAre(...ALL.map(published))
-
-      await pollPublications(deps(STILL_RUNNING))
-
-      const bodyOf = async (id: number) =>
-        comments().find((c) => c.issue === issueOf_(id))?.body ?? ''
-      const issues = new Map([
-        [gateway, await issueOf(gateway)],
-        [slack, await issueOf(slack)],
-      ])
-      const issueOf_ = (id: number) => issues.get(id)
-      const tagsOf = async (id: number) =>
-        (await getDb().select().from(delivery).where(eq(delivery.taskId, id))).map((d) => d.tag)
-      expect(await tagsOf(gateway)).toEqual(['@theokit/gateway@0.16.1'])
-      expect(await tagsOf(slack)).toEqual(['@theokit/gateway-slack@0.5.1'])
-      expect(await bodyOf(gateway)).toContain('@theokit/gateway@0.16.1')
-      expect(await bodyOf(gateway)).not.toContain('gateway-slack')
-      expect(await bodyOf(slack)).toContain('@theokit/gateway-slack@0.5.1')
-      expect(await bodyOf(slack)).not.toContain('@theokit/gateway@0.16.1')
     })
 
     it('keeps the issue open when a later release carries a task of a package an earlier publication never published', async () => {
@@ -494,6 +462,49 @@ describe('publishing a changesets release', () => {
       expect(shipped.held).toEqual([`#${await issueOf(gateway)}: @theokit/gateway`])
       expect(await stageOf(gateway)).toBe('done')
       expect(closed()).not.toContain(await issueOf(gateway))
+    })
+
+    it('does not hold a task for a package a later publication publishes', async () => {
+      const asked = await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      commitIn('gw-merge', 'gateway')
+      await getDb()
+        .update(publication)
+        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'] })
+        .where(eq(publication.taskId, asked))
+
+      const shipped = await shipContained(
+        { db: getDb(), api },
+        {
+          repository: REPO,
+          token: 't',
+          promotedSha: 'promoted2',
+          releaseBranch: 'main',
+          askedTaskId: 0,
+          actor: 'human',
+          tags: [{ tag: '@theokit/gateway@0.17.0', url: 'https://example.test/g17' }],
+        },
+      )
+
+      expect(shipped.held).toEqual([])
+      expect(await stageOf(gateway)).toBe('released')
+    })
+
+    it('releases the held tasks and closes their issues when the missing release appears', async () => {
+      const asked = await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      commitIn('gw-merge', 'gateway')
+      await getDb()
+        .update(publication)
+        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'], tags: [ALL[0]] })
+        .where(eq(publication.taskId, asked))
+      releasesAre(...ALL.map(published))
+
+      await pollPublications(deps(PAST_THE_WAIT))
+
+      expect(await row()).toMatchObject({ status: 'published' })
+      expect(await stageOf(gateway)).toBe('released')
+      expect(closed()).toContain(await issueOf(gateway))
     })
 
     it('stops holding, and takes the publication as published, once the missing release appears', async () => {

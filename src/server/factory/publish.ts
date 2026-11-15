@@ -179,7 +179,6 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     publishedBy: "the repository's release workflow",
     detail: { published: 'changesets' },
     missing,
-    perPackage: true,
   })
   const unclosed = unclosedNote(shipped)
   await deps.db
@@ -277,8 +276,8 @@ export async function pollPublications(deps: PublishDeps): Promise<PublishResult
 
 /**
  * Looks again at each publication that ended with a package unpublished. When the release of every package
- * it lacked has appeared, the publication is published and stops being held against the tasks that carry
- * those packages: the next release that contains them ships them. A look that fails is recorded and tried
+ * it lacked has appeared, the tasks held for them are released and their issues closed, and the
+ * publication is published. A look that fails is recorded and tried
  * again on the next pass.
  */
 async function resolvePartials(deps: PublishDeps, result: PublishResult) {
@@ -286,17 +285,28 @@ async function resolvePartials(deps: PublishDeps, result: PublishResult) {
   for (const p of partial) {
     try {
       const { token } = await deps.github.installationToken(p.repository)
-      const out = new Set(
-        (await deps.api.releasesSince(p.repository, token, p.startedAt)).map((r) => r.tag),
-      )
-      const stillMissing = (p.missing ?? []).filter((tag) => !out.has(tag))
-      if (stillMissing.length > 0) continue
+      const out = await deps.api.releasesSince(p.repository, token, p.startedAt)
+      const late = out.filter((r) => (p.missing ?? []).includes(r.tag))
+      if (late.length < (p.missing ?? []).length) continue
+      // The held tasks ship now, with the releases that were missing; only then is the publication done.
+      const shipped = await shipContained(deps, {
+        repository: p.repository,
+        token,
+        promotedSha: p.promotedSha,
+        releaseBranch: p.releaseBranch,
+        askedTaskId: 0,
+        actor: p.actor,
+        tags: late,
+        publishedBy: "the repository's release workflow",
+        detail: { published: 'changesets' },
+        completes: p.id,
+      })
       await deps.db
         .update(publication)
         .set({
           status: 'published',
-          tags: [...(p.tags ?? []), ...(p.missing ?? [])],
-          detail: `${p.detail ?? ''}; later published ${(p.missing ?? []).join(', ')}`,
+          tags: [...(p.tags ?? []), ...late.map((r) => r.tag)],
+          detail: `${p.detail ?? ''}; later published ${late.map((r) => r.tag).join(', ')}${unclosedNote(shipped)}`,
         })
         .where(eq(publication.id, p.id))
     } catch (error) {

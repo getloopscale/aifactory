@@ -235,6 +235,18 @@ describe('packagesOfCommit', () => {
     expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual(['@theokit/ui'])
   })
 
+  it('attributes a file to a package a later commit of the promotion created', async () => {
+    const api = new FakeGithub()
+    const tree = { ...theokit, 'packages/new/src/a.ts': 'a' }
+    api
+      .repo('o/r')
+      .files('m1^', tree)
+      .files('m1', { ...tree, 'packages/new/src/a.ts': 'b' })
+      .files('promoted', { ...tree, 'packages/new/package.json': '{"name":"@theokit/new"}' })
+
+    expect(await packagesOfCommit(api, 'o/r', 't', 'm1', 'promoted')).toEqual(['@theokit/new'])
+  })
+
   it('names the root package only for files no nested package holds', async () => {
     const api = new FakeGithub()
     const tree = { ...theokit, 'packages/ui/src/a.ts': 'a', 'README.md': 'a' }

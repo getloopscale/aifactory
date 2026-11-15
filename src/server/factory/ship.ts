@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, or } from 'drizzle-orm'
+import { and, eq, isNotNull, ne, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
@@ -29,11 +29,8 @@ export type Shipment = {
    * of those packages is not released and its issue stays open.
    */
   missing?: string[]
-  /**
-   * The tags are one release per package (changesets): each task is told, and given a delivery for, the
-   * packages that carry its change, not all of them.
-   */
-  perPackage?: boolean
+  /** The partial publication this shipment completes: the releases it lacked are now out, so it holds nothing. */
+  completes?: number
 }
 
 export type Shipped = {
@@ -73,9 +70,11 @@ async function carriedPackages(
   t: typeof task.$inferSelect,
   owed: string[],
 ): Promise<Carried | undefined> {
-  if (!s.perPackage && owed.length === 0) return undefined
+  if (owed.length === 0) return undefined
   try {
-    return { names: await packagesOfCommit(api, s.repository, s.token, t.mergedSha!) }
+    return {
+      names: await packagesOfCommit(api, s.repository, s.token, t.mergedSha!, s.promotedSha),
+    }
   } catch (error) {
     return { unread: message(error) }
   }
@@ -94,13 +93,6 @@ function heldFor(carried: Carried | undefined, owed: string[]): string[] {
   return carried.names.filter((name) => missing.includes(name))
 }
 
-/** The tags of the packages that carry a task's change; all of them when none can be told apart. */
-function tagsFor(s: Shipment, carried: Carried | undefined): Shipment['tags'] {
-  if (!s.perPackage || !carried || 'unread' in carried) return s.tags
-  const own = s.tags.filter((tag) => carried.names.includes(packageOfTag(tag.tag)))
-  return own.length > 0 ? own : s.tags
-}
-
 /**
  * The releases still owed in a repository: the ones this shipment lacks and those of an earlier publication
  * that ended partly published and has not been completed, so a later release does not close their issues.
@@ -109,8 +101,19 @@ async function owedReleases(db: Database, s: Shipment): Promise<string[]> {
   const earlier = await db
     .select({ missing: publication.missing })
     .from(publication)
-    .where(and(eq(publication.repository, s.repository), eq(publication.status, 'partial')))
-  return [...new Set([...(s.missing ?? []), ...earlier.flatMap((p) => p.missing ?? [])])]
+    .where(
+      and(
+        eq(publication.repository, s.repository),
+        eq(publication.status, 'partial'),
+        ne(publication.id, s.completes ?? 0),
+      ),
+    )
+  // A package this shipment publishes is no longer owed: its release carries the promoted commit.
+  const published = new Set(s.tags.map((tag) => packageOfTag(tag.tag)))
+  const outstanding = earlier
+    .flatMap((p) => p.missing ?? [])
+    .filter((tag) => !published.has(packageOfTag(tag)))
+  return [...new Set([...(s.missing ?? []), ...outstanding])]
 }
 
 /** Tells the issue why it stays open. A failure is returned, as in `announce`. */
@@ -162,15 +165,7 @@ async function belongs(
   const known = await deps.db
     .select({ id: delivery.id })
     .from(delivery)
-    .where(
-      and(
-        eq(delivery.taskId, t.id),
-        inArray(
-          delivery.tag,
-          s.tags.map((tag) => tag.tag),
-        ),
-      ),
-    )
+    .where(and(eq(delivery.taskId, t.id), eq(delivery.tag, s.tags[0].tag)))
   if (known.length > 0) return false
   if (t.id === s.askedTaskId) return true
   return deps.api.contains(s.repository, s.token, s.promotedSha, t.mergedSha!)
@@ -209,9 +204,8 @@ export async function shipContained(
       if (error) shipped.issueErrors.push(error)
       continue
     }
-    const own = { ...s, tags: tagsFor(s, carried) }
     await deps.db.insert(delivery).values(
-      own.tags.map((tag) => ({
+      s.tags.map((tag) => ({
         taskId: t.id,
         kind: 'release' as const,
         tag: tag.tag,
@@ -220,11 +214,11 @@ export async function shipContained(
         actor: s.actor,
       })),
     )
-    const issueError = await announce(deps.api, own, t.issueNumber)
+    const issueError = await announce(deps.api, s, t.issueNumber)
     await enterStage(deps.db, t.id, 'released', {
       actor: s.actor,
-      tag: own.tags.map((tag) => tag.tag).join(', '),
-      url: own.tags[0].url,
+      tag: s.tags.map((tag) => tag.tag).join(', '),
+      url: s.tags[0].url,
       mergeSha: s.promotedSha,
       ...s.detail,
       ...(issueError ? { issueError } : {}),

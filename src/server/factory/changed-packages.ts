@@ -111,9 +111,16 @@ export async function packagesOfCommit(
   repo: string,
   token: string,
   sha: string,
+  layout: string = sha,
 ): Promise<string[]> {
   const files = touchedPaths(await api.changedFiles(repo, token, `${sha}^`, sha))
-  const dirs = packageDirs(await api.filePaths(repo, token, sha))
+  // The packages of the commit and of the promoted tree (`layout`): a later task may have created or moved one.
+  const dirs = [
+    ...new Set([
+      ...packageDirs(await api.filePaths(repo, token, sha)),
+      ...packageDirs(layout === sha ? [] : await api.filePaths(repo, token, layout)),
+    ]),
+  ]
   // A file belongs to the innermost package that holds it, so a nested package's change is not the root's.
   const touched = [
     ...new Set(
@@ -125,7 +132,11 @@ export async function packagesOfCommit(
   ]
   const names: string[] = []
   for (const dir of touched) {
-    const { name } = parseManifest(await mustRead(api, repo, token, manifestPath(dir), sha), dir)
+    const path = manifestPath(dir)
+    const text =
+      (await api.readFile(repo, token, path, layout)) ??
+      (await mustRead(api, repo, token, path, sha))
+    const { name } = parseManifest(text, dir)
     if (name !== undefined) names.push(name)
   }
   return names
