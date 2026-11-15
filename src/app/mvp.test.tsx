@@ -56,9 +56,13 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       baseBranch: null,
       releaseBranch: null,
       askQuestions: true,
+      runLimitMinutes: null,
       harness: 'codex',
       reviewer: null,
       releaseMode: 'trial',
+      checksProvenSha: null,
+      unprovenChecks: [],
+      checksProof: null,
     },
     {
       fullName: 'paulo/other',
@@ -74,6 +78,10 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       harness: null,
       reviewer: null,
       releaseMode: null,
+      runLimitMinutes: null,
+      checksProvenSha: null,
+      unprovenChecks: [],
+      checksProof: null,
     },
   ],
   agents: ['claude-code', 'codex'],
@@ -362,6 +370,7 @@ describe('repositories', () => {
       harness: 'codex',
       reviewer: 'claude-code',
       releaseMode: null,
+      runLimitMinutes: null,
     })
   })
 

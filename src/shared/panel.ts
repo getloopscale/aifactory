@@ -1,8 +1,11 @@
+import type { DoctorSay } from './doctor-say'
+
 /** What the panel's API returns. The server builds these, the interface reads them. */
 
 export type Stage =
   | 'intake'
   | 'sandbox'
+  | 'plan'
   | 'build'
   | 'push'
   | 'verify'
@@ -13,10 +16,11 @@ export type Stage =
   | 'released'
   | 'handoff'
   | 'failed'
+  | 'cancelled'
 
 /** Where a stage sits on the board. */
 export type Column =
-  'queued' | 'working' | 'waiting' | 'retrying' | 'review' | 'released' | 'attention'
+  'queued' | 'working' | 'waiting' | 'retrying' | 'review' | 'released' | 'resolved' | 'attention'
 
 export const COLUMNS: { id: Column; title: string }[] = [
   { id: 'queued', title: 'Queued' },
@@ -25,18 +29,20 @@ export const COLUMNS: { id: Column; title: string }[] = [
   { id: 'retrying', title: 'Will retry itself' },
   { id: 'review', title: 'Delivered' },
   { id: 'released', title: 'Released' },
+  { id: 'resolved', title: 'Already resolved' },
   { id: 'attention', title: 'Needs a person' },
 ]
 
 /**
- * Why a failed task is not waiting for a person: the agent's usage limit, or the environment (GitHub, the
- * network, the sandbox, a restart). Both pass, and the factory runs the task again once they have. A failure
- * of the work itself is neither, and stays with a person.
+ * Why a failed task is not waiting for a person: the agent's usage limit, the environment (GitHub, the
+ * network, the sandbox, a restart), or an issue it is blocked by that is still open. Each passes, and the
+ * factory runs the task again once it has. A failure of the work itself is none of them, and stays with a
+ * person.
  */
-export type Retryable = 'quota' | 'environment' | null
+export type Retryable = 'quota' | 'environment' | 'blocked' | null
 
 const ENVIRONMENT =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|timed out after \d+ ms|clone failed/i
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
 
 /**
  * An agent that used all the time a run gives it. Nothing around it failed: a new run of the same issue on
@@ -50,12 +56,27 @@ const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
 export function retryableFailure(detail: Record<string, unknown> | null | undefined): Retryable {
   if (!detail) return null
   if (detail.quota === true) return 'quota'
+  if (Array.isArray(detail.blockedBy) && detail.blockedBy.length > 0) return 'blocked'
   if (typeof detail.error !== 'string' || AGENT_OUT_OF_TIME.test(detail.error)) return null
   return ENVIRONMENT.test(detail.error) ? 'environment' : null
 }
 
-export function columnOf(stage: Stage, retryable: Retryable = null): Column {
+/** What a done task left behind, which decides whether a release still has something to carry. */
+export type DoneOutcome = { resolved?: boolean; integrated?: boolean }
+
+/**
+ * Delivered means waiting for a release. A done task resolved with no change (the code already did what
+ * the issue asks, or a person resolved it another way) has nothing merged for a release to carry, so it
+ * goes to its own column until its resolving commit is on the release branch, when it becomes `released`
+ * (`factory/resolved-release.ts`).
+ */
+export function columnOf(
+  stage: Stage,
+  retryable: Retryable = null,
+  { resolved = false, integrated = false }: DoneOutcome = {},
+): Column {
   if (stage === 'failed' && retryable) return 'retrying'
+  if (stage === 'done' && resolved && !integrated) return 'resolved'
   switch (stage) {
     case 'intake':
       return 'queued'
@@ -67,6 +88,8 @@ export function columnOf(stage: Stage, retryable: Retryable = null): Column {
       return 'released'
     case 'handoff':
     case 'failed':
+    // Nothing enters it yet. Until something does and says where it belongs, a person sees it.
+    case 'cancelled':
       return 'attention'
     default:
       return 'working'
@@ -98,8 +121,14 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'reviewer'
+  role: 'builder' | 'planner' | 'reviewer'
   harness: string
+  /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
+  model: string | null
+  effort: string | null
+  /** Null for an agent that reports no tokens. */
+  tokensIn: number | null
+  tokensOut: number | null
   attempt: number
   /** Empty for an agent that does not report a cost. */
   costUsd: number | null
@@ -123,7 +152,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'reviewer'
+  role: 'builder' | 'planner' | 'reviewer'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -132,6 +161,46 @@ export type CostGroup = {
   failed: number
   quota: number
 }
+
+/**
+ * Where an indicator's latest day stands: no baseline yet, inside its band, or the strongest tier of the
+ * rules it broke (`log`, `show`, `act`).
+ */
+export type MetricBand = 'no_baseline' | 'in_band' | 'log' | 'show' | 'act'
+
+/** The latest day of one indicator for one repository, or for all of them when `repository` is `*`. */
+export type MetricRow = {
+  metric: string
+  label: string
+  unit: 'share' | 'count' | 'minutes' | 'hours' | 'usd'
+  worse: 'up' | 'down'
+  repository: string
+  day: string
+  value: number
+  samples: number
+  /** The baseline, when there are enough days before the latest ones to make one. */
+  mean: number | null
+  sd: number | null
+  band: MetricBand
+  rules: string[]
+}
+
+/** A rule an indicator broke that the owner should see: shown on the panel, or filed as an issue. */
+export type MetricSignalView = {
+  metric: string
+  label: string
+  repository: string
+  day: string
+  rule: string
+  tier: 'show' | 'act'
+  value: number
+  mean: number
+  sd: number
+  issueUrl: string | null
+  error: string | null
+}
+
+export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
 
 export type HealthReport = {
   cost: {
@@ -166,6 +235,11 @@ export type TaskCard = {
   /** The pull request was merged into the integration branch, so it is on the pre-release branch too. */
   integrated: boolean
   /**
+   * The pull request waits for the integration branch's required checks: GitHub merges it once they pass,
+   * and the factory finishes the integration then. It is not a merge GitHub refused.
+   */
+  waitingForChecks: boolean
+  /**
    * Delivered without a pull request: the agent changed nothing, the checks passed at the commit and the
    * reviewer confirmed the code already does what the issue asks. The factory closed the issue.
    */
@@ -179,6 +253,21 @@ export type TaskCard = {
   release: { tag: string; url: string } | null
   /** The default branch went red after this task's release and nobody has dealt with it yet. */
   mainRed: boolean
+  /**
+   * A release of this task that waits for the release branch's required checks, or the last one that was
+   * refused, while the task is not released. Null when none waited, or once one merged.
+   */
+  releaseWait: ReleaseWaitView | null
+}
+
+/** A release that waits for the release branch's required checks, or why it did not happen. */
+export type ReleaseWaitView = {
+  status: 'waiting' | 'refused'
+  pullRequestUrl: string
+  /** The checks the release branch required when the release was asked for. */
+  checks: string[]
+  /** Why a refused release did not happen. */
+  reason: string | null
 }
 
 export type TimelineEvent = {
@@ -212,6 +301,19 @@ export type ReviewView = {
   at: string
 }
 
+/** A plan the builder wrote before it changed anything; the latest one is what the reviewer measured by. */
+export type ChangePlanView = {
+  id: number
+  baseSha: string
+  harness: string
+  files: { path: string; why: string }[]
+  order: string[]
+  risks: string[]
+  proof: string[]
+  outOfScope: string[]
+  at: string
+}
+
 export type QuestionView = {
   id: number
   body: string
@@ -234,6 +336,8 @@ export type TaskDetail = {
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
   reviews: ReviewView[]
+  /** Oldest first. */
+  plans: ChangePlanView[]
   questions: QuestionView[]
   decisions: DecisionView[]
   deliveries: DeliveryView[]
@@ -288,6 +392,58 @@ export type RepositoryView = {
   harness: string | null
   reviewer: string | null
   releaseMode: 'manual' | 'trial' | 'auto' | null
+  /** How long a run may last, in minutes; null means the factory's default. */
+  runLimitMinutes: number | null
+  /** The commit of the integration branch the proven checks passed on; null when none was proven. */
+  checksProvenSha: string | null
+  /** The names of the saved checks that no proof ran: the owner typed them, and the first task tries them. */
+  unprovenChecks: string[]
+  /** The last proof of proposed checks, running or finished; null when none was asked for. */
+  checksProof: ChecksProof | null
+}
+
+/**
+ * How one proposed check did on the head of the integration branch. `too_slow` is a check that was still
+ * running at its time limit: it did not fail, and no run could wait for it either.
+ */
+export type ProvenCheck = {
+  name: string
+  command: string
+  status: 'passed' | 'failed' | 'too_slow'
+  exitCode: number
+  durationMs: number
+  /** The tail of what the command printed. */
+  output: string
+}
+
+/**
+ * One proof of proposed checks, from the request to its end. `proving` has no results yet; `done` has one
+ * for each check, and `saved` names the ones that passed and were stored; `failed` is a proof that could
+ * not run (no sandbox, no clone), with the reason.
+ */
+export type ChecksProof = {
+  fullName: string
+  status: 'proving' | 'done' | 'failed'
+  /** When it was asked for. */
+  at: string
+  /** What was proposed. */
+  checks: { name: string; command: string }[]
+  /** The commit the checks ran on; null until the sandbox has the repository. */
+  sha: string | null
+  /** How long one check may take in a run, which is what `too_slow` was measured against. */
+  limitMs: number
+  results: ProvenCheck[]
+  saved: string[]
+  error: string | null
+}
+
+/** What saving a repository answers with. */
+export type RepositorySaved = {
+  fullName: string
+  /** The doctor's report, when the save enabled the repository. */
+  doctor?: DoctorReport
+  /** The names of the saved checks that no proof ran. */
+  unprovenChecks: string[]
 }
 
 /** A project's `.factory/setup.json` on its default branch, and which of its domains wait for the owner. */
@@ -303,6 +459,50 @@ export type RecipeView = {
   approved: string[]
   /** Why the recipe cannot be used; a run fails with the same reason. */
   problem: string | null
+}
+
+/** One diagnosis of the repository doctor. */
+export type DoctorItemId =
+  | 'issues_disabled'
+  | 'app_access'
+  | 'app_events'
+  | 'branches'
+  | 'label'
+  | 'auto_merge'
+  | 'ci_silent'
+  | 'checks_parity'
+  | 'publish_mode'
+  | 'recipe'
+  | 'sandbox'
+
+/**
+ * What the doctor found about one thing a repository needs. `blocked` stops work, `warn` does not, and
+ * `unknown` is something the doctor could not read: its cause says what it tried, and it is never `ok`.
+ */
+export type DoctorItem = {
+  id: DoctorItemId
+  status: 'ok' | 'warn' | 'blocked' | 'unknown'
+  /** What is wrong, or what was found to be fine, in one sentence. */
+  cause: string
+  /** The exact repair; empty when there is nothing to repair. */
+  repair: string
+  /** Where the repair is made: a page on GitHub, or a path of the panel. */
+  link?: string
+  /** Whether the factory can make the repair itself. */
+  canRepair: boolean
+  /** The code and values of the two sentences, for an item that is not fine: the panel translates from it. */
+  say?: DoctorSay
+}
+
+/** How a repository publishes a release: its own changesets workflow, a workflow that runs on a tag, or nothing. */
+export type PublishMode = 'changesets' | 'tag' | 'none'
+
+/** The last examination of a repository. `publishMode` is null when it could not be read. */
+export type DoctorReport = {
+  fullName: string
+  at: string
+  items: DoctorItem[]
+  publishMode: PublishMode | null
 }
 
 export type RepositoriesView = {
@@ -449,6 +649,17 @@ export type AgentSettings = {
   repositoriesWithOwn: { repository: string; builder: string | null; reviewer: string | null }[]
 }
 
+/** One change of the agent settings: what a role had, what it has now, and when. A null is the default. */
+export type AgentSettingChange = {
+  id: number
+  role: AgentRole
+  field: 'engine' | 'model' | 'effort'
+  oldValue: string | null
+  newValue: string | null
+  actor: string
+  at: string
+}
+
 /** A model a coding agent can be told to use, and the effort levels it takes. */
 export type ModelOption = {
   id: string
@@ -485,3 +696,10 @@ export type CodexConnection = {
     { connected: false; problem?: string } | { connected: true; email?: string; plan?: string }
   login: CodexLoginState
 }
+
+/**
+ * The least and the most minutes an owner may give a run in a repository. The form and the server both
+ * validate against them; `factory/run-limit.ts` says where the least comes from.
+ */
+export const MIN_RUN_MINUTES = 50
+export const MAX_RUN_MINUTES = 240

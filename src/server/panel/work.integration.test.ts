@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
@@ -11,9 +11,12 @@ import type { IssuesApi, NewIssue } from '../github/issues-api'
 
 import { writeKnowledgeConfig } from '../knowledge/store'
 
-import { FakeBranches } from '../../test/fake-branches'
+import { FakeGithub } from '../../test/fake-github'
+import { GET } from '../routes/panel/repositories'
+import { PUT } from '../routes/panel/repositories/[owner]/[name]'
 
 import { ActionRefused } from './actions'
+import { repositoryDoctor } from './doctor'
 import {
   createJob,
   createPlan,
@@ -27,12 +30,18 @@ import {
   type WorkDeps,
 } from './work'
 
+// The routes build their dependencies from the environment; here they get this suite's fakes.
+vi.mock('./deps', async (original) => ({
+  ...(await original<typeof import('./deps')>()),
+  workDeps: () => deps(),
+}))
+
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
 })
 beforeEach(async () => {
-  branches = new FakeBranches()
+  api = new FakeGithub()
   await getPool().query('truncate table plan_item, plan, repository restart identity cascade')
   world.reachable = [
     { fullName: 'Paulo/App', private: true, defaultBranch: 'main' },
@@ -93,11 +102,16 @@ const issues: IssuesApi = {
   },
 }
 
-let branches = new FakeBranches()
+let api = new FakeGithub()
+const repo = () => api.repo('paulo/app')
+/** The branches `createBranch` made, in order. */
+const created = () => api.answered('createBranch').map(([branch]) => branch)
 
 const deps = (): WorkDeps => ({
   db: getDb(),
-  api: branches.api,
+  api,
+  diagnose: (fullName) =>
+    repositoryDoctor({ db: getDb(), github: api.appClient(), api, issues: api }, fullName),
   github: {
     async installationToken(repo) {
       world.tokens.push(repo)
@@ -156,7 +170,7 @@ describe('the repositories page', () => {
   })
 
   it('enables a repository under the name GitHub gives it, whatever case was asked for', async () => {
-    expect(await saveRepository(deps(), 'paulo/app', { enabled: true })).toEqual({
+    expect(await saveRepository(deps(), 'paulo/app', { enabled: true })).toMatchObject({
       fullName: 'Paulo/App',
     })
     const view = await listRepositories(deps())
@@ -164,6 +178,45 @@ describe('the repositories page', () => {
     expect(await getDb().select().from(repository)).toMatchObject([
       { fullName: 'Paulo/App', enabled: true },
     ])
+  })
+
+  it('runs the doctor on a repository it enables, answers with the report and keeps it', async () => {
+    const { doctor } = await saveRepository(deps(), 'paulo/app', { enabled: true })
+
+    expect(doctor?.fullName).toBe('Paulo/App')
+    expect(doctor?.items.find((i) => i.id === 'branches')?.status).toBe('ok')
+    expect((await getDb().select().from(repository))[0].doctor).toEqual(doctor)
+  })
+
+  it('enables a repository the doctor finds blocked, and shows what blocks it', async () => {
+    repo().hasIssues = false
+
+    const { doctor } = await saveRepository(deps(), 'paulo/app', { enabled: true })
+
+    expect(doctor?.items.find((i) => i.id === 'issues_disabled')).toMatchObject({
+      status: 'blocked',
+      link: 'https://github.com/Paulo/App/settings',
+    })
+    expect(await getDb().select().from(repository)).toMatchObject([
+      { fullName: 'Paulo/App', enabled: true },
+    ])
+  })
+
+  it('does not run the doctor on a save that enables nothing', async () => {
+    await enable()
+    const examined = () => api.callsTo('repositorySettings').length
+    const before = examined()
+
+    expect(await saveRepository(deps(), 'paulo/app', { harness: 'codex' })).toEqual({
+      fullName: 'Paulo/App',
+      unprovenChecks: [],
+    })
+    expect(await saveRepository(deps(), 'paulo/app', { enabled: false })).toEqual({
+      fullName: 'Paulo/App',
+      unprovenChecks: [],
+    })
+    expect(before).toBe(1)
+    expect(examined()).toBe(1)
   })
 
   it('refuses to enable a repository the App does not reach', async () => {
@@ -180,7 +233,7 @@ describe('the repositories page', () => {
         /Paulo\/App is the knowledge base of the factory; its rules change only through a pull request the owner merges/,
       )
       expect(await getDb().select().from(repository)).toEqual([])
-      expect(branches.created).toEqual([])
+      expect(created()).toEqual([])
     } finally {
       await writeKnowledgeConfig(getDb(), null)
     }
@@ -253,18 +306,157 @@ describe('the repositories page', () => {
     })
   })
 
+  describe('the run limit through the settings endpoints', () => {
+    // The route as the server runs it: the body is parsed by the schema the route declares, and the handler
+    // answers with a Response or the value it returns.
+    type Call = (ctx: { params: unknown; body: unknown }) => Promise<unknown>
+    const put = async (body: unknown) => {
+      const parsed = PUT.body!.safeParse(body)
+      if (!parsed.success) return { status: 400 }
+      const out = (await (PUT.handler as unknown as Call)({
+        params: PUT.params!.parse({ owner: 'paulo', name: 'app' }),
+        body: parsed.data,
+      })) as Response | object
+      return out instanceof Response ? { status: out.status } : { status: 200 }
+    }
+    const listed = async () => {
+      const view = (await (GET.handler as unknown as Call)({ params: {}, body: {} })) as {
+        repositories: { fullName: string; runLimitMinutes: number | null }[]
+      }
+      return view.repositories.find((r) => r.fullName === 'Paulo/App')?.runLimitMinutes
+    }
+
+    it('saves, reads back, refuses a value out of range, and clears with null', async () => {
+      await enable()
+      expect(await put({ runLimitMinutes: 150 })).toEqual({ status: 200 })
+      expect(await listed()).toBe(150)
+
+      expect(await put({ runLimitMinutes: 5 })).toEqual({ status: 400 })
+      expect(await put({ runLimitMinutes: 241 })).toEqual({ status: 400 })
+      expect(await put({ runLimitMinutes: 90.5 })).toEqual({ status: 400 })
+      expect(await listed()).toBe(150)
+
+      expect(await put({ runLimitMinutes: null })).toEqual({ status: 200 })
+      expect(await listed()).toBeNull()
+      const [row] = await getDb().select().from(repository)
+      expect(row?.runLimitMinutes).toBeNull()
+    })
+  })
+
   it('creates the integration and pre-release branches when a repository is enabled, and touches none that exist', async () => {
     await enable()
-    expect(branches.created).toEqual(['workspace', 'develop'])
+    expect(created()).toEqual(['workspace', 'develop'])
 
-    branches = FakeBranches.prepared()
+    api = new FakeGithub()
+    repo().prepare()
     await saveRepository(deps(), 'paulo/app', { harness: 'codex' })
-    expect(branches.created).toEqual([])
+    expect(created()).toEqual([])
+  })
+
+  describe('checks the owner types', () => {
+    const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+    const LINT = { name: 'lint', command: 'npm run lint' }
+    const UNIT = { name: 'unit', command: 'pnpm test' }
+    const passed = (check: typeof LINT) => ({
+      ...check,
+      status: 'passed' as const,
+      exitCode: 0,
+      durationMs: 5,
+      output: '',
+    })
+    /** A repository whose two checks a proof ran and saved. */
+    const proven = async () => {
+      await saveRepository(deps(), 'paulo/app', { checks: [LINT, UNIT] })
+      await getDb()
+        .update(repository)
+        .set({ checksProvenSha: SHA, checksProven: [passed(LINT), passed(UNIT)] })
+    }
+    const listed = async () => (await listRepositories(deps())).repositories[0]
+
+    it('are saved as typed, and the answer names each as not proven', async () => {
+      const answer = await saveRepository(deps(), 'paulo/app', {
+        checks: [LINT, { name: 'unit', command: ' pnpm test ' }],
+      })
+
+      expect(answer).toEqual({ fullName: 'Paulo/App', unprovenChecks: ['lint', 'unit'] })
+      const [row] = await getDb().select().from(repository)
+      expect(row).toMatchObject({ checks: [LINT, UNIT], checksProvenSha: null, checksProven: [] })
+      expect(await listed()).toMatchObject({
+        checks: [LINT, UNIT],
+        checksProvenSha: null,
+        unprovenChecks: ['lint', 'unit'],
+        checksProof: null,
+      })
+    })
+
+    it('stay proven when the form sends them back as they were', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', {
+        checks: [LINT, UNIT],
+        harness: 'codex',
+      })
+
+      expect(answer.unprovenChecks).toEqual([])
+      expect(await listed()).toMatchObject({ checksProvenSha: SHA, unprovenChecks: [] })
+    })
+
+    it('lose the proof of the one the owner changed, and keep the others', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', {
+        checks: [LINT, { name: 'unit', command: 'pnpm test --all' }],
+      })
+
+      expect(answer.unprovenChecks).toEqual(['unit'])
+      const [row] = await getDb().select().from(repository)
+      expect(row.checksProvenSha).toBe(SHA)
+      expect(row.checksProven.map((c) => c.name)).toEqual(['lint'])
+    })
+
+    it('keep their proof through a save that says nothing about checks', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', { askQuestions: false })
+
+      expect(answer.unprovenChecks).toEqual([])
+      const [row] = await getDb().select().from(repository)
+      expect(row).toMatchObject({ checksProvenSha: SHA, checks: [LINT, UNIT] })
+      expect(row.checksProven).toHaveLength(2)
+    })
+
+    it('forget the proof when the owner clears them', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', { checks: null })
+
+      expect(answer.unprovenChecks).toEqual([])
+      const [row] = await getDb().select().from(repository)
+      expect(row).toMatchObject({ checks: null, checksProvenSha: null, checksProven: [] })
+    })
+
+    it('are listed with the last proof, and one whose job died is shown as failed', async () => {
+      await proven()
+      const proof = {
+        fullName: 'Paulo/App',
+        status: 'proving' as const,
+        at: '2026-11-01T00:00:00.000Z',
+        checks: [LINT],
+        sha: null,
+        limitMs: 900_000,
+        results: [],
+        saved: [],
+        error: null,
+      }
+      await getDb().update(repository).set({ checksProof: proof })
+
+      expect((await listed()).checksProof).toMatchObject({ status: 'failed', checks: [LINT] })
+    })
   })
 
   it('does not prepare a repository that stays disabled', async () => {
     await saveRepository(deps(), 'paulo/app', { checks: [{ name: 'unit', command: 'pnpm test' }] })
-    expect(branches.created).toEqual([])
+    expect(created()).toEqual([])
   })
 
   it('refuses to enable a repository whose branches cannot be prepared, and saves nothing', async () => {
@@ -272,7 +464,7 @@ describe('the repositories page', () => {
       saveRepository(deps(), 'paulo/app', { enabled: true, baseBranch: 'main' }),
     ).rejects.toThrow(/could not be prepared.*only a release reaches/)
     expect(await getDb().select().from(repository)).toEqual([])
-    expect(branches.created).toEqual([])
+    expect(created()).toEqual([])
   })
 
   it('saves the branch the work starts from, shows it, and goes back to the default with null', async () => {
@@ -297,9 +489,9 @@ describe('the repositories page', () => {
   })
 
   it('saves the release branch, prepares the repository from it, and clears it with null', async () => {
-    branches.defaultName = 'develop'
-    branches.heads.set('develop', 'd'.repeat(40))
-    branches.heads.set('main', 'e'.repeat(40))
+    repo().defaultBranch = 'develop'
+    repo().heads.set('develop', 'd'.repeat(40))
+    repo().heads.set('main', 'e'.repeat(40))
     await expect(saveRepository(deps(), 'paulo/app', { enabled: true })).rejects.toThrow(
       /default branch is develop.*name another release branch/,
     )
@@ -307,7 +499,7 @@ describe('the repositories page', () => {
     await saveRepository(deps(), 'paulo/app', { enabled: true, releaseBranch: 'main' })
     const [row] = await getDb().select().from(repository)
     expect(row.releaseBranch).toBe('main')
-    expect(branches.heads.get('workspace')).toBe('e'.repeat(40))
+    expect(repo().heads.get('workspace')).toBe('e'.repeat(40))
     const view = await listRepositories(deps())
     expect(view.repositories.find((r) => r.fullName === 'Paulo/App')?.releaseBranch).toBe('main')
 

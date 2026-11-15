@@ -29,7 +29,8 @@ com o token de `FACTORY_PANEL_TOKEN`.
 1. A página Setup mostra o que falta e leva à página que conserta.
 2. Em Repositories, o botão "Install on GitHub" abre o GitHub, onde você escolhe a conta ou a
    organização e o que a App alcança, e o painel percebe quando a instalação termina. Habilite os repositórios em que a fábrica pode trabalhar e ajuste os checks, os
-   domínios e os agentes de cada um.
+   domínios e os agentes de cada um. Ao habilitar, o doctor examina o repositório e diz o que bloqueia
+   (Issues desligadas, CI mudo, um check exigido sem par na fábrica), com o reparo e o link.
 3. Em Plans, escreva o objetivo, revise as issues que o agente propõe e crie-as (já iniciadas ou não).
 4. O botão New job no quadro abre uma issue avulsa.
 5. Acompanhe no quadro, aprove, peça mudanças e faça o release.
@@ -62,6 +63,11 @@ repositórios em que está instalada, com o secret de `GITHUB_WEBHOOK_SECRET`; s
 repositório um webhook de eventos `Issues`, com conteúdo `application/json` e o mesmo secret.
 
 - Uma issue que recebe a label `factory`, ou que é aberta com ela, vira uma task em `intake`.
+- Um comentário (`issue_comment`, `pull_request_review_comment`), um review enviado
+  (`pull_request_review`), um check concluído (`check_suite`, `check_run`) e uma issue fechada,
+  reaberta ou que perde a label `factory` são reconhecidos e gravados com o resultado `routed` e
+  um código próprio. Por enquanto nada age sobre eles: não criam task nem job. A App precisa
+  assinar esses eventos para recebê-los, e a página Setup diz quais faltam.
 - Cada entrega fica em `ingress`, com o resultado, um código e o motivo. Uma entrega repetida
   (mesmo `X-GitHub-Delivery`) não muda nada. Uma issue tem no máximo uma task, mesmo que a label
   seja removida e posta de novo.

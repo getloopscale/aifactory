@@ -174,6 +174,7 @@ describe('what the guides read', () => {
           harness: null,
           reviewer: null,
           releaseMode: null,
+          runLimitMinutes: null,
         },
         {
           fullName: 'o/b',

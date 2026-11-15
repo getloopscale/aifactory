@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
@@ -7,6 +7,7 @@ import { integrationBranch } from '../factory/branches'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
+import { outcome, stagesWhere, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
 export class ActionRefused extends Error {
@@ -28,60 +29,138 @@ export type ActionDeps = {
   inTransaction: <T>(
     work: (
       tx: Database,
-      enqueueRun: (input: { taskId: number; decisionId?: number }, key: string) => Promise<void>,
+      enqueueRun: (
+        input: { taskId: number; decisionId?: number; feedback?: string; resume?: boolean },
+        key: string,
+      ) => Promise<void>,
     ) => Promise<T>,
   ) => Promise<T>
 }
 
 const NOTE_MAX = 4_000
 
-/** The stages a run is in while it works, or waits to be picked up. */
-const STUCK_STAGES = ['intake', 'sandbox', 'build', 'push', 'verify', 'review', 'pr']
-
 /**
  * Moves a task from one of `from` to `intake` and records why, in one transaction with the decision
  * and the queued run. The stage is checked and changed by the same statement, so a double click
- * cannot queue two runs.
+ * cannot queue two runs. A task that runs again is not resolved any more: what the new run finds decides.
  */
 async function requeue(
   deps: ActionDeps,
   taskId: number,
   from: string[],
-  kind: 'request_changes' | 'retry' | 'automatic_retry',
+  kind: 'request_changes' | 'retry' | 'automatic_retry' | 'automatic_changes',
   note: string,
   sha: string | null,
+  rework?: Rework,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
+    // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
     const moved = await tx
       .update(task)
-      .set({ stage: 'intake' })
+      .set({ stage: 'intake', awaitingCiSha: null, resolvedSha: null })
       .where(and(eq(task.id, taskId), inArray(task.stage, from as never)))
       .returning({ id: task.id })
     if (moved.length === 0) {
       throw new ActionRefused(
-        `this task cannot be ${kind === 'request_changes' ? 'sent back' : 'retried'} now`,
+        `this task cannot be ${kind.endsWith('changes') ? 'sent back' : 'retried'} now`,
       )
     }
-    if (kind === 'automatic_retry') {
+    if (kind === 'automatic_retry' || kind === 'automatic_changes') {
       // Nobody decided this one, so no decision is recorded in anybody's name: the intake says it was the
-      // factory's own, and the count of these is what stops it after a few.
+      // factory's own, and the count of these is what stops it after a few. Changes carry their note to
+      // the run as feedback, on the branch the agent already pushed.
+      const changes = kind === 'automatic_changes' || (rework !== undefined && !rework.plain)
       const [event] = await tx
         .insert(stageEvent)
-        .values({ taskId, stage: 'intake', detail: { decision: 'retry', note, automatic: true } })
+        .values({
+          taskId,
+          stage: 'intake',
+          detail: {
+            decision: changes ? 'request_changes' : 'retry',
+            note,
+            automatic: true,
+            ...(rework?.preAgent ? { kept: true } : {}),
+            ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
+          },
+        })
         .returning({ id: stageEvent.id })
-      await enqueueRun({ taskId }, `task-${taskId}-auto${event.id}`)
+      const input = rework?.plain
+        ? { taskId, resume: true }
+        : !changes
+          ? { taskId }
+          : rework?.decisionId
+            ? { taskId, decisionId: rework.decisionId }
+            : { taskId, feedback: note }
+      await enqueueRun(input, `task-${taskId}-auto${event.id}`)
       return null
     }
     const [made] = await tx
       .insert(decision)
       .values({ taskId, kind, sha, note })
       .returning({ id: decision.id })
-    await tx
-      .insert(stageEvent)
-      .values({ taskId, stage: 'intake', detail: { decision: kind, note } })
+    await tx.insert(stageEvent).values({
+      taskId,
+      stage: 'intake',
+      detail: {
+        decision: kind,
+        note,
+        ...(kind === 'request_changes' ? { decisionId: made.id } : {}),
+      },
+    })
     await enqueueRun({ taskId, decisionId: made.id }, `task-${taskId}-d${made.id}`)
     return made.id
   })
+}
+
+/** Work a failed run left on its branch: what to change, and the decision it came from when a person asked. */
+type Rework = {
+  note: string
+  decisionId?: number
+  plain?: boolean
+  /** The run that failed never started an agent (its sandbox failed), so it was no attempt of the work. */
+  preAgent: boolean
+}
+
+/**
+ * The work an automatic retry must keep. A run that was a rework (the latest intake was a request for
+ * changes) keeps its note and, for a person's request, its decision, so the prompt is the one the person
+ * caused. A run that pushed a branch keeps it too, even a first run, as a plain continuation: nothing was asked for, so no feedback is made up.
+ */
+async function workToKeep(
+  deps: ActionDeps,
+  row: typeof task.$inferSelect,
+  token: string,
+): Promise<Rework | undefined> {
+  const [failed, before] = await deps.db
+    .select({ stage: stageEvent.stage })
+    .from(stageEvent)
+    .where(eq(stageEvent.taskId, row.id))
+    .orderBy(desc(stageEvent.id))
+    .limit(2)
+  const preAgent = failed?.stage === 'failed' && before?.stage === 'sandbox'
+  const events = await deps.db
+    .select({ stage: stageEvent.stage, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'intake')))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  const detail = (events[0]?.detail ?? {}) as Record<string, unknown>
+  if (detail.decision === 'request_changes' && typeof detail.note === 'string') {
+    let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
+    if (decisionId === undefined && detail.automatic !== true) {
+      // An intake written before it named its decision: the person's latest request is the one.
+      const [asked] = await deps.db
+        .select({ id: decision.id })
+        .from(decision)
+        .where(and(eq(decision.taskId, row.id), eq(decision.kind, 'request_changes')))
+        .orderBy(desc(decision.id))
+        .limit(1)
+      decisionId = asked?.id
+    }
+    return { note: detail.note, decisionId, preAgent }
+  }
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  return head ? { note: '', plain: true, preAgent } : undefined
 }
 
 async function load(db: Database, taskId: number) {
@@ -90,42 +169,43 @@ async function load(db: Database, taskId: number) {
   return row
 }
 
+/** Refuses, with the reason the transition table gives, an event the task's state does not allow. */
+function mustAllow(row: typeof task.$inferSelect, event: TransitionEvent) {
+  const decided = outcome(row, event)
+  if (decided.kind !== 'action') throw new ActionRefused(decided.reason)
+}
+
 /**
  * Approves the commit the pull request is at. The approval names that commit: if the branch moves
  * (a rework, a new push), it no longer covers it. Merging is a later step and reads this.
  */
 export async function approve(deps: ActionDeps, taskId: number) {
   const row = await load(deps.db, taskId)
-  if (!['done', 'handoff'].includes(row.stage) || !row.headSha) {
-    throw new ActionRefused('only a task with a pull request can be approved')
-  }
+  mustAllow(row, 'approve')
+  // Only a task with a commit is approved.
+  const sha = row.headSha!
   const [made] = await deps.db
     .insert(decision)
-    .values({ taskId, kind: 'approve', sha: row.headSha, note: '' })
+    .values({ taskId, kind: 'approve', sha, note: '' })
     .returning({ id: decision.id })
-  return { decisionId: made.id, sha: row.headSha }
+  return { decisionId: made.id, sha }
 }
 
 /**
  * Sends a pull request back with a note. A new run starts from the branch the agent already pushed,
- * with the note in its prompt, and goes through the checks and the review again.
+ * with the note in its prompt, and goes through the checks and the review again. A task with no branch
+ * on GitHub (resolved with no change, or its branch deleted by a retry) starts from the integration
+ * branch instead, as a first run does, with the same note.
  */
 export async function requestChanges(deps: ActionDeps, taskId: number, note: string) {
   const text = note.trim()
   if (text === '') throw new ActionRefused('say what should change')
   const row = await load(deps.db, taskId)
-  if (!['done', 'handoff'].includes(row.stage)) {
-    throw new ActionRefused('only a task with a pull request can be sent back')
-  }
-  if (row.mergedSha) {
-    throw new ActionRefused(
-      'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
-    )
-  }
+  mustAllow(row, 'request_changes')
   const decisionId = await requeue(
     deps,
     taskId,
-    ['done', 'handoff'],
+    stagesWhere('request_changes', row),
     'request_changes',
     text.slice(0, NOTE_MAX),
     row.headSha,
@@ -146,18 +226,12 @@ export async function retry(
 ) {
   const row = await load(deps.db, taskId)
   // A run the supervisor found stalled or lost is in a working stage, which retry otherwise refuses.
-  const notIntegrated = row.stage === 'done' && !row.mergedSha && !row.resolvedSha
-  const allowed = [
-    ...(options.fromFinding ? STUCK_STAGES : []),
-    'failed',
-    'handoff',
-    ...(notIntegrated ? ['done'] : []),
-  ]
-  if (!allowed.includes(row.stage)) {
-    throw new ActionRefused(
-      'only a failed or handed-over task, or one whose pull request was never merged, can be retried',
-    )
-  }
+  const event = options.fromFinding ? 'retry_from_finding' : 'retry'
+  mustAllow(row, event)
+  // What makes a done task one to retry was read with its stage, so only a task read as done may be done.
+  const allowed = stagesWhere(event, row).filter(
+    (stage) => stage !== 'done' || row.stage === 'done',
+  )
   const { token } = await deps.github.installationToken(row.repository)
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
   const decisionId = await requeue(deps, taskId, allowed, 'retry', '', row.headSha)
@@ -173,9 +247,7 @@ export async function resolveElsewhere(deps: ActionDeps, taskId: number, note: s
   const text = note.trim()
   if (text === '') throw new ActionRefused('say where the issue was resolved')
   const row = await load(deps.db, taskId)
-  if (!['failed', 'handoff'].includes(row.stage)) {
-    throw new ActionRefused('only a failed or handed-over task can be resolved another way')
-  }
+  mustAllow(row, 'resolve')
   const [config] = await deps.db
     .select({ baseBranch: repository.baseBranch })
     .from(repository)
@@ -188,7 +260,7 @@ export async function resolveElsewhere(deps: ActionDeps, taskId: number, note: s
     const moved = await tx
       .update(task)
       .set({ stage: 'done', resolvedSha: sha })
-      .where(and(eq(task.id, taskId), inArray(task.stage, ['failed', 'handoff'])))
+      .where(and(eq(task.id, taskId), inArray(task.stage, stagesWhere('resolve', row))))
       .returning({ id: task.id })
     if (moved.length === 0)
       throw new ActionRefused('this task moved on before it could be resolved')
@@ -211,15 +283,34 @@ export async function resolveElsewhere(deps: ActionDeps, taskId: number, note: s
 export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   const row = await load(deps.db, taskId)
   // A done task whose pull request GitHub refused to merge is not delivered, so it may run again too.
-  const notIntegrated = row.stage === 'done' && !row.mergedSha && !row.resolvedSha
-  if (row.stage !== 'failed' && !notIntegrated) {
-    throw new ActionRefused(
-      'only a failed task, or one whose pull request was never merged, runs again on its own',
-    )
-  }
+  mustAllow(row, row.stage === 'failed' ? 'retry_due' : 'conflict_rerun')
+  // A rework, or a run that pushed, repeats on its branch with its note; only a run that never pushed starts over.
   const { token } = await deps.github.installationToken(row.repository)
-  await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
-  await requeue(deps, taskId, [row.stage], 'automatic_retry', '', row.headSha)
+  const rework = row.stage === 'failed' ? await workToKeep(deps, row, token) : undefined
+  if (!rework) {
+    await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
+  }
+  await requeue(
+    deps,
+    taskId,
+    [row.stage],
+    'automatic_retry',
+    rework?.note ?? '',
+    row.headSha,
+    rework,
+  )
+}
+
+/**
+ * Sends work back to its agent because the repository's required checks failed on it, with no person
+ * asking. Like a request for changes, the run continues on the branch the agent pushed with the note as
+ * feedback; like an automatic retry, nothing is decided in anybody's name. Only a task whose pull request
+ * waits for those checks qualifies.
+ */
+export async function sendBackAutomatically(deps: ActionDeps, taskId: number, note: string) {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'send_back_after_ci')
+  await requeue(deps, taskId, ['done'], 'automatic_changes', note.slice(0, NOTE_MAX), row.headSha)
 }
 
 /**

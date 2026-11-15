@@ -14,6 +14,22 @@ export type HarnessInput = {
   onEvent?: (event: AgentEvent) => void
 }
 
+const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
+
+/** The sum of the counts that are numbers, or undefined when none is. */
+export function sum(...parts: unknown[]): number | undefined {
+  const given = parts.filter(count)
+  return given.length === 0 ? undefined : given.reduce((a, b) => a + b, 0)
+}
+
+/** The token fields of a result, only for the counts the agent gave. */
+export function tokenCounts(tokensIn: unknown, tokensOut: unknown): Partial<HarnessResult> {
+  return {
+    ...(count(tokensIn) ? { tokensIn } : {}),
+    ...(count(tokensOut) ? { tokensOut } : {}),
+  }
+}
+
 /** The agent stopped because its account's quota ran out: a wait, not a flaw in the work. */
 export type QuotaStop = { message: string; resetsAt?: string }
 
@@ -21,9 +37,16 @@ export type HarnessResult = {
   ok: boolean
   summary: string
   costUsd?: number
+  /** The model the agent reports it ran. Absent when it says nothing; null when it says several, so none is the pass's. */
+  model?: string | null
+  /** Tokens the agent says it read and wrote, when it says. */
+  tokensIn?: number
+  tokensOut?: number
   /** What `resume` needs to continue this conversation. */
   sessionId?: string
   quota?: QuotaStop
+  /** The provider refused the agent's login (a 401): renewing it and running again may fix that. */
+  unauthorized?: boolean
 }
 
 /**
@@ -32,6 +55,9 @@ export type HarnessResult = {
  */
 export interface CodingHarness {
   readonly name: string
+  /** The model and effort this agent was told to use; absent when it runs on its own default. */
+  readonly model?: string
+  readonly effort?: string
   /**
    * The firewall rules that sign this agent's calls. The secret lives here, on the factory host,
    * and the sandbox only ever gets a placeholder, so this is the one place a credential is read.
@@ -39,6 +65,13 @@ export interface CodingHarness {
   egress(): Promise<EgressRule[]>
   /** Installs and configures the agent in a fresh sandbox, when it is not already there. */
   prepare?(backend: SandboxBackend): Promise<void>
+  /**
+   * Renews the login the provider refused, `installed` being the credential the sandbox's firewall signs with,
+   * and puts the new one in the sandbox. Answers the rules the firewall must now have.
+   */
+  reauthorize?(backend: SandboxBackend, installed: string): Promise<EgressRule[]>
+  /** Records that the provider refused `installed` again after a renewal, so the panel can say so. */
+  markRefused?(installed: string): Promise<void>
   run(backend: SandboxBackend, input: HarnessInput): Promise<HarnessResult>
   /** Continues a conversation `run` started, in the same sandbox or one restored from a snapshot. */
   resume?(backend: SandboxBackend, sessionId: string, input: HarnessInput): Promise<HarnessResult>
@@ -112,6 +145,10 @@ export function buildPrompt(input: {
   branch: string
   /** What a person asked to change in an earlier pull request from this branch. */
   feedback?: string
+  /** Who sent the work back: a person (the default) or the repository's required checks. */
+  feedbackFrom?: 'person' | 'checks'
+  /** True when the branch the feedback was about is gone: the work starts from the integration branch. */
+  startsOver?: boolean
   /** False when nobody is there to answer: the agent decides, and says what it assumed. */
   askQuestions?: boolean
   /** Where the knowledge base is in the sandbox, when the factory delivered one. */
@@ -141,7 +178,18 @@ ${checksRule(input.checks)}${
 ${input.knowledgeDir ? `${LEARNED_RULE}\n` : ''}- Finish with a short summary of what you changed.
 ${input.knowledgeDir ? `\n${knowledgeRules(input.knowledgeDir)}\n` : ''}${
     input.feedback
-      ? `\nA person reviewed your earlier pull request and asked for these changes:\n\n${input.feedback}\n\nThe branch already holds your earlier work. Build on it.\n`
+      ? `\n${sentBackBy(input)}\n\n${input.feedback}\n\n${input.startsOver ? 'The branch of that run no longer exists, so none of its work is here. Start from what the repository holds now.' : 'The branch already holds your earlier work. Build on it.'}\n`
       : ''
   }`
+}
+
+/** The line that says who sent the work back, above what they said. */
+function sentBackBy(input: { feedbackFrom?: 'person' | 'checks'; startsOver?: boolean }): string {
+  if (input.feedbackFrom === 'checks')
+    return input.startsOver
+      ? "The repository's required checks failed on what an earlier run of this issue delivered:"
+      : "The repository's required checks failed on your earlier pull request:"
+  return input.startsOver
+    ? 'A person read what an earlier run of this issue ended with and asked for these changes:'
+    : 'A person reviewed your earlier pull request and asked for these changes:'
 }

@@ -1,22 +1,41 @@
 import { type SandboxBackend } from '@theokit/agents/sandbox'
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
 import {
   agentRun,
-  decision,
+  changePlan,
   evidence,
   question as questionTable,
   review as reviewTable,
+  stageEvent,
   task,
 } from '../db/schema'
 import type { Issue } from '../github/issues'
-import type { GithubApi } from '../github/pulls'
+import {
+  autoMergeOrMergeable,
+  NEEDS_A_PERSON,
+  titleToRestore,
+  type GithubApi,
+  type PullRequest,
+} from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
 import { parseLearned, withoutLearned } from '../knowledge/format'
 
 import { cloneRepository } from './clone'
-import { ensureBranches, integrationBranch, PRE_RELEASE_BRANCH } from './branches'
-import { createPreRelease, release } from './deliver'
+import { evidenceOfNote } from './ci-wait'
+import { ensureBranches, integrationBranch } from './branches'
+import { uploadChangesetCheck } from './changeset-check'
+import { withChangesetCheck } from './changesets'
+import { githubEgress, renewGithubCredential } from './credential-renewal'
+import { createPreRelease } from './deliver'
+import {
+  advancePreRelease,
+  describeDelivery,
+  describeIntegration,
+  releaseByMode,
+  type Handed,
+  type Integrated,
+} from './integration'
 import {
   DEFAULT_CHECKS,
   failingChecks,
@@ -25,16 +44,28 @@ import {
   type CheckResult,
   type Verdict,
 } from './evidence'
-import { diffGuards, parseNameStatus, testScriptOf } from './guards'
+import { diffFacts } from './diff-facts'
+import {
+  changePlanPrompt,
+  implementPlanPrompt,
+  parseChangePlan,
+  planAgainPrompt,
+  renderChangePlan,
+  type ChangePlan,
+} from './change-plan'
 import { buildPrompt, type CodingHarness, type HarnessResult } from './harness'
 import {
+  blockingCount,
   MAX_ATTEMPTS,
   notResolvedPrompt,
+  OUTSIDE_THE_PLAN,
   parseVerdict,
   renderFindings,
   resolvedPrompt,
+  reviewAllowsRework,
   reviewPrompt,
   reworkPrompt,
+  roundsNote,
   type Finding,
   type ReviewVerdict,
 } from './review'
@@ -53,8 +84,16 @@ import {
   Asked,
   QuotaStop,
   StageFailure,
+  type Continuation,
   type StoredCheck,
 } from './run-support'
+import {
+  fitToSession,
+  planAgentPass,
+  DEFAULT_CHECK_MS,
+  DEFAULT_REVIEW_MS,
+  NoTimeForAgent,
+} from './agent-time'
 import type { RepoConfig } from './repo-config'
 import { labelsWithRepoChoice } from './repo-config'
 import type { Parked, RunResult, RunTaskDeps } from './run-types'
@@ -62,6 +101,7 @@ import {
   createIsolatedSandbox,
   restoreIsolatedSandbox,
   type IsolatedSandbox,
+  type EgressRule,
   type SandboxSpec,
 } from './sandbox'
 import { enterStage } from './stages'
@@ -85,51 +125,40 @@ export type RunContext = {
   state: RunState
   signal?: AbortSignal
   resuming?: Parked
-  continuation?: { feedback: string }
+  continuation?: Continuation
+  /**
+   * What was asked of a run that could not continue: the task's branch is not on GitHub, so the run starts
+   * from the integration branch as a first run does, and only the builder's prompt knows it was sent back.
+   */
+  startingOver?: Continuation
 }
 
 type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 /**
- * The sandbox stops a run after `sandboxMs`. A builder may take 25 minutes, so 30 left no room for the checks,
- * a review and a rework: 21 of 616 runs in three days were cut there. A run keeps the GitHub token it took at
- * its start, and GitHub's last an hour, so the limit stays well under that (drain.test.ts).
+ * The sandbox stops a run after `sandboxMs`. A run is a builder (up to `agentMs`, cut by `agentTimeLeft` so the
+ * checks and a review still fit), the checks, a review, and
+ * at times a rework and the checks again. In a repository whose checks take twenty minutes on a busy machine
+ * that is more than 50 minutes, and 8 runs were cut at 50 on 2026-11-11 (paulohenriquevn/aifactory#4). The
+ * GitHub token is renewed while the run works (`renewGithubCredential`), so the limit is set by what a run
+ * needs, not by the hour a token lasts. A first build that adds a package needs more than 25 minutes, and four
+ * were cut at 25 on 2026-11-11 (paulohenriquevn/aifactory#23), so a pass may take 45.
  */
-export const DEFAULT_TIMEOUTS: Timeouts = { sandboxMs: 50 * 60_000, agentMs: 25 * 60_000 }
+/** GitHub failing: not a refusal of the work, so the run fails and repeats. */
+const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
 
-/** What the factory handed over, or why it could not. A failure to hand over never fails the task. */
-type Handed = { tag: string; url: string } | { error: string }
+/** The stages that end a run; a task goes through them again when a person sends it back. */
+const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
-/** What the integration did, or why it did not happen. Nothing set means it did not run. */
-type Integrated = {
-  /** The pull request was merged, and this is the commit on the integration branch. */
-  mergedSha?: string
-  /** The pre-release branch advanced, and this is where it is. */
-  developSha?: string
-  developError?: string
-  /**
-   * Where the work waits to reach the pre-release branch when GitHub would not let the factory advance it
-   * (a protected branch): a pull request from the integration branch, which the factory only opens.
-   */
-  developPullRequest?: string
-  /** GitHub refused to merge the pull request, which stays open for a person. */
-  error?: string
-}
+export const DEFAULT_TIMEOUTS: Timeouts = { sandboxMs: 90 * 60_000, agentMs: 45 * 60_000 }
 
-const describeIntegration = (integrated: Integrated) => ({
-  ...(integrated.error ? { integrationError: integrated.error } : {}),
-  ...(integrated.mergedSha ? { mergedSha: integrated.mergedSha } : {}),
-  ...(integrated.developSha ? { developSha: integrated.developSha } : {}),
-  ...(integrated.developError ? { developError: integrated.developError } : {}),
-  ...(integrated.developPullRequest ? { developPullRequest: integrated.developPullRequest } : {}),
-})
-
-const describeDelivery = (handed: Handed) =>
-  'tag' in handed
-    ? { preRelease: handed.tag, preReleaseUrl: handed.url }
-    : { preReleaseError: handed.error }
+/** The longest the planning turn may take: it reads and writes a plan, it does not build or test. */
+export const PLAN_MS = 15 * 60_000
 
 /** The result of running the checks on a commit: what ran, what it adds up to, and what to show. */
 type Checked = { results: CheckResult[]; here: StoredCheck[]; verdict: Verdict }
+
+/** Per run, keyed by its egress rules: puts one rule in the firewall through the run's queue of changes. */
+const refreshers = new WeakMap<EgressRule[], (rule: EgressRule) => Promise<void>>()
 
 /**
  * One run of a task, from the sandbox to the pull request. It holds what changes as the run goes
@@ -148,21 +177,38 @@ export class Run {
    * when there was none), then each commit the run pushed. A push replaces exactly that and nothing else.
    */
   remoteHead = ''
+  /** The clone holds `.changeset/config.json`: the repository publishes with changesets. */
+  usesChangesets = false
+  /** What the builder meant to change, written before it changed anything; the reviewer measures the diff by it. */
+  plan: ChangePlan | undefined
+  /** This run wrote the plan, so the first build pass continues the planning session. */
+  private planned: { discarded: boolean } | undefined
   /** What the agents of this task do, written while they work. Opened by the first agent run. */
   private transcript: Transcript | undefined
+
+  /** When the current sandbox started; a renewed session starts its provider's clock again. */
+  private sessionStartedAt: number
 
   private constructor(
     private readonly c: RunContext,
     private readonly builder: CodingHarness,
     private readonly reviewer: CodingHarness,
-    private readonly sandbox: IsolatedSandbox,
+    private sandbox: IsolatedSandbox,
+    private readonly spec: SandboxSpec,
     private readonly repoDir: string,
     private readonly baseSha: string,
+    /** When the first sandbox started, which is when the run's time began to run out. */
+    private readonly startedAt: number,
   ) {
+    this.sessionStartedAt = startedAt
     this.cost = c.resuming?.costUsd ?? 0
     this.sessionId = c.resuming?.sessionId
   }
 
+  /** The plan as markdown, for the pull request; nothing when the task has none. */
+  private get renderedPlan(): string | undefined {
+    return this.plan ? renderChangePlan(this.plan) : undefined
+  }
   private get backend(): SandboxBackend {
     return this.sandbox.backend
   }
@@ -173,13 +219,145 @@ export class Run {
     return `GIT_CONFIG_GLOBAL=${GITCONFIG} git -c core.hooksPath=/dev/null -C ${this.repoDir}`
   }
   private get timeouts(): Timeouts {
-    return this.c.deps.timeouts ?? DEFAULT_TIMEOUTS
+    return fitToSession(this.c.deps.timeouts ?? DEFAULT_TIMEOUTS, this.c.deps.sandbox.maxSessionMs)
+  }
+  /**
+   * How long the next agent pass may take. When the provider's session has no room for it but the run does,
+   * the disk moves to a new session first. Throws when the run has too little time left for a pass.
+   */
+  private async agentTimeout(): Promise<number> {
+    const plan = this.planPass()
+    if (plan.kind === 'pass') return plan.timeoutMs
+    await this.renewSession()
+    const renewed = this.planPass()
+    if (renewed.kind === 'pass') return renewed.timeoutMs
+    throw new StageFailure('a new sandbox session still had no room for an agent pass')
+  }
+  private planPass() {
+    const { deps } = this.c
+    const now = Date.now()
+    const limits = deps.timeouts ?? DEFAULT_TIMEOUTS
+    const cap = deps.sandbox.maxSessionMs
+    try {
+      return planAgentPass(
+        limits,
+        { runElapsedMs: now - this.startedAt, sessionElapsedMs: now - this.sessionStartedAt },
+        cap === undefined
+          ? undefined
+          : { maxSessionMs: cap, renewable: !!this.sandbox.snapshot && !!deps.sandbox.restore },
+      )
+    } catch (error) {
+      if (error instanceof NoTimeForAgent) throw new StageFailure(error.message)
+      throw error
+    }
+  }
+
+  /**
+   * Moves the run to a new sandbox session: the disk goes to a snapshot (which stops the sandbox), comes back
+   * in a new sandbox under the same egress policy, and the snapshot is deleted. The checkout, the agent's
+   * session files and the knowledge base come with the disk, so the next pass continues where it was.
+   */
+  private async renewSession(): Promise<void> {
+    const { deps, taskId, state } = this.c
+    const minutes = Math.floor((Date.now() - this.sessionStartedAt) / 60_000)
+    state.current = 'sandbox'
+    // The same rules, with the token the run holds now rather than the one it started with.
+    // In place, so the renewal of the new session and a later refusal both work on these rules.
+    this.spec.egress.forEach((rule, i) => {
+      if (rule.domain === 'github.com') this.spec.egress[i] = githubEgress(this.c.token)
+    })
+    const spec = this.spec
+    this.feed?.stop()
+    const snapshotId = await this.sandbox.snapshot!()
+    let restored: IsolatedSandbox
+    try {
+      restored = await restoreIsolatedSandbox(deps.sandbox, snapshotId, spec)
+    } catch (error) {
+      await deps.sandbox.deleteSnapshot?.(snapshotId).catch(() => {})
+      throw error
+    }
+    this.sessionStartedAt = Date.now()
+    const sandbox = Run.withCredentials(this.c, restored, this.spec.egress)
+    state.sandbox = sandbox
+    // The snapshot did its job; keeping it only costs storage.
+    await deps.sandbox.deleteSnapshot?.(snapshotId).catch(() => {})
+    this.feed = await KnowledgeFeed.open(deps.knowledge, sandbox.backend, this.c.row.repository, {
+      taskId,
+    })
+    this.sandbox = this.feed.attachTo(sandbox)
+    state.sandbox = this.sandbox
+    await enterStage(deps.db, taskId, 'sandbox', {
+      provider: deps.sandbox.name,
+      renewed: true,
+      sessionMinutes: minutes,
+    })
+  }
+
+  /**
+   * The sandbox with its GitHub token renewed while the run works, since a run may outlast a token. Every
+   * change of the firewall goes through one queue and is built from `egress` as it is when it is sent, so a
+   * GitHub renewal never puts back an old Codex token and a Codex renewal never puts back an old GitHub one.
+   */
+  private static withCredentials(
+    c: RunContext,
+    started: IsolatedSandbox,
+    egress: SandboxSpec['egress'],
+  ): IsolatedSandbox {
+    let queue: Promise<unknown> = Promise.resolve()
+    const serial = <T>(step: () => Promise<T>): Promise<T> => {
+      const done = queue.then(step)
+      queue = done.catch(() => {})
+      return done
+    }
+    const put = (rule: EgressRule) => {
+      const i = egress.findIndex((known) => known.domain === rule.domain)
+      if (i >= 0) egress[i] = rule
+    }
+    const update = started.updateEgress?.bind(started)
+    const serialized: IsolatedSandbox = update
+      ? {
+          ...started,
+          updateEgress: (rules) =>
+            serial(async () => {
+              const github = rules.find((rule) => rule.domain === 'github.com')
+              if (github) put(github)
+              await update([...egress])
+            }),
+        }
+      : started
+    if (update) {
+      refreshers.set(egress, (rule) =>
+        serial(async () => {
+          put(rule)
+          await update([...egress])
+        }),
+      )
+    }
+    return renewGithubCredential(serialized, egress, {
+      mint: async () => (await c.deps.github.installationToken(c.row.repository)).token,
+      onToken: (token) => {
+        c.token = token
+      },
+      onFailure: (error) =>
+        console.warn(
+          JSON.stringify({
+            event: 'credential_renewal_failed',
+            taskId: c.taskId,
+            repository: c.row.repository,
+            error: String(error),
+          }),
+        ),
+    })
   }
   private get title() {
     return `${oneLine(this.c.issue.title)} (#${this.c.row.issueNumber})`
   }
   private get checks() {
-    return this.c.repo.checks ?? this.c.deps.checks ?? DEFAULT_CHECKS
+    return withChangesetCheck(
+      this.c.repo.checks ?? this.c.deps.checks ?? DEFAULT_CHECKS,
+      this.usesChangesets,
+      integrationBranch(this.c.repo),
+    )
   }
 
   /**
@@ -187,7 +365,8 @@ export class Run {
    * prepares the agents. The agents come from the issue's labels, and each signs its own calls: its
    * secret is read here, on the host, and becomes a firewall rule, so the sandbox never holds one.
    */
-  static async open(c: RunContext): Promise<Run> {
+  static async open(given: RunContext): Promise<Run> {
+    const c = await Run.withoutLostBranch(given)
     const { deps, issue, resuming } = c
     // Before any sandbox exists: a repository without the integration and pre-release branches gets them.
     if (!resuming) {
@@ -204,27 +383,29 @@ export class Run {
     const agentEgress = mergeEgress(await Promise.all(agents.map((a) => a.egress())))
 
     const spec: SandboxSpec = {
-      timeoutMs: (deps.timeouts ?? DEFAULT_TIMEOUTS).sandboxMs,
+      timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs)
+        .sandboxMs,
       cacheKey: c.row.repository,
       egress: [
-        {
-          domain: 'github.com',
-          headers: {
-            authorization: `Basic ${Buffer.from(`x-access-token:${c.token}`).toString('base64')}`,
-          },
-        },
+        githubEgress(c.token),
         ...agentEgress,
         { domain: 'registry.npmjs.org' },
         ...c.repo.egress.map((domain) => ({ domain })),
       ],
     }
-    const sandbox = resuming
+    const startedAt = Date.now()
+    const started = resuming
       ? await restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)
       : await createIsolatedSandbox(deps.sandbox, spec)
+    c.state.sandbox = started
+    const sandbox = Run.withCredentials(c, started, spec.egress)
     c.state.sandbox = sandbox
     // The snapshot did its job; keeping it only costs storage.
     if (resuming) await deps.sandbox.deleteSnapshot?.(resuming.snapshotId).catch(() => {})
-    c.signal?.addEventListener('abort', () => void sandbox.stop().catch(() => {}), { once: true })
+    // A renewed session replaces the sandbox, so an abort stops the one the run is in when it comes.
+    c.signal?.addEventListener('abort', () => void c.state.sandbox?.stop().catch(() => {}), {
+      once: true,
+    })
 
     const { repoDir, baseSha } = await Run.checkout(c, sandbox.backend)
     for (const agent of agents) await agent.prepare?.(sandbox.backend)
@@ -233,9 +414,12 @@ export class Run {
     })
     // Stopping the sandbox stops the feed first, so no copy goes into a sandbox that is gone.
     c.state.sandbox = feed.attachTo(sandbox)
-    const run = new Run(c, builder, reviewer, sandbox, repoDir, baseSha)
+    const run = new Run(c, builder, reviewer, c.state.sandbox, spec, repoDir, baseSha, startedAt)
     run.feed = feed
     run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
+    run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
+    // Before the builder's first pass, so it can run the check it is told to run.
+    await uploadChangesetCheck(sandbox.backend, run.checks)
     return run
   }
 
@@ -244,6 +428,26 @@ export class Run {
    * inside the snapshot. The SDK's provisioner clones with `--` and the `ext::` transport off. The work
    * starts from the integration branch: `workspace`, or the one the owner chose for the repository.
    */
+  /** Whether the clone has `.changeset/config.json`; only an answer of `yes` counts. */
+  private static async publishesWithChangesets(backend: SandboxBackend, repoDir: string) {
+    const found = await must(
+      backend,
+      `test -f ${repoDir}/.changeset/config.json && echo yes || echo no`,
+    )
+    return found.stdout.trim() === 'yes'
+  }
+
+  /**
+   * A run sent back continues on the task's branch only while GitHub has it. A task resolved with no change
+   * never pushed one, and a retry deletes it: fetching it would fail the task before any agent read the note
+   * (paulohenriquevn/aifactory#54). Such a run starts over instead, and keeps what was asked for its prompt.
+   */
+  private static async withoutLostBranch(c: RunContext): Promise<RunContext> {
+    if (!c.continuation) return c
+    const head = await c.api.branchHead(c.row.repository, c.token, c.branch)
+    return head ? c : { ...c, continuation: undefined, startingOver: c.continuation }
+  }
+
   private static async checkout(c: RunContext, backend: SandboxBackend) {
     const { resuming, continuation, branch, row } = c
     if (resuming) return { repoDir: resuming.repoDir, baseSha: resuming.baseSha }
@@ -276,7 +480,7 @@ export class Run {
   /** Runs the agent, books its cost and session, and turns a quota stop into its own error. */
   private async settle(
     who: CodingHarness,
-    role: 'builder' | 'reviewer',
+    role: 'builder' | 'planner' | 'reviewer',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -286,14 +490,21 @@ export class Run {
     const started = Date.now()
     let result: HarnessResult
     try {
-      result = await call(this.transcript.sink(role, attempt))
+      result = await call(this.transcript.sink(role === 'planner' ? 'builder' : role, attempt))
+      if (result.unauthorized && who.reauthorize) {
+        await this.transcript.drain()
+        result = await this.afterRefusal(who, role, attempt, call)
+      }
     } catch (error) {
       await this.transcript.drain()
-      // The agent did not come back (the sandbox died, say). It still ran, and that is on record.
+      // The agent did not come back (the sandbox died, say, or its login could not be renewed). It still ran,
+      // and that is on record.
       await db.insert(agentRun).values({
         taskId,
         role,
         harness: who.name,
+        model: who.model ?? null,
+        effort: who.effort ?? null,
         attempt,
         durationMs: Date.now() - started,
         ok: false,
@@ -307,6 +518,11 @@ export class Run {
       taskId,
       role,
       harness: who.name,
+      // What the agent says it ran, else what it was told; null when neither is known, never a guess.
+      model: result.model === undefined ? (who.model ?? null) : result.model,
+      effort: who.effort ?? null,
+      tokensIn: result.tokensIn ?? null,
+      tokensOut: result.tokensOut ?? null,
       attempt,
       costUsd: result.costUsd ?? null,
       durationMs: Date.now() - started,
@@ -325,11 +541,55 @@ export class Run {
   }
 
   /**
+   * The provider refused the agent's login. Renews it once for the token the sandbox signs with, gives the
+   * firewall the new one, and runs the pass again. A login that cannot be renewed, or is refused again, is a
+   * fault of the environment, not of the work: the task waits to retry, and the owner connects Codex again.
+   */
+  private async afterRefusal(
+    who: CodingHarness,
+    role: 'builder' | 'planner' | 'reviewer',
+    attempt: number,
+    call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
+  ): Promise<HarnessResult> {
+    const refused = `the ${who.name} login was refused by the provider`
+    const rules = this.spec.egress
+    const at = rules.findIndex((rule) => rule.domain === 'chatgpt.com')
+    const installed = rules[at]?.headers?.authorization?.replace(/^Bearer /, '')
+    if (!who.reauthorize || at < 0 || !installed) {
+      throw new StageFailure(`${refused}: connect Codex again from the Setup page`)
+    }
+    try {
+      const push = refreshers.get(rules)
+      for (const rule of await who.reauthorize(this.backend, installed)) {
+        if (push) await push(rule)
+        else {
+          const i = rules.findIndex((known) => known.domain === rule.domain)
+          if (i >= 0) rules[i] = rule
+          await this.sandbox.updateEgress?.(rules)
+        }
+      }
+    } catch (error) {
+      throw new StageFailure(
+        `Codex login was refused and could not be renewed (${error instanceof Error ? error.message : String(error)}): connect Codex again from the Setup page`,
+      )
+    }
+    const again = await call(this.transcript!.sink(role === 'planner' ? 'builder' : role, attempt))
+    if (again.unauthorized) {
+      const now = rules[at]?.headers?.authorization?.replace(/^Bearer /, '')
+      if (now) await who.markRefused?.(now).catch(() => {})
+      throw new StageFailure(
+        'Codex login was refused again after it was renewed: connect Codex again from the Setup page',
+      )
+    }
+    return again
+  }
+
+  /**
    * Parks the run. The disk is saved to a snapshot (which stops the sandbox), the question goes to the
    * issue, and everything a resume needs is stored. Never returns: the run ends here.
    */
   private async ask(text: string, attempt: number): Promise<never> {
-    const { deps, taskId, row, token, api, state } = this.c
+    const { deps, taskId, row, api, state } = this.c
     if (!this.sandbox.snapshot || !deps.sandbox.restore) {
       throw new StageFailure(
         `the agent asked a question, but ${deps.sandbox.name} cannot save a sandbox to wait: ${text}`,
@@ -344,7 +604,7 @@ export class Run {
     try {
       commentId = await api.commentOnIssue(
         row.repository,
-        token,
+        this.c.token,
         row.issueNumber,
         questionComment(taskId, text),
       )
@@ -410,6 +670,11 @@ export class Run {
     ])
   }
 
+  private async hasNothingToCommit(): Promise<boolean> {
+    const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    return pending.stdout.trim() === ''
+  }
+
   /** Commits whatever the agent left in the checkout and pushes it. Returns the new head. */
   private async commitAndPush(message: string, detail: Record<string, unknown>): Promise<string> {
     const { deps, taskId, branch, state } = this.c
@@ -452,7 +717,8 @@ export class Run {
 
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */
   private async firstPass(): Promise<HarnessResult> {
-    const { deps, taskId, row, issue, branch, resuming, continuation } = this.c
+    const { deps, taskId, resuming } = this.c
+    const timeoutMs = await this.agentTimeout()
     const { builder, backend, repoDir } = this
     if (resuming) {
       if (!builder.resume) throw new StageFailure(`${builder.name} cannot resume a session`)
@@ -470,7 +736,7 @@ export class Run {
         builder.resume!(backend, resuming.sessionId, {
           onEvent,
           cwd: repoDir,
-          timeoutMs: this.timeouts.agentMs,
+          timeoutMs,
           prompt,
         }),
       )
@@ -479,25 +745,117 @@ export class Run {
       harness: builder.name,
       attempt: 1,
       ...(this.feed?.delivered ? { knowledge: this.feed.delivered } : {}),
+      ...(this.planned ? { planned: true } : {}),
     })
+    if (this.planned && this.sessionId) {
+      const prompt = implementPlanPrompt(this.planned)
+      const sessionId = this.sessionId
+      return this.settle(builder, 'builder', 1, (onEvent) =>
+        builder.resume!(backend, sessionId, { onEvent, cwd: repoDir, timeoutMs, prompt }),
+      )
+    }
     return this.settle(builder, 'builder', 1, (onEvent) =>
       builder.run(backend, {
         onEvent,
         cwd: repoDir,
-        timeoutMs: this.timeouts.agentMs,
-        prompt: buildPrompt({
-          repo: row.repository,
-          issueNumber: row.issueNumber,
-          title: issue.title,
-          body: issue.body,
-          branch,
-          feedback: continuation?.feedback,
-          askQuestions: this.c.repo.askQuestions,
-          knowledgeDir: this.feed?.dir,
-          checks: this.checks,
-        }),
+        timeoutMs,
+        prompt: buildPrompt(this.buildInput()),
       }),
     )
+  }
+
+  /** What the builder is told about the issue and its rules, the same for the plan and the work. */
+  private buildInput(): Parameters<typeof buildPrompt>[0] {
+    const { row, issue, branch, startingOver } = this.c
+    const sentBack = this.c.continuation ?? startingOver
+    return {
+      repo: row.repository,
+      issueNumber: row.issueNumber,
+      title: issue.title,
+      body: issue.body,
+      branch,
+      feedback: sentBack?.feedback,
+      feedbackFrom: sentBack?.fromChecks ? 'checks' : 'person',
+      startsOver: startingOver !== undefined,
+      askQuestions: this.c.repo.askQuestions,
+      knowledgeDir: this.feed?.dir,
+      checks: this.checks,
+    }
+  }
+
+  /**
+   * Before it changes anything, the builder writes what it will change: the files, the order, the risks,
+   * the proof and what it leaves out. The plan is stored and the build continues the same session. A run
+   * that continues the task (an answer, a person's changes, the repository's checks) keeps the plan the
+   * task has, and so does a builder that cannot resume a session, which plans nothing here.
+   */
+  private async planChange(): Promise<void> {
+    const { deps, taskId, resuming, continuation, state } = this.c
+    if (resuming || continuation) {
+      this.plan = await this.storedPlan()
+      return
+    }
+    if (!(deps.planFirst ?? true) || !this.builder.resume) return
+    // Reading and planning is short; the rest of the pass is left to the work.
+    const timeoutMs = Math.min(await this.agentTimeout(), PLAN_MS)
+    state.current = 'plan'
+    await enterStage(deps.db, taskId, 'plan', { harness: this.builder.name })
+    const prompt = changePlanPrompt(this.buildInput())
+    const first = await this.settle(this.builder, 'planner', 1, (onEvent) =>
+      this.builder.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
+    )
+    if (!first.ok) throw new StageFailure(`the agent did not finish the plan: ${first.summary}`)
+    this.sessionId = first.sessionId ?? this.sessionId
+    const plan = parseChangePlan(first.summary) ?? (await this.planAgain(timeoutMs))
+    const discarded = await this.discardEdits()
+    await deps.db.insert(changePlan).values({
+      taskId,
+      baseSha: this.baseSha,
+      harness: this.builder.name,
+      plan,
+    })
+    this.plan = plan
+    this.planned = { discarded }
+  }
+
+  /** The planning turn ended with no plan that could be read: one more turn, asking for the plan alone. */
+  private async planAgain(timeoutMs: number): Promise<ChangePlan> {
+    if (!this.sessionId)
+      throw new StageFailure('the agent wrote no plan and gave no session to ask again')
+    const sessionId = this.sessionId
+    const again = await this.settle(this.builder, 'planner', 1, (onEvent) =>
+      this.builder.resume!(this.backend, sessionId, {
+        onEvent,
+        cwd: this.repoDir,
+        timeoutMs,
+        prompt: planAgainPrompt(),
+      }),
+    )
+    this.sessionId = again.sessionId ?? this.sessionId
+    const plan = again.ok ? parseChangePlan(again.summary) : undefined
+    if (!plan)
+      throw new StageFailure(`the agent wrote no plan: ${oneLine(again.summary).slice(0, 700)}`)
+    return plan
+  }
+
+  /** Puts back the checkout the planning turn was not to change. Says whether there was anything to put back. */
+  private async discardEdits(): Promise<boolean> {
+    const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    if (pending.stdout.trim() === '') return false
+    await must(this.backend, `git -C ${this.repoDir} reset --hard ${this.baseSha}`)
+    await must(this.backend, `git -C ${this.repoDir} clean -fd`)
+    return true
+  }
+
+  /** The latest plan of the task, written by an earlier run. */
+  private async storedPlan(): Promise<ChangePlan | undefined> {
+    const [latest] = await this.c.deps.db
+      .select()
+      .from(changePlan)
+      .where(eq(changePlan.taskId, this.c.taskId))
+      .orderBy(desc(changePlan.id))
+      .limit(1)
+    return latest?.plan as ChangePlan | undefined
   }
 
   private firstMessage(): string {
@@ -507,17 +865,44 @@ export class Run {
   }
 
   /**
+   * A run that was sent back changed nothing, and no review approved the head of its branch: an earlier run
+   * fixed what was asked and stopped before a review, or a person pushed the fix. Ending here would deliver
+   * work nobody checked, so the run goes on from that head.
+   */
+  private async unreviewedHeadLeftAsItIs(): Promise<boolean> {
+    const { continuation, deps, taskId } = this.c
+    if (!continuation || continuation.plain || continuation.fromChecks || !this.remoteHead) {
+      return false
+    }
+    if (!(await this.hasNothingToCommit())) return false
+    const [approved] = await deps.db
+      .select({ id: reviewTable.id })
+      .from(reviewTable)
+      .where(
+        and(
+          eq(reviewTable.taskId, taskId),
+          eq(reviewTable.sha, this.remoteHead),
+          eq(reviewTable.verdict, 'approve'),
+        ),
+      )
+      .limit(1)
+    return !approved
+  }
+
+  /**
    * A person asked for a change and the agent found nothing to change (the test was already there,
    * say). That is an answer, not a failure: the pull request stays as it was, and the person reads why.
    */
   private async answeredWithNoChange(first: HarnessResult): Promise<RunResult | undefined> {
-    const { deps, taskId, row, token, api, branch, continuation } = this.c
-    if (!continuation || !row.pullRequestUrl || !row.headSha) return undefined
+    const { deps, taskId, row, api, branch, continuation } = this.c
+    // A plain continuation was asked nothing, so leaving the pull request as it is answers nothing.
+    if (!continuation || continuation.plain || !row.pullRequestUrl || !row.headSha) return undefined
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     if (pending.stdout.trim() !== '') return undefined
+    if (continuation.fromChecks) return this.checksUnanswered(first)
     await api.commentOnIssue(
       row.repository,
-      token,
+      this.c.token,
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
@@ -539,13 +924,49 @@ export class Run {
   }
 
   /**
+   * The repository's required checks failed and the agent changed nothing, saying why (often a check that
+   * fails on the integration branch too). Its auto-merge is already off and its wait over, so leaving the
+   * task done would leave it nowhere: it goes to a person, with the agent's words on the issue.
+   */
+  private async checksUnanswered(first: HarnessResult): Promise<RunResult> {
+    const { deps, taskId, row, api, branch } = this.c
+    const evidence = evidenceOfNote(this.c.continuation?.feedback ?? '')
+    const reason =
+      "the repository's required checks failed and the agent changed nothing, saying why below" +
+      (evidence ? `. What the failed checks reported:\n\n${evidence}` : '')
+    const said = first.summary.slice(0, 3_000)
+    await api.commentOnIssue(
+      row.repository,
+      this.c.token,
+      row.issueNumber,
+      `The repository's required checks failed on ${row.pullRequestUrl}, and the agent left it as it is:\n\n${said}${evidence ? `\n\nWhat the failed checks reported:\n\n${evidence}` : ''}`,
+    )
+    await enterStage(deps.db, taskId, 'handoff', {
+      branch,
+      sha: row.headSha,
+      reason,
+      pullRequestUrl: row.pullRequestUrl,
+      unchanged: true,
+      agentSummary: first.summary.slice(0, 4_000),
+      costUsd: this.cost,
+    })
+    return {
+      status: 'handoff',
+      branch,
+      sha: row.headSha!,
+      pullRequestUrl: row.pullRequestUrl!,
+      reason,
+    }
+  }
+
+  /**
    * The builder changed nothing on a new issue and says the code already does what it asks. That is a claim:
    * the checks run at the commit the run started from and the reviewer checks it against the code. When
    * both agree, the issue is closed with that evidence and the task is delivered without a pull request;
    * otherwise it goes to a person with what did not hold.
    */
   private async resolvedAlready(first: HarnessResult): Promise<RunResult | undefined> {
-    const { deps, taskId, row, token, api, continuation, state } = this.c
+    const { deps, taskId, row, api, continuation, state } = this.c
     if (continuation) return undefined
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     if (pending.stdout.trim() !== '') return undefined
@@ -571,7 +992,7 @@ export class Run {
     state.current = 'done'
     await api.commentOnIssue(
       row.repository,
-      token,
+      this.c.token,
       row.issueNumber,
       resolvedComment({
         sha: this.baseSha,
@@ -581,7 +1002,7 @@ export class Run {
         rows: checked.here,
       }),
     )
-    await api.closeIssue(row.repository, token, row.issueNumber)
+    await api.closeIssue(row.repository, this.c.token, row.issueNumber)
     await enterStage(
       deps.db,
       taskId,
@@ -607,6 +1028,7 @@ export class Run {
     outcome: ReviewVerdict,
   ): Promise<{ changed: boolean; summary: string }> {
     const { deps, taskId, state } = this.c
+    const timeoutMs = await this.agentTimeout()
     state.current = 'build'
     await enterStage(deps.db, taskId, 'build', {
       harness: this.builder.name,
@@ -617,7 +1039,7 @@ export class Run {
       this.builder.resume!(this.backend, this.sessionId!, {
         onEvent,
         cwd: this.repoDir,
-        timeoutMs: this.timeouts.agentMs,
+        timeoutMs,
         prompt: notResolvedPrompt({
           summary: outcome.summary,
           findings: outcome.findings,
@@ -649,7 +1071,7 @@ export class Run {
       this.reviewer.run(this.backend, {
         onEvent,
         cwd: this.repoDir,
-        timeoutMs: this.timeouts.reviewMs ?? 10 * 60_000,
+        timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
         prompt: resolvedPrompt({
           repo: row.repository,
           issueNumber: row.issueNumber,
@@ -684,6 +1106,7 @@ export class Run {
    * something (the run parks) or when a person's requested change needed no change.
    */
   async start(): Promise<{ result: RunResult } | { sha: string }> {
+    await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()
     if (!first.ok) throw new StageFailure(`the agent did not finish: ${first.summary}`)
@@ -694,10 +1117,16 @@ export class Run {
     if (asked) await this.ask(asked, this.c.resuming?.attempt ?? 1)
     this.summary = first.summary
 
+    // Work a review never approved is not left as it is: it goes on to the checks and the review.
+    if (await this.unreviewedHeadLeftAsItIs()) return { sha: this.remoteHead }
     const unchanged = await this.answeredWithNoChange(first)
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)
     if (resolved) return { result: resolved }
+    // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed.
+    if (this.c.continuation?.plain && (await this.hasNothingToCommit())) {
+      return { sha: this.remoteHead }
+    }
     const sha = await this.commitAndPush(this.firstMessage(), {
       costUsd: first.costUsd,
       agentSummary: first.summary.slice(0, 4_000),
@@ -713,6 +1142,7 @@ export class Run {
     failed: CheckResult[],
   ): Promise<string> {
     const { deps, taskId, state } = this.c
+    const timeoutMs = await this.agentTimeout()
     state.current = 'build'
     await enterStage(deps.db, taskId, 'build', {
       harness: this.builder.name,
@@ -723,7 +1153,7 @@ export class Run {
       this.builder.resume!(this.backend, this.sessionId!, {
         onEvent,
         cwd: this.repoDir,
-        timeoutMs: this.timeouts.agentMs,
+        timeoutMs,
         prompt: reworkPrompt({ findings, failedChecks: failed, checks: this.checks }),
       }),
     )
@@ -748,7 +1178,7 @@ export class Run {
     attempt: number,
     options: { publish: boolean } = { publish: true },
   ): Promise<Checked> {
-    const { deps, taskId, row, token, api, state } = this.c
+    const { deps, taskId, row, api, state } = this.c
     const { db } = deps
     state.current = 'verify'
     await enterStage(
@@ -768,23 +1198,20 @@ export class Run {
     // The checks judge the commit, not what the agent left in ignored files: a builder that installed with
     // --ignore-scripts left a node_modules without its native binaries, and the install check took it as done.
     await must(this.backend, `git -C ${this.repoDir} clean -fdxq`)
+    await uploadChangesetCheck(this.backend, this.checks)
     const results = await runChecks(
       this.backend,
       this.repoDir,
       this.checks,
-      this.timeouts.checkMs ?? 10 * 60_000,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
     )
     for (const check of results) await db.insert(evidence).values({ taskId, sha, ...check })
-    const rows = await db
-      .select()
-      .from(evidence)
-      .where(eq(evidence.taskId, taskId))
-      .orderBy(asc(evidence.id))
+    const rows = await this.checkRuns()
     const verdict = gate({ headSha: sha, required: this.checks.map((c) => c.name), evidence: rows })
     const here = rows.filter((r) => r.sha === sha)
     // A commit of the integration branch that the run did not make gets no check run of the factory.
     if (!options.publish) return { results, here, verdict }
-    await api.createCheckRun(row.repository, token, {
+    await api.createCheckRun(row.repository, this.c.token, {
       name: 'aifactory/verify',
       headSha: sha,
       conclusion: verdict.open ? 'success' : 'failure',
@@ -794,21 +1221,14 @@ export class Run {
     return { results, here, verdict }
   }
 
-  /** What the diff says about itself, without a model: facts an agent could bend. */
-  private async diffFacts(): Promise<Finding[]> {
-    const { backend, repoDir, baseSha } = this
-    const changes = parseNameStatus(
-      (await must(backend, `git -C ${repoDir} diff --name-status ${baseSha} HEAD`)).stdout,
-    )
-    const showScript = async (rev: string) => {
-      const shown = await backend.execute(`git -C ${repoDir} show ${rev}:package.json`)
-      return shown.exitCode === 0 ? testScriptOf(shown.stdout) : undefined
-    }
-    return diffGuards({
-      changes,
-      baseTestScript: await showScript(baseSha),
-      headTestScript: await showScript('HEAD'),
-    })
+  /** Every result of the factory's checks on this task, oldest first. */
+  private checkRuns() {
+    const { deps, taskId } = this.c
+    return deps.db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.taskId, taskId))
+      .orderBy(asc(evidence.id))
   }
 
   /** Has the reviewer read the commit, adds the facts about the diff, and records the outcome. */
@@ -816,12 +1236,17 @@ export class Run {
     const { deps, taskId, row, issue, branch, state } = this.c
     state.current = 'review'
     await enterStage(deps.db, taskId, 'review', { sha, attempt, reviewer: this.reviewer.name })
-    const guards = await this.diffFacts()
+    const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
+      baseSha: this.baseSha,
+      plan: this.plan,
+      issue,
+      checkRuns: await this.checkRuns(),
+    })
     const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent) =>
       this.reviewer.run(this.backend, {
         onEvent,
         cwd: this.repoDir,
-        timeoutMs: this.timeouts.reviewMs ?? 10 * 60_000,
+        timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
         prompt: reviewPrompt({
           repo: row.repository,
           issueNumber: row.issueNumber,
@@ -830,6 +1255,10 @@ export class Run {
           branch,
           baseSha: this.baseSha,
           knowledgeDir: this.feed?.dir,
+          required,
+          ...(this.plan
+            ? { plan: this.renderedPlan, unplanned, builderSummary: this.summary }
+            : {}),
         }),
       }),
     )
@@ -842,10 +1271,16 @@ export class Run {
       : { verdict: 'invalid', summary: `the reviewer failed: ${result.summary}`, findings: [] }
     // A fact about the diff that an agent could bend outranks an approval.
     const blocked = read.verdict === 'approve' && guards.some((g) => g.severity !== 'minor')
+    // A file outside the plan is on record; whether it was needed is the reviewer's call.
+    const outside: Finding[] = unplanned.map((file) => ({
+      severity: 'minor',
+      file,
+      issue: OUTSIDE_THE_PLAN,
+    }))
     const merged: ReviewVerdict = {
       verdict: blocked ? 'changes' : read.verdict,
       summary: read.summary,
-      findings: [...guards, ...read.findings],
+      findings: [...guards, ...outside, ...read.findings],
     }
     await deps.db.insert(reviewTable).values({
       taskId,
@@ -860,62 +1295,64 @@ export class Run {
   }
 
   /**
-   * The factory's delivery. It is made for any commit with green checks that reached a pull request,
-   * approved or handed over, and a failure here never fails the task: the pull request is the work,
-   * and the pre-release is how it is handed over.
-   */
-  /**
    * Integrates the approved work: the pull request is merged into the integration branch, pinned to the
    * commit that was verified and reviewed, and the pre-release branch then advances to include it. Nobody
    * is asked, because the checks and the review are the decision. A merge GitHub refuses (a conflict, a
    * protected branch) leaves the pull request open for a person and does not fail the task.
+   *
+   * An integration branch that requires status checks gets the repository's own CI first: GitHub merges
+   * the pull request through auto-merge once they pass, pinned to the same commit, and the
+   * `integrate-after-ci` cron does the rest. When GitHub refuses auto-merge because the checks already
+   * passed (the pull request is clean), it is merged at once like one with no required checks. When it
+   * refuses because the pull request is a draft, the pull request is marked ready and asked once more. Any
+   * other refusal fails the run, with what to set.
+   *
+   * The pull request may be the draft a handoff left, when a person asked for changes and the new run was
+   * approved. A draft is marked ready for review first, with its title restored, on either path: GitHub
+   * merges no draft. One that is not a draft gets no call.
    */
-  private async integrate(sha: string, pullNumber: number): Promise<Integrated> {
-    const { deps, taskId, row, token, api, branch } = this.c
+  private async integrate(sha: string, opened: PullRequest): Promise<Integrated> {
+    const { deps, taskId, row, api, branch } = this.c
+    const pullNumber = opened.number
+    const markReady = (title: string) =>
+      api.markReadyForReview(row.repository, this.c.token, pullNumber, title)
+    const restored = titleToRestore(opened, this.title)
+    if (restored !== undefined) await markReady(restored)
+    const integration = integrationBranch(this.c.repo)
+    const required = await api.requiredChecks(row.repository, this.c.token, integration)
+    const pull = { repo: row.repository, token: this.c.token, number: pullNumber, sha }
+    if (
+      required.length > 0 &&
+      (await autoMergeOrMergeable(api, pull, () => markReady(this.title))) === 'waiting'
+    ) {
+      return { awaitingChecks: required }
+    }
     let merged: { sha: string }
     try {
-      merged = await api.mergePullRequest(row.repository, token, pullNumber, sha, {
+      merged = await api.mergePullRequest(row.repository, this.c.token, pullNumber, sha, {
         method: 'squash',
         title: this.title,
       })
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // GitHub failing is the environment's: the run fails and repeats, it is not an integration refusal.
+      if (GITHUB_SERVER_ERROR.test(message)) throw error
+      return { error: message }
     }
     await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
-    await api.deleteBranch(row.repository, token, branch).catch(() => {})
-    try {
-      const develop = await api.mergeBranch(row.repository, token, PRE_RELEASE_BRANCH, merged.sha)
-      return { mergedSha: merged.sha, developSha: develop.sha }
-    } catch (error) {
-      return {
-        mergedSha: merged.sha,
-        developError: error instanceof Error ? error.message : String(error),
-        developPullRequest: await this.proposePreRelease(),
+    await api.deleteBranch(row.repository, this.c.token, branch).catch((error: unknown) => {
+      // GitHub failing is the environment's and surfaces; any other cleanup failure is left alone.
+      if (GITHUB_SERVER_ERROR.test(error instanceof Error ? error.message : String(error))) {
+        throw error
       }
-    }
-  }
-
-  /**
-   * A protected pre-release branch only takes a pull request, so the factory opens one from the
-   * integration branch, or finds the one already open, and leaves the merge to whoever the branch's rules
-   * ask. It is one standing pull request: later integrations add to it. Failing to open it is not an error:
-   * the work is integrated either way.
-   */
-  private async proposePreRelease(): Promise<string | undefined> {
-    const { row, token, api } = this.c
-    const from = integrationBranch(this.c.repo)
-    try {
-      return (
-        await api.openPullRequest(row.repository, token, {
-          head: from,
-          base: PRE_RELEASE_BRANCH,
-          title: `Pre-release: ${from} into ${PRE_RELEASE_BRANCH}`,
-          body: `${PRE_RELEASE_BRANCH} accepts changes only through a pull request, so the factory could not advance it. Merging this pull request publishes what has been integrated into ${from}.`,
-        })
-      ).url
-    } catch {
-      return undefined
-    }
+    })
+    const advanced = await advancePreRelease(api, {
+      repository: row.repository,
+      token: this.c.token,
+      integration,
+      mergedSha: merged.sha,
+    })
+    return { mergedSha: merged.sha, ...advanced }
   }
 
   private async deliver(
@@ -924,14 +1361,14 @@ export class Run {
     attempts: number,
     integrated?: Integrated,
   ): Promise<Handed> {
-    const { deps, taskId, row, issue, token, api } = this.c
+    const { deps, taskId, row, issue, api } = this.c
     try {
       return await createPreRelease(
         { db: deps.db, api },
         {
           taskId,
           repository: row.repository,
-          token,
+          token: this.c.token,
           issueNumber: row.issueNumber,
           title: issue.title,
           sha,
@@ -946,36 +1383,25 @@ export class Run {
         },
       )
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // GitHub failing is the environment's: the run fails and repeats, it is not a delivery refusal.
+      if (GITHUB_SERVER_ERROR.test(message)) throw error
+      return { error: message }
     }
   }
 
-  /**
-   * What the release mode says to do once a commit is delivered and approved. `trial` records what an
-   * agent would have released; `auto` releases it, and records why when that is refused. It returns the
-   * tag of a release that was made.
-   */
-  private async releaseByMode(sha: string): Promise<string | undefined> {
+  /** What the release mode says to do once a commit is delivered and approved (see `releaseByMode`). */
+  private releaseByMode(sha: string): Promise<string | undefined> {
     const { deps, taskId, api } = this.c
-    const actor = `agent:${this.reviewer.name}`
-    const record = (note: string) =>
-      deps.db.insert(decision).values({ taskId, kind: 'would_release', sha, note })
-    const mode = this.c.repo.releaseMode ?? deps.releaseMode
-    if (mode === 'trial') {
-      await record(`${actor}: checks green and the review approved`)
-      return undefined
-    }
-    if (mode !== 'auto') return undefined
-    try {
-      return (
-        await release({ db: deps.db, github: deps.github, api }, taskId, { bump: 'patch', actor })
-      ).tag
-    } catch (error) {
-      await record(
-        `an automatic release was refused: ${error instanceof Error ? error.message : String(error)}`,
-      )
-      return undefined
-    }
+    return releaseByMode(
+      { db: deps.db, github: deps.github, api },
+      {
+        taskId,
+        sha,
+        mode: this.c.repo.releaseMode ?? deps.releaseMode,
+        actor: `agent:${this.reviewer.name}`,
+      },
+    )
   }
 
   /** The work was approved: open the pull request, hand it over as a pre-release, and finish. */
@@ -985,10 +1411,10 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
   ): Promise<RunResult> {
-    const { deps, taskId, row, token, api, branch, state } = this.c
+    const { deps, taskId, row, api, branch, state } = this.c
     state.current = 'pr'
     await enterStage(deps.db, taskId, 'pr', { branch, sha })
-    const pull = await api.openPullRequest(row.repository, token, {
+    const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,
       base: integrationBranch(this.c.repo),
       title: this.title,
@@ -998,9 +1424,11 @@ export class Run {
         rows: here,
         agentSummary: this.summary,
         review: { reviewer: this.reviewer.name, attempt, outcome },
+        plan: this.renderedPlan,
       }),
     })
-    const integrated = await this.integrate(sha, pull.number)
+    const integrated = await this.integrate(sha, pull)
+    if (integrated.awaitingChecks) return this.awaitChecks(sha, attempt, pull.url, integrated)
     const handed = await this.deliver(sha, pull.url, attempt, integrated)
     await enterStage(
       deps.db,
@@ -1032,6 +1460,36 @@ export class Run {
   }
 
   /**
+   * The work is approved and its pull request waits for the repository's required checks. The run ends here:
+   * the pre-release and the release follow the merge, from the `integrate-after-ci` cron, which reads what it
+   * needs for them from this stage's detail.
+   */
+  private async awaitChecks(
+    sha: string,
+    attempt: number,
+    pullRequestUrl: string,
+    integrated: Integrated,
+  ): Promise<RunResult> {
+    const { deps, taskId, branch } = this.c
+    await enterStage(
+      deps.db,
+      taskId,
+      'done',
+      {
+        branch,
+        sha,
+        pullRequestUrl,
+        costUsd: this.cost,
+        attempts: attempt,
+        agentSummary: this.summary,
+        ...describeIntegration(integrated),
+      },
+      { pullRequestUrl, awaitingCiSha: sha },
+    )
+    return { status: 'done', branch, sha, pullRequestUrl, summary: this.summary }
+  }
+
+  /**
    * No approval and no attempts left (or no verdict to act on): a person takes it from here, with a
    * draft pull request, a comment on the issue and a pre-release of what the factory did get done.
    */
@@ -1040,17 +1498,18 @@ export class Run {
     attempt: number,
     here: StoredCheck[],
     outcome: ReviewVerdict,
+    counts: number[] = [],
   ): Promise<RunResult> {
-    const { deps, taskId, row, token, api, branch, state } = this.c
+    const { deps, taskId, row, api, branch, state } = this.c
     const reason =
       outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}`
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`
     state.current = 'pr'
-    const pull = await api.openPullRequest(row.repository, token, {
+    const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,
       base: integrationBranch(this.c.repo),
-      title: `[needs a person] ${this.title}`,
+      title: `${NEEDS_A_PERSON}${this.title}`,
       draft: true,
       body: pullRequestBody({
         issueNumber: row.issueNumber,
@@ -1059,11 +1518,12 @@ export class Run {
         agentSummary: this.summary,
         review: { reviewer: this.reviewer.name, attempt, outcome },
         handoff: reason,
+        plan: this.renderedPlan,
       }),
     })
     await api.commentOnIssue(
       row.repository,
-      token,
+      this.c.token,
       row.issueNumber,
       [
         `The factory could not get this approved: ${reason}.`,
@@ -1101,12 +1561,46 @@ export class Run {
   }
 
   /**
-   * Checks the commit and has it reviewed, up to three attempts. Failing checks and a review that
+   * The blocking findings of the review rounds before the one a resumed run starts at, read from what
+   * the earlier part of the run stored. The review of the claim that the issue is resolved is not one.
+   */
+  private async priorCounts(): Promise<number[]> {
+    const { deps, taskId, resuming } = this.c
+    if (!resuming) return []
+    // A run that ended (delivered, handed off, failed, cancelled) is not this one: only what came after
+    // the last such stage belongs to the run that parked, whose rounds a continuation numbers again.
+    const [ended] = await deps.db
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, taskId), inArray(stageEvent.stage, ENDING_STAGES)))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    const rows = await deps.db
+      .select()
+      .from(reviewTable)
+      .where(eq(reviewTable.taskId, taskId))
+      .orderBy(asc(reviewTable.id))
+    const byRound = new Map<number, number>()
+    for (const r of rows) {
+      if (ended && r.at <= ended.at) continue
+      if (r.sha !== this.baseSha) byRound.set(r.round, blockingCount(r.findings as Finding[]))
+    }
+    const counts: number[] = []
+    for (let round = 1; round < resuming.attempt; round++) {
+      const count = byRound.get(round)
+      if (count !== undefined) counts.push(count)
+    }
+    return counts
+  }
+
+  /**
+   * Checks the commit and has it reviewed, up to three attempts, or six while the blocking findings fall. Failing checks and a review that
    * asks for changes send the work back to the same agent session; an approval opens the pull request,
    * and running out of attempts after green checks hands the work to a person.
    */
   async loop(pushed: string): Promise<RunResult> {
     let sha = pushed
+    const counts = await this.priorCounts()
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
@@ -1123,11 +1617,14 @@ export class Run {
 
       const outcome = await this.review(sha, attempt)
       if (outcome.verdict === 'approve') return this.approved(sha, attempt, checked.here, outcome)
-      if (outcome.verdict === 'changes' && canRework) {
+      counts.push(blockingCount(outcome.findings))
+      const mayRework =
+        this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
+      if (outcome.verdict === 'changes' && mayRework) {
         sha = await this.rework(attempt + 1, outcome.findings, [])
         continue
       }
-      return this.handOver(sha, attempt, checked.here, outcome)
+      return this.handOver(sha, attempt, checked.here, outcome, counts)
     }
   }
 }

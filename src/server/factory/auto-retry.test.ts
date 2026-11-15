@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { AUTOMATIC_RETRIES, rerunsAfterConflict, retryAt } from './auto-retry'
+import { rerunsAfterConflict, retryAt } from './auto-retry'
+import { AUTOMATIC_RETRIES } from './transitions'
 
 const failedAt = new Date('2026-11-06T00:13:00Z')
 const iso = (d: Date | null) => d?.toISOString() ?? null
@@ -79,5 +80,15 @@ describe('when a finished task whose pull request conflicts with its base runs a
 
   it('reads only a recorded message: a stored value of another shape holding the same words is not a refusal', () => {
     expect(rerunsAfterConflict(['Pull Request has merge conflicts'], 0)).toBe(false)
+  })
+})
+
+describe('when a task blocked by an open issue runs again', () => {
+  it('checks again half an hour later, however many times it already has', () => {
+    for (const automaticRetries of [0, AUTOMATIC_RETRIES, 40]) {
+      expect(iso(retryAt({ retryable: 'blocked', failedAt, automaticRetries }))).toBe(
+        '2026-11-06T00:43:00.000Z',
+      )
+    }
   })
 })

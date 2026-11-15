@@ -1,15 +1,12 @@
 import type { Retryable } from '../../shared/panel'
 
 import { quotaResumesAt } from './quota-reset'
-
-/**
- * How many times in a row the factory runs again, on its own, a task that failed on the environment. Past
- * that the failure is not passing by itself, and it goes to a person.
- */
-export const AUTOMATIC_RETRIES = 3
+import { automaticRunsLeft } from './transitions'
 
 const ENVIRONMENT_WAIT_MS = 5 * 60_000
 const QUOTA_UNKNOWN_WAIT_MS = 60 * 60_000
+/** How often a task blocked by an open issue checks again. The check reads issues, before any sandbox. */
+const BLOCKED_WAIT_MS = 30 * 60_000
 const AFTER_RESET_MS = 60_000
 
 export type FailureToRetry = {
@@ -25,7 +22,8 @@ export type FailureToRetry = {
 
 /**
  * When a failed task runs again on its own, or nothing when it does not. A quota stop runs again once the
- * quota is back, however often that takes, because waiting is what fixes it. An environment failure runs
+ * quota is back, and a task blocked by an open issue every half hour, however often that takes, because
+ * waiting is what fixes them. An environment failure runs
  * again with a doubling wait, a limited number of times. A failure of the work itself never does.
  */
 export function retryAt(failure: FailureToRetry): Date | null {
@@ -38,7 +36,9 @@ export function retryAt(failure: FailureToRetry): Date | null {
         : quotaResumesAt(failure.resetsAt, failure.failedAt)
     return new Date(resumes ? resumes.getTime() + AFTER_RESET_MS : failed + QUOTA_UNKNOWN_WAIT_MS)
   }
-  if (failure.retryable === 'environment' && failure.automaticRetries < AUTOMATIC_RETRIES) {
+  // Waiting is what unblocks it, so it is not limited like an environment failure.
+  if (failure.retryable === 'blocked') return new Date(failed + BLOCKED_WAIT_MS)
+  if (failure.retryable === 'environment' && automaticRunsLeft(failure.automaticRetries)) {
     return new Date(failed + ENVIRONMENT_WAIT_MS * 2 ** failure.automaticRetries)
   }
   return null
@@ -57,6 +57,6 @@ export function rerunsAfterConflict(integrationError: unknown, automaticRetries:
   return (
     typeof integrationError === 'string' &&
     MERGE_CONFLICT.test(integrationError) &&
-    automaticRetries < AUTOMATIC_RETRIES
+    automaticRunsLeft(automaticRetries)
   )
 }

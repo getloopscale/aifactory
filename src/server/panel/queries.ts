@@ -3,11 +3,13 @@ import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import {
   agentRun,
+  changePlan,
   decision,
   delivery,
   evidence,
   finding,
   question,
+  releaseWait,
   review,
   stageEvent,
   task,
@@ -17,9 +19,11 @@ import { retryAt } from '../factory/auto-retry'
 import {
   columnOf,
   retryableFailure,
+  type ChangePlanView,
   type DecisionView,
   type Retryable,
   type DeliveryView,
+  type ReleaseWaitView,
   type CostGroup,
   type EvidenceView,
   type FindingView,
@@ -38,11 +42,25 @@ import {
 type TaskRow = typeof task.$inferSelect
 
 /**
+ * The columns of `stage_event` with the table's name in front. Drizzle writes a column of a query over one
+ * table as a bare name, and inside a subquery over the same table under an alias a bare `task_id` is the
+ * alias's own column: the comparison would be true for every row, and the count would follow the events of
+ * every task instead of this one's.
+ */
+const OUTER = {
+  id: sql.raw('"stage_event"."id"'),
+  taskId: sql.raw('"stage_event"."task_id"'),
+  stage: sql.raw('"stage_event"."stage"'),
+  detail: sql.raw('"stage_event"."detail"'),
+}
+
+/**
  * Per task, in a query grouped by `stage_event.task_id`: the automatic runs since a person last started it.
- * A person's retry starts the count over.
+ * A person's retry starts the count over. A rework that failed creating its sandbox, before any agent ran,
+ * is not counted: nothing of the work was attempted.
  */
 export function automaticRunsSincePerson() {
-  return sql<number>`count(*) filter (where ${stageEvent.stage} = 'intake' and ${stageEvent.detail}->>'automatic' = 'true' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0))`
+  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0) and not ((${OUTER.detail}->>'decision') is not distinct from 'request_changes' and exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage from stage_event f where f.task_id = ${OUTER.taskId} and f.id > s.id order by f.id limit 1) = 'failed')))`
 }
 
 const iso = (date: Date) => date.toISOString()
@@ -77,8 +95,9 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       taskId: stageEvent.taskId,
       last: sql<Date>`max(${stageEvent.at})`,
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
-      // the runs before it are not attempts of this one.
-      verifies: sql<number>`count(*) filter (where ${stageEvent.stage} = 'verify' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake'), 0))`,
+      // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
+      // same run again, so the checks before it still count.
+      verifies: sql<number>`count(*) filter (where ${OUTER.stage} = 'verify' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true'), 0))`,
       automatic: automaticRunsSincePerson(),
     })
     .from(stageEvent)
@@ -95,6 +114,11 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     .where(inArray(delivery.taskId, ids))
     .orderBy(asc(delivery.id))
   const watched = await db.select().from(watch).where(inArray(watch.taskId, ids))
+  const releases = await db
+    .select()
+    .from(releaseWait)
+    .where(inArray(releaseWait.taskId, ids))
+    .orderBy(asc(releaseWait.id))
   const failures = await db
     .selectDistinctOn([stageEvent.taskId], {
       taskId: stageEvent.taskId,
@@ -117,7 +141,10 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       issueNumber: r.issueNumber,
       title: r.issueTitle,
       stage: r.stage as Stage,
-      column: columnOf(r.stage as Stage, again?.retryable ?? null),
+      column: columnOf(r.stage as Stage, again?.retryable ?? null, {
+        resolved: r.resolvedSha !== null,
+        integrated: r.mergedSha !== null,
+      }),
       pullRequestUrl: r.pullRequestUrl,
       headSha: r.headSha,
       costUsd: r.costUsd,
@@ -126,14 +153,31 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       updatedAt: iso(new Date(seen?.last ?? r.createdAt)),
       approved: r.headSha !== null && kinds.some((k) => k.sha === r.headSha),
       integrated: r.mergedSha !== null,
+      waitingForChecks: r.awaitingCiSha !== null,
       resolved: r.resolvedSha !== null,
       retryable: again?.retryable ?? null,
       retryAt: again?.at.toISOString() ?? null,
       preRelease: lastDelivery(delivered, r, 'prerelease'),
       release: lastDelivery(delivered, r, 'release'),
       mainRed: watched.some((w) => w.taskId === r.id && w.status === 'red' && !w.acknowledgedAt),
+      releaseWait: lastReleaseWait(releases, r),
     }
   })
+}
+
+/** The latest release of a task that waits for checks or was refused, while the task is not released. */
+function lastReleaseWait(
+  rows: (typeof releaseWait.$inferSelect)[],
+  t: TaskRow,
+): ReleaseWaitView | null {
+  const last = rows.filter((w) => w.taskId === t.id).at(-1)
+  if (!last || last.status === 'merged' || t.stage !== 'done') return null
+  return {
+    status: last.status,
+    pullRequestUrl: last.pullRequestUrl,
+    checks: last.checks,
+    reason: last.detail,
+  }
 }
 
 type DeliveryRow = typeof delivery.$inferSelect
@@ -163,7 +207,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
   const [row] = await db.select().from(task).where(eq(task.id, id))
   if (!row) return undefined
   const [card] = await cards(db, [row])
-  const [events, checks, reviews, questions, decisions, deliveries, watches, runs] =
+  const [events, checks, reviews, questions, decisions, deliveries, watches, runs, plans] =
     await Promise.all([
       db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
       db.select().from(evidence).where(eq(evidence.taskId, id)).orderBy(asc(evidence.id)),
@@ -173,6 +217,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       db.select().from(delivery).where(eq(delivery.taskId, id)).orderBy(asc(delivery.id)),
       db.select().from(watch).where(eq(watch.taskId, id)).orderBy(asc(watch.id)),
       db.select().from(agentRun).where(eq(agentRun.taskId, id)).orderBy(asc(agentRun.id)),
+      db.select().from(changePlan).where(eq(changePlan.taskId, id)).orderBy(asc(changePlan.id)),
     ])
   return {
     task: card,
@@ -204,6 +249,13 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       findings: r.findings as ReviewView['findings'],
       at: iso(r.at),
     })),
+    plans: plans.map((p): ChangePlanView => ({
+      id: p.id,
+      baseSha: p.baseSha,
+      harness: p.harness,
+      ...(p.plan as Omit<ChangePlanView, 'id' | 'baseSha' | 'harness' | 'at'>),
+      at: iso(p.at),
+    })),
     questions: questions.map((q): QuestionView => ({
       id: q.id,
       body: q.body,
@@ -223,6 +275,10 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       id: r.id,
       role: r.role,
       harness: r.harness,
+      model: r.model,
+      effort: r.effort,
+      tokensIn: r.tokensIn,
+      tokensOut: r.tokensOut,
       attempt: r.attempt,
       costUsd: r.costUsd,
       durationMs: r.durationMs,

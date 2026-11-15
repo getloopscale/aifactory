@@ -7,6 +7,8 @@ import {
   executeAgent,
   PROMPT_FILE,
   SUMMARY_MAX,
+  sum,
+  tokenCounts,
   type CodingHarness,
   type HarnessInput,
   type HarnessResult,
@@ -100,6 +102,8 @@ export function claudeCodeHarness(
 
   return {
     name: 'claude-code',
+    ...(options.model ? { model: options.model } : {}),
+    ...(options.effort ? { effort: options.effort } : {}),
     egress: async () => [anthropicEgress(credential)],
 
     async prepare(backend) {
@@ -144,12 +148,29 @@ function isResult(line: string): boolean {
   }
 }
 
+/**
+ * The model Claude Code reports using: its name when exactly one, null when it reports several (the pass has no
+ * single model, and the configured one is not claimed for it), undefined when it reports none.
+ */
+function ranModel(usage: Record<string, unknown> | undefined): string | null | undefined {
+  const names = Object.keys(usage ?? {})
+  if (names.length === 0) return undefined
+  return names.length === 1 ? names[0] : null
+}
+
 export function parseClaudeResult(exitCode: number, stdout: string, stderr: string): HarnessResult {
   try {
     const parsed = JSON.parse(stdout) as {
       is_error?: boolean
       result?: string
       total_cost_usd?: number
+      modelUsage?: Record<string, unknown>
+      usage?: {
+        input_tokens?: number
+        cache_creation_input_tokens?: number
+        cache_read_input_tokens?: number
+        output_tokens?: number
+      }
       session_id?: string
     }
     const summary = String(parsed.result ?? '').slice(0, SUMMARY_MAX)
@@ -161,6 +182,16 @@ export function parseClaudeResult(exitCode: number, stdout: string, stderr: stri
       ok,
       summary,
       costUsd: parsed.total_cost_usd,
+      ...(ranModel(parsed.modelUsage) !== undefined ? { model: ranModel(parsed.modelUsage) } : {}),
+      ...tokenCounts(
+        // Input counts what the agent read, cached or not.
+        sum(
+          parsed.usage?.input_tokens,
+          parsed.usage?.cache_creation_input_tokens,
+          parsed.usage?.cache_read_input_tokens,
+        ),
+        parsed.usage?.output_tokens,
+      ),
       ...(parsed.session_id ? { sessionId: parsed.session_id } : {}),
       ...(quota ? { quota } : {}),
     }

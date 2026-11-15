@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm'
 import {
   boolean,
   integer,
@@ -9,12 +10,19 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-/** The stages of a task, in the order a successful run passes through them. */
+import type { ChecksProof, DoctorReport, ProvenCheck } from '../../shared/panel'
+
+/**
+ * The stages of a task, in the order a successful run passes through them, then the ways a run ends
+ * without delivering. `cancelled` is a run that was stopped because its issue no longer asks for it.
+ */
 export const TASK_STAGES = [
   'intake',
   'sandbox',
+  'plan',
   'build',
   'push',
   'verify',
@@ -25,6 +33,7 @@ export const TASK_STAGES = [
   'released',
   'handoff',
   'failed',
+  'cancelled',
 ] as const
 export type TaskStage = (typeof TASK_STAGES)[number]
 
@@ -38,7 +47,10 @@ export const ingress = pgTable('ingress', {
   event: text('event').notNull(),
   repository: text('repository'),
   payload: jsonb('payload').notNull(),
-  outcome: text('outcome', { enum: ['task_created', 'task_exists', 'ignored'] }).notNull(),
+  /** `routed` is a delivery that was understood and starts no task: its code names what it means. */
+  outcome: text('outcome', {
+    enum: ['task_created', 'task_exists', 'ignored', 'routed'],
+  }).notNull(),
   /** Stable code for the decision, so a refusal can be counted and searched. */
   code: text('code').notNull(),
   reason: text('reason').notNull(),
@@ -67,6 +79,12 @@ export const task = pgTable(
      * nothing, the checks passed there and the reviewer confirmed it. Such a task has no pull request.
      */
     resolvedSha: text('resolved_sha'),
+    /**
+     * The verified commit whose pull request waits for the integration branch's required checks: GitHub
+     * merges it through auto-merge, and the `integrate-after-ci` cron finishes the integration. Null once
+     * it is merged, sent back or handed to a person.
+     */
+    awaitingCiSha: text('awaiting_ci_sha'),
     /** What the run has spent so far, agents included. It grows while the run is going. */
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -121,6 +139,22 @@ export const review = pgTable('review', {
   verdict: text('verdict', { enum: ['approve', 'changes', 'invalid'] }).notNull(),
   summary: text('summary').notNull(),
   findings: jsonb('findings').notNull(),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * The plan the builder wrote before it changed anything (`ChangePlan`): the files, the order, the risks,
+ * the proof and what it left out. The reviewer measures the diff against the latest one of the task, and a
+ * run that continues the task (an answer, a person's changes) keeps it instead of planning again.
+ */
+export const changePlan = pgTable('change_plan', {
+  id: serial('id').primaryKey(),
+  taskId: integer('task_id')
+    .notNull()
+    .references(() => task.id),
+  baseSha: text('base_sha').notNull(),
+  harness: text('harness').notNull(),
+  plan: jsonb('plan').notNull(),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -194,6 +228,85 @@ export const delivery = pgTable('delivery', {
 })
 
 /**
+ * A release handed to a repository that publishes with changesets. The factory promoted `develop` to the
+ * release branch and made no tag of its own; the repository's release workflow opens a Version Packages
+ * pull request, the factory merges it once its checks are green, and the workflow publishes. The row
+ * waits until the published releases appear, then names them and the tasks they shipped.
+ */
+export const publication = pgTable('publication', {
+  id: serial('id').primaryKey(),
+  /** The task whose release started it. */
+  taskId: integer('task_id')
+    .notNull()
+    .unique()
+    .references(() => task.id),
+  repository: text('repository').notNull(),
+  /** The branch the promotion landed on, which the Version Packages pull request targets. */
+  releaseBranch: text('release_branch').notNull(),
+  /** The merge commit of the promotion: what was released. */
+  promotedSha: text('promoted_sha').notNull(),
+  /** Who decided the release, which also covers merging the Version Packages pull request. */
+  actor: text('actor').notNull(),
+  /**
+   * `failed` when the release workflow finished without a Version Packages pull request and the factory
+   * could not release the promotion as its own; the reason is in `detail` and on the task.
+   */
+  status: text('status', { enum: ['waiting', 'published', 'failed'] })
+    .notNull()
+    .default('waiting'),
+  /** The Version Packages pull request, once the factory merged it or saw it merged. */
+  versionPullRequest: integer('version_pull_request'),
+  /** The tags the repository's workflow published, once it did. */
+  tags: jsonb('tags').$type<string[]>(),
+  /** What the last look found: what it waits for, or why it cannot go on. */
+  detail: text('detail'),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+})
+
+/**
+ * A release that waits for the release branch's required checks. The release pull request from `develop`
+ * cannot merge before they report, so the factory turns auto-merge on, pinned to the head it saw, and the
+ * `integrate-after-ci` cron finishes the release once GitHub merges it, or records why it did not.
+ * A repository has at most one waiting release, since they would share the one release pull request.
+ */
+export const releaseWait = pgTable(
+  'release_wait',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    repository: text('repository').notNull(),
+    pullRequestNumber: integer('pull_request_number').notNull(),
+    pullRequestUrl: text('pull_request_url').notNull(),
+    /** The head of the release pull request when the release was asked for: auto-merge is pinned to it. */
+    sha: text('sha').notNull(),
+    /** The branch the release lands on. */
+    releaseBranch: text('release_branch').notNull(),
+    bump: text('bump', { enum: ['patch', 'minor', 'major'] }).notNull(),
+    /** Who decided the release: `human` or `agent:<name>`. */
+    actor: text('actor').notNull(),
+    /** The repository publishes with changesets, so the release becomes a publication once it lands. */
+    changesets: boolean('changesets').notNull(),
+    /** The checks the release branch required when the release was asked for. */
+    checks: jsonb('checks').$type<string[]>().notNull(),
+    status: text('status', { enum: ['waiting', 'merged', 'refused'] })
+      .notNull()
+      .default('waiting'),
+    /** Why a refused release did not happen: the failed checks, a new push, a closed pull request. */
+    detail: text('detail'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('release_wait_one_per_repository')
+      .on(table.repository)
+      .where(sql`${table.status} = 'waiting'`),
+  ],
+)
+
+/**
  * A release under watch. After the factory (or a person through it) merges a pull request, the
  * checks on the merge commit are watched. If they turn red the factory opens a pull request that
  * reverts the merge, and goes no further: a person decides whether to merge it.
@@ -236,8 +349,14 @@ export const agentRun = pgTable('agent_run', {
   taskId: integer('task_id')
     .notNull()
     .references(() => task.id),
-  role: text('role', { enum: ['builder', 'reviewer'] }).notNull(),
+  role: text('role', { enum: ['builder', 'planner', 'reviewer'] }).notNull(),
   harness: text('harness').notNull(),
+  /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
+  model: text('model'),
+  effort: text('effort'),
+  /** Tokens the agent reported; null for an agent that reports none. */
+  tokensIn: integer('tokens_in'),
+  tokensOut: integer('tokens_out'),
   attempt: integer('attempt').notNull(),
   costUsd: real('cost_usd'),
   durationMs: integer('duration_ms').notNull(),
@@ -329,6 +448,18 @@ export const repository = pgTable('repository', {
   harness: text('harness'),
   reviewer: text('reviewer'),
   releaseMode: text('release_mode', { enum: ['manual', 'trial', 'auto'] }),
+  /** How long a run may last in this repository, in minutes; absent means the factory's default. */
+  runLimitMinutes: integer('run_limit_minutes'),
+  /** The doctor's last report on the repository, with its time. */
+  doctor: jsonb('doctor').$type<DoctorReport>(),
+  /** How the repository publishes a release, as the doctor last read it. */
+  publishMode: text('publish_mode', { enum: ['changesets', 'tag', 'none'] }),
+  /** The commit of the integration branch the checks in `checksProven` passed on. */
+  checksProvenSha: text('checks_proven_sha'),
+  /** The saved checks a proof ran and saw pass, each with its result; one the owner typed is not here. */
+  checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
+  /** The last proof of proposed checks, running or finished. */
+  checksProof: jsonb('checks_proof').$type<ChecksProof>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -409,6 +540,22 @@ export const setting = pgTable('setting', {
 })
 
 /**
+ * Every change of the agent settings, oldest first: which role, which field, from what to what, and when.
+ * `setting` keeps only the latest choice; this keeps the proof that a pass ran under one. A null is the
+ * agent's own default.
+ */
+export const agentSettingChange = pgTable('agent_setting_change', {
+  id: serial('id').primaryKey(),
+  role: text('role', { enum: ['builder', 'planner', 'reviewer'] }).notNull(),
+  field: text('field', { enum: ['engine', 'model', 'effort'] }).notNull(),
+  oldValue: text('old_value'),
+  newValue: text('new_value'),
+  /** Who changed it. The panel has one owner, so it is always `owner`. */
+  actor: text('actor').notNull().default('owner'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * A fact the factory keeps for the knowledge base: one an agent left with `LEARNED:`, or the verdict of a run
  * that found nothing to change. Runs only insert; the main process writes the pending ones to the memory
  * branch of the knowledge repository and marks them with the commit, so there is one writer. The same text
@@ -452,3 +599,71 @@ export const knowledgeDelivery = pgTable('knowledge_delivery', {
   files: integer('files').notNull(),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * A failure the promotion watch filed: one issue per repository, check and failure signature, so the same
+ * failure on a later commit is a comment on its issue rather than a second issue. `lastSha` is the head
+ * commit it was last reported on, which keeps a pass from saying it twice. `issueNumber` is empty while the
+ * issue is being opened: the row is taken first so that two passes cannot open two.
+ */
+export const promotionFinding = pgTable(
+  'promotion_finding',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    checkName: text('check_name').notNull(),
+    signature: text('signature').notNull(),
+    issueNumber: integer('issue_number'),
+    issueUrl: text('issue_url'),
+    /** Whether the issue went to the factory's agents (`factory` label) or to a person. */
+    forFactory: boolean('for_factory').notNull(),
+    lastSha: text('last_sha').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique('promotion_finding_unique').on(table.repository, table.checkName, table.signature),
+  ],
+)
+
+/**
+ * One day of one indicator the factory keeps about itself (`metrics/config.ts`), for one repository or for
+ * all of them (`*`): the mean of what was observed that day and how many observations made it. The
+ * `measure` cron writes it again on every pass for the days it still covers.
+ */
+export const metricPoint = pgTable(
+  'metric_point',
+  {
+    metric: text('metric').notNull(),
+    repository: text('repository').notNull(),
+    /** `YYYY-MM-DD`, in UTC. */
+    day: text('day').notNull(),
+    value: real('value').notNull(),
+    samples: integer('samples').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.metric, t.repository, t.day] })],
+)
+
+/**
+ * A control-band rule an indicator broke on a day, recorded once. `tier` says what it led to: `log` only this
+ * row, `show` this row and the panel, `act` an issue as well (`issueUrl`, or `error` when opening it failed).
+ */
+export const metricSignal = pgTable(
+  'metric_signal',
+  {
+    id: serial('id').primaryKey(),
+    metric: text('metric').notNull(),
+    repository: text('repository').notNull(),
+    day: text('day').notNull(),
+    rule: text('rule').notNull(),
+    tier: text('tier', { enum: ['log', 'show', 'act'] }).notNull(),
+    value: real('value').notNull(),
+    mean: real('mean').notNull(),
+    sd: real('sd').notNull(),
+    issueUrl: text('issue_url'),
+    error: text('error'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique('metric_signal_once').on(t.metric, t.repository, t.day, t.rule)],
+)

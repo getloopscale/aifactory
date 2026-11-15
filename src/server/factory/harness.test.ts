@@ -23,6 +23,41 @@ describe('parseClaudeResult', () => {
     ).toEqual({ ok: true, summary: 'done', costUsd: 0.4 })
   })
 
+  it('reads the tokens, counting what was read from the cache as input', () => {
+    const result = parseClaudeResult(
+      0,
+      JSON.stringify({
+        result: 'done',
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 20,
+          cache_read_input_tokens: 30,
+          output_tokens: 7,
+        },
+      }),
+      '',
+    )
+    expect(result).toMatchObject({ tokensIn: 60, tokensOut: 7 })
+    expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('tokensIn')
+  })
+
+  it('reads the model Claude reports it ran, when it reports exactly one', () => {
+    const run = (modelUsage: object) =>
+      parseClaudeResult(0, JSON.stringify({ result: 'x', modelUsage }), '')
+    expect(run({ 'claude-opus-4': {} })).toMatchObject({ model: 'claude-opus-4' })
+    expect(run({ a: {}, b: {} })).toMatchObject({ model: null })
+    expect(run({})).not.toHaveProperty('model')
+    expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('model')
+  })
+
+  it('says which model and effort the agent was told to use', () => {
+    const told = claudeCodeHarness(
+      { kind: 'api-key', secret: 'k' },
+      { model: 'opus', effort: 'high' },
+    )
+    expect(told).toMatchObject({ model: 'opus', effort: 'high' })
+  })
+
   it('is not ok when claude reports an error, even with exit code 0', () => {
     const result = parseClaudeResult(
       0,
@@ -262,6 +297,38 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('Nobody is there to answer a question, so do not ask one')
     expect(prompt).toContain('say in your final message what you assumed')
     expect(prompt).not.toContain('QUESTION:')
+  })
+
+  it('says the repository checks, not a person, sent the work back when they did', () => {
+    const base = { repo: 'o/r', issueNumber: 1, title: 't', body: 'b', branch: 'x' }
+    const fromChecks = buildPrompt({ ...base, feedback: 'CI failed', feedbackFrom: 'checks' })
+    expect(fromChecks).toContain(
+      "The repository's required checks failed on your earlier pull request",
+    )
+    expect(fromChecks).toContain('CI failed')
+    expect(fromChecks).not.toContain('A person reviewed')
+    expect(buildPrompt({ ...base, feedback: 'rename' })).toContain('A person reviewed')
+  })
+
+  it('says the earlier branch is gone, and not that it holds the work, when the run starts over', () => {
+    const base = { repo: 'o/r', issueNumber: 1, title: 't', body: 'b', branch: 'x' }
+    const startsOver = buildPrompt({ ...base, feedback: 'rename', startsOver: true })
+    expect(startsOver).toContain('rename')
+    expect(startsOver).toContain('The branch of that run no longer exists')
+    expect(startsOver).not.toContain('The branch already holds your earlier work')
+    expect(startsOver).not.toContain('pull request')
+    expect(buildPrompt({ ...base, feedback: 'rename' })).toContain(
+      'The branch already holds your earlier work',
+    )
+    expect(buildPrompt({ ...base, startsOver: true })).not.toContain('no longer exists')
+    const checks = buildPrompt({
+      ...base,
+      feedback: 'CI',
+      feedbackFrom: 'checks',
+      startsOver: true,
+    })
+    expect(checks).toContain("The repository's required checks failed on what an earlier run")
+    expect(checks).not.toContain('A person')
   })
 
   it('says when the issue has no description', () => {

@@ -1,5 +1,7 @@
 import { createSign } from 'node:crypto'
 
+import { z } from 'zod'
+
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 export type InstallationToken = { token: string; expiresAt: Date }
@@ -46,6 +48,21 @@ export type AppRepos = {
   owner(): Promise<string>
 }
 
+/** What the App is subscribed to, which its owner changes on GitHub and nowhere else. */
+export type AppEvents = {
+  /** The webhook events GitHub sends the App, and the page where its owner chooses them. */
+  subscriptions(): Promise<{ events: string[]; settingsUrl: string; owner?: string }>
+}
+
+/** What an installation was granted, which its account accepts on GitHub and nowhere else. */
+export type AppAccess = {
+  /**
+   * The permissions of the installation that covers a repository, by name (`contents: 'write'`), or
+   * undefined when the App is not installed on it.
+   */
+  installationPermissions(repo: string): Promise<Record<string, string> | undefined>
+}
+
 export type GithubApp = {
   /**
    * A short-lived token limited to one repository. There is no way to ask for a token without a
@@ -61,9 +78,12 @@ export type GithubAppOptions = {
   fetch?: FetchLike
   apiUrl?: string
   now?: () => number
+  /** The pause before a read that GitHub answered with a 5xx is asked again. */
+  wait?: (ms: number) => Promise<void>
 }
 
-const PERMISSIONS = {
+/** What the factory asks of an installation: every token it mints carries exactly these. */
+export const APP_PERMISSIONS = {
   contents: 'write',
   pull_requests: 'write',
   issues: 'write',
@@ -77,21 +97,34 @@ const PERMISSIONS = {
 const LIST_TTL_MS = 15_000
 
 /**
- * A token with less than this left is replaced rather than handed out. A run takes one token at its start and
- * keeps it to the end (the firewall's git header is set once, when its sandbox is made), and a run lasts up to
- * 52 minutes (`JOB_SHUTDOWN_WAIT_MS`), so a token handed out has to outlive that. GitHub's last an hour.
+ * A token with less than this left is replaced rather than handed out, so one handed out is at most five
+ * minutes old. A run renews its token every `CREDENTIAL_RENEWAL_MS` (factory/credential-renewal.ts), and
+ * drain.test.ts keeps the token a run holds at least half an hour from expiring. GitHub's last an hour.
  */
 export const TOKEN_LIFE_LEFT_MS = 55 * 60_000
+
+/** The part of `GET /app` that says what the App hears and whose settings page changes it. */
+const appDescription = z.object({
+  slug: z.string(),
+  owner: z.object({ login: z.string(), type: z.string().optional() }),
+  events: z.array(z.string()),
+})
+
+const READ_ATTEMPTS = 3
+const READ_RETRY_MS = 2_000
 
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 const base64url = (value: unknown) =>
   Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)).toString('base64url')
 
-export function createGithubApp(options: GithubAppOptions): GithubApp & AppHooks & AppRepos {
+export function createGithubApp(
+  options: GithubAppOptions,
+): GithubApp & AppHooks & AppRepos & AppEvents & AppAccess {
   const { appId, privateKey, apiUrl = 'https://api.github.com' } = options
   const fetchImpl: FetchLike = options.fetch ?? ((url, init) => fetch(url, init))
   const now = options.now ?? Date.now
+  const wait = options.wait ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
   const cache = new Map<string, InstallationToken>()
   let listed: { at: number; repositories: ReachableRepository[] } | undefined
   let installed: { at: number; installations: AppInstallation[] } | undefined
@@ -108,15 +141,21 @@ export function createGithubApp(options: GithubAppOptions): GithubApp & AppHooks
   }
 
   async function call(path: string, init: RequestInit = {}): Promise<Response> {
-    return fetchImpl(`${apiUrl}${path}`, {
-      ...init,
-      headers: {
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-        authorization: `Bearer ${appJwt()}`,
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-      },
-    })
+    const isRead = (init.method ?? 'GET') === 'GET'
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await fetchImpl(`${apiUrl}${path}`, {
+        ...init,
+        headers: {
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          authorization: `Bearer ${appJwt()}`,
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+        },
+      })
+      // A read GitHub answers with a 5xx is asked again with a pause; a call that changes something never is.
+      if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
+      await wait(READ_RETRY_MS * attempt)
+    }
   }
 
   async function listInstallations(): Promise<AppInstallation[]> {
@@ -146,6 +185,36 @@ export function createGithubApp(options: GithubAppOptions): GithubApp & AppHooks
       const response = await call('/app')
       if (!response.ok) throw new Error(`GitHub answered ${response.status} reading the App`)
       return ((await response.json()) as { owner: { login: string } }).owner.login
+    },
+    async subscriptions() {
+      const response = await call('/app')
+      if (!response.ok) throw new Error(`GitHub answered ${response.status} reading the App`)
+      const described = appDescription.safeParse(await response.json())
+      if (!described.success) {
+        throw new Error(
+          `GitHub described the App without its slug, owner or events: ${z.prettifyError(described.error)}`,
+        )
+      }
+      const { slug, owner, events } = described.data
+      // An App's settings live under its owner: the account's own, or the organization's.
+      const account =
+        owner.type === 'Organization' ? `organizations/${owner.login}/settings` : 'settings'
+      return {
+        events,
+        settingsUrl: `https://github.com/${account}/apps/${slug}/permissions`,
+        owner: owner.login,
+      }
+    },
+    async installationPermissions(repo) {
+      if (!REPO.test(repo)) {
+        throw new Error(`repository must be written owner/name, got ${JSON.stringify(repo)}`)
+      }
+      const response = await call(`/repos/${repo}/installation`)
+      if (response.status === 404) return undefined
+      if (!response.ok) {
+        throw new Error(`GitHub answered ${response.status} reading the installation of ${repo}`)
+      }
+      return ((await response.json()) as { permissions?: Record<string, string> }).permissions ?? {}
     },
     async installationRepositories() {
       // The list is walked page by page, so a page that asks twice in a row is answered from memory.
@@ -250,7 +319,7 @@ export function createGithubApp(options: GithubAppOptions): GithubApp & AppHooks
 
       const minted = await call(`/app/installations/${id}/access_tokens`, {
         method: 'POST',
-        body: JSON.stringify({ repositories: [name], permissions: PERMISSIONS }),
+        body: JSON.stringify({ repositories: [name], permissions: APP_PERMISSIONS }),
       })
       if (minted.status !== 201) {
         throw new Error(`GitHub answered ${minted.status} minting a token for ${repo}`)

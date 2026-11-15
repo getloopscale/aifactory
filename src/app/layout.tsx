@@ -4,7 +4,7 @@ import { ThemeProvider, builtinThemes } from '@theokit/ui'
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 
-import type { HealthReport, InboxItem } from '../shared/panel'
+import type { HealthReport, InboxItem, RepositoriesView } from '../shared/panel'
 
 import { GuidePanel } from './components/guide/GuidePanel'
 import { Rail } from './components/shell/Rail'
@@ -12,6 +12,7 @@ import { Sidebar } from './components/shell/Sidebar'
 import { inWork, TopBar } from './components/shell/TopBar'
 import { post } from './lib/api'
 import { ChatsProvider } from './lib/chats'
+import { CopyProvider, useCopy } from './lib/copy'
 import { GuideProvider } from './lib/guide-state'
 import { useResource } from './lib/live'
 
@@ -41,12 +42,25 @@ function useMenuHidden(): [boolean, (hidden: boolean) => void] {
 
 /** The frame of every page: the menu on the left, the bar on top, and the way to the login. */
 export default function RootLayout() {
+  return (
+    <CopyProvider>
+      <Shell />
+    </CopyProvider>
+  )
+}
+
+function Shell() {
+  const { t } = useCopy()
   const location = useLocation()
   const navigate = useNavigate()
   const onLogin = location.pathname === '/login'
   const me = useResource<{ owner: boolean; name?: string }>('/api/panel/me', { everyMs: 60_000 })
   const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
   const health = useResource<HealthReport>('/api/panel/health', { everyMs: 60_000 })
+  const repositories = useResource<RepositoriesView>('/api/panel/repositories', {
+    everyMs: 60_000,
+    stream: false,
+  })
   const [menuHidden, setMenuHidden] = useMenuHidden()
   const [searchOnOpen, setSearchOnOpen] = useState(false)
 
@@ -65,7 +79,7 @@ export default function RootLayout() {
     <ThemeProvider themes={builtinThemes} defaultTheme="violet-forge" defaultMode="dark">
       <ChatsProvider enabled={signedIn}>
         <GuideProvider>
-          <div className="flex h-screen bg-[#0b0b0c] text-foreground">
+          <div className="flex h-screen bg-background text-foreground">
             {signedIn ? (
               menuHidden ? (
                 <Rail
@@ -75,7 +89,7 @@ export default function RootLayout() {
                   }}
                   waiting={inbox.data?.items.length ?? 0}
                   wrong={health.data?.findings.length ?? 0}
-                  name={me.data?.name ?? 'dono'}
+                  name={me.data?.name ?? t.layout.ownerName}
                   onSignOut={signOut}
                 />
               ) : (
@@ -85,10 +99,11 @@ export default function RootLayout() {
                     setMenuHidden(true)
                   }}
                   startSearching={searchOnOpen}
+                  showOnboarding={repositories.data?.repositories.some((r) => r.enabled) === false}
                   waiting={inbox.data?.items.length ?? 0}
                   wrong={health.data?.findings.length ?? 0}
-                  name={me.data?.name ?? 'dono'}
-                  plan="dono da fábrica"
+                  name={me.data?.name ?? t.layout.ownerName}
+                  plan={t.layout.ownerRole}
                   onSignOut={signOut}
                 />
               )
@@ -103,7 +118,7 @@ export default function RootLayout() {
                 ) : signedIn || onLogin ? (
                   <Outlet />
                 ) : (
-                  <p className="p-6 text-sm text-muted-foreground">Carregando…</p>
+                  <p className="p-6 text-sm text-muted-foreground">{t.layout.loading}</p>
                 )}
               </main>
             </div>

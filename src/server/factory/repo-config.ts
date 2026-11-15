@@ -22,6 +22,8 @@ export type RepoConfig = {
   harness?: string
   reviewer?: string
   releaseMode?: ReleaseMode
+  /** How long a run may last, in ms; absent means the factory's default. */
+  runLimitMs?: number
 }
 
 export const NO_CONFIG: RepoConfig = { egress: [] }
@@ -60,6 +62,7 @@ export async function loadRepoConfig(db: Database, fullName: string): Promise<Re
     harness: row.harness ?? undefined,
     reviewer: row.reviewer ?? undefined,
     releaseMode: row.releaseMode ?? undefined,
+    runLimitMs: row.runLimitMinutes ? row.runLimitMinutes * 60_000 : undefined,
   }
 }
 

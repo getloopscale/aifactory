@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
 import { describe, expect, it, vi } from 'vitest'
 
@@ -97,6 +97,24 @@ const spec = {
 const instant = async () => {}
 
 describe('creating a docker sandbox', () => {
+  it('does not sweep a live sandbox with a longer limit than its own', async () => {
+    const created = new Date(Date.now() - 100 * 60_000)
+      .toISOString()
+      .replace('T', ' ')
+      .replace('Z', ' +0000 UTC')
+    const { docker, all } = fakeDocker((args) => {
+      const line = args.join(' ')
+      if (line.includes('{{.Names}} {{.CreatedAt}}')) return ok(`factory-sbx-long ${created}\n`)
+      return undefined
+    })
+    const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create({
+      ...spec,
+      timeoutMs: 30 * 60_000,
+    })
+    expect(all()).not.toContain('rm -f factory-sbx-long')
+    await sandbox.stop()
+  })
+
   it('makes a network with no way out, a proxy on it, and a sandbox with no capabilities', async () => {
     const { docker, all } = fakeDocker()
     const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create(spec)
@@ -126,6 +144,33 @@ describe('creating a docker sandbox', () => {
     const mount = proxy[proxy.indexOf(proxy.find((a) => a.endsWith(':/rules:ro'))!)]
     const rules = JSON.parse(readFileSync(`${mount.split(':')[0]}/rules.json`, 'utf8'))
     expect(rules.allow['github.com'].headers.authorization).toBe('Basic TOP-SECRET-VALUE')
+    await sandbox.stop()
+  })
+
+  it('hands the proxy new credentials while the sandbox runs, by replacing its rules file whole', async () => {
+    const { docker, calls } = fakeDocker()
+    const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create(spec)
+    const proxy = calls.find((c) => c.args.includes('--entrypoint'))!.args
+    const rulesDir = proxy.find((a) => a.endsWith(':/rules:ro'))!.split(':')[0]
+
+    await sandbox.updateEgress!([
+      { domain: 'github.com', headers: { authorization: 'Basic RENEWED-VALUE' } },
+      { domain: 'registry.npmjs.org' },
+    ])
+
+    const rules = JSON.parse(readFileSync(`${rulesDir}/rules.json`, 'utf8'))
+    expect(rules.allow['github.com'].headers.authorization).toBe('Basic RENEWED-VALUE')
+    // The proxy reads the file while it is replaced, so no half-written file may ever be there.
+    expect(readdirSync(rulesDir)).toEqual(['rules.json'])
+    expect(JSON.stringify(calls)).not.toContain('RENEWED-VALUE')
+    await sandbox.stop()
+  })
+
+  it('refuses new egress rules that would leave the sandbox without a policy', async () => {
+    const { docker } = fakeDocker()
+    const sandbox = await dockerSandboxProvider({ docker, sleep: instant }).create(spec)
+
+    await expect(sandbox.updateEgress!([])).rejects.toThrow(/refusing to run without isolation/)
     await sandbox.stop()
   })
 

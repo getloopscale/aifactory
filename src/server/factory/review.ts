@@ -1,6 +1,7 @@
 import { knowledgeRules } from '../knowledge/prompt'
 import type { CheckSpec } from './evidence'
 import { checksRule } from './harness'
+import type { RequiredByCheck } from './required-files'
 
 export type Severity = 'blocker' | 'major' | 'minor'
 
@@ -15,6 +16,42 @@ export type ReviewVerdict = {
 /** The reviews a task gets before it goes to a person, counting the first one. */
 export const MAX_ATTEMPTS = 3
 
+/** The reviews a task gets while its blocking findings keep going down from one round to the next. */
+export const MAX_CONVERGING_ATTEMPTS = 6
+
+/** The finding the factory adds itself for a file the plan does not cover. */
+export const OUTSIDE_THE_PLAN = 'changed outside the plan'
+
+/** Findings that block: major and above, without the entries the factory adds for files outside the plan. */
+export function blockingCount(findings: Finding[]): number {
+  return findings.filter((f) => f.severity !== 'minor' && f.issue !== OUTSIDE_THE_PLAN).length
+}
+
+/** Did the blocking findings go down from the round before? */
+export function converging(counts: number[]): boolean {
+  const [before, last] = counts.slice(-2)
+  return before !== undefined && last !== undefined && last < before
+}
+
+/**
+ * May a review that asked for changes at `attempt` send the work back for another round? The first
+ * `MAX_ATTEMPTS` always may; after that only while the blocking findings fell in the last round, up to
+ * `MAX_CONVERGING_ATTEMPTS`. `counts` has the blocking findings of each review round so far.
+ */
+export function reviewAllowsRework(attempt: number, counts: number[]): boolean {
+  if (attempt < MAX_ATTEMPTS) return true
+  return attempt < MAX_CONVERGING_ATTEMPTS && converging(counts)
+}
+
+/** What a handoff says about the rounds, once the first limit is passed; empty before that. */
+export function roundsNote(attempt: number, counts: number[]): string {
+  if (attempt < MAX_ATTEMPTS || counts.length === 0) return ''
+  const per = `blocking findings per round: ${counts.join(', ')}`
+  return converging(counts)
+    ? ` (still converging, but this is the limit; ${per})`
+    : ` (the review is not converging; ${per})`
+}
+
 export function reviewPrompt(input: {
   repo: string
   issueNumber: number
@@ -24,13 +61,22 @@ export function reviewPrompt(input: {
   baseSha: string
   /** Where the knowledge base is in the sandbox, when the factory delivered one. */
   knowledgeDir?: string
+  /** The plan the builder wrote before it changed anything, as markdown. */
+  plan?: string
+  /** The changed files the plan does not cover, found without a model. */
+  unplanned?: string[]
+  /** What the builder said when it finished, where it gives its reasons. */
+  builderSummary?: string
+  /** The factory checks that failed on an earlier attempt and pass now, with the files added since. */
+  required?: RequiredByCheck[]
 }): string {
+  const required = input.required ?? []
   return `You are an independent code reviewer for the repository ${input.repo}. Another agent implemented the issue below on the branch ${input.branch}. You did not write this code and you must not change it.
 
 # ${input.title} (#${input.issueNumber})
 
 ${input.body || '(the issue has no description)'}
-
+${input.plan === undefined ? '' : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
 Review the work:
 - Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches.
 - Decide whether it does what the issue asks, no more and no less.
@@ -47,6 +93,58 @@ Finish with one JSON object on its own, and nothing after it:
 {"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}
 
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
+`
+}
+
+/** The plan in the review: what the builder meant to change, and where the diff left it. */
+function planSection(
+  plan: string,
+  unplanned: string[],
+  builderSummary: string | undefined,
+  required: RequiredByCheck[],
+): string {
+  const covered = required.some((check) => check.files.length > 0)
+    ? 'Every file the diff changes is in the plan or was added after a factory check failed (see below).'
+    : 'Every file the diff changes is in the plan.'
+  const outside =
+    unplanned.length === 0
+      ? covered
+      : `A check without a model found these files changed outside the plan:\n\n${unplanned.map((p) => `- \`${p}\``).join('\n')}`
+  return `
+# The builder's plan
+
+The builder wrote this before it changed anything:
+
+${plan}
+
+${outside}
+
+Measure the diff against the plan. A file changed outside the plan is a finding, at least major, unless the builder's summary gives a reason the issue needs it; then judge the reason. Edits the issue does not need (a reformat, a lint fix in an unrelated file) are not a reason.
+${builderSummary ? `\nWhat the builder said when it finished:\n\n${builderSummary.slice(0, 3_000)}\n` : ''}`
+}
+
+/**
+ * What the factory's own checks asked for. Without it the reviewer reads a file a check demanded (an empty
+ * changeset in a private package) as outside the plan and asks to remove it, which the builder cannot do
+ * without failing the check again.
+ */
+function requiredSection(required: RequiredByCheck[]): string {
+  if (required.length === 0) return ''
+  const checks = required.map((check) => {
+    const files =
+      check.files.length === 0
+        ? 'No file was added between the two commits.'
+        : `Files added between the two commits:\n\n${check.files.map((p) => `- \`${p}\``).join('\n')}`
+    return `The check \`${check.name}\` (\`${check.command}\`) failed on ${check.failedSha.slice(0, 7)} with:\n\n> ${check.error}\n\nIt passes on ${check.passedSha.slice(0, 7)} and on the commit under review. ${files}`
+  })
+  return `
+# What the factory's checks required
+
+The factory runs its own checks on every commit and accepts no work while one fails. On an earlier attempt of this task:
+
+${checks.join('\n\n')}
+
+A file listed here that the error of its check calls for is legitimate: the factory required it. Do not report it as outside the plan or as an unrelated change, and do not ask to remove it, even when a rule of the knowledge base says such a file is not needed. Its content is still yours to review, and so is any listed file the error does not explain.
 `
 }
 

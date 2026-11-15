@@ -2,12 +2,15 @@ import { describe, expect, it } from 'vitest'
 
 import { diffGuards, parseNameStatus, testScriptOf } from './guards'
 import {
+  blockingCount,
   notResolvedPrompt,
   parseVerdict,
   renderFindings,
   resolvedPrompt,
+  reviewAllowsRework,
   reviewPrompt,
   reworkPrompt,
+  roundsNote,
 } from './review'
 
 const answer = (verdict: unknown) => `I read the diff.\n\n${JSON.stringify(verdict)}`
@@ -92,6 +95,101 @@ describe('prompts', () => {
     expect(prompt).toContain('git diff abc...HEAD')
     expect(prompt).toContain('Do not edit, create or delete files')
     expect(prompt).toContain('"verdict"')
+    expect(prompt).not.toContain("# The builder's plan")
+  })
+
+  it('gives the reviewer the plan, the files changed outside it, and what the builder said', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      plan: '**Files**\n\n- `src/a.ts`',
+      unplanned: ['src/lint-only.ts', '.prettierrc'],
+      builderSummary: 'changed a.ts',
+    })
+    expect(prompt).toContain("# The builder's plan")
+    expect(prompt).toContain('- `src/a.ts`')
+    expect(prompt).toContain('- `src/lint-only.ts`')
+    expect(prompt).toContain('- `.prettierrc`')
+    expect(prompt).toContain('changed a.ts')
+    expect(prompt).toContain('outside the plan')
+  })
+
+  it('says when every changed file is in the plan', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      plan: 'p',
+      unplanned: [],
+    })
+    expect(prompt).toContain('Every file the diff changes is in the plan.')
+  })
+
+  const reviewOf = (extra: Partial<Parameters<typeof reviewPrompt>[0]>) =>
+    reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      ...extra,
+    })
+  const changesetCheck = {
+    name: 'changeset',
+    command: 'pnpm exec changeset status --since=origin/workspace',
+    error: 'error Some packages have been changed but no changesets were found.',
+    failedSha: 'f'.repeat(40),
+    passedSha: 'a'.repeat(40),
+    files: ['.changeset/quiet-pens-wave.md'],
+  }
+
+  it('names the check that failed on an earlier attempt, its error and the files added since', () => {
+    const prompt = reviewOf({ required: [changesetCheck] })
+
+    expect(prompt).toContain("# What the factory's checks required")
+    expect(prompt).toContain('`changeset` (`pnpm exec changeset status --since=origin/workspace`)')
+    expect(prompt).toContain('failed on fffffff with:')
+    expect(prompt).toContain('It passes on aaaaaaa and on the commit under review.')
+    expect(prompt).toContain(
+      '> error Some packages have been changed but no changesets were found.',
+    )
+    expect(prompt).toContain('- `.changeset/quiet-pens-wave.md`')
+    expect(prompt).toContain('is legitimate')
+  })
+
+  it('does not call a file added for a check part of the plan', () => {
+    const prompt = reviewOf({ plan: 'p', unplanned: [], required: [changesetCheck] })
+
+    expect(prompt).not.toContain('Every file the diff changes is in the plan.')
+    expect(prompt).toContain(
+      'Every file the diff changes is in the plan or was added after a factory check failed',
+    )
+  })
+
+  it('says when a check was repaired without adding a file', () => {
+    const prompt = reviewOf({
+      plan: 'p',
+      unplanned: [],
+      required: [{ ...changesetCheck, files: [] }],
+    })
+
+    expect(prompt).toContain('No file was added between the two commits.')
+    expect(prompt).toContain('Every file the diff changes is in the plan.')
+  })
+
+  it('says nothing about the checks when none failed on an earlier attempt', () => {
+    const base = { plan: 'p', unplanned: ['src/extra.ts'], builderSummary: 'done' }
+
+    expect(reviewOf({ ...base, required: [] })).toBe(reviewOf(base))
+    expect(reviewOf(base)).not.toContain("# What the factory's checks required")
   })
 
   it('gives the builder the failing output and the findings, and forbids committing', () => {
@@ -156,6 +254,32 @@ describe('diffGuards', () => {
       headTestScript: 'node --test',
     })
     expect(findings).toHaveLength(1)
+  })
+
+  it('flags a deleted Python or Go test file too', () => {
+    const findings = diffGuards({
+      ...clean,
+      changes: [
+        { status: 'D', path: 'pkg/test_parse.py' },
+        { status: 'D', path: 'pkg/parse_test.go' },
+      ],
+    })
+    expect(findings.map((f) => f.file)).toEqual(['pkg/test_parse.py', 'pkg/parse_test.go'])
+  })
+
+  it('adds what the change took from the tests, as a blocker in a bug fix', () => {
+    const patch = [
+      'diff --git a/src/x.test.js b/src/x.test.js',
+      '--- a/src/x.test.js',
+      '+++ b/src/x.test.js',
+      '@@ -3 +2,0 @@',
+      '-  expect(x()).toBe(1)',
+    ].join('\n')
+    const findings = diffGuards({
+      ...clean,
+      tests: { patch, issue: { labels: ['bug'], title: 'x is wrong', body: '' } },
+    })
+    expect(findings.map((f) => [f.severity, f.file])).toEqual([['blocker', 'src/x.test.js']])
   })
 })
 
@@ -354,5 +478,40 @@ describe('notResolvedPrompt', () => {
   it('says nothing about findings when the reviewer listed none', () => {
     const prompt = notResolvedPrompt({ summary: 'nothing of it is there', findings: [] })
     expect(prompt.split('\n\n')).toHaveLength(5)
+  })
+})
+
+describe('the rounds a review gets', () => {
+  it("counts major and blocker findings, not minor ones or the factory's outside-the-plan entries", () => {
+    expect(
+      blockingCount([
+        { severity: 'blocker', issue: 'a' },
+        { severity: 'major', issue: 'b' },
+        { severity: 'minor', issue: 'c' },
+        { severity: 'major', issue: 'changed outside the plan' },
+      ]),
+    ).toBe(2)
+  })
+
+  it('always allows the first three rounds', () => {
+    expect(reviewAllowsRework(1, [5])).toBe(true)
+    expect(reviewAllowsRework(2, [5, 6])).toBe(true)
+  })
+
+  it('allows more only while the findings fall, up to six', () => {
+    expect(reviewAllowsRework(3, [4, 3, 2])).toBe(true)
+    expect(reviewAllowsRework(3, [5, 6, 7])).toBe(false)
+    expect(reviewAllowsRework(3, [3, 3, 4])).toBe(false)
+    expect(reviewAllowsRework(3, [3, 3, 3])).toBe(false)
+    expect(reviewAllowsRework(5, [9, 8, 7, 6, 5])).toBe(true)
+    expect(reviewAllowsRework(6, [9, 8, 7, 6, 5, 4])).toBe(false)
+  })
+
+  it('says in the handoff what the rounds were', () => {
+    expect(roundsNote(2, [3, 4])).toBe('')
+    expect(roundsNote(3, [5, 6, 7])).toBe(
+      ' (the review is not converging; blocking findings per round: 5, 6, 7)',
+    )
+    expect(roundsNote(6, [9, 8, 7, 6, 5, 4])).toContain('still converging')
   })
 })

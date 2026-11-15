@@ -3,6 +3,7 @@ import { useState } from 'react'
 
 import type { RepositoriesView } from '../../shared/panel'
 import { get, post } from '../lib/api'
+import { useCopy } from '../lib/copy'
 
 import { Assist } from './Assist'
 
@@ -10,10 +11,21 @@ import { Assist } from './Assist'
 export type CreatedJob = { number: number; url: string; started: boolean }
 
 /** One issue, written here, opened on GitHub, and started if asked. The task comes back through the webhook. */
-export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) {
+export function NewJob({
+  onCreated,
+  repository: preferred = '',
+  label,
+}: {
+  onCreated: (job: CreatedJob) => void
+  /** The repository the form starts on, when it is not the first enabled one. */
+  repository?: string
+  /** The text of the button that opens the form. */
+  label?: string
+}) {
+  const { t } = useCopy()
   const [open, setOpen] = useState(false)
   const [repos, setRepos] = useState<RepositoriesView>()
-  const [repository, setRepository] = useState('')
+  const [repository, setRepository] = useState(preferred)
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [start, setStart] = useState(true)
@@ -25,6 +37,8 @@ export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) 
     setOpen(next)
     if (next) {
       setMessage(undefined)
+      // The previous answer may be stale: show the loading state until the new one arrives.
+      setRepos(undefined)
       get<RepositoriesView>('/api/panel/repositories')
         .then(setRepos)
         .catch((e: unknown) => setMessage(e instanceof Error ? e.message : String(e)))
@@ -58,25 +72,26 @@ export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) 
   return (
     <Dialog open={open} onOpenChange={toggle}>
       <Dialog.Trigger asChild>
-        <Button size="sm">New job</Button>
+        <Button size="sm">{label ?? t.newJob.open}</Button>
       </Dialog.Trigger>
-      <Dialog.Content>
+      <Dialog.Content closeLabel={t.newJob.close}>
         <Dialog.Header>
-          <Dialog.Title>New job</Dialog.Title>
-          <Dialog.Description>
-            Opens an issue on GitHub. With &ldquo;Start now&rdquo; the factory begins as soon as it
-            is created.
-          </Dialog.Description>
+          <Dialog.Title>{t.newJob.title}</Dialog.Title>
+          <Dialog.Description>{t.newJob.description}</Dialog.Description>
         </Dialog.Header>
         <Dialog.Body className="space-y-3 text-sm">
-          {enabled.length === 0 ? (
-            <p className="text-muted-foreground">Enable a repository under Repositories first.</p>
+          {repos === undefined ? (
+            message ? null : (
+              <p className="text-muted-foreground">{t.newJob.loading}</p>
+            )
+          ) : enabled.length === 0 ? (
+            <p className="text-muted-foreground">{t.newJob.enableFirst}</p>
           ) : (
             <>
               <label className="block">
-                <span className="text-foreground">Repository</span>
+                <span className="text-foreground">{t.newJob.repository}</span>
                 <select
-                  aria-label="Repository"
+                  aria-label={t.newJob.repository}
                   value={chosen}
                   onChange={(e) => setRepository(e.target.value)}
                   className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground"
@@ -87,7 +102,7 @@ export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) 
                 </select>
               </label>
               <label className="block">
-                <span className="text-foreground">Title</span>
+                <span className="text-foreground">{t.newJob.titleField}</span>
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -95,9 +110,7 @@ export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) 
                 />
               </label>
               <label className="block">
-                <span className="text-foreground">
-                  What should it do, and how will you know it works?
-                </span>
+                <span className="text-foreground">{t.newJob.bodyField}</span>
                 <Textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
@@ -120,7 +133,7 @@ export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) 
                   checked={start}
                   onChange={(e) => setStart(e.target.checked)}
                 />
-                <span className="text-foreground">Start now</span>
+                <span className="text-foreground">{t.newJob.startNow}</span>
               </label>
             </>
           )}
@@ -136,7 +149,7 @@ export function NewJob({ onCreated }: { onCreated: (job: CreatedJob) => void }) 
             disabled={busy || chosen === '' || title.trim() === ''}
             onClick={() => void submit()}
           >
-            Create job
+            {t.newJob.create}
           </Button>
         </Dialog.Footer>
       </Dialog.Content>
