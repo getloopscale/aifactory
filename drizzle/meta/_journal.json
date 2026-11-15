@@ -211,6 +211,13 @@
       "when": 1794680000000,
       "tag": "0032_agent_telemetry",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794690000000,
+      "tag": "0033_plan_agent",
+      "breakpoints": true
     }
   ]
 }

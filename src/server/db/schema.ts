@@ -476,6 +476,12 @@ export const plan = pgTable('plan', {
   summary: text('summary').notNull().default(''),
   error: text('error'),
   costUsd: real('cost_usd').notNull().default(0),
+  /** Which agent planned, with the model and effort it ran with and the tokens it reported; null before this was recorded. */
+  agent: text('agent'),
+  model: text('model'),
+  effort: text('effort'),
+  tokensIn: integer('tokens_in'),
+  tokensOut: integer('tokens_out'),
   /** The GitHub milestone the issues were gathered under, once created. */
   milestoneNumber: integer('milestone_number'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
