@@ -24,11 +24,27 @@ const withoutDatabase = ({ DATABASE_URL: _unused, ...env }) => env
  * Runs the real deploy script from a copy of the repository layout, with every outside command replaced by
  * one that writes down how it was called. `busy` is what the database says about working tasks.
  */
-function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
+function deploy({
+  busy = '0',
+  enabledWorkers = [],
+  checkFails = false,
+  migrateFails = false,
+  envFile,
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'deploy-test-'))
   homes.push(root)
   mkdirSync(join(root, 'scripts'))
   copyFileSync(new URL('./deploy.sh', import.meta.url), join(root, 'scripts', 'deploy.sh'))
+  copyFileSync(
+    new URL('./write-units.sh', import.meta.url),
+    join(root, 'scripts', 'write-units.sh'),
+  )
+  chmodSync(join(root, 'scripts', 'write-units.sh'), 0o755)
+  mkdirSync(join(root, 'ops', 'systemd'), { recursive: true })
+  writeFileSync(join(root, 'ops', 'systemd', 'aifactory.service'), 'ExecStart=@ROOT@/run\n')
+  if (envFile !== undefined) writeFileSync(join(root, '.env.local'), envFile)
+  const home = join(root, 'home')
+  mkdirSync(home)
   const bin = join(root, 'bin')
   mkdirSync(bin)
   const calls = join(root, 'calls.log')
@@ -40,7 +56,7 @@ function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
   // `pnpm evals:check` is the agent-configuration gate; the deploy must stop when it fails.
   fake(
     'pnpm',
-    `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}`,
+    `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}\n${migrateFails ? 'case "$*" in db:migrate*) exit 1 ;; esac' : ''}`,
   )
   // `list-dependencies` answers with the units the boot target wants, which is where an enabled worker is.
   const wanted = ['aifactory.service', ...enabledWorkers, 'aifactory-tunnel.service'].join('\\n')
@@ -48,7 +64,7 @@ function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
   fake('curl')
   fake('journalctl')
   const run = spawnSync('bash', [join(root, 'scripts', 'deploy.sh')], {
-    env: { ...withoutDatabase(process.env), PATH: `${bin}:${process.env.PATH}` },
+    env: { ...withoutDatabase(process.env), HOME: home, PATH: `${bin}:${process.env.PATH}` },
     encoding: 'utf8',
   })
   const code = run.status
@@ -59,6 +75,8 @@ function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
     output,
     pnpm: log.filter((l) => l.startsWith('pnpm ') && !l.startsWith('pnpm sees')),
     pnpmEnv: log.filter((l) => l.startsWith('pnpm sees')),
+    unit: join(home, '.config', 'systemd', 'user', 'aifactory.service'),
+    root,
     systemctl: log.filter((l) => l.startsWith('systemctl ')),
   }
 }
@@ -104,14 +122,14 @@ describe('the deploy script', () => {
     const { code, pnpm } = deploy()
 
     expect(code).toBe(0)
-    expect(pnpm).toEqual(['pnpm evals:check', 'pnpm build'])
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build'])
   })
 
   it('builds and restarts nothing when the agents do worse than the baseline', () => {
     const { code, pnpm, systemctl, output } = deploy({ checkFails: true })
 
     expect(code).not.toBe(0)
-    expect(pnpm).toEqual(['pnpm evals:check'])
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check'])
     expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
     expect(output).toMatch(/the agents did worse than the baseline/)
   })
@@ -120,8 +138,46 @@ describe('the deploy script', () => {
     const { code, pnpmEnv } = deploy()
 
     expect(code).toBe(0)
-    expect(pnpmEnv[0]).toBe(
-      'pnpm sees DATABASE_URL=postgres://factory:factory@localhost:54329/factory',
-    )
+    const url = 'pnpm sees DATABASE_URL=postgres://factory:factory@localhost:54329/factory'
+    expect(pnpmEnv).toEqual([url, url, url])
+  })
+
+  it('gives the migration and the check the database .env.local names', () => {
+    const { code, pnpmEnv } = deploy({ envFile: 'DATABASE_URL=postgres://other/db\n' })
+
+    expect(code).toBe(0)
+    expect(pnpmEnv.slice(0, 2)).toEqual([
+      'pnpm sees DATABASE_URL=postgres://other/db',
+      'pnpm sees DATABASE_URL=postgres://other/db',
+    ])
+  })
+
+  it('ends before the build when the migrations fail', () => {
+    const { code, pnpm, systemctl, output } = deploy({ migrateFails: true })
+
+    expect(code).not.toBe(0)
+    expect(pnpm).toEqual(['pnpm db:migrate'])
+    expect(systemctl).toEqual([])
+    expect(output).toMatch(/the migrations failed/)
+  })
+
+  it('writes the unit files and reloads systemd before the restart, enabling nothing', () => {
+    const { code, systemctl, unit, root } = deploy()
+
+    expect(code).toBe(0)
+    expect(readFileSync(unit, 'utf8')).toBe(`ExecStart=${join(root, 'run')}\n`)
+    const reload = systemctl.indexOf('systemctl --user daemon-reload')
+    const restart = systemctl.findIndex((l) => l.includes(' restart '))
+    expect(reload).toBeGreaterThanOrEqual(0)
+    expect(reload).toBeLessThan(restart)
+    expect(systemctl.filter((l) => /\b(enable|disable)\b/.test(l))).toEqual([])
+  })
+
+  it('leaves a unit that was disabled disabled', () => {
+    // The fake systemctl keeps no state, so the only way a unit changes is a call that enables or disables it.
+    const { code, systemctl } = deploy({ enabledWorkers: ['aifactory-worker@1.service'] })
+
+    expect(code).toBe(0)
+    expect(systemctl.filter((l) => /\b(enable|disable|link|mask|unmask)\b/.test(l))).toEqual([])
   })
 })
