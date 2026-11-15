@@ -17,15 +17,38 @@ else
   echo "could not ask the database whether tasks are working; going on" >&2
 fi
 
+# The database the service uses: the one .env.local names, else the default scripts/run-server.sh uses.
+if [ -f .env.local ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.local
+  set +a
+fi
+export DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/factory}"
+
+# A tunnel unit that is enabled and cannot be rendered (no cloudflared) stops the deploy before anything changes.
+scripts/write-units.sh --check || exit 1
+
+# The check reads tables the release may have changed, so the migrations come first. A failure stops the
+# deploy before anything is built or restarted.
+if ! pnpm db:migrate; then
+  echo "the migrations failed (see above); nothing was built or restarted" >&2
+  exit 1
+fi
+
 # When a prompt, an agent or a model changed since evals/baseline.json, the quick cases run again on real
-# agents and must do no worse than the baseline (docs/adr/0008). Nothing changed, nothing runs. It reads the
-# factory's database, which .env.local does not name: the default is the one scripts/run-server.sh uses.
-if ! DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/factory}" pnpm evals:check; then
+# agents and must do no worse than the baseline (docs/adr/0008). Nothing changed, nothing runs.
+if ! pnpm evals:check; then
   echo "the agents did worse than the baseline (see above); nothing was built or restarted" >&2
   exit 1
 fi
 
+# The installed units are copies, so a release that changes one reaches them here. Only the files are written
+# and systemd reloaded: nothing is enabled or disabled, so a unit the owner turned off stays off. It runs before
+# the restart, after a build that succeeded, so a failed build leaves the installed units as they were.
 pnpm build
+scripts/write-units.sh
+systemctl --user daemon-reload
 # All at once, so each process drains its own run in parallel. The workers run tasks and the feeder hands them
 # out from the same build, so each one left alone keeps the code from before it.
 # Every enabled worker is restarted, a stopped one included: try-restart left a stopped worker stopped, and
