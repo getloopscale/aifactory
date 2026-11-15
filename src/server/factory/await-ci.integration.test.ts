@@ -592,8 +592,14 @@ describe('pollAwaitingIntegrations', () => {
     gh.attempts = { 2: 1 }
     const id = await waitingTask()
 
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], rerun: [] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
+      sentBack: [],
+      rerun: [],
+      toPerson: [id],
+    })
     expect(gh.reruns).toEqual([])
+    expect((await row(id)).stage).toBe('handoff')
+    expect(comments()[0].body).toContain('not known whether the failure is of the work')
   })
 
   it('asks for a rerun once across passes, even while GitHub still shows the first attempt', async () => {
@@ -608,7 +614,7 @@ describe('pollAwaitingIntegrations', () => {
 
     expect(gh.reruns).toEqual([1])
     expect(again).toMatchObject({ rerun: [id], sentBack: [] })
-    expect(Object.keys((await row(id)).ciReruns)).toEqual(['10'])
+    expect(Object.keys((await row(id)).ciReruns)).toEqual(['1'])
   })
 
   it('reruns both same-named failures and gives each its own log in the note', async () => {
@@ -635,7 +641,7 @@ describe('pollAwaitingIntegrations', () => {
     expect(sentBack[0].note).toContain('FAIL src/b.test.ts')
   })
 
-  it('stops waiting for a rerun claimed long ago, and sends the work back without asking again', async () => {
+  it('hands a rerun claimed long ago to a person as unconfirmed, without asking again', async () => {
     const a = 'https://github.com/paulo/app/actions/runs/500/job/1'
     reports({ name: 'CI', state: 'failure', detail: '', url: a })
     gh.failedRuns = [{ id: 1, name: 'CI', url: a, summary: '', actions: true }]
@@ -644,7 +650,7 @@ describe('pollAwaitingIntegrations', () => {
     const id = await waitingTask()
     await getDb()
       .update(task)
-      .set({ ciReruns: { '10': new Date(NOW.getTime() - 20 * 60_000).toISOString() } })
+      .set({ ciReruns: { '1': new Date(NOW.getTime() - 20 * 60_000).toISOString() } })
       .where(eq(task.id, id))
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], rerun: [] })

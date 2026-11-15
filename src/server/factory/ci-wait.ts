@@ -201,7 +201,12 @@ function stepLine(r: FailedReport): string {
 }
 
 /** What a note says after its list of checks: the quoted reports, for a handoff to carry the same evidence. */
-export const evidenceOfNote = (note: string): string => note.split('\n\n').slice(1).join('\n\n')
+export const evidenceOfNote = (note: string): string => {
+  const [head, ...quotes] = note.split('\n\n')
+  // That a rerun could not be made is part of the evidence: the failure may not be of the work.
+  const rerun = /^The factory could not rerun the failed jobs.*$/m.exec(head)?.[0]
+  return [...(rerun ? [rerun] : []), ...quotes].join('\n\n')
+}
 
 const said = (r: FailedReport) =>
   evidenceLines(r).length > 0 || r.detail.trim() !== '' || stepLine(r) !== ''

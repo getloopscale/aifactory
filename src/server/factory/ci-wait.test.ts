@@ -433,6 +433,12 @@ describe('checksFeedback step and refused rerun', () => {
     )
   })
 
+  it('keeps the refused rerun in what a handoff carries', () => {
+    const evidence = evidenceOfNote(checksFeedback('abc1234', failed, '403'))
+    expect(evidence).toContain('The factory could not rerun the failed jobs (403)')
+    expect(evidence).toContain('boom')
+  })
+
   it('renders the step alone when nothing else was read, and marks a check the factory lacks', () => {
     const only = [
       {

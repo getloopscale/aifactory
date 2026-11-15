@@ -1908,6 +1908,39 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  it('says in the handoff that a rerun was refused, so the failure is not blamed on the work', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'Nothing to change.' }
+      },
+    }
+    const filler = Array.from({ length: 60 }, (_, i) => `error filler line number ${i}`).join('\n')
+
+    const result = await runTask(
+      deps(new FakeSandbox(changed()), { harness: builder }),
+      id,
+      undefined,
+      {
+        feedback: `CI failed:\n- CI: u\nThe factory could not rerun the failed jobs (GitHub answered 403), so a failure that is not of the work may be among these.\n\nCI:\n~~~~text\n${filler}\n~~~~`,
+        fromChecks: true,
+      },
+    )
+
+    expect(result).toMatchObject({
+      status: 'handoff',
+      reason: expect.stringContaining('could not rerun the failed jobs (GitHub answered 403)'),
+    })
+  })
+
   it('does not mention a review when nobody sent anything back', async () => {
     const id = await seedTask()
     const prompts: string[] = []
