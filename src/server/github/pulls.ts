@@ -340,10 +340,10 @@ const MERGE_RETRY_MS = 3_000
 
 /**
  * A merge refused for a moment: another merge moved the base between the request and the merge (405
- * "Base branch was modified"). A conflict is not one: it needs new work.
+ * "Base branch was modified"), or GitHub failed (5xx). A conflict is not one: it needs new work.
  */
 const mergeMayPassLater = (status: number, message: string) =>
-  status === 405 && /base branch was modified/i.test(message)
+  status >= 500 || (status === 405 && /base branch was modified/i.test(message))
 
 /** Conclusions GitHub counts as passing for a required check. */
 const PASSING = new Set(['success', 'neutral', 'skipped'])

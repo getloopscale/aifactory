@@ -116,16 +116,6 @@ describe('a 5xx from GitHub', () => {
     expect(graphql).toBe(1)
   })
 
-  it('does not repeat a merge that answers 502', async () => {
-    const { fetch, calls } = fakeFetch({ 'PUT /pulls/3/merge': { status: 502 } })
-    await expect(
-      createGithubApi(fetch, noWait).mergePullRequest('o/r', 't', 3, 'abc', {
-        method: 'merge',
-      } as never),
-    ).rejects.toThrow(/GitHub answered 502/)
-    expect(calls).toHaveLength(1)
-  })
-
   it('fails a 4xx at once, with what GitHub said', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /git/ref/heads/b': { status: 403, body: { message: 'nope' } },
@@ -662,6 +652,22 @@ describe('pull request state and merge', () => {
 
     expect(merged).toEqual({ sha: 'merge1' })
     expect(github.merges()).toBe(2)
+  })
+
+  it('merges on a later try when GitHub answers a server error', async () => {
+    const github = answering(
+      { status: 502, body: { message: 'Bad Gateway' } },
+      { status: 500, body: { message: 'Server Error' } },
+      { status: 200, body: { sha: 'merge1' } },
+    )
+
+    expect(
+      await createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
+        method: 'squash',
+        title: 'T',
+      }),
+    ).toEqual({ sha: 'merge1' })
+    expect(github.merges()).toBe(3)
   })
 
   it('gives up after a few tries and says what GitHub answered last', async () => {
