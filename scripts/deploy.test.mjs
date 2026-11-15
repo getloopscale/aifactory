@@ -2,8 +2,10 @@ import { spawnSync } from 'node:child_process'
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -17,6 +19,8 @@ const homes = []
 afterEach(() => {
   for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
 })
+
+const readIfThere = (path) => (existsSync(path) ? readFileSync(path, 'utf8') : undefined)
 
 const withoutDatabase = ({ DATABASE_URL: _unused, ...env }) => env
 
@@ -58,9 +62,25 @@ function deploy({
     'pnpm',
     `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}\n${migrateFails ? 'case "$*" in db:migrate*) exit 1 ;; esac' : ''}`,
   )
-  // `list-dependencies` answers with the units the boot target wants, which is where an enabled worker is.
-  const wanted = ['aifactory.service', ...enabledWorkers, 'aifactory-tunnel.service'].join('\\n')
-  fake('systemctl', `case "$*" in *list-dependencies*) printf '${wanted}\\n' ;; esac`)
+  // The fake systemctl keeps state: a unit is enabled when a file of its name is in `enabled`. `list-dependencies`
+  // answers with those, `enable` and `disable` add and remove them, and `daemon-reload` and the first `restart`
+  // copy the installed unit file as it is at that moment. A unit not seeded there is disabled.
+  const state = join(root, 'state')
+  mkdirSync(join(state, 'enabled'), { recursive: true })
+  for (const unit of ['aifactory.service', ...enabledWorkers]) {
+    writeFileSync(join(state, 'enabled', unit), '')
+  }
+  const installed = join(home, '.config', 'systemd', 'user', 'aifactory.service')
+  fake(
+    'systemctl',
+    `case "$*" in
+*list-dependencies*) ls ${state}/enabled ;;
+*daemon-reload*) cat ${installed} > ${state}/at-reload 2>/dev/null ;;
+*" enable "*) for u in "$@"; do case "$u" in *.service|*.timer) touch ${state}/enabled/$u ;; esac; done ;;
+*" disable "*) for u in "$@"; do rm -f ${state}/enabled/$u; done ;;
+*" restart "*) [ -e ${state}/at-restart ] || cat ${installed} > ${state}/at-restart 2>/dev/null ;;
+esac`,
+  )
   fake('curl')
   fake('journalctl')
   const run = spawnSync('bash', [join(root, 'scripts', 'deploy.sh')], {
@@ -75,8 +95,10 @@ function deploy({
     output,
     pnpm: log.filter((l) => l.startsWith('pnpm ') && !l.startsWith('pnpm sees')),
     pnpmEnv: log.filter((l) => l.startsWith('pnpm sees')),
-    unit: join(home, '.config', 'systemd', 'user', 'aifactory.service'),
     root,
+    atReload: readIfThere(join(state, 'at-reload')),
+    atRestart: readIfThere(join(state, 'at-restart')),
+    enabled: readdirSync(join(state, 'enabled')).sort(),
     systemctl: log.filter((l) => l.startsWith('systemctl ')),
   }
 }
@@ -161,11 +183,13 @@ describe('the deploy script', () => {
     expect(output).toMatch(/the migrations failed/)
   })
 
-  it('writes the unit files and reloads systemd before the restart, enabling nothing', () => {
-    const { code, systemctl, unit, root } = deploy()
+  it('has the release unit files installed when systemd reloads, before the first restart', () => {
+    const { code, systemctl, atReload, atRestart, root } = deploy()
 
     expect(code).toBe(0)
-    expect(readFileSync(unit, 'utf8')).toBe(`ExecStart=${join(root, 'run')}\n`)
+    const rendered = `ExecStart=${join(root, 'run')}\n`
+    expect(atReload).toBe(rendered)
+    expect(atRestart).toBe(rendered)
     const reload = systemctl.indexOf('systemctl --user daemon-reload')
     const restart = systemctl.findIndex((l) => l.includes(' restart '))
     expect(reload).toBeGreaterThanOrEqual(0)
@@ -173,11 +197,11 @@ describe('the deploy script', () => {
     expect(systemctl.filter((l) => /\b(enable|disable)\b/.test(l))).toEqual([])
   })
 
-  it('leaves a unit that was disabled disabled', () => {
-    // The fake systemctl keeps no state, so the only way a unit changes is a call that enables or disables it.
-    const { code, systemctl } = deploy({ enabledWorkers: ['aifactory-worker@1.service'] })
+  it('leaves a unit that was disabled disabled, and one that was enabled enabled', () => {
+    // The tunnel and worker 2 were never enabled; the server and worker 1 were.
+    const { code, enabled } = deploy({ enabledWorkers: ['aifactory-worker@1.service'] })
 
     expect(code).toBe(0)
-    expect(systemctl.filter((l) => /\b(enable|disable|link|mask|unmask)\b/.test(l))).toEqual([])
+    expect(enabled).toEqual(['aifactory-worker@1.service', 'aifactory.service'])
   })
 })
