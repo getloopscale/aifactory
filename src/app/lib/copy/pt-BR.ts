@@ -499,6 +499,13 @@ export const ptBR: Copy = {
     changePlaceholder: 'Quer diferente? Diga o quê, com as suas palavras',
     change: 'Mudar',
   },
+  runLimit: {
+    label: 'Minutos que uma execução pode durar',
+    placeholder: 'Vazio: o padrão da fábrica (90 minutos)',
+    help: 'Aumente quando as verificações forem lentas e uma execução terminar por tempo antes de a revisão acabar.',
+    invalid: (min: number, max: number) =>
+      `Uma execução pode durar de ${min} a ${max} minutos inteiros.`,
+  },
   onboarding: {
     title: 'Primeiros passos',
     stepsLabel: 'Passos para ligar um repositório',

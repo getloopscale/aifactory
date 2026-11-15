@@ -274,6 +274,12 @@ export const en = {
     changePlaceholder: 'Something different? Say what, in your words',
     change: 'Change it',
   },
+  runLimit: {
+    label: 'Minutes a run may last',
+    placeholder: "Empty: the factory's default (90 minutes)",
+    help: 'Raise it when the checks are slow and a run ends for time before the review is done.',
+    invalid: (min: number, max: number) => `A run may last from ${min} to ${max} whole minutes.`,
+  },
   onboarding: {
     title: 'Get started',
     stepsLabel: 'Steps to turn a repository on',
