@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A task that failed with work on its branch can be sent back with a note from the panel, and the run continues on that branch. Before, a failed task could only be retried, which deletes the branch and starts over: a run that ran out of time, or whose agent asked a question the sandbox could not wait for, lost its work (#89)
 - A task blocked by an issue in its own repository starts once the factory has integrated that issue's fix, instead of waiting for the issue to close at the release; a blocker in another repository still waits for its release (#36)
 
 - A rework that no longer fits in what is left of an E2B session, but fits in the run's 90 minutes, no longer fails with "no time left for another agent pass": the run saves the disk to a snapshot, restores it into a new session under the same network rules, deletes the snapshot and goes on. The task's history shows the new session. A provider that cannot save a sandbox refuses the pass as before (#29)
@@ -32,6 +33,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A task's attempts and its automatic retries are counted from its own events. The count compared against the latest run a person started on any task, so most tasks showed no automatic retry at all: an environment failure was retried past its limit of three, and the board could show the wrong number of attempts (#89)
 - The new job dialog no longer says "Enable a repository under Repositories first" while the list of repositories is still loading; it says it is reading them, and shows the form or that message once the list arrives (#79)
 - The onboarding no longer marks "Choose a repository" as done while the connection to GitHub is still being checked: a step is done only when every step before it is (#79)
 - With the panel in Brazilian Portuguese, the repository doctor now says what is wrong and how to repair it in Portuguese, on the repositories page and in the onboarding. Each item that is not fine carries the code and the values of its two sentences (`say`), and the English sentences stay in `cause` and `repair` (#80)
