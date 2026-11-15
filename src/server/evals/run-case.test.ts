@@ -76,6 +76,8 @@ type World = {
   nameStatusPerCommit?: string[]
   /** `git diff -U0` of the test files between the base and the commit. */
   testPatch?: string
+  /** Whether the builder committed by itself (a merge does), leaving one commit the run did not make. */
+  agentCommitted?: boolean
 }
 
 function sandbox(world: World = {}) {
@@ -98,6 +100,7 @@ function sandbox(world: World = {}) {
           'M\tsrc/cli.ts\n',
       }
     if (command.includes('diff -U0')) return { stdout: world.testPatch ?? '' }
+    if (command.includes('rev-list --count')) return { stdout: world.agentCommitted ? '1\n' : '0\n' }
     if (command.includes('rev-parse HEAD')) return { stdout: 'b'.repeat(40) }
     return undefined
   })
@@ -510,6 +513,19 @@ describe('runCase', () => {
 
     expect(result).toMatchObject({ passed: false, reason: 'the agent made no change' })
     expect(provider.stopped).toBe(1)
+  })
+
+  it('goes on with a commit the builder made by itself, adding none of its own', async () => {
+    const provider = sandbox({ dirty: false, agentCommitted: true })
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase(
+      deps(provider, agent('builder', planned(built('merged the base'))), reviewer),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: true })
+    expect(provider.backend.commands.some((c) => c.includes('commit -F'))).toBe(false)
   })
 
   it('fails a case whose builder asked a question nobody will answer', async () => {

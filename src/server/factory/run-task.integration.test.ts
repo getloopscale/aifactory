@@ -2138,6 +2138,53 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(done?.detail).not.toMatchObject({ unchanged: true })
   })
 
+  it('pushes the merge the agent committed itself, with nothing left uncommitted, and checks and reviews it', async () => {
+    const approved = 'a'.repeat(40)
+    const merge = 'b'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: approved, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    let merged = false
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${approved}\trefs/heads/factory/7\n` }
+        if (command.includes('rev-list --count')) return { stdout: merged ? '1\n' : '0\n' }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${merged ? merge : approved}\n` }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        // `git merge` commits by itself, so the checkout is clean and one commit ahead of GitHub.
+        merged = true
+        dirty = false
+        return { ok: true, summary: 'Merged the integration branch and regenerated the docs.' }
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'The pull request conflicts with workspace: git merge origin/workspace.',
+    })
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    const commands = sandbox.backend.commands
+    expect(commands.some((c) => c.includes('commit -F'))).toBe(false)
+    expect(
+      commands.some((c) =>
+        c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${approved}`),
+      ),
+    ).toBe(true)
+    const stages = await stagesOf(id)
+    expect(stages).toContain('verify')
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('failed')
+  })
+
   it('hands to a person work whose required checks failed when the agent finds nothing to change', async () => {
     const id = await seedTask()
     branchPushed()

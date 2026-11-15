@@ -43,7 +43,7 @@ export type WaitingStep =
    * check reported (`checksFeedback`) as feedback.
    */
   | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
-  /** The pull request conflicts with its base: the task starts again from the new base. */
+  /** The pull request conflicts with its base: the task runs again to merge the new base into its branch. */
   | { kind: 'start_over'; reason: string }
   | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
 

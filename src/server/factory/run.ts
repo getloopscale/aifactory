@@ -672,7 +672,20 @@ export class Run {
 
   private async hasNothingToCommit(): Promise<boolean> {
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    return pending.stdout.trim() === ''
+    return pending.stdout.trim() === '' && !(await this.hasUnpushedCommits())
+  }
+
+  /**
+   * Whether the branch has commits GitHub does not: the agent may commit by itself, as `git merge` does, and
+   * leave nothing uncommitted. Counted from the head the branch had on GitHub, or from the base on a new one.
+   */
+  private async hasUnpushedCommits(): Promise<boolean> {
+    const since = this.remoteHead || this.baseSha
+    const counted = await must(
+      this.backend,
+      `git -C ${this.repoDir} rev-list --count ${since}..HEAD`,
+    )
+    return Number(counted.stdout.trim()) > 0
   }
 
   /** Commits whatever the agent left in the checkout and pushes it. Returns the new head. */
@@ -682,7 +695,8 @@ export class Run {
     state.current = 'push'
     await enterStage(deps.db, taskId, 'push', { branch, ...detail })
     const changes = await must(backend, `git -C ${this.repoDir} status --porcelain`)
-    if (changes.stdout.trim() === '') {
+    const uncommitted = changes.stdout.trim() !== ''
+    if (!uncommitted && !(await this.hasUnpushedCommits())) {
       // A rework that changed nothing is the reviewer's business, not a fact about the issue.
       if (!detail.rework) await this.keepNoChange()
       throw new StageFailure(
@@ -693,12 +707,16 @@ export class Run {
     }
     // Text that came from outside (the issue title, the author) goes in by file, so none of it is
     // ever parsed by a shell (the SDK does not export its quoting helper: usetheokit/theokit#1131).
-    await backend.uploadFile(GITCONFIG, gitConfig(deps.author))
-    await backend.uploadFile(COMMIT_MESSAGE, `${message}\n`)
-    await must(backend, `${git} add -A`)
-    await must(backend, `${git} commit -F ${COMMIT_MESSAGE}`)
+    // What the agent committed by itself (a merge, say) goes as it is, with nothing added to it.
+    if (uncommitted) {
+      await backend.uploadFile(GITCONFIG, gitConfig(deps.author))
+      await backend.uploadFile(COMMIT_MESSAGE, `${message}\n`)
+      await must(backend, `${git} add -A`)
+      await must(backend, `${git} commit -F ${COMMIT_MESSAGE}`)
+    }
     // What is about to leave the sandbox, kept so a refused push can be explained.
-    const files = (await must(backend, `${git} diff --name-status HEAD~1 HEAD`)).stdout.trim()
+    const since = uncommitted ? 'HEAD~1' : this.remoteHead || this.baseSha
+    const files = (await must(backend, `${git} diff --name-status ${since} HEAD`)).stdout.trim()
     try {
       // The lease makes the push fail, instead of overwriting, when someone else pushed during the run.
       const lease = `--force-with-lease=refs/heads/${branch}:${this.remoteHead}`
@@ -897,8 +915,7 @@ export class Run {
     const { deps, taskId, row, api, branch, continuation } = this.c
     // A plain continuation was asked nothing, so leaving the pull request as it is answers nothing.
     if (!continuation || continuation.plain || !row.pullRequestUrl || !row.headSha) return undefined
-    const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    if (pending.stdout.trim() !== '') return undefined
+    if (!(await this.hasNothingToCommit())) return undefined
     if (continuation.fromChecks) return this.checksUnanswered(first)
     await api.commentOnIssue(
       row.repository,
@@ -968,8 +985,7 @@ export class Run {
   private async resolvedAlready(first: HarnessResult): Promise<RunResult | undefined> {
     const { deps, taskId, row, api, continuation, state } = this.c
     if (continuation) return undefined
-    const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    if (pending.stdout.trim() !== '') return undefined
+    if (!(await this.hasNothingToCommit())) return undefined
     await this.keepNoChange()
     const said = `The agent said: ${oneLine(first.summary).slice(0, 700)}`
     const at = this.baseSha.slice(0, 7)
@@ -1053,8 +1069,7 @@ export class Run {
     const asked = parseQuestion(withoutLearned(result.summary))
     if (asked) await this.ask(asked, 1)
     this.summary = result.summary
-    const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    return { changed: pending.stdout.trim() !== '', summary: result.summary }
+    return { changed: !(await this.hasNothingToCommit()), summary: result.summary }
   }
 
   /** Has the reviewer check, without changing anything, that the code already resolves the issue. */

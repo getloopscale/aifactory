@@ -87,6 +87,8 @@ class CaseRun {
   reviewRounds = 0
   /** The findings that block, in each review round so far. */
   private readonly blockingCounts: number[] = []
+  /** The last commit this case made or found, from which the next round counts what the builder committed. */
+  private committed: string | undefined
   private sessionId: string | undefined
   /** What the builder meant to change, written before it changed anything. */
   private plan: ChangePlan | undefined
@@ -205,18 +207,29 @@ class CaseRun {
     this.summary = result.summary
   }
 
-  /** Commits what the builder left, in the sandbox only, and answers the commit. */
+  /**
+   * Commits what the builder left, in the sandbox only, and answers the commit. A commit the builder made by
+   * itself (a merge does) counts as its change and goes as it is, the same as `Run.commitAndPush`.
+   */
   private async commit(): Promise<string> {
     const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    if (changes.stdout.trim() === '') throw new Stopped('the agent made no change')
-    await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
-    await this.backend.uploadFile(
-      COMMIT_MESSAGE,
-      `evaluation of ${this.c.id}, attempt ${this.attempts}\n`,
-    )
-    await must(this.backend, `${this.git} add -A`)
-    await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
-    return (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+    const uncommitted = changes.stdout.trim() !== ''
+    const since = this.committed ?? this.c.baseSha
+    const ahead = await must(this.backend, `git -C ${this.repoDir} rev-list --count ${since}..HEAD`)
+    if (!uncommitted && !(Number(ahead.stdout.trim()) > 0)) {
+      throw new Stopped('the agent made no change')
+    }
+    if (uncommitted) {
+      await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
+      await this.backend.uploadFile(
+        COMMIT_MESSAGE,
+        `evaluation of ${this.c.id}, attempt ${this.attempts}\n`,
+      )
+      await must(this.backend, `${this.git} add -A`)
+      await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
+    }
+    this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+    return this.committed
   }
 
   /** Runs the checks on the commit and keeps every result, as the factory keeps its evidence. */
