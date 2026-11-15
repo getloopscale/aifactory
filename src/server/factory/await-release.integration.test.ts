@@ -213,6 +213,53 @@ describe('pollAwaitingReleases', () => {
     expect(await getDb().select().from(watch)).toMatchObject([{ sha: 'main0001', tag: null }])
   })
 
+  it('does not release a task an earlier publication held after this release began waiting', async () => {
+    mergedPull()
+    const id = await waitingRelease({ changesets: true })
+    const [i] = await getDb()
+      .insert(ingress)
+      .values({
+        deliveryId: 'd-older',
+        event: 'issues',
+        payload: {},
+        outcome: 'task_created',
+        code: 'issue_labeled',
+        reason: 'r',
+      })
+      .returning({ id: ingress.id })
+    const [older] = await getDb()
+      .insert(task)
+      .values({
+        ingressId: i.id,
+        repository: 'paulo/app',
+        issueNumber: 8,
+        issueTitle: 'Older',
+        stage: 'released',
+      })
+      .returning({ id: task.id })
+    await getDb()
+      .insert(publication)
+      .values({
+        taskId: older.id,
+        repository: 'paulo/app',
+        releaseBranch: 'main',
+        promotedSha: 'older0001',
+        actor: 'human',
+        status: 'partial',
+        missing: {
+          releases: ['@x/pkg@0.1.0'],
+          held: [{ taskId: id, issue: 7, packages: ['@x/pkg'] }],
+        },
+      })
+
+    const result = await pollAwaitingReleases(deps())
+
+    expect(result.released).toEqual([])
+    expect(result.errors).toHaveLength(1)
+    expect(await taskRow(id)).toMatchObject({ stage: 'done' })
+    expect(await getDb().select().from(watch)).toEqual([])
+  })
+
   it('refuses the release when a required check fails, names it, stops auto-merge and never retries', async () => {
     reports({ name: 'CI', state: 'failure', detail: 'lint failed', url: 'u' })
     const id = await waitingRelease()

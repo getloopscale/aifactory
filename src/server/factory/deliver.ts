@@ -182,9 +182,7 @@ export async function release(
   const allowed = outcome(row, 'release')
   if (allowed.kind !== 'action') throw new ReleaseRefused(allowed.reason)
   if ((await heldTasks(deps.db, row.repository)).has(taskId)) {
-    throw new ReleaseRefused(
-      'a package that carries this work was not published: the task stays held until it is',
-    )
+    throw heldRefusal()
   }
   // Only integrated work with a commit is released.
   const headSha = row.headSha!
@@ -368,6 +366,11 @@ async function waitForChecks(
   }
 }
 
+const heldRefusal = () =>
+  new ReleaseRefused(
+    'a package that carries this work was not published: the task stays held until it is',
+  )
+
 /**
  * What follows the promotion's merge, however it was made: the factory's own release or the publication a
  * changesets repository makes, the watch on the merge commit, and the task's move to `released`. With its own
@@ -380,6 +383,8 @@ export async function completeRelease(
 ): Promise<ReleaseResult> {
   const { row, pre, pull, token, target, sha, mergeSha, actor } = input
   const taskId = row.id
+  // A hold may have been recorded after the release started waiting for CI: look again before moving anything.
+  if ((await heldTasks(deps.db, row.repository)).has(taskId)) throw heldRefusal()
   const published: Published = input.changesets
     ? await handToChangesets(deps, { row, target, mergeSha, actor })
     : await createOwnRelease(deps, { row, pre, pr: pull, token, mergeSha, bump: input.bump, actor })
