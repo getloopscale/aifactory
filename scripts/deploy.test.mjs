@@ -24,21 +24,14 @@ const withoutDatabase = ({ DATABASE_URL: _unused, ...env }) => env
  * Runs the real deploy script from a copy of the repository layout, with every outside command replaced by
  * one that writes down how it was called. `busy` is what the database says about working tasks.
  */
-function deploy({ busy = '0', enabledWorkers = [], checkFails = false, envLocal } = {}) {
+function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'deploy-test-'))
   homes.push(root)
   mkdirSync(join(root, 'scripts'))
   copyFileSync(new URL('./deploy.sh', import.meta.url), join(root, 'scripts', 'deploy.sh'))
-  if (envLocal !== undefined) writeFileSync(join(root, '.env.local'), envLocal)
   const bin = join(root, 'bin')
   mkdirSync(bin)
   const calls = join(root, 'calls.log')
-  // The deploy reinstalls the units first, so a changed TimeoutStopSec is in place before the restart.
-  writeFileSync(
-    join(root, 'scripts', 'install-services.sh'),
-    `#!/bin/sh\necho "install-services" >> ${calls}\n`,
-  )
-  chmodSync(join(root, 'scripts', 'install-services.sh'), 0o755)
   const fake = (name, body = '') => {
     writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> ${calls}\n${body}\n`)
     chmodSync(join(bin, name), 0o755)
@@ -67,20 +60,10 @@ function deploy({ busy = '0', enabledWorkers = [], checkFails = false, envLocal 
     pnpm: log.filter((l) => l.startsWith('pnpm ') && !l.startsWith('pnpm sees')),
     pnpmEnv: log.filter((l) => l.startsWith('pnpm sees')),
     systemctl: log.filter((l) => l.startsWith('systemctl ')),
-    log,
   }
 }
 
 describe('the deploy script', () => {
-  it('reinstalls the service units after the build and before the restart', () => {
-    const { code, log } = deploy()
-
-    expect(code).toBe(0)
-    const at = (prefix) => log.findIndex((l) => l.startsWith(prefix))
-    expect(at('pnpm build')).toBeLessThan(at('install-services'))
-    expect(at('install-services')).toBeLessThan(at('systemctl --user restart aifactory.service'))
-  })
-
   it('restarts the server, and the feeder only when it is running, after the build', () => {
     const { code, systemctl } = deploy()
 
@@ -121,15 +104,14 @@ describe('the deploy script', () => {
     const { code, pnpm } = deploy()
 
     expect(code).toBe(0)
-    // The migrations come first: the check reads columns a release may have just added.
-    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build'])
+    expect(pnpm).toEqual(['pnpm evals:check', 'pnpm build'])
   })
 
   it('builds and restarts nothing when the agents do worse than the baseline', () => {
     const { code, pnpm, systemctl, output } = deploy({ checkFails: true })
 
     expect(code).not.toBe(0)
-    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check'])
+    expect(pnpm).toEqual(['pnpm evals:check'])
     expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
     expect(output).toMatch(/the agents did worse than the baseline/)
   })
@@ -141,18 +123,5 @@ describe('the deploy script', () => {
     expect(pnpmEnv[0]).toBe(
       'pnpm sees DATABASE_URL=postgres://factory:factory@localhost:54329/factory',
     )
-  })
-
-  it('migrates and checks the database .env.local names, as the service does', () => {
-    const { code, pnpmEnv } = deploy({
-      envLocal: 'DATABASE_URL=postgres://other:pw@db.internal:5432/f\n',
-    })
-
-    expect(code).toBe(0)
-    expect(pnpmEnv).toEqual([
-      'pnpm sees DATABASE_URL=postgres://other:pw@db.internal:5432/f',
-      'pnpm sees DATABASE_URL=postgres://other:pw@db.internal:5432/f',
-      'pnpm sees DATABASE_URL=postgres://other:pw@db.internal:5432/f',
-    ])
   })
 })

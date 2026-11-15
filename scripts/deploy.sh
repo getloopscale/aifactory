@@ -17,34 +17,15 @@ else
   echo "could not ask the database whether tasks are working; going on" >&2
 fi
 
-# The service gets its environment from .env.local (scripts/run-server.sh), and the database is one of its
-# values. Migrating and checking must reach the same database, so read the same file the same way.
-if [ -f .env.local ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env.local
-  set +a
-fi
-
-# The check reads the repository table, and a release that added a column to it is not applied until the
-# server starts. Apply the migrations first, so the check never reads a schema older than the code.
-if ! DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/factory}" pnpm db:migrate; then
-  echo "the migrations failed (see above); nothing was built or restarted" >&2
-  exit 1
-fi
-
 # When a prompt, an agent or a model changed since evals/baseline.json, the quick cases run again on real
 # agents and must do no worse than the baseline (docs/adr/0008). Nothing changed, nothing runs. It reads the
-# factory's database: the one .env.local names, else the default scripts/run-server.sh uses.
+# factory's database, which .env.local does not name: the default is the one scripts/run-server.sh uses.
 if ! DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/factory}" pnpm evals:check; then
   echo "the agents did worse than the baseline (see above); nothing was built or restarted" >&2
   exit 1
 fi
 
 pnpm build
-# The units are templates copied into the user's systemd directory: a deploy that left the installed ones
-# would keep the old TimeoutStopSec and kill a long run it is draining. Reinstall them, which reloads systemd.
-scripts/install-services.sh >/dev/null
 # All at once, so each process drains its own run in parallel. The workers run tasks and the feeder hands them
 # out from the same build, so each one left alone keeps the code from before it.
 # Every enabled worker is restarted, a stopped one included: try-restart left a stopped worker stopped, and
