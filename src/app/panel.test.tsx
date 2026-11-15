@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -878,6 +878,10 @@ describe('health', () => {
             id: 1,
             role: 'builder',
             harness: 'claude-code',
+            model: null,
+            effort: null,
+            tokensIn: null,
+            tokensOut: null,
             attempt: 1,
             costUsd: 0.12,
             durationMs: 31_500,
@@ -889,6 +893,10 @@ describe('health', () => {
             id: 2,
             role: 'reviewer',
             harness: 'codex',
+            model: null,
+            effort: null,
+            tokensIn: null,
+            tokensOut: null,
             attempt: 1,
             costUsd: null,
             durationMs: 9_000,
@@ -903,9 +911,185 @@ describe('health', () => {
     await waitFor(() => expect(screen.getByRole('region', { name: 'Executions' })).toBeDefined())
     expect(screen.getByText('$0.12')).toBeDefined()
     expect(screen.getByText('31.5 s')).toBeDefined()
-    expect(screen.getByText('not reported')).toBeDefined()
+    // The reviewer's cost, and the tokens of both passes.
+    expect(screen.getAllByText('not reported')).toHaveLength(3)
     expect(screen.getByText('out of quota')).toBeDefined()
     expect(screen.getByText('finished')).toBeDefined()
+  })
+
+  it('shows which agent, model and effort built and reviewed, and the tokens each used', async () => {
+    const run = {
+      attempt: 1,
+      costUsd: null,
+      durationMs: 1000,
+      ok: true,
+      quota: false,
+      at: '2026-11-04T10:00:00Z',
+    }
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        reviews: [
+          {
+            id: 1,
+            round: 1,
+            sha: 'abcdef123456',
+            reviewer: 'codex',
+            verdict: 'approve',
+            summary: 'fine',
+            findings: [],
+            at: '2026-11-04T10:04:00Z',
+          },
+        ],
+        runs: [
+          {
+            ...run,
+            id: 1,
+            role: 'builder',
+            harness: 'claude-code',
+            model: 'opus',
+            effort: 'high',
+            tokensIn: 1200,
+            tokensOut: 300,
+          },
+          {
+            ...run,
+            id: 2,
+            role: 'reviewer',
+            harness: 'codex',
+            model: 'gpt-6.1-sol',
+            effort: 'medium',
+            tokensIn: null,
+            tokensOut: null,
+          },
+        ],
+      }),
+    })
+    renderTask()
+    const runs = await screen.findByRole('region', { name: 'Executions' })
+    const rows = within(runs).getAllByRole('row')
+    expect(rows[1].textContent).toContain('claude-code')
+    expect(rows[1].textContent).toContain('opus · high')
+    expect(rows[1].textContent).toContain('1200 / 300')
+    expect(rows[2].textContent).toContain('codex')
+    expect(rows[2].textContent).toContain('gpt-6.1-sol · medium')
+    const reviews = screen.getByRole('region', { name: 'Reviews' })
+    expect(reviews.textContent).toContain('codex on abcdef1')
+    expect(reviews.textContent).toContain('gpt-6.1-sol · medium')
+  })
+
+  it('says a pass whose model was not recorded is unknown', async () => {
+    const run = {
+      role: 'builder' as const,
+      harness: 'claude-code',
+      tokensIn: null,
+      tokensOut: null,
+      attempt: 1,
+      costUsd: null,
+      durationMs: 1000,
+      ok: true,
+      quota: false,
+      at: '2026-11-04T10:00:00Z',
+    }
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        runs: [
+          { ...run, id: 1, model: null, effort: null },
+          { ...run, id: 2, model: 'gpt-6.1-sol', effort: 'high' },
+        ],
+      }),
+    })
+    renderTask()
+    const runs = await screen.findByRole('region', { name: 'Executions' })
+    const rows = within(runs).getAllByRole('row')
+    expect(rows[1].textContent).toContain('not recorded')
+    expect(rows[2].textContent).toContain('gpt-6.1-sol · high')
+    expect(rows[2].textContent).not.toContain('not recorded')
+  })
+
+  it('gives each review the model of its own pass, also after a retry restarted the attempts', async () => {
+    const run = {
+      role: 'reviewer' as const,
+      harness: 'codex',
+      effort: null,
+      tokensIn: null,
+      tokensOut: null,
+      attempt: 1,
+      costUsd: null,
+      durationMs: 1000,
+      ok: true,
+      quota: false,
+    }
+    const review = (id: number, at: string, sha: string) => ({
+      id,
+      round: 1,
+      sha,
+      reviewer: 'codex',
+      verdict: 'approve' as const,
+      summary: 'fine',
+      findings: [],
+      at,
+    })
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        reviews: [
+          review(1, '2026-11-04T10:04:00Z', 'aaaaaaa1111'),
+          review(2, '2026-11-05T10:04:00Z', 'bbbbbbb2222'),
+        ],
+        runs: [
+          { ...run, id: 1, model: 'gpt-6.1-terra', at: '2026-11-04T10:03:00Z' },
+          { ...run, id: 2, model: 'gpt-6.1-sol', at: '2026-11-05T10:03:00Z' },
+        ],
+      }),
+    })
+    renderTask()
+    const reviews = await screen.findByRole('region', { name: 'Reviews' })
+    const [first, second] = within(reviews).getAllByRole('listitem')
+    expect(first.textContent).toContain('gpt-6.1-terra')
+    expect(first.textContent).not.toContain('gpt-6.1-sol')
+    expect(second.textContent).toContain('gpt-6.1-sol')
+  })
+
+  it('says the model of a review is not recorded when no pass of its attempt and run matches', async () => {
+    const pass = {
+      role: 'reviewer' as const,
+      harness: 'codex',
+      model: 'gpt-6.1-terra',
+      effort: null,
+      tokensIn: null,
+      tokensOut: null,
+      costUsd: null,
+      durationMs: 1000,
+      ok: true,
+      quota: false,
+    }
+    const review = (id: number, round: number, at: string) => ({
+      id,
+      round,
+      sha: `sha${id}0000000`,
+      reviewer: 'codex',
+      verdict: 'changes' as const,
+      summary: 'fix',
+      findings: [],
+      at,
+    })
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        timeline: [
+          { id: 1, stage: 'intake', at: '2026-11-04T09:00:00Z', detail: null },
+          { id: 2, stage: 'intake', at: '2026-11-05T09:00:00Z', detail: null },
+        ],
+        reviews: [review(1, 2, '2026-11-04T10:04:00Z'), review(2, 1, '2026-11-05T10:04:00Z')],
+        // Round 1 of the earlier run is the only pass: the first review is of attempt 2, the second of a later run.
+        runs: [{ ...pass, id: 1, attempt: 1, at: '2026-11-04T10:03:00Z' }],
+      }),
+    })
+    renderTask()
+    const reviews = await screen.findByRole('region', { name: 'Reviews' })
+    const [first, second] = within(reviews).getAllByRole('listitem')
+    expect(first.textContent).toContain('not recorded')
+    expect(first.textContent).not.toContain('gpt-6.1-terra')
+    expect(second.textContent).toContain('not recorded')
+    expect(second.textContent).not.toContain('gpt-6.1-terra')
   })
 })
 
