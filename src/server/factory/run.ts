@@ -1303,29 +1303,13 @@ export class Run {
     }
     await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
     await api.deleteBranch(row.repository, this.c.token, branch).catch(() => {})
-    try {
-      const advanced = await advancePreRelease(api, {
-        repository: row.repository,
-        token: this.c.token,
-        integration,
-        mergedSha: merged.sha,
-      })
-      return { mergedSha: merged.sha, ...advanced }
-    } catch (error) {
-      if (!GITHUB_SERVER_ERROR.test(error instanceof Error ? error.message : String(error))) {
-        throw error
-      }
-      return this.mergedAwaitingCron(merged.sha)
-    }
-  }
-
-  /**
-   * The pull request is merged but GitHub failed after that: running the task again would start from an
-   * integration branch that already holds the change. The `integrate-after-ci` cron finishes what follows
-   * a merge (the pre-release branch, the pre-release), so the task waits for it, as for auto-merge.
-   */
-  private mergedAwaitingCron(mergedSha: string): Integrated {
-    return { mergedSha, awaitingChecks: [] }
+    const advanced = await advancePreRelease(api, {
+      repository: row.repository,
+      token: this.c.token,
+      integration,
+      mergedSha: merged.sha,
+    })
+    return { mergedSha: merged.sha, ...advanced }
   }
 
   private async deliver(
@@ -1402,18 +1386,7 @@ export class Run {
     })
     const integrated = await this.integrate(sha, pull)
     if (integrated.awaitingChecks) return this.awaitChecks(sha, attempt, pull.url, integrated)
-    let handed: Handed
-    try {
-      handed = await this.deliver(sha, pull.url, attempt, integrated)
-    } catch (error) {
-      if (
-        !integrated.mergedSha ||
-        !GITHUB_SERVER_ERROR.test(String(error instanceof Error ? error.message : error))
-      ) {
-        throw error
-      }
-      return this.awaitChecks(sha, attempt, pull.url, this.mergedAwaitingCron(integrated.mergedSha))
-    }
+    const handed = await this.deliver(sha, pull.url, attempt, integrated)
     await enterStage(
       deps.db,
       taskId,

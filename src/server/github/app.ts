@@ -78,8 +78,6 @@ export type GithubAppOptions = {
   fetch?: FetchLike
   apiUrl?: string
   now?: () => number
-  /** The pause before a read that GitHub failed is asked again. */
-  wait?: (ms: number) => Promise<void>
 }
 
 /** What the factory asks of an installation: every token it mints carries exactly these. */
@@ -95,8 +93,6 @@ export const APP_PERMISSIONS = {
 
 /** How long the list of reachable repositories is kept. */
 const LIST_TTL_MS = 15_000
-const READ_ATTEMPTS = 3
-const READ_RETRY_MS = 2_000
 
 /**
  * A token with less than this left is replaced rather than handed out, so one handed out is at most five
@@ -123,7 +119,6 @@ export function createGithubApp(
   const { appId, privateKey, apiUrl = 'https://api.github.com' } = options
   const fetchImpl: FetchLike = options.fetch ?? ((url, init) => fetch(url, init))
   const now = options.now ?? Date.now
-  const wait = options.wait ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
   const cache = new Map<string, InstallationToken>()
   let listed: { at: number; repositories: ReachableRepository[] } | undefined
   let installed: { at: number; installations: AppInstallation[] } | undefined
@@ -139,22 +134,16 @@ export function createGithubApp(
     return `${unsigned}.${signature}`
   }
 
-  /** A read that GitHub answers with a 5xx is asked again with a pause. A POST is sent once. */
   async function call(path: string, init: RequestInit = {}): Promise<Response> {
-    const isRead = (init.method ?? 'GET') === 'GET'
-    for (let attempt = 1; ; attempt += 1) {
-      const response = await fetchImpl(`${apiUrl}${path}`, {
-        ...init,
-        headers: {
-          accept: 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          authorization: `Bearer ${appJwt()}`,
-          ...(init.body ? { 'content-type': 'application/json' } : {}),
-        },
-      })
-      if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
-      await wait(READ_RETRY_MS * attempt)
-    }
+    return fetchImpl(`${apiUrl}${path}`, {
+      ...init,
+      headers: {
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+        authorization: `Bearer ${appJwt()}`,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    })
   }
 
   async function listInstallations(): Promise<AppInstallation[]> {

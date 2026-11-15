@@ -51,7 +51,6 @@ import { requestChanges, retryAutomatically, type ActionDeps } from '../panel/ac
 import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
-import { pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
 import { pollAnswers } from './waiting'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
@@ -280,16 +279,6 @@ function resumableBuilder(): CodingHarness & { resumed: string[] } {
 
 const approving = () => reviewerSaying(verdictJson('approve'))
 
-const awaitDeps = (): AwaitCiDeps => ({
-  db: getDb(),
-  github,
-  api: githubApi,
-  checks: {} as never,
-  releaseMode: undefined,
-  sendBack: async () => {},
-  startOver: async () => {},
-})
-
 function deps(sandbox: FakeSandbox, overrides: Partial<RunTaskDeps> = {}): RunTaskDeps {
   return {
     db: getDb(),
@@ -509,55 +498,45 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
-  it('finishes the delivery through the cron when GitHub answers 5xx creating the pre-release after the merge', async () => {
+  it('fails as an environment failure when GitHub answers 5xx handing the work over', async () => {
     const id = await seedTask()
     githubApi.fail(
       'createRelease',
       new Error('GitHub answered 502 creating the release on paulo/app: {}'),
-      { times: 1 },
     )
 
     const result = await runTask(deps(new FakeSandbox(changed())), id)
 
-    // The pull request is merged, so the task waits for the cron instead of repeating the run.
-    expect(result).toMatchObject({ status: 'done' })
-    const [waiting] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(waiting.stage).toBe('done')
-    expect(waiting.mergedSha).not.toBeNull()
-    expect(waiting.awaitingCiSha).not.toBeNull()
-
-    await pollAwaitingIntegrations(awaitDeps())
-
-    const [after] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(after.awaitingCiSha).toBeNull()
-    expect(githubApi.answered('createRelease')).toHaveLength(1)
-    const delivered = await getDb().select().from(delivery).where(eq(delivery.taskId, id))
-    expect(delivered).toHaveLength(1)
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
-  it('does not open a pull request when GitHub answers 5xx advancing the pre-release branch', async () => {
+  it('fails as an environment failure, with no fallback pull request, when GitHub answers 5xx advancing the pre-release branch', async () => {
     const id = await seedTask()
     githubApi.fail(
       'mergeBranch',
       new Error('GitHub answered 502 merging into develop on paulo/app: {}'),
-      { times: 1 },
     )
 
-    await runTask(deps(new FakeSandbox(changed())), id)
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
 
-    // Only the pull request of the task was opened; no fallback pull request for the pre-release branch.
+    expect(result).toMatchObject({ status: 'failed' })
     expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
-    const [waiting] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(waiting.awaitingCiSha).not.toBeNull()
-
-    await pollAwaitingIntegrations(awaitDeps())
-
-    const [after] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(after.awaitingCiSha).toBeNull()
-    expect(githubApi.answered('mergeBranch')).toHaveLength(1)
-    expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
-    const delivered = await getDb().select().from(delivery).where(eq(delivery.taskId, id))
-    expect(delivered).toHaveLength(1)
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
   it('gives the firewall the credentials and the sandbox none of them', async () => {
