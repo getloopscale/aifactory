@@ -337,6 +337,9 @@ function mergeFields(number: number, merge: PullRequestMerge): Record<string, st
 /** How many times a merge is asked for when GitHub's answer is one a moment later may change. */
 const MERGE_ATTEMPTS = 4
 const MERGE_RETRY_MS = 3_000
+/** A read that GitHub answers with a 5xx is asked again this many times, with a pause. Writes never are. */
+const READ_ATTEMPTS = 3
+const READ_RETRY_MS = 2_000
 
 /**
  * A merge refused for a moment: another merge moved the base between the request and the merge (405
@@ -367,17 +370,23 @@ export function createGithubApi(
   fetchImpl: FetchLike = (url, init) => fetch(url, init),
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): GithubApi {
-  const call = (repo: string, token: string, path: string, init: RequestInit = {}) =>
-    fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
-      ...init,
-      headers: {
-        accept: 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-        authorization: `Bearer ${token}`,
-        ...(init.body ? { 'content-type': 'application/json' } : {}),
-        ...(init.headers as Record<string, string> | undefined),
-      },
-    })
+  const call = async (repo: string, token: string, path: string, init: RequestInit = {}) => {
+    const isRead = (init.method ?? 'GET') === 'GET'
+    for (let attempt = 1; ; attempt += 1) {
+      const response = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+        ...init,
+        headers: {
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          authorization: `Bearer ${token}`,
+          ...(init.body ? { 'content-type': 'application/json' } : {}),
+          ...(init.headers as Record<string, string> | undefined),
+        },
+      })
+      if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
+      await wait(READ_RETRY_MS * attempt)
+    }
+  }
 
   async function ensure(response: Response, action: string, status: number[]) {
     if (!status.includes(response.status)) {
@@ -407,6 +416,12 @@ export function createGithubApi(
       },
       body: JSON.stringify({ query, variables: { id: pull.node_id, ...variables } }),
     })
+    if (response.status >= 500) {
+      const detail = (await response.text().catch(() => '')).slice(0, 300)
+      throw new Error(
+        `GitHub answered ${response.status} changing ${repo}#${number} through GraphQL: ${detail}`,
+      )
+    }
     const result = (await response.json().catch(() => ({}))) as GraphqlAnswer<T>
     if (result.errors?.length) return { why: result.errors.map((e) => e.message).join('; ') }
     if (!response.ok || !result.data) return { why: `HTTP ${response.status}` }
