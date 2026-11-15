@@ -1487,26 +1487,29 @@ describe('releasesSince', () => {
     expect(found.map((r) => r.tag)).toContain('pkg@1')
   })
 
-  it('stops at the first page that reaches back before the time asked', async () => {
-    const asked: string[] = []
+  it('finds a release created early but published after a newer-created one, on a later page', async () => {
+    const release = (tag: string, published: string) => ({
+      tag_name: tag,
+      html_url: 'u',
+      prerelease: false,
+      draft: false,
+      published_at: published,
+    })
+    const pages = [
+      Array.from({ length: 100 }, (_, i) => release(`old${i}`, '2026-01-01T00:00:00Z')),
+      [release('late@1.0.0', '2026-11-14T00:00:00Z')],
+    ]
     const fetch = async (url: string) => {
-      asked.push(url)
-      return new Response(
-        JSON.stringify(
-          Array.from({ length: 100 }, (_, i) => ({
-            tag_name: `t${i}`,
-            html_url: 'u',
-            prerelease: false,
-            draft: false,
-            published_at: '2026-01-01T00:00:00Z',
-          })),
-        ),
-        { status: 200 },
-      )
+      const page = Number(new URL(url).searchParams.get('page'))
+      return new Response(JSON.stringify(pages[page - 1] ?? []), { status: 200 })
     }
 
-    await createGithubApi(fetch).releasesSince('o/r', 't', new Date('2026-11-01T00:00:00Z'))
+    const found = await createGithubApi(fetch).releasesSince(
+      'o/r',
+      't',
+      new Date('2026-11-01T00:00:00Z'),
+    )
 
-    expect(asked).toHaveLength(1)
+    expect(found.map((r) => r.tag)).toEqual(['late@1.0.0'])
   })
 })

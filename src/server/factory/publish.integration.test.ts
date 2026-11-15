@@ -539,6 +539,25 @@ describe('publishing a changesets release', () => {
         expect(await stageOf(both)).toBe('done')
       })
 
+      it('posts a new notice when a different package is the one missing now', async () => {
+        await waitingPublication()
+        const both = await seedTask('done', 'both-merge')
+        commitIn('both-merge', 'gateway', 'slack')
+        releasesAre(published(ALL[0]), published(ALL[1]))
+        await pollPublications(deps(PAST_THE_WAIT))
+        const issue = await issueOf(both)
+        expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
+
+        // gateway is out now, and slack is the one missing.
+        releasesAre(published(ALL[0]), published(ALL[2]))
+        await shipContained({ db: getDb(), api }, shipment())
+
+        const told = comments().filter((c) => c.issue === issue)
+        expect(told).toHaveLength(2)
+        expect(told[1].body).toContain('@theokit/gateway-slack@0.5.1')
+        expect(await stageOf(both)).toBe('done')
+      })
+
       it('releases it and closes its issue once the package has its release', async () => {
         const gateway = await setUp()
 

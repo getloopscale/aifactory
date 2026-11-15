@@ -660,7 +660,8 @@ export function createGithubApi(
 
     async releasesSince(repo, token, since) {
       const found: PublishedRelease[] = []
-      // Newest first, a page of 100 at a time: read on until one comes short or reaches back before `since`.
+      // A page of 100 at a time, read on until one comes short: GitHub orders releases by creation, not by
+      // publication, so no page can be skipped on the strength of its dates.
       for (let page = 1; ; page++) {
         const releases = (await (
           await ensure(
@@ -682,10 +683,7 @@ export function createGithubApi(
             found.push({ tag: r.tag_name, url: r.html_url, publishedAt })
           }
         }
-        const oldest = releases.at(-1)?.published_at
-        if (releases.length < 100 || (oldest && new Date(oldest).getTime() < since.getTime())) {
-          return found
-        }
+        if (releases.length < 100) return found
       }
     },
 

@@ -99,13 +99,22 @@ async function releasesMissing(
   }
 }
 
-/** The first line of the comment that says why an issue stays open, whatever packages it names. */
+/** The first line of the comment that says why an issue stays open. */
 const NOT_AVAILABLE = 'Not available yet: the package that carries this change has no release.'
+const NAMES = 'No release for '
+
+/** The releases a notice names, on the line that follows its first one. */
+const named = (body: string): string[] => {
+  if (!body.startsWith(NOT_AVAILABLE)) return []
+  const line = body.split('\n').find((l) => l.startsWith(NAMES))
+  return line ? line.slice(NAMES.length).split('. ')[0].split(', ') : []
+}
 
 /**
- * Tells the issue why it stays open, once: a comment that already says so is not repeated, whichever
- * packages it named. Shipments that overlap take turns on the issue (an advisory lock held for the
- * lookup and the comment), so only one posts. A failure is returned, as in `announce`.
+ * Tells the issue why it stays open. A notice that already names every package missing now is not repeated,
+ * whatever else it names; one that lacks a package missing now is followed by another that names it.
+ * Shipments that overlap take turns on the issue (an advisory lock held for the lookup and the comment), so
+ * only one posts. A failure is returned, as in `announce`.
  */
 async function explainOpen(
   deps: { db: Database; api: GithubApi },
@@ -119,11 +128,12 @@ async function explainOpen(
         sql`select pg_advisory_xact_lock(hashtext(${`${s.repository}#${issueNumber}`}))`,
       )
       const seen = await deps.api.listIssueComments(s.repository, s.token, issueNumber, new Date(0))
-      if (seen.some((c) => c.body.startsWith(NOT_AVAILABLE))) return
+      const told = new Set(seen.flatMap((c) => named(c.body)))
+      if (missing.every((m) => told.has(m))) return
       const body = [
         NOT_AVAILABLE,
         '',
-        `No release for ${missing.join(', ')}. The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed, but the repository's release workflow has published none. This issue stays open; a later release, once the package has its release, closes it.`,
+        `${NAMES}${missing.join(', ')}. The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed, but the repository's release workflow has published none. This issue stays open; a later release, once the package has its release, closes it.`,
         '',
       ].join('\n')
       await deps.api.commentOnIssue(s.repository, s.token, issueNumber, body)
