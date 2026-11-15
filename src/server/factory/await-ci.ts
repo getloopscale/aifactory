@@ -75,12 +75,19 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
   if (claimed.length === 0) return false
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`).catch(() => {})
   const repo = await loadRepoConfig(deps.db, row.repository)
-  const advanced = await advancePreRelease(deps.api, {
-    repository: row.repository,
-    token,
-    integration: integrationBranch(repo),
-    mergedSha,
-  })
+  let advanced: Awaited<ReturnType<typeof advancePreRelease>>
+  try {
+    advanced = await advancePreRelease(deps.api, {
+      repository: row.repository,
+      token,
+      integration: integrationBranch(repo),
+      mergedSha,
+    })
+  } catch (error) {
+    // GitHub failed: the wait is put back so the next pass finishes the integration.
+    await deps.db.update(task).set({ awaitingCiSha: verifiedSha }).where(eq(task.id, row.id))
+    throw error
+  }
   let handed: Handed
   try {
     handed = await createPreRelease(
