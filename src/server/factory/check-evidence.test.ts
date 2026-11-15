@@ -259,6 +259,27 @@ describe('attachEvidence', () => {
     })
   })
 
+  it('reads the sibling when the gate only lists the jobs that failed', async () => {
+    const { api } = fakeApi({
+      runs: [
+        actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
+        actionsRun({ id: 3, name: 'validate', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
+      ],
+      logs: {
+        1: '##[error]The following jobs failed: validate\n##[error]Job validate failed',
+        3: DOC_LOG,
+      },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed[0]).toMatchObject({ evidence: { lines: [] } })
+    expect(failed[1]).toMatchObject({
+      name: 'validate',
+      evidence: { lines: ['[doc-coverage] FAIL 99.7% is below the 100% floor'] },
+    })
+  })
+
   it('leaves the siblings out when the required job names the error of the work', async () => {
     const { api } = fakeApi({
       runs: [

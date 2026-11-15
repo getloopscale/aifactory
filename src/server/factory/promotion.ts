@@ -51,6 +51,8 @@ const GENERIC = [
   // What an aggregate (gate) job says when a job it needs failed: that one did, never which.
   /\b(one or more|some|any|at least one)\b.*\b(jobs?|checks?|dependenc(y|ies)|needs)\b.*\b(fail|did not succeed|not succeed)/i,
   /^(the )?(job|workflow|run|build|check)s? (has |have )?failed\.?$/i,
+  /\b(the following|these|those) (jobs?|checks?|needs)\b.*\b(fail|did not succeed|not succeed)/i,
+  /^(the )?jobs? \S+ (has |have )?failed\.?$/i,
   /\b(required|dependent|upstream) (jobs?|checks?)\b.*\b(fail|did not succeed)/i,
 ]
 
