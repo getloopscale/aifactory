@@ -181,6 +181,8 @@ export type Continuation = {
   feedback: string
   /** The repository's required checks sent the work back, not a person. */
   fromChecks?: boolean
+  /** The run only continues a branch an earlier run pushed before it finished: nobody asked for anything. */
+  plain?: boolean
 }
 
 /**
@@ -191,7 +193,9 @@ export type Continuation = {
 export function runContinuation(
   decided: { kind: string; note: string } | undefined,
   feedback: string | undefined,
+  resume?: boolean,
 ): Continuation | undefined {
   if (decided?.kind === 'request_changes') return { feedback: decided.note }
-  return feedback ? { feedback, fromChecks: true } : undefined
+  if (feedback) return { feedback, fromChecks: true }
+  return resume ? { feedback: '', plain: true } : undefined
 }

@@ -43,10 +43,11 @@ type TaskRow = typeof task.$inferSelect
 
 /**
  * Per task, in a query grouped by `stage_event.task_id`: the automatic runs since a person last started it.
- * A person's retry starts the count over.
+ * A person's retry starts the count over. A rework that failed creating its sandbox, before any agent ran,
+ * is not counted: nothing of the work was attempted.
  */
 export function automaticRunsSincePerson() {
-  return sql<number>`count(*) filter (where ${stageEvent.stage} = 'intake' and ${stageEvent.detail}->>'automatic' = 'true' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0))`
+  return sql<number>`count(*) filter (where ${stageEvent.stage} = 'intake' and ${stageEvent.detail}->>'automatic' = 'true' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0) and not ((${stageEvent.detail}->>'decision') is not distinct from 'request_changes' and exists (select 1 from stage_event s where s.task_id = ${stageEvent.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${stageEvent.taskId} and n.id > ${stageEvent.id}) and (select f.stage from stage_event f where f.task_id = ${stageEvent.taskId} and f.id > s.id order by f.id limit 1) = 'failed')))`
 }
 
 const iso = (date: Date) => date.toISOString()
@@ -81,8 +82,9 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       taskId: stageEvent.taskId,
       last: sql<Date>`max(${stageEvent.at})`,
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
-      // the runs before it are not attempts of this one.
-      verifies: sql<number>`count(*) filter (where ${stageEvent.stage} = 'verify' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake'), 0))`,
+      // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
+      // same run again, so the checks before it still count.
+      verifies: sql<number>`count(*) filter (where ${stageEvent.stage} = 'verify' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true'), 0))`,
       automatic: automaticRunsSincePerson(),
     })
     .from(stageEvent)
