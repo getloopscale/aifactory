@@ -256,6 +256,16 @@ describe('the deploy script', () => {
     expect(tunnel).toBe('ExecStart=/gone/cloudflared run\n')
   })
 
+  it('reads the installed path when the unit writes it in double quotes', () => {
+    const { code, tunnel } = deploy({
+      cloudflared: false,
+      installedTunnel: 'ExecStart="/opt/cloudflared" tunnel run\n',
+    })
+
+    expect(code).toBe(0)
+    expect(tunnel).toBe('ExecStart=/opt/cloudflared run\n')
+  })
+
   it('renders an enabled tunnel unit with the installed path and does not stop', () => {
     const { code, tunnel } = deploy({
       cloudflared: false,

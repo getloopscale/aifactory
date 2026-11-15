@@ -10,7 +10,9 @@ cloudflared="$(command -v cloudflared || true)"
 # runs; with neither, that unit cannot be rendered and is left as it is with a line on stderr (unless it is
 # enabled: then nothing is written and the script fails), so a missing cloudflared never keeps the other services from deploying.
 if [ -z "$cloudflared" ] && [ -f "$dest/aifactory-tunnel.service" ]; then
-  candidate="$(sed -n 's/^ExecStart=\([^ ]*cloudflared\) .*/\1/p' "$dest/aifactory-tunnel.service" | head -n 1)"
+  # The executable is the first word of ExecStart, which systemd lets a unit write in double quotes.
+  candidate="$(sed -n -e 's/^ExecStart="\([^"]*cloudflared\)".*/\1/p' -e 's/^ExecStart=\([^" ]*cloudflared\)\( .*\)\{0,1\}$/\1/p' \
+    "$dest/aifactory-tunnel.service" | head -n 1)"
   if [ -n "$candidate" ]; then cloudflared="$candidate"; fi
 fi
 # The tunnel unit needs cloudflared. When none is found and that unit is enabled, nothing is written: the caller
