@@ -169,8 +169,9 @@ async function workToKeep(
 }
 
 /**
- * A run cut at its time limit pushed what the agent had written and failed naming that commit. That branch
- * is the work, so a retry continues it instead of deleting it.
+ * A run cut at its time limit pushed what the agent had written and failed naming that commit (`keptSha` in
+ * the failure). That branch is the work, so a retry continues it instead of deleting it, but only while
+ * the branch is still at that commit: a failed push, or a branch that moved, keeps nothing.
  */
 async function keptTimedOutWork(
   deps: ActionDeps,
@@ -178,19 +179,15 @@ async function keptTimedOutWork(
   token: string,
 ): Promise<boolean> {
   if (row.stage !== 'failed') return false
-  const [failed, before] = await deps.db
+  const [failed] = await deps.db
     .select({ stage: stageEvent.stage, detail: stageEvent.detail })
     .from(stageEvent)
     .where(eq(stageEvent.taskId, row.id))
     .orderBy(desc(stageEvent.id))
-    .limit(2)
-  const pushed = (before?.detail ?? {}) as Record<string, unknown>
-  if (failed?.stage !== 'failed' || before?.stage !== 'push' || pushed.timedOut !== true) {
-    return false
-  }
-  return (
-    (await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)) !== undefined
-  )
+    .limit(1)
+  const kept = ((failed?.detail ?? {}) as Record<string, unknown>).keptSha
+  if (failed?.stage !== 'failed' || typeof kept !== 'string') return false
+  return (await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)) === kept
 }
 
 async function load(db: Database, taskId: number) {

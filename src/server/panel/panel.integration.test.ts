@@ -741,7 +741,10 @@ describe('actions', () => {
       { stage: 'push', detail: { branch: 'factory/72', timedOut: true } },
       {
         stage: 'failed',
-        detail: { error: 'the agent did not finish\nthe work was kept in commit c1' },
+        detail: {
+          error: 'the agent did not finish\nthe work was kept in commit c1',
+          keptSha: 'c1',
+        },
       },
     ])
     api.repo('paulo/app').heads.set('factory/72', 'c1')
@@ -756,21 +759,30 @@ describe('actions', () => {
     expect(runContinuation(made, undefined, input.resume)).toEqual({ feedback: '', plain: true })
   })
 
-  it('deletes the branch on retry when the failed pass was not cut at its limit, or the branch is gone', async () => {
+  it('deletes the branch on retry when the cut pass kept nothing: another failure, a failed push, or a moved branch', async () => {
     const other = await seed('failed', { issueNumber: 73 }, [
       { stage: 'push', detail: { branch: 'factory/73' } },
       { stage: 'failed', detail: { error: 'push refused' } },
     ])
     api.repo('paulo/app').heads.set('factory/73', 'c1')
     await retry(deps(), other)
-    const gone = await seed('failed', { issueNumber: 74 }, [
-      { stage: 'push', detail: { branch: 'factory/74', timedOut: true } },
-      { stage: 'failed', detail: { error: 'x' } },
+    // A cut pass whose push failed names no commit: an older branch that is still there is not its work.
+    const unpushed = await seed('failed', { issueNumber: 75 }, [
+      { stage: 'push', detail: { branch: 'factory/75', timedOut: true } },
+      { stage: 'failed', detail: { error: 'x\nthe work could not be kept: push refused' } },
     ])
-    await retry(deps(), gone)
+    api.repo('paulo/app').heads.set('factory/75', 'older')
+    await retry(deps(), unpushed)
+    // A kept commit the branch has moved past is not kept either.
+    const moved = await seed('failed', { issueNumber: 74 }, [
+      { stage: 'failed', detail: { error: 'x', keptSha: 'c1' } },
+    ])
+    api.repo('paulo/app').heads.set('factory/74', 'c2')
+    await retry(deps(), moved)
 
-    expect(deleted()).toEqual(['factory/73', 'factory/74'])
+    expect(deleted()).toEqual(['factory/73', 'factory/75', 'factory/74'])
     expect(queued.map((q) => (q.input as { resume?: boolean }).resume)).toEqual([
+      undefined,
       undefined,
       undefined,
     ])

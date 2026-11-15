@@ -83,6 +83,7 @@ import {
   resolvedComment,
   Asked,
   QuotaStop,
+  KeptWork,
   StageFailure,
   type Continuation,
   type StoredCheck,
@@ -726,15 +727,13 @@ export class Run {
     try {
       sha = await this.commitAndPush(
         `${this.title}: work in progress, the agent reached its time limit`,
-        {
-          timedOut: true,
-        },
+        { timedOut: true },
       )
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
       throw new StageFailure(`${plain}\nthe work could not be kept: ${reason}`)
     }
-    throw new StageFailure(`${plain}\nthe work was kept in commit ${sha} on ${this.c.branch}`)
+    throw new KeptWork(`${plain}\nthe work was kept in commit ${sha} on ${this.c.branch}`, sha)
   }
 
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */

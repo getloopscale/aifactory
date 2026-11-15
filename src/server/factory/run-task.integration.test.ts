@@ -777,6 +777,7 @@ describe('runTask', () => {
         .orderBy(desc(stageEvent.id))
         .limit(1)
       expect(failed?.stage).toBe('failed')
+      expect(failed?.detail).toMatchObject({ keptSha: remote })
     } finally {
       await git.close()
     }
