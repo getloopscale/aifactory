@@ -298,6 +298,23 @@ describe('the repositories page', () => {
     })
   })
 
+  it('saves the run limit, reads it back, refuses one out of range, and clears it with null', async () => {
+    await enable()
+    await saveRepository(deps(), 'paulo/app', { runLimitMinutes: 150 })
+    let view = await listRepositories(deps())
+    expect(view.repositories.find((r) => r.fullName === 'Paulo/App')?.runLimitMinutes).toBe(150)
+
+    await expect(saveRepository(deps(), 'paulo/app', { runLimitMinutes: 5 })).rejects.toThrow()
+    let [row] = await getDb().select().from(repository)
+    expect(row?.runLimitMinutes).toBe(150)
+
+    await saveRepository(deps(), 'paulo/app', { runLimitMinutes: null })
+    ;[row] = await getDb().select().from(repository)
+    expect(row?.runLimitMinutes).toBeNull()
+    view = await listRepositories(deps())
+    expect(view.repositories.find((r) => r.fullName === 'Paulo/App')?.runLimitMinutes).toBeNull()
+  })
+
   it('creates the integration and pre-release branches when a repository is enabled, and touches none that exist', async () => {
     await enable()
     expect(created()).toEqual(['workspace', 'develop'])
