@@ -213,7 +213,7 @@ describe('pollAwaitingReleases', () => {
     expect(await getDb().select().from(watch)).toMatchObject([{ sha: 'main0001', tag: null }])
   })
 
-  it('does not release a task an earlier publication held after this release began waiting', async () => {
+  it('completes the promotion but keeps a task an earlier publication held while this release waited', async () => {
     mergedPull()
     const id = await waitingRelease({ changesets: true })
     const [i] = await getDb()
@@ -254,10 +254,10 @@ describe('pollAwaitingReleases', () => {
 
     const result = await pollAwaitingReleases(deps())
 
-    expect(result.released).toEqual([])
-    expect(result.errors).toHaveLength(1)
+    expect(result.errors).toEqual([])
     expect(await taskRow(id)).toMatchObject({ stage: 'done' })
-    expect(await getDb().select().from(watch)).toEqual([])
+    expect(await getDb().select().from(watch)).toHaveLength(1)
+    expect(await getDb().select().from(publication)).toHaveLength(2)
   })
 
   it('refuses the release when a required check fails, names it, stops auto-merge and never retries', async () => {

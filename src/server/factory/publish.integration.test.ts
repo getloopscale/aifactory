@@ -10,7 +10,7 @@ import type { GithubApp } from '../github/app'
 import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
 import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
 
-import { ReleaseRefused, release } from './deliver'
+import { ReleaseRefused, completeRelease, release } from './deliver'
 import { pollPublications } from './publish'
 import { shipContained } from './ship'
 
@@ -577,6 +577,57 @@ describe('publishing a changesets release', () => {
         ReleaseRefused,
       )
       expect(await stageOf(gateway)).toBe('done')
+    })
+
+    it('refuses a later release while an earlier publication has not ended', async () => {
+      await waitingPublication()
+      const later = await seedTask('done', 'later-merge')
+
+      await expect(release(deps(), later, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+        /has not ended/,
+      )
+      expect(await stageOf(later)).toBe('done')
+      expect(closed()).toEqual([])
+    })
+
+    it('completes a merged promotion and gives back the held task that the direct path had claimed', async () => {
+      const asked = await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      await getDb()
+        .update(publication)
+        .set({
+          status: 'partial',
+          missing: {
+            releases: ['@theokit/gateway@0.16.1'],
+            held: [
+              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
+            ],
+          },
+        })
+        .where(eq(publication.taskId, asked))
+      // `release()` claimed the task before merging: it is `released` when the hold is found.
+      await getDb().update(task).set({ stage: 'released' }).where(eq(task.id, gateway))
+      const [row] = await getDb().select().from(task).where(eq(task.id, gateway))
+      const [pre] = await getDb().select().from(delivery).where(eq(delivery.taskId, asked))
+
+      await completeRelease(deps(), {
+        row,
+        pre,
+        pull: { number: 9, url: 'https://example.test/pull/9' },
+        token: 't',
+        target: 'main',
+        sha: 'abc1234',
+        mergeSha: 'promoted9',
+        changesets: true,
+        bump: 'patch',
+        actor: 'human',
+      })
+
+      expect(await stageOf(gateway)).toBe('done')
+      expect(closed()).not.toContain(await issueOf(gateway))
+      expect(
+        (await getDb().select().from(publication).where(eq(publication.taskId, gateway)))[0],
+      ).toMatchObject({ promotedSha: 'promoted9', status: 'waiting' })
     })
 
     it('keeps open the held task of an earlier partial publication, whatever its package is called now, and holds no other', async () => {
