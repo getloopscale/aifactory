@@ -28,6 +28,7 @@ import { FakeGithub } from '../../test/fake-github'
 import {
   ActionRefused,
   approve,
+  acknowledgePublication,
   acknowledgeWatch,
   resolveFinding,
   type FindingAction,
@@ -391,6 +392,20 @@ describe('inbox', () => {
       expect(items[0].task.id).not.toBe(asked)
       expect(items[0].summary).toContain('@theokit/gateway-agent@0.1.0')
       expect(items[0].summary).toContain('#415')
+    })
+
+    it('leaves the inbox once the owner says it was handled, and the hold stays', async () => {
+      const heldId = await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
+      await partial('partial', [heldId])
+      const item = (await inbox(getDb())).find((i) => i.kind === 'publication_partial')
+
+      await acknowledgePublication({ db: getDb() } as ActionDeps, item!.publicationId!)
+
+      expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(false)
+      expect((await getDb().select().from(publication))[0].missing?.held).toHaveLength(1)
+      await expect(
+        acknowledgePublication({ db: getDb() } as ActionDeps, item!.publicationId!),
+      ).rejects.toThrow(ActionRefused)
     })
 
     it('stays while another task of the repository is done or released, and goes once published', async () => {

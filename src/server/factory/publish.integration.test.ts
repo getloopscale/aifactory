@@ -590,6 +590,30 @@ describe('publishing a changesets release', () => {
       expect(closed()).toEqual([])
     })
 
+    it('ships nothing while an earlier publication has not decided its holds, and gives back the asked task', async () => {
+      await waitingPublication()
+      const later = await seedTask('released', 'later-merge')
+      const other = await seedTask('done', 'other-merge')
+
+      const shipped = await shipContained(
+        { db: getDb(), api },
+        {
+          repository: REPO,
+          token: 't',
+          promotedSha: 'promoted2',
+          releaseBranch: 'main',
+          askedTaskId: later,
+          actor: 'human',
+          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
+        },
+      )
+
+      expect(shipped.released).toEqual([])
+      expect(await stageOf(later)).toBe('done')
+      expect(await stageOf(other)).toBe('done')
+      expect(closed()).toEqual([])
+    })
+
     it('completes a merged promotion and gives back the held task that the direct path had claimed', async () => {
       const asked = await waitingPublication()
       const gateway = await seedTask('done', 'gw-merge')

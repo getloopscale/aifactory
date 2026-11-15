@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, ne, or } from 'drizzle-orm'
+import { and, eq, isNotNull, lt, ne, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
@@ -29,6 +29,8 @@ export type Shipment = {
    * of those packages is not released and its issue stays open.
    */
   missing?: string[]
+  /** The publication this shipment finishes, when it is one: only earlier ones that wait can defer it. */
+  publicationId?: number
   /** The tasks `decideHolds` chose, already recorded on the publication. They get a comment, not a release. */
   held?: HeldTask[]
 }
@@ -221,6 +223,27 @@ export async function shipContained(
   s: Shipment,
 ): Promise<Shipped> {
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
+  // An earlier publication of the repository that has not decided its holds may still hold these tasks: they
+  // stay `done`, candidates for it and for a later release, rather than closing issues that may be wrong.
+  const waiting = await deps.db
+    .select({ id: publication.id })
+    .from(publication)
+    .where(
+      and(
+        eq(publication.repository, s.repository),
+        eq(publication.status, 'waiting'),
+        lt(publication.id, s.publicationId ?? Number.MAX_SAFE_INTEGER),
+      ),
+    )
+  if (waiting.length > 0) {
+    const [asked] = await deps.db.select().from(task).where(eq(task.id, s.askedTaskId))
+    if (asked?.stage === 'released') {
+      await enterStage(deps.db, asked.id, 'done', {
+        deferred: 'an earlier publication has not ended',
+      })
+    }
+    return shipped
+  }
   const owed = s.missing ?? []
   const now = new Map((s.held ?? []).map((h) => [h.taskId, h]))
   const earlier = await heldTasks(deps.db, s.repository)

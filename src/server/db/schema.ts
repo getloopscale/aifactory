@@ -250,9 +250,9 @@ export const publication = pgTable('publication', {
   /**
    * `failed` when the release workflow finished without a Version Packages pull request and the factory
    * could not release the promotion as its own; the reason is in `detail` and on the task. `partial` when
-   * a package the Version Packages merge versioned has no release: `missing` names them. The tasks it holds stay held.
+   * a package the Version Packages merge versioned has no release: `missing` names them. `acknowledged` once the owner dealt with that; the tasks it holds stay held.
    */
-  status: text('status', { enum: ['waiting', 'published', 'failed', 'partial'] })
+  status: text('status', { enum: ['waiting', 'published', 'failed', 'partial', 'acknowledged'] })
     .notNull()
     .default('waiting'),
   /** The Version Packages pull request, once the factory merged it or saw it merged. */

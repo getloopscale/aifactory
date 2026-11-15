@@ -193,7 +193,7 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
       .set({ missing: { releases: missing, held } })
       .where(eq(publication.id, p.id))
   }
-  const shipped = await shipContained(deps, { ...shipment, held })
+  const shipped = await shipContained(deps, { ...shipment, held, publicationId: p.id })
   const unclosed = unclosedNote(shipped)
   await deps.db
     .update(publication)

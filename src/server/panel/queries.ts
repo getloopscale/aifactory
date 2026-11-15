@@ -400,6 +400,7 @@ async function partialPublications(db: Database): Promise<InboxItem[]> {
       items.push({
         task: card,
         kind: 'publication_partial',
+        publicationId: p.id,
         summary: `Not published: ${releases.join(', ')}.${
           mine
             ? ` Issue #${mine.issue} stays open until ${mine.packages.join(', ')} is published.`
