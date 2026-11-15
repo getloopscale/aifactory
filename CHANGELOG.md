@@ -21,6 +21,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- When a required check of the integration branch fails, the note the builder gets carries the error lines of the job that failed and the step that exited, also when the required check is a gate job that only reports that another job of the same run failed. A command is named for the step only when the log ties it to that step; a log that could not be read is said so, with the link. A task handed to a person after an unchanged rework carries the same evidence (#84)
 - A task that failed with work on its branch can be sent back with a note from the panel, and the run continues on that branch. Before, a failed task could only be retried, which deletes the branch and starts over: a run that ran out of time, or whose agent asked a question the sandbox could not wait for, lost its work (#89)
 - A task blocked by an issue in its own repository starts once the factory has integrated that issue's fix, instead of waiting for the issue to close at the release; a blocker in another repository still waits for its release (#36)
 
