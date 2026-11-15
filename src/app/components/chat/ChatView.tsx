@@ -28,7 +28,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
   const [model, setModel] = useState<ChatModel>('openrouter')
   const [restored, setRestored] = useState<ChatMessageView[]>([])
   const [loading, setLoading] = useState(chatId !== undefined)
-  const [loadError, setLoadError] = useState<string>()
+  const [loadError, setLoadError] = useState(false)
   const [value, setValue] = useState('')
   const { needsConnection, recheck: checkConnection } = useChatgptConnection(model)
 
@@ -61,12 +61,12 @@ export function ChatView({ chatId }: { chatId?: string }) {
         setRestored(detail.messages)
         setModel(detail.chat.model)
       })
-      .catch(() => alive && setLoadError(t.chat.notFound))
+      .catch(() => alive && setLoadError(true))
       .finally(() => alive && setLoading(false))
     return () => {
       alive = false
     }
-  }, [chatId, t])
+  }, [chatId])
 
   /** Keeps the conversation: creates it the first time, and sends the owner to its address. */
   const keep = useCallback(async () => {
@@ -128,7 +128,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
   if (loadError) {
     return (
       <p role="alert" className="p-6 text-sm text-destructive">
-        {loadError}
+        {t.chat.notFound}
       </p>
     )
   }

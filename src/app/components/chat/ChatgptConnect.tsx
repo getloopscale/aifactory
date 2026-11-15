@@ -49,7 +49,7 @@ export function ChatgptConnect({ onConnected }: { onConnected: () => void }) {
             {state.verificationUri}
           </a>{' '}
           {t.chatgpt.typeCode}{' '}
-          <strong className="font-mono tracking-wider text-foreground">{state.userCode}</strong>.
+          <strong className="font-mono tracking-wider text-foreground">{state.userCode}</strong>.{' '}
           {t.chatgpt.waitHint}
         </p>
       ) : (
