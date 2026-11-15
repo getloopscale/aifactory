@@ -39,6 +39,7 @@ import {
   type ActionDeps,
 } from './actions'
 import { health, inbox, listTasks, taskDetail } from './queries'
+import { runContinuation } from '../factory/run-support'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
 import { stageStream } from './stream'
 import { eventsOf, pruneTranscripts } from '../factory/transcript-store'
@@ -132,6 +133,30 @@ describe('listTasks', () => {
     const [card] = await listTasks(getDb())
 
     expect(card.id).toBe(id)
+    expect(card.attempts).toBe(1)
+  })
+
+  it("counts a task's attempts and automatic retries from its own events, whatever other tasks did later", async () => {
+    // The environment failed this task three times, each followed by an automatic retry.
+    const first = await seed('failed', {}, [
+      { stage: 'intake' },
+      { stage: 'verify' },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      { stage: 'intake', detail: { decision: 'retry', automatic: true } },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      { stage: 'intake', detail: { decision: 'retry', automatic: true } },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      { stage: 'intake', detail: { decision: 'retry', automatic: true } },
+      { stage: 'verify' },
+      { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+    ])
+    // A person started another task after all of that.
+    await seed('verify', {}, [{ stage: 'intake' }, { stage: 'verify' }])
+
+    const card = (await listTasks(getDb())).find((c) => c.id === first)!
+
+    // Three automatic retries are the limit: it does not run again on its own.
+    expect(card.retryAt).toBeNull()
     expect(card.attempts).toBe(1)
   })
 
@@ -455,11 +480,16 @@ describe('actions', () => {
         const integrated =
           'this work is already integrated, so there is no pull request to send back: open a new job for what should change'
         expect(await refusals({}, (id) => requestChanges(deps(), id, 'Rename it.'))).toEqual(
-          inEvery(except('done', 'handoff'), no),
+          inEvery(except('done', 'handoff', 'failed'), no),
         )
         expect(
           await refusals({ mergedSha: 'm' }, (id) => requestChanges(deps(), id, 'Rename it.')),
-        ).toEqual({ ...inEvery(TASK_STAGES, no), done: integrated, handoff: integrated })
+        ).toEqual({
+          ...inEvery(TASK_STAGES, no),
+          done: integrated,
+          handoff: integrated,
+          failed: integrated,
+        })
       })
 
       it('retry, and retry from a finding', async () => {
@@ -616,9 +646,24 @@ describe('actions', () => {
   it('refuses an empty note, and a task that is not at a pull request', async () => {
     const id = await seed('done', { headSha: 'abc' })
     await expect(requestChanges(deps(), id, '   ')).rejects.toThrow(/say what should change/)
-    const failed = await seed('failed')
-    await expect(requestChanges(deps(), failed, 'x')).rejects.toThrow(/pull request/)
+    const working = await seed('build')
+    await expect(requestChanges(deps(), working, 'x')).rejects.toThrow(/pull request/)
     expect(queued).toEqual([])
+  })
+
+  it('sends back a run that failed, with the note, instead of only starting it over', async () => {
+    const failed = await seed('failed', { headSha: 'abc' })
+
+    const result = await requestChanges(deps(), failed, 'Answer: keep the narrow scope.')
+
+    expect(result.decisionId).toBeGreaterThan(0)
+    expect(queued).toHaveLength(1)
+    expect(await getDb().select().from(decision)).toMatchObject([
+      { kind: 'request_changes', note: 'Answer: keep the narrow scope.', sha: 'abc' },
+    ])
+    const [row] = await getDb().select().from(task).where(eq(task.id, failed))
+    expect(row.stage).toBe('intake')
+    expect(row.headSha).toBe('abc')
   })
 
   it('retries a failed or handed-over task from the start, after deleting its branch', async () => {
@@ -748,6 +793,181 @@ describe('actions', () => {
     const intake = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, oldest))
     expect(intake.at(-1)?.detail).toMatchObject({ decision: 'retry', automatic: true })
     expect(queued.map((q) => q.input)).toEqual([{ taskId: oldest }, { taskId: middle }])
+  })
+
+  describe('an automatic retry after a sandbox outage', () => {
+    const outage = { error: '403: team is blocked: spend_limit' }
+    const later = () => ({ limit: 5, now: new Date(Date.now() + 24 * 3600_000) })
+    /** A rework a person asked for, with its decision, that failed creating its sandbox. */
+    async function reworkAtSandbox(issueNumber: number, intake: object | null = null) {
+      const id = await seed('failed', { issueNumber, headSha: 'abc' })
+      api.repo('paulo/app').heads.set(`factory/${issueNumber}`, 'abc')
+      const [asked] = await getDb()
+        .insert(decision)
+        .values({ taskId: id, kind: 'request_changes', sha: 'abc', note: 'rename it' })
+        .returning({ id: decision.id })
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          {
+            taskId: id,
+            stage: 'intake',
+            detail: intake ?? { decision: 'request_changes', note: 'rename it' },
+          },
+          { taskId: id, stage: 'sandbox' },
+          { taskId: id, stage: 'failed', detail: outage },
+        ])
+      return { id, decisionId: asked.id }
+    }
+    /** What the job that was queued would run with, as the job reads it. */
+    async function continuationOf(input: {
+      decisionId?: number
+      feedback?: string
+      resume?: boolean
+    }) {
+      const [decided] = input.decisionId
+        ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
+        : []
+      return runContinuation(decided, input.feedback, input.resume)
+    }
+    const failAgain = async (id: number) => {
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          { taskId: id, stage: 'sandbox' },
+          { taskId: id, stage: 'failed', detail: outage },
+        ])
+      await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+    }
+
+    it('keeps the branch, the note and the head of a rework, even when its intake did not name the decision', async () => {
+      const { id } = await reworkAtSandbox(91)
+      expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+      expect(deleted()).toEqual([])
+      // The branch the new run fetches is still at the commit the failed run started from.
+      expect(api.repo('paulo/app').heads.get('factory/91')).toBe('abc')
+      expect(await continuationOf(queued[0].input)).toEqual({ feedback: 'rename it' })
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.headSha).toBe('abc')
+    })
+
+    it('keeps the source of the feedback when the work was sent back for failed checks', async () => {
+      const { id } = await reworkAtSandbox(94, {
+        decision: 'request_changes',
+        note: 'the lint check failed',
+        automatic: true,
+      })
+      await runDueRetries(deps(), later())
+      expect(queued.map((q) => q.input)).toEqual([
+        { taskId: id, feedback: 'the lint check failed' },
+      ])
+      expect(await continuationOf(queued[0].input)).toEqual({
+        feedback: 'the lint check failed',
+        fromChecks: true,
+      })
+    })
+
+    it('starts a first run over when it never pushed', async () => {
+      const id = await seed('failed', { issueNumber: 92 }, [
+        { stage: 'intake', detail: { decision: 'retry', note: '' } },
+        { stage: 'sandbox' },
+        { stage: 'failed', detail: outage },
+      ])
+      await runDueRetries(deps(), later())
+      expect(deleted()).toEqual(['factory/92'])
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
+    })
+
+    it('still limits the automatic retries of a first run that keeps failing at the sandbox', async () => {
+      const id = await seed('failed', { issueNumber: 97 }, [
+        { stage: 'intake', detail: { decision: 'retry', note: '' } },
+        { stage: 'sandbox' },
+        { stage: 'failed', detail: outage },
+      ])
+      let runs = 0
+      for (; runs < 10; runs++) {
+        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+        if (card.retryAt === null) break
+        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+        await failAgain(id)
+      }
+      expect(runs).toBeGreaterThan(0)
+      expect(runs).toBeLessThan(10)
+      expect(deleted()).toEqual(Array(runs).fill('factory/97'))
+    })
+
+    it('keeps the branch of a first run that pushed before the environment failed', async () => {
+      const id = await seed('failed', { issueNumber: 95 }, [
+        { stage: 'intake', detail: { decision: 'retry', note: '' } },
+        { stage: 'push' },
+        { stage: 'failed', detail: outage },
+      ])
+      api.repo('paulo/app').heads.set('factory/95', 'pushed')
+      await runDueRetries(deps(), later())
+      expect(deleted()).toEqual([])
+      // Nobody asked for anything, so no feedback is made up: the job only continues the branch.
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: id, resume: true }])
+      expect(await continuationOf(queued[0].input)).toEqual({ feedback: '', plain: true })
+      expect(api.repo('paulo/app').heads.get('factory/95')).toBe('pushed')
+    })
+
+    it('does not count three sandbox failures of a rework as attempts', async () => {
+      const { id } = await reworkAtSandbox(93)
+      // The rework had reached verification twice before the sandbox failed renewing.
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          { taskId: id, stage: 'verify' },
+          { taskId: id, stage: 'verify' },
+          { taskId: id, stage: 'sandbox' },
+          { taskId: id, stage: 'failed', detail: outage },
+        ])
+      const before = async () => (await listTasks(getDb())).find((c) => c.id === id)!
+      const attemptsBefore = (await before()).attempts
+      expect(attemptsBefore).toBe(2)
+      for (let i = 0; i < 4; i++) {
+        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+        await failAgain(id)
+      }
+      expect(deleted()).toEqual([])
+      expect(queued).toHaveLength(4)
+      // Every one of them still runs the person's decision.
+      for (const q of queued)
+        expect(await continuationOf(q.input)).toEqual({ feedback: 'rename it' })
+      expect((await before()).retryAt).not.toBeNull()
+      expect((await before()).attempts).toBe(attemptsBefore)
+    })
+
+    it('starts the attempts again when the rework that failed had run its agent', async () => {
+      const { id } = await reworkAtSandbox(98)
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          { taskId: id, stage: 'verify' },
+          { taskId: id, stage: 'build' },
+          { taskId: id, stage: 'failed', detail: outage },
+        ])
+      await runDueRetries(deps(), later())
+      await failAgain(id)
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.attempts).toBe(0)
+    })
+
+    it('counts a rework whose agent ran and then failed', async () => {
+      const { id } = await reworkAtSandbox(96)
+      for (let i = 0; i < 3; i++) {
+        await runDueRetries(deps(), later())
+        await getDb()
+          .insert(stageEvent)
+          .values([
+            { taskId: id, stage: 'build' },
+            { taskId: id, stage: 'failed', detail: outage },
+          ])
+        await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+      }
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.retryAt).toBeNull()
+    })
   })
 
   it('runs again on its own a finished task whose pull request GitHub refused for a conflict with its base', async () => {

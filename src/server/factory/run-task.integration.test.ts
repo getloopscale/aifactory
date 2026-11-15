@@ -46,7 +46,9 @@ import type { CodingHarness } from './harness'
 import type { Finding } from './review'
 import { mergeEgress, resumeTask, runTask, type RunTaskDeps } from './run-task'
 import { runContinuation } from './run-support'
-import { requestChanges } from '../panel/actions'
+import { requestChanges, retryAutomatically, type ActionDeps } from '../panel/actions'
+import { runDueRetries } from '../panel/retry-waiting'
+import { listTasks } from '../panel/queries'
 import { release } from './deliver'
 import { pollAnswers } from './waiting'
 
@@ -976,6 +978,91 @@ describe('runTask review loop', () => {
     expect(seen.drafts).toEqual([false])
   })
 
+  it('leaves the model unknown for a pass that reported several, instead of the configured one', async () => {
+    const id = await seedTask()
+    const reviewer = { ...reviewerSaying(verdictJson('approve')), model: 'opus', effort: 'high' }
+    const run = reviewer.run
+    reviewer.run = async (backend, input) => ({ ...(await run(backend, input)), model: null })
+
+    await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+    const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({ model: null, effort: 'high' })
+  })
+
+  it('records the model, the effort and the tokens of the reviewer pass on its agent_run row', async () => {
+    const id = await seedTask()
+    const reviewer = {
+      ...reviewerSaying(verdictJson('approve')),
+      model: 'gpt-6.1-sol',
+      effort: 'high',
+    }
+    const run = reviewer.run
+    reviewer.run = async (backend, input) => ({
+      ...(await run(backend, input)),
+      tokensIn: 900,
+      tokensOut: 40,
+    })
+
+    await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+    const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({
+      harness: 'fake-reviewer',
+      model: 'gpt-6.1-sol',
+      effort: 'high',
+      tokensIn: 900,
+      tokensOut: 40,
+    })
+    expect(rows.find((r) => r.role === 'builder')).toMatchObject({
+      model: null,
+      effort: null,
+    })
+  })
+
+  // Each case seeds its own task: two tasks from the same delivery cannot exist.
+  it.each([
+    [
+      'could not be renewed',
+      (async () => {
+        throw new Error('the refresh token was revoked')
+      }) as CodingHarness['reauthorize'],
+    ],
+    [
+      'was refused again',
+      (async () => [
+        { domain: 'chatgpt.com', headers: { authorization: 'Bearer new-token' } },
+      ]) as CodingHarness['reauthorize'],
+    ],
+  ])(
+    'records a reviewer pass whose login %s, with its model and effort',
+    async (_what, reauthorize) => {
+      const reviewer: CodingHarness = {
+        name: 'fake-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        egress: async () => [
+          { domain: 'chatgpt.com', headers: { authorization: 'Bearer old-token' } },
+        ],
+        reauthorize,
+        markRefused: async () => {},
+        run: async () => ({ ok: false, summary: 'refused', unauthorized: true }),
+      }
+      const id = await seedTask()
+
+      const result = await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+      expect(result.status).not.toBe('done')
+      const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+      expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({
+        harness: 'fake-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        ok: false,
+      })
+    },
+  )
+
   it('sends the work back to the same session, then opens the pull request on the next approval', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
@@ -1411,6 +1498,24 @@ describe('runTask planning before it builds', () => {
           : undefined,
       ),
     )
+
+  it('records the planning pass as its own execution, apart from the build', async () => {
+    const id = await seedTask()
+    const builder = planningBuilder([`Read it.\n${JSON.stringify(plan)}`])
+
+    await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+
+    const runs = await getDb()
+      .select()
+      .from(agentRun)
+      .where(eq(agentRun.taskId, id))
+      .orderBy(agentRun.id)
+    expect(runs.map((r) => [r.role, r.harness])).toEqual([
+      ['planner', 'fake-agent'],
+      ['builder', 'fake-agent'],
+      ['reviewer', 'fake-reviewer'],
+    ])
+  })
 
   it('stores the plan and builds in the session that wrote it', async () => {
     const id = await seedTask()
@@ -1908,6 +2013,51 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  describe('a plain continuation, after a run that pushed and then failed for the environment', () => {
+    const pushed = 'f'.repeat(40)
+    // The branch is on GitHub at `pushed`, and the checkout of it is at that commit too: the shared
+    // fake answers the base's hash for HEAD, which a continuation from a branch never has.
+    const lsRemote = (command: string) => {
+      if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+      if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
+      return undefined
+    }
+
+    it('starts from the branch, claims no review or failed check, and goes on from its head when the agent adds nothing', async () => {
+      const id = await seedTask()
+      branchPushed()
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: pushed, pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      const sandbox = new FakeSandbox(changed(lsRemote))
+      const prompts: string[] = []
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async (_b, input) => {
+          prompts.push(input.prompt)
+          dirty = false
+          return { ok: true, summary: 'Nothing left to do.' }
+        },
+      }
+
+      const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+        feedback: '',
+        plain: true,
+      })
+
+      expect(result).toMatchObject({ status: 'done', sha: pushed })
+      expect(prompts[0]).not.toContain('A person reviewed')
+      expect(prompts[0]).not.toContain('required checks failed')
+      expect(seen.comments).toEqual([])
+      const commands = sandbox.backend.commands
+      expect(commands.some((c) => c.includes('checkout -B factory/7 FETCH_HEAD'))).toBe(true)
+      expect(commands.some((c) => c.includes('push origin'))).toBe(false)
+      expect(await stagesOf(id)).not.toContain('handoff')
+    })
+  })
+
   it('does not mention a review when nobody sent anything back', async () => {
     const id = await seedTask()
     const prompts: string[] = []
@@ -1922,6 +2072,80 @@ describe('runTask continuing from a branch a person sent back', () => {
     }
     await runTask(deps(new FakeSandbox(changed()), { harness: builder }), id)
     expect(prompts[0]).not.toContain('A person reviewed')
+  })
+})
+
+describe('an automatic retry of a run that failed creating its sandbox', () => {
+  type Queued = { taskId: number; decisionId?: number; feedback?: string; resume?: boolean }
+  const blocked = () => {
+    const sandbox = new FakeSandbox(changed())
+    sandbox.create = async () => {
+      throw new Error('403: team is blocked: spend_limit')
+    }
+    return sandbox
+  }
+  const later = () => ({ limit: 5, now: new Date(Date.now() + 24 * 3600_000) })
+  function actionDeps(queued: Queued[], deleted: string[]): ActionDeps {
+    const api = Object.assign(Object.create(githubApi), {
+      deleteBranch: async (_r: string, _t: string, branch: string) => void deleted.push(branch),
+    })
+    return {
+      db: getDb(),
+      github,
+      api,
+      enqueueResume: async () => {},
+      deleteSnapshot: async () => {},
+      inTransaction: (work) =>
+        getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+    }
+  }
+  /** What the `run-task` job runs for the input that was queued last. */
+  async function runQueued(id: number, queued: Queued[]) {
+    const input = queued.at(-1)!
+    const [decided] = input.decisionId
+      ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
+      : []
+    const continuation = runContinuation(decided, input.feedback, input.resume)
+    const result = await runTask(deps(blocked()), id, undefined, continuation)
+    expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
+    return continuation
+  }
+
+  it('keeps the branch, runs on the same commit with the same note, and counts no attempt', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'done', headSha: 'f'.repeat(40) })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+    const deleted: string[] = []
+    const action = actionDeps(queued, deleted)
+    await requestChanges(action, id, 'Rename the helper to cut.')
+    await runQueued(id, queued)
+
+    for (let i = 0; i < 3; i++) {
+      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+      expect(await runQueued(id, queued)).toMatchObject({ feedback: 'Rename the helper to cut.' })
+    }
+
+    expect(deleted).toEqual([])
+    expect(repo().heads.get('factory/7')).toBe('f'.repeat(40))
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.headSha).toBe('f'.repeat(40))
+    // Three failed sandboxes are no attempt of the work: it still comes due again.
+    const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+    expect(card.retryAt).not.toBeNull()
+  })
+
+  it('starts a first run that failed at the sandbox over, with a new branch', async () => {
+    const id = await seedTask()
+    const queued: Queued[] = []
+    const deleted: string[] = []
+    await runTask(deps(blocked()), id)
+    await retryAutomatically(actionDeps(queued, deleted), id)
+    expect(deleted).toEqual(['factory/7'])
+    expect(queued).toEqual([{ taskId: id }])
   })
 })
 
@@ -2200,8 +2424,13 @@ describe('runTask waiting for an answer', () => {
       .insert(stageEvent)
       .values({ taskId: id, stage: 'handoff', at: new Date(now - 10_000) })
     let runs = 0
+    let commits = 0
     const sandbox = new FakeSandbox(
       changed((c) => {
+        // The first commit gets a hash of its own: the shared fake gives it the base's, and a review of
+        // the base commit is the review of a "nothing to change" claim, which is not a round.
+        if (c.includes('commit -F')) commits += 1
+        if (c.endsWith('rev-parse HEAD') && commits === 1) return { stdout: 'first111\n' }
         if (!c.endsWith('npm test')) return undefined
         runs += 1
         // Round 2 fails its checks, twice, so it has no review.
