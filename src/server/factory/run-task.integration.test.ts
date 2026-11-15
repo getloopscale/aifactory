@@ -562,6 +562,25 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
+  it('fails as an environment failure when GitHub answers 502 deleting the merged branch', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'deleteBranch',
+      new Error('GitHub answered 502 deleting factory/7 on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
   it('fails as an environment failure when GitHub answers 5xx handing the work over', async () => {
     const id = await seedTask()
     githubApi.fail(

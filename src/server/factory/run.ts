@@ -1302,7 +1302,12 @@ export class Run {
       return { error: message }
     }
     await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
-    await api.deleteBranch(row.repository, this.c.token, branch).catch(() => {})
+    await api.deleteBranch(row.repository, this.c.token, branch).catch((error: unknown) => {
+      // GitHub failing is the environment's and surfaces; any other cleanup failure is left alone.
+      if (GITHUB_SERVER_ERROR.test(error instanceof Error ? error.message : String(error))) {
+        throw error
+      }
+    })
     const advanced = await advancePreRelease(api, {
       repository: row.repository,
       token: this.c.token,
