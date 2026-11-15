@@ -372,8 +372,7 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
 
 /**
  * Publications that ended with a package unpublished. Nothing else will publish it, so the owner is told
- * until the release workflow's missing releases appear: the `publish-changesets` cron then marks the
- * publication published and the item goes.
+ * until it is handled by hand.
  */
 async function partialPublications(db: Database): Promise<InboxItem[]> {
   const rows = await db.select().from(publication).where(eq(publication.status, 'partial'))

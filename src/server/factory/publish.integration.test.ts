@@ -464,67 +464,6 @@ describe('publishing a changesets release', () => {
       expect(closed()).not.toContain(await issueOf(gateway))
     })
 
-    it('does not hold a task for a package a later publication publishes', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      commitIn('gw-merge', 'gateway')
-      await getDb()
-        .update(publication)
-        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'] })
-        .where(eq(publication.taskId, asked))
-
-      const shipped = await shipContained(
-        { db: getDb(), api },
-        {
-          repository: REPO,
-          token: 't',
-          promotedSha: 'promoted2',
-          releaseBranch: 'main',
-          askedTaskId: 0,
-          actor: 'human',
-          tags: [{ tag: '@theokit/gateway@0.17.0', url: 'https://example.test/g17' }],
-        },
-      )
-
-      expect(shipped.held).toEqual([])
-      expect(await stageOf(gateway)).toBe('released')
-    })
-
-    it('releases the held tasks and closes their issues when the missing release appears', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      commitIn('gw-merge', 'gateway')
-      await getDb()
-        .update(publication)
-        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'], tags: [ALL[0]] })
-        .where(eq(publication.taskId, asked))
-      releasesAre(...ALL.map(published))
-
-      await pollPublications(deps(PAST_THE_WAIT))
-
-      expect(await row()).toMatchObject({ status: 'published' })
-      expect(await stageOf(gateway)).toBe('released')
-      expect(closed()).toContain(await issueOf(gateway))
-    })
-
-    it('stops holding, and takes the publication as published, once the missing release appears', async () => {
-      const asked = await waitingPublication()
-      await getDb()
-        .update(publication)
-        .set({ status: 'partial', missing: ['@theokit/gateway@0.16.1'], tags: [ALL[0]] })
-        .where(eq(publication.taskId, asked))
-      releasesAre(...ALL.slice(0, 2).map(published))
-
-      await pollPublications(deps(PAST_THE_WAIT))
-      expect(await row()).toMatchObject({ status: 'partial' })
-
-      releasesAre(...ALL.map(published))
-      await pollPublications(deps(PAST_THE_WAIT))
-
-      expect(await row()).toMatchObject({ status: 'published' })
-      expect((await row()).tags).toContain('@theokit/gateway@0.16.1')
-    })
-
     it('records why it cannot tell the releases apart when GitHub names no merge commit for the merged pull request', async () => {
       await waitingPublication()
       releasesAre(...ALL.map(published))

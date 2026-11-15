@@ -269,50 +269,6 @@ export async function pollPublications(deps: PublishDeps): Promise<PublishResult
       await note(deps.db, p.id, message)
     }
   }
-  await resolvePartials(deps, result)
   await mergeBackMerges(deps, result)
   return result
-}
-
-/**
- * Looks again at each publication that ended with a package unpublished. When the release of every package
- * it lacked has appeared, the tasks held for them are released and their issues closed, and the
- * publication is published. A look that fails is recorded and tried
- * again on the next pass.
- */
-async function resolvePartials(deps: PublishDeps, result: PublishResult) {
-  const partial = await deps.db.select().from(publication).where(eq(publication.status, 'partial'))
-  for (const p of partial) {
-    try {
-      const { token } = await deps.github.installationToken(p.repository)
-      const out = await deps.api.releasesSince(p.repository, token, p.startedAt)
-      const late = out.filter((r) => (p.missing ?? []).includes(r.tag))
-      if (late.length < (p.missing ?? []).length) continue
-      // The held tasks ship now, with the releases that were missing; only then is the publication done.
-      const shipped = await shipContained(deps, {
-        repository: p.repository,
-        token,
-        promotedSha: p.promotedSha,
-        releaseBranch: p.releaseBranch,
-        askedTaskId: 0,
-        actor: p.actor,
-        tags: late,
-        publishedBy: "the repository's release workflow",
-        detail: { published: 'changesets' },
-        completes: p.id,
-      })
-      await deps.db
-        .update(publication)
-        .set({
-          status: 'published',
-          tags: [...(p.tags ?? []), ...late.map((r) => r.tag)],
-          detail: `${p.detail ?? ''}; later published ${late.map((r) => r.tag).join(', ')}${unclosedNote(shipped)}`,
-        })
-        .where(eq(publication.id, p.id))
-    } catch (error) {
-      result.errors.push(
-        `${p.repository}: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
 }

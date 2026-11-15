@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, ne, or } from 'drizzle-orm'
+import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
@@ -29,8 +29,6 @@ export type Shipment = {
    * of those packages is not released and its issue stays open.
    */
   missing?: string[]
-  /** The partial publication this shipment completes: the releases it lacked are now out, so it holds nothing. */
-  completes?: number
 }
 
 export type Shipped = {
@@ -95,25 +93,14 @@ function heldFor(carried: Carried | undefined, owed: string[]): string[] {
 
 /**
  * The releases still owed in a repository: the ones this shipment lacks and those of an earlier publication
- * that ended partly published and has not been completed, so a later release does not close their issues.
+ * that ended partly published, so a later release does not close their issues.
  */
 async function owedReleases(db: Database, s: Shipment): Promise<string[]> {
   const earlier = await db
     .select({ missing: publication.missing })
     .from(publication)
-    .where(
-      and(
-        eq(publication.repository, s.repository),
-        eq(publication.status, 'partial'),
-        ne(publication.id, s.completes ?? 0),
-      ),
-    )
-  // A package this shipment publishes is no longer owed: its release carries the promoted commit.
-  const published = new Set(s.tags.map((tag) => packageOfTag(tag.tag)))
-  const outstanding = earlier
-    .flatMap((p) => p.missing ?? [])
-    .filter((tag) => !published.has(packageOfTag(tag)))
-  return [...new Set([...(s.missing ?? []), ...outstanding])]
+    .where(and(eq(publication.repository, s.repository), eq(publication.status, 'partial')))
+  return [...new Set([...(s.missing ?? []), ...earlier.flatMap((p) => p.missing ?? [])])]
 }
 
 /** Tells the issue why it stays open. A failure is returned, as in `announce`. */
