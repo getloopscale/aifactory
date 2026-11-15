@@ -1020,25 +1020,34 @@ describe('runTask review loop', () => {
     })
   })
 
-  it('records a reviewer pass whose login could not be renewed or was refused again, with its model and effort', async () => {
-    const refusedReviewer = (reauthorize: CodingHarness['reauthorize']): CodingHarness => ({
-      name: 'fake-codex',
-      model: 'gpt-6.1-sol',
-      effort: 'high',
-      egress: async () => [
-        { domain: 'chatgpt.com', headers: { authorization: 'Bearer old-token' } },
-      ],
-      reauthorize,
-      markRefused: async () => {},
-      run: async () => ({ ok: false, summary: 'refused', unauthorized: true }),
-    })
-    const renewalFails = refusedReviewer(async () => {
-      throw new Error('the refresh token was revoked')
-    })
-    const refusedAgain = refusedReviewer(async () => [
-      { domain: 'chatgpt.com', headers: { authorization: 'Bearer new-token' } },
-    ])
-    for (const reviewer of [renewalFails, refusedAgain]) {
+  // Each case seeds its own task: two tasks from the same delivery cannot exist.
+  it.each([
+    [
+      'could not be renewed',
+      (async () => {
+        throw new Error('the refresh token was revoked')
+      }) as CodingHarness['reauthorize'],
+    ],
+    [
+      'was refused again',
+      (async () => [
+        { domain: 'chatgpt.com', headers: { authorization: 'Bearer new-token' } },
+      ]) as CodingHarness['reauthorize'],
+    ],
+  ])(
+    'records a reviewer pass whose login %s, with its model and effort',
+    async (_what, reauthorize) => {
+      const reviewer: CodingHarness = {
+        name: 'fake-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        egress: async () => [
+          { domain: 'chatgpt.com', headers: { authorization: 'Bearer old-token' } },
+        ],
+        reauthorize,
+        markRefused: async () => {},
+        run: async () => ({ ok: false, summary: 'refused', unauthorized: true }),
+      }
       const id = await seedTask()
 
       const result = await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
@@ -1051,8 +1060,8 @@ describe('runTask review loop', () => {
         effort: 'high',
         ok: false,
       })
-    }
-  })
+    },
+  )
 
   it('sends the work back to the same session, then opens the pull request on the next approval', async () => {
     const id = await seedTask()
