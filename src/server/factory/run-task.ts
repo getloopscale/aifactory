@@ -1,6 +1,6 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, isNotNull, isNull } from 'drizzle-orm'
 
-import { question as questionTable, task } from '../db/schema'
+import { delivery, question as questionTable, review, stageEvent, task } from '../db/schema'
 import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
 import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
 import { withRecipe } from './recipe'
@@ -10,6 +10,7 @@ import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { Run, type RunState } from './run'
 import type { Parked, RunResult, RunTaskDeps } from './run-types'
+import { completeIntegration } from './await-ci'
 import { enterStage } from './stages'
 
 export type { RunResult, RunTaskDeps } from './run-types'
@@ -78,6 +79,8 @@ async function execute(
 
   const state: RunState = { current: 'sandbox', sandbox: undefined }
   try {
+    const interrupted = await interruptedDelivery(db, row)
+    if (interrupted) return await finishDelivery(deps, row, interrupted, state)
     await enterStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
 
     // One token, limited to this task's repository. It is used here and in the firewall rule,
@@ -181,4 +184,70 @@ async function fail(
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
   })
   return { status: 'failed', stage: state.current, error: message }
+}
+
+/**
+ * The verified commit of a task whose pull request was merged but whose delivery GitHub interrupted (a 5xx
+ * advancing the pre-release branch or creating the pre-release): the run failed at `pr`, with the merge
+ * stored and nothing delivered. Running it again from the integration branch would find the work already
+ * there, so it finishes the delivery instead.
+ */
+async function interruptedDelivery(
+  db: RunTaskDeps['db'],
+  row: typeof task.$inferSelect,
+): Promise<string | undefined> {
+  if (row.stage !== 'failed' || !row.mergedSha || !row.pullRequestUrl) return undefined
+  const [last] = await db
+    .select({ detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(eq(stageEvent.taskId, row.id))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  if ((last?.detail as { failedAt?: string } | null)?.failedAt !== 'pr') return undefined
+  const [pr] = await db
+    .select({ detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'pr')))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  const sha = (pr?.detail as { sha?: string } | null)?.sha
+  if (!sha) return undefined
+  const delivered = await db
+    .select({ id: delivery.id })
+    .from(delivery)
+    .where(and(eq(delivery.taskId, row.id), eq(delivery.kind, 'prerelease')))
+  return delivered.length === 0 ? sha : undefined
+}
+
+async function finishDelivery(
+  deps: RunTaskDeps,
+  row: typeof task.$inferSelect,
+  sha: string,
+  state: RunState,
+): Promise<RunResult> {
+  state.current = 'pr'
+  const { token } = await deps.github.installationToken(row.repository)
+  const [rounds] = await deps.db
+    .select({ n: count() })
+    .from(review)
+    .where(eq(review.taskId, row.id))
+  await completeIntegration(
+    {
+      db: deps.db,
+      github: deps.github,
+      api: deps.githubApi ?? createGithubApi(),
+      releaseMode: deps.releaseMode,
+    },
+    { row, verifiedSha: sha, token, done: { attempts: Math.max(1, rounds?.n ?? 1) } },
+    row.mergedSha!,
+    'retry',
+  )
+  await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, row.id))
+  return {
+    status: 'done',
+    branch: `factory/${row.issueNumber}`,
+    sha,
+    pullRequestUrl: row.pullRequestUrl!,
+    summary: '',
+  }
 }

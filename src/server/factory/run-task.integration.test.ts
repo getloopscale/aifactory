@@ -518,26 +518,41 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
-  it('fails as an environment failure, with no fallback pull request, when GitHub answers 5xx advancing the pre-release branch', async () => {
-    const id = await seedTask()
-    githubApi.fail(
-      'mergeBranch',
-      new Error('GitHub answered 502 merging into develop on paulo/app: {}'),
-    )
+  it.each([
+    ['createRelease', 'GitHub answered 502 creating the release on paulo/app: {}'],
+    ['mergeBranch', 'GitHub answered 502 merging into develop on paulo/app: {}'],
+  ] as const)(
+    'finishes the delivery of a merged pull request on the retry when GitHub answers 502 on %s',
+    async (method, message) => {
+      const id = await seedTask()
+      githubApi.fail(method, new Error(message), { times: 1 })
 
-    const result = await runTask(deps(new FakeSandbox(changed())), id)
+      const first = await runTask(deps(new FakeSandbox(changed())), id)
 
-    expect(result).toMatchObject({ status: 'failed' })
-    expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
-    const [last] = await getDb()
-      .select()
-      .from(stageEvent)
-      .where(eq(stageEvent.taskId, id))
-      .orderBy(desc(stageEvent.id))
-      .limit(1)
-    expect(last!.stage).toBe('failed')
-    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
-  })
+      expect(first).toMatchObject({ status: 'failed' })
+      const [last] = await getDb()
+        .select()
+        .from(stageEvent)
+        .where(eq(stageEvent.taskId, id))
+        .orderBy(desc(stageEvent.id))
+        .limit(1)
+      expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+      // No fallback pull request for the pre-release branch is opened on a 5xx.
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
+
+      const sandbox = new FakeSandbox(changed())
+      const second = await runTask(deps(sandbox), id)
+
+      expect(second).toMatchObject({ status: 'done' })
+      expect(sandbox.specs).toHaveLength(0)
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.stage).toBe('done')
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
+      expect(githubApi.answered('mergePullRequest')).toHaveLength(1)
+      const delivered = await getDb().select().from(delivery).where(eq(delivery.taskId, id))
+      expect(delivered).toHaveLength(1)
+    },
+  )
 
   it('gives the firewall the credentials and the sandbox none of them', async () => {
     const id = await seedTask()

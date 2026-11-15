@@ -1301,7 +1301,11 @@ export class Run {
       if (GITHUB_SERVER_ERROR.test(message)) throw error
       return { error: message }
     }
-    await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
+    // The pull request is kept with the merge: a delivery GitHub interrupts is finished from them.
+    await deps.db
+      .update(task)
+      .set({ mergedSha: merged.sha, pullRequestUrl: opened.url })
+      .where(eq(task.id, taskId))
     await api.deleteBranch(row.repository, this.c.token, branch).catch(() => {})
     const advanced = await advancePreRelease(api, {
       repository: row.repository,

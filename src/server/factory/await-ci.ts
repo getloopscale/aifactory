@@ -74,6 +74,31 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
     .returning({ id: task.id })
   if (claimed.length === 0) return false
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`).catch(() => {})
+  try {
+    await completeIntegration(deps, w, mergedSha)
+  } catch (error) {
+    // GitHub failed: the wait is put back, so the next pass finishes what follows the merge.
+    await deps.db.update(task).set({ awaitingCiSha: verifiedSha }).where(eq(task.id, row.id))
+    throw error
+  }
+  return true
+}
+
+/** GitHub answering 5xx is the environment's, not a refusal of the delivery. */
+const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
+
+/**
+ * What follows a merge into the integration branch: the pre-release branch advances, the pre-release is made
+ * and a release follows by the repository's mode. A 5xx from GitHub is thrown, so the caller can try again;
+ * every call it makes is safe to repeat once it did not complete.
+ */
+export async function completeIntegration(
+  deps: Pick<AwaitCiDeps, 'db' | 'github' | 'api' | 'releaseMode'>,
+  w: Pick<Waiting, 'row' | 'verifiedSha' | 'token' | 'done'>,
+  mergedSha: string,
+  integratedBy = 'auto-merge',
+): Promise<void> {
+  const { row, verifiedSha, token } = w
   const repo = await loadRepoConfig(deps.db, row.repository)
   const advanced = await advancePreRelease(deps.api, {
     repository: row.repository,
@@ -100,7 +125,9 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
       },
     )
   } catch (error) {
-    handed = { error: error instanceof Error ? error.message : String(error) }
+    const message = error instanceof Error ? error.message : String(error)
+    if (GITHUB_SERVER_ERROR.test(message)) throw error
+    handed = { error: message }
   }
   await deps.db.insert(stageEvent).values({
     taskId: row.id,
@@ -108,7 +135,7 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
     detail: {
       sha: verifiedSha,
       pullRequestUrl: row.pullRequestUrl,
-      integratedBy: 'auto-merge',
+      integratedBy,
       ...describeIntegration({ mergedSha, ...advanced }),
       ...describeDelivery(handed),
     },
@@ -131,7 +158,6 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
       },
     )
   }
-  return true
 }
 
 /** The work goes to a person: the pull request stays as it is, and the issue says why. */
