@@ -191,9 +191,12 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     handoff: approve,
   },
   request_changes: {
-    ...each(['intake', ...WORKING, 'waiting', 'released', 'failed', 'cancelled'], NOT_SENT_BACK),
+    ...each(['intake', ...WORKING, 'waiting', 'released', 'cancelled'], NOT_SENT_BACK),
     done: sendBack,
     handoff: sendBack,
+    // A run that failed after pushing (out of time, a question the sandbox could not wait for) has work
+    // on its branch, which a retry would delete.
+    failed: sendBack,
   },
   retry: {
     ...each(['intake', ...WORKING, 'waiting', 'released', 'cancelled'], NOT_RETRIED),

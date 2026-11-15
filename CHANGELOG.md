@@ -21,6 +21,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A task that failed with work on its branch can be sent back with a note from the panel, and the run continues on that branch. Before, a failed task could only be retried, which deletes the branch and starts over: a run that ran out of time, or whose agent asked a question the sandbox could not wait for, lost its work (#89)
 - A task blocked by an issue in its own repository starts once the factory has integrated that issue's fix, instead of waiting for the issue to close at the release; a blocker in another repository still waits for its release (#36)
 
 - A rework that no longer fits in what is left of an E2B session, but fits in the run's 90 minutes, no longer fails with "no time left for another agent pass": the run saves the disk to a snapshot, restores it into a new session under the same network rules, deletes the snapshot and goes on. The task's history shows the new session. A provider that cannot save a sandbox refuses the pass as before (#29)

@@ -132,10 +132,25 @@ describe('what a person asks for in the panel', () => {
     expect(acting('request_changes')).toEqual({
       done: 'continue_on_branch',
       handoff: 'continue_on_branch',
+      failed: 'continue_on_branch',
     })
     expect(elsewhere('request_changes')).toEqual([
       refused('only a task with a pull request can be sent back'),
     ])
+  })
+
+  it('sends back a run that failed with its work on a branch, instead of only starting it over', () => {
+    // A run that ran out of time, or whose agent asked a question the sandbox could not wait for, pushed
+    // work: a retry would delete it, so a person may send it back with a note.
+    expect(outcome({ stage: 'failed', branchGone: false }, 'request_changes')).toEqual(
+      act('continue_on_branch'),
+    )
+    expect(outcome({ stage: 'failed', branchGone: true }, 'request_changes')).toEqual(
+      act('start_from_integration_branch'),
+    )
+    expect(outcome({ stage: 'failed', mergedSha: 'm' }, 'request_changes')).toEqual(
+      expect.objectContaining({ kind: 'refused' }),
+    )
   })
 
   it('refuses to send back integrated work, and says what to do instead', () => {
@@ -409,7 +424,7 @@ describe('what a delivery from GitHub is meant to do, once something acts on it'
 
 describe('the stages a task may be in when what was decided is carried out', () => {
   it('lists every stage where the event acts for the task as it was read', () => {
-    expect(stagesWhere('request_changes', {})).toEqual(['done', 'handoff'])
+    expect(stagesWhere('request_changes', {})).toEqual(['done', 'handoff', 'failed'])
     expect(stagesWhere('request_changes', { mergedSha: 'm' })).toEqual([])
     expect(stagesWhere('resolve', {})).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', { mergedSha: 'm' })).toEqual(['handoff', 'failed'])

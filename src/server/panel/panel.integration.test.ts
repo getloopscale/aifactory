@@ -480,11 +480,16 @@ describe('actions', () => {
         const integrated =
           'this work is already integrated, so there is no pull request to send back: open a new job for what should change'
         expect(await refusals({}, (id) => requestChanges(deps(), id, 'Rename it.'))).toEqual(
-          inEvery(except('done', 'handoff'), no),
+          inEvery(except('done', 'handoff', 'failed'), no),
         )
         expect(
           await refusals({ mergedSha: 'm' }, (id) => requestChanges(deps(), id, 'Rename it.')),
-        ).toEqual({ ...inEvery(TASK_STAGES, no), done: integrated, handoff: integrated })
+        ).toEqual({
+          ...inEvery(TASK_STAGES, no),
+          done: integrated,
+          handoff: integrated,
+          failed: integrated,
+        })
       })
 
       it('retry, and retry from a finding', async () => {
@@ -641,9 +646,24 @@ describe('actions', () => {
   it('refuses an empty note, and a task that is not at a pull request', async () => {
     const id = await seed('done', { headSha: 'abc' })
     await expect(requestChanges(deps(), id, '   ')).rejects.toThrow(/say what should change/)
-    const failed = await seed('failed')
-    await expect(requestChanges(deps(), failed, 'x')).rejects.toThrow(/pull request/)
+    const working = await seed('build')
+    await expect(requestChanges(deps(), working, 'x')).rejects.toThrow(/pull request/)
     expect(queued).toEqual([])
+  })
+
+  it('sends back a run that failed, with the note, instead of only starting it over', async () => {
+    const failed = await seed('failed', { headSha: 'abc' })
+
+    const result = await requestChanges(deps(), failed, 'Answer: keep the narrow scope.')
+
+    expect(result.decisionId).toBeGreaterThan(0)
+    expect(queued).toHaveLength(1)
+    expect(await getDb().select().from(decision)).toMatchObject([
+      { kind: 'request_changes', note: 'Answer: keep the narrow scope.', sha: 'abc' },
+    ])
+    const [row] = await getDb().select().from(task).where(eq(task.id, failed))
+    expect(row.stage).toBe('intake')
+    expect(row.headSha).toBe('abc')
   })
 
   it('retries a failed or handed-over task from the start, after deleting its branch', async () => {
