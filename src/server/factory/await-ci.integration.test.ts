@@ -34,6 +34,16 @@ const gh = {
   failedRuns: [] as FailedRun[],
   logs: {} as Record<number, string>,
   annotations: {} as Record<number, string[]>,
+  jobs: {} as Record<
+    number,
+    {
+      runId: number
+      attempt: number
+      failedStep?: string
+      ranSteps?: number
+      failedPosition?: number
+    }
+  >,
   logFails: false,
 }
 const sentBack: { taskId: number; note: string }[] = []
@@ -69,7 +79,7 @@ beforeEach(async () => {
   repo().prepare().required.set('workspace', ['CI'])
   pull()
   reports({ name: 'CI', state: 'pending', detail: '', url: 'u' })
-  Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, logFails: false })
+  Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
   sentBack.length = 0
   startedOver.length = 0
 })
@@ -81,6 +91,12 @@ const checks: EvidenceApi = {
     return gh.logs[jobId] ?? ''
   },
   annotations: async (_repo, _token, checkRunId) => gh.annotations[checkRunId] ?? [],
+  // What GitHub says of a job: its run, and which of the steps that ran is the one that failed.
+  jobAttempt: async (_repo, _token, jobId) => {
+    const job = gh.jobs[jobId]
+    if (!job) throw new Error(`GitHub answered 404 reading job ${jobId}`)
+    return job
+  },
 }
 
 const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
@@ -324,6 +340,46 @@ describe('pollAwaitingIntegrations', () => {
     expect(sentBack[0].note).toContain(
       'CodeQL:\n~~~~text\nsrc/a.ts:3 Sink: tainted input\n1 new alert\n~~~~',
     )
+  })
+
+  it('puts the error line and the step of a sibling job of the same run in the note of a gate job', async () => {
+    const run = 'https://github.com/paulo/app/actions/runs/431'
+    reports({ name: 'CI', state: 'failure', detail: '', url: `${run}/job/1` })
+    gh.failedRuns = [
+      { id: 1, name: 'CI', url: `${run}/job/1`, summary: '', actions: true },
+      { id: 2, name: 'validate', url: `${run}/job/2`, summary: '', actions: true },
+      {
+        id: 3,
+        name: 'other',
+        url: 'https://github.com/paulo/app/actions/runs/999/job/3',
+        summary: '',
+        actions: true,
+      },
+    ]
+    gh.logs = {
+      1: '2026-11-12T10:00:02.0000000Z ##[error]at least one dependency did not succeed',
+      2: [
+        '2026-11-12T10:00:00.0000000Z ##[group]Run pnpm quality',
+        '2026-11-12T10:00:00.0000000Z shell: /usr/bin/bash -e {0}',
+        '2026-11-12T10:00:00.0000000Z ##[endgroup]',
+        'error types-dont-import-runtime: packages/sdk/src/types/agent.ts → packages/sdk/src/builtin-tools.ts',
+        'ERROR: "quality:depcruise" exited with 1.',
+        '2026-11-12T10:00:02.0000000Z ##[error]Process completed with exit code 1.',
+      ].join('\n'),
+      3: 'ERROR: "unrelated" exited with 1.',
+    }
+    // The job ran one step, named in the workflow, and that step is the one that failed.
+    gh.jobs = {
+      2: { runId: 431, attempt: 1, failedStep: 'Validate', ranSteps: 1, failedPosition: 0 },
+    }
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
+
+    const { note } = sentBack[0]
+    expect(note).toContain('Step that exited: Validate (ran: pnpm quality)')
+    expect(note).toContain('error types-dont-import-runtime: packages/sdk/src/types/agent.ts')
+    expect(note).not.toContain('unrelated')
   })
 
   it('sends the work back with the link when the evidence cannot be read, and logs why', async () => {

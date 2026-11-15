@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- When a required check of the integration branch fails, the note the builder gets carries the error lines of the job that failed and the step that exited, also when the required check is a gate job that only reports that another job of the same run failed. A command is named for the step only when the log ties it to that step; a log that could not be read is said so, with the link. A task handed to a person after an unchanged rework carries the same evidence (#84)
 - A task that failed with work on its branch can be sent back with a note from the panel, and the run continues on that branch. Before, a failed task could only be retried, which deletes the branch and starts over: a run that ran out of time, or whose agent asked a question the sandbox could not wait for, lost its work (#89)
 - A task blocked by an issue in its own repository starts once the factory has integrated that issue's fix, instead of waiting for the issue to close at the release; a blocker in another repository still waits for its release (#36)
 
@@ -33,6 +34,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A 5xx from GitHub no longer fails a task for a person. A read is asked again up to three times with a pause; a call that changes something is sent once, and a 5xx from it fails the run as an environment failure, so the task waits under "Will retry itself" and the whole run is repeated. That covers creating the check run, opening the pull request and the GraphQL mutations. A merge is asked again only when GitHub refused it because the base branch moved, never after a 5xx, since the merge may have happened (#83)
 - A task's attempts and its automatic retries are counted from its own events. The count compared against the latest run a person started on any task, so most tasks showed no automatic retry at all: an environment failure was retried past its limit of three, and the board could show the wrong number of attempts (#89)
 - The new job dialog no longer says "Enable a repository under Repositories first" while the list of repositories is still loading; it says it is reading them, and shows the form or that message once the list arrives (#79)
 - The onboarding no longer marks "Choose a repository" as done while the connection to GitHub is still being checked: a step is done only when every step before it is (#79)

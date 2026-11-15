@@ -70,6 +70,27 @@ function fakeApi(
   return { api, calls }
 }
 
+describe('a gate that only says its job failed', () => {
+  it('still reads the failed sibling job of the run', async () => {
+    const gate = actionsRun({
+      id: 11,
+      name: 'checks-pass',
+      url: `https://github.com/o/r/actions/runs/1/job/11`,
+    })
+    const sibling = actionsRun({
+      id: 12,
+      name: 'validate',
+      url: `https://github.com/o/r/actions/runs/1/job/12`,
+    })
+    const { api } = fakeApi({
+      runs: [gate, sibling],
+      logs: { 11: '##[error]The job failed', 12: DOC_LOG },
+    })
+    const attached = await attachEvidence(api, REPO, 't', SHA, [report('checks-pass')])
+    expect(JSON.stringify(attached)).toContain('99.7% is below the 100% floor')
+  })
+})
+
 describe('readEvidence', () => {
   it('reads the error lines of an Actions job from its log', async () => {
     const { api, calls } = fakeApi({ logs: { 11: DOC_LOG } })
@@ -98,7 +119,10 @@ describe('readEvidence', () => {
 describe('attachEvidence', () => {
   it('gives each failed check the evidence of the check run with its name', async () => {
     const { api, calls } = fakeApi({
-      runs: [actionsRun({ id: 9, name: 'Lint' }), actionsRun()],
+      runs: [
+        actionsRun({ id: 9, name: 'Lint', url: 'https://github.com/o/r/actions/runs/2/job/9' }),
+        actionsRun(),
+      ],
       logs: { 11: DOC_LOG, 9: 'error TS2322: wrong type' },
     })
 
@@ -117,7 +141,11 @@ describe('attachEvidence', () => {
     const { api } = fakeApi({
       runs: [
         actionsRun({ id: 1, name: 'CI' }),
-        actionsRun({ id: 2, name: 'Type tests', url: 'https://ci/2' }),
+        actionsRun({
+          id: 2,
+          name: 'Type tests',
+          url: 'https://github.com/o/r/actions/runs/1/job/2',
+        }),
       ],
       logs: { 1: AGGREGATE_LOG, 2: TYPE_TESTS_LOG },
     })
@@ -130,7 +158,7 @@ describe('attachEvidence', () => {
         name: 'Type tests',
         state: 'failure',
         detail: '',
-        url: 'https://ci/2',
+        url: 'https://github.com/o/r/actions/runs/1/job/2',
         notRequired: true,
         evidence: { lines: ['AssertionError: expected 1 to be 2'] },
       },
@@ -156,15 +184,63 @@ describe('attachEvidence', () => {
     ])
   })
 
-  it('leaves out another failed job that says no more than the aggregate does', async () => {
+  it("takes only the failed jobs of the gate's own workflow run, whatever their names", async () => {
     const { api } = fakeApi({
-      runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 3, name: 'All checks' })],
-      logs: { 1: AGGREGATE_LOG, 3: AGGREGATE_LOG },
+      runs: [
+        actionsRun({ id: 1, name: 'CI' }),
+        actionsRun({ id: 2, name: 'CI', url: 'https://github.com/o/r/actions/runs/1/job/2' }),
+        actionsRun({
+          id: 3,
+          name: 'Type tests',
+          url: 'https://github.com/o/r/actions/runs/7/job/3',
+        }),
+      ],
+      logs: { 1: AGGREGATE_LOG, 2: TYPE_TESTS_LOG, 3: DOC_LOG },
     })
 
-    expect(await attachEvidence(api, REPO, 't', SHA, [report('CI')])).toEqual([
-      { ...report('CI'), evidence: { lines: [] } },
+    const failed = await attachEvidence(api, REPO, 't', SHA, [
+      { ...report('CI'), url: 'https://github.com/o/r/actions/runs/1/job/1' },
     ])
+
+    expect(failed.map((r) => [r.name, r.url])).toEqual([
+      ['CI', 'https://github.com/o/r/actions/runs/1/job/1'],
+      ['CI', 'https://github.com/o/r/actions/runs/1/job/2'],
+    ])
+    expect(failed[1].evidence).toEqual({ lines: ['AssertionError: expected 1 to be 2'] })
+  })
+
+  it.each([
+    'One or more required jobs failed',
+    'Some required checks did not succeed',
+    'Required jobs failed: validate',
+  ])('reads the sibling jobs when the gate says only "%s"', async (message) => {
+    const { api } = fakeApi({
+      runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 2, name: 'Type tests' })],
+      logs: { 1: `2026-11-12T22:00:01.0000000Z ##[error]${message}`, 2: TYPE_TESTS_LOG },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed.map((r) => r.name)).toEqual(['CI', 'Type tests'])
+    expect(failed[1].evidence).toMatchObject({ lines: ['AssertionError: expected 1 to be 2'] })
+  })
+
+  it('reads the gate and adds the evidence of the failed sibling of its run', async () => {
+    const { api } = fakeApi({
+      runs: [
+        actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
+        actionsRun({ id: 3, name: 'validate', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
+      ],
+      logs: { 1: AGGREGATE_LOG, 3: DOC_LOG },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed[0]).toMatchObject({ name: 'CI', evidence: { lines: expect.any(Array) } })
+    expect(failed[1]).toMatchObject({
+      name: 'validate',
+      evidence: { lines: ['[doc-coverage] FAIL 99.7% is below the 100% floor'] },
+    })
   })
 
   it('names another failed job whose evidence could not be read', async () => {
@@ -183,7 +259,42 @@ describe('attachEvidence', () => {
     })
   })
 
-  it('does not look past a required check whose evidence could not be read', async () => {
+  it('reads the sibling when the gate only lists the jobs that failed', async () => {
+    const { api } = fakeApi({
+      runs: [
+        actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
+        actionsRun({ id: 3, name: 'validate', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
+      ],
+      logs: {
+        1: '##[error]The following jobs failed: validate\n##[error]Job validate failed',
+        3: DOC_LOG,
+      },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed[0]).toMatchObject({ evidence: { lines: [] } })
+    expect(failed[1]).toMatchObject({
+      name: 'validate',
+      evidence: { lines: ['[doc-coverage] FAIL 99.7% is below the 100% floor'] },
+    })
+  })
+
+  it('leaves the siblings out when the required job names the error of the work', async () => {
+    const { api } = fakeApi({
+      runs: [
+        actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
+        actionsRun({ id: 3, name: 'Lint', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
+      ],
+      logs: { 1: DOC_LOG, 3: TYPE_TESTS_LOG },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed).toHaveLength(1)
+  })
+
+  it('keeps the unreadable status of a required job whose run has a failed sibling', async () => {
     const { api, calls } = fakeApi({
       runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 2, name: 'Type tests' })],
       logs: { 2: TYPE_TESTS_LOG },
@@ -192,10 +303,12 @@ describe('attachEvidence', () => {
 
     const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
 
-    expect(failed).toEqual([
-      { ...report('CI'), evidence: { unreadable: 'GitHub answered 410 reading job 1' } },
-    ])
-    expect(calls).toEqual([`checks o/r t ${SHA}`, 'log o/r t 1'])
+    expect(failed[0]).toMatchObject({
+      name: 'CI',
+      evidence: { unreadable: 'GitHub answered 410 reading job 1' },
+    })
+    expect(failed[1]).toMatchObject({ name: 'Type tests' })
+    expect(calls).toContain('log o/r t 1')
   })
 
   it('leaves a commit status, which has no check run, with what it said of itself', async () => {
@@ -247,5 +360,118 @@ describe('attachEvidence', () => {
     expect(await attachEvidence(api, REPO, 't', SHA, [report('CI')])).toEqual([
       { ...report('CI'), evidence: { unreadable: 'socket hang up' } },
     ])
+  })
+})
+
+describe('the step of a failed job, from its metadata', () => {
+  const log = [
+    '##[group]Run pnpm build',
+    'shell: /usr/bin/bash -e {0}',
+    '##[endgroup]',
+    '##[group]Run some-org/deploy@v2',
+    '##[endgroup]',
+    '##[error]Process completed with exit code 1.',
+  ].join('\n')
+  const stepOf = async (
+    failedStep: string | undefined,
+    text: string,
+    position: { ranSteps: number; failedPosition: number } = { ranSteps: 0, failedPosition: -1 },
+  ) => {
+    const { api } = fakeApi({ runs: [actionsRun()], logs: { 11: text } })
+    api.jobAttempt = async () => ({
+      runId: 1,
+      attempt: 1,
+      failedStep,
+      ...(position.failedPosition >= 0 ? position : {}),
+    })
+    const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+    return attached.evidence && 'lines' in attached.evidence ? attached.evidence.step : undefined
+  }
+
+  it('names a custom-named failed action step and gives it no earlier command', async () => {
+    expect(await stepOf('Deploy to staging', log)).toEqual({ name: 'Deploy to staging' })
+  })
+
+  it('gives a custom-named shell step the command its log group shows', async () => {
+    const shell = [
+      '##[group]Run pnpm quality',
+      'shell: bash',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Validate', shell.join('\n'), { ranSteps: 1, failedPosition: 0 })).toEqual({
+      name: 'Validate',
+      command: 'pnpm quality',
+    })
+  })
+
+  it('gives a failed action with no log group no earlier shell command', async () => {
+    // Two steps ran, the log shows a group for one: the position ties nothing, so no command is attached.
+    expect(
+      await stepOf('Deploy', log.split('\n').slice(0, 3).concat('##[error]x').join('\n'), {
+        ranSteps: 2,
+        failedPosition: 1,
+      }),
+    ).toEqual({ name: 'Deploy' })
+  })
+
+  it('gives a failed action with no group no command a script printed in a Run group', async () => {
+    const printed = [
+      '##[group]Run pnpm build',
+      'shell: bash',
+      '##[endgroup]',
+      '##[group]Run rm -rf dist',
+      'cleaning',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Deploy', printed.join('\n'), { ranSteps: 2, failedPosition: 1 })).toEqual({
+      name: 'Deploy',
+    })
+  })
+
+  it('gives a failed docker action no command, even by position', async () => {
+    const docker = [
+      '##[group]Run docker://alpine:3',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Scan', docker.join('\n'), { ranSteps: 1, failedPosition: 0 })).toEqual({
+      name: 'Scan',
+    })
+  })
+
+  it('attributes no command when the metadata cannot be read', async () => {
+    const { api } = fakeApi({ runs: [actionsRun()], logs: { 11: log } })
+    api.jobAttempt = async () => {
+      throw new Error('GitHub answered 502')
+    }
+    const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+    const ev = attached.evidence
+    expect(ev && 'lines' in ev ? ev.step : 'unreadable').toBeUndefined()
+  })
+
+  it('keeps the script the log says exited, without a command, when the metadata cannot be read', async () => {
+    const { api } = fakeApi({
+      runs: [actionsRun()],
+      logs: {
+        11: '##[group]Run pnpm quality\n##[endgroup]\nERROR: "quality:loc" exited with 1.\n##[error]Process completed with exit code 1.',
+      },
+    })
+    api.jobAttempt = async () => {
+      throw new Error('GitHub answered 502')
+    }
+    const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+    const ev = attached.evidence
+    expect(ev && 'lines' in ev ? ev.step : undefined).toEqual({ name: 'quality:loc' })
+  })
+
+  it('gives an ungrouped action step named like an earlier shell command no command', async () => {
+    const shell = [
+      '##[group]Run pnpm build --production',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Run pnpm build', shell.join('\n'))).toEqual({ name: 'Run pnpm build' })
   })
 })
