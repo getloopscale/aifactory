@@ -216,27 +216,18 @@ describe('the deploy script', () => {
     expect(systemctl.filter((l) => /\b(enable|disable)\b/.test(l))).toEqual([])
   })
 
-  it('keeps the installed tunnel unit when cloudflared is not on the PATH of the deploy', () => {
+  it('fails before writing, building or restarting when cloudflared is not on the PATH, even with a tunnel unit installed', () => {
     const installed = 'ExecStart=/opt/bin/cloudflared run\n'
-    const { code, tunnel, output, systemctl } = deploy({
+    const { code, tunnel, output, systemctl, atReload } = deploy({
       cloudflared: false,
       installedTunnel: installed,
     })
 
-    expect(code).toBe(0)
-    expect(tunnel).toBe(installed)
-    expect(output).toMatch(
-      /cloudflared is not on PATH; aifactory-tunnel.service was left as installed/,
-    )
-    expect(systemctl).toContain('systemctl --user restart aifactory.service')
-  })
-
-  it('stops before the restart when cloudflared is missing and the tunnel unit is not installed', () => {
-    const { code, tunnel, output, systemctl } = deploy({ cloudflared: false })
-
     expect(code).not.toBe(0)
-    expect(tunnel).toBeUndefined()
-    expect(output).toMatch(/cannot write it/)
+    expect(tunnel).toBe(installed)
+    expect(atReload).toBeUndefined()
+    expect(output).toMatch(/cloudflared is not on PATH; cannot write aifactory-tunnel.service/)
+    expect(output).not.toMatch(/pnpm build/)
     expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
   })
 
