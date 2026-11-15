@@ -530,14 +530,16 @@ export class Run {
       quota: result.quota !== undefined,
       sessionId: result.sessionId ?? null,
     })
-    if (result.quota) {
-      const resets = result.quota.resetsAt ? `, resets ${result.quota.resetsAt}` : ''
-      throw new QuotaStop(
-        `the ${who.name} quota ran out${resets}: ${result.quota.message}`,
-        result.quota.resetsAt,
-      )
-    }
+    // A builder cut at its limit goes on to `failUnfinished`, which keeps what it wrote before the quota is told.
+    if (result.quota && !(role === 'builder' && result.timedOut)) throw this.quotaStop(who, result)
     return result
+  }
+
+  private quotaStop(who: CodingHarness, result: HarnessResult): QuotaStop {
+    const quota = result.quota
+    if (!quota) throw new Error('a quota stop needs a quota')
+    const resets = quota.resetsAt ? `, resets ${quota.resetsAt}` : ''
+    return new QuotaStop(`the ${who.name} quota ran out${resets}: ${quota.message}`, quota.resetsAt)
   }
 
   /**
@@ -721,7 +723,9 @@ export class Run {
    */
   private async failUnfinished(result: HarnessResult, what: string): Promise<never> {
     const plain = `${what}: ${result.summary}`
-    if (!result.timedOut || (await this.hasNothingToCommit())) throw new StageFailure(plain)
+    if (!result.timedOut || (await this.hasNothingToCommit())) {
+      throw result.quota ? this.quotaStop(this.builder, result) : new StageFailure(plain)
+    }
     let sha: string
     try {
       sha = await this.commitAndPush(

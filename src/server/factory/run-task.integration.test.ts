@@ -810,6 +810,27 @@ describe('runTask', () => {
     expect(result.status === 'failed' && result.error).not.toContain('kept in commit')
   })
 
+  it('keeps the work of a pass cut at its limit even when the provider also reported its quota', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({
+        ok: false,
+        timedOut: true,
+        summary: 'codex exited 124',
+        quota: { message: 'usage limit', resetsAt: 'tomorrow' },
+      }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'push' })
+    expect(result.status === 'failed' && result.error).toMatch(/kept in commit \S+ on factory\//)
+    expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(true)
+  })
+
   it('pushes nothing when a pass cut at its limit left a clean checkout', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox((c) =>
