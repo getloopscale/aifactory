@@ -42,9 +42,9 @@ fi
 
 # The installed units are copies, so a release that changes one reaches them here. Only the files are written
 # and systemd reloaded: nothing is enabled or disabled, so a unit the owner turned off stays off. It runs before
-# the build: a unit that cannot be rendered (no cloudflared on PATH) ends the deploy with nothing built.
-scripts/write-units.sh
+# the restart, after a build that succeeded, so a failed build leaves the installed units as they were.
 pnpm build
+scripts/write-units.sh
 systemctl --user daemon-reload
 # All at once, so each process drains its own run in parallel. The workers run tasks and the feeder hands them
 # out from the same build, so each one left alone keeps the code from before it.

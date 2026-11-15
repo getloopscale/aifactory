@@ -35,6 +35,8 @@ function deploy({
   migrateFails = false,
   envFile,
   cloudflared = true,
+  installedCloudflared = false,
+  buildFails = false,
   installedTunnel,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'deploy-test-'))
@@ -63,6 +65,13 @@ function deploy({
   }
   const bin = join(root, 'bin')
   mkdirSync(bin)
+  if (installedCloudflared) {
+    const elsewhere = join(root, 'elsewhere')
+    mkdirSync(elsewhere)
+    writeFileSync(join(elsewhere, 'cloudflared'), '#!/bin/sh\n')
+    chmodSync(join(elsewhere, 'cloudflared'), 0o755)
+    writeFileSync(tunnel, `ExecStart=${join(elsewhere, 'cloudflared')} run\n`)
+  }
   const calls = join(root, 'calls.log')
   const fake = (name, body = '') => {
     writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> ${calls}\n${body}\n`)
@@ -72,7 +81,7 @@ function deploy({
   // `pnpm evals:check` is the agent-configuration gate; the deploy must stop when it fails.
   fake(
     'pnpm',
-    `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}\n${migrateFails ? 'case "$*" in db:migrate*) exit 1 ;; esac' : ''}`,
+    `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}\n${buildFails ? 'case "$*" in build*) exit 1 ;; esac' : ''}\n${migrateFails ? 'case "$*" in db:migrate*) exit 1 ;; esac' : ''}`,
   )
   // The fake systemctl keeps state: a unit is enabled when a file of its name is in `enabled`. `list-dependencies`
   // answers with those, `enable` and `disable` add and remove them, and `daemon-reload` and the first `restart`
@@ -110,6 +119,7 @@ esac`,
   return {
     code,
     output,
+    log,
     pnpm: log.filter((l) => l.startsWith('pnpm ') && !l.startsWith('pnpm sees')),
     pnpmEnv: log.filter((l) => l.startsWith('pnpm sees')),
     root,
@@ -203,12 +213,14 @@ describe('the deploy script', () => {
   })
 
   it('has the release unit files installed when systemd reloads, before the first restart', () => {
-    const { code, systemctl, atReload, atRestart, root } = deploy()
+    const { code, systemctl, atReload, atRestart, root, log } = deploy()
 
     expect(code).toBe(0)
     const rendered = `ExecStart=${join(root, 'run')}\n`
     expect(atReload).toBe(rendered)
     expect(atRestart).toBe(rendered)
+    const order = log.filter((l) => l === 'pnpm build' || l.includes(' restart '))
+    expect(order[0]).toBe('pnpm build')
     const reload = systemctl.indexOf('systemctl --user daemon-reload')
     const restart = systemctl.findIndex((l) => l.includes(' restart '))
     expect(reload).toBeGreaterThanOrEqual(0)
@@ -216,9 +228,21 @@ describe('the deploy script', () => {
     expect(systemctl.filter((l) => /\b(enable|disable)\b/.test(l))).toEqual([])
   })
 
-  it('fails before writing, building or restarting when cloudflared is not on the PATH, even with a tunnel unit installed', () => {
-    const installed = 'ExecStart=/opt/bin/cloudflared run\n'
-    const { code, tunnel, output, systemctl, atReload } = deploy({
+  it('renders the tunnel unit with the cloudflared the installed one names when none is on the PATH', () => {
+    const { code, tunnel, systemctl } = deploy({
+      cloudflared: false,
+      installedTunnel: 'old\n',
+      installedCloudflared: true,
+    })
+
+    expect(code).toBe(0)
+    expect(tunnel).toMatch(/^ExecStart=.*\/cloudflared run\n$/)
+    expect(systemctl).toContain('systemctl --user restart aifactory.service')
+  })
+
+  it('fails with nothing restarted and the installed unit untouched when no cloudflared runs', () => {
+    const installed = 'ExecStart=/gone/cloudflared run\n'
+    const { code, tunnel, output, systemctl, pnpm, atReload } = deploy({
       cloudflared: false,
       installedTunnel: installed,
     })
@@ -226,9 +250,18 @@ describe('the deploy script', () => {
     expect(code).not.toBe(0)
     expect(tunnel).toBe(installed)
     expect(atReload).toBeUndefined()
-    expect(output).toMatch(/cloudflared is not on PATH; cannot write aifactory-tunnel.service/)
-    expect(output).not.toMatch(/pnpm build/)
+    expect(output).toMatch(/cannot write aifactory-tunnel.service/)
+    expect(pnpm).toContain('pnpm build')
     expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
+  })
+
+  it('leaves the installed units alone when the build fails', () => {
+    const installed = 'ExecStart=/old/cloudflared run\n'
+    const { code, tunnel, systemctl } = deploy({ buildFails: true, installedTunnel: installed })
+
+    expect(code).not.toBe(0)
+    expect(tunnel).toBe(installed)
+    expect(systemctl.filter((l) => /daemon-reload|restart/.test(l))).toEqual([])
   })
 
   it('renders the tunnel unit with the cloudflared of the PATH when there is one', () => {
