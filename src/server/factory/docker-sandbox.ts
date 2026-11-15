@@ -14,6 +14,7 @@ import type {
   SandboxSpec,
   StreamingOptions,
 } from './sandbox'
+import { MAX_RUN_MS } from './run-limit'
 import { assertIsolated } from './sandbox'
 
 /** The exit code the TheoKit backends report for a command that hit its timeout. */
@@ -556,10 +557,13 @@ export function dockerSandboxProvider(deps: DockerProviderDeps = {}): IsolatedSa
     async create(spec: SandboxSpec): Promise<IsolatedSandbox> {
       const cert = await prepared()
       // Sweeping what an earlier process left must not stop this run, but a sweep that keeps failing
-      // leaves containers running, so it is said out loud.
-      await removeStaleSandboxes(spec.timeoutMs + 10 * 60_000, docker).catch((error) => {
-        console.warn(JSON.stringify({ event: 'sandbox_sweep_failed', error: String(error) }))
-      })
+      // leaves containers running, so it is said out loud. The age is the longest a run may last, not this
+      // run's own limit: another run with a longer limit may be alive.
+      await removeStaleSandboxes(Math.max(spec.timeoutMs, MAX_RUN_MS) + 10 * 60_000, docker).catch(
+        (error) => {
+          console.warn(JSON.stringify({ event: 'sandbox_sweep_failed', error: String(error) }))
+        },
+      )
       const id = randomBytes(5).toString('hex')
       const net = `factory-sbx-${id}`
       const proxy = `factory-px-${id}`

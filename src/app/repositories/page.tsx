@@ -7,7 +7,9 @@ import { Assist } from '../components/Assist'
 import { RecipeCard } from '../components/RecipeCard'
 import { ProveChecks, RepositoryDoctor } from '../components/RepositoryDoctor'
 import { put } from '../lib/api'
+import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
+import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 import { formatChecks, formatDomains, parseChecks, parseDomains } from '../lib/repo-form'
 
 const selectClass =
@@ -22,6 +24,7 @@ function Settings({
   agents: string[]
   onSaved: () => void
 }) {
+  const { t } = useCopy()
   const [checks, setChecks] = useState(formatChecks(repo.checks))
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
@@ -30,6 +33,7 @@ function Settings({
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
+  const [runLimit, setRunLimit] = useState(repo.runLimitMinutes?.toString() ?? '')
   const [message, setMessage] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -37,6 +41,14 @@ function Settings({
     setBusy(true)
     setMessage(undefined)
     try {
+      const minutes = runLimit.trim() ? Number(runLimit) : null
+      if (
+        minutes !== null &&
+        (!Number.isInteger(minutes) || minutes < MIN_RUN_MINUTES || minutes > MAX_RUN_MINUTES)
+      ) {
+        setMessage(t.runLimit.invalid(MIN_RUN_MINUTES, MAX_RUN_MINUTES))
+        return
+      }
       const parsed = parseChecks(checks)
       await put(`/api/panel/repositories/${repo.fullName}`, {
         checks: parsed.length > 0 ? parsed : null,
@@ -47,6 +59,7 @@ function Settings({
         harness: harness || null,
         reviewer: reviewer || null,
         releaseMode: release || null,
+        runLimitMinutes: minutes,
       })
       setMessage('Saved.')
       onSaved()
@@ -116,6 +129,18 @@ function Settings({
           Only needed when the default branch is develop, which is where the pre-release goes: name
           main, or the branch your releases use.
         </span>
+      </label>
+      <label className="block">
+        <span className="text-foreground">{t.runLimit.label}</span>
+        <Input
+          aria-label={t.runLimit.label}
+          type="number"
+          value={runLimit}
+          placeholder={t.runLimit.placeholder}
+          onChange={(e) => setRunLimit(e.target.value)}
+          className="mt-1 w-full"
+        />
+        <span className="text-muted-foreground">{t.runLimit.help}</span>
       </label>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />

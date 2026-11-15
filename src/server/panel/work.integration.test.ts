@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
@@ -12,6 +12,8 @@ import type { IssuesApi, NewIssue } from '../github/issues-api'
 import { writeKnowledgeConfig } from '../knowledge/store'
 
 import { FakeGithub } from '../../test/fake-github'
+import { GET } from '../routes/panel/repositories'
+import { PUT } from '../routes/panel/repositories/[owner]/[name]'
 
 import { ActionRefused } from './actions'
 import { repositoryDoctor } from './doctor'
@@ -27,6 +29,12 @@ import {
   startPlanItem,
   type WorkDeps,
 } from './work'
+
+// The routes build their dependencies from the environment; here they get this suite's fakes.
+vi.mock('./deps', async (original) => ({
+  ...(await original<typeof import('./deps')>()),
+  workDeps: () => deps(),
+}))
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -295,6 +303,43 @@ describe('the repositories page', () => {
       harness: null,
       releaseMode: null,
       reviewer: 'claude-code',
+    })
+  })
+
+  describe('the run limit through the settings endpoints', () => {
+    // The route as the server runs it: the body is parsed by the schema the route declares, and the handler
+    // answers with a Response or the value it returns.
+    type Call = (ctx: { params: unknown; body: unknown }) => Promise<unknown>
+    const put = async (body: unknown) => {
+      const parsed = PUT.body!.safeParse(body)
+      if (!parsed.success) return { status: 400 }
+      const out = (await (PUT.handler as unknown as Call)({
+        params: PUT.params!.parse({ owner: 'paulo', name: 'app' }),
+        body: parsed.data,
+      })) as Response | object
+      return out instanceof Response ? { status: out.status } : { status: 200 }
+    }
+    const listed = async () => {
+      const view = (await (GET.handler as unknown as Call)({ params: {}, body: {} })) as {
+        repositories: { fullName: string; runLimitMinutes: number | null }[]
+      }
+      return view.repositories.find((r) => r.fullName === 'Paulo/App')?.runLimitMinutes
+    }
+
+    it('saves, reads back, refuses a value out of range, and clears with null', async () => {
+      await enable()
+      expect(await put({ runLimitMinutes: 150 })).toEqual({ status: 200 })
+      expect(await listed()).toBe(150)
+
+      expect(await put({ runLimitMinutes: 5 })).toEqual({ status: 400 })
+      expect(await put({ runLimitMinutes: 241 })).toEqual({ status: 400 })
+      expect(await put({ runLimitMinutes: 90.5 })).toEqual({ status: 400 })
+      expect(await listed()).toBe(150)
+
+      expect(await put({ runLimitMinutes: null })).toEqual({ status: 200 })
+      expect(await listed()).toBeNull()
+      const [row] = await getDb().select().from(repository)
+      expect(row?.runLimitMinutes).toBeNull()
     })
   })
 

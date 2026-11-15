@@ -392,6 +392,8 @@ export type RepositoryView = {
   harness: string | null
   reviewer: string | null
   releaseMode: 'manual' | 'trial' | 'auto' | null
+  /** How long a run may last, in minutes; null means the factory's default. */
+  runLimitMinutes: number | null
   /** The commit of the integration branch the proven checks passed on; null when none was proven. */
   checksProvenSha: string | null
   /** The names of the saved checks that no proof ran: the owner typed them, and the first task tries them. */
@@ -694,3 +696,10 @@ export type CodexConnection = {
     { connected: false; problem?: string } | { connected: true; email?: string; plan?: string }
   login: CodexLoginState
 }
+
+/**
+ * The least and the most minutes an owner may give a run in a repository. The form and the server both
+ * validate against them; `factory/run-limit.ts` says where the least comes from.
+ */
+export const MIN_RUN_MINUTES = 50
+export const MAX_RUN_MINUTES = 240

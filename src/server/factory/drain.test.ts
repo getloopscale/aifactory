@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { TOKEN_LIFE_LEFT_MS } from '../github/app'
 import { CREDENTIAL_RENEWAL_MS } from './credential-renewal'
 import { JOB_SHUTDOWN_WAIT_MS } from './drain'
+import { MAX_RUN_MS } from './run-limit'
 import { DEFAULT_TIMEOUTS } from './run'
 
 // A restart must let the run in progress finish (usetheokit/theokit#1292). Four places have to agree on that,
@@ -38,6 +39,10 @@ describe('a restart of a process that runs tasks', () => {
     // A token comes from installationToken with up to an hour left, and is held at most one renewal more.
     const oldestHeld = 60 * 60_000 - TOKEN_LIFE_LEFT_MS + CREDENTIAL_RENEWAL_MS
     expect(60 * 60_000 - oldestHeld).toBeGreaterThanOrEqual(30 * 60_000)
+  })
+
+  it('waits for the largest limit an owner may save for a repository', () => {
+    expect(JOB_SHUTDOWN_WAIT_MS).toBeGreaterThan(MAX_RUN_MS)
   })
 
   it('waits for a run longer than a run can last, since its sandbox stops it at the latest', () => {
