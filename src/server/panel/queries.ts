@@ -82,8 +82,9 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       taskId: stageEvent.taskId,
       last: sql<Date>`max(${stageEvent.at})`,
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
-      // the runs before it are not attempts of this one.
-      verifies: sql<number>`count(*) filter (where ${stageEvent.stage} = 'verify' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake'), 0))`,
+      // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
+      // same run again, so the checks before it still count.
+      verifies: sql<number>`count(*) filter (where ${stageEvent.stage} = 'verify' and ${stageEvent.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${stageEvent.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true'), 0))`,
       automatic: automaticRunsSincePerson(),
     })
     .from(stageEvent)

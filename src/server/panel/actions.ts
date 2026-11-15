@@ -79,6 +79,7 @@ async function requeue(
             decision: changes ? 'request_changes' : 'retry',
             note,
             automatic: true,
+            ...(rework ? { kept: true } : {}),
             ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
           },
         })

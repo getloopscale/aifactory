@@ -869,7 +869,18 @@ describe('actions', () => {
 
     it('does not count three sandbox failures of a rework as attempts', async () => {
       const { id } = await reworkAtSandbox(93)
+      // The rework had reached verification twice before the sandbox failed renewing.
+      await getDb()
+        .insert(stageEvent)
+        .values([
+          { taskId: id, stage: 'verify' },
+          { taskId: id, stage: 'verify' },
+          { taskId: id, stage: 'sandbox' },
+          { taskId: id, stage: 'failed', detail: outage },
+        ])
       const before = async () => (await listTasks(getDb())).find((c) => c.id === id)!
+      const attemptsBefore = (await before()).attempts
+      expect(attemptsBefore).toBe(2)
       for (let i = 0; i < 4; i++) {
         expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
         await failAgain(id)
@@ -880,6 +891,7 @@ describe('actions', () => {
       for (const q of queued)
         expect(await continuationOf(q.input)).toEqual({ feedback: 'rename it' })
       expect((await before()).retryAt).not.toBeNull()
+      expect((await before()).attempts).toBe(attemptsBefore)
     })
 
     it('counts a rework whose agent ran and then failed', async () => {
