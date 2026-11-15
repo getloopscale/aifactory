@@ -18,6 +18,16 @@ const FILES = [
   'src/app/components/CodexAccount.tsx',
   'src/app/components/RecipeCard.tsx',
   'src/app/components/WatchPanel.tsx',
+  'src/app/plans/page.tsx',
+  'src/app/plans/[planId]/page.tsx',
+  'src/app/agents/page.tsx',
+  'src/app/components/PlanSection.tsx',
+  'src/app/components/agents/AgentDetail.tsx',
+  'src/app/components/guide/GuideThread.tsx',
+  'src/app/components/guide/GuidePanel.tsx',
+  'src/app/components/chat/PillComposer.tsx',
+  'src/app/components/chat/ChatgptConnect.tsx',
+  'src/app/components/chat/ChatView.tsx',
 ]
 
 // The name of the GitHub label, not a word of either language.

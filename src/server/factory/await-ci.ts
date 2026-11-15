@@ -35,7 +35,7 @@ export type AwaitCiDeps = {
   now?: () => Date
   /** Runs the task again on its branch with the note as feedback (the panel's `sendBackAutomatically`). */
   sendBack: (taskId: number, note: string) => Promise<void>
-  /** Runs the task again from the new base (the panel's `retryAutomatically`). */
+  /** Runs the task again: on its branch to merge the new base, or from it when the branch is gone (`retryAutomatically`). */
   startOver: (taskId: number) => Promise<void>
 }
 
@@ -245,7 +245,8 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       return
     }
     case 'start_over':
-      // Starting over deletes the branch, which closes the pull request and its auto-merge with it.
+      // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
+      await deps.api.disableAutoMerge(row.repository, token, number)
       await deps.startOver(row.id)
       result.startedOver.push(row.id)
       return

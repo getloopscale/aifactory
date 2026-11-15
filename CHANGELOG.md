@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Approved work whose pull request conflicts with the integration branch is no longer thrown away. Before, the factory deleted the task's branch, which closed the pull request, and ran the task again from the start. Now the task goes back on its own branch with a note to merge the integration branch, regenerate generated files with their scripts, and change nothing else; auto-merge is turned off first, and the merge then goes through the checks and the review. A task whose branch is gone still starts over. A commit the agent makes by itself, as `git merge` does, is now pushed as it is, where before a clean checkout read as no change (#122)
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

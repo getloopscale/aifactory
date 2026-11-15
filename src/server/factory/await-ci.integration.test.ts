@@ -444,13 +444,15 @@ describe('pollAwaitingIntegrations', () => {
     expect(await row(id)).toMatchObject({ stage: 'handoff' })
   })
 
-  it('starts over a pull request that conflicts with its base', async () => {
+  it('runs again a pull request that conflicts with its base, with its auto-merge off first', async () => {
     pull({ mergeableState: 'dirty' })
     const id = await waitingTask()
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ startedOver: [id] })
 
     expect(startedOver).toEqual([id])
+    // The run merges the base into the open pull request: the merge it pushes must not go through unverified.
+    expect(autoMergeOff()).toEqual([12])
   })
 
   it('tells a person about a required check that never reports', async () => {

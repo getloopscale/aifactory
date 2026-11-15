@@ -1024,6 +1024,41 @@ describe('actions', () => {
     expect(queued.map((q) => q.input)).toEqual([{ taskId: conflicted }])
   })
 
+  it('sends back on its own branch a finished task whose pull request conflicts with its base, to merge the base', async () => {
+    const id = await seed(
+      'done',
+      {
+        issueNumber: 85,
+        headSha: 'approved1',
+        pullRequestUrl: 'https://github.com/paulo/app/pull/85',
+      },
+      [
+        {
+          stage: 'done',
+          detail: {
+            integrationError:
+              'GitHub answered 405 merging paulo/app#85: {"message":"Pull Request has merge conflicts"}',
+          },
+        },
+      ],
+    )
+    api.repo('paulo/app').heads.set('factory/85', 'approved1')
+
+    expect(await runConflictRetries(deps(), { limit: 5 })).toEqual({ started: 1, skipped: 0 })
+
+    // The approved work stays where it is: the run merges the new base into it instead of starting over.
+    expect(deleted()).toEqual([])
+    expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('intake')
+    expect(await getDb().select().from(decision)).toEqual([])
+    const intake = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    expect(intake.at(-1)?.detail).toMatchObject({ decision: 'request_changes', automatic: true })
+    expect(queued).toHaveLength(1)
+    const input = queued[0].input as { taskId: number; feedback?: string }
+    expect(input.taskId).toBe(id)
+    expect(input.feedback).toContain('git merge origin/workspace')
+    expect(input.feedback).toMatch(/generated file/)
+  })
+
   it('starts no more conflicted tasks in one pass than the limit, the longest-waiting first', async () => {
     const conflict = (issueNumber: number) =>
       seed('done', { issueNumber }, [

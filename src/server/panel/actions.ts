@@ -286,6 +286,7 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   mustAllow(row, row.stage === 'failed' ? 'retry_due' : 'conflict_rerun')
   // A rework, or a run that pushed, repeats on its branch with its note; only a run that never pushed starts over.
   const { token } = await deps.github.installationToken(row.repository)
+  if (row.stage === 'done' && (await mergesTheBase(deps, row, token))) return
   const rework = row.stage === 'failed' ? await workToKeep(deps, row, token) : undefined
   if (!rework) {
     await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
@@ -299,6 +300,41 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
     row.headSha,
     rework,
   )
+}
+
+/**
+ * What a run is told when its finished work conflicts with the integration branch, which moved after the
+ * work was approved (another task merged first). Tasks of one repository often regenerate the same files,
+ * so most of these conflicts are in generated files, which only their generator writes right.
+ */
+export function conflictNote(base: string): string {
+  return [
+    `The pull request conflicts with ${base}, which moved after this work was approved.`,
+    `Merge it into this branch: git fetch origin ${base} && git merge origin/${base}.`,
+    'Resolve each conflict keeping what both sides changed. A generated file (a reference, a map or docs a script writes) is regenerated with the script that writes it, never edited by hand; a budget or a version takes the value the merged code needs.',
+    'Commit the merge and change nothing else.',
+  ].join(' ')
+}
+
+/**
+ * Sends a done task whose pull request conflicts with its base back to its own branch, to merge the base,
+ * and answers whether it did. Approved work is kept: starting over would delete the branch and pay for the
+ * whole run again (paulohenriquevn/aifactory#122). Without the branch there is nothing to keep.
+ */
+async function mergesTheBase(
+  deps: ActionDeps,
+  row: typeof task.$inferSelect,
+  token: string,
+): Promise<boolean> {
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  if (!head) return false
+  const [config] = await deps.db
+    .select({ baseBranch: repository.baseBranch })
+    .from(repository)
+    .where(eq(repository.fullName, row.repository))
+  const note = conflictNote(integrationBranch(config ?? {}))
+  await requeue(deps, row.id, ['done'], 'automatic_changes', note, row.headSha)
+  return true
 }
 
 /**
