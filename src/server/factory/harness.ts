@@ -47,6 +47,8 @@ export type HarnessResult = {
   quota?: QuotaStop
   /** The provider refused the agent's login (a 401): renewing it and running again may fix that. */
   unauthorized?: boolean
+  /** The pass was cut at its time limit: what it wrote in the checkout is still there. */
+  timedOut?: boolean
 }
 
 /**
@@ -132,9 +134,11 @@ export const PROMPT_FILE = '/tmp/factory-prompt.md'
  */
 export function checksRule(checks: CheckSpec[] | undefined): string {
   if (!checks?.length) return ''
-  return `- Before you finish, run what the factory runs on your commit, in the repository root, and fix what fails:\n${checks
+  return `- The factory runs these checks on your commit after your pass, and sends the work back when one fails:\n${checks
     .map((c) => `  - \`${c.command}\``)
-    .join('\n')}\n`
+    .join(
+      '\n',
+    )}\n  Do not run them yourself: they are slow and your pass has a time limit. Run only the tests of the files you touched.\n`
 }
 
 export function buildPrompt(input: {

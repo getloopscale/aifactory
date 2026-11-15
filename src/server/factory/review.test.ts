@@ -345,7 +345,8 @@ describe('what the builder is told, at its edges', () => {
       failedChecks: [],
       checks: [{ name: 'check', command: 'pnpm check' }],
     })
-    expect(named).toContain('run what the factory runs on your commit')
+    expect(named).toContain('The factory runs these checks on your commit')
+    expect(named).toContain('Do not run them yourself')
     expect(named).toContain('  - `pnpm check`')
     expect(
       notResolvedPrompt({

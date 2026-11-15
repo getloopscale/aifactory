@@ -715,6 +715,28 @@ export class Run {
     return this.remoteHead
   }
 
+  /**
+   * A pass that did not finish fails the run. One cut at its time limit leaves what it wrote in the
+   * checkout, which the sandbox takes away: it is committed and pushed first, and the reason names it.
+   */
+  private async failUnfinished(result: HarnessResult, what: string): Promise<never> {
+    const plain = `${what}: ${result.summary}`
+    if (!result.timedOut || (await this.hasNothingToCommit())) throw new StageFailure(plain)
+    let sha: string
+    try {
+      sha = await this.commitAndPush(
+        `${this.title}: work in progress, the agent reached its time limit`,
+        {
+          timedOut: true,
+        },
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw new StageFailure(`${plain}\nthe work could not be kept: ${reason}`)
+    }
+    throw new StageFailure(`${plain}\nthe work was kept in commit ${sha} on ${this.c.branch}`)
+  }
+
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */
   private async firstPass(): Promise<HarnessResult> {
     const { deps, taskId, resuming } = this.c
@@ -1047,7 +1069,7 @@ export class Run {
         }),
       }),
     )
-    if (!result.ok) throw new StageFailure(`the agent did not finish: ${result.summary}`)
+    if (!result.ok) await this.failUnfinished(result, 'the agent did not finish')
     await this.keepLearned(result.summary)
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(withoutLearned(result.summary))
@@ -1109,7 +1131,7 @@ export class Run {
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()
-    if (!first.ok) throw new StageFailure(`the agent did not finish: ${first.summary}`)
+    if (!first.ok) await this.failUnfinished(first, 'the agent did not finish')
     await this.keepLearned(first.summary)
     // A fact the agent left is not part of its question, wherever it put it.
     const asked = parseQuestion(withoutLearned(first.summary))
@@ -1157,7 +1179,7 @@ export class Run {
         prompt: reworkPrompt({ findings, failedChecks: failed, checks: this.checks }),
       }),
     )
-    if (!result.ok) throw new StageFailure(`the agent did not finish the rework: ${result.summary}`)
+    if (!result.ok) await this.failUnfinished(result, 'the agent did not finish the rework')
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(result.summary)
     if (asked) await this.ask(asked, attempt)
