@@ -8,10 +8,12 @@ import type { AgentsView } from '../../shared/panel'
 import { AgentDetail } from '../components/agents/AgentDetail'
 import { AgentList } from '../components/agents/AgentList'
 import { filterAgents } from '../lib/agents'
+import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 
 /** Who works in the factory, what each is told, and what each may do. Read from the code that runs them. */
 export default function AgentsPage() {
+  const { t } = useCopy()
   const { data, error, reload } = useResource<AgentsView>('/api/panel/agents', {
     stream: false,
     everyMs: 60_000,
@@ -25,24 +27,18 @@ export default function AgentsPage() {
 
   return (
     <div className="space-y-5">
-      <Metadata
-        title="Agentes · aifactory"
-        description="Os agentes da fábrica e os prompts de cada um."
-      />
+      <Metadata title={t.agents.metaTitle} description={t.agents.metaDescription} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Agents</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Quem trabalha na fábrica, o que cada um recebe de instrução e o que pode fazer. As
-            instruções são só para ler; o agente de código de cada papel dá para trocar aqui.
-          </p>
+          <h1 className="text-xl font-semibold">{t.agents.heading}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t.agents.intro}</p>
         </div>
         <label className="relative block w-full max-w-sm">
-          <span className="sr-only">Buscar agente ou texto de uma instrução</span>
+          <span className="sr-only">{t.agents.searchLabel}</span>
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
-            aria-label="Buscar agente ou texto de uma instrução"
-            placeholder="Buscar agente ou texto de uma instrução"
+            aria-label={t.agents.searchLabel}
+            placeholder={t.agents.searchLabel}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="pl-9"
@@ -50,15 +46,13 @@ export default function AgentsPage() {
         </label>
       </div>
 
-      {error ? (
-        <Alert intent="destructive" title="Não consegui carregar os agentes" description={error} />
-      ) : null}
-      {!data && !error ? <p className="text-sm text-muted-foreground">Carregando…</p> : null}
+      {error ? <Alert intent="destructive" title={t.agents.loadError} description={error} /> : null}
+      {!data && !error ? <p className="text-sm text-muted-foreground">{t.agents.loading}</p> : null}
 
       {data ? (
         shown.length === 0 ? (
           <p role="status" className="text-sm text-muted-foreground">
-            Nenhum agente tem “{query}” no nome nem nas instruções.
+            {t.agents.none(query)}
           </p>
         ) : (
           <div className="grid gap-8 lg:grid-cols-[260px_minmax(0,1fr)]">
