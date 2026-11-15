@@ -24,11 +24,12 @@ const withoutDatabase = ({ DATABASE_URL: _unused, ...env }) => env
  * Runs the real deploy script from a copy of the repository layout, with every outside command replaced by
  * one that writes down how it was called. `busy` is what the database says about working tasks.
  */
-function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
+function deploy({ busy = '0', enabledWorkers = [], checkFails = false, envLocal } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'deploy-test-'))
   homes.push(root)
   mkdirSync(join(root, 'scripts'))
   copyFileSync(new URL('./deploy.sh', import.meta.url), join(root, 'scripts', 'deploy.sh'))
+  if (envLocal !== undefined) writeFileSync(join(root, '.env.local'), envLocal)
   const bin = join(root, 'bin')
   mkdirSync(bin)
   const calls = join(root, 'calls.log')
@@ -140,5 +141,18 @@ describe('the deploy script', () => {
     expect(pnpmEnv[0]).toBe(
       'pnpm sees DATABASE_URL=postgres://factory:factory@localhost:54329/factory',
     )
+  })
+
+  it('migrates and checks the database .env.local names, as the service does', () => {
+    const { code, pnpmEnv } = deploy({
+      envLocal: 'DATABASE_URL=postgres://other:pw@db.internal:5432/f\n',
+    })
+
+    expect(code).toBe(0)
+    expect(pnpmEnv).toEqual([
+      'pnpm sees DATABASE_URL=postgres://other:pw@db.internal:5432/f',
+      'pnpm sees DATABASE_URL=postgres://other:pw@db.internal:5432/f',
+      'pnpm sees DATABASE_URL=postgres://other:pw@db.internal:5432/f',
+    ])
   })
 })
