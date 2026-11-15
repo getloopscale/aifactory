@@ -47,8 +47,7 @@ const unreadable = (error: unknown): ServerEvidence => ({
 /**
  * The step that failed. Its name is the one in the job's metadata (a step has its own name, and an action
  * step has no command). The log's command is
- * attached only when its group is the failed step's: by position among the steps that ran, or, when the log
- * does not show a group for each, by a name that is the command itself (`Run <first line>`). When the metadata
+ * attached only when its group is the failed step's, by position among the steps that ran. When the metadata
  * cannot be read or names no failed step, the log alone says what it can.
  */
 async function stepOf(
@@ -66,15 +65,12 @@ async function stepOf(
   if (!named)
     return fromLog && fromLog.name !== fromLog.command ? { name: fromLog.name } : undefined
   // The command is the one of the log group in the failed step's position, when the log has a group for
-  // every step that ran. Without that, only a step named after its own command (`Run <first line>`) is tied.
+  // every step that ran. Nothing else ties a command to a step: never a name, never an earlier step.
   const groups = stepCommands(log)
-  const own = /^Run (.+)/.exec(named)?.[1]?.split('\n')[0]
   const command =
     job.failedPosition !== undefined && groups.length === job.ranSteps
       ? groups[job.failedPosition]
-      : own !== undefined && fromLog?.command?.startsWith(own)
-        ? fromLog.command
-        : undefined
+      : undefined
   return { name: named, ...(command ? { command } : {}) }
 }
 
@@ -95,44 +91,20 @@ async function evidenceOf(
   }
 }
 
-/** A check run whose log or annotations were read and said nothing about what failed (an aggregate job). */
-const silent = (report: FailedReport) =>
-  report.evidence !== undefined && 'lines' in report.evidence && report.evidence.lines.length === 0
-
 /**
- * The other failed jobs of the workflow run a silent required check (an aggregate job such as `checks-pass`)
- * belongs to, for one that only says something it depends on failed. A sibling is a failed job whose link
- * names the same workflow run, whatever its name; a job of another workflow, or the gate's own job, is left
- * out. As in `withEvidence` for the promotion watch, a job that says no more than the gate is left out; one
- * whose evidence could not be read is named all the same.
+ * The other failed jobs of the workflow run a required Actions check belongs to. A sibling is a failed job
+ * whose link names the same workflow run and that is not itself a required check (those are reported on
+ * their own). A job whose evidence could not be read is named all the same.
  */
-async function alongside(
+async function siblingsOf(
   api: EvidenceApi,
   repo: string,
   token: string,
   runs: FailedRun[],
-  gates: { report: CheckReport; run?: FailedRun }[],
-  required: FailedRun[],
-): Promise<FailedReport[]> {
-  const workflows = new Set(
-    gates.map(({ report, run }) => runIdOf(run?.url ?? report.url)).filter(Boolean),
-  )
-  const gateJobs = new Set(required.map((run) => run.id))
-  const others: FailedReport[] = []
-  for (const run of runs) {
-    const workflow = runIdOf(run.url)
-    if (!run.actions || gateJobs.has(run.id) || !workflow || !workflows.has(workflow)) continue
-    const other: FailedReport = {
-      name: run.name,
-      state: 'failure',
-      detail: run.summary,
-      url: run.url,
-      notRequired: true,
-      evidence: await evidenceOf(api, repo, token, run),
-    }
-    if (!silent(other)) others.push(other)
-  }
-  return others
+  workflow: string,
+  required: Set<number>,
+): Promise<FailedRun[]> {
+  return runs.filter((run) => run.actions && !required.has(run.id) && runIdOf(run.url) === workflow)
 }
 
 /**
@@ -154,16 +126,35 @@ export async function attachEvidence(
   } catch (error) {
     return reports.map((r) => ({ ...r, evidence: unreadable(error) }))
   }
+  const requiredRuns = reports.map((report) => runOf(runs, report))
+  const requiredIds = new Set(requiredRuns.flatMap((run) => (run ? [run.id] : [])))
   const attached: FailedReport[] = []
-  const gates: { report: CheckReport; run?: FailedRun }[] = []
-  const required: FailedRun[] = []
-  for (const report of reports) {
-    const run = runOf(runs, report)
-    const withEv = run ? { ...report, evidence: await evidenceOf(api, repo, token, run) } : report
-    attached.push(withEv)
-    if (run) required.push(run)
-    if (silent(withEv)) gates.push({ report, run })
+  const extra = new Map<number, FailedReport>()
+  for (const [i, report] of reports.entries()) {
+    const run = requiredRuns[i]
+    if (!run) {
+      attached.push(report)
+      continue
+    }
+    const workflow = run.actions ? runIdOf(run.url) : undefined
+    const siblings = workflow ? await siblingsOf(api, repo, token, runs, workflow, requiredIds) : []
+    if (siblings.length === 0) {
+      attached.push({ ...report, evidence: await evidenceOf(api, repo, token, run) })
+      continue
+    }
+    // The gate is only a name: what failed is in the jobs of its run that failed.
+    attached.push({ ...report, detail: '', evidence: { lines: [] } })
+    for (const sibling of siblings) {
+      if (extra.has(sibling.id)) continue
+      extra.set(sibling.id, {
+        name: sibling.name,
+        state: 'failure',
+        detail: sibling.summary,
+        url: sibling.url,
+        notRequired: true,
+        evidence: await evidenceOf(api, repo, token, sibling),
+      })
+    }
   }
-  if (gates.length === 0) return attached
-  return [...attached, ...(await alongside(api, repo, token, runs, gates, required))]
+  return [...attached, ...extra.values()]
 }

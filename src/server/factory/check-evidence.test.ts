@@ -119,7 +119,10 @@ describe('readEvidence', () => {
 describe('attachEvidence', () => {
   it('gives each failed check the evidence of the check run with its name', async () => {
     const { api, calls } = fakeApi({
-      runs: [actionsRun({ id: 9, name: 'Lint' }), actionsRun()],
+      runs: [
+        actionsRun({ id: 9, name: 'Lint', url: 'https://github.com/o/r/actions/runs/2/job/9' }),
+        actionsRun(),
+      ],
       logs: { 11: DOC_LOG, 9: 'error TS2322: wrong type' },
     })
 
@@ -222,15 +225,22 @@ describe('attachEvidence', () => {
     expect(failed[1].evidence).toMatchObject({ lines: ['AssertionError: expected 1 to be 2'] })
   })
 
-  it('leaves out another failed job that says no more than the aggregate does', async () => {
+  it('takes the evidence from the failed sibling and leaves the gate only its name', async () => {
     const { api } = fakeApi({
-      runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 3, name: 'All checks' })],
-      logs: { 1: AGGREGATE_LOG, 3: AGGREGATE_LOG },
+      runs: [
+        actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
+        actionsRun({ id: 3, name: 'validate', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
+      ],
+      logs: { 1: '##[error]Job validate failed', 3: DOC_LOG },
     })
 
-    expect(await attachEvidence(api, REPO, 't', SHA, [report('CI')])).toEqual([
-      { ...report('CI'), evidence: { lines: [] } },
-    ])
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI', 'Job validate failed')])
+
+    expect(failed[0]).toEqual({ ...report('CI'), evidence: { lines: [] } })
+    expect(failed[1]).toMatchObject({
+      name: 'validate',
+      evidence: { lines: ['[doc-coverage] FAIL 99.7% is below the 100% floor'] },
+    })
   })
 
   it('names another failed job whose evidence could not be read', async () => {
@@ -249,7 +259,7 @@ describe('attachEvidence', () => {
     })
   })
 
-  it('does not look past a required check whose evidence could not be read', async () => {
+  it('does not read the log of a gate whose run has a failed sibling', async () => {
     const { api, calls } = fakeApi({
       runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 2, name: 'Type tests' })],
       logs: { 2: TYPE_TESTS_LOG },
@@ -258,10 +268,12 @@ describe('attachEvidence', () => {
 
     const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
 
-    expect(failed).toEqual([
-      { ...report('CI'), evidence: { unreadable: 'GitHub answered 410 reading job 1' } },
-    ])
-    expect(calls).toEqual([`checks o/r t ${SHA}`, 'log o/r t 1'])
+    expect(failed[0]).toEqual({
+      ...report('CI'),
+      detail: '',
+      evidence: { lines: [] },
+    })
+    expect(calls).not.toContain('log o/r t 1')
   })
 
   it('leaves a commit status, which has no check run, with what it said of itself', async () => {
@@ -404,11 +416,12 @@ describe('the step of a failed job, from its metadata', () => {
     expect(ev && 'lines' in ev ? ev.step : undefined).toEqual({ name: 'quality:loc' })
   })
 
-  it('gives a step named after its own command that command', async () => {
-    const shell = log.split('\n').slice(0, 2).concat('##[error]Process completed with exit code 1.')
-    expect(await stepOf('Run pnpm build', shell.join('\n'))).toEqual({
-      name: 'Run pnpm build',
-      command: 'pnpm build',
-    })
+  it('gives an ungrouped action step named like an earlier shell command no command', async () => {
+    const shell = [
+      '##[group]Run pnpm build --production',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Run pnpm build', shell.join('\n'))).toEqual({ name: 'Run pnpm build' })
   })
 })

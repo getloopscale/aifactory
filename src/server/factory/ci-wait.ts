@@ -192,7 +192,11 @@ function quote(r: FailedReport, share: number): string {
 function stepLine(r: FailedReport): string {
   const step = r.evidence && 'lines' in r.evidence ? r.evidence.step : undefined
   if (!step) return ''
-  const ran = step.command && step.command !== step.name ? ` (ran: ${step.command})` : ''
+  const ran = step.command
+    ? step.command !== step.name
+      ? ` (ran: ${step.command})`
+      : ''
+    : ' (the command was not identified)'
   return `Step that exited: ${step.name}${ran}\n`.replace(/~{3,}/g, '~~')
 }
 
