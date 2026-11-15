@@ -191,7 +191,7 @@ describe('reworkByReviewer', () => {
     taskId: number,
     attempt: number,
     hour: number,
-    trigger: 'review' | 'checks' | null = 'review',
+    trigger: 'review' | 'checks' | 'guard' | null = 'review',
   ) => ({
     taskId,
     attempt,
@@ -230,6 +230,14 @@ describe('reworkByReviewer', () => {
     expect(result).toEqual([
       { reviewer: 'codex', model: null, reviews: 1, reworkRounds: 0, perReview: 0 },
     ])
+  })
+
+  it('charges nobody for a rework a diff guard started over an approving reviewer', () => {
+    // The reviewer approved, the guard turned it into `changes`, and the rework is the guard's.
+    const reviews = [fact(1, 'codex', 'changes', 1)]
+    expect(reworkByReviewer(reviews, [rework(1, 2, 2, 'guard')], events([1, finished(0)]))).toEqual(
+      [{ reviewer: 'codex', model: null, reviews: 1, reworkRounds: 0, perReview: 0 }],
+    )
   })
 
   it('leaves out of the rate a review whose rework was recorded without its trigger', () => {

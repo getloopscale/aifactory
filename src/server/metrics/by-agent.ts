@@ -272,7 +272,7 @@ export type ReworkFact = {
   attempt: number
   at: Date
   /** What sent the work back; absent on a build recorded before the trigger was kept, which is charged to nobody. */
-  trigger?: 'review' | 'checks'
+  trigger?: 'review' | 'checks' | 'guard'
   /** A build that answered a reviewer's refusal of a claim that nothing needed changing: it answers the review of its own attempt. */
   refuted?: boolean
 }
@@ -358,7 +358,9 @@ async function reworkRoundsOf(db: Database): Promise<ReworkFact[]> {
             attempt: detail.attempt,
             at: e.at,
             ...(detail.refuted === true ? { refuted: true } : {}),
-            ...(detail.trigger === 'review' || detail.trigger === 'checks'
+            ...(detail.trigger === 'review' ||
+            detail.trigger === 'checks' ||
+            detail.trigger === 'guard'
               ? { trigger: detail.trigger }
               : {}),
           },

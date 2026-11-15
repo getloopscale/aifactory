@@ -1099,7 +1099,7 @@ export class Run {
     attempt: number,
     findings: Finding[],
     failed: CheckResult[],
-    trigger: 'review' | 'checks',
+    trigger: 'review' | 'checks' | 'guard',
   ): Promise<string> {
     const { deps, taskId, state } = this.c
     const timeoutMs = await this.agentTimeout()
@@ -1243,6 +1243,7 @@ export class Run {
       verdict: blocked ? 'changes' : read.verdict,
       summary: read.summary,
       findings: [...guards, ...outside, ...read.findings],
+      ...(blocked ? { guarded: true as const } : {}),
     }
     await deps.db.insert(reviewTable).values({
       taskId,
@@ -1572,7 +1573,12 @@ export class Run {
       const mayRework =
         this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
       if (outcome.verdict === 'changes' && mayRework) {
-        sha = await this.rework(attempt + 1, outcome.findings, [], 'review')
+        sha = await this.rework(
+          attempt + 1,
+          outcome.findings,
+          [],
+          outcome.guarded ? 'guard' : 'review',
+        )
         continue
       }
       return this.handOver(sha, attempt, checked.here, outcome, counts)
