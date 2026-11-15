@@ -34,6 +34,16 @@ const gh = {
   failedRuns: [] as FailedRun[],
   logs: {} as Record<number, string>,
   annotations: {} as Record<number, string[]>,
+  jobs: {} as Record<
+    number,
+    {
+      runId: number
+      attempt: number
+      failedStep?: string
+      ranSteps?: number
+      failedPosition?: number
+    }
+  >,
   logFails: false,
 }
 const sentBack: { taskId: number; note: string }[] = []
@@ -69,7 +79,7 @@ beforeEach(async () => {
   repo().prepare().required.set('workspace', ['CI'])
   pull()
   reports({ name: 'CI', state: 'pending', detail: '', url: 'u' })
-  Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, logFails: false })
+  Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
   sentBack.length = 0
   startedOver.length = 0
 })
@@ -81,6 +91,12 @@ const checks: EvidenceApi = {
     return gh.logs[jobId] ?? ''
   },
   annotations: async (_repo, _token, checkRunId) => gh.annotations[checkRunId] ?? [],
+  // What GitHub says of a job: its run, and which of the steps that ran is the one that failed.
+  jobAttempt: async (_repo, _token, jobId) => {
+    const job = gh.jobs[jobId]
+    if (!job) throw new Error(`GitHub answered 404 reading job ${jobId}`)
+    return job
+  },
 }
 
 const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
@@ -352,12 +368,16 @@ describe('pollAwaitingIntegrations', () => {
       ].join('\n'),
       3: 'ERROR: "unrelated" exited with 1.',
     }
+    // The job ran one step, named in the workflow, and that step is the one that failed.
+    gh.jobs = {
+      2: { runId: 431, attempt: 1, failedStep: 'Validate', ranSteps: 1, failedPosition: 0 },
+    }
     const id = await waitingTask()
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
 
     const { note } = sentBack[0]
-    expect(note).toContain('Step that exited: quality:depcruise (ran: pnpm quality)')
+    expect(note).toContain('Step that exited: Validate (ran: pnpm quality)')
     expect(note).toContain('error types-dont-import-runtime: packages/sdk/src/types/agent.ts')
     expect(note).not.toContain('unrelated')
   })

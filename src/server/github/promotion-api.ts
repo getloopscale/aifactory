@@ -49,6 +49,9 @@ export type PromotionApi = {
 }
 
 /** A run that ended this way says the commit is broken. A cancelled or skipped one says nothing. */
+/** The most pages of check runs read for one commit: a thousand runs. */
+const CHECK_RUN_PAGES = 10
+
 const FAILED = new Set(['failure', 'timed_out', 'startup_failure'])
 
 const refusal = async (response: Response, action: string, repo: string) => {
@@ -98,26 +101,32 @@ export function createPromotionApi(
     },
 
     async failedChecks(repo, token, sha) {
-      const answer = (await (
-        await call(
-          repo,
-          token,
-          `/commits/${sha}/check-runs?filter=latest&per_page=100`,
-          `reading the check runs of ${sha.slice(0, 7)}`,
-          [200],
-        )
-      ).json()) as {
-        check_runs: {
-          id: number
-          name: string
-          status: string
-          conclusion: string | null
-          html_url?: string | null
-          app?: { slug?: string } | null
-          output?: { summary?: string | null } | null
-        }[]
+      type CheckRun = {
+        id: number
+        name: string
+        status: string
+        conclusion: string | null
+        html_url?: string | null
+        app?: { slug?: string } | null
+        output?: { summary?: string | null } | null
       }
-      return answer.check_runs
+      // A commit of a large repository has more than a hundred check runs, and the one that failed may be
+      // on any page. The pages are bounded so a wrong `total_count` cannot make this read for ever.
+      const runs: CheckRun[] = []
+      for (let page = 1; page <= CHECK_RUN_PAGES; page++) {
+        const answer = (await (
+          await call(
+            repo,
+            token,
+            `/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
+            `reading the check runs of ${sha.slice(0, 7)}`,
+            [200],
+          )
+        ).json()) as { total_count?: number; check_runs: CheckRun[] }
+        runs.push(...answer.check_runs)
+        if (answer.check_runs.length < 100 || runs.length >= (answer.total_count ?? 0)) break
+      }
+      return runs
         .filter((run) => run.status === 'completed' && FAILED.has(run.conclusion ?? ''))
         .map((run) => ({
           id: run.id,
