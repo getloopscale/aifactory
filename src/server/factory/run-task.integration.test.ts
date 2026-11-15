@@ -2048,6 +2048,16 @@ describe('runTask continuing from a branch a person sent back', () => {
       .update(task)
       .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
       .where(eq(task.id, id))
+    // The work on the pull request was approved before the person asked for more.
+    await getDb().insert(review).values({
+      taskId: id,
+      round: 1,
+      sha: 'oldsha1',
+      reviewer: 'r',
+      verdict: 'approve',
+      summary: 'ok',
+      findings: [],
+    })
     const sandbox = new FakeSandbox(changed())
     const builder: CodingHarness = {
       name: 'fake-agent',
@@ -2073,6 +2083,59 @@ describe('runTask continuing from a branch a person sent back', () => {
     const done = (await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'done')))[0]
     expect(done.detail).toMatchObject({ unchanged: true })
     expect(sandbox.stopped).toBe(1)
+  })
+
+  it('checks and reviews the head of the branch when the agent finds nothing to change and no review approved that head', async () => {
+    const pushed = 'f'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: pushed, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    // The last review of the branch asked for changes, and a later run fixed them and stopped before a review.
+    await getDb().insert(review).values({
+      taskId: id,
+      round: 1,
+      sha: 'earlier1',
+      reviewer: 'r',
+      verdict: 'changes',
+      summary: 'no',
+      findings: [],
+    })
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'The branch already has every fix the review asked for.' }
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'Fix what the review asked for.',
+    })
+
+    expect(result).toMatchObject({ status: 'done', sha: pushed })
+    const stages = await stagesOf(id)
+    expect(stages).toContain('verify')
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('failed')
+    const reviews = await getDb().select().from(review).where(eq(review.taskId, id))
+    expect(reviews.at(-1)).toMatchObject({ sha: pushed, verdict: 'approve' })
+    expect(seen.comments.some((c) => c.includes('left the pull request as it is'))).toBe(false)
+    expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(false)
+    const done = (await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'done'))).at(
+      -1,
+    )
+    expect(done?.detail).not.toMatchObject({ unchanged: true })
   })
 
   it('hands to a person work whose required checks failed when the agent finds nothing to change', async () => {

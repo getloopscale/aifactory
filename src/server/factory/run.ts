@@ -865,6 +865,31 @@ export class Run {
   }
 
   /**
+   * A run that was sent back changed nothing, and no review approved the head of its branch: an earlier run
+   * fixed what was asked and stopped before a review, or a person pushed the fix. Ending here would deliver
+   * work nobody checked, so the run goes on from that head.
+   */
+  private async unreviewedHeadLeftAsItIs(): Promise<boolean> {
+    const { continuation, deps, taskId } = this.c
+    if (!continuation || continuation.plain || continuation.fromChecks || !this.remoteHead) {
+      return false
+    }
+    if (!(await this.hasNothingToCommit())) return false
+    const [approved] = await deps.db
+      .select({ id: reviewTable.id })
+      .from(reviewTable)
+      .where(
+        and(
+          eq(reviewTable.taskId, taskId),
+          eq(reviewTable.sha, this.remoteHead),
+          eq(reviewTable.verdict, 'approve'),
+        ),
+      )
+      .limit(1)
+    return !approved
+  }
+
+  /**
    * A person asked for a change and the agent found nothing to change (the test was already there,
    * say). That is an answer, not a failure: the pull request stays as it was, and the person reads why.
    */
@@ -1092,6 +1117,8 @@ export class Run {
     if (asked) await this.ask(asked, this.c.resuming?.attempt ?? 1)
     this.summary = first.summary
 
+    // Work a review never approved is not left as it is: it goes on to the checks and the review.
+    if (await this.unreviewedHeadLeftAsItIs()) return { sha: this.remoteHead }
     const unchanged = await this.answeredWithNoChange(first)
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)

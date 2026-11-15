@@ -35,6 +35,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A task sent back whose agent finds nothing to change is no longer delivered, or failed, with work no review approved. When the head of its branch has no approving review (an earlier run fixed what was asked and stopped before a review, or a person pushed the fix), the run goes on to the checks and the review at that head. Work that was already approved is still left as it is, with the agent's reason on the issue (#113)
 - A 5xx from GitHub no longer fails a task for a person. A read is asked again up to three times with a pause; a call that changes something is sent once, and a 5xx from it fails the run as an environment failure, so the task waits under "Will retry itself" and the whole run is repeated. That covers creating the check run, opening the pull request and the GraphQL mutations. A merge is asked again only when GitHub refused it because the base branch moved, never after a 5xx, since the merge may have happened (#83)
 - A task's attempts and its automatic retries are counted from its own events. The count compared against the latest run a person started on any task, so most tasks showed no automatic retry at all: an environment failure was retried past its limit of three, and the board could show the wrong number of attempts (#89)
 - The new job dialog no longer says "Enable a repository under Repositories first" while the list of repositories is still loading; it says it is reading them, and shows the form or that message once the list arrives (#79)
