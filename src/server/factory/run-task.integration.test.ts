@@ -498,6 +498,26 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
+  it('fails as an environment failure when GitHub answers 5xx handing the work over', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'createRelease',
+      new Error('GitHub answered 502 creating the release on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
   it('gives the firewall the credentials and the sandbox none of them', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())

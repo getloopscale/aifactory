@@ -46,6 +46,37 @@ function fakeGithub(options: { expiresInMs?: number; installationStatus?: number
 const app = (fetch: FetchLike, extra = {}) =>
   createGithubApp({ appId: '123', privateKey, fetch, ...extra })
 
+describe('a 5xx while looking up the installation', () => {
+  const noWait = async () => {}
+  it('asks the lookup again and then mints the token once', async () => {
+    const github = fakeGithub()
+    let lookups = 0
+    const fetch: FetchLike = async (url, init) => {
+      if (url.endsWith('/installation') && ++lookups === 1) {
+        return Response.json({ message: 'Bad Gateway' }, { status: 502 })
+      }
+      return github.fetch(url, init)
+    }
+    const token = await app(fetch, { wait: noWait }).installationToken('o/r')
+    expect(token.token).toBe('ghs_token_1')
+    expect(lookups).toBe(2)
+    expect(github.minted()).toBe(1)
+  })
+
+  it('never sends the token request twice when it answers 502', async () => {
+    let mints = 0
+    const fetch: FetchLike = async (url) => {
+      if (url.endsWith('/installation')) return Response.json({ id: 1 })
+      mints += 1
+      return Response.json({ message: 'Bad Gateway' }, { status: 502 })
+    }
+    await expect(app(fetch, { wait: noWait }).installationToken('o/r')).rejects.toThrow(
+      /GitHub answered 502 minting a token/,
+    )
+    expect(mints).toBe(1)
+  })
+})
+
 describe('GitHub App installation tokens', () => {
   it('always limits the token to the one repository it was asked for', async () => {
     const github = fakeGithub()
@@ -372,7 +403,7 @@ describe('how long the repository list is kept', () => {
       }
       return Response.json({})
     }
-    const github = app(fetch)
+    const github = app(fetch, { wait: async () => {} })
     await expect(github.installationRepositories()).rejects.toThrow('502')
     fail = false
     expect(await github.installationRepositories()).toEqual([])
@@ -498,10 +529,11 @@ describe('what an installation was granted', () => {
 
   it('says what GitHub answered when it cannot be read, and refuses a name that is not a repository', async () => {
     const { fetch, urls } = answering(502)
-    await expect(app(fetch).installationPermissions('o/r')).rejects.toThrow(
+    const quick = { wait: async () => {} }
+    await expect(app(fetch, quick).installationPermissions('o/r')).rejects.toThrow(
       'GitHub answered 502 reading the installation of o/r',
     )
-    await expect(app(fetch).installationPermissions('o/r/x')).rejects.toThrow(/owner\/name/)
-    expect(urls).toHaveLength(1)
+    await expect(app(fetch, quick).installationPermissions('o/r/x')).rejects.toThrow(/owner\/name/)
+    expect(urls).toHaveLength(3)
   })
 })

@@ -143,6 +143,9 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
  * were cut at 25 on 2026-11-11 (paulohenriquevn/aifactory#23), so a pass may take 45.
  */
 /** The stages that end a run; a task goes through them again when a person sends it back. */
+/** GitHub failing: not a refusal of the work, so the run fails and repeats. */
+const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
+
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
 export const DEFAULT_TIMEOUTS: Timeouts = { sandboxMs: 90 * 60_000, agentMs: 45 * 60_000 }
@@ -1295,7 +1298,7 @@ export class Run {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       // GitHub failing is the environment's: the run fails and repeats, it is not an integration refusal.
-      if (/^GitHub answered 5\d\d\b/.test(message)) throw error
+      if (GITHUB_SERVER_ERROR.test(message)) throw error
       return { error: message }
     }
     await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
@@ -1337,7 +1340,10 @@ export class Run {
         },
       )
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // GitHub failing is the environment's: the run fails and repeats, it is not a delivery refusal.
+      if (GITHUB_SERVER_ERROR.test(message)) throw error
+      return { error: message }
     }
   }
 
