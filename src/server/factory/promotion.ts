@@ -48,6 +48,9 @@ const GENERIC = [
   /ELIFECYCLE/,
   /ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL/,
   /dependency did not succeed/,
+  // What an aggregate (gate) job says when a job it needs failed: that one did, never which.
+  /\b(one or more|some|any|at least one)\b.*\b(jobs?|checks?|dependenc(y|ies)|needs)\b.*\b(fail|did not succeed|not succeed)/i,
+  /\b(required|dependent|upstream) (jobs?|checks?)\b.*\b(fail|did not succeed)/i,
 ]
 
 /** Lines that say what failed: a test, an assertion, a type error, a lint rule. */

@@ -185,6 +185,22 @@ describe('attachEvidence', () => {
     expect(failed[1].evidence).toEqual({ lines: ['AssertionError: expected 1 to be 2'] })
   })
 
+  it.each([
+    'One or more required jobs failed',
+    'Some required checks did not succeed',
+    'Required jobs failed: validate',
+  ])('reads the sibling jobs when the gate says only "%s"', async (message) => {
+    const { api } = fakeApi({
+      runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 2, name: 'Type tests' })],
+      logs: { 1: `2026-11-12T22:00:01.0000000Z ##[error]${message}`, 2: TYPE_TESTS_LOG },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed.map((r) => r.name)).toEqual(['CI', 'Type tests'])
+    expect(failed[1].evidence).toMatchObject({ lines: ['AssertionError: expected 1 to be 2'] })
+  })
+
   it('leaves out another failed job that says no more than the aggregate does', async () => {
     const { api } = fakeApi({
       runs: [actionsRun({ id: 1, name: 'CI' }), actionsRun({ id: 3, name: 'All checks' })],
