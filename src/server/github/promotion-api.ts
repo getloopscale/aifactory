@@ -34,7 +34,7 @@ export type PromotionApi = {
     repo: string,
     token: string,
     jobId: number,
-  ): Promise<{ runId: number; attempt: number }>
+  ): Promise<{ runId: number; attempt: number; failedStep?: string }>
   jobLog(repo: string, token: string, jobId: number): Promise<string>
   annotations(repo: string, token: string, checkRunId: number): Promise<string[]>
   rerunFailedJobs(repo: string, token: string, runId: number): Promise<RerunAnswer>
@@ -124,8 +124,17 @@ export function createPromotionApi(
     async jobAttempt(repo, token, jobId) {
       const job = (await (
         await call(repo, token, `/actions/jobs/${jobId}`, `reading job ${jobId}`, [200])
-      ).json()) as { run_id: number; run_attempt: number }
-      return { runId: job.run_id, attempt: job.run_attempt }
+      ).json()) as {
+        run_id: number
+        run_attempt: number
+        steps?: { name: string; conclusion: string | null }[]
+      }
+      const failed = job.steps?.find((step) => FAILED.has(step.conclusion ?? ''))
+      return {
+        runId: job.run_id,
+        attempt: job.run_attempt,
+        ...(failed ? { failedStep: failed.name } : {}),
+      }
     },
 
     async jobLog(repo, token, jobId) {

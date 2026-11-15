@@ -278,3 +278,32 @@ describe('attachEvidence', () => {
     ])
   })
 })
+
+describe('the step of a failed job, from its metadata', () => {
+  const log = [
+    '##[group]Run pnpm build',
+    'shell: /usr/bin/bash -e {0}',
+    '##[endgroup]',
+    '##[group]Run some-org/deploy@v2',
+    '##[endgroup]',
+    '##[error]Process completed with exit code 1.',
+  ].join('\n')
+  const stepOf = async (failedStep: string | undefined, text: string) => {
+    const { api } = fakeApi({ runs: [actionsRun()], logs: { 11: text } })
+    api.jobAttempt = async () => ({ runId: 1, attempt: 1, failedStep })
+    const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+    return attached.evidence && 'lines' in attached.evidence ? attached.evidence.step : undefined
+  }
+
+  it('names a custom-named failed action step and gives it no earlier command', async () => {
+    expect(await stepOf('Deploy to staging', log)).toEqual({ name: 'Deploy to staging' })
+  })
+
+  it('gives a step named after its own command that command', async () => {
+    const shell = log.split('\n').slice(0, 2).concat('##[error]Process completed with exit code 1.')
+    expect(await stepOf('Run pnpm build', shell.join('\n'))).toEqual({
+      name: 'Run pnpm build',
+      command: 'pnpm build',
+    })
+  })
+})

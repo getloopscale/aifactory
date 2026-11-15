@@ -106,6 +106,8 @@ export function failedStep(log: string): FailedStep | undefined {
     if (GROUP_STEP.test(line)) {
       const run = GROUP_RUN.exec(line)?.[1].trim()
       command = run && !ACTION_USE.test(run) ? run : undefined
+      // A script name belongs to the step it was printed in: an earlier step's line does not carry over.
+      script = undefined
       collecting = command !== undefined
       if (command) command = command.slice(0, SCRIPT_MAX)
     } else if (collecting) {
@@ -113,7 +115,7 @@ export function failedStep(log: string): FailedStep | undefined {
       if (/^(shell|env):|^##\[/.test(line)) collecting = false
       else command = `${command}\n${line}`.slice(0, SCRIPT_MAX)
     }
-    script ??= EXITED.exec(line.replace('##[error]', ''))?.[1]
+    if (end < 0 || index <= end) script ??= EXITED.exec(line.replace('##[error]', ''))?.[1]
   })
   const name = script ?? command
   return name ? { name, ...(command ? { command } : {}) } : undefined

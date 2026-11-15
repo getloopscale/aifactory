@@ -2,10 +2,11 @@ import type { FailedRun, PromotionApi } from '../github/promotion-api'
 import type { CheckReport } from '../github/pulls'
 
 import type { FailedReport, ServerEvidence } from './ci-wait'
-import { checkEvidence, failedStep, logEvidence } from './promotion'
+import { checkEvidence, failedStep, logEvidence, type FailedStep } from './promotion'
 
 /** What reading a failed check's evidence takes from GitHub, with a repository-scoped token. */
-export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'>
+export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'> &
+  Partial<Pick<PromotionApi, 'jobAttempt'>>
 
 /**
  * The lines that say why a check run failed, read on the factory host: the error lines of an Actions job's
@@ -43,6 +44,31 @@ const unreadable = (error: unknown): ServerEvidence => ({
   unreadable: error instanceof Error ? error.message : String(error),
 })
 
+/**
+ * The step that failed. Its name is the one in the job's metadata (a step has its own name, and an action
+ * step has no command). The log's command is attached only when it belongs to that step: a step the runner
+ * named after its own command (`Run <first line>`) is the one whose group the log shows. When the metadata
+ * cannot be read or names no failed step, the log alone says what it can.
+ */
+async function stepOf(
+  api: EvidenceApi,
+  repo: string,
+  token: string,
+  run: FailedRun,
+  log: string,
+): Promise<FailedStep | undefined> {
+  const fromLog = failedStep(log)
+  const named = await api.jobAttempt?.call(api, repo, token, run.id).then(
+    (job) => job.failedStep,
+    () => undefined,
+  )
+  if (!named) return fromLog
+  const own = /^Run (.+)/.exec(named)?.[1]?.split('\n')[0]
+  const command = fromLog?.command
+  const belongs = own !== undefined && command !== undefined && command.startsWith(own)
+  return { name: named, ...(belongs ? { command } : {}) }
+}
+
 /** A check's evidence as the note takes it: what was read, or why it could not be. */
 async function evidenceOf(
   api: EvidenceApi,
@@ -53,7 +79,7 @@ async function evidenceOf(
   try {
     if (!run.actions) return { lines: await readEvidence(api, repo, token, run) }
     const log = await api.jobLog(repo, token, run.id)
-    const step = failedStep(log)
+    const step = await stepOf(api, repo, token, run, log)
     return { lines: logEvidence(log), ...(step ? { step } : {}) }
   } catch (error) {
     return unreadable(error)
