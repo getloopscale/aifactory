@@ -6,7 +6,7 @@ import { checkEvidence, failedStep, logEvidence, type FailedStep } from './promo
 
 /** What reading a failed check's evidence takes from GitHub, with a repository-scoped token. */
 export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'> &
-  Partial<Pick<PromotionApi, 'jobAttempt' | 'rerunFailedJobs'>>
+  Partial<Pick<PromotionApi, 'jobAttempt' | 'rerunJob'>>
 
 /**
  * The lines that say why a check run failed, read on the factory host: the error lines of an Actions job's
@@ -24,7 +24,12 @@ export async function readEvidence(
 }
 
 /** What became of the rerun of the failed jobs: how many runs are rerunning, and what kept the others from it. */
-export type RerunOutcome = { started: number; problems: string[] }
+export type RerunOutcome = {
+  started: number
+  problems: string[]
+  /** Reruns asked for whose outcome GitHub never showed: whether the work is at fault is not known. */
+  unconfirmed: string[]
+}
 
 /**
  * Where the reruns asked for are kept, so that one run is asked for once however many passes look at it, and
@@ -74,7 +79,7 @@ function requiredRuns(runs: FailedRun[], reports: CheckReport[]): FailedRun[] {
 }
 
 /**
- * Reruns, once, the failed Actions runs behind the failed required checks whose job is on its first attempt:
+ * Reruns, once, each job (never the other jobs of its workflow run) behind the failed required checks whose job is on its first attempt:
  * a failure that is not of the work (a flaky test) passes on the second attempt. The request is claimed in the
  * `ledger` first, atomically, so a concurrent pass or a restart never asks twice. A claim stays when the
  * request's outcome is unknown (a timeout, a lost connection, a process that stopped): only a refusal GitHub
@@ -93,9 +98,9 @@ export async function rerunTransient(
   ledger: RerunLedger,
   now: Date = new Date(),
 ): Promise<RerunOutcome> {
-  const outcome: RerunOutcome = { started: 0, problems: [] }
-  const { jobAttempt, rerunFailedJobs } = api
-  if (!jobAttempt || !rerunFailedJobs) return outcome
+  const outcome: RerunOutcome = { started: 0, problems: [], unconfirmed: [] }
+  const { jobAttempt, rerunJob } = api
+  if (!jobAttempt || !rerunJob) return outcome
   let runs: FailedRun[]
   let failed: FailedRun[]
   try {
@@ -117,24 +122,24 @@ export async function rerunTransient(
     let asked = false
     try {
       const job = await jobAttempt.call(api, repo, token, run.id)
-      if (job.attempt >= 2 || tried.has(job.runId)) continue
-      tried.add(job.runId)
-      const claimedAt = await ledger.claim(job.runId)
+      if (job.attempt >= 2 || tried.has(run.id)) continue
+      tried.add(run.id)
+      const claimedAt = await ledger.claim(run.id)
       if (claimedAt) {
         if (now.getTime() - claimedAt.getTime() < RERUN_WAIT_MS) outcome.started += 1
         else {
-          outcome.problems.push(
-            `the rerun of ${run.name} asked for at ${claimedAt.toISOString()} was not confirmed: GitHub still shows the first attempt, so the failure is not known to be after a rerun`,
+          outcome.unconfirmed.push(
+            `the rerun of ${run.name} asked for at ${claimedAt.toISOString()} was not confirmed: GitHub still shows the first attempt, so it is not known whether the failure is of the work`,
           )
         }
         continue
       }
       asked = true
-      const answer = await rerunFailedJobs.call(api, repo, token, job.runId)
+      const answer = await rerunJob.call(api, repo, token, run.id)
       if (answer.started) outcome.started += 1
       else {
         outcome.problems.push(answer.refusal)
-        await ledger.release(job.runId)
+        await ledger.release(run.id)
       }
     } catch (error) {
       // A request whose answer was lost may have been accepted, and the claim stays: the run is pending.

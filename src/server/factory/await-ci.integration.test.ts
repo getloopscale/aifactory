@@ -100,7 +100,7 @@ const checks: EvidenceApi = {
     if (gh.attemptFails.includes(jobId)) throw new Error(`GitHub answered 502 reading job ${jobId}`)
     return { runId: jobId * 10, attempt: gh.attempts[jobId] ?? 2 }
   },
-  rerunFailedJobs: async (_repo, _token, runId) => {
+  rerunJob: async (_repo, _token, runId) => {
     if (gh.rerunRefusal) return { started: false, refusal: gh.rerunRefusal }
     gh.reruns.push(runId)
     if (gh.rerunLost) throw new Error('connection reset')
@@ -334,7 +334,7 @@ describe('pollAwaitingIntegrations', () => {
     const result = await pollAwaitingIntegrations(deps())
 
     expect(result).toMatchObject({ rerun: [id], sentBack: [], toPerson: [], errors: [] })
-    expect(gh.reruns).toEqual([13080])
+    expect(gh.reruns).toEqual([1308])
     expect(sentBack).toEqual([])
     expect(autoMergeOff()).toEqual([])
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
@@ -360,7 +360,7 @@ describe('pollAwaitingIntegrations', () => {
     const result = await pollAwaitingIntegrations(deps())
     expect(result).toMatchObject({ rerun: [id], sentBack: [], toPerson: [], errors: [] })
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
-    expect(gh.reruns).toEqual([13080])
+    expect(gh.reruns).toEqual([1308])
     expect(sentBack).toEqual([])
   })
 
@@ -376,7 +376,7 @@ describe('pollAwaitingIntegrations', () => {
     const id = await waitingTask()
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
-    expect(gh.reruns).toEqual([10])
+    expect(gh.reruns).toEqual([1])
   })
 
   it('sends the consumed changeset files and the back-merge instruction with the step', async () => {
@@ -440,7 +440,7 @@ describe('pollAwaitingIntegrations', () => {
 
     const result = await pollAwaitingIntegrations(deps())
 
-    expect(gh.reruns).toEqual([20])
+    expect(gh.reruns).toEqual([2])
     expect(result).toMatchObject({ rerun: [id], sentBack: [] })
     expect(result.errors).toEqual([`task ${id}: rerunning CI: GitHub answered 502 reading job 1`])
   })
@@ -577,7 +577,7 @@ describe('pollAwaitingIntegrations', () => {
     const id = await waitingTask({ automaticRuns: 3 })
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], toPerson: [] })
-    expect(gh.reruns).toEqual([13080])
+    expect(gh.reruns).toEqual([1308])
 
     gh.attempts = { 1308: 2 }
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ toPerson: [id] })
@@ -606,7 +606,7 @@ describe('pollAwaitingIntegrations', () => {
     await Promise.all([pollAwaitingIntegrations(deps()), pollAwaitingIntegrations(deps())])
     const again = await pollAwaitingIntegrations(deps())
 
-    expect(gh.reruns).toEqual([10])
+    expect(gh.reruns).toEqual([1])
     expect(again).toMatchObject({ rerun: [id], sentBack: [] })
     expect(Object.keys((await row(id)).ciReruns)).toEqual(['10'])
   })
@@ -626,7 +626,7 @@ describe('pollAwaitingIntegrations', () => {
     const id = await waitingTask()
 
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
-    expect(gh.reruns).toEqual([10, 20])
+    expect(gh.reruns).toEqual([1, 2])
 
     gh.attempts = { 1: 2, 2: 2 }
     gh.logs = { 1: 'FAIL src/a.test.ts', 2: 'FAIL src/b.test.ts' }
@@ -664,7 +664,7 @@ describe('pollAwaitingIntegrations', () => {
 
     await pollAwaitingIntegrations(deps())
 
-    expect(gh.reruns).toEqual([10])
+    expect(gh.reruns).toEqual([1])
   })
 
   it('stops auto-merge and hands to a person a pull request someone pushed to', async () => {

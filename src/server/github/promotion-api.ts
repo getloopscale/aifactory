@@ -38,6 +38,8 @@ export type PromotionApi = {
   jobLog(repo: string, token: string, jobId: number): Promise<string>
   annotations(repo: string, token: string, checkRunId: number): Promise<string[]>
   rerunFailedJobs(repo: string, token: string, runId: number): Promise<RerunAnswer>
+  /** Reruns one job (and the jobs that need it), not the other failed jobs of its workflow run. */
+  rerunJob(repo: string, token: string, jobId: number): Promise<RerunAnswer>
   issueOpen(repo: string, token: string, issueNumber: number): Promise<boolean>
 }
 
@@ -171,6 +173,20 @@ export function createPromotionApi(
         repo,
         token,
         `/actions/runs/${runId}/rerun-failed-jobs`,
+        action,
+        [201, ...RERUN_REFUSED],
+        'POST',
+      )
+      if (response.status === 201) return { started: true }
+      return { started: false, refusal: await refusal(response, action, repo) }
+    },
+
+    async rerunJob(repo, token, jobId) {
+      const action = `rerunning job ${jobId}`
+      const response = await call(
+        repo,
+        token,
+        `/actions/jobs/${jobId}/rerun`,
         action,
         [201, ...RERUN_REFUSED],
         'POST',

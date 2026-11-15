@@ -376,6 +376,18 @@ describe('recurrenceIsNewIssue', () => {
 })
 
 describe('failedStep', () => {
+  it('carries the whole script of a multiline run step, up to its shell line', () => {
+    const log = [
+      '##[group]Run set -e',
+      'pnpm build',
+      'node scripts/check.mjs',
+      'shell: /usr/bin/bash -e {0}',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)?.command).toBe('set -e\npnpm build\nnode scripts/check.mjs')
+  })
+
   it('keeps the command through a group the script printed itself', () => {
     const log = [
       '##[group]Run pnpm test',
@@ -410,6 +422,7 @@ describe('failedStep', () => {
   it('names the script that exited and the command of the step', () => {
     const log = [
       '2026-11-12T10:00:00Z ##[group]Run pnpm quality',
+      '2026-11-12T10:00:00Z shell: bash',
       'ERROR: "quality:loc" exited with 1.',
       '2026-11-12T10:00:01Z ##[error]Process completed with exit code 1.',
     ].join('\n')

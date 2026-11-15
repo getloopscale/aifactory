@@ -273,7 +273,7 @@ describe('rerunTransient', () => {
       jobLog: async () => '',
       annotations: async () => [],
       jobAttempt: async (_r, _t, id) => ({ runId: id * 10, attempt }),
-      rerunFailedJobs: async (_r, _t, runId) => (reruns.push(runId), { started: true }),
+      rerunJob: async (_r, _t, jobId) => (reruns.push(jobId), { started: true }),
     }
     return { api, reruns }
   }
@@ -285,8 +285,8 @@ describe('rerunTransient', () => {
   it('reruns the run of a failed required check on its first attempt, once', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
     const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(), NOW)
-    expect(outcome).toEqual({ started: 1, problems: [] })
-    expect(reruns).toEqual([110])
+    expect(outcome).toEqual({ started: 1, problems: [], unconfirmed: [] })
+    expect(reruns).toEqual([11])
   })
 
   it('never reruns a run already on its second attempt, whoever asks', async () => {
@@ -294,6 +294,7 @@ describe('rerunTransient', () => {
     expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(), NOW)).toEqual({
       started: 0,
       problems: [],
+      unconfirmed: [],
     })
     expect(reruns).toEqual([])
   })
@@ -304,16 +305,26 @@ describe('rerunTransient', () => {
     const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
     const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
     expect([first.started, second.started]).toEqual([1, 1])
-    expect(reruns).toEqual([110])
+    expect(reruns).toEqual([11])
   })
 
   it('stops waiting for a claim older than a quarter of an hour, and never asks again (a restart, a lost request)', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
-    const old = new Map([[110, new Date(NOW.getTime() - 16 * 60_000)]])
+    const old = new Map([[11, new Date(NOW.getTime() - 16 * 60_000)]])
     const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(old), NOW)
     expect(outcome.started).toBe(0)
-    expect(outcome.problems).toEqual([expect.stringContaining('was not confirmed')])
+    expect(outcome.problems).toEqual([])
+    expect(outcome.unconfirmed).toEqual([expect.stringContaining('was not confirmed')])
     expect(reruns).toEqual([])
+  })
+
+  it('reruns only the required job of a workflow that has another failed job', async () => {
+    const { api, reruns } = rerunning(
+      [actionsRun(), actionsRun({ id: 12, name: 'deploy preview' })],
+      1,
+    )
+    await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(new Map()), NOW)
+    expect(reruns).toEqual([11])
   })
 
   it('does not rerun an unrelated job that shares the name of a failed status', async () => {
@@ -343,14 +354,14 @@ describe('rerunTransient', () => {
 
   it('counts a request whose answer was lost as pending, keeps the claim and does not ask again', async () => {
     const { api, reruns } = rerunning([actionsRun()], 1)
-    api.rerunFailedJobs = async () => {
+    api.rerunJob = async () => {
       throw new Error('connection lost')
     }
     const ledger = ledgerOf()
     const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    expect(first).toEqual({ started: 1, problems: [] })
+    expect(first).toEqual({ started: 1, problems: [], unconfirmed: [] })
     const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    expect(second).toEqual({ started: 1, problems: [] })
+    expect(second).toEqual({ started: 1, problems: [], unconfirmed: [] })
     expect(reruns).toEqual([])
   })
 
@@ -361,16 +372,17 @@ describe('rerunTransient', () => {
       [1, 2, 3].map(() => rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)),
     )
     expect(all.map((o) => o.started)).toEqual([1, 1, 1])
-    expect(reruns).toEqual([110])
+    expect(reruns).toEqual([11])
   })
 
   it('gives the claim back when GitHub refuses, so the reason is not lost and a pass may ask again', async () => {
     const { api } = rerunning([actionsRun()], 1)
-    api.rerunFailedJobs = async () => ({ started: false, refusal: 'no' })
+    api.rerunJob = async () => ({ started: false, refusal: 'no' })
     const ledger = ledgerOf()
     expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)).toEqual({
       started: 0,
       problems: ['no'],
+      unconfirmed: [],
     })
     expect(await ledger.claim(110)).toBeUndefined()
   })
@@ -381,7 +393,7 @@ describe('rerunTransient', () => {
       1,
     )
     await rerunTransient(api, REPO, 'tok', SHA, [at(12, 'validate')], ledgerOf(), NOW)
-    expect(reruns).toEqual([120])
+    expect(reruns).toEqual([12])
   })
 
   it('reruns neither of two same-named jobs when the check names no job', async () => {
@@ -441,7 +453,7 @@ describe('the failed step of a job', () => {
   }
 
   it('names a shell step by the name the workflow gave it, and keeps its command', async () => {
-    const log = '##[group]Run pnpm quality\nERROR: "quality:loc" exited with 1.'
+    const log = '##[group]Run pnpm quality\nshell: bash\nERROR: "quality:loc" exited with 1.'
     expect(await stepOfReport(stepsApi('Quality gates', log))).toEqual({
       name: 'Quality gates',
       command: 'pnpm quality',
@@ -457,7 +469,7 @@ describe('the failed step of a job', () => {
   })
 
   it('falls back to the log when the job metadata names no failed step', async () => {
-    const log = '##[group]Run pnpm quality\nERROR: "quality:loc" exited with 1.'
+    const log = '##[group]Run pnpm quality\nshell: bash\nERROR: "quality:loc" exited with 1.'
     expect(await stepOfReport(stepsApi(undefined, log))).toEqual({
       name: 'quality:loc',
       command: 'pnpm quality',

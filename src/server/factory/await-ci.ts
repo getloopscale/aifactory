@@ -264,7 +264,7 @@ async function readFailure(
   reports: CheckReport[],
   repo: RepoConfig,
   result: AwaitCiResult,
-): Promise<string | undefined> {
+): Promise<string | { uncertain: string } | undefined> {
   const { row, token, verifiedSha } = w
   const now = deps.now?.() ?? new Date()
   const rerun = await rerunTransient(
@@ -281,6 +281,7 @@ async function readFailure(
     result.rerun.push(row.id)
     return undefined
   }
+  if (rerun.unconfirmed.length > 0) return { uncertain: rerun.unconfirmed.join('; ') }
   const failed = await attachEvidence(deps.checks, row.repository, token, verifiedSha, reports)
   for (const check of failed) {
     if (check.evidence && 'unreadable' in check.evidence) {
@@ -337,6 +338,11 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
     case 'send_back': {
       const note = await readFailure(deps, w, step.reports, repo, result)
       if (note === undefined) return
+      if (typeof note !== 'string') {
+        const person = { kind: 'person' as const, reason: note.uncertain, stopAutoMerge: true }
+        if (await toPerson(deps, w, person)) result.toPerson.push(row.id)
+        return
+      }
       // Off first: the new commit the agent pushes must not merge before the factory verifies it.
       await deps.api.disableAutoMerge(row.repository, token, number)
       await deps.sendBack(row.id, note)
@@ -354,7 +360,8 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
         // Checks that still fail get the same rerun and evidence before a person is told.
         const note = await readFailure(deps, w, step.reports, repo, result)
         if (note === undefined) return
-        said = { ...step, reason: `${step.reason}\n\n${evidenceOfNote(note)}`.slice(0, 3_000) }
+        if (typeof note !== 'string') said = { ...step, reason: note.uncertain }
+        else said = { ...step, reason: `${step.reason}\n\n${evidenceOfNote(note)}`.slice(0, 3_000) }
       }
       if (await toPerson(deps, w, said)) result.toPerson.push(row.id)
     }

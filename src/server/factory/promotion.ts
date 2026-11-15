@@ -77,6 +77,8 @@ const clean = (raw: string) =>
 /** The step of a job that failed: the script that exited (when the log names it) and the command the step ran. */
 export type FailedStep = { name: string; command?: string }
 
+/** The most of a step's script the note carries. */
+const SCRIPT_MAX = 1_000
 const GROUP_RUN = /^##\[group\]Run (.+)$/
 /** The groups the runner opens for a step of its own; any other group is output a script printed. */
 const GROUP_STEP = /^##\[group\](Run |Post |Set up job|Complete job|Initialize containers)/
@@ -98,11 +100,18 @@ export function failedStep(log: string): FailedStep | undefined {
   const end = fatal >= 0 ? fatal : lines.map((line) => line.includes('##[error]')).lastIndexOf(true)
   let command: string | undefined
   let script: string | undefined
+  let collecting = false
   lines.forEach((line, index) => {
     if (end >= 0 && index > end) return
     if (GROUP_STEP.test(line)) {
       const run = GROUP_RUN.exec(line)?.[1].trim()
-      command = run && !ACTION_USE.test(run) ? run.slice(0, MAX_LINE) : undefined
+      command = run && !ACTION_USE.test(run) ? run : undefined
+      collecting = command !== undefined
+      if (command) command = command.slice(0, SCRIPT_MAX)
+    } else if (collecting) {
+      // The rest of a multiline script runs up to the `shell:` line the runner prints after it.
+      if (/^(shell|env):|^##\[/.test(line)) collecting = false
+      else command = `${command}\n${line}`.slice(0, SCRIPT_MAX)
     }
     script ??= EXITED.exec(line.replace('##[error]', ''))?.[1]
   })
