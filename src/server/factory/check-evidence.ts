@@ -139,7 +139,11 @@ export async function attachEvidence(
     // The required job is read first: what it says, or why it could not be read, stays in the note.
     attached.push({ ...report, evidence: await evidenceOf(api, repo, token, run) })
     const workflow = run.actions ? runIdOf(run.url) : undefined
-    const siblings = workflow ? await siblingsOf(api, repo, token, runs, workflow, requiredIds) : []
+    // Siblings are looked at only when the required job names no error of the work itself.
+    const own = attached[attached.length - 1].evidence
+    const says = own !== undefined && 'lines' in own && own.lines.length > 0
+    const siblings =
+      workflow && !says ? await siblingsOf(api, repo, token, runs, workflow, requiredIds) : []
     for (const sibling of siblings) {
       if (extra.has(sibling.id)) continue
       extra.set(sibling.id, {

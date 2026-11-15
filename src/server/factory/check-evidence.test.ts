@@ -231,10 +231,10 @@ describe('attachEvidence', () => {
         actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
         actionsRun({ id: 3, name: 'validate', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
       ],
-      logs: { 1: '##[error]Job validate failed', 3: DOC_LOG },
+      logs: { 1: AGGREGATE_LOG, 3: DOC_LOG },
     })
 
-    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI', 'Job validate failed')])
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
 
     expect(failed[0]).toMatchObject({ name: 'CI', evidence: { lines: expect.any(Array) } })
     expect(failed[1]).toMatchObject({
@@ -257,6 +257,20 @@ describe('attachEvidence', () => {
       notRequired: true,
       evidence: { unreadable: 'GitHub answered 410 reading job 4' },
     })
+  })
+
+  it('leaves the siblings out when the required job names the error of the work', async () => {
+    const { api } = fakeApi({
+      runs: [
+        actionsRun({ id: 1, name: 'CI', url: 'https://github.com/o/r/actions/runs/5/job/1' }),
+        actionsRun({ id: 3, name: 'Lint', url: 'https://github.com/o/r/actions/runs/5/job/3' }),
+      ],
+      logs: { 1: DOC_LOG, 3: TYPE_TESTS_LOG },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+
+    expect(failed).toHaveLength(1)
   })
 
   it('keeps the unreadable status of a required job whose run has a failed sibling', async () => {

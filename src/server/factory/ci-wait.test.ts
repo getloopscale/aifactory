@@ -252,6 +252,17 @@ describe('readRequired', () => {
 })
 
 describe('checksFeedback', () => {
+  it('keeps the evidence and step of the first reports when many failed jobs do not all fit', () => {
+    const many = Array.from({ length: 25 }, (_, i) => ({
+      ...report(`matrix job ${i} with a long name`, 'failure', ''),
+      evidence: { lines: [`error line ${i}`], step: { name: `step ${i}`, command: `cmd ${i}` } },
+    }))
+    const note = checksFeedback(VERIFIED, many)
+    expect(note).toContain('error line 0')
+    expect(note).toContain('Step that exited: step 0')
+    expect(note.length).toBeLessThanOrEqual(4_000)
+  })
+
   it('names each failed check with its link and the end of what it reported', () => {
     const note = checksFeedback(VERIFIED, [report('CI', 'failure', 'x'.repeat(5_000) + 'END')])
     expect(note).toContain('abc1234')
@@ -267,8 +278,9 @@ describe('checksFeedback', () => {
     const note = checksFeedback(VERIFIED, failed)
     expect(note.length).toBeLessThanOrEqual(4_000)
     expect(note).toContain('- check-29:')
-    // Too many to quote: the checks and their links are what fits.
-    expect(note).not.toContain('~~~~')
+    // Too many to quote all: the first are quoted, the rest are in the list with their links.
+    expect(note).toContain('check-0:\n~~~~text')
+    expect(note).not.toContain('check-29:\n~~~~text')
   })
 
   it('cuts even the list of checks when it alone is longer than a note', () => {

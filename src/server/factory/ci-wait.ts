@@ -220,10 +220,15 @@ export function checksFeedback(sha: string, failed: FailedReport[]): string {
     `The repository's required checks failed on ${short(sha)}, so the pull request was not merged. Fix what they report:`,
     ...failed.map((r) => `- ${r.name}: ${r.url}${remarks(r)}`),
   ].join('\n')
+  // The reports that say something, in order; when they do not all fit, the last ones are left out (their
+  // names and links stay in the list above) so the first keep their evidence and step.
   const told = failed.filter(said)
-  // Each report gets an equal share of what is left once its frame (`\n\n<name>:\n` and a fence) is counted.
-  const frames = told.reduce((sum, r) => sum + r.name.length + FRAME + stepLine(r).length, 0)
-  const share = Math.floor((NOTE_MAX - head.length - frames) / Math.max(told.length, 1))
+  const shareOf = (list: FailedReport[]) => {
+    const frames = list.reduce((sum, r) => sum + r.name.length + FRAME + stepLine(r).length, 0)
+    return Math.floor((NOTE_MAX - head.length - frames) / Math.max(list.length, 1))
+  }
+  while (told.length > 1 && shareOf(told) < TAIL_MIN) told.pop()
+  const share = shareOf(told)
   if (share < TAIL_MIN) return head.slice(0, NOTE_MAX)
   const quotes = told.map((r) => {
     const text = quote(r, share)
