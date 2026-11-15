@@ -22,7 +22,7 @@ const fact = (
   hour: number,
   round = 1,
   model: string | null = null,
-): ReviewFact => ({ taskId, reviewer, model, round, verdict, at: at(hour) })
+): ReviewFact => ({ taskId, reviewer, model, round, verdict, guarded: false, at: at(hour) })
 const event = (stage: TaskStage, hour: number, detail: Record<string, unknown> | null = null) => ({
   stage,
   at: at(hour),
@@ -244,6 +244,16 @@ describe('reworkByReviewer', () => {
     const guarded = { ...fact(1, 'codex', 'changes', 1), guarded: true }
     expect(approvalByReviewer([guarded], events([1, finished(0)]))).toMatchObject([
       { reviewer: 'codex', reviews: 1, approved: 1, share: 1 },
+    ])
+  })
+
+  it('leaves out of the rate a rejection recorded before its cause was, which a guard may have made', () => {
+    // A pre-migration `changes` has guarded null: the reviewer may have approved and a guard overridden it.
+    const old = { ...fact(1, 'codex', 'changes', 1), guarded: null }
+    expect(approvalByReviewer([old], events([1, finished(0)]))).toEqual([])
+    const approved = { ...fact(2, 'codex', 'approve', 1), guarded: null }
+    expect(approvalByReviewer([approved], events([2, finished(0)]))).toMatchObject([
+      { reviewer: 'codex', reviews: 1, approved: 1 },
     ])
   })
 

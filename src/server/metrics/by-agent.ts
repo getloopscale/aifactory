@@ -20,7 +20,7 @@ export type ReviewFact = {
   round: number
   verdict: 'approve' | 'changes' | 'invalid'
   /** The reviewer approved and a guard on the diff overrode it: the stored verdict is `changes`, the reviewer's was approval. */
-  guarded?: boolean
+  guarded?: boolean | null
   at: Date
 }
 
@@ -49,6 +49,8 @@ export function approvalByReviewer(
       if (!terminalOf(run)) continue
       const first = mine.find((r) => inRun(run, r.at))
       if (!first) continue
+      // A rejection from before the cause was recorded may have been a guard over an approval: unknown, left out.
+      if (first.verdict === 'changes' && first.guarded == null) continue
       const key = keyOf(first.reviewer, first.model)
       const t = totals.get(key) ?? { reviews: 0, approved: 0 }
       t.reviews += 1

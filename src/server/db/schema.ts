@@ -139,8 +139,8 @@ export const review = pgTable('review', {
   verdict: text('verdict', { enum: ['approve', 'changes', 'invalid'] }).notNull(),
   summary: text('summary').notNull(),
   findings: jsonb('findings').notNull(),
-  /** The reviewer approved and a fact about the diff turned it into `changes`; `verdict` holds the outcome, this the cause. */
-  guarded: boolean('guarded').notNull().default(false),
+  /** The reviewer approved and a fact about the diff turned it into `changes`; null for a review before this was recorded, whose cause is unknown. */
+  guarded: boolean('guarded'),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
 
@@ -478,12 +478,6 @@ export const plan = pgTable('plan', {
   summary: text('summary').notNull().default(''),
   error: text('error'),
   costUsd: real('cost_usd').notNull().default(0),
-  /** Which agent planned, with the model and effort it ran with and the tokens it reported; null before this was recorded. */
-  agent: text('agent'),
-  model: text('model'),
-  effort: text('effort'),
-  tokensIn: integer('tokens_in'),
-  tokensOut: integer('tokens_out'),
   /** The GitHub milestone the issues were gathered under, once created. */
   milestoneNumber: integer('milestone_number'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

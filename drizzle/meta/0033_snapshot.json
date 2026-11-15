@@ -1284,36 +1284,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "agent": {
-          "name": "agent",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "model": {
-          "name": "model",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "effort": {
-          "name": "effort",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tokens_in": {
-          "name": "tokens_in",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "tokens_out": {
-          "name": "tokens_out",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -2061,6 +2031,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "guarded": {
+          "name": "guarded",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},

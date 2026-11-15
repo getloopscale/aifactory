@@ -111,12 +111,9 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
       .where(eq(plan.id, planId))
 
   let stop: (() => Promise<void>) | undefined
-  // What is known of the planner as soon as it is chosen, so a pass that throws is still on record.
-  let known: Partial<typeof plan.$inferInsert> = {}
   try {
     const config = await loadRepoConfig(db, row.repository)
     const agent = deps.harness(labelsWithRepoChoice([], config))
-    known = { agent: agent.name, model: agent.model ?? null, effort: agent.effort ?? null }
     const { token } = await deps.github.installationToken(row.repository)
     await ensureBranches(deps.api, row.repository, token, {
       integration: integrationBranch(config),
@@ -159,19 +156,10 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
       prompt: planPrompt({ repo: row.repository, goal: row.goal, knowledgeDir: feed.dir }),
     })
     const cost = result.costUsd ?? 0
-    // What ran, on record whatever the outcome: the owner may change the planner afterwards.
-    const ran = {
-      agent: agent.name,
-      model: result.model === undefined ? (agent.model ?? null) : result.model,
-      effort: agent.effort ?? null,
-      tokensIn: result.tokensIn ?? null,
-      tokensOut: result.tokensOut ?? null,
-    }
     if (result.quota) {
       await finish({
         status: 'failed',
         costUsd: cost,
-        ...ran,
         error: `the ${agent.name} quota ran out: ${result.quota.message}`,
       })
       return
@@ -181,15 +169,15 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
       const why = result.ok
         ? 'the agent did not end with a usable plan'
         : `the agent did not finish: ${result.summary}`
-      await finish({ status: 'failed', costUsd: cost, ...ran, error: why.slice(0, 600) })
+      await finish({ status: 'failed', costUsd: cost, error: why.slice(0, 600) })
       return
     }
     await db
       .insert(planItem)
       .values(draft.items.map((item, position) => ({ planId, position, ...item })))
-    await finish({ status: 'ready', summary: draft.summary, costUsd: cost, ...ran })
+    await finish({ status: 'ready', summary: draft.summary, costUsd: cost })
   } catch (error) {
-    await finish({ status: 'failed', ...known, error: message(error).slice(0, 600) })
+    await finish({ status: 'failed', error: message(error).slice(0, 600) })
   } finally {
     await stop?.()
   }
