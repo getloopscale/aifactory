@@ -749,10 +749,7 @@ describe('health metrics', () => {
   it('says when there is nothing to measure yet', async () => {
     serve({
       'GET /api/panel/health': report(),
-      'GET /api/panel/metrics': {
-        rows: [],
-        signals: [],
-      },
+      'GET /api/panel/metrics': { rows: [], signals: [] },
     })
     render(
       <MemoryRouter>
