@@ -139,8 +139,6 @@ export const review = pgTable('review', {
   verdict: text('verdict', { enum: ['approve', 'changes', 'invalid'] }).notNull(),
   summary: text('summary').notNull(),
   findings: jsonb('findings').notNull(),
-  /** The reviewer approved and a fact about the diff turned it into `changes`; null for a review before this was recorded, whose cause is unknown. */
-  guarded: boolean('guarded'),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
 

@@ -997,8 +997,6 @@ export class Run {
       harness: this.builder.name,
       attempt: 1,
       refuted: true,
-      // The reviewer's verdict sent the builder back, so that reviewer is charged for the pass.
-      trigger: 'review',
     })
     const result = await this.settle(this.builder, 'builder', 1, (onEvent) =>
       this.builder.resume!(this.backend, this.sessionId!, {
@@ -1099,7 +1097,6 @@ export class Run {
     attempt: number,
     findings: Finding[],
     failed: CheckResult[],
-    trigger: 'review' | 'checks' | 'guard',
   ): Promise<string> {
     const { deps, taskId, state } = this.c
     const timeoutMs = await this.agentTimeout()
@@ -1108,8 +1105,6 @@ export class Run {
       harness: this.builder.name,
       attempt,
       rework: true,
-      // What sent the work back, so a reviewer is charged only for the rounds its own verdict started.
-      trigger,
     })
     const result = await this.settle(this.builder, 'builder', attempt, (onEvent) =>
       this.builder.resume!(this.backend, this.sessionId!, {
@@ -1243,7 +1238,6 @@ export class Run {
       verdict: blocked ? 'changes' : read.verdict,
       summary: read.summary,
       findings: [...guards, ...outside, ...read.findings],
-      ...(blocked ? { guarded: true as const } : {}),
     }
     await deps.db.insert(reviewTable).values({
       taskId,
@@ -1253,7 +1247,6 @@ export class Run {
       verdict: merged.verdict,
       summary: merged.summary,
       findings: merged.findings,
-      guarded: blocked,
     })
     return merged
   }
@@ -1564,7 +1557,7 @@ export class Run {
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''
           throw new StageFailure(`no pull request: ${checked.verdict.reasons.join('; ')}${after}`)
         }
-        sha = await this.rework(attempt + 1, [], failingChecks(checked.results), 'checks')
+        sha = await this.rework(attempt + 1, [], failingChecks(checked.results))
         continue
       }
 
@@ -1574,12 +1567,7 @@ export class Run {
       const mayRework =
         this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
       if (outcome.verdict === 'changes' && mayRework) {
-        sha = await this.rework(
-          attempt + 1,
-          outcome.findings,
-          [],
-          outcome.guarded ? 'guard' : 'review',
-        )
+        sha = await this.rework(attempt + 1, outcome.findings, [])
         continue
       }
       return this.handOver(sha, attempt, checked.here, outcome, counts)

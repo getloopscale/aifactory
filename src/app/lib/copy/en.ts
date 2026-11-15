@@ -118,17 +118,6 @@ export const en = {
     passed: 'passed',
     checkFailed: 'failed',
   },
-  byReviewer: {
-    title: 'By reviewer',
-    reviewer: 'Reviewer',
-    approval: 'Approved on the first review',
-    rework: 'Rework rounds it asked for',
-    cost: 'Cost of a delivery it reviewed',
-    reworkValue: (rounds: number, reviews: number) => `${rounds} in ${reviews} reviews`,
-    unknownCost: (runs: number) => `unknown (${runs} runs)`,
-    knownCost: (usd: string, reported: number, delivered: number) =>
-      `$${usd} (${reported}/${delivered} runs)`,
-  },
   time: {
     secondsAgo: (n: number) => `${n}s ago`,
     minutesAgo: (n: number) => `${n}m ago`,

@@ -1,10 +1,11 @@
+import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { repository } from '../db/schema'
+import { repository, setting } from '../db/schema'
 import { ActionRefused } from '../panel/actions'
 import { changeAgentSettings } from '../panel/agent-settings'
 
@@ -340,14 +341,21 @@ describe('the history of the agent settings', () => {
     }
   })
 
-  it('keeps concurrent saves in the order of their ids and their times', async () => {
+  it('keeps two concurrent changes of the reviewer, in the order they were applied', async () => {
     await Promise.all([
-      saveChosen(getDb(), { reviewer: 'codex' }, ready),
-      saveChosen(getDb(), { builder: 'codex' }, ready),
-      saveChosen(getDb(), { planner: 'codex' }, ready),
+      changeAgentSettings(getDb(), { reviewer: 'claude-code' }, ready),
+      changeAgentSettings(getDb(), { reviewer: 'codex' }, ready),
     ])
-    const times = (await listSettingChanges(getDb())).map((c) => Date.parse(c.at))
-    expect(times).toHaveLength(3)
-    expect(times).toEqual([...times].sort((a, b) => a - b))
+
+    const changes = await listSettingChanges(getDb())
+
+    expect(changes).toHaveLength(2)
+    // Applied one after the other: the second replaced what the first set, and it is dated no earlier.
+    expect(changes[0].oldValue).toBeNull()
+    expect(changes[1].oldValue).toBe(changes[0].newValue)
+    expect(new Set(changes.map((c) => c.newValue))).toEqual(new Set(['claude-code', 'codex']))
+    expect(Date.parse(changes[1].at)).toBeGreaterThanOrEqual(Date.parse(changes[0].at))
+    const [stored] = await getDb().select().from(setting).where(eq(setting.key, 'agent.reviewer'))
+    expect(stored.value).toBe(changes[1].newValue)
   })
 })

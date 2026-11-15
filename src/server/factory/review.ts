@@ -11,8 +11,6 @@ export type ReviewVerdict = {
   verdict: 'approve' | 'changes' | 'invalid'
   summary: string
   findings: Finding[]
-  /** The reviewer approved and a fact about the diff overrode it: the guard, not the reviewer, asks for the changes. */
-  guarded?: true
 }
 
 /** The reviews a task gets before it goes to a person, counting the first one. */

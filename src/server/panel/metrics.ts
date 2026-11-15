@@ -4,7 +4,6 @@ import type { Database } from '../db'
 import { metricPoint, metricSignal } from '../db/schema'
 import { evaluate, strongest, type Point } from '../metrics/bands'
 import { BANDS, METRIC_NAMES, METRICS, type BandConfig, type MetricName } from '../metrics/config'
-import { comparisonByAgent } from '../metrics/by-agent'
 import { firstDay } from '../metrics/measure'
 import { ALL_REPOSITORIES } from '../metrics/series'
 import type { MetricBand, MetricRow, MetricsReport, MetricSignalView } from '../../shared/panel'
@@ -90,5 +89,5 @@ export async function metricsReport(
     issueUrl: s.issueUrl,
     error: s.error,
   }))
-  return { rows, signals, byAgent: await comparisonByAgent(db) }
+  return { rows, signals }
 }

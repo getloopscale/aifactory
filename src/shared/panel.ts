@@ -200,53 +200,7 @@ export type MetricSignalView = {
   error: string | null
 }
 
-/** What each builder's runs needed: the rework rounds after its first builds. */
-export type BuilderRework = {
-  builder: string
-  runs: number
-  reworkRounds: number
-  /** reworkRounds / runs. */
-  perRun: number
-}
-
-/** What each reviewer's verdicts caused: the rework rounds that followed their reviews. */
-export type ReviewerRework = {
-  reviewer: string
-  model: string | null
-  reviews: number
-  reworkRounds: number
-  /** reworkRounds / reviews. */
-  perReview: number
-}
-
-/** What a delivered run cost with an agent and model in it. A null model is the agent's own default. */
-export type AgentDeliveryCost = {
-  agent: string
-  model: string | null
-  deliveredRuns: number
-  /** How many of them have a cost for every pass of this agent; the rest are unknown, never zero. */
-  reportedRuns: number
-  /** The cost of the reported runs. */
-  costUsd: number
-  /** costUsd / reportedRuns; null when no run reported a cost. */
-  perDelivery: number | null
-}
-
-/** The indicators the factory keeps, split by agent, so a change of agent can be compared with what came before. */
-export type AgentComparison = {
-  approval: ReviewerApproval[]
-  rework: BuilderRework[]
-  reviewerRework: ReviewerRework[]
-  cost: AgentDeliveryCost[]
-  /** The whole cost of a delivered run, for the agent and model that reviewed it. */
-  reviewerCost: AgentDeliveryCost[]
-}
-
-export type MetricsReport = {
-  rows: MetricRow[]
-  signals: MetricSignalView[]
-  byAgent: AgentComparison
-}
+export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
 
 export type HealthReport = {
   cost: {
@@ -702,17 +656,6 @@ export type AgentSettingChange = {
   newValue: string | null
   actor: string
   at: string
-}
-
-/** How the first review of each run went, for the agent that did it. */
-export type ReviewerApproval = {
-  reviewer: string
-  /** The model the reviews ran with; null when none was recorded. */
-  model: string | null
-  reviews: number
-  approved: number
-  /** approved / reviews. */
-  share: number
 }
 
 /** A model a coding agent can be told to use, and the effort levels it takes. */

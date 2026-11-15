@@ -1,6 +1,5 @@
-import type { AgentComparison, MetricBand, MetricRow, MetricsReport } from '../../shared/panel'
+import type { MetricBand, MetricRow, MetricsReport } from '../../shared/panel'
 import { metricValue } from '../lib/format'
-import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 
 const BAND: Record<MetricBand, { label: string; className: string }> = {
@@ -16,66 +15,6 @@ const where = (repository: string) => (repository === '*' ? 'All repositories' :
 function baseline(row: MetricRow): string {
   if (row.mean === null || row.sd === null) return '—'
   return `${metricValue(row.mean, row.unit)} ± ${metricValue(row.sd, row.unit)}`
-}
-
-const who = (agent: string, model: string | null) => (model ? `${agent} · ${model}` : agent)
-const percent = (share: number) => `${Math.round(share * 100)}%`
-
-/** What the reviewers did, one row for each agent and model that reviewed, so a change of reviewer can be compared. */
-function ByReviewer({ data }: { data: AgentComparison }) {
-  const { t } = useCopy()
-  const w = t.byReviewer
-  if (
-    data.approval.length === 0 &&
-    data.reviewerRework.length === 0 &&
-    data.reviewerCost.length === 0
-  )
-    return null
-  const rows = new Map<string, { label: string; cells: Record<string, string> }>()
-  const put = (agent: string, model: string | null, cell: string, value: string) => {
-    const key = JSON.stringify([agent, model])
-    const row = rows.get(key) ?? { label: who(agent, model), cells: {} }
-    row.cells[cell] = value
-    rows.set(key, row)
-  }
-  for (const a of data.approval)
-    put(a.reviewer, a.model, 'approval', `${percent(a.share)} (${a.approved}/${a.reviews})`)
-  for (const r of data.reviewerRework)
-    put(r.reviewer, r.model, 'rework', w.reworkValue(r.reworkRounds, r.reviews))
-  for (const c of data.reviewerCost)
-    put(
-      c.agent,
-      c.model,
-      'cost',
-      c.perDelivery === null
-        ? w.unknownCost(c.deliveredRuns)
-        : w.knownCost(c.perDelivery.toFixed(2), c.reportedRuns, c.deliveredRuns),
-    )
-  return (
-    <div className="mt-4">
-      <h3 className="mb-2 text-sm font-semibold">{w.title}</h3>
-      <table className="w-full text-left text-sm">
-        <thead className="text-xs text-muted-foreground">
-          <tr>
-            <th className="py-1 pr-3">{w.reviewer}</th>
-            <th className="py-1 pr-3">{w.approval}</th>
-            <th className="py-1 pr-3">{w.rework}</th>
-            <th className="py-1 pr-3">{w.cost}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {[...rows.entries()].map(([key, row]) => (
-            <tr key={key} className="border-t border-border">
-              <td className="py-1 pr-3 font-medium">{row.label}</td>
-              <td className="py-1 pr-3">{row.cells.approval ?? '—'}</td>
-              <td className="py-1 pr-3">{row.cells.rework ?? '—'}</td>
-              <td className="py-1 pr-3">{row.cells.cost ?? '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
 }
 
 /** The factory's own indicators, each latest day against its control band, and the signals worth a look. */
@@ -120,7 +59,6 @@ export function MetricsSection() {
           </tbody>
         </table>
       )}
-      {data ? <ByReviewer data={data.byAgent} /> : null}
       {data && data.signals.length > 0 ? (
         <ul className="mt-3 space-y-1 text-sm">
           {data.signals.map((s) => (
