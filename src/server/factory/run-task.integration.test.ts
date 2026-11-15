@@ -22,7 +22,7 @@ import {
   watch,
 } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import { createGithubApi, type ChangedFile, type IssueComment } from '../github/pulls'
+import type { ChangedFile, IssueComment } from '../github/pulls'
 
 import { retryableFailure } from '../../shared/panel'
 import {
@@ -452,27 +452,7 @@ describe('runTask', () => {
     expect(await getDb().select().from(evidence).where(eq(evidence.taskId, id))).toHaveLength(1)
   })
 
-  it('goes on when GitHub answers 502 once creating the check run', async () => {
-    const id = await seedTask()
-    let tries = 0
-    const flaky = createGithubApi(
-      async () => {
-        tries += 1
-        return new Response(tries === 1 ? '{"message":"Server Error"}' : '{}', {
-          status: tries === 1 ? 502 : 201,
-        })
-      },
-      async () => {},
-    )
-    const api = Object.assign(githubApi, { createCheckRun: flaky.createCheckRun })
-
-    const result = await runTask(deps(new FakeSandbox(changed()), { githubApi: api }), id)
-
-    expect(tries).toBe(2)
-    expect(result).toMatchObject({ status: 'done' })
-  })
-
-  it('fails as an environment failure that retries when GitHub keeps answering 502', async () => {
+  it('fails as an environment failure that retries when a call that changes something answers 502', async () => {
     const id = await seedTask()
     githubApi.fail(
       'createCheckRun',

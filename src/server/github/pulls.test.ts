@@ -1,11 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { retryableFailure } from '../../shared/panel'
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
 
 type Call = { method: string; url: string; body?: unknown; auth?: string }
-
-const noWait = async () => {}
 
 type Answer = { status: number; body?: unknown }
 
@@ -21,7 +18,7 @@ function fakeFetch(answers: Record<string, Answer | Answer[]>) {
       auth: (init.headers as Record<string, string>).authorization,
     })
     const given = answers[`${method} ${path.split('?')[0]}`] ?? { status: 404 }
-    const answer = Array.isArray(given) ? (given.length > 1 ? given.shift()! : given[0]!) : given
+    const answer = Array.isArray(given) ? (given.length > 1 ? given.shift()! : given[0]) : given
     // A 204 has no body, and the Response constructor refuses one.
     return new Response(answer.status === 204 ? null : JSON.stringify(answer.body ?? {}), {
       status: answer.status,
@@ -34,7 +31,7 @@ describe('createCheckRun', () => {
   it('reports a completed check on the SHA with the conclusion', async () => {
     const { fetch, calls } = fakeFetch({ 'POST /check-runs': { status: 201 } })
 
-    await createGithubApi(fetch).createCheckRun('o/r', 'tok', {
+    await createGithubApi(fetch, async () => {}).createCheckRun('o/r', 'tok', {
       name: 'aifactory/verify',
       headSha: 'abc',
       conclusion: 'failure',
@@ -58,7 +55,7 @@ describe('createCheckRun', () => {
   it('throws with the status when GitHub refuses', async () => {
     const { fetch } = fakeFetch({ 'POST /check-runs': { status: 403, body: { message: 'nope' } } })
     await expect(
-      createGithubApi(fetch).createCheckRun('o/r', 't', {
+      createGithubApi(fetch, async () => {}).createCheckRun('o/r', 't', {
         name: 'n',
         headSha: 'a',
         conclusion: 'success',
@@ -69,7 +66,7 @@ describe('createCheckRun', () => {
   })
 })
 
-describe('createCheckRun on a 5xx', () => {
+describe('a 5xx from GitHub', () => {
   const check = {
     name: 'n',
     headSha: 'a',
@@ -77,121 +74,65 @@ describe('createCheckRun on a 5xx', () => {
     title: 't',
     summary: 's',
   }
+  const noWait = async () => {}
 
-  it('calls again after a 502 and goes on', async () => {
+  it('repeats a read that answers 502 and goes on', async () => {
     const { fetch, calls } = fakeFetch({
-      'POST /check-runs': [{ status: 502, body: { message: 'Server Error' } }, { status: 201 }],
+      'GET /git/ref/heads/b': [{ status: 502 }, { status: 200, body: { object: { sha: 'abc' } } }],
     })
     const pauses: number[] = []
-    await createGithubApi(fetch, async (ms) => void pauses.push(ms)).createCheckRun(
+    const sha = await createGithubApi(fetch, async (ms) => void pauses.push(ms)).branchHead(
       'o/r',
       't',
-      check,
+      'b',
     )
+    expect(sha).toBe('abc')
     expect(calls).toHaveLength(2)
     expect(pauses).toHaveLength(1)
   })
 
-  it('throws the 502 when every try gets it', async () => {
+  it('sends a call that changes something once and names the 5xx', async () => {
     const { fetch, calls } = fakeFetch({
       'POST /check-runs': { status: 502, body: { message: 'Server Error' } },
     })
+    await expect(createGithubApi(fetch, noWait).createCheckRun('o/r', 't', check)).rejects.toThrow(
+      /GitHub answered 502 creating the check run on o\/r.*Server Error/,
+    )
+    expect(calls).toHaveLength(1)
+  })
+
+  it('names the 5xx of a GraphQL mutation the same way, without repeating it', async () => {
+    let graphql = 0
+    const fetch = async (url: string) => {
+      if (url.endsWith('/graphql')) {
+        graphql += 1
+        return new Response('{}', { status: 502 })
+      }
+      return new Response(JSON.stringify({ node_id: 'n' }), { status: 200 })
+    }
     await expect(
-      createGithubApi(fetch, async () => {}).createCheckRun('o/r', 't', check),
-    ).rejects.toThrow(/GitHub answered 502 creating the check run on o\/r.*Server Error/)
-    expect(calls.length).toBeGreaterThan(1)
-  })
-
-  it('repeats a read that gets a 502', async () => {
-    const { fetch, calls } = fakeFetch({
-      'GET /pulls/3': [{ status: 502 }, { status: 200, body: { node_id: 'n' } }],
-    })
-    await createGithubApi(fetch, noWait)
-      .readPullRequest('o/r', 't', 3)
-      .catch(() => undefined)
-    expect(calls.filter((c) => c.url === '/pulls/3').length).toBeGreaterThan(1)
-  })
-
-  it('takes a new comment with the same text that a 502 posted, not an older one', async () => {
-    const { fetch, calls } = fakeFetch({
-      'POST /issues/3/comments': { status: 502 },
-      'GET /issues/3/comments': [
-        { status: 200, body: [{ id: 5, body: 'hi' }] },
-        {
-          status: 200,
-          body: [
-            { id: 5, body: 'hi' },
-            { id: 9, body: 'hi' },
-          ],
-        },
-      ],
-    })
-    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('9')
-    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
-  })
-
-  it('posts the comment again when the 502 posted nothing', async () => {
-    const { fetch, calls } = fakeFetch({
-      'POST /issues/3/comments': [{ status: 502 }, { status: 201, body: { id: 4 } }],
-      'GET /issues/3/comments': { status: 200, body: [{ id: 5, body: 'hi' }] },
-    })
-    expect(await createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi')).toBe('4')
-    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
-  })
-
-  it('fails with the 502 after the tries when no new comment shows', async () => {
-    const { fetch } = fakeFetch({
-      'POST /issues/3/comments': { status: 502 },
-      'GET /issues/3/comments': { status: 200, body: [] },
-    })
-    await expect(
-      createGithubApi(fetch, noWait).commentOnIssue('o/r', 't', 3, 'hi'),
+      createGithubApi(fetch, noWait).markReadyForReview('o/r', 't', 3, 'T'),
     ).rejects.toThrow(/GitHub answered 502/)
+    expect(graphql).toBe(1)
   })
 
-  it('does not repeat a merge of branches or a release that GitHub answers 502', async () => {
-    const merge = fakeFetch({ 'POST /merges': { status: 502 } })
+  it('does not repeat a merge that answers 502', async () => {
+    const { fetch, calls } = fakeFetch({ 'PUT /pulls/3/merge': { status: 502 } })
     await expect(
-      createGithubApi(merge.fetch, noWait).mergeBranch('o/r', 't', 'd', 'x'),
-    ).rejects.toThrow(/502/)
-    expect(merge.calls).toHaveLength(1)
+      createGithubApi(fetch, noWait).mergePullRequest('o/r', 't', 3, 'abc', {
+        method: 'merge',
+      } as never),
+    ).rejects.toThrow(/GitHub answered 502/)
+    expect(calls).toHaveLength(1)
   })
 
-  it('finds the pull request a 502 opened instead of opening it twice', async () => {
+  it('fails a 4xx at once, with what GitHub said', async () => {
     const { fetch, calls } = fakeFetch({
-      'GET /pulls': [
-        { status: 200, body: [] },
-        { status: 200, body: [{ number: 5, html_url: 'https://github.com/o/r/pull/5' }] },
-      ],
-      'GET /': { status: 200, body: { default_branch: 'trunk' } },
-      'POST /pulls': { status: 502 },
+      'GET /git/ref/heads/b': { status: 403, body: { message: 'nope' } },
     })
-    const opened = await createGithubApi(fetch, noWait).openPullRequest('o/r', 't', {
-      head: 'factory/1',
-      title: 'T',
-      body: 'B',
-    })
-    expect(opened).toMatchObject({ number: 5 })
-    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1)
-  })
-
-  it('takes a branch a 502 created as created', async () => {
-    const { fetch } = fakeFetch({
-      'POST /git/refs': [{ status: 502 }, { status: 422 }],
-      'GET /git/ref/heads/workspace': { status: 200, body: { object: { sha: 'abc' } } },
-    })
-    await expect(
-      createGithubApi(fetch, noWait).createBranch('o/r', 't', 'workspace', 'abc'),
-    ).resolves.toBeUndefined()
-  })
-
-  it('does not repeat a 4xx', async () => {
-    const { fetch, calls } = fakeFetch({
-      'POST /check-runs': { status: 422, body: { message: 'bad sha' } },
-    })
-    await expect(
-      createGithubApi(fetch, async () => {}).createCheckRun('o/r', 't', check),
-    ).rejects.toThrow(/422.*bad sha/)
+    await expect(createGithubApi(fetch, noWait).branchHead('o/r', 't', 'b')).rejects.toThrow(
+      /403.*nope/,
+    )
     expect(calls).toHaveLength(1)
   })
 })
@@ -209,7 +150,7 @@ describe('openPullRequest', () => {
       },
     })
 
-    const result = await createGithubApi(fetch).openPullRequest('o/r', 'tok', pull)
+    const result = await createGithubApi(fetch, async () => {}).openPullRequest('o/r', 'tok', pull)
 
     expect(result).toEqual({ number: 5, url: 'https://github.com/o/r/pull/5' })
     expect(calls.at(-1)?.body).toEqual({
@@ -231,7 +172,10 @@ describe('openPullRequest', () => {
       },
     })
 
-    await createGithubApi(fetch).openPullRequest('o/r', 'tok', { ...pull, base: 'develop' })
+    await createGithubApi(fetch, async () => {}).openPullRequest('o/r', 'tok', {
+      ...pull,
+      base: 'develop',
+    })
 
     expect((calls.at(-1)?.body as { base: string }).base).toBe('develop')
     expect(calls.map((c) => `${c.method} ${c.url}`).some((c) => c.endsWith('/repos/o/r'))).toBe(
@@ -249,7 +193,10 @@ describe('openPullRequest', () => {
       },
     })
 
-    await createGithubApi(fetch).openPullRequest('o/r', 'tok', { ...pull, draft: true })
+    await createGithubApi(fetch, async () => {}).openPullRequest('o/r', 'tok', {
+      ...pull,
+      draft: true,
+    })
 
     expect((calls.at(-1)?.body as { draft: boolean }).draft).toBe(true)
   })
@@ -262,7 +209,7 @@ describe('openPullRequest', () => {
       },
     })
 
-    const result = await createGithubApi(fetch).openPullRequest('o/r', 'tok', pull)
+    const result = await createGithubApi(fetch, async () => {}).openPullRequest('o/r', 'tok', pull)
 
     expect(result.number).toBe(3)
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
@@ -283,7 +230,7 @@ describe('openPullRequest', () => {
       },
     })
 
-    const result = await createGithubApi(fetch).openPullRequest('o/r', 'tok', pull)
+    const result = await createGithubApi(fetch, async () => {}).openPullRequest('o/r', 'tok', pull)
 
     expect(result).toEqual({
       number: 3,
@@ -327,7 +274,7 @@ describe('markReadyForReview', () => {
       },
     })
 
-    await createGithubApi(fetch).markReadyForReview('o/r', 'tok', 12, 'Fix it')
+    await createGithubApi(fetch, async () => {}).markReadyForReview('o/r', 'tok', 12, 'Fix it')
 
     const graphql = calls.filter((c) => c.url.includes('graphql'))
     expect(graphql).toHaveLength(1)
@@ -350,49 +297,9 @@ describe('markReadyForReview', () => {
       },
     })
 
-    await expect(createGithubApi(fetch).markReadyForReview('o/r', 't', 12, 'T')).rejects.toThrow(
-      /o\/r#12 ready for review: Resource not accessible by integration/,
-    )
-  })
-})
-
-describe('a GraphQL call GitHub keeps failing with a 5xx', () => {
-  it('fails with an error that retryableFailure takes for the environment', async () => {
-    const { fetch, calls } = fakeFetch({
-      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
-      'POST https://api.github.com/graphql': { status: 500 },
-    })
-    const error = await createGithubApi(fetch, noWait)
-      .markReadyForReview('o/r', 't', 12, 'T')
-      .catch((e: Error) => e)
-    expect(error).toBeInstanceOf(Error)
-    expect(retryableFailure({ error: (error as Error).message })).toBe('environment')
-    expect(calls.filter((c) => c.url.includes('graphql')).length).toBeGreaterThan(1)
-  })
-
-  it('keeps the 5xx when the body has errors too', async () => {
-    const { fetch } = fakeFetch({
-      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
-      'POST https://api.github.com/graphql': {
-        status: 502,
-        body: { errors: [{ message: 'Something went wrong' }] },
-      },
-    })
-    const error = await createGithubApi(fetch, noWait)
-      .markReadyForReview('o/r', 't', 12, 'T')
-      .catch((e: Error) => e)
-    expect(retryableFailure({ error: (error as Error).message })).toBe('environment')
-  })
-
-  it('does not repeat a revert, which would open a second pull request', async () => {
-    const { fetch, calls } = fakeFetch({
-      'GET /pulls/12': { status: 200, body: { node_id: 'n' } },
-      'POST https://api.github.com/graphql': { status: 502 },
-    })
     await expect(
-      createGithubApi(fetch, noWait).revertPullRequest('o/r', 't', 12, { title: 'T', body: 'B' }),
-    ).rejects.toThrow(/GitHub answered 502/)
-    expect(calls.filter((c) => c.url.includes('graphql'))).toHaveLength(1)
+      createGithubApi(fetch, async () => {}).markReadyForReview('o/r', 't', 12, 'T'),
+    ).rejects.toThrow(/o\/r#12 ready for review: Resource not accessible by integration/)
   })
 })
 
@@ -400,7 +307,7 @@ describe('commentOnIssue', () => {
   it('posts the comment on the issue and throws when GitHub refuses', async () => {
     const ok = fakeFetch({ 'POST /issues/7/comments': { status: 201 } })
     await createGithubApi(ok.fetch).commentOnIssue('o/r', 'tok', 7, 'hello')
-    expect(ok.calls.find((c) => c.method === 'POST')).toMatchObject({
+    expect(ok.calls[0]).toMatchObject({
       method: 'POST',
       url: '/issues/7/comments',
       body: { body: 'hello' },
@@ -449,7 +356,7 @@ describe('releases', () => {
       },
     })
 
-    const made = await createGithubApi(fetch).createRelease('o/r', 'tok', release)
+    const made = await createGithubApi(fetch, async () => {}).createRelease('o/r', 'tok', release)
 
     expect(made).toEqual({
       id: 4,
@@ -469,7 +376,7 @@ describe('releases', () => {
     const { fetch, calls } = fakeFetch({
       'POST /releases': { status: 201, body: { id: 5, tag_name: 'v0.1.0', html_url: 'u' } },
     })
-    await createGithubApi(fetch).createRelease('o/r', 't', {
+    await createGithubApi(fetch, async () => {}).createRelease('o/r', 't', {
       ...release,
       tag: 'v0.1.0',
       prerelease: false,
@@ -489,12 +396,16 @@ describe('releases', () => {
         },
       },
     })
-    expect(await createGithubApi(fetch).createRelease('o/r', 't', release)).toMatchObject({ id: 4 })
+    expect(
+      await createGithubApi(fetch, async () => {}).createRelease('o/r', 't', release),
+    ).toMatchObject({ id: 4 })
   })
 
   it('throws when GitHub refuses for another reason', async () => {
     const { fetch } = fakeFetch({ 'POST /releases': { status: 403, body: { message: 'nope' } } })
-    await expect(createGithubApi(fetch).createRelease('o/r', 't', release)).rejects.toThrow(/403/)
+    await expect(
+      createGithubApi(fetch, async () => {}).createRelease('o/r', 't', release),
+    ).rejects.toThrow(/403/)
   })
 
   it('lists the tags that start with v, by name', async () => {
@@ -513,7 +424,9 @@ describe('releases', () => {
 
   it('throws when GitHub will not list the tags', async () => {
     const { fetch } = fakeFetch({ 'GET /git/matching-refs/tags/v': { status: 403 } })
-    await expect(createGithubApi(fetch).versionTags('o/r', 't')).rejects.toThrow(/403/)
+    await expect(createGithubApi(fetch, async () => {}).versionTags('o/r', 't')).rejects.toThrow(
+      /403/,
+    )
   })
 })
 
@@ -540,7 +453,9 @@ describe('what changed between two branches, and the files of a branch', () => {
       [{ filename: '.changeset/brave-fox.md', status: 'added' }],
     ])
 
-    expect(await createGithubApi(fetch).changedFiles('o/r', 't', 'main', 'develop')).toEqual([
+    expect(
+      await createGithubApi(fetch, async () => {}).changedFiles('o/r', 't', 'main', 'develop'),
+    ).toEqual([
       { path: 'apps/theoclaw/a.ts', status: 'modified' },
       { path: 'b.md', status: 'renamed', previousPath: 'old/b.md' },
       { path: '.changeset/brave-fox.md', status: 'added' },
@@ -556,14 +471,14 @@ describe('what changed between two branches, and the files of a branch', () => {
     const page = Array.from({ length: 300 }, (_, i) => ({ filename: `f${i}`, status: 'added' }))
     const { fetch } = comparePages(Array.from({ length: 10 }, () => page))
     await expect(
-      createGithubApi(fetch).changedFiles('o/r', 't', 'main', 'develop'),
+      createGithubApi(fetch, async () => {}).changedFiles('o/r', 't', 'main', 'develop'),
     ).rejects.toThrow(/main\.\.\.develop on o\/r changes 3000 files or more/)
   })
 
   it('throws when GitHub will not compare the branches', async () => {
     const { fetch } = fakeFetch({ 'GET /compare/main...develop': { status: 404 } })
     await expect(
-      createGithubApi(fetch).changedFiles('o/r', 't', 'main', 'develop'),
+      createGithubApi(fetch, async () => {}).changedFiles('o/r', 't', 'main', 'develop'),
     ).rejects.toThrow(/404 comparing main with develop/)
   })
 
@@ -581,7 +496,7 @@ describe('what changed between two branches, and the files of a branch', () => {
         },
       },
     })
-    expect(await createGithubApi(fetch).filePaths('o/r', 't', 'develop')).toEqual([
+    expect(await createGithubApi(fetch, async () => {}).filePaths('o/r', 't', 'develop')).toEqual([
       'package.json',
       'apps/theoclaw/package.json',
     ])
@@ -592,9 +507,9 @@ describe('what changed between two branches, and the files of a branch', () => {
     const { fetch } = fakeFetch({
       'GET /git/trees/develop': { status: 200, body: { truncated: true, tree: [] } },
     })
-    await expect(createGithubApi(fetch).filePaths('o/r', 't', 'develop')).rejects.toThrow(
-      /truncated/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).filePaths('o/r', 't', 'develop'),
+    ).rejects.toThrow(/truncated/)
   })
 
   it('reads a file at a branch, raw, and nothing when it is not there', async () => {
@@ -607,7 +522,7 @@ describe('what changed between two branches, and the files of a branch', () => {
         ? new Response('{}', { status: 404 })
         : new Response('{"name":"theoclaw"}', { status: 200 })
     }
-    const api = createGithubApi(fetch)
+    const api = createGithubApi(fetch, async () => {})
 
     expect(await api.readFile('o/r', 't', 'apps/the claw/package.json', 'develop')).toBe(
       '{"name":"theoclaw"}',
@@ -620,7 +535,7 @@ describe('what changed between two branches, and the files of a branch', () => {
   it('throws when GitHub will not give the file', async () => {
     const { fetch } = fakeFetch({ 'GET /contents/package.json': { status: 403 } })
     await expect(
-      createGithubApi(fetch).readFile('o/r', 't', 'package.json', 'develop'),
+      createGithubApi(fetch, async () => {}).readFile('o/r', 't', 'package.json', 'develop'),
     ).rejects.toThrow(/403 reading package.json at develop/)
   })
 })
@@ -642,7 +557,9 @@ describe('pull request state and merge', () => {
         ],
       },
     })
-    expect(await createGithubApi(fetch).findPullRequest('o/r', 't', 'factory/7')).toEqual({
+    expect(
+      await createGithubApi(fetch, async () => {}).findPullRequest('o/r', 't', 'factory/7'),
+    ).toEqual({
       number: 9,
       url: 'u',
       headSha: 'abc',
@@ -662,7 +579,7 @@ describe('pull request state and merge', () => {
       'PUT /pulls/9/merge': { status: 200, body: { sha: 'merge1' } },
     })
     expect(
-      await createGithubApi(fetch).mergePullRequest('o/r', 't', 9, 'abc', {
+      await createGithubApi(fetch, async () => {}).mergePullRequest('o/r', 't', 9, 'abc', {
         method: 'squash',
         title: 'T',
       }),
@@ -677,7 +594,7 @@ describe('pull request state and merge', () => {
       'PUT /pulls/9/merge': { status: 200, body: { sha: 'merge1' } },
     })
 
-    await createGithubApi(fetch).mergePullRequest('o/r', 't', 9, 'abc', {
+    await createGithubApi(fetch, async () => {}).mergePullRequest('o/r', 't', 9, 'abc', {
       method: 'squash',
       title: 'Fix the parser (#4)',
     })
@@ -695,7 +612,9 @@ describe('pull request state and merge', () => {
       'PUT /pulls/9/merge': { status: 200, body: { sha: 'merge1' } },
     })
 
-    await createGithubApi(fetch).mergePullRequest('o/r', 't', 9, 'abc', { method: 'merge' })
+    await createGithubApi(fetch, async () => {}).mergePullRequest('o/r', 't', 9, 'abc', {
+      method: 'merge',
+    })
 
     expect(calls[0].body).toEqual({ sha: 'abc', merge_method: 'merge' })
   })
@@ -705,7 +624,7 @@ describe('pull request state and merge', () => {
       'PUT /pulls/9/merge': { status: 409, body: { message: 'Head branch was modified' } },
     })
     await expect(
-      createGithubApi(fetch).mergePullRequest('o/r', 't', 9, 'abc', {
+      createGithubApi(fetch, async () => {}).mergePullRequest('o/r', 't', 9, 'abc', {
         method: 'squash',
         title: 'T',
       }),
@@ -715,9 +634,7 @@ describe('pull request state and merge', () => {
   // Each answer in turn, the last one repeated: a merge that GitHub refuses for a moment, then takes.
   function answering(...answers: { status: number; body: unknown }[]) {
     let merges = 0
-    const fetch = async (_url: string, init: RequestInit = {}) => {
-      // The read of the pull request after a 5xx finds it not merged.
-      if (init.method !== 'PUT') return new Response('{}', { status: 200 })
+    const fetch = async () => {
       const answer = answers[Math.min(merges, answers.length - 1)]
       merges += 1
       return new Response(JSON.stringify(answer.body), { status: answer.status })
@@ -745,22 +662,6 @@ describe('pull request state and merge', () => {
 
     expect(merged).toEqual({ sha: 'merge1' })
     expect(github.merges()).toBe(2)
-  })
-
-  it('merges on a later try when GitHub answers a server error', async () => {
-    const github = answering(
-      { status: 502, body: { message: 'Bad Gateway' } },
-      { status: 500, body: { message: 'Server Error' } },
-      { status: 200, body: { sha: 'merge1' } },
-    )
-
-    expect(
-      await createGithubApi(github.fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
-        method: 'squash',
-        title: 'T',
-      }),
-    ).toEqual({ sha: 'merge1' })
-    expect(github.merges()).toBe(3)
   })
 
   it('gives up after a few tries and says what GitHub answered last', async () => {
@@ -797,7 +698,7 @@ describe('commitChecks', () => {
       },
       'GET /commits/abc/status': { status: 200, body: { state: 'pending', total_count: 2 } },
     })
-    expect(await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')).toEqual({
+    expect(await createGithubApi(fetch, async () => {}).commitChecks('o/r', 't', 'abc')).toEqual({
       checkRuns: [{ name: 'ci', status: 'completed', conclusion: 'failure' }],
       statuses: 'pending',
     })
@@ -809,7 +710,7 @@ describe('commitChecks', () => {
       'GET /commits/abc/check-runs': { status: 200, body: { check_runs: [] } },
       'GET /commits/abc/status': { status: 200, body: { state: 'pending', total_count: 0 } },
     })
-    expect(await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')).toEqual({
+    expect(await createGithubApi(fetch, async () => {}).commitChecks('o/r', 't', 'abc')).toEqual({
       checkRuns: [],
       statuses: 'none',
     })
@@ -834,7 +735,12 @@ describe('revertPullRequest', () => {
       },
     })
 
-    const made = await createGithubApi(fetch).revertPullRequest('o/r', 'tok', 12, revert)
+    const made = await createGithubApi(fetch, async () => {}).revertPullRequest(
+      'o/r',
+      'tok',
+      12,
+      revert,
+    )
 
     expect(made).toEqual({ number: 41, url: 'https://github.com/o/r/pull/41' })
     const graphql = calls.find((c) => c.url.includes('graphql'))!
@@ -856,16 +762,16 @@ describe('revertPullRequest', () => {
         body: { errors: [{ message: 'Pull request is not merged' }] },
       },
     })
-    await expect(createGithubApi(fetch).revertPullRequest('o/r', 't', 12, revert)).rejects.toThrow(
-      /would not open a revert of o\/r#12: Pull request is not merged/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).revertPullRequest('o/r', 't', 12, revert),
+    ).rejects.toThrow(/would not open a revert of o\/r#12: Pull request is not merged/)
   })
 })
 
 describe('the branches of a repository', () => {
   it('reads the default branch', async () => {
     const { fetch } = fakeFetch({ 'GET /': { status: 200, body: { default_branch: 'trunk' } } })
-    expect(await createGithubApi(fetch).defaultBranch('o/r', 'tok')).toBe('trunk')
+    expect(await createGithubApi(fetch, async () => {}).defaultBranch('o/r', 'tok')).toBe('trunk')
   })
 
   it('reads where a branch is, and says a missing one is missing instead of failing', async () => {
@@ -873,7 +779,7 @@ describe('the branches of a repository', () => {
       'GET /git/ref/heads/release/1': { status: 200, body: { object: { sha: 'abc' } } },
       'GET /git/ref/heads/gone': { status: 404, body: { message: 'Not Found' } },
     })
-    const api = createGithubApi(fetch)
+    const api = createGithubApi(fetch, async () => {})
     expect(await api.branchHead('o/r', 'tok', 'release/1')).toBe('abc')
     expect(await api.branchHead('o/r', 'tok', 'gone')).toBeUndefined()
     expect(calls[0].url).toContain('/git/ref/heads/release/1')
@@ -889,7 +795,7 @@ describe('the branches of a repository', () => {
       },
     })
 
-    const ahead = await createGithubApi(fetch).branchAhead(
+    const ahead = await createGithubApi(fetch, async () => {}).branchAhead(
       'o/r',
       'tok',
       'main',
@@ -910,7 +816,12 @@ describe('the branches of a repository', () => {
     })
 
     expect(
-      await createGithubApi(fetch).branchAhead('o/r', 'tok', 'main', 'changeset-release/main'),
+      await createGithubApi(fetch, async () => {}).branchAhead(
+        'o/r',
+        'tok',
+        'main',
+        'changeset-release/main',
+      ),
     ).toBeUndefined()
     expect(calls).toHaveLength(1)
   })
@@ -929,34 +840,23 @@ describe('the branches of a repository', () => {
     }).fetch
 
     await expect(
-      createGithubApi(noCompare, noWait).branchAhead('o/r', 't', 'main', 'b'),
+      createGithubApi(noCompare, async () => {}).branchAhead('o/r', 't', 'main', 'b'),
     ).rejects.toThrow(/500/)
     await expect(
-      createGithubApi(noCommit, noWait).branchAhead('o/r', 't', 'main', 'b'),
+      createGithubApi(noCommit, async () => {}).branchAhead('o/r', 't', 'main', 'b'),
     ).rejects.toThrow(/500/)
   })
 
   it('fails on any other answer when reading a branch', async () => {
     const { fetch } = fakeFetch({ 'GET /git/ref/heads/x': { status: 500, body: 'boom' } })
-    await expect(createGithubApi(fetch, noWait).branchHead('o/r', 'tok', 'x')).rejects.toThrow(
-      /500/,
-    )
-  })
-
-  it('keeps the 422 of a first try even when the branch is at the commit', async () => {
-    const { fetch, calls } = fakeFetch({
-      'POST /git/refs': { status: 422, body: 'Reference already exists' },
-      'GET /git/ref/heads/w': { status: 200, body: { object: { sha: 'sha' } } },
-    })
     await expect(
-      createGithubApi(fetch, noWait).createBranch('o/r', 'tok', 'w', 'sha'),
-    ).rejects.toThrow(/422/)
-    expect(calls).toHaveLength(1)
+      createGithubApi(fetch, async () => {}).branchHead('o/r', 'tok', 'x'),
+    ).rejects.toThrow(/500/)
   })
 
   it('creates a branch at a commit', async () => {
     const { fetch, calls } = fakeFetch({ 'POST /git/refs': { status: 201, body: {} } })
-    await createGithubApi(fetch).createBranch('o/r', 'tok', 'workspace', 'deadbeef')
+    await createGithubApi(fetch, async () => {}).createBranch('o/r', 'tok', 'workspace', 'deadbeef')
     expect(calls[0].body).toEqual({ ref: 'refs/heads/workspace', sha: 'deadbeef' })
   })
 
@@ -964,16 +864,21 @@ describe('the branches of a repository', () => {
     const { fetch } = fakeFetch({
       'POST /git/refs': { status: 422, body: 'Reference already exists' },
     })
-    await expect(createGithubApi(fetch).createBranch('o/r', 'tok', 'w', 'sha')).rejects.toThrow(
-      /422/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).createBranch('o/r', 'tok', 'w', 'sha'),
+    ).rejects.toThrow(/422/)
   })
 
   it('merges one branch or commit into another and returns where the base is', async () => {
     const { fetch, calls } = fakeFetch({
       'POST /merges': { status: 201, body: { sha: 'merged1' } },
     })
-    const result = await createGithubApi(fetch).mergeBranch('o/r', 'tok', 'develop', 'a'.repeat(40))
+    const result = await createGithubApi(fetch, async () => {}).mergeBranch(
+      'o/r',
+      'tok',
+      'develop',
+      'a'.repeat(40),
+    )
     expect(result).toEqual({ sha: 'merged1', changed: true })
     expect(calls[0].body).toMatchObject({ base: 'develop', head: 'a'.repeat(40) })
   })
@@ -983,7 +888,9 @@ describe('the branches of a repository', () => {
       'POST /merges': { status: 204, body: '' },
       'GET /git/ref/heads/develop': { status: 200, body: { object: { sha: 'head1' } } },
     })
-    expect(await createGithubApi(fetch).mergeBranch('o/r', 'tok', 'develop', 'x')).toEqual({
+    expect(
+      await createGithubApi(fetch, async () => {}).mergeBranch('o/r', 'tok', 'develop', 'x'),
+    ).toEqual({
       sha: 'head1',
       changed: false,
     })
@@ -1009,9 +916,14 @@ describe('what a release with changesets needs to read', () => {
         body: [{ name: 'config.json' }, { name: 'README.md' }, { name: 'brave-fox.md' }],
       },
     })
-    expect(await createGithubApi(fetch).listDirectory('o/r', 't', '.changeset', 'develop')).toEqual(
-      ['config.json', 'README.md', 'brave-fox.md'],
-    )
+    expect(
+      await createGithubApi(fetch, async () => {}).listDirectory(
+        'o/r',
+        't',
+        '.changeset',
+        'develop',
+      ),
+    ).toEqual(['config.json', 'README.md', 'brave-fox.md'])
     expect(calls[0].url).toBe('/contents/.changeset?ref=develop')
     const none = fakeFetch({ 'GET /contents/.changeset': { status: 404 } })
     expect(
@@ -1024,7 +936,7 @@ describe('what a release with changesets needs to read', () => {
       'GET /contents/.changeset': { status: 200, body: { name: '.changeset', type: 'file' } },
     })
     await expect(
-      createGithubApi(fetch).listDirectory('o/r', 't', '.changeset', 'develop'),
+      createGithubApi(fetch, async () => {}).listDirectory('o/r', 't', '.changeset', 'develop'),
     ).rejects.toThrow(/not a directory/)
   })
 
@@ -1059,7 +971,11 @@ describe('what a release with changesets needs to read', () => {
       },
     })
     expect(
-      await createGithubApi(fetch).releasesSince('o/r', 't', new Date('2026-11-11T11:00:00Z')),
+      await createGithubApi(fetch, async () => {}).releasesSince(
+        'o/r',
+        't',
+        new Date('2026-11-11T11:00:00Z'),
+      ),
     ).toEqual([
       {
         tag: '@theokit/ui@1.13.0',
@@ -1097,8 +1013,13 @@ describe('what a release with changesets needs to read', () => {
       },
     })
     expect(
-      (await createGithubApi(fetch).findPullRequest('o/r', 't', 'changeset-release/main'))
-        ?.mergedAt,
+      (
+        await createGithubApi(fetch, async () => {}).findPullRequest(
+          'o/r',
+          't',
+          'changeset-release/main',
+        )
+      )?.mergedAt,
     ).toEqual(new Date('2026-09-25T21:12:10Z'))
   })
   it('lists the open pull requests from a branch of the repository into a base, with where each comes from', async () => {
@@ -1124,7 +1045,7 @@ describe('what a release with changesets needs to read', () => {
       },
     })
 
-    const found = await createGithubApi(fetch).openPullRequestsBetween(
+    const found = await createGithubApi(fetch, async () => {}).openPullRequestsBetween(
       'o/r',
       't',
       'main',
@@ -1183,11 +1104,9 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    expect(await createGithubApi(fetch).requiredChecks('o/r', 't', 'workspace')).toEqual([
-      'CI',
-      'Lint',
-      'Types',
-    ])
+    expect(
+      await createGithubApi(fetch, async () => {}).requiredChecks('o/r', 't', 'workspace'),
+    ).toEqual(['CI', 'Lint', 'Types'])
     expect(calls.map((c) => c.url)).toEqual(['/branches/workspace', '/rules/branches/workspace'])
   })
 
@@ -1206,14 +1125,16 @@ describe('what integrating through the repository CI needs', () => {
       'GET /rules/branches/workspace': { status: 200, body: [] },
     })
 
-    expect(await createGithubApi(fetch).requiredChecks('o/r', 't', 'workspace')).toEqual([])
+    expect(
+      await createGithubApi(fetch, async () => {}).requiredChecks('o/r', 't', 'workspace'),
+    ).toEqual([])
   })
 
   it('throws when the integration branch cannot be read, rather than merging past its rules', async () => {
     const { fetch } = fakeFetch({ 'GET /branches/workspace': { status: 404 } })
-    await expect(createGithubApi(fetch).requiredChecks('o/r', 't', 'workspace')).rejects.toThrow(
-      /404 reading the branch workspace of o\/r/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).requiredChecks('o/r', 't', 'workspace'),
+    ).rejects.toThrow(/404 reading the branch workspace of o\/r/)
   })
 
   it('reads a pull request by number, with its merge commit and whether auto-merge is on', async () => {
@@ -1234,7 +1155,7 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    expect(await createGithubApi(fetch).readPullRequest('o/r', 't', 12)).toEqual({
+    expect(await createGithubApi(fetch, async () => {}).readPullRequest('o/r', 't', 12)).toEqual({
       number: 12,
       url: 'https://github.com/o/r/pull/12',
       state: 'closed',
@@ -1264,72 +1185,15 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    expect(await createGithubApi(fetch).readPullRequest('o/r', 't', 12)).toMatchObject({
+    expect(
+      await createGithubApi(fetch, async () => {}).readPullRequest('o/r', 't', 12),
+    ).toMatchObject({
       merged: false,
       mergeCommitSha: undefined,
       mergedAt: undefined,
       autoMerge: false,
       mergeableState: 'dirty',
     })
-  })
-
-  it('takes auto-merge as on when a 502 hid that it was enabled', async () => {
-    const { fetch } = fakeFetch({
-      'GET /pulls/12': {
-        status: 200,
-        body: { node_id: 'PR_12', auto_merge: { merge_method: 'merge' } },
-      },
-      'POST https://api.github.com/graphql': [
-        { status: 502 },
-        {
-          status: 200,
-          body: { errors: [{ message: 'Pull request Auto merge is already enabled' }] },
-        },
-      ],
-    })
-    await expect(
-      createGithubApi(fetch, noWait).enableAutoMerge('o/r', 't', 12, 'abc'),
-    ).resolves.toBeUndefined()
-  })
-
-  it('still refuses when a 502 came and auto-merge is not on', async () => {
-    const { fetch } = fakeFetch({
-      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12', auto_merge: null } },
-      'POST https://api.github.com/graphql': [
-        { status: 502 },
-        { status: 200, body: { errors: [{ message: 'Pull request is in clean status' }] } },
-      ],
-    })
-    await expect(
-      createGithubApi(fetch, noWait).enableAutoMerge('o/r', 't', 12, 'abc'),
-    ).rejects.toThrow(/clean status/)
-  })
-
-  it('takes a pull request as merged when a 502 hid the merge', async () => {
-    const { fetch, calls } = fakeFetch({
-      'PUT /pulls/9/merge': { status: 502 },
-      'GET /pulls/9': {
-        status: 200,
-        body: { merged: true, merge_commit_sha: 'm1', head: { sha: 'abc' } },
-      },
-    })
-    const done = await createGithubApi(fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
-      method: 'merge',
-    })
-    expect(done).toEqual({ sha: 'm1' })
-    expect(calls.filter((c) => c.method === 'PUT')).toHaveLength(1)
-  })
-
-  it('merges again after a 502 that merged nothing', async () => {
-    const { fetch } = fakeFetch({
-      'PUT /pulls/9/merge': [{ status: 502 }, { status: 200, body: { sha: 'm2' } }],
-      'GET /pulls/9': { status: 200, body: { merged: false, head: { sha: 'abc' } } },
-    })
-    expect(
-      await createGithubApi(fetch, noWait).mergePullRequest('o/r', 't', 9, 'abc', {
-        method: 'merge',
-      }),
-    ).toEqual({ sha: 'm2' })
   })
 
   it('turns auto-merge on as a merge commit, pinned to the verified head', async () => {
@@ -1341,7 +1205,7 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    await createGithubApi(fetch).enableAutoMerge('o/r', 'tok', 12, 'abc')
+    await createGithubApi(fetch, async () => {}).enableAutoMerge('o/r', 'tok', 12, 'abc')
 
     const graphql = calls.find((c) => c.url.includes('graphql'))!
     expect(graphql.auth).toBe('Bearer tok')
@@ -1363,7 +1227,7 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    const refused = createGithubApi(fetch).enableAutoMerge('o/r', 't', 12, 'abc')
+    const refused = createGithubApi(fetch, async () => {}).enableAutoMerge('o/r', 't', 12, 'abc')
 
     await expect(refused).rejects.toBeInstanceOf(AutoMergeRefused)
     await expect(refused).rejects.toThrow(
@@ -1506,7 +1370,7 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    await createGithubApi(fetch).disableAutoMerge('o/r', 't', 12)
+    await createGithubApi(fetch, async () => {}).disableAutoMerge('o/r', 't', 12)
 
     const graphql = calls.find((c) => c.url.includes('graphql'))!
     expect(JSON.stringify(graphql.body)).toContain('disablePullRequestAutoMerge')
@@ -1515,15 +1379,12 @@ describe('what integrating through the repository CI needs', () => {
 
   it('throws when auto-merge cannot be turned off', async () => {
     const { fetch } = fakeFetch({
-      'GET /pulls/12': {
-        status: 200,
-        body: { node_id: 'PR_12', auto_merge: { merge_method: 'merge' } },
-      },
+      'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
       'POST https://api.github.com/graphql': { status: 502, body: {} },
     })
-    await expect(createGithubApi(fetch, noWait).disableAutoMerge('o/r', 't', 12)).rejects.toThrow(
-      /could not turn auto-merge off on o\/r#12: GitHub answered 502/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).disableAutoMerge('o/r', 't', 12),
+    ).rejects.toThrow(/could not turn auto-merge off on o\/r#12: GitHub answered 502/)
   })
 
   it('reports each check on a commit with what it said and where to read it', async () => {
@@ -1556,7 +1417,7 @@ describe('what integrating through the repository CI needs', () => {
       },
     })
 
-    expect(await createGithubApi(fetch).checkReports('o/r', 't', 'abc')).toEqual([
+    expect(await createGithubApi(fetch, async () => {}).checkReports('o/r', 't', 'abc')).toEqual([
       {
         name: 'CI',
         state: 'failure',
@@ -1585,7 +1446,7 @@ describe('what integrating through the repository CI needs', () => {
       'GET /commits/abc/status': { status: 200, body: { state: 'pending', total_count: 0 } },
     })
 
-    expect(await createGithubApi(fetch).checkReports('o/r', 't', 'abc')).toEqual([
+    expect(await createGithubApi(fetch, async () => {}).checkReports('o/r', 't', 'abc')).toEqual([
       { name: 'CI', state: 'success', detail: '', url: 'push' },
       { name: 'CI', state: 'failure', detail: '', url: 'pr' },
     ])
@@ -1606,7 +1467,7 @@ describe('what the doctor reads of a repository', () => {
       },
     })
 
-    expect(await createGithubApi(fetch).repositorySettings('o/r', 'tok')).toEqual({
+    expect(await createGithubApi(fetch, async () => {}).repositorySettings('o/r', 'tok')).toEqual({
       hasIssues: false,
       defaultBranch: 'trunk',
       allowAutoMerge: false,
@@ -1620,7 +1481,7 @@ describe('what the doctor reads of a repository', () => {
       'GET /': { status: 200, body: { has_issues: true, default_branch: 'main' } },
     })
 
-    const settings = await createGithubApi(fetch).repositorySettings('o/r', 't')
+    const settings = await createGithubApi(fetch, async () => {}).repositorySettings('o/r', 't')
 
     expect(settings.allowAutoMerge).toBeUndefined()
     expect(settings.allowMergeCommit).toBeUndefined()
@@ -1628,9 +1489,9 @@ describe('what the doctor reads of a repository', () => {
 
   it('throws when the settings cannot be read', async () => {
     const { fetch } = fakeFetch({ 'GET /': { status: 502 } })
-    await expect(createGithubApi(fetch, noWait).repositorySettings('o/r', 't')).rejects.toThrow(
-      /GitHub answered 502 reading o\/r/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).repositorySettings('o/r', 't'),
+    ).rejects.toThrow(/GitHub answered 502 reading o\/r/)
   })
 
   it('says whether a label exists, and throws on any answer that is neither', async () => {
@@ -1638,7 +1499,7 @@ describe('what the doctor reads of a repository', () => {
       'GET /labels/factory': { status: 200, body: { name: 'factory' } },
       'GET /labels/broken': { status: 500 },
     })
-    const api = createGithubApi(fetch, noWait)
+    const api = createGithubApi(fetch, async () => {})
 
     expect(await api.labelExists('o/r', 't', 'factory')).toBe(true)
     expect(await api.labelExists('o/r', 't', 'good first issue')).toBe(false)
@@ -1653,18 +1514,17 @@ describe('what the doctor reads of a repository', () => {
       'GET /commits': { status: 200, body: [{ sha: 'c2' }, { sha: 'c1' }] },
     })
 
-    expect(await createGithubApi(fetch).recentCommits('o/r', 't', 'feat/x', 5)).toEqual([
-      'c2',
-      'c1',
-    ])
+    expect(
+      await createGithubApi(fetch, async () => {}).recentCommits('o/r', 't', 'feat/x', 5),
+    ).toEqual(['c2', 'c1'])
     expect(calls[0].url).toBe('/commits?sha=feat%2Fx&per_page=5')
   })
 
   it('throws when the commits of a branch cannot be listed', async () => {
     const { fetch } = fakeFetch({})
-    await expect(createGithubApi(fetch).recentCommits('o/r', 't', 'gone', 5)).rejects.toThrow(
-      /404 listing the commits of gone on o\/r/,
-    )
+    await expect(
+      createGithubApi(fetch, async () => {}).recentCommits('o/r', 't', 'gone', 5),
+    ).rejects.toThrow(/404 listing the commits of gone on o\/r/)
   })
 
   it('lists the heads of the pull requests into a branch that changed last, open or not', async () => {
@@ -1672,9 +1532,14 @@ describe('what the doctor reads of a repository', () => {
       'GET /pulls': { status: 200, body: [{ head: { sha: 'p2' } }, { head: { sha: 'p1' } }] },
     })
 
-    expect(await createGithubApi(fetch).recentPullRequestHeads('o/r', 't', 'workspace', 3)).toEqual(
-      ['p2', 'p1'],
-    )
+    expect(
+      await createGithubApi(fetch, async () => {}).recentPullRequestHeads(
+        'o/r',
+        't',
+        'workspace',
+        3,
+      ),
+    ).toEqual(['p2', 'p1'])
     expect(calls[0].url).toBe(
       '/pulls?state=all&base=workspace&sort=updated&direction=desc&per_page=3',
     )
@@ -1683,7 +1548,7 @@ describe('what the doctor reads of a repository', () => {
   it('throws when the pull requests cannot be listed', async () => {
     const { fetch } = fakeFetch({ 'GET /pulls': { status: 403 } })
     await expect(
-      createGithubApi(fetch).recentPullRequestHeads('o/r', 't', 'workspace', 3),
+      createGithubApi(fetch, async () => {}).recentPullRequestHeads('o/r', 't', 'workspace', 3),
     ).rejects.toThrow(/403 listing the pull requests into workspace on o\/r/)
   })
 })
