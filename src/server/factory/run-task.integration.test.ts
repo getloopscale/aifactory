@@ -498,6 +498,48 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
+  it('fails as an environment failure when GitHub answers 5xx advancing the pre-release branch', async () => {
+    const id = await seedTask()
+    githubApi.fail(
+      'mergeBranch',
+      new Error('GitHub answered 502 merging into develop on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    expect(githubApi.callsTo('openPullRequest')).toHaveLength(1)
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  it('fails as an environment failure when a GraphQL mutation answers 5xx turning on auto-merge', async () => {
+    repo().required.set('workspace', ['CI'])
+    const id = await seedTask()
+    githubApi.fail(
+      'enableAutoMerge',
+      new Error('GitHub answered 502 changing paulo/app#12 through GraphQL: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last!.stage).toBe('failed')
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
   it('fails as an environment failure when GitHub answers 5xx handing the work over', async () => {
     const id = await seedTask()
     githubApi.fail(

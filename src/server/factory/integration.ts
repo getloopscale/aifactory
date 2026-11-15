@@ -49,6 +49,8 @@ export const describeDelivery = (handed: Handed) =>
     ? { preRelease: handed.tag, preReleaseUrl: handed.url }
     : { preReleaseError: handed.error }
 
+const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
+
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /**
@@ -94,6 +96,8 @@ export async function advancePreRelease(
     )
     return { developSha: develop.sha }
   } catch (error) {
+    // GitHub failing is the environment's, not a refusal of the branch: it surfaces and the run repeats.
+    if (GITHUB_SERVER_ERROR.test(message(error))) throw error
     return {
       developError: message(error),
       developPullRequest: await proposePreRelease(
