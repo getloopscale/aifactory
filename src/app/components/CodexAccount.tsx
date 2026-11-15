@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 
 import type { CodexConnection } from '../../shared/panel'
 import { del, get, post } from '../lib/api'
+import { useCopy } from '../lib/copy'
 
 import { RetryWaiting } from './RetryWaiting'
 
@@ -18,6 +19,8 @@ const failed = (error: unknown): CodexConnection => ({
  * The panel checks that the account answers before it keeps it, and no token ever reaches the page.
  */
 export function CodexAccount({ onChanged }: { onChanged: () => void }) {
+  const { t } = useCopy()
+  const c = t.account.codex
   const [conn, setConn] = useState<CodexConnection>()
   const [busy, setBusy] = useState(false)
   const status = conn?.login.status
@@ -63,21 +66,18 @@ export function CodexAccount({ onChanged }: { onChanged: () => void }) {
   const { account, login } = conn
 
   return (
-    <section
-      aria-label="Trocar a conta do Codex"
-      className="rounded-lg border border-border bg-card p-3 text-sm"
-    >
+    <section aria-label={c.label} className="rounded-lg border border-border bg-card p-3 text-sm">
       {login.status === 'idle' ? (
         <div className="flex flex-wrap items-center gap-3">
           <p className="min-w-0 flex-1 text-muted-foreground">
             {account.connected
-              ? `Conectado${account.email ? ` como ${account.email}` : ''}${account.plan ? ` (plano ${account.plan})` : ''}. A conta estourou o limite, ou você quer usar outra? Entre com a outra conta aqui.`
+              ? c.connected(account.email, account.plan)
               : account.problem
-                ? `O login do Codex que está aqui não pode ser usado: ${account.problem}`
-                : 'O Codex ainda não tem uma conta do ChatGPT. Entre com ela aqui.'}
+                ? c.unusable(account.problem)
+                : c.noAccount}
           </p>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => void start()}>
-            {account.connected ? 'Entrar com outra conta' : 'Conectar o Codex'}
+            {account.connected ? t.account.signInOther : c.connect}
           </Button>
         </div>
       ) : null}
@@ -85,33 +85,29 @@ export function CodexAccount({ onChanged }: { onChanged: () => void }) {
       {login.status === 'waiting' ? (
         <div className="space-y-2">
           <p>
-            Abra{' '}
+            {c.open}{' '}
             <a href={login.verificationUri} target="_blank" rel="noreferrer" className="underline">
               {login.verificationUri}
             </a>{' '}
-            na conta do ChatGPT que quer usar e digite o código{' '}
-            <strong className="font-mono tracking-wider">{login.userCode}</strong>. Se o navegador
-            já estiver em outra conta, saia dela antes ou use uma janela anônima. Esta página
-            percebe sozinha quando você terminar.
+            {c.thenType} <strong className="font-mono tracking-wider">{login.userCode}</strong>.{' '}
+            {c.waitHint}
           </p>
           <Button size="sm" variant="ghost" disabled={busy} onClick={() => void cancel()}>
-            Cancelar
+            {t.account.cancel}
           </Button>
         </div>
       ) : null}
 
       {login.status === 'checking' ? (
         <p role="status" className="text-muted-foreground">
-          Conferindo a conta com uma chamada de teste. Pode levar até dois minutos.
+          {t.account.checking(t.account.twoMinutes)}
         </p>
       ) : null}
 
       {login.status === 'done' ? (
         <div className="space-y-2">
           <p role="status" className="text-foreground">
-            Pronto: a fábrica já usa a conta nova
-            {account.connected && account.email ? ` (${account.email})` : ''}, sem reiniciar nada.
-            Testei com uma chamada e ela respondeu.
+            {c.done(account.connected ? account.email : undefined)}
           </p>
           <RetryWaiting />
         </div>
@@ -123,7 +119,7 @@ export function CodexAccount({ onChanged }: { onChanged: () => void }) {
             {login.message}
           </p>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => void start()}>
-            Tentar de novo
+            {t.account.tryAgain}
           </Button>
         </div>
       ) : null}

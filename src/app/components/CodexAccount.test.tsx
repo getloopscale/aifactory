@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { CodexConnection } from '../../shared/panel'
+import { en } from '../lib/copy/en'
 
 import { CodexAccount } from './CodexAccount'
 
@@ -43,14 +44,16 @@ const mount = () => {
 describe('changing the Codex account from the panel', () => {
   it('names the account in use and offers to sign in with another', async () => {
     mount()
-    expect(await screen.findByText(/Conectado como owner@example.com \(plano pro\)/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Entrar com outra conta' })).toBeTruthy()
+    expect(
+      await screen.findByText(en.account.codex.connected('owner@example.com', 'pro')),
+    ).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.account.signInOther })).toBeTruthy()
   })
 
   it('offers to connect when there is no account', async () => {
     api.get.mockResolvedValue({ account: { connected: false }, login: { status: 'idle' } })
     mount()
-    expect(await screen.findByRole('button', { name: 'Conectar o Codex' })).toBeTruthy()
+    expect(await screen.findByRole('button', { name: en.account.codex.connect })).toBeTruthy()
   })
 
   it('says why a login on disk cannot be used', async () => {
@@ -59,13 +62,15 @@ describe('changing the Codex account from the panel', () => {
       login: { status: 'idle' },
     })
     mount()
-    expect(await screen.findByText(/não pode ser usado: credential file mode is 644/)).toBeTruthy()
+    expect(
+      await screen.findByText(en.account.codex.unusable('credential file mode is 644')),
+    ).toBeTruthy()
   })
 
   it('shows the code to type and the address once the login starts', async () => {
     api.post.mockResolvedValueOnce(waiting)
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: 'Entrar com outra conta' }))
+    fireEvent.click(await screen.findByRole('button', { name: en.account.signInOther }))
     expect(await screen.findByText('ABCD-1234')).toBeTruthy()
     expect(
       screen
@@ -83,9 +88,7 @@ describe('changing the Codex account from the panel', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(3100)
     })
-    expect(
-      await screen.findByText(/a fábrica já usa a conta nova \(owner@example.com\)/),
-    ).toBeTruthy()
+    expect(await screen.findByText(en.account.codex.done('owner@example.com'))).toBeTruthy()
     expect(onChanged).toHaveBeenCalled()
   })
 
@@ -93,8 +96,8 @@ describe('changing the Codex account from the panel', () => {
     api.get.mockResolvedValueOnce(waiting)
     api.del.mockResolvedValueOnce(idle)
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: 'Cancelar' }))
-    expect(await screen.findByRole('button', { name: 'Entrar com outra conta' })).toBeTruthy()
+    fireEvent.click(await screen.findByRole('button', { name: en.account.cancel }))
+    expect(await screen.findByRole('button', { name: en.account.signInOther })).toBeTruthy()
     expect(api.del).toHaveBeenCalledWith('/api/panel/codex/login')
   })
 
@@ -105,7 +108,7 @@ describe('changing the Codex account from the panel', () => {
     })
     mount()
     expect((await screen.findByRole('alert')).textContent).toMatch(/limite de uso/)
-    expect(screen.getByRole('button', { name: 'Tentar de novo' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: en.account.tryAgain })).toBeTruthy()
   })
 
   it('shows a request that failed as an error instead of hiding it', async () => {

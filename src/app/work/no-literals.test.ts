@@ -8,6 +8,16 @@ const FILES = [
   'src/app/components/Badges.tsx',
   'src/app/components/NewJob.tsx',
   'src/app/lib/format.ts',
+  'src/app/repositories/page.tsx',
+  'src/app/setup/page.tsx',
+  'src/app/login/page.tsx',
+  'src/app/health/page.tsx',
+  'src/app/error.tsx',
+  'src/app/components/KnowledgeRepository.tsx',
+  'src/app/components/ClaudeAccount.tsx',
+  'src/app/components/CodexAccount.tsx',
+  'src/app/components/RecipeCard.tsx',
+  'src/app/components/WatchPanel.tsx',
 ]
 
 // The name of the GitHub label, not a word of either language.
