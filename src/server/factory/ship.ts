@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, or } from 'drizzle-orm'
+import { and, eq, isNotNull, ne, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
@@ -99,11 +99,21 @@ function heldFor(carried: Carried | undefined, owed: string[]): string[] {
  * The tasks the publications of a repository hold, a partial one or one that recorded its holds and has
  * not finished: their issues stay open for good, whatever releases come later.
  */
-export async function heldTasks(db: Database, repository: string): Promise<Map<number, string[]>> {
+export async function heldTasks(
+  db: Database,
+  repository: string,
+  except?: number,
+): Promise<Map<number, string[]>> {
   const rows = await db
     .select({ missing: publication.missing })
     .from(publication)
-    .where(and(eq(publication.repository, repository), isNotNull(publication.missing)))
+    .where(
+      and(
+        eq(publication.repository, repository),
+        isNotNull(publication.missing),
+        ne(publication.id, except ?? 0),
+      ),
+    )
   return new Map(
     rows.flatMap((p) => (p.missing?.held ?? []).map((h) => [h.taskId, h.packages] as const)),
   )
@@ -117,12 +127,14 @@ export async function heldTasks(db: Database, repository: string): Promise<Map<n
 export async function decideHolds(
   deps: { db: Database; api: GithubApi },
   s: Shipment,
+  own: { id: number; held: HeldTask[] },
 ): Promise<HeldTask[]> {
   const owed = s.missing ?? []
-  if (owed.length === 0) return []
-  const already = await heldTasks(deps.db, s.repository)
-  const out: HeldTask[] = []
+  if (owed.length === 0) return own.held
+  const already = await heldTasks(deps.db, s.repository, own.id)
+  const out: HeldTask[] = [...own.held]
   for (const t of await candidatesOf(deps.db, s)) {
+    if (out.some((h) => h.taskId === t.id)) continue
     if (already.has(t.id) || !(await belongs(deps, s, t))) continue
     const held = heldFor(await carriedPackages(deps.api, s, t), owed)
     if (held.length > 0) out.push({ taskId: t.id, issue: t.issueNumber, packages: held })

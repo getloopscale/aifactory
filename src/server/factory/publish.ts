@@ -182,7 +182,9 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
   }
   // The holds are recorded before any task ships, so a failure part way, or a release that runs meanwhile,
   // still finds them.
-  const held = missing ? await decideHolds(deps, shipment) : []
+  const held = missing
+    ? await decideHolds(deps, shipment, { id: p.id, held: p.missing?.held ?? [] })
+    : []
   if (missing) {
     await deps.db
       .update(publication)

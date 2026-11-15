@@ -169,10 +169,14 @@ const MANIFESTS = {
   '.changeset/config.json': '{}',
 }
 const commitIn = (sha: string, dir: 'gateway' | 'slack') => {
+  // The promoted trees hold the same packages, so a commit's package is found where it still is.
+  repo().files('promoted1', MANIFESTS).files('promoted2', MANIFESTS)
   repo()
     .files(`${sha}^`, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'a' })
     .files(sha, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'b' })
 }
+const mergedShaOf = async (id: number) =>
+  (await getDb().select().from(task).where(eq(task.id, id)))[0].mergedSha!
 const stageOf = async (id: number) =>
   (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
 const issueOf = async (id: number) =>
@@ -396,7 +400,7 @@ describe('publishing a changesets release', () => {
 
     it('publishes with what exists after the bounded wait, naming the package with no release', async () => {
       const asked = await waitingPublication()
-      commitIn('m1', 'slack')
+      commitIn(await mergedShaOf(asked), 'slack')
       releasesAre(...ALL.slice(0, 2).map(published))
 
       const result = await pollPublications(deps(PAST_THE_WAIT))
@@ -445,7 +449,7 @@ describe('publishing a changesets release', () => {
 
     it('gives back the task that asked for the publication when its own package is the one missing', async () => {
       const asked = await waitingPublication()
-      commitIn('m1', 'gateway')
+      commitIn(await mergedShaOf(asked), 'gateway')
       releasesAre(...ALL.slice(0, 2).map(published))
       expect(await stageOf(asked)).toBe('released')
 
@@ -487,6 +491,31 @@ describe('publishing a changesets release', () => {
 
       expect(shipped.released).not.toContain(gateway)
       expect(await stageOf(gateway)).toBe('done')
+    })
+
+    it('keeps the holds it saved when shipping failed and the publication is looked at again', async () => {
+      const asked = await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      commitIn('gw-merge', 'gateway')
+      releasesAre(...ALL.slice(0, 2).map(published))
+      // A first pass saved the hold and then failed before it shipped anything: the publication still waits.
+      await getDb()
+        .update(publication)
+        .set({
+          missing: {
+            releases: ['@theokit/gateway@0.16.1'],
+            held: [
+              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
+            ],
+          },
+        })
+        .where(eq(publication.taskId, asked))
+
+      await pollPublications(deps(PAST_THE_WAIT))
+
+      expect((await row()).missing?.held.map((h) => h.taskId)).toContain(gateway)
+      expect(await stageOf(gateway)).toBe('done')
+      expect(closed()).not.toContain(await issueOf(gateway))
     })
 
     it('refuses to release a held task when it is the one asked to release', async () => {
