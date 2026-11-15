@@ -376,6 +376,27 @@ describe('recurrenceIsNewIssue', () => {
 })
 
 describe('failedStep', () => {
+  it('keeps the command through a group the script printed itself', () => {
+    const log = [
+      '##[group]Run pnpm test',
+      '##[group]vitest suite',
+      'ok',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)).toEqual({ name: 'pnpm test', command: 'pnpm test' })
+  })
+
+  it('is not decided by an annotation an earlier step raised without failing', () => {
+    const log = [
+      '##[group]Run owner/action@v2',
+      '##[error]Cache not found',
+      '##[group]Run pnpm quality',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)).toEqual({ name: 'pnpm quality', command: 'pnpm quality' })
+  })
+
   it('shows no command when a step of another kind began after the shell step', () => {
     const log = '##[group]Run pnpm build\nok\n##[group]Post job cleanup\n##[error]boom'
     expect(failedStep(log)).toBeUndefined()

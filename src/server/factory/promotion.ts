@@ -78,31 +78,34 @@ const clean = (raw: string) =>
 export type FailedStep = { name: string; command?: string }
 
 const GROUP_RUN = /^##\[group\]Run (.+)$/
-const GROUP_ANY = /^##\[group\]/
+/** The groups the runner opens for a step of its own; any other group is output a script printed. */
+const GROUP_STEP = /^##\[group\](Run |Post |Set up job|Complete job|Initialize containers)/
 /** A step that uses an action (`owner/repo@ref`, `./local`) has no shell command to show. */
 const ACTION_USE = /^(\.\/\S*|[\w.-]+\/[\w./-]+@\S+)$/
 const EXITED = /ERROR: "([^"]+)" exited with \d+/
+/** What the runner says when the step's process ends the job; an earlier `##[error]` is a step's own annotation. */
+const FATAL = /##\[error\](Process completed with exit code|The operation was canceled)/
 
 /**
- * The step that exited, read from an Actions log: the command of the last `Run` group before the first error
- * line, and the script a runner such as pnpm says exited. Undefined when the log names neither.
+ * The step that exited, read from an Actions log: the command of the last `Run` step before the line where
+ * the runner reports the failure (the last error line when it reports none), and the script a runner such
+ * as pnpm says exited. A group a script prints inside a step does not end it, and an earlier annotation does
+ * not decide it. The command is kept only while no other kind of step began. Undefined when the log names neither.
  */
 export function failedStep(log: string): FailedStep | undefined {
+  const lines = log.split('\n').map((raw) => raw.replace(TIMESTAMP, '').replace(COLORS, '').trim())
+  const fatal = lines.findIndex((line) => FATAL.test(line))
+  const end = fatal >= 0 ? fatal : lines.map((line) => line.includes('##[error]')).lastIndexOf(true)
   let command: string | undefined
   let script: string | undefined
-  let ended = false
-  for (const raw of log.split('\n')) {
-    const line = clean(raw)
-    const stripped = raw.replace(TIMESTAMP, '').replace(COLORS, '').trim()
-    const group = GROUP_RUN.exec(stripped)
-    // Any group opens a step of its own: a command is kept only while no other kind of step has begun.
-    if (!ended && GROUP_ANY.test(stripped)) {
-      const used = !group || ACTION_USE.test(group[1].trim())
-      command = used ? undefined : group[1].slice(0, MAX_LINE)
+  lines.forEach((line, index) => {
+    if (end >= 0 && index > end) return
+    if (GROUP_STEP.test(line)) {
+      const run = GROUP_RUN.exec(line)?.[1].trim()
+      command = run && !ACTION_USE.test(run) ? run.slice(0, MAX_LINE) : undefined
     }
-    if (raw.includes('##[error]')) ended = true
-    script ??= EXITED.exec(line)?.[1]
-  }
+    script ??= EXITED.exec(line.replace('##[error]', ''))?.[1]
+  })
   const name = script ?? command
   return name ? { name, ...(command ? { command } : {}) } : undefined
 }
