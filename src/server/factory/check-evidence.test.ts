@@ -315,6 +315,19 @@ describe('the step of a failed job, from its metadata', () => {
     expect(await stepOf('Deploy to staging', log)).toEqual({ name: 'Deploy to staging' })
   })
 
+  it('gives a custom-named shell step the command its log group shows', async () => {
+    const shell = [
+      '##[group]Run pnpm quality',
+      'shell: bash',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Validate', shell.join('\n'))).toEqual({
+      name: 'Validate',
+      command: 'pnpm quality',
+    })
+  })
+
   it('gives a step named after its own command that command', async () => {
     const shell = log.split('\n').slice(0, 2).concat('##[error]Process completed with exit code 1.')
     expect(await stepOf('Run pnpm build', shell.join('\n'))).toEqual({

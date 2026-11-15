@@ -47,7 +47,8 @@ const unreadable = (error: unknown): ServerEvidence => ({
 /**
  * The step that failed. Its name is the one in the job's metadata (a step has its own name, and an action
  * step has no command). The log's command is attached only when it belongs to that step: a step the runner
- * named after its own command (`Run <first line>`) is the one whose group the log shows. When the metadata
+ * named after its own command (`Run <first line>`) must match the group the log shows; a custom name is
+ * matched by the log's last group, which is dropped when an action step followed it. When the metadata
  * cannot be read or names no failed step, the log alone says what it can.
  */
 async function stepOf(
@@ -65,7 +66,9 @@ async function stepOf(
   if (!named) return fromLog
   const own = /^Run (.+)/.exec(named)?.[1]?.split('\n')[0]
   const command = fromLog?.command
-  const belongs = own !== undefined && command !== undefined && command.startsWith(own)
+  // A custom name says nothing of the command, so the log's group stands: `failedStep` already drops the
+  // command when an action step's group came after the shell step. A `Run <command>` name must match it.
+  const belongs = command !== undefined && (own === undefined || command.startsWith(own))
   return { name: named, ...(belongs ? { command } : {}) }
 }
 
