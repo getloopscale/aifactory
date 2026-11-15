@@ -70,6 +70,27 @@ function fakeApi(
   return { api, calls }
 }
 
+describe('a gate that only says its job failed', () => {
+  it('still reads the failed sibling job of the run', async () => {
+    const gate = actionsRun({
+      id: 11,
+      name: 'checks-pass',
+      url: `https://github.com/o/r/actions/runs/1/job/11`,
+    })
+    const sibling = actionsRun({
+      id: 12,
+      name: 'validate',
+      url: `https://github.com/o/r/actions/runs/1/job/12`,
+    })
+    const { api } = fakeApi({
+      runs: [gate, sibling],
+      logs: { 11: '##[error]The job failed', 12: DOC_LOG },
+    })
+    const attached = await attachEvidence(api, REPO, 't', SHA, [report('checks-pass')])
+    expect(JSON.stringify(attached)).toContain('99.7% is below the 100% floor')
+  })
+})
+
 describe('readEvidence', () => {
   it('reads the error lines of an Actions job from its log', async () => {
     const { api, calls } = fakeApi({ logs: { 11: DOC_LOG } })
@@ -304,9 +325,18 @@ describe('the step of a failed job, from its metadata', () => {
     '##[endgroup]',
     '##[error]Process completed with exit code 1.',
   ].join('\n')
-  const stepOf = async (failedStep: string | undefined, text: string) => {
+  const stepOf = async (
+    failedStep: string | undefined,
+    text: string,
+    position: { ranSteps: number; failedPosition: number } = { ranSteps: 0, failedPosition: -1 },
+  ) => {
     const { api } = fakeApi({ runs: [actionsRun()], logs: { 11: text } })
-    api.jobAttempt = async () => ({ runId: 1, attempt: 1, failedStep })
+    api.jobAttempt = async () => ({
+      runId: 1,
+      attempt: 1,
+      failedStep,
+      ...(position.failedPosition >= 0 ? position : {}),
+    })
     const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
     return attached.evidence && 'lines' in attached.evidence ? attached.evidence.step : undefined
   }
@@ -322,9 +352,30 @@ describe('the step of a failed job, from its metadata', () => {
       '##[endgroup]',
       '##[error]Process completed with exit code 1.',
     ]
-    expect(await stepOf('Validate', shell.join('\n'))).toEqual({
+    expect(await stepOf('Validate', shell.join('\n'), { ranSteps: 1, failedPosition: 0 })).toEqual({
       name: 'Validate',
       command: 'pnpm quality',
+    })
+  })
+
+  it('gives a failed action with no log group no earlier shell command', async () => {
+    // Two steps ran, the log shows a group for one: the position ties nothing, so no command is attached.
+    expect(
+      await stepOf('Deploy', log.split('\n').slice(0, 3).concat('##[error]x').join('\n'), {
+        ranSteps: 2,
+        failedPosition: 1,
+      }),
+    ).toEqual({ name: 'Deploy' })
+  })
+
+  it('gives a failed docker action no command, even by position', async () => {
+    const docker = [
+      '##[group]Run docker://alpine:3',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ]
+    expect(await stepOf('Scan', docker.join('\n'), { ranSteps: 1, failedPosition: 0 })).toEqual({
+      name: 'Scan',
     })
   })
 

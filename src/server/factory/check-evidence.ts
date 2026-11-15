@@ -2,7 +2,7 @@ import type { FailedRun, PromotionApi } from '../github/promotion-api'
 import type { CheckReport } from '../github/pulls'
 
 import type { FailedReport, ServerEvidence } from './ci-wait'
-import { checkEvidence, failedStep, logEvidence, type FailedStep } from './promotion'
+import { checkEvidence, failedStep, logEvidence, stepCommands, type FailedStep } from './promotion'
 
 /** What reading a failed check's evidence takes from GitHub, with a repository-scoped token. */
 export type EvidenceApi = Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'> &
@@ -46,9 +46,9 @@ const unreadable = (error: unknown): ServerEvidence => ({
 
 /**
  * The step that failed. Its name is the one in the job's metadata (a step has its own name, and an action
- * step has no command). The log's command is attached only when it belongs to that step: a step the runner
- * named after its own command (`Run <first line>`) must match the group the log shows; a custom name is
- * matched by the log's last group, which is dropped when an action step followed it. When the metadata
+ * step has no command). The log's command is
+ * attached only when its group is the failed step's: by position among the steps that ran, or, when the log
+ * does not show a group for each, by a name that is the command itself (`Run <first line>`). When the metadata
  * cannot be read or names no failed step, the log alone says what it can.
  */
 async function stepOf(
@@ -59,17 +59,20 @@ async function stepOf(
   log: string,
 ): Promise<FailedStep | undefined> {
   const fromLog = failedStep(log)
-  const named = await api.jobAttempt?.call(api, repo, token, run.id).then(
-    (job) => job.failedStep,
-    () => undefined,
-  )
+  const job = await api.jobAttempt?.call(api, repo, token, run.id).catch(() => undefined)
+  const named = job?.failedStep
   if (!named) return fromLog
+  // The command is the one of the log group in the failed step's position, when the log has a group for
+  // every step that ran. Without that, only a step named after its own command (`Run <first line>`) is tied.
+  const groups = stepCommands(log)
   const own = /^Run (.+)/.exec(named)?.[1]?.split('\n')[0]
-  const command = fromLog?.command
-  // A custom name says nothing of the command, so the log's group stands: `failedStep` already drops the
-  // command when an action step's group came after the shell step. A `Run <command>` name must match it.
-  const belongs = command !== undefined && (own === undefined || command.startsWith(own))
-  return { name: named, ...(belongs ? { command } : {}) }
+  const command =
+    job.failedPosition !== undefined && groups.length === job.ranSteps
+      ? groups[job.failedPosition]
+      : own !== undefined && fromLog?.command?.startsWith(own)
+        ? fromLog.command
+        : undefined
+  return { name: named, ...(command ? { command } : {}) }
 }
 
 /** A check's evidence as the note takes it: what was read, or why it could not be. */

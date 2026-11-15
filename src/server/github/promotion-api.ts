@@ -34,7 +34,14 @@ export type PromotionApi = {
     repo: string,
     token: string,
     jobId: number,
-  ): Promise<{ runId: number; attempt: number; failedStep?: string }>
+  ): Promise<{
+    runId: number
+    attempt: number
+    failedStep?: string
+    /** How many steps ran (not skipped), and the position of the failed one among them. */
+    ranSteps?: number
+    failedPosition?: number
+  }>
   jobLog(repo: string, token: string, jobId: number): Promise<string>
   annotations(repo: string, token: string, checkRunId: number): Promise<string[]>
   rerunFailedJobs(repo: string, token: string, runId: number): Promise<RerunAnswer>
@@ -129,11 +136,14 @@ export function createPromotionApi(
         run_attempt: number
         steps?: { name: string; conclusion: string | null }[]
       }
-      const failed = job.steps?.find((step) => FAILED.has(step.conclusion ?? ''))
+      const ran = (job.steps ?? []).filter((step) => step.conclusion !== 'skipped')
+      const failed = ran.findIndex((step) => FAILED.has(step.conclusion ?? ''))
       return {
         runId: job.run_id,
         attempt: job.run_attempt,
-        ...(failed ? { failedStep: failed.name } : {}),
+        ...(failed >= 0
+          ? { failedStep: ran[failed].name, ranSteps: ran.length, failedPosition: failed }
+          : {}),
       }
     },
 

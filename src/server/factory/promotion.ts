@@ -50,6 +50,7 @@ const GENERIC = [
   /dependency did not succeed/,
   // What an aggregate (gate) job says when a job it needs failed: that one did, never which.
   /\b(one or more|some|any|at least one)\b.*\b(jobs?|checks?|dependenc(y|ies)|needs)\b.*\b(fail|did not succeed|not succeed)/i,
+  /^(the )?(job|workflow|run|build|check)s? (has |have )?failed\.?$/i,
   /\b(required|dependent|upstream) (jobs?|checks?)\b.*\b(fail|did not succeed)/i,
 ]
 
@@ -86,7 +87,7 @@ const GROUP_RUN = /^##\[group\]Run (.+)$/
 /** The groups the runner opens for a step of its own; any other group is output a script printed. */
 const GROUP_STEP = /^##\[group\](Run |Post |Set up job|Complete job|Initialize containers)/
 /** A step that uses an action (`owner/repo@ref`, `./local`) has no shell command to show. */
-const ACTION_USE = /^(\.\/\S*|[\w.-]+\/[\w./-]+@\S+)$/
+const ACTION_USE = /^(\.\/\S*|docker:\/\/\S+|[\w.-]+\/[\w./-]+@\S+)$/
 const EXITED = /ERROR: "([^"]+)" exited with \d+/
 /** What the runner says when the step's process ends the job; an earlier `##[error]` is a step's own annotation. */
 const FATAL = /##\[error\](Process completed with exit code|The operation was canceled)/
@@ -122,6 +123,29 @@ export function failedStep(log: string): FailedStep | undefined {
   })
   const name = script ?? command
   return name ? { name, ...(command ? { command } : {}) } : undefined
+}
+
+/**
+ * The shell command of each step the runner opened a group for, in order (undefined for a step that uses an
+ * action, or any step that has no command). The position of a step among them is how a step of the job's
+ * metadata is tied to its group in the log, whatever the step is called.
+ */
+export function stepCommands(log: string): (string | undefined)[] {
+  const commands: (string | undefined)[] = []
+  let collecting = false
+  for (const raw of log.split('\n')) {
+    const line = raw.replace(TIMESTAMP, '').replace(COLORS, '').trim()
+    if (GROUP_STEP.test(line)) {
+      const run = GROUP_RUN.exec(line)?.[1].trim()
+      const command = run && !ACTION_USE.test(run) ? run.slice(0, SCRIPT_MAX) : undefined
+      commands.push(command)
+      collecting = command !== undefined
+    } else if (collecting) {
+      if (/^(shell|env):|^##\[/.test(line)) collecting = false
+      else commands[commands.length - 1] = `${commands.at(-1)}\n${line}`.slice(0, SCRIPT_MAX)
+    }
+  }
+  return commands
 }
 
 /**
