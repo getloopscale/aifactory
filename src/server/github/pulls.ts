@@ -1055,30 +1055,37 @@ export function createGithubApi(
     },
 
     async listIssueComments(repo, token, issueNumber, since) {
-      const response = await ensure(
-        await call(
-          repo,
-          token,
-          `/issues/${issueNumber}/comments?per_page=100&since=${encodeURIComponent(since.toISOString())}`,
-        ),
-        `listing comments on ${repo}#${issueNumber}`,
-        [200],
-      )
-      const comments = (await response.json()) as {
-        id: number
-        body?: string
-        user?: { login: string; type: string } | null
-        author_association: string
-        created_at: string
-      }[]
-      return comments.map((c) => ({
-        id: String(c.id),
-        body: c.body ?? '',
-        author: c.user?.login ?? '',
-        authorType: c.user?.type ?? '',
-        association: c.author_association,
-        createdAt: new Date(c.created_at),
-      }))
+      const all: IssueComment[] = []
+      // A page holds at most 100 comments: read on until one comes short.
+      for (let page = 1; ; page++) {
+        const response = await ensure(
+          await call(
+            repo,
+            token,
+            `/issues/${issueNumber}/comments?per_page=100&page=${page}&since=${encodeURIComponent(since.toISOString())}`,
+          ),
+          `listing comments on ${repo}#${issueNumber}`,
+          [200],
+        )
+        const comments = (await response.json()) as {
+          id: number
+          body?: string
+          user?: { login: string; type: string } | null
+          author_association: string
+          created_at: string
+        }[]
+        all.push(
+          ...comments.map((c) => ({
+            id: String(c.id),
+            body: c.body ?? '',
+            author: c.user?.login ?? '',
+            authorType: c.user?.type ?? '',
+            association: c.author_association,
+            createdAt: new Date(c.created_at),
+          })),
+        )
+        if (comments.length < 100) return all
+      }
     },
   }
 }

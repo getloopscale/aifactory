@@ -186,7 +186,6 @@ describe('releasesRead', () => {
     ).toEqual({
       complete:
         '; no release for @theokit/gateway@0.16.1 30 minutes after the Version Packages merge',
-      missing: ['@theokit/gateway@0.16.1'],
     })
   })
 })

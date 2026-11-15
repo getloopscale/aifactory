@@ -258,11 +258,6 @@ export const publication = pgTable('publication', {
   versionPullRequest: integer('version_pull_request'),
   /** The tags the repository's workflow published, once it did. */
   tags: jsonb('tags').$type<string[]>(),
-  /**
-   * The releases (`name@version`) the Version Packages merge called for that the shipment of this publication
-   * did not find, for the panel to name. Null when none was missing. It holds back nothing.
-   */
-  missing: jsonb('missing').$type<string[]>(),
   /** What the last look found: what it waits for, or why it cannot go on. */
   detail: text('detail'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),

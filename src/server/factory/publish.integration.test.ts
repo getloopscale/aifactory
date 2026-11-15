@@ -7,6 +7,7 @@ import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { delivery, ingress, publication, repository, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import { inbox } from '../panel/queries'
 import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
 import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
 
@@ -83,7 +84,7 @@ const opened = () => api.callsTo('openPullRequest').map(([pull]) => pull)
 
 beforeEach(async () => {
   await getPool().query(
-    'truncate table repository, publication, watch, delivery, decision, question, review, evidence, stage_event, task, ingress restart identity cascade',
+    'truncate table setting, repository, publication, watch, delivery, decision, question, review, evidence, stage_event, task, ingress restart identity cascade',
   )
   api = new FakeGithub()
   // GitHub merges at the moment of the promotion, and the next pull request it opens is #1975.
@@ -169,7 +170,7 @@ const MANIFESTS = {
 }
 const commitIn = (sha: string, dir: 'gateway' | 'slack') => {
   // The promoted trees hold the same packages, so a commit's package is found where it still is.
-  repo().files('promoted1', MANIFESTS).files('promoted2', MANIFESTS)
+  repo().files('promoted1', MANIFESTS).files('promoted2', MANIFESTS).files('main', MANIFESTS)
   repo()
     .files(`${sha}^`, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'a' })
     .files(sha, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'b' })
@@ -425,20 +426,21 @@ describe('publishing a changesets release', () => {
 
       expect(await stageOf(slack)).toBe('released')
       expect(await stageOf(gateway)).toBe('done')
-      expect(await row()).toMatchObject({
-        status: 'published',
-        missing: ['@theokit/gateway@0.16.1'],
-      })
+      expect(await row()).toMatchObject({ status: 'published' })
       expect((await row()).detail).toMatch(/issues left open.*@theokit\/gateway/)
       expect(closed()).not.toContain(await issueOf(gateway))
       expect(closed()).toContain(await issueOf(slack))
+      expect((await inbox(getDb())).find((i) => i.kind === 'publication_partial')).toMatchObject({
+        task: { id: gateway },
+        summary: expect.stringContaining('@theokit/gateway@0.16.1'),
+      })
       const slackIssue = await issueOf(slack)
       const told = comments().find((c) => c.issue === slackIssue)?.body ?? ''
       expect(told).toContain('@theokit/gateway-slack@0.5.1')
       const heldIssue = await issueOf(gateway)
       const open = comments().filter((c) => c.issue === heldIssue)
       expect(open).toHaveLength(1)
-      expect(open[0].body).toContain('@theokit/gateway has no release')
+      expect(open[0].body).toContain('no release for @theokit/gateway@0.16.1')
     })
 
     it('gives back the task that asked for the publication when its own package is the one missing', async () => {
@@ -454,15 +456,14 @@ describe('publishing a changesets release', () => {
     })
 
     describe('a later shipment that contains the task', () => {
-      const shipment = (missing: string[]) => ({
+      const shipment = () => ({
         repository: REPO,
         token: 't',
         promotedSha: 'promoted2',
         releaseBranch: 'main',
         askedTaskId: 0,
         actor: 'human',
-        tags: [{ tag: '@theokit/gateway-slack@0.5.2', url: 'https://example.test/v2' }],
-        missing,
+        tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
       })
       const setUp = async () => {
         await waitingPublication()
@@ -478,25 +479,29 @@ describe('publishing a changesets release', () => {
         const issue = await issueOf(gateway)
         expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
 
-        const shipped = await shipContained(
-          { db: getDb(), api },
-          shipment(['@theokit/gateway@0.16.1']),
-        )
+        const shipped = await shipContained({ db: getDb(), api }, shipment())
 
         expect(shipped.held.map((h) => h.taskId)).toEqual([gateway])
         expect(await stageOf(gateway)).toBe('done')
         expect(closed()).not.toContain(issue)
         expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
+        expect((await inbox(getDb())).find((i) => i.kind === 'publication_partial')).toMatchObject({
+          task: { id: gateway },
+          summary: expect.stringContaining('@theokit/gateway@0.16.1'),
+        })
       })
 
       it('releases it and closes its issue once the package has its release', async () => {
         const gateway = await setUp()
 
-        const shipped = await shipContained({ db: getDb(), api }, shipment([]))
+        releasesAre(...ALL.map(published))
+
+        const shipped = await shipContained({ db: getDb(), api }, shipment())
 
         expect(shipped.released).toContain(gateway)
         expect(await stageOf(gateway)).toBe('released')
         expect(closed()).toContain(await issueOf(gateway))
+        expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(false)
       })
     })
 

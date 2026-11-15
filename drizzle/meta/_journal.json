@@ -204,13 +204,6 @@
       "when": 1794592462430,
       "tag": "0031_checks_proof",
       "breakpoints": true
-    },
-    {
-      "idx": 29,
-      "version": "7",
-      "when": 1794593462430,
-      "tag": "0032_publication_partial",
-      "breakpoints": true
     }
   ]
 }

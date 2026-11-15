@@ -5,6 +5,7 @@ import {
   changesetIgnore,
   changesetPackages,
   enclosingPackages,
+  isIgnored,
   packageDirs,
   parseManifest,
   publishedTouched,
@@ -97,9 +98,6 @@ export async function versionedTags(
   return tags
 }
 
-/** The package a changesets tag (`name@version`) names. */
-export const packageOfTag = (tag: string) => tag.slice(0, tag.lastIndexOf('@'))
-
 /**
  * The packages the commit of a task changes, by name: the named package that carries each file its merge
  * changed against its first parent (the innermost one that holds it). Whether the package is private or ignored is not asked, since
@@ -113,6 +111,45 @@ export async function packagesOfCommit(
   sha: string,
   layout: string = sha,
 ): Promise<string[]> {
+  const found = await manifestsOfCommit(api, repo, token, sha, layout)
+  return found.flatMap(({ text, dir }) => {
+    const { name } = parseManifest(text, dir)
+    return name === undefined ? [] : [name]
+  })
+}
+
+/**
+ * The releases (`name@version`) of the published packages a task's commit changed, at the version `ref` (the
+ * release branch) holds: what changesets must have released for the change to be available. A private or
+ * ignored package, or one with no name or version, is never released and is left out.
+ */
+export async function releasesOfCommit(
+  api: GithubApi,
+  repo: string,
+  token: string,
+  sha: string,
+  ref: string,
+): Promise<string[]> {
+  const found = await manifestsOfCommit(api, repo, token, sha, ref)
+  if (found.length === 0) return []
+  const ignore = changesetIgnore(await mustRead(api, repo, token, '.changeset/config.json', ref))
+  return found.flatMap(({ text, dir }) => {
+    const { name, private: kept } = parseManifest(text, dir)
+    const { version } = JSON.parse(text) as { version?: unknown }
+    if (name === undefined || kept || typeof version !== 'string' || isIgnored(name, ignore)) {
+      return []
+    }
+    return [`${name}@${version}`]
+  })
+}
+
+async function manifestsOfCommit(
+  api: GithubApi,
+  repo: string,
+  token: string,
+  sha: string,
+  layout: string,
+): Promise<{ dir: string; text: string }[]> {
   const files = touchedPaths(await api.changedFiles(repo, token, `${sha}^`, sha))
   // The packages of the commit and of the promoted tree (`layout`): a later task may have created or moved one.
   const atCommit = packageDirs(await api.filePaths(repo, token, sha))
@@ -135,14 +172,13 @@ export async function packagesOfCommit(
       `${gone.join(', ')} is no package in the promoted tree: it was moved or removed`,
     )
   }
-  const names: string[] = []
+  const found: { dir: string; text: string }[] = []
   for (const dir of touched) {
     const path = manifestPath(dir)
     const text =
       (await api.readFile(repo, token, path, layout)) ??
       (await mustRead(api, repo, token, path, sha))
-    const { name } = parseManifest(text, dir)
-    if (name !== undefined) names.push(name)
+    found.push({ dir, text })
   }
-  return names
+  return found
 }

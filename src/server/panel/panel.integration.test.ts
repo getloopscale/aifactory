@@ -18,7 +18,6 @@ import {
   stageEvent,
   task,
   watch,
-  publication,
   releaseWait,
   TASK_STAGES,
 } from '../db/schema'
@@ -345,40 +344,6 @@ describe('inbox', () => {
     ])
     expect(items[0].summary).toBe('Out of quota. the codex quota ran out')
     expect(items[1].summary).toBe('A or B?')
-  })
-
-  describe('a package with no release found by the last publication of a repository', () => {
-    const publish = async (missing: string[] | null) => {
-      const asked = await seed('released', {}, [{ stage: 'released' }])
-      await getDb()
-        .insert(publication)
-        .values({
-          taskId: asked,
-          repository: 'paulo/app',
-          releaseBranch: 'main',
-          promotedSha: `p${asked}`,
-          actor: 'human',
-          status: 'published',
-          missing,
-        })
-      return asked
-    }
-
-    it('names the package for the owner', async () => {
-      const asked = await publish(['@theokit/gateway-agent@0.1.0'])
-
-      const item = (await inbox(getDb())).find((i) => i.kind === 'publication_partial')
-
-      expect(item?.task.id).toBe(asked)
-      expect(item?.summary).toContain('@theokit/gateway-agent@0.1.0')
-    })
-
-    it('goes once a later publication of the repository finds every release', async () => {
-      await publish(['@theokit/gateway-agent@0.1.0'])
-      await publish(null)
-
-      expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(false)
-    })
   })
 
   it('leaves out an issue delivered as already resolved, which has no pull request to review', async () => {

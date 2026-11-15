@@ -138,7 +138,7 @@ export const VERSION_RELEASES_WAIT_MS = 30 * 60_000
  * Whether the published releases are the whole publication. `complete` carries what to add to its detail:
  * nothing when every `expected` release is in `tags`, or the missing ones once the bounded wait is over.
  */
-export type ReleasesRead = { wait: string } | { complete: string; missing?: string[] }
+export type ReleasesRead = { wait: string } | { complete: string }
 
 export function releasesRead(
   expected: string[],
@@ -146,8 +146,7 @@ export function releasesRead(
   mergedAt: Date,
   now: Date,
 ): ReleasesRead {
-  const absent = expected.filter((tag) => !tags.includes(tag))
-  const missing = absent.join(', ')
+  const missing = expected.filter((tag) => !tags.includes(tag)).join(', ')
   if (missing === '') return { complete: '' }
   if (now.getTime() - mergedAt.getTime() < VERSION_RELEASES_WAIT_MS) {
     return { wait: `waiting for the release workflow to publish ${missing}` }
@@ -155,7 +154,6 @@ export function releasesRead(
   const minutes = VERSION_RELEASES_WAIT_MS / 60_000
   return {
     complete: `; no release for ${missing} ${minutes} minutes after the Version Packages merge`,
-    missing: absent,
   }
 }
 

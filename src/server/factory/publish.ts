@@ -177,14 +177,12 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     tags,
     publishedBy: "the repository's release workflow",
     detail: { published: 'changesets' },
-    missing: read.missing,
   })
   const unclosed = unclosedNote(shipped)
   await deps.db
     .update(publication)
     .set({
       status: 'published',
-      missing: read.missing ?? null,
       tags: tags.map((t) => t.tag),
       publishedAt: new Date(),
       detail: `${merged}published ${tags.map((t) => t.tag).join(', ')}${read.complete}${unclosed}`,

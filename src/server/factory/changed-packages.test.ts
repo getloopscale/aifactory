@@ -4,7 +4,7 @@ import { FakeGithub } from '../../test/fake-github'
 
 import {
   changesetsWaiting,
-  packageOfTag,
+  releasesOfCommit,
   packagesOfCommit,
   publishedPackagesChanged,
   versionedTags,
@@ -200,13 +200,6 @@ describe('versionedTags', () => {
   })
 })
 
-describe('packageOfTag', () => {
-  it('is the name before the version, scope included', () => {
-    expect(packageOfTag('@theokit/gateway-agent@0.1.0')).toBe('@theokit/gateway-agent')
-    expect(packageOfTag('plain@1.2.3')).toBe('plain')
-  })
-})
-
 describe('packagesOfCommit', () => {
   it('names a package that was private when the commit landed, since a later commit may publish it', async () => {
     const api = new FakeGithub()
@@ -273,5 +266,36 @@ describe('packagesOfCommit', () => {
       '@theokit/ui',
       'theokit-monorepo',
     ])
+  })
+})
+
+describe('releasesOfCommit', () => {
+  it('names name@version of the published packages a commit changed, at the version the ref holds', async () => {
+    const api = new FakeGithub()
+    const tree = {
+      '.changeset/config.json': '{"ignore":["@theokit/skip"]}',
+      'packages/a/package.json': '{"name":"@theokit/a","version":"0.1.0"}',
+      'packages/a/src/a.ts': 'a',
+      'packages/p/package.json': '{"name":"@theokit/p","version":"1.0.0","private":true}',
+      'packages/p/src/a.ts': 'a',
+      'packages/skip/package.json': '{"name":"@theokit/skip","version":"1.0.0"}',
+      'packages/skip/src/a.ts': 'a',
+    }
+    const changed = {
+      ...tree,
+      'packages/a/src/a.ts': 'b',
+      'packages/p/src/a.ts': 'b',
+      'packages/skip/src/a.ts': 'b',
+    }
+    api
+      .repo('o/r')
+      .files('m1^', tree)
+      .files('m1', changed)
+      .files('main', {
+        ...changed,
+        'packages/a/package.json': '{"name":"@theokit/a","version":"0.2.0"}',
+      })
+
+    expect(await releasesOfCommit(api, 'o/r', 't', 'm1', 'main')).toEqual(['@theokit/a@0.2.0'])
   })
 })

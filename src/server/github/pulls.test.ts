@@ -1437,3 +1437,31 @@ describe('what the doctor reads of a repository', () => {
     ).rejects.toThrow(/403 listing the pull requests into workspace on o\/r/)
   })
 })
+
+describe('listIssueComments', () => {
+  it('reads every page, so a comment past the first hundred is found', async () => {
+    const comment = (id: number) => ({
+      id,
+      body: `c${id}`,
+      user: { login: 'bot', type: 'Bot' },
+      author_association: 'NONE',
+      created_at: '2026-11-15T00:00:00Z',
+    })
+    const pages = [
+      Array.from({ length: 100 }, (_, i) => comment(i + 1)),
+      [comment(101), comment(102)],
+    ]
+    const asked: string[] = []
+    const fetch = async (url: string) => {
+      asked.push(url)
+      const page = Number(new URL(url).searchParams.get('page'))
+      return new Response(JSON.stringify(pages[page - 1] ?? []), { status: 200 })
+    }
+
+    const seen = await createGithubApi(fetch).listIssueComments('o/r', 't', 7, new Date(0))
+
+    expect(seen).toHaveLength(102)
+    expect(seen.at(-1)?.body).toBe('c102')
+    expect(asked).toHaveLength(2)
+  })
+})
