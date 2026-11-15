@@ -121,8 +121,14 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'reviewer'
+  role: 'builder' | 'planner' | 'reviewer'
   harness: string
+  /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
+  model: string | null
+  effort: string | null
+  /** Null for an agent that reports no tokens. */
+  tokensIn: number | null
+  tokensOut: number | null
   attempt: number
   /** Empty for an agent that does not report a cost. */
   costUsd: number | null
@@ -146,7 +152,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'reviewer'
+  role: 'builder' | 'planner' | 'reviewer'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -639,6 +645,17 @@ export type AgentSettings = {
   engines: Record<string, EngineModels>
   /** Repositories that name an agent of their own, which wins over what is chosen here. */
   repositoriesWithOwn: { repository: string; builder: string | null; reviewer: string | null }[]
+}
+
+/** One change of the agent settings: what a role had, what it has now, and when. A null is the default. */
+export type AgentSettingChange = {
+  id: number
+  role: AgentRole
+  field: 'engine' | 'model' | 'effort'
+  oldValue: string | null
+  newValue: string | null
+  actor: string
+  at: string
 }
 
 /** A model a coding agent can be told to use, and the effort levels it takes. */

@@ -1,6 +1,12 @@
 import type { ReactNode } from 'react'
 
-import { columnOf, type TaskDetail } from '../../shared/panel'
+import {
+  columnOf,
+  type ReviewView,
+  type RunView,
+  type TaskDetail,
+  type TimelineEvent,
+} from '../../shared/panel'
 import { Pass, StageBadge } from './Badges'
 import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
@@ -155,7 +161,9 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
               <tr>
                 <th className="py-1 pr-3">{t.task.role}</th>
                 <th className="py-1 pr-3">{t.task.agent}</th>
+                <th className="py-1 pr-3">{t.task.model}</th>
                 <th className="py-1 pr-3">{t.task.attempt}</th>
+                <th className="py-1 pr-3">{t.task.tokens}</th>
                 <th className="py-1 pr-3">{t.task.cost}</th>
                 <th className="py-1 pr-3">{t.task.time}</th>
                 <th className="py-1 pr-3">{t.task.result}</th>
@@ -166,7 +174,15 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
                 <tr key={r.id} className="border-t border-border">
                   <td className="py-1 pr-3">{r.role}</td>
                   <td className="py-1 pr-3">{r.harness}</td>
+                  <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
                   <td className="py-1 pr-3">{r.attempt}</td>
+                  <td className="py-1 pr-3">
+                    {r.tokensIn === null && r.tokensOut === null ? (
+                      <span className="text-muted-foreground">{t.task.notReported}</span>
+                    ) : (
+                      `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
+                    )}
+                  </td>
                   <td className="py-1 pr-3">
                     {r.costUsd === null ? (
                       <span className="text-muted-foreground">{t.task.notReported}</span>
@@ -234,6 +250,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
                   <span className="font-medium">{t.task.reviewLine(r.round, r.verdict)}</span>
                   <span className="text-xs text-muted-foreground">
                     {t.task.reviewedOn(r.reviewer, shortSha(r.sha))}
+                    {modelLine(detail.runs, detail.timeline, r, t.task)}
                   </span>
                 </div>
                 <p className="mt-1 text-foreground">{r.summary}</p>
@@ -254,4 +271,48 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
       </section>
     </div>
   )
+}
+
+/**
+ * The model and effort a pass ran with, said as one line. A model or effort that was not recorded is said
+ * to be unknown, never claimed to be the default.
+ */
+function modelOf(run: RunView, words: { notRecorded: string }): string {
+  if (run.model === null && run.effort === null) return words.notRecorded
+  const model = run.model ?? words.notRecorded
+  const effort = run.effort
+  return effort ? `${model} · ${effort}` : model
+}
+
+/**
+ * The agent pass that made a review: the latest pass of that reviewer, in that attempt, made in the same run
+ * before the review was written. A run starts at an intake, and attempts restart at one in each, so a pass of
+ * another run or attempt is never the review's: with no such pass the model is left unknown.
+ */
+function reviewRun(runs: RunView[], timeline: TimelineEvent[], r: ReviewView): RunView | undefined {
+  const reviewedAt = Date.parse(r.at)
+  const started = timeline
+    .filter((e) => e.stage === 'intake' && Date.parse(e.at) <= reviewedAt)
+    .map((e) => Date.parse(e.at))
+    .sort((x, y) => y - x)[0]
+  return runs
+    .filter(
+      (x) =>
+        x.role === 'reviewer' &&
+        x.harness === r.reviewer &&
+        x.attempt === r.round &&
+        Date.parse(x.at) <= reviewedAt &&
+        (started === undefined || Date.parse(x.at) >= started),
+    )
+    .sort((x, y) => Date.parse(y.at) - Date.parse(x.at))[0]
+}
+
+function modelLine(
+  runs: RunView[],
+  timeline: TimelineEvent[],
+  r: ReviewView,
+  words: { notRecorded: string },
+): string {
+  const run = reviewRun(runs, timeline, r)
+  return ` · ${run ? modelOf(run, words) : words.notRecorded}`
 }
