@@ -30,7 +30,7 @@ export type ActionDeps = {
     work: (
       tx: Database,
       enqueueRun: (
-        input: { taskId: number; decisionId?: number; feedback?: string },
+        input: { taskId: number; decisionId?: number; feedback?: string; resume?: boolean },
         key: string,
       ) => Promise<void>,
     ) => Promise<T>,
@@ -69,7 +69,7 @@ async function requeue(
       // Nobody decided this one, so no decision is recorded in anybody's name: the intake says it was the
       // factory's own, and the count of these is what stops it after a few. Changes carry their note to
       // the run as feedback, on the branch the agent already pushed.
-      const changes = kind === 'automatic_changes' || rework !== undefined
+      const changes = kind === 'automatic_changes' || (rework !== undefined && !rework.plain)
       const [event] = await tx
         .insert(stageEvent)
         .values({
@@ -79,16 +79,18 @@ async function requeue(
             decision: changes ? 'request_changes' : 'retry',
             note,
             automatic: true,
-            ...(rework ? { kept: true } : {}),
+            ...(rework?.preAgent ? { kept: true } : {}),
             ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
           },
         })
         .returning({ id: stageEvent.id })
-      const input = !changes
-        ? { taskId }
-        : rework?.decisionId
-          ? { taskId, decisionId: rework.decisionId }
-          : { taskId, feedback: note }
+      const input = rework?.plain
+        ? { taskId, resume: true }
+        : !changes
+          ? { taskId }
+          : rework?.decisionId
+            ? { taskId, decisionId: rework.decisionId }
+            : { taskId, feedback: note }
       await enqueueRun(input, `task-${taskId}-auto${event.id}`)
       return null
     }
@@ -111,17 +113,31 @@ async function requeue(
 }
 
 /** Work a failed run left on its branch: what to change, and the decision it came from when a person asked. */
-type Rework = { note: string; decisionId?: number }
+type Rework = {
+  note: string
+  decisionId?: number
+  plain?: boolean
+  /** The run that failed never started an agent (its sandbox failed), so it was no attempt of the work. */
+  preAgent: boolean
+}
 
 /**
  * The work an automatic retry must keep. A run that was a rework (the latest intake was a request for
  * changes) keeps its note and, for a person's request, its decision, so the prompt is the one the person
- * caused. Any other run never had work sent back, so it starts over.
+ * caused. A run that pushed a branch keeps it too, even a first run, as a plain continuation: nothing was asked for, so no feedback is made up.
  */
 async function workToKeep(
   deps: ActionDeps,
   row: typeof task.$inferSelect,
+  token: string,
 ): Promise<Rework | undefined> {
+  const [failed, before] = await deps.db
+    .select({ stage: stageEvent.stage })
+    .from(stageEvent)
+    .where(eq(stageEvent.taskId, row.id))
+    .orderBy(desc(stageEvent.id))
+    .limit(2)
+  const preAgent = failed?.stage === 'failed' && before?.stage === 'sandbox'
   const events = await deps.db
     .select({ stage: stageEvent.stage, detail: stageEvent.detail })
     .from(stageEvent)
@@ -141,9 +157,10 @@ async function workToKeep(
         .limit(1)
       decisionId = asked?.id
     }
-    return { note: detail.note, decisionId }
+    return { note: detail.note, decisionId, preAgent }
   }
-  return undefined
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  return head ? { note: '', plain: true, preAgent } : undefined
 }
 
 async function load(db: Database, taskId: number) {
@@ -269,7 +286,7 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   mustAllow(row, row.stage === 'failed' ? 'retry_due' : 'conflict_rerun')
   // A rework, or a run that pushed, repeats on its branch with its note; only a run that never pushed starts over.
   const { token } = await deps.github.installationToken(row.repository)
-  const rework = row.stage === 'failed' ? await workToKeep(deps, row) : undefined
+  const rework = row.stage === 'failed' ? await workToKeep(deps, row, token) : undefined
   if (!rework) {
     await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
   }

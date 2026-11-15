@@ -1812,6 +1812,46 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  describe('a plain continuation, after a run that pushed and then failed for the environment', () => {
+    const pushed = 'f'.repeat(40)
+    const lsRemote = (command: string) =>
+      command.includes('ls-remote') ? { stdout: `${pushed}\trefs/heads/factory/7\n` } : undefined
+
+    it('starts from the branch, claims no review or failed check, and goes on from its head when the agent adds nothing', async () => {
+      const id = await seedTask()
+      branchPushed()
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: pushed, pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      const sandbox = new FakeSandbox(changed(lsRemote))
+      const prompts: string[] = []
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async (_b, input) => {
+          prompts.push(input.prompt)
+          dirty = false
+          return { ok: true, summary: 'Nothing left to do.' }
+        },
+      }
+
+      const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+        feedback: '',
+        plain: true,
+      })
+
+      expect(result).toMatchObject({ status: 'done', sha: pushed })
+      expect(prompts[0]).not.toContain('A person reviewed')
+      expect(prompts[0]).not.toContain('required checks failed')
+      expect(seen.comments).toEqual([])
+      const commands = sandbox.backend.commands
+      expect(commands.some((c) => c.includes('checkout -B factory/7 FETCH_HEAD'))).toBe(true)
+      expect(commands.some((c) => c.includes('push origin'))).toBe(false)
+      expect(await stagesOf(id)).not.toContain('handoff')
+    })
+  })
+
   it('does not mention a review when nobody sent anything back', async () => {
     const id = await seedTask()
     const prompts: string[] = []
@@ -1830,7 +1870,7 @@ describe('runTask continuing from a branch a person sent back', () => {
 })
 
 describe('an automatic retry of a run that failed creating its sandbox', () => {
-  type Queued = { taskId: number; decisionId?: number; feedback?: string }
+  type Queued = { taskId: number; decisionId?: number; feedback?: string; resume?: boolean }
   const blocked = () => {
     const sandbox = new FakeSandbox(changed())
     sandbox.create = async () => {
@@ -1859,7 +1899,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
     const [decided] = input.decisionId
       ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
       : []
-    const continuation = runContinuation(decided, input.feedback)
+    const continuation = runContinuation(decided, input.feedback, input.resume)
     const result = await runTask(deps(blocked()), id, undefined, continuation)
     expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
     return continuation
