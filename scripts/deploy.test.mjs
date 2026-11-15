@@ -240,19 +240,26 @@ describe('the deploy script', () => {
     expect(systemctl).toContain('systemctl --user restart aifactory.service')
   })
 
-  it('fails with nothing restarted and the installed unit untouched when no cloudflared runs', () => {
+  it('deploys the other units and keeps the installed tunnel unit when no cloudflared runs', () => {
     const installed = 'ExecStart=/gone/cloudflared run\n'
-    const { code, tunnel, output, systemctl, pnpm, atReload } = deploy({
+    const { code, tunnel, output, systemctl, root, atRestart } = deploy({
       cloudflared: false,
       installedTunnel: installed,
     })
 
-    expect(code).not.toBe(0)
+    expect(code).toBe(0)
     expect(tunnel).toBe(installed)
-    expect(atReload).toBeUndefined()
-    expect(output).toMatch(/cannot write aifactory-tunnel.service/)
-    expect(pnpm).toContain('pnpm build')
-    expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
+    expect(output).toMatch(/cloudflared is not on PATH.*aifactory-tunnel.service was not written/)
+    expect(atRestart).toBe(`ExecStart=${join(root, 'run')}\n`)
+    expect(systemctl).toContain('systemctl --user restart aifactory.service')
+  })
+
+  it('deploys without a tunnel unit when none is installed and no cloudflared runs', () => {
+    const { code, tunnel, systemctl } = deploy({ cloudflared: false })
+
+    expect(code).toBe(0)
+    expect(tunnel).toBeUndefined()
+    expect(systemctl).toContain('systemctl --user restart aifactory.service')
   })
 
   it('leaves the installed units alone when the build fails', () => {

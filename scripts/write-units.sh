@@ -7,7 +7,8 @@ dest="$HOME/.config/systemd/user"
 mkdir -p "$dest"
 cloudflared="$(command -v cloudflared || true)"
 # Without cloudflared on this PATH, the executable the installed tunnel unit already names is used when it still
-# runs; with neither, the unit cannot be rendered and nothing is written, so the deploy stops naming cloudflared.
+# runs; with neither, that unit cannot be rendered and is skipped with a warning (an installed copy stays as it
+# is), so a missing cloudflared never keeps the other services from deploying.
 if [ -z "$cloudflared" ] && [ -f "$dest/aifactory-tunnel.service" ]; then
   candidate="$(sed -n 's/^ExecStart=\([^ ]*cloudflared\) .*/\1/p' "$dest/aifactory-tunnel.service" | head -n 1)"
   if [ -n "$candidate" ] && [ -x "$candidate" ]; then cloudflared="$candidate"; fi
@@ -17,8 +18,8 @@ trap 'rm -rf "$staging"' EXIT
 for unit in "$root"/ops/systemd/*; do
   name="$(basename "$unit")"
   if [ -z "$cloudflared" ] && grep -q '@CLOUDFLARED@' "$unit"; then
-    echo "cloudflared is not on PATH and no installed one runs; cannot write $name" >&2
-    exit 1
+    echo "cloudflared is not on PATH and no installed one runs; $name was not written" >&2
+    continue
   fi
   sed -e "s#@ROOT@#$root#g" -e "s#@HOME@#$HOME#g" -e "s#@NODE_BIN@#$(dirname "$(command -v node)")#g" \
     -e "s#@CLOUDFLARED@#$cloudflared#g" "$unit" > "$staging/$name"
