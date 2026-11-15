@@ -74,7 +74,9 @@ async function proposePreRelease(
         body: `${PRE_RELEASE_BRANCH} accepts changes only through a pull request, so the factory could not advance it. Merging this pull request publishes what has been integrated into ${from}.`,
       })
     ).url
-  } catch {
+  } catch (error) {
+    // GitHub failing is the environment's: it surfaces, the run is not finished as if the branch were proposed.
+    if (GITHUB_SERVER_ERROR.test(message(error))) throw error
     return undefined
   }
 }

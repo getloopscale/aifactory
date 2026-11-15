@@ -540,6 +540,28 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
   })
 
+  it('fails as an environment failure when GitHub answers 502 opening the pre-release pull request', async () => {
+    const id = await seedTask()
+    githubApi.fail('mergeBranch', new Error('GitHub answered 409 merging into develop: {}'), {
+      times: 1,
+    })
+    githubApi.fail(
+      'openPullRequest',
+      new Error('GitHub answered 502 opening a pull request on paulo/app: {}'),
+    )
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('environment')
+  })
+
   it('fails as an environment failure when GitHub answers 5xx handing the work over', async () => {
     const id = await seedTask()
     githubApi.fail(
