@@ -23,6 +23,41 @@ describe('parseClaudeResult', () => {
     ).toEqual({ ok: true, summary: 'done', costUsd: 0.4 })
   })
 
+  it('reads the tokens, counting what was read from the cache as input', () => {
+    const result = parseClaudeResult(
+      0,
+      JSON.stringify({
+        result: 'done',
+        usage: {
+          input_tokens: 10,
+          cache_creation_input_tokens: 20,
+          cache_read_input_tokens: 30,
+          output_tokens: 7,
+        },
+      }),
+      '',
+    )
+    expect(result).toMatchObject({ tokensIn: 60, tokensOut: 7 })
+    expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('tokensIn')
+  })
+
+  it('reads the model Claude reports it ran, when it reports exactly one', () => {
+    const run = (modelUsage: object) =>
+      parseClaudeResult(0, JSON.stringify({ result: 'x', modelUsage }), '')
+    expect(run({ 'claude-opus-4': {} })).toMatchObject({ model: 'claude-opus-4' })
+    expect(run({ a: {}, b: {} })).toMatchObject({ model: null })
+    expect(run({})).not.toHaveProperty('model')
+    expect(parseClaudeResult(0, JSON.stringify({ result: 'x' }), '')).not.toHaveProperty('model')
+  })
+
+  it('says which model and effort the agent was told to use', () => {
+    const told = claudeCodeHarness(
+      { kind: 'api-key', secret: 'k' },
+      { model: 'opus', effort: 'high' },
+    )
+    expect(told).toMatchObject({ model: 'opus', effort: 'high' })
+  })
+
   it('is not ok when claude reports an error, even with exit code 0', () => {
     const result = parseClaudeResult(
       0,

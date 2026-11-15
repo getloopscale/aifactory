@@ -1125,6 +1125,91 @@ describe('runTask review loop', () => {
     expect(seen.drafts).toEqual([false])
   })
 
+  it('leaves the model unknown for a pass that reported several, instead of the configured one', async () => {
+    const id = await seedTask()
+    const reviewer = { ...reviewerSaying(verdictJson('approve')), model: 'opus', effort: 'high' }
+    const run = reviewer.run
+    reviewer.run = async (backend, input) => ({ ...(await run(backend, input)), model: null })
+
+    await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+    const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({ model: null, effort: 'high' })
+  })
+
+  it('records the model, the effort and the tokens of the reviewer pass on its agent_run row', async () => {
+    const id = await seedTask()
+    const reviewer = {
+      ...reviewerSaying(verdictJson('approve')),
+      model: 'gpt-6.1-sol',
+      effort: 'high',
+    }
+    const run = reviewer.run
+    reviewer.run = async (backend, input) => ({
+      ...(await run(backend, input)),
+      tokensIn: 900,
+      tokensOut: 40,
+    })
+
+    await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+    const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({
+      harness: 'fake-reviewer',
+      model: 'gpt-6.1-sol',
+      effort: 'high',
+      tokensIn: 900,
+      tokensOut: 40,
+    })
+    expect(rows.find((r) => r.role === 'builder')).toMatchObject({
+      model: null,
+      effort: null,
+    })
+  })
+
+  // Each case seeds its own task: two tasks from the same delivery cannot exist.
+  it.each([
+    [
+      'could not be renewed',
+      (async () => {
+        throw new Error('the refresh token was revoked')
+      }) as CodingHarness['reauthorize'],
+    ],
+    [
+      'was refused again',
+      (async () => [
+        { domain: 'chatgpt.com', headers: { authorization: 'Bearer new-token' } },
+      ]) as CodingHarness['reauthorize'],
+    ],
+  ])(
+    'records a reviewer pass whose login %s, with its model and effort',
+    async (_what, reauthorize) => {
+      const reviewer: CodingHarness = {
+        name: 'fake-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        egress: async () => [
+          { domain: 'chatgpt.com', headers: { authorization: 'Bearer old-token' } },
+        ],
+        reauthorize,
+        markRefused: async () => {},
+        run: async () => ({ ok: false, summary: 'refused', unauthorized: true }),
+      }
+      const id = await seedTask()
+
+      const result = await runTask(deps(new FakeSandbox(changed()), { reviewer }), id)
+
+      expect(result.status).not.toBe('done')
+      const rows = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+      expect(rows.find((r) => r.role === 'reviewer')).toMatchObject({
+        harness: 'fake-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        ok: false,
+      })
+    },
+  )
+
   it('sends the work back to the same session, then opens the pull request on the next approval', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
@@ -1560,6 +1645,24 @@ describe('runTask planning before it builds', () => {
           : undefined,
       ),
     )
+
+  it('records the planning pass as its own execution, apart from the build', async () => {
+    const id = await seedTask()
+    const builder = planningBuilder([`Read it.\n${JSON.stringify(plan)}`])
+
+    await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+
+    const runs = await getDb()
+      .select()
+      .from(agentRun)
+      .where(eq(agentRun.taskId, id))
+      .orderBy(agentRun.id)
+    expect(runs.map((r) => [r.role, r.harness])).toEqual([
+      ['planner', 'fake-agent'],
+      ['builder', 'fake-agent'],
+      ['reviewer', 'fake-reviewer'],
+    ])
+  })
 
   it('stores the plan and builds in the session that wrote it', async () => {
     const id = await seedTask()

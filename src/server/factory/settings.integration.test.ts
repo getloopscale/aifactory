@@ -1,15 +1,24 @@
+import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { repository } from '../db/schema'
+import { repository, setting } from '../db/schema'
 import { ActionRefused } from '../panel/actions'
 import { changeAgentSettings } from '../panel/agent-settings'
 
 import { agentsView } from './agent-view'
-import { agentSettings, effectiveEnv, loadChosen, saveChosen, SettingRefused } from './settings'
+import {
+  agentSettings,
+  effectiveEnv,
+  listSettingChanges,
+  loadChosen,
+  saveChosen,
+  SETTINGS_LOCK,
+  SettingRefused,
+} from './settings'
 import { optionsFor } from './engine-models'
 
 beforeAll(async () => {
@@ -17,7 +26,9 @@ beforeAll(async () => {
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
 })
 beforeEach(async () => {
-  await getPool().query('truncate table setting, repository restart identity cascade')
+  await getPool().query(
+    'truncate table setting, agent_setting_change, repository restart identity cascade',
+  )
 })
 afterAll(() => getStorageManager().dispose())
 
@@ -275,5 +286,76 @@ describe('the model and the effort, kept in the panel', () => {
     expect(view.agents.find((a) => a.id === 'builder')?.engine.value).toBe(
       'codex · gpt-6.1-sol · esforço high',
     )
+  })
+})
+
+describe('the history of the agent settings', () => {
+  it('keeps both changes of the reviewer, in order, with their times and what each replaced', async () => {
+    const before = Date.now()
+    await changeAgentSettings(getDb(), { reviewer: 'claude-code' }, ready)
+    await changeAgentSettings(
+      getDb(),
+      { reviewer: 'codex', models: { reviewer: 'gpt-6-luna' } },
+      ready,
+      read,
+    )
+
+    const changes = (await listSettingChanges(getDb())).filter((c) => c.role === 'reviewer')
+
+    expect(changes.map((c) => [c.field, c.oldValue, c.newValue])).toEqual([
+      ['engine', null, 'claude-code'],
+      ['engine', 'claude-code', 'codex'],
+      ['model', null, 'codex:gpt-6-luna'],
+    ])
+    const times = changes.map((c) => Date.parse(c.at))
+    expect(times[0]).toBeGreaterThanOrEqual(before - 1000)
+    expect(times).toEqual([...times].sort((a, b) => a - b))
+  })
+
+  it('records nothing for a save that changes nothing, and a reset to the default as a null', async () => {
+    await changeAgentSettings(getDb(), { reviewer: 'codex' }, ready)
+    await changeAgentSettings(getDb(), { reviewer: 'codex' }, ready)
+    await changeAgentSettings(getDb(), { reviewer: null }, ready)
+
+    expect((await listSettingChanges(getDb())).map((c) => [c.oldValue, c.newValue])).toEqual([
+      [null, 'codex'],
+      ['codex', null],
+    ])
+  })
+
+  it('dates a save that waited for the lock after the change it waited for', async () => {
+    const holder = await getPool().connect()
+    try {
+      await holder.query('begin')
+      await holder.query('select pg_advisory_xact_lock($1)', [SETTINGS_LOCK])
+      const waiting = saveChosen(getDb(), { reviewer: 'codex' }, ready)
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      const released = Date.now()
+      await holder.query('commit')
+      await waiting
+
+      const [change] = await listSettingChanges(getDb())
+      expect(Date.parse(change.at)).toBeGreaterThanOrEqual(released - 5)
+    } finally {
+      holder.release()
+    }
+  })
+
+  it('keeps two concurrent changes of the reviewer, in the order they were applied', async () => {
+    await Promise.all([
+      changeAgentSettings(getDb(), { reviewer: 'claude-code' }, ready),
+      changeAgentSettings(getDb(), { reviewer: 'codex' }, ready),
+    ])
+
+    const changes = await listSettingChanges(getDb())
+
+    expect(changes).toHaveLength(2)
+    // Applied one after the other: the second replaced what the first set, and it is dated no earlier.
+    expect(changes[0].oldValue).toBeNull()
+    expect(changes[1].oldValue).toBe(changes[0].newValue)
+    expect(new Set(changes.map((c) => c.newValue))).toEqual(new Set(['claude-code', 'codex']))
+    expect(Date.parse(changes[1].at)).toBeGreaterThanOrEqual(Date.parse(changes[0].at))
+    const [stored] = await getDb().select().from(setting).where(eq(setting.key, 'agent.reviewer'))
+    expect(stored.value).toBe(changes[1].newValue)
   })
 })

@@ -479,7 +479,7 @@ export class Run {
   /** Runs the agent, books its cost and session, and turns a quota stop into its own error. */
   private async settle(
     who: CodingHarness,
-    role: 'builder' | 'reviewer',
+    role: 'builder' | 'planner' | 'reviewer',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -489,23 +489,26 @@ export class Run {
     const started = Date.now()
     let result: HarnessResult
     try {
-      result = await call(this.transcript.sink(role, attempt))
+      result = await call(this.transcript.sink(role === 'planner' ? 'builder' : role, attempt))
+      if (result.unauthorized && who.reauthorize) {
+        await this.transcript.drain()
+        result = await this.afterRefusal(who, role, attempt, call)
+      }
     } catch (error) {
       await this.transcript.drain()
-      // The agent did not come back (the sandbox died, say). It still ran, and that is on record.
+      // The agent did not come back (the sandbox died, say, or its login could not be renewed). It still ran,
+      // and that is on record.
       await db.insert(agentRun).values({
         taskId,
         role,
         harness: who.name,
+        model: who.model ?? null,
+        effort: who.effort ?? null,
         attempt,
         durationMs: Date.now() - started,
         ok: false,
       })
       throw error
-    }
-    if (result.unauthorized && who.reauthorize) {
-      await this.transcript.drain()
-      result = await this.afterRefusal(who, role, attempt, call)
     }
     await this.transcript.flush()
     this.cost += result.costUsd ?? 0
@@ -514,6 +517,11 @@ export class Run {
       taskId,
       role,
       harness: who.name,
+      // What the agent says it ran, else what it was told; null when neither is known, never a guess.
+      model: result.model === undefined ? (who.model ?? null) : result.model,
+      effort: who.effort ?? null,
+      tokensIn: result.tokensIn ?? null,
+      tokensOut: result.tokensOut ?? null,
       attempt,
       costUsd: result.costUsd ?? null,
       durationMs: Date.now() - started,
@@ -538,7 +546,7 @@ export class Run {
    */
   private async afterRefusal(
     who: CodingHarness,
-    role: 'builder' | 'reviewer',
+    role: 'builder' | 'planner' | 'reviewer',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -564,7 +572,7 @@ export class Run {
         `Codex login was refused and could not be renewed (${error instanceof Error ? error.message : String(error)}): connect Codex again from the Setup page`,
       )
     }
-    const again = await call(this.transcript!.sink(role, attempt))
+    const again = await call(this.transcript!.sink(role === 'planner' ? 'builder' : role, attempt))
     if (again.unauthorized) {
       const now = rules[at]?.headers?.authorization?.replace(/^Bearer /, '')
       if (now) await who.markRefused?.(now).catch(() => {})
@@ -792,7 +800,7 @@ export class Run {
     state.current = 'plan'
     await enterStage(deps.db, taskId, 'plan', { harness: this.builder.name })
     const prompt = changePlanPrompt(this.buildInput())
-    const first = await this.settle(this.builder, 'builder', 1, (onEvent) =>
+    const first = await this.settle(this.builder, 'planner', 1, (onEvent) =>
       this.builder.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
     )
     if (!first.ok) throw new StageFailure(`the agent did not finish the plan: ${first.summary}`)
@@ -814,7 +822,7 @@ export class Run {
     if (!this.sessionId)
       throw new StageFailure('the agent wrote no plan and gave no session to ask again')
     const sessionId = this.sessionId
-    const again = await this.settle(this.builder, 'builder', 1, (onEvent) =>
+    const again = await this.settle(this.builder, 'planner', 1, (onEvent) =>
       this.builder.resume!(this.backend, sessionId, {
         onEvent,
         cwd: this.repoDir,
