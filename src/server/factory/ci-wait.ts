@@ -31,8 +31,6 @@ export type ServerEvidence = { lines: string[]; step?: FailedStep } | { unreadab
 export type FailedReport = CheckReport & {
   evidence?: ServerEvidence
   notRequired?: true
-  /** No check of the factory's has this name: only running the step's command in the sandbox reproduces it. */
-  alone?: true
 }
 
 /** What to do about a task whose pull request waits for the repository's required checks. */
@@ -173,9 +171,7 @@ const unread = (r: FailedReport) => r.evidence !== undefined && 'unreadable' in 
 const remarks = (r: FailedReport) =>
   (r.notRequired
     ? ' (not a required check: it failed on the same commit, where a required one names no failure of its own)'
-    : '') +
-  (r.alone ? ' (no check of the factory matches it, so the factory never ran it)' : '') +
-  (unread(r) ? ' (the factory could not read its log or annotations)' : '')
+    : '') + (unread(r) ? ' (the factory could not read its log or annotations)' : '')
 
 /** The lines read from the check's log or annotations, when the factory read any. */
 const evidenceLines = (r: FailedReport) =>
@@ -202,10 +198,8 @@ function stepLine(r: FailedReport): string {
 
 /** What a note says after its list of checks: the quoted reports, for a handoff to carry the same evidence. */
 export const evidenceOfNote = (note: string): string => {
-  const [head, ...quotes] = note.split('\n\n')
-  // That a rerun could not be made is part of the evidence: the failure may not be of the work.
-  const rerun = /^The factory could not rerun the failed jobs.*$/m.exec(head)?.[0]
-  return [...(rerun ? [rerun] : []), ...quotes].join('\n\n')
+  const [, ...quotes] = note.split('\n\n')
+  return quotes.join('\n\n')
 }
 
 const said = (r: FailedReport) =>
@@ -217,15 +211,10 @@ const said = (r: FailedReport) =>
  * server is quoted from it, because the agent's sandbox cannot open the link; one whose evidence could not be
  * read says so, and the reason goes to the factory's log rather than to the agent.
  */
-export function checksFeedback(sha: string, failed: FailedReport[], rerunProblem?: string): string {
+export function checksFeedback(sha: string, failed: FailedReport[]): string {
   const head = [
     `The repository's required checks failed on ${short(sha)}, so the pull request was not merged. Fix what they report:`,
     ...failed.map((r) => `- ${r.name}: ${r.url}${remarks(r)}`),
-    ...(rerunProblem
-      ? [
-          `The factory could not rerun the failed jobs (${rerunProblem.slice(0, 200)}), so a failure that is not of the work may be among these.`,
-        ]
-      : []),
   ].join('\n')
   const told = failed.filter(said)
   // Each report gets an equal share of what is left once its frame (`\n\n<name>:\n` and a fence) is counted.

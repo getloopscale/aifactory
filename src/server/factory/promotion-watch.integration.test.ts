@@ -72,7 +72,6 @@ const api: PromotionApi = {
       : undefined,
   failedChecks: async () => world.runs,
   jobAttempt: async (_repo, _token, jobId) => ({ runId: 9, attempt: world.attempts[jobId] ?? 1 }),
-  rerunJob: async () => ({ started: true }),
   jobLog: async (_repo, _token, jobId) => world.logs[jobId] ?? '',
   annotations: async () => ['apps/a.ts:118 Server-side request forgery: depends on user input.'],
   rerunFailedJobs: async (_repo, _token, runId) => {

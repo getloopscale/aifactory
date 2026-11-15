@@ -34,12 +34,10 @@ export type PromotionApi = {
     repo: string,
     token: string,
     jobId: number,
-  ): Promise<{ runId: number; attempt: number; failedStep?: string }>
+  ): Promise<{ runId: number; attempt: number }>
   jobLog(repo: string, token: string, jobId: number): Promise<string>
   annotations(repo: string, token: string, checkRunId: number): Promise<string[]>
   rerunFailedJobs(repo: string, token: string, runId: number): Promise<RerunAnswer>
-  /** Reruns one job (and the jobs that need it), not the other failed jobs of its workflow run. */
-  rerunJob(repo: string, token: string, jobId: number): Promise<RerunAnswer>
   issueOpen(repo: string, token: string, issueNumber: number): Promise<boolean>
 }
 
@@ -126,17 +124,8 @@ export function createPromotionApi(
     async jobAttempt(repo, token, jobId) {
       const job = (await (
         await call(repo, token, `/actions/jobs/${jobId}`, `reading job ${jobId}`, [200])
-      ).json()) as {
-        run_id: number
-        run_attempt: number
-        steps?: { name: string; conclusion: string | null }[]
-      }
-      const failed = job.steps?.find((step) => FAILED.has(step.conclusion ?? ''))
-      return {
-        runId: job.run_id,
-        attempt: job.run_attempt,
-        ...(failed ? { failedStep: failed.name } : {}),
-      }
+      ).json()) as { run_id: number; run_attempt: number }
+      return { runId: job.run_id, attempt: job.run_attempt }
     },
 
     async jobLog(repo, token, jobId) {
@@ -173,20 +162,6 @@ export function createPromotionApi(
         repo,
         token,
         `/actions/runs/${runId}/rerun-failed-jobs`,
-        action,
-        [201, ...RERUN_REFUSED],
-        'POST',
-      )
-      if (response.status === 201) return { started: true }
-      return { started: false, refusal: await refusal(response, action, repo) }
-    },
-
-    async rerunJob(repo, token, jobId) {
-      const action = `rerunning job ${jobId}`
-      const response = await call(
-        repo,
-        token,
-        `/actions/jobs/${jobId}/rerun`,
         action,
         [201, ...RERUN_REFUSED],
         'POST',

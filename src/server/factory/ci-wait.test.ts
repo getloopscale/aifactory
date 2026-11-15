@@ -3,13 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import { AUTOMATIC_RETRIES } from './transitions'
-import {
-  CI_SILENCE_MS,
-  checksFeedback,
-  evidenceOfNote,
-  decideWaitingIntegration,
-  readRequired,
-} from './ci-wait'
+import { CI_SILENCE_MS, checksFeedback, decideWaitingIntegration, readRequired } from './ci-wait'
 
 const VERIFIED = 'abc1234def'
 const open: PullRequestDetail = {
@@ -408,51 +402,23 @@ describe('checksFeedback', () => {
   })
 })
 
-describe('checksFeedback step and refused rerun', () => {
-  const failed = [
-    {
-      name: 'CI',
-      state: 'failure' as const,
-      detail: '',
-      url: 'u',
-      evidence: { lines: ['boom'], step: { name: 'quality:loc', command: 'pnpm quality' } },
-    },
-  ]
-
-  it('names the step before the quoted lines, and the handoff can take the same text', () => {
-    const note = checksFeedback('abc1234', failed)
-    expect(note).toContain(
-      'CI:\nStep that exited: quality:loc (ran: pnpm quality)\n~~~~text\nboom\n~~~~',
-    )
-    expect(evidenceOfNote(note)).toContain('boom')
-  })
-
-  it('says a rerun was refused', () => {
-    expect(checksFeedback('abc1234', failed, '403')).toContain(
-      'could not rerun the failed jobs (403)',
-    )
-  })
-
-  it('keeps the refused rerun in what a handoff carries', () => {
-    const evidence = evidenceOfNote(checksFeedback('abc1234', failed, '403'))
-    expect(evidence).toContain('The factory could not rerun the failed jobs (403)')
-    expect(evidence).toContain('boom')
-  })
-
-  it('renders the step alone when nothing else was read, and marks a check the factory lacks', () => {
-    const only = [
+describe('checksFeedback with the step that exited', () => {
+  it('names the step and the command it ran before the quoted lines', () => {
+    const note = checksFeedback('abc1234def', [
       {
-        name: 'changesets',
-        state: 'failure' as const,
+        name: 'CI',
+        state: 'failure',
         detail: '',
         url: 'u',
-        alone: true as const,
-        evidence: { lines: [], step: { name: 'node check.mjs' } },
+        evidence: {
+          lines: ['ERROR: "quality:loc" exited with 1.'],
+          step: { name: 'quality:loc', command: 'pnpm quality' },
+        },
       },
-    ]
-    const note = checksFeedback('abc1234', only)
-    expect(note).toContain('no check of the factory matches it')
-    expect(note).toContain('changesets:\nStep that exited: node check.mjs')
-    expect(note).not.toContain('~~~~')
+    ])
+
+    expect(note).toContain(
+      'CI:\nStep that exited: quality:loc (ran: pnpm quality)\n~~~~text\nERROR: "quality:loc" exited with 1.\n~~~~',
+    )
   })
 })

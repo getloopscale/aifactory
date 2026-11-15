@@ -3,13 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { FailedRun } from '../github/promotion-api'
 import type { CheckReport } from '../github/pulls'
 
-import {
-  attachEvidence,
-  readEvidence,
-  rerunTransient,
-  type EvidenceApi,
-  type RerunLedger,
-} from './check-evidence'
+import { attachEvidence, readEvidence, type EvidenceApi } from './check-evidence'
 
 const SHA = 'abc1234def'
 const REPO = 'o/r'
@@ -123,7 +117,11 @@ describe('attachEvidence', () => {
     const { api } = fakeApi({
       runs: [
         actionsRun({ id: 1, name: 'CI' }),
-        actionsRun({ id: 2, name: 'Type tests', url: 'https://ci/2' }),
+        actionsRun({
+          id: 2,
+          name: 'Type tests',
+          url: 'https://github.com/o/r/actions/runs/1/job/2',
+        }),
       ],
       logs: { 1: AGGREGATE_LOG, 2: TYPE_TESTS_LOG },
     })
@@ -136,7 +134,7 @@ describe('attachEvidence', () => {
         name: 'Type tests',
         state: 'failure',
         detail: '',
-        url: 'https://ci/2',
+        url: 'https://github.com/o/r/actions/runs/1/job/2',
         notRequired: true,
         evidence: { lines: ['AssertionError: expected 1 to be 2'] },
       },
@@ -160,6 +158,31 @@ describe('attachEvidence', () => {
       ['Lint', false],
       ['Type tests', true],
     ])
+  })
+
+  it("takes only the failed jobs of the gate's own workflow run, whatever their names", async () => {
+    const { api } = fakeApi({
+      runs: [
+        actionsRun({ id: 1, name: 'CI' }),
+        actionsRun({ id: 2, name: 'CI', url: 'https://github.com/o/r/actions/runs/1/job/2' }),
+        actionsRun({
+          id: 3,
+          name: 'Type tests',
+          url: 'https://github.com/o/r/actions/runs/7/job/3',
+        }),
+      ],
+      logs: { 1: AGGREGATE_LOG, 2: TYPE_TESTS_LOG, 3: DOC_LOG },
+    })
+
+    const failed = await attachEvidence(api, REPO, 't', SHA, [
+      { ...report('CI'), url: 'https://github.com/o/r/actions/runs/1/job/1' },
+    ])
+
+    expect(failed.map((r) => [r.name, r.url])).toEqual([
+      ['CI', 'https://github.com/o/r/actions/runs/1/job/1'],
+      ['CI', 'https://github.com/o/r/actions/runs/1/job/2'],
+    ])
+    expect(failed[1].evidence).toEqual({ lines: ['AssertionError: expected 1 to be 2'] })
   })
 
   it('leaves out another failed job that says no more than the aggregate does', async () => {
@@ -253,226 +276,5 @@ describe('attachEvidence', () => {
     expect(await attachEvidence(api, REPO, 't', SHA, [report('CI')])).toEqual([
       { ...report('CI'), evidence: { unreadable: 'socket hang up' } },
     ])
-  })
-})
-
-describe('rerunTransient', () => {
-  const NOW = new Date('2026-11-14T12:00:00Z')
-  const ledgerOf = (held = new Map<number, Date>()): RerunLedger => ({
-    claim: async (id) => {
-      const at = held.get(id)
-      if (!at) held.set(id, NOW)
-      return at
-    },
-    release: async (id) => void held.delete(id),
-  })
-  const rerunning = (runs: FailedRun[], attempt: number) => {
-    const reruns: number[] = []
-    const api: EvidenceApi = {
-      failedChecks: async () => runs,
-      jobLog: async () => '',
-      annotations: async () => [],
-      jobAttempt: async (_r, _t, id) => ({ runId: id * 10, attempt }),
-      rerunJob: async (_r, _t, jobId) => (reruns.push(jobId), { started: true }),
-    }
-    return { api, reruns }
-  }
-  const at = (job: number, name = 'CI'): CheckReport => ({
-    ...report(name),
-    url: `https://github.com/o/r/actions/runs/1/job/${job}`,
-  })
-
-  it('reruns the run of a failed required check on its first attempt, once', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(), NOW)
-    expect(outcome).toEqual({ started: 1, problems: [], unconfirmed: [] })
-    expect(reruns).toEqual([11])
-  })
-
-  it('never reruns a run already on its second attempt, whoever asks', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 2)
-    expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(), NOW)).toEqual({
-      started: 0,
-      problems: [],
-      unconfirmed: [],
-    })
-    expect(reruns).toEqual([])
-  })
-
-  it('asks once for repeated passes, and waits while GitHub still shows the first attempt', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    const ledger = ledgerOf()
-    const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    expect([first.started, second.started]).toEqual([1, 1])
-    expect(reruns).toEqual([11])
-  })
-
-  it('stops waiting for a claim older than a quarter of an hour, and never asks again (a restart, a lost request)', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    const old = new Map([[11, new Date(NOW.getTime() - 16 * 60_000)]])
-    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(old), NOW)
-    expect(outcome.started).toBe(0)
-    expect(outcome.problems).toEqual([])
-    expect(outcome.unconfirmed).toEqual([expect.stringContaining('was not confirmed')])
-    expect(reruns).toEqual([])
-  })
-
-  it('reruns only the required job of a workflow that has another failed job', async () => {
-    const { api, reruns } = rerunning(
-      [actionsRun(), actionsRun({ id: 12, name: 'deploy preview' })],
-      1,
-    )
-    await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledgerOf(new Map()), NOW)
-    expect(reruns).toEqual([11])
-  })
-
-  it('does not rerun an unrelated job that shares the name of a failed status', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    const status: CheckReport = { ...report('CI'), url: 'https://ci.example.com/build/9' }
-    const outcome = await rerunTransient(api, REPO, 'tok', SHA, [status], ledgerOf(), NOW)
-    expect(outcome.started).toBe(0)
-    expect(outcome.problems).toEqual([expect.stringContaining('CI was not rerun')])
-    expect(reruns).toEqual([])
-  })
-
-  it('says a required check with no Actions job was not rerun', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    const outcome = await rerunTransient(
-      api,
-      REPO,
-      'tok',
-      SHA,
-      [report('coverage floors')],
-      ledgerOf(),
-      NOW,
-    )
-    expect(outcome.started).toBe(0)
-    expect(outcome.problems).toEqual([expect.stringContaining('coverage floors was not rerun')])
-    expect(reruns).toEqual([])
-  })
-
-  it('counts a request whose answer was lost as pending, keeps the claim and does not ask again', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    api.rerunJob = async () => {
-      throw new Error('connection lost')
-    }
-    const ledger = ledgerOf()
-    const first = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    expect(first).toEqual({ started: 1, problems: [], unconfirmed: [] })
-    const second = await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)
-    expect(second).toEqual({ started: 1, problems: [], unconfirmed: [] })
-    expect(reruns).toEqual([])
-  })
-
-  it('asks once when passes run at the same time', async () => {
-    const { api, reruns } = rerunning([actionsRun()], 1)
-    const ledger = ledgerOf()
-    const all = await Promise.all(
-      [1, 2, 3].map(() => rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)),
-    )
-    expect(all.map((o) => o.started)).toEqual([1, 1, 1])
-    expect(reruns).toEqual([11])
-  })
-
-  it('gives the claim back when GitHub refuses, so the reason is not lost and a pass may ask again', async () => {
-    const { api } = rerunning([actionsRun()], 1)
-    api.rerunJob = async () => ({ started: false, refusal: 'no' })
-    const ledger = ledgerOf()
-    expect(await rerunTransient(api, REPO, 'tok', SHA, [at(11)], ledger, NOW)).toEqual({
-      started: 0,
-      problems: ['no'],
-      unconfirmed: [],
-    })
-    expect(await ledger.claim(110)).toBeUndefined()
-  })
-
-  it('reruns only the job the required check names, not a same-named job of another workflow', async () => {
-    const { api, reruns } = rerunning(
-      [actionsRun({ id: 11, name: 'validate' }), actionsRun({ id: 12, name: 'validate' })],
-      1,
-    )
-    await rerunTransient(api, REPO, 'tok', SHA, [at(12, 'validate')], ledgerOf(), NOW)
-    expect(reruns).toEqual([12])
-  })
-
-  it('reruns neither of two same-named jobs when the check names no job', async () => {
-    const { api, reruns } = rerunning(
-      [actionsRun({ id: 11, name: 'validate' }), actionsRun({ id: 12, name: 'validate' })],
-      1,
-    )
-    await rerunTransient(api, REPO, 'tok', SHA, [report('validate')], ledgerOf(), NOW)
-    expect(reruns).toEqual([])
-  })
-
-  it('leaves alone a workflow no required check names, and a check with no Actions job', async () => {
-    const { api, reruns } = rerunning(
-      [
-        actionsRun({ id: 12, name: 'Deploy docs' }),
-        actionsRun({ id: 13, name: 'CI', actions: false }),
-      ],
-      1,
-    )
-    await rerunTransient(api, REPO, 'tok', SHA, [report('CI')], ledgerOf(), NOW)
-    expect(reruns).toEqual([])
-  })
-})
-
-describe('attachEvidence by job identity', () => {
-  it('attaches the log of the job a report names, not of a same-named job of another workflow', async () => {
-    const api: EvidenceApi = {
-      failedChecks: async () => [
-        actionsRun({ id: 11, name: 'validate' }),
-        actionsRun({ id: 12, name: 'validate' }),
-      ],
-      jobLog: async (_r, _t, id) => `FAIL job ${id}`,
-      annotations: async () => [],
-    }
-    const both = ['11', '12'].map((job) => ({
-      ...report('validate'),
-      url: `https://github.com/o/r/actions/runs/1/job/${job}`,
-    }))
-    const attached = await attachEvidence(api, REPO, 'tok', SHA, both)
-    expect(attached.map((a) => a.evidence)).toEqual([
-      { lines: ['FAIL job 11'] },
-      { lines: ['FAIL job 12'] },
-    ])
-  })
-})
-
-describe('the failed step of a job', () => {
-  const stepsApi = (failedStepName: string | undefined, log: string): EvidenceApi => ({
-    failedChecks: async () => [actionsRun()],
-    jobLog: async () => log,
-    annotations: async () => [],
-    jobAttempt: async () => ({ runId: 1, attempt: 1, failedStep: failedStepName }),
-  })
-  const stepOfReport = async (api: EvidenceApi) => {
-    const [one] = await attachEvidence(api, REPO, 'tok', SHA, [report('CI')])
-    return one.evidence && 'lines' in one.evidence ? one.evidence.step : undefined
-  }
-
-  it('names a shell step by the name the workflow gave it, and keeps its command', async () => {
-    const log = '##[group]Run pnpm quality\nshell: bash\nERROR: "quality:loc" exited with 1.'
-    expect(await stepOfReport(stepsApi('Quality gates', log))).toEqual({
-      name: 'Quality gates',
-      command: 'pnpm quality',
-    })
-  })
-
-  it('names an action step that has no Run group', async () => {
-    expect(
-      await stepOfReport(stepsApi('Set up Node', '##[error]Unable to locate executable')),
-    ).toEqual({
-      name: 'Set up Node',
-    })
-  })
-
-  it('falls back to the log when the job metadata names no failed step', async () => {
-    const log = '##[group]Run pnpm quality\nshell: bash\nERROR: "quality:loc" exited with 1.'
-    expect(await stepOfReport(stepsApi(undefined, log))).toEqual({
-      name: 'quality:loc',
-      command: 'pnpm quality',
-    })
   })
 })

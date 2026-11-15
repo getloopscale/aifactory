@@ -375,6 +375,24 @@ describe('recurrenceIsNewIssue', () => {
   })
 })
 
+describe('failedStep after a shell step', () => {
+  it('gives a failed action step no command of the shell step before it', () => {
+    const log = [
+      '##[group]Run pnpm build',
+      'pnpm build',
+      'shell: /usr/bin/bash -e {0}',
+      '##[endgroup]',
+      '##[group]Run some-org/deploy-action@v2',
+      'with:',
+      '  token: ***',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+
+    expect(failedStep(log)).toBeUndefined()
+  })
+})
+
 describe('failedStep', () => {
   it('carries the whole script of a multiline run step, up to its shell line', () => {
     const log = [
