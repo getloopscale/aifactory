@@ -379,6 +379,31 @@ describe('the step of a failed job, from its metadata', () => {
     })
   })
 
+  it('attributes no command when the metadata cannot be read', async () => {
+    const { api } = fakeApi({ runs: [actionsRun()], logs: { 11: log } })
+    api.jobAttempt = async () => {
+      throw new Error('GitHub answered 502')
+    }
+    const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+    const ev = attached.evidence
+    expect(ev && 'lines' in ev ? ev.step : 'unreadable').toBeUndefined()
+  })
+
+  it('keeps the script the log says exited, without a command, when the metadata cannot be read', async () => {
+    const { api } = fakeApi({
+      runs: [actionsRun()],
+      logs: {
+        11: '##[group]Run pnpm quality\n##[endgroup]\nERROR: "quality:loc" exited with 1.\n##[error]Process completed with exit code 1.',
+      },
+    })
+    api.jobAttempt = async () => {
+      throw new Error('GitHub answered 502')
+    }
+    const [attached] = await attachEvidence(api, REPO, 't', SHA, [report('CI')])
+    const ev = attached.evidence
+    expect(ev && 'lines' in ev ? ev.step : undefined).toEqual({ name: 'quality:loc' })
+  })
+
   it('gives a step named after its own command that command', async () => {
     const shell = log.split('\n').slice(0, 2).concat('##[error]Process completed with exit code 1.')
     expect(await stepOf('Run pnpm build', shell.join('\n'))).toEqual({

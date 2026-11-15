@@ -61,7 +61,10 @@ async function stepOf(
   const fromLog = failedStep(log)
   const job = await api.jobAttempt?.call(api, repo, token, run.id).catch(() => undefined)
   const named = job?.failedStep
-  if (!named) return fromLog
+  // Without the metadata nothing ties the log's command to the failed step, so only the script the log
+  // says exited is kept, never a command.
+  if (!named)
+    return fromLog && fromLog.name !== fromLog.command ? { name: fromLog.name } : undefined
   // The command is the one of the log group in the failed step's position, when the log has a group for
   // every step that ran. Without that, only a step named after its own command (`Run <first line>`) is tied.
   const groups = stepCommands(log)
