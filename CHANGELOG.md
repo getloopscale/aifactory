@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
 ### Added
 
 - A repository can have its own limit for a run, in minutes, saved on the repositories page, with the default staying at 90 (#103)
