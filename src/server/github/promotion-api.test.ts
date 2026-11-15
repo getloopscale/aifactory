@@ -111,7 +111,42 @@ describe('failedChecks', () => {
       },
       { id: 6, name: 'late', url: '', summary: '', actions: false },
     ])
-    expect(calls[0].url).toBe('/commits/abc/check-runs?filter=latest&per_page=100')
+    expect(calls[0].url).toBe('/commits/abc/check-runs?filter=latest&per_page=100&page=1')
+  })
+  it('reads every page of the check runs, so a failure beyond the first hundred is found', async () => {
+    const passed = (id: number) => ({
+      id,
+      name: `job ${id}`,
+      status: 'completed',
+      conclusion: 'success',
+      app: { slug: 'github-actions' },
+    })
+    const pages: Record<string, unknown[]> = {
+      '1': Array.from({ length: 100 }, (_, n) => passed(n + 1)),
+      '2': [
+        {
+          id: 101,
+          name: 'validate',
+          status: 'completed',
+          conclusion: 'failure',
+          html_url: 'https://github.com/o/r/actions/runs/9/job/101',
+          app: { slug: 'github-actions' },
+        },
+      ],
+    }
+    const asked: string[] = []
+    const fetch = async (url: string) => {
+      const page = new URL(url).searchParams.get('page') ?? '1'
+      asked.push(page)
+      return new Response(JSON.stringify({ total_count: 101, check_runs: pages[page] ?? [] }), {
+        status: 200,
+      })
+    }
+
+    const failed = await createPromotionApi(fetch).failedChecks('o/r', 't', 'abc')
+
+    expect(failed.map((run) => run.id)).toEqual([101])
+    expect(asked).toEqual(['1', '2'])
   })
 })
 

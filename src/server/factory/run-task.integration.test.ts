@@ -1953,14 +1953,21 @@ describe('runTask continuing from a branch a person sent back', () => {
       id,
       undefined,
       {
-        feedback: 'CI failed',
+        feedback:
+          'CI failed:\n- CI: u\n\nCI:\nStep that exited: quality:loc\n~~~~text\nERROR: "quality:loc" exited with 1.\n~~~~',
         fromChecks: true,
       },
     )
 
-    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
+    expect(result).toMatchObject({
+      status: 'handoff',
+      pullRequestUrl: PR_URL,
+      reason: expect.stringContaining('ERROR: "quality:loc" exited with 1.'),
+    })
     expect(seen.comments).toEqual([
-      expect.stringMatching(/required checks failed[\s\S]*broken on workspace too/),
+      expect.stringMatching(
+        /required checks failed[\s\S]*broken on workspace too[\s\S]*ERROR: "quality:loc" exited with 1\./,
+      ),
     ])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row.stage).toBe('handoff')
@@ -1970,6 +1977,39 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(handoff.detail).toMatchObject({
       reason: expect.stringMatching(/required checks failed and the agent changed nothing/),
       unchanged: true,
+    })
+  })
+
+  it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'Nothing to change.' }
+      },
+    }
+    const filler = Array.from({ length: 60 }, (_, i) => `error filler line number ${i}`).join('\n')
+
+    const result = await runTask(
+      deps(new FakeSandbox(changed()), { harness: builder }),
+      id,
+      undefined,
+      {
+        feedback: `CI failed:\n- CI: u\n\nCI:\n~~~~text\n${filler}\nERROR: "late:step" exited with 1.\n~~~~`,
+        fromChecks: true,
+      },
+    )
+
+    expect(result).toMatchObject({
+      status: 'handoff',
+      reason: expect.stringContaining('ERROR: "late:step" exited with 1.'),
     })
   })
 

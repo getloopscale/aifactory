@@ -3,12 +3,17 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { GithubApi } from '../github/pulls'
+import type { CheckReport, GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
-import { checksFeedback, decideWaitingIntegration, type WaitingStep } from './ci-wait'
+import {
+  checksFeedback,
+  decideWaitingIntegration,
+  evidenceOfNote,
+  type WaitingStep,
+} from './ci-wait'
 import { createPreRelease, type ReleaseMode } from './deliver'
 import {
   advancePreRelease,
@@ -171,6 +176,26 @@ async function toPerson(
   return true
 }
 
+/**
+ * What a failed required check says: the note with what the log says and the step that exited. Reading the
+ * evidence never fails the pass; a log that could not be read is reported and the note says so.
+ */
+async function readFailure(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  reports: CheckReport[],
+  result: AwaitCiResult,
+): Promise<string> {
+  const { row, token, verifiedSha } = w
+  const failed = await attachEvidence(deps.checks, row.repository, token, verifiedSha, reports)
+  for (const check of failed) {
+    if (check.evidence && 'unreadable' in check.evidence) {
+      result.unreadEvidence.push(`task ${row.id}: ${check.name}: ${check.evidence.unreadable}`)
+    }
+  }
+  return checksFeedback(verifiedSha, failed)
+}
+
 async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: AwaitCiResult) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
@@ -212,21 +237,10 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
       return
     case 'send_back': {
-      const failed = await attachEvidence(
-        deps.checks,
-        row.repository,
-        token,
-        verifiedSha,
-        step.reports,
-      )
-      for (const check of failed) {
-        if (check.evidence && 'unreadable' in check.evidence) {
-          result.unreadEvidence.push(`task ${row.id}: ${check.name}: ${check.evidence.unreadable}`)
-        }
-      }
+      const note = await readFailure(deps, w, step.reports, result)
       // Off first: the new commit the agent pushes must not merge before the factory verifies it.
       await deps.api.disableAutoMerge(row.repository, token, number)
-      await deps.sendBack(row.id, checksFeedback(verifiedSha, failed))
+      await deps.sendBack(row.id, note)
       result.sentBack.push(row.id)
       return
     }
@@ -235,8 +249,15 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       await deps.startOver(row.id)
       result.startedOver.push(row.id)
       return
-    case 'person':
-      if (await toPerson(deps, w, step)) result.toPerson.push(row.id)
+    case 'person': {
+      let said = step
+      if (step.reports) {
+        // Checks that still fail get the same evidence before a person is told.
+        const note = await readFailure(deps, w, step.reports, result)
+        said = { ...step, reason: `${step.reason}\n\n${evidenceOfNote(note)}`.slice(0, 3_000) }
+      }
+      if (await toPerson(deps, w, said)) result.toPerson.push(row.id)
+    }
   }
 }
 

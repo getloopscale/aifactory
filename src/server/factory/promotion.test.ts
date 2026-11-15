@@ -7,6 +7,7 @@ import {
   recurrenceIsNewIssue,
   issueBody,
   issueTitle,
+  failedStep,
   logEvidence,
   needsPerson,
   newIssuesCapFromEnv,
@@ -371,5 +372,127 @@ describe('recurrenceIsNewIssue', () => {
 
   it('opens a new issue when the issue was closed', () => {
     expect(recurrenceIsNewIssue({ issueOpen: false, fixIntegrated: false })).toBe(true)
+  })
+})
+
+describe('failedStep with an earlier nonfatal error line', () => {
+  it('does not name the failed step after a script an earlier step printed', () => {
+    const log = [
+      '##[group]Run pnpm lint',
+      'shell: /usr/bin/bash -e {0}',
+      '##[endgroup]',
+      'ERROR: "lint:soft" exited with 1.',
+      '##[group]Run pnpm test',
+      'shell: /usr/bin/bash -e {0}',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+
+    expect(failedStep(log)).toEqual({ name: 'pnpm test', command: 'pnpm test' })
+  })
+})
+
+describe('failedStep after a shell step', () => {
+  it('gives a failed action step no command of the shell step before it', () => {
+    const log = [
+      '##[group]Run pnpm build',
+      'shell: /usr/bin/bash -e {0}',
+      '##[endgroup]',
+      '##[group]Run some-org/deploy-action@v2',
+      'with:',
+      '  token: ***',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+
+    expect(failedStep(log)).toBeUndefined()
+  })
+})
+
+describe('failedStep', () => {
+  it('carries the whole script of a multiline run step, up to its shell line', () => {
+    const log = [
+      '##[group]Run set -e',
+      'pnpm build',
+      'node scripts/check.mjs',
+      'shell: /usr/bin/bash -e {0}',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)?.command).toBe('set -e\npnpm build\nnode scripts/check.mjs')
+  })
+
+  it('keeps the command through a group the script printed itself', () => {
+    const log = [
+      '##[group]Run pnpm test',
+      '##[group]vitest suite',
+      'ok',
+      '##[endgroup]',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)).toEqual({ name: 'pnpm test', command: 'pnpm test' })
+  })
+
+  it('is not decided by an annotation an earlier step raised without failing', () => {
+    const log = [
+      '##[group]Run owner/action@v2',
+      '##[error]Cache not found',
+      '##[group]Run pnpm quality',
+      '##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)).toEqual({ name: 'pnpm quality', command: 'pnpm quality' })
+  })
+
+  it('shows no command when a step of another kind began after the shell step', () => {
+    const log = '##[group]Run pnpm build\nok\n##[group]Post job cleanup\n##[error]boom'
+    expect(failedStep(log)).toBeUndefined()
+  })
+
+  it('shows no command for a failing action step that follows a successful shell step', () => {
+    const log = '##[group]Run pnpm build\nok\n##[group]Run owner/action@v2\n##[error]boom'
+    expect(failedStep(log)).toBeUndefined()
+  })
+
+  it('names the script that exited and the command of the step', () => {
+    const log = [
+      '2026-11-12T10:00:00Z ##[group]Run pnpm quality',
+      '2026-11-12T10:00:00Z shell: bash',
+      'ERROR: "quality:loc" exited with 1.',
+      '2026-11-12T10:00:01Z ##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(failedStep(log)).toEqual({ name: 'quality:loc', command: 'pnpm quality' })
+    expect(logEvidence(log)).toEqual(['ERROR: "quality:loc" exited with 1.'])
+  })
+
+  it('falls back to the command, and to nothing for a log without steps', () => {
+    expect(failedStep('##[group]Run npm test\n##[error]boom\n##[group]Run post')).toEqual({
+      name: 'npm test',
+      command: 'npm test',
+    })
+    expect(failedStep('nothing here')).toBeUndefined()
+  })
+
+  it('keeps depcruise rule lines and errno lines as evidence', () => {
+    expect(logEvidence('error types-dont-import-runtime: a.ts → b.ts')).toHaveLength(1)
+    expect(logEvidence('Error: ENOTEMPTY: directory not empty, rmdir x')).toHaveLength(1)
+    expect(logEvidence('ENOTEMPTY: directory not empty')).toHaveLength(1)
+  })
+
+  it('keeps the consumed changeset files and the back-merge instruction', () => {
+    const log = [
+      '2026-11-12T10:00:00Z ##[group]Run node scripts/check-changesets.mjs',
+      '2026-11-12T10:00:01Z Consumed changeset files that came back:',
+      '2026-11-12T10:00:01Z   .changeset/brave-lions.md',
+      '2026-11-12T10:00:01Z   .changeset/odd-pears.md',
+      '2026-11-12T10:00:01Z',
+      '2026-11-12T10:00:01Z back-merge origin/workspace into this branch first.',
+      '2026-11-12T10:00:02Z ##[error]Process completed with exit code 1.',
+    ].join('\n')
+    expect(logEvidence(log)).toEqual([
+      'Consumed changeset files that came back:',
+      '.changeset/brave-lions.md',
+      '.changeset/odd-pears.md',
+      'back-merge origin/workspace into this branch first.',
+    ])
   })
 })
