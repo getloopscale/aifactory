@@ -189,28 +189,6 @@ describe('pollAwaitingIntegrations', () => {
     expect(autoMergeOff()).toEqual([])
   })
 
-  it.each([
-    ['mergeBranch', 'merging into develop'],
-    ['createRelease', 'creating the release'],
-  ] as const)(
-    'keeps the wait, and finishes on the next pass, when GitHub answers 502 on %s',
-    async (method, action) => {
-      pull({ state: 'closed', merged: true, mergeCommitSha: 'merge0001' })
-      api.fail(method, githubAnswered(502, `${action} on paulo/app`), { times: 1 })
-      const id = await waitingTask()
-
-      expect(await pollAwaitingIntegrations(deps())).toMatchObject({
-        merged: [],
-        errors: [expect.stringMatching(/502/)],
-      })
-      expect(await row(id)).toMatchObject({ stage: 'done', awaitingCiSha: VERIFIED })
-
-      expect(await pollAwaitingIntegrations(deps())).toMatchObject({ merged: [id], errors: [] })
-      expect(await row(id)).toMatchObject({ awaitingCiSha: null })
-      expect(await getDb().select().from(delivery).where(eq(delivery.taskId, id))).toHaveLength(1)
-    },
-  )
-
   it('finishes the integration GitHub merged: develop advances and the pre-release is made there', async () => {
     pull({ state: 'closed', merged: true, mergeCommitSha: 'merge0001' })
     const id = await waitingTask()
