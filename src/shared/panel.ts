@@ -346,8 +346,6 @@ export type InboxItem = {
   /** One line that says what is wanted. */
   summary: string
   at: string
-  /** For `publication_partial`: the publication the owner acknowledges once the package is handled. */
-  publicationId?: number
 }
 
 /** One step of an agent at work: what it said, a tool it called, what came back. */

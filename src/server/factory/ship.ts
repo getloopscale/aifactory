@@ -1,7 +1,7 @@
-import { and, eq, isNotNull, lt, ne, or } from 'drizzle-orm'
+import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { delivery, publication, task } from '../db/schema'
+import { delivery, task } from '../db/schema'
 import type { GithubApi } from '../github/pulls'
 
 import { packageOfTag, packagesOfCommit } from './changed-packages'
@@ -25,18 +25,11 @@ export type Shipment = {
   /** Added to the `released` stage of every task. */
   detail?: Record<string, unknown>
   /**
-   * Releases (`name@version`) the publication called for and never got. A task whose commit changed one
-   * of those packages is not released and its issue stays open.
+   * Releases (`name@version`) the promotion cut that the shipment did not find. A task whose commit changed
+   * one of those packages is not released and its issue stays open; nothing is remembered about it.
    */
   missing?: string[]
-  /** The publication this shipment finishes, when it is one: only earlier ones that wait can defer it. */
-  publicationId?: number
-  /** The tasks `decideHolds` chose, already recorded on the publication. They get a comment, not a release. */
-  held?: HeldTask[]
 }
-
-/** A task a partial publication holds: its issue, and the missing packages that carry its change. */
-export type HeldTask = { taskId: number; issue: number; packages: string[] }
 
 export type Shipped = {
   released: number[]
@@ -44,8 +37,8 @@ export type Shipped = {
   resolved: number[]
   /** Issues that could not be commented on or closed, as `#<number>: <why>`. The release stands. */
   issueErrors: string[]
-  /** Tasks left unreleased because the package that carries their change has no release, as `#<issue>: <packages>`. */
-  held: HeldTask[]
+  /** Tasks left unreleased because a package that carries their change has no release. */
+  held: { taskId: number; issue: number; packages: string[] }[]
 }
 
 /** What a publication's detail adds when issues of the release could not be closed. */
@@ -66,99 +59,42 @@ export const availableIn = (s: Shipment) =>
     '',
   ].join('\n')
 
-/** The packages a task's change is in, or why that could not be told. */
-type Carried = { names: string[] } | { unread: string }
-
-async function carriedPackages(
+/** The missing packages a task's change is in. A commit that cannot be read is left open, never released. */
+async function packagesWithoutRelease(
   api: GithubApi,
   s: Shipment,
   t: typeof task.$inferSelect,
-): Promise<Carried | undefined> {
-  if (!s.missing?.length) return undefined
+): Promise<string[]> {
+  const missing = (s.missing ?? []).map(packageOfTag)
+  if (missing.length === 0) return []
   try {
-    return {
-      names: await packagesOfCommit(api, s.repository, s.token, t.mergedSha!, s.promotedSha),
-    }
+    const names = await packagesOfCommit(api, s.repository, s.token, t.mergedSha!, s.promotedSha)
+    return names.filter((name) => missing.includes(name))
   } catch (error) {
-    return { unread: message(error) }
+    return [`${missing.join(', ')} (its commit could not be read: ${message(error)})`]
   }
 }
 
 /**
- * The missing packages a task's change is in. A commit that cannot be read is held, never released:
- * closing an issue as available is what this guards against.
+ * Tells the issue why it stays open, once: a comment that already says so is not repeated. A failure is
+ * returned, as in `announce`.
  */
-function heldFor(carried: Carried | undefined, owed: string[]): string[] {
-  if (!carried) return []
-  const missing = owed.map(packageOfTag)
-  if ('unread' in carried) {
-    return [`${missing.join(', ')} (its commit could not be read: ${carried.unread})`]
-  }
-  return carried.names.filter((name) => missing.includes(name))
-}
-
-/**
- * The tasks the publications of a repository hold, a partial one or one that recorded its holds and has
- * not finished: their issues stay open for good, whatever releases come later.
- */
-export async function heldTasks(
-  db: Database,
-  repository: string,
-  except?: number,
-): Promise<Map<number, string[]>> {
-  const rows = await db
-    .select({ missing: publication.missing })
-    .from(publication)
-    .where(
-      and(
-        eq(publication.repository, repository),
-        isNotNull(publication.missing),
-        ne(publication.id, except ?? 0),
-      ),
-    )
-  return new Map(
-    rows.flatMap((p) => (p.missing?.held ?? []).map((h) => [h.taskId, h.packages] as const)),
-  )
-}
-
-/**
- * The tasks a publication that lacks releases holds: those the promotion carries whose commit changed a
- * missing package, or whose package could not be established. Decided before anything ships, so the
- * caller can record the holds first.
- */
-export async function decideHolds(
-  deps: { db: Database; api: GithubApi },
-  s: Shipment,
-  own: { id: number; held: HeldTask[] },
-): Promise<HeldTask[]> {
-  const owed = s.missing ?? []
-  if (owed.length === 0) return own.held
-  const already = await heldTasks(deps.db, s.repository, own.id)
-  const out: HeldTask[] = [...own.held]
-  for (const t of await candidatesOf(deps.db, s)) {
-    if (out.some((h) => h.taskId === t.id)) continue
-    if (already.has(t.id) || !(await belongs(deps, s, t))) continue
-    const held = heldFor(await carriedPackages(deps.api, s, t), owed)
-    if (held.length > 0) out.push({ taskId: t.id, issue: t.issueNumber, packages: held })
-  }
-  return out
-}
-
-/** Tells the issue why it stays open. A failure is returned, as in `announce`. */
-async function explainHold(
+async function explainOpen(
   api: GithubApi,
   s: Shipment,
   issueNumber: number,
-  held: string[],
-  missingTags: string[],
+  packages: string[],
 ): Promise<string | undefined> {
-  const body = [
-    `Not available yet: ${held.join(', ')} has no release.`,
-    '',
-    `The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed and the repository's release workflow published the other packages, but it published no release for ${missingTags.join(', ')} within the time the factory waits. This issue stays open until that package is published.`,
-    '',
-  ].join('\n')
+  const first = `Not available yet: ${packages.join(', ')} has no release.`
   try {
+    const seen = await api.listIssueComments(s.repository, s.token, issueNumber, new Date(0))
+    if (seen.some((c) => c.body.startsWith(first))) return undefined
+    const body = [
+      first,
+      '',
+      `The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed, but the repository's release workflow published no release for ${(s.missing ?? []).join(', ')}. This issue stays open; a later release that has it closes the issue.`,
+      '',
+    ].join('\n')
     await api.commentOnIssue(s.repository, s.token, issueNumber, body)
     return undefined
   } catch (error) {
@@ -199,18 +135,6 @@ async function belongs(
   return deps.api.contains(s.repository, s.token, s.promotedSha, t.mergedSha!)
 }
 
-const candidatesOf = (db: Database, s: Shipment) =>
-  db
-    .select()
-    .from(task)
-    .where(
-      and(
-        eq(task.repository, s.repository),
-        isNotNull(task.mergedSha),
-        or(eq(task.stage, 'done'), eq(task.id, s.askedTaskId)),
-      ),
-    )
-
 /**
  * Releases every task whose work is in the promoted commit: the one that asked for the release, and each
  * finished task integrated before it. Each gets a delivery per tag, moves to `released`, and its issue is
@@ -222,45 +146,30 @@ export async function shipContained(
   deps: { db: Database; api: GithubApi },
   s: Shipment,
 ): Promise<Shipped> {
-  const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
-  // An earlier publication of the repository that has not decided its holds may still hold these tasks: they
-  // stay `done`, candidates for it and for a later release, rather than closing issues that may be wrong.
-  const waiting = await deps.db
-    .select({ id: publication.id })
-    .from(publication)
+  const candidates = await deps.db
+    .select()
+    .from(task)
     .where(
       and(
-        eq(publication.repository, s.repository),
-        eq(publication.status, 'waiting'),
-        lt(publication.id, s.publicationId ?? Number.MAX_SAFE_INTEGER),
+        eq(task.repository, s.repository),
+        isNotNull(task.mergedSha),
+        or(eq(task.stage, 'done'), eq(task.id, s.askedTaskId)),
       ),
     )
-  if (waiting.length > 0) {
-    const [asked] = await deps.db.select().from(task).where(eq(task.id, s.askedTaskId))
-    if (asked?.stage === 'released') {
-      await enterStage(deps.db, asked.id, 'done', {
-        deferred: 'an earlier publication has not ended',
-      })
-    }
-    return shipped
-  }
-  const owed = s.missing ?? []
-  const now = new Map((s.held ?? []).map((h) => [h.taskId, h]))
-  const earlier = await heldTasks(deps.db, s.repository)
-  for (const t of await candidatesOf(deps.db, s)) {
-    const hold = now.get(t.id)
-    if (hold) {
-      // The task that asked for the release is already `released` when the publication begins: it is
-      // given back, since its package has no release.
+  const shipped: Shipped = { released: [], resolved: [], issueErrors: [], held: [] }
+  for (const t of candidates) {
+    if (!(await belongs(deps, s, t))) continue
+    const lacking = await packagesWithoutRelease(deps.api, s, t)
+    if (lacking.length > 0) {
+      // The task that asked for the release is already `released` when a publication begins: given back.
       if (t.stage === 'released') {
-        await enterStage(deps.db, t.id, 'done', { held: hold.packages, missing: owed })
+        await enterStage(deps.db, t.id, 'done', { missing: lacking })
       }
-      const error = await explainHold(deps.api, s, t.issueNumber, hold.packages, owed)
-      shipped.held.push(hold)
+      const error = await explainOpen(deps.api, s, t.issueNumber, lacking)
+      shipped.held.push({ taskId: t.id, issue: t.issueNumber, packages: lacking })
       if (error) shipped.issueErrors.push(error)
       continue
     }
-    if (earlier.has(t.id) || !(await belongs(deps, s, t))) continue
     await deps.db.insert(delivery).values(
       s.tags.map((tag) => ({
         taskId: t.id,

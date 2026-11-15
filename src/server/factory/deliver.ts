@@ -19,7 +19,7 @@ import { PRE_RELEASE_BRANCH, releaseBranchOf } from './branches'
 import { changesetsWaiting, publishedPackagesChanged } from './changed-packages'
 import { usesChangesets } from './changesets'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
-import { heldTasks, shipContained } from './ship'
+import { shipContained } from './ship'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
 
@@ -181,17 +181,6 @@ export async function release(
   if (!row) throw new ReleaseRefused(`task ${taskId} does not exist`)
   const allowed = outcome(row, 'release')
   if (allowed.kind !== 'action') throw new ReleaseRefused(allowed.reason)
-  if ((await heldTasks(deps.db, row.repository)).has(taskId)) throw heldRefusal()
-  // A publication that has not ended may still hold tasks: a release now could ship them first.
-  const waiting = await deps.db
-    .select({ id: publication.id })
-    .from(publication)
-    .where(and(eq(publication.repository, row.repository), eq(publication.status, 'waiting')))
-  if (waiting.length > 0) {
-    throw new ReleaseRefused(
-      'an earlier publication of this repository has not ended: its packages are not all published yet',
-    )
-  }
   // Only integrated work with a commit is released.
   const headSha = row.headSha!
   const pre = await latestPreRelease(deps.db, taskId)
@@ -374,17 +363,6 @@ async function waitForChecks(
   }
 }
 
-const heldRefusal = () =>
-  new ReleaseRefused(
-    'a package that carries this work was not published: the task stays held until it is',
-  )
-
-/** A held task that the promotion's claim moved to `released` goes back to `done`. */
-async function giveBack(db: Database, taskId: number) {
-  const [t] = await db.select({ stage: task.stage }).from(task).where(eq(task.id, taskId))
-  if (t?.stage === 'released') await enterStage(db, taskId, 'done', { held: true })
-}
-
 /**
  * What follows the promotion's merge, however it was made: the factory's own release or the publication a
  * changesets repository makes, the watch on the merge commit, and the task's move to `released`. With its own
@@ -397,9 +375,6 @@ export async function completeRelease(
 ): Promise<ReleaseResult> {
   const { row, pre, pull, token, target, sha, mergeSha, actor } = input
   const taskId = row.id
-  // A hold may have been recorded after the release started waiting for CI. The promotion is merged by now,
-  // so it is completed all the same and only the held task is kept from `released`.
-  const held = (await heldTasks(deps.db, row.repository)).has(taskId)
   const published: Published = input.changesets
     ? await handToChangesets(deps, { row, target, mergeSha, actor })
     : await createOwnRelease(deps, { row, pre, pr: pull, token, mergeSha, bump: input.bump, actor })
@@ -431,12 +406,7 @@ export async function completeRelease(
       tags: [created],
       detail: { sha },
     })
-    if (held) await giveBack(deps.db, taskId)
     return { tag: created.tag, url: created.url, mergeSha, issueErrors: shipped.issueErrors }
-  }
-  if (held) {
-    await giveBack(deps.db, taskId)
-    return { tag: undefined, url: undefined, mergeSha, publishing }
   }
   await enterStage(deps.db, taskId, 'released', {
     actor,

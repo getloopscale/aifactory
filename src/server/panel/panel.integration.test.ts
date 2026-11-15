@@ -28,7 +28,6 @@ import { FakeGithub } from '../../test/fake-github'
 import {
   ActionRefused,
   approve,
-  acknowledgePublication,
   acknowledgeWatch,
   resolveFinding,
   type FindingAction,
@@ -348,8 +347,8 @@ describe('inbox', () => {
     expect(items[1].summary).toBe('A or B?')
   })
 
-  describe('a publication that left a package unpublished', () => {
-    const partial = async (status: 'partial' | 'published', held: number[] = []) => {
+  describe('a package with no release found by the last publication of a repository', () => {
+    const publish = async (missing: string[] | null) => {
       const asked = await seed('released', {}, [{ stage: 'released' }])
       await getDb()
         .insert(publication)
@@ -357,64 +356,26 @@ describe('inbox', () => {
           taskId: asked,
           repository: 'paulo/app',
           releaseBranch: 'main',
-          promotedSha: 'p1',
+          promotedSha: `p${asked}`,
           actor: 'human',
-          status,
-          missing: {
-            releases: ['@theokit/gateway-agent@0.1.0'],
-            held: held.map((taskId) => ({
-              taskId,
-              issue: 415,
-              packages: ['@theokit/gateway-agent'],
-            })),
-          },
+          status: 'published',
+          missing,
         })
       return asked
     }
 
-    it('names the package for the owner, with no task held and none waiting', async () => {
-      const asked = await partial('partial')
+    it('names the package for the owner', async () => {
+      const asked = await publish(['@theokit/gateway-agent@0.1.0'])
 
-      const items = await inbox(getDb())
+      const item = (await inbox(getDb())).find((i) => i.kind === 'publication_partial')
 
-      const item = items.find((i) => i.kind === 'publication_partial')
       expect(item?.task.id).toBe(asked)
       expect(item?.summary).toContain('@theokit/gateway-agent@0.1.0')
     })
 
-    it('names the held task, which is not the task that asked for the publication', async () => {
-      const heldId = await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
-      const asked = await partial('partial', [heldId])
-
-      const items = (await inbox(getDb())).filter((i) => i.kind === 'publication_partial')
-
-      expect(items.map((i) => i.task.id)).toEqual([heldId])
-      expect(items[0].task.id).not.toBe(asked)
-      expect(items[0].summary).toContain('@theokit/gateway-agent@0.1.0')
-      expect(items[0].summary).toContain('#415')
-    })
-
-    it('leaves the inbox once the owner says it was handled, and the hold stays', async () => {
-      const heldId = await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
-      await partial('partial', [heldId])
-      const item = (await inbox(getDb())).find((i) => i.kind === 'publication_partial')
-
-      await acknowledgePublication({ db: getDb() } as ActionDeps, item!.publicationId!)
-
-      expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(false)
-      expect((await getDb().select().from(publication))[0].missing?.held).toHaveLength(1)
-      await expect(
-        acknowledgePublication({ db: getDb() } as ActionDeps, item!.publicationId!),
-      ).rejects.toThrow(ActionRefused)
-    })
-
-    it('stays while another task of the repository is done or released, and goes once published', async () => {
-      await partial('partial')
-      await seed('done', { headSha: 'abc', mergedSha: 'm1' }, [{ stage: 'done' }])
-      await getDb().update(task).set({ stage: 'released' }).where(eq(task.stage, 'done'))
-      expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(true)
-
-      await getDb().update(publication).set({ status: 'published' })
+    it('goes once a later publication of the repository finds every release', async () => {
+      await publish(['@theokit/gateway-agent@0.1.0'])
+      await publish(null)
 
       expect((await inbox(getDb())).some((i) => i.kind === 'publication_partial')).toBe(false)
     })

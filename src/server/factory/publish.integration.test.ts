@@ -10,7 +10,6 @@ import type { GithubApp } from '../github/app'
 import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
 import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
 
-import { ReleaseRefused, completeRelease, release } from './deliver'
 import { pollPublications } from './publish'
 import { shipContained } from './ship'
 
@@ -414,7 +413,7 @@ describe('publishing a changesets release', () => {
       expect(closed()).toHaveLength(1)
     })
 
-    it('ends partly published, releases the tasks of the published packages and keeps open the issue of the missing one', async () => {
+    it('releases the tasks of the published packages and leaves the task of the missing one open, with one comment', async () => {
       await waitingPublication()
       const gateway = await seedTask('done', 'gw-merge')
       const slack = await seedTask('done', 'slack-merge')
@@ -427,13 +426,8 @@ describe('publishing a changesets release', () => {
       expect(await stageOf(slack)).toBe('released')
       expect(await stageOf(gateway)).toBe('done')
       expect(await row()).toMatchObject({
-        status: 'partial',
-        missing: {
-          releases: ['@theokit/gateway@0.16.1'],
-          held: [
-            { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-          ],
-        },
+        status: 'published',
+        missing: ['@theokit/gateway@0.16.1'],
       })
       expect((await row()).detail).toMatch(/issues left open.*@theokit\/gateway/)
       expect(closed()).not.toContain(await issueOf(gateway))
@@ -442,9 +436,9 @@ describe('publishing a changesets release', () => {
       const told = comments().find((c) => c.issue === slackIssue)?.body ?? ''
       expect(told).toContain('@theokit/gateway-slack@0.5.1')
       const heldIssue = await issueOf(gateway)
-      const held = comments().find((c) => c.issue === heldIssue)
-      expect(held?.body).toContain('@theokit/gateway@0.16.1')
-      expect(held?.body).toContain('has no release')
+      const open = comments().filter((c) => c.issue === heldIssue)
+      expect(open).toHaveLength(1)
+      expect(open[0].body).toContain('@theokit/gateway has no release')
     })
 
     it('gives back the task that asked for the publication when its own package is the one missing', async () => {
@@ -457,240 +451,53 @@ describe('publishing a changesets release', () => {
 
       expect(await stageOf(asked)).toBe('done')
       expect(closed()).not.toContain(await issueOf(asked))
-      expect((await row()).missing?.held.map((h) => h.taskId)).toEqual([asked])
     })
 
-    it('records the holds before any task ships, and still enforces them while the publication waits', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      await getDb()
-        .update(publication)
-        .set({
-          missing: {
-            releases: ['@theokit/gateway@0.16.1'],
-            held: [
-              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-            ],
-          },
-        })
-        .where(eq(publication.taskId, asked))
-      expect((await row()).status).toBe('waiting')
-
-      const shipped = await shipContained(
-        { db: getDb(), api },
-        {
-          repository: REPO,
-          token: 't',
-          promotedSha: 'promoted2',
-          releaseBranch: 'main',
-          askedTaskId: asked,
-          actor: 'human',
-          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
-        },
-      )
-
-      expect(shipped.released).not.toContain(gateway)
-      expect(await stageOf(gateway)).toBe('done')
-    })
-
-    it('keeps the holds it saved when shipping failed and the publication is looked at again', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      commitIn('gw-merge', 'gateway')
-      releasesAre(...ALL.slice(0, 2).map(published))
-      // A first pass saved the hold and then failed before it shipped anything: the publication still waits.
-      await getDb()
-        .update(publication)
-        .set({
-          missing: {
-            releases: ['@theokit/gateway@0.16.1'],
-            held: [
-              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-            ],
-          },
-        })
-        .where(eq(publication.taskId, asked))
-
-      await pollPublications(deps(PAST_THE_WAIT))
-
-      expect((await row()).missing?.held.map((h) => h.taskId)).toContain(gateway)
-      expect(await stageOf(gateway)).toBe('done')
-      expect(closed()).not.toContain(await issueOf(gateway))
-    })
-
-    it('keeps the saved holds when every release has appeared by the time a failed pass is retried', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      commitIn('gw-merge', 'gateway')
-      releasesAre(...ALL.map(published))
-      await getDb()
-        .update(publication)
-        .set({
-          missing: {
-            releases: ['@theokit/gateway@0.16.1'],
-            held: [
-              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-            ],
-          },
-        })
-        .where(eq(publication.taskId, asked))
-
-      await pollPublications(deps(PAST_THE_WAIT))
-
-      expect((await row()).missing?.held.map((h) => h.taskId)).toEqual([gateway])
-      expect(await stageOf(gateway)).toBe('done')
-      expect(closed()).not.toContain(await issueOf(gateway))
-
-      // A later factory release does not free it either.
-      const shipped = await shipContained(
-        { db: getDb(), api },
-        {
-          repository: REPO,
-          token: 't',
-          promotedSha: 'promoted2',
-          releaseBranch: 'main',
-          askedTaskId: 0,
-          actor: 'human',
-          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
-        },
-      )
-      expect(shipped.released).not.toContain(gateway)
-    })
-
-    it('refuses to release a held task when it is the one asked to release', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      await getDb()
-        .update(publication)
-        .set({
-          status: 'partial',
-          missing: {
-            releases: ['@theokit/gateway@0.16.1'],
-            held: [
-              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-            ],
-          },
-        })
-        .where(eq(publication.taskId, asked))
-
-      await expect(release(deps(), gateway, { bump: 'patch', actor: 'human' })).rejects.toThrow(
-        ReleaseRefused,
-      )
-      expect(await stageOf(gateway)).toBe('done')
-    })
-
-    it('refuses a later release while an earlier publication has not ended', async () => {
-      await waitingPublication()
-      const later = await seedTask('done', 'later-merge')
-
-      await expect(release(deps(), later, { bump: 'patch', actor: 'human' })).rejects.toThrow(
-        /has not ended/,
-      )
-      expect(await stageOf(later)).toBe('done')
-      expect(closed()).toEqual([])
-    })
-
-    it('ships nothing while an earlier publication has not decided its holds, and gives back the asked task', async () => {
-      await waitingPublication()
-      const later = await seedTask('released', 'later-merge')
-      const other = await seedTask('done', 'other-merge')
-
-      const shipped = await shipContained(
-        { db: getDb(), api },
-        {
-          repository: REPO,
-          token: 't',
-          promotedSha: 'promoted2',
-          releaseBranch: 'main',
-          askedTaskId: later,
-          actor: 'human',
-          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
-        },
-      )
-
-      expect(shipped.released).toEqual([])
-      expect(await stageOf(later)).toBe('done')
-      expect(await stageOf(other)).toBe('done')
-      expect(closed()).toEqual([])
-    })
-
-    it('completes a merged promotion and gives back the held task that the direct path had claimed', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      await getDb()
-        .update(publication)
-        .set({
-          status: 'partial',
-          missing: {
-            releases: ['@theokit/gateway@0.16.1'],
-            held: [
-              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-            ],
-          },
-        })
-        .where(eq(publication.taskId, asked))
-      // `release()` claimed the task before merging: it is `released` when the hold is found.
-      await getDb().update(task).set({ stage: 'released' }).where(eq(task.id, gateway))
-      const [row] = await getDb().select().from(task).where(eq(task.id, gateway))
-      const [pre] = await getDb().select().from(delivery).where(eq(delivery.taskId, asked))
-
-      await completeRelease(deps(), {
-        row,
-        pre,
-        pull: { number: 9, url: 'https://example.test/pull/9' },
+    describe('a later shipment that contains the task', () => {
+      const shipment = (missing: string[]) => ({
+        repository: REPO,
         token: 't',
-        target: 'main',
-        sha: 'abc1234',
-        mergeSha: 'promoted9',
-        changesets: true,
-        bump: 'patch',
+        promotedSha: 'promoted2',
+        releaseBranch: 'main',
+        askedTaskId: 0,
         actor: 'human',
+        tags: [{ tag: '@theokit/gateway-slack@0.5.2', url: 'https://example.test/v2' }],
+        missing,
+      })
+      const setUp = async () => {
+        await waitingPublication()
+        const gateway = await seedTask('done', 'gw-merge')
+        commitIn('gw-merge', 'gateway')
+        releasesAre(...ALL.slice(0, 2).map(published))
+        await pollPublications(deps(PAST_THE_WAIT))
+        return gateway
+      }
+
+      it('leaves it open and does not comment again while the release is still missing', async () => {
+        const gateway = await setUp()
+        const issue = await issueOf(gateway)
+        expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
+
+        const shipped = await shipContained(
+          { db: getDb(), api },
+          shipment(['@theokit/gateway@0.16.1']),
+        )
+
+        expect(shipped.held.map((h) => h.taskId)).toEqual([gateway])
+        expect(await stageOf(gateway)).toBe('done')
+        expect(closed()).not.toContain(issue)
+        expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
       })
 
-      expect(await stageOf(gateway)).toBe('done')
-      expect(closed()).not.toContain(await issueOf(gateway))
-      expect(
-        (await getDb().select().from(publication).where(eq(publication.taskId, gateway)))[0],
-      ).toMatchObject({ promotedSha: 'promoted9', status: 'waiting' })
-    })
+      it('releases it and closes its issue once the package has its release', async () => {
+        const gateway = await setUp()
 
-    it('keeps open the held task of an earlier partial publication, whatever its package is called now, and holds no other', async () => {
-      const asked = await waitingPublication()
-      const gateway = await seedTask('done', 'gw-merge')
-      const fresh = await seedTask('done', 'fresh-merge')
-      // The package of the held task was renamed since: its commit no longer names the missing one.
-      commitIn('gw-merge', 'slack')
-      commitIn('fresh-merge', 'gateway')
-      await getDb()
-        .update(publication)
-        .set({
-          status: 'partial',
-          missing: {
-            releases: ['@theokit/gateway@0.16.1'],
-            held: [
-              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
-            ],
-          },
-        })
-        .where(eq(publication.taskId, asked))
+        const shipped = await shipContained({ db: getDb(), api }, shipment([]))
 
-      const shipped = await shipContained(
-        { db: getDb(), api },
-        {
-          repository: REPO,
-          token: 't',
-          promotedSha: 'promoted2',
-          releaseBranch: 'main',
-          askedTaskId: asked,
-          actor: 'human',
-          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
-        },
-      )
-
-      expect(shipped.held).toEqual([])
-      expect(await stageOf(gateway)).toBe('done')
-      expect(closed()).not.toContain(await issueOf(gateway))
-      expect(await stageOf(fresh)).toBe('released')
+        expect(shipped.released).toContain(gateway)
+        expect(await stageOf(gateway)).toBe('released')
+        expect(closed()).toContain(await issueOf(gateway))
+      })
     })
 
     it('records why it cannot tell the releases apart when GitHub names no merge commit for the merged pull request', async () => {

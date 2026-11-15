@@ -15,7 +15,7 @@ import {
   type ReleasesRead,
 } from './changesets'
 import { endWithoutVersionPullRequest, type Ending } from './publication-end'
-import { decideHolds, shipContained, unclosedNote } from './ship'
+import { shipContained, unclosedNote } from './ship'
 import { classify } from './watch'
 
 export type PublishDeps = { db: Database; github: GithubApp; api: GithubApi; now?: () => Date }
@@ -167,11 +167,7 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     result.waiting += 1
     return
   }
-  // Holds a failed earlier pass saved stay, even when every release has appeared since: nothing here
-  // releases a held task.
-  const saved = p.missing ?? undefined
-  const missing = ('missing' in read ? read.missing : undefined) ?? saved?.releases
-  const shipment = {
+  const shipped = await shipContained(deps, {
     repository: p.repository,
     token,
     promotedSha: p.promotedSha,
@@ -181,25 +177,14 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     tags,
     publishedBy: "the repository's release workflow",
     detail: { published: 'changesets' },
-    missing,
-  }
-  // The holds are recorded before any task ships, so a failure part way, or a release that runs meanwhile,
-  // still finds them.
-  const own = { id: p.id, held: saved?.held ?? [] }
-  const held = !missing ? [] : 'missing' in read ? await decideHolds(deps, shipment, own) : own.held
-  if (missing) {
-    await deps.db
-      .update(publication)
-      .set({ missing: { releases: missing, held } })
-      .where(eq(publication.id, p.id))
-  }
-  const shipped = await shipContained(deps, { ...shipment, held, publicationId: p.id })
+    missing: read.missing,
+  })
   const unclosed = unclosedNote(shipped)
   await deps.db
     .update(publication)
     .set({
-      status: missing ? 'partial' : 'published',
-      missing: missing ? { releases: missing, held } : null,
+      status: 'published',
+      missing: read.missing ?? null,
       tags: tags.map((t) => t.tag),
       publishedAt: new Date(),
       detail: `${merged}published ${tags.map((t) => t.tag).join(', ')}${read.complete}${unclosed}`,

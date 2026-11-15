@@ -249,10 +249,9 @@ export const publication = pgTable('publication', {
   actor: text('actor').notNull(),
   /**
    * `failed` when the release workflow finished without a Version Packages pull request and the factory
-   * could not release the promotion as its own; the reason is in `detail` and on the task. `partial` when
-   * a package the Version Packages merge versioned has no release: `missing` names them. `acknowledged` once the owner dealt with that; the tasks it holds stay held.
+   * could not release the promotion as its own; the reason is in `detail` and on the task.
    */
-  status: text('status', { enum: ['waiting', 'published', 'failed', 'partial', 'acknowledged'] })
+  status: text('status', { enum: ['waiting', 'published', 'failed'] })
     .notNull()
     .default('waiting'),
   /** The Version Packages pull request, once the factory merged it or saw it merged. */
@@ -260,14 +259,10 @@ export const publication = pgTable('publication', {
   /** The tags the repository's workflow published, once it did. */
   tags: jsonb('tags').$type<string[]>(),
   /**
-   * Set when `partial`: the releases (`name@version`) the Version Packages merge called for that never
-   * appeared, and the tasks held for them. The hold is by task, so a later release or a renamed package
-   * cannot free one.
+   * The releases (`name@version`) the Version Packages merge called for that the shipment of this publication
+   * did not find, for the panel to name. Null when none was missing. It holds back nothing.
    */
-  missing: jsonb('missing').$type<{
-    releases: string[]
-    held: { taskId: number; issue: number; packages: string[] }[]
-  }>(),
+  missing: jsonb('missing').$type<string[]>(),
   /** What the last look found: what it waits for, or why it cannot go on. */
   detail: text('detail'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),

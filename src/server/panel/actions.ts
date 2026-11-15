@@ -1,16 +1,7 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import {
-  decision,
-  finding,
-  publication,
-  question,
-  repository,
-  stageEvent,
-  task,
-  watch,
-} from '../db/schema'
+import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { integrationBranch } from '../factory/branches'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
@@ -270,21 +261,6 @@ export async function acknowledgeWatch(deps: ActionDeps, watchId: number) {
   if (done.length === 0)
     throw new ActionRefused('there is no red default branch waiting for you here')
   return { watchId }
-}
-
-/**
- * Says a person dealt with a package a publication never published, so it leaves the inbox. The tasks the
- * publication holds stay held: nothing here releases them.
- */
-export async function acknowledgePublication(deps: ActionDeps, publicationId: number) {
-  const done = await deps.db
-    .update(publication)
-    .set({ status: 'acknowledged' })
-    .where(and(eq(publication.id, publicationId), eq(publication.status, 'partial')))
-    .returning({ id: publication.id })
-  if (done.length === 0)
-    throw new ActionRefused('there is no unpublished package waiting for you here')
-  return { publicationId }
 }
 
 /** What a person can do about a supervisor finding, and which findings each one is for. */

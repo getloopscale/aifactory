@@ -366,47 +366,29 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
       })
     }
   }
-  items.push(...(await partialPublications(db)))
+  items.push(...(await missingReleases(db)))
   return items.sort((a, b) => a.at.localeCompare(b.at))
 }
 
 /**
- * Publications that ended with a package unpublished. Nothing else will publish it, so the owner is told
- * until it is handled by hand.
+ * The packages with no release that the last publication of each repository found. Nothing else will
+ * publish them, so the owner is told; a later publication that finds them clears the item.
  */
-async function partialPublications(db: Database): Promise<InboxItem[]> {
-  const rows = await db.select().from(publication).where(eq(publication.status, 'partial'))
+async function missingReleases(db: Database): Promise<InboxItem[]> {
+  const rows = await db.select().from(publication).orderBy(desc(publication.id))
+  const last = new Map<string, (typeof rows)[number]>()
+  for (const p of rows)
+    if (!last.has(p.repository) && p.status === 'published') last.set(p.repository, p)
   const items: InboxItem[] = []
-  for (const p of rows) {
-    const { releases = [], held = [] } = p.missing ?? {}
-    const at = iso(p.publishedAt ?? p.startedAt)
-    const heldTasks = held.length
-      ? await db
-          .select()
-          .from(task)
-          .where(
-            inArray(
-              task.id,
-              held.map((h) => h.taskId),
-            ),
-          )
-      : []
-    // One item per held task, so the owner sees which issues stay open; the requesting task when none is held.
-    const subjects = heldTasks.length
-      ? heldTasks
-      : await db.select().from(task).where(eq(task.id, p.taskId))
+  for (const p of last.values()) {
+    if (!p.missing?.length) continue
+    const subjects = await db.select().from(task).where(eq(task.id, p.taskId))
     for (const card of await cards(db, subjects)) {
-      const mine = held.find((h) => h.taskId === card.id)
       items.push({
         task: card,
         kind: 'publication_partial',
-        publicationId: p.id,
-        summary: `Not published: ${releases.join(', ')}.${
-          mine
-            ? ` Issue #${mine.issue} stays open until ${mine.packages.join(', ')} is published.`
-            : ''
-        }`,
-        at,
+        summary: `No release for ${p.missing.join(', ')} in ${p.repository}; the issues of that package stay open.`,
+        at: iso(p.publishedAt ?? p.startedAt),
       })
     }
   }
