@@ -167,7 +167,10 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
     result.waiting += 1
     return
   }
-  const missing = 'missing' in read ? read.missing : undefined
+  // Holds a failed earlier pass saved stay, even when every release has appeared since: nothing here
+  // releases a held task.
+  const saved = p.missing ?? undefined
+  const missing = ('missing' in read ? read.missing : undefined) ?? saved?.releases
   const shipment = {
     repository: p.repository,
     token,
@@ -182,9 +185,8 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
   }
   // The holds are recorded before any task ships, so a failure part way, or a release that runs meanwhile,
   // still finds them.
-  const held = missing
-    ? await decideHolds(deps, shipment, { id: p.id, held: p.missing?.held ?? [] })
-    : []
+  const own = { id: p.id, held: saved?.held ?? [] }
+  const held = !missing ? [] : 'missing' in read ? await decideHolds(deps, shipment, own) : own.held
   if (missing) {
     await deps.db
       .update(publication)

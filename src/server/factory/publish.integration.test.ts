@@ -518,6 +518,45 @@ describe('publishing a changesets release', () => {
       expect(closed()).not.toContain(await issueOf(gateway))
     })
 
+    it('keeps the saved holds when every release has appeared by the time a failed pass is retried', async () => {
+      const asked = await waitingPublication()
+      const gateway = await seedTask('done', 'gw-merge')
+      commitIn('gw-merge', 'gateway')
+      releasesAre(...ALL.map(published))
+      await getDb()
+        .update(publication)
+        .set({
+          missing: {
+            releases: ['@theokit/gateway@0.16.1'],
+            held: [
+              { taskId: gateway, issue: await issueOf(gateway), packages: ['@theokit/gateway'] },
+            ],
+          },
+        })
+        .where(eq(publication.taskId, asked))
+
+      await pollPublications(deps(PAST_THE_WAIT))
+
+      expect((await row()).missing?.held.map((h) => h.taskId)).toEqual([gateway])
+      expect(await stageOf(gateway)).toBe('done')
+      expect(closed()).not.toContain(await issueOf(gateway))
+
+      // A later factory release does not free it either.
+      const shipped = await shipContained(
+        { db: getDb(), api },
+        {
+          repository: REPO,
+          token: 't',
+          promotedSha: 'promoted2',
+          releaseBranch: 'main',
+          askedTaskId: 0,
+          actor: 'human',
+          tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
+        },
+      )
+      expect(shipped.released).not.toContain(gateway)
+    })
+
     it('refuses to release a held task when it is the one asked to release', async () => {
       const asked = await waitingPublication()
       const gateway = await seedTask('done', 'gw-merge')
