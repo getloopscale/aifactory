@@ -32,6 +32,12 @@ function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
   const bin = join(root, 'bin')
   mkdirSync(bin)
   const calls = join(root, 'calls.log')
+  // The deploy reinstalls the units first, so a changed TimeoutStopSec is in place before the restart.
+  writeFileSync(
+    join(root, 'scripts', 'install-services.sh'),
+    `#!/bin/sh\necho "install-services" >> ${calls}\n`,
+  )
+  chmodSync(join(root, 'scripts', 'install-services.sh'), 0o755)
   const fake = (name, body = '') => {
     writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> ${calls}\n${body}\n`)
     chmodSync(join(bin, name), 0o755)
@@ -60,10 +66,20 @@ function deploy({ busy = '0', enabledWorkers = [], checkFails = false } = {}) {
     pnpm: log.filter((l) => l.startsWith('pnpm ') && !l.startsWith('pnpm sees')),
     pnpmEnv: log.filter((l) => l.startsWith('pnpm sees')),
     systemctl: log.filter((l) => l.startsWith('systemctl ')),
+    log,
   }
 }
 
 describe('the deploy script', () => {
+  it('reinstalls the service units after the build and before the restart', () => {
+    const { code, log } = deploy()
+
+    expect(code).toBe(0)
+    const at = (prefix) => log.findIndex((l) => l.startsWith(prefix))
+    expect(at('pnpm build')).toBeLessThan(at('install-services'))
+    expect(at('install-services')).toBeLessThan(at('systemctl --user restart aifactory.service'))
+  })
+
   it('restarts the server, and the feeder only when it is running, after the build', () => {
     const { code, systemctl } = deploy()
 

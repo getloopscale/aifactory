@@ -26,6 +26,9 @@ if ! DATABASE_URL="${DATABASE_URL:-postgres://factory:factory@localhost:54329/fa
 fi
 
 pnpm build
+# The units are templates copied into the user's systemd directory: a deploy that left the installed ones
+# would keep the old TimeoutStopSec and kill a long run it is draining. Reinstall them, which reloads systemd.
+scripts/install-services.sh >/dev/null
 # All at once, so each process drains its own run in parallel. The workers run tasks and the feeder hands them
 # out from the same build, so each one left alone keeps the code from before it.
 # Every enabled worker is restarted, a stopped one included: try-restart left a stopped worker stopped, and
