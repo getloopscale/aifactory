@@ -659,23 +659,34 @@ export function createGithubApi(
     },
 
     async releasesSince(repo, token, since) {
-      const releases = (await (
-        await ensure(
-          await call(repo, token, '/releases?per_page=100'),
-          `listing the releases of ${repo}`,
-          [200],
-        )
-      ).json()) as {
-        tag_name: string
-        html_url: string
-        prerelease: boolean
-        draft: boolean
-        published_at: string | null
-      }[]
-      return releases
-        .filter((r) => !r.prerelease && !r.draft && r.published_at !== null)
-        .map((r) => ({ tag: r.tag_name, url: r.html_url, publishedAt: new Date(r.published_at!) }))
-        .filter((r) => r.publishedAt.getTime() >= since.getTime())
+      const found: PublishedRelease[] = []
+      // Newest first, a page of 100 at a time: read on until one comes short or reaches back before `since`.
+      for (let page = 1; ; page++) {
+        const releases = (await (
+          await ensure(
+            await call(repo, token, `/releases?per_page=100&page=${page}`),
+            `listing the releases of ${repo}`,
+            [200],
+          )
+        ).json()) as {
+          tag_name: string
+          html_url: string
+          prerelease: boolean
+          draft: boolean
+          published_at: string | null
+        }[]
+        for (const r of releases) {
+          if (r.prerelease || r.draft || r.published_at === null) continue
+          const publishedAt = new Date(r.published_at)
+          if (publishedAt.getTime() >= since.getTime()) {
+            found.push({ tag: r.tag_name, url: r.html_url, publishedAt })
+          }
+        }
+        const oldest = releases.at(-1)?.published_at
+        if (releases.length < 100 || (oldest && new Date(oldest).getTime() < since.getTime())) {
+          return found
+        }
+      }
     },
 
     async contains(repo, token, descendant, ancestor) {

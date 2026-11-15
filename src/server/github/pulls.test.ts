@@ -1465,3 +1465,48 @@ describe('listIssueComments', () => {
     expect(asked).toHaveLength(2)
   })
 })
+
+describe('releasesSince', () => {
+  it('reads past the first page, so a package release older than the latest hundred is found', async () => {
+    const release = (n: number, day: string) => ({
+      tag_name: `pkg@${n}`,
+      html_url: `u${n}`,
+      prerelease: false,
+      draft: false,
+      published_at: `2026-11-${day}T00:00:00Z`,
+    })
+    const pages = [Array.from({ length: 100 }, (_, i) => release(i + 2, '14')), [release(1, '01')]]
+    const fetch = async (url: string) => {
+      const page = Number(new URL(url).searchParams.get('page'))
+      return new Response(JSON.stringify(pages[page - 1] ?? []), { status: 200 })
+    }
+
+    const found = await createGithubApi(fetch).releasesSince('o/r', 't', new Date(0))
+
+    expect(found).toHaveLength(101)
+    expect(found.map((r) => r.tag)).toContain('pkg@1')
+  })
+
+  it('stops at the first page that reaches back before the time asked', async () => {
+    const asked: string[] = []
+    const fetch = async (url: string) => {
+      asked.push(url)
+      return new Response(
+        JSON.stringify(
+          Array.from({ length: 100 }, (_, i) => ({
+            tag_name: `t${i}`,
+            html_url: 'u',
+            prerelease: false,
+            draft: false,
+            published_at: '2026-01-01T00:00:00Z',
+          })),
+        ),
+        { status: 200 },
+      )
+    }
+
+    await createGithubApi(fetch).releasesSince('o/r', 't', new Date('2026-11-01T00:00:00Z'))
+
+    expect(asked).toHaveLength(1)
+  })
+})

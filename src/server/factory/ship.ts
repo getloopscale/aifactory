@@ -1,10 +1,10 @@
-import { and, eq, isNotNull, or } from 'drizzle-orm'
+import { and, eq, isNotNull, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, setting, task } from '../db/schema'
 import type { GithubApi } from '../github/pulls'
 
-import { releasesOfCommit } from './changed-packages'
+import { releasesOfCommit, versionedTags } from './changed-packages'
 import { releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
 
@@ -24,6 +24,11 @@ export type Shipment = {
   publishedBy?: string
   /** Added to the `released` stage of every task. */
   detail?: Record<string, unknown>
+  /**
+   * The commit that cut the versions of this shipment (a Version Packages merge): the packages and versions
+   * are read there, never from a branch that a later promotion may have moved. The promoted commit when absent.
+   */
+  versionedSha?: string
 }
 
 export type Shipped = {
@@ -55,26 +60,29 @@ export const availableIn = (s: Shipment) =>
   ].join('\n')
 
 /** What a shipment knows about the releases of a repository that publishes with changesets. */
-type Published = { tags: Set<string> } | undefined
+type Published = { tags: Set<string>; unpublished: string[] } | undefined
+
+const layoutOf = (s: Shipment) => s.versionedSha ?? s.promotedSha
 
 /**
  * The releases that exist, when the repository publishes with changesets (`.changeset/config.json` on the
- * release branch). Elsewhere a release is the factory's own tag, and no package carries a change.
+ * versioned commit), and which of the versions that commit cut have none. Elsewhere a release is the
+ * factory's own tag, and no package carries a change.
  */
 async function publishedReleases(api: GithubApi, s: Shipment): Promise<Published> {
-  if (
-    (await api.readFile(s.repository, s.token, '.changeset/config.json', s.releaseBranch)) ===
-    undefined
-  ) {
+  const ref = layoutOf(s)
+  if ((await api.readFile(s.repository, s.token, '.changeset/config.json', ref)) === undefined) {
     return undefined
   }
   const all = await api.releasesSince(s.repository, s.token, new Date(0))
-  return { tags: new Set([...all.map((r) => r.tag), ...s.tags.map((t) => t.tag)]) }
+  const tags = new Set([...all.map((r) => r.tag), ...s.tags.map((t) => t.tag)])
+  const cut = s.versionedSha ? await versionedTags(api, s.repository, s.token, s.versionedSha) : []
+  return { tags, unpublished: cut.filter((tag) => !tags.has(tag)) }
 }
 
 /**
  * The releases (`name@version`) of the published packages a task's commit changed that do not exist, at the
- * version the release branch holds. A commit that cannot be read is left open, never released.
+ * version the shipment's versioned commit holds. A commit that cannot be read is left open, never released.
  */
 async function releasesMissing(
   api: GithubApi,
@@ -84,34 +92,42 @@ async function releasesMissing(
 ): Promise<string[]> {
   if (!published) return []
   try {
-    const wanted = await releasesOfCommit(api, s.repository, s.token, t.mergedSha!, s.releaseBranch)
+    const wanted = await releasesOfCommit(api, s.repository, s.token, t.mergedSha!, layoutOf(s))
     return wanted.filter((tag) => !published.tags.has(tag))
   } catch (error) {
     return [`its package could not be read: ${message(error)}`]
   }
 }
 
+/** The first line of the comment that says why an issue stays open, whatever packages it names. */
+const NOT_AVAILABLE = 'Not available yet: the package that carries this change has no release.'
+
 /**
- * Tells the issue why it stays open, once: a comment that already says so is not repeated. A failure is
- * returned, as in `announce`.
+ * Tells the issue why it stays open, once: a comment that already says so is not repeated, whichever
+ * packages it named. Shipments that overlap take turns on the issue (an advisory lock held for the
+ * lookup and the comment), so only one posts. A failure is returned, as in `announce`.
  */
 async function explainOpen(
-  api: GithubApi,
+  deps: { db: Database; api: GithubApi },
   s: Shipment,
   issueNumber: number,
   missing: string[],
 ): Promise<string | undefined> {
-  const first = `Not available yet: no release for ${missing.join(', ')}.`
   try {
-    const seen = await api.listIssueComments(s.repository, s.token, issueNumber, new Date(0))
-    if (seen.some((c) => c.body.startsWith(first))) return undefined
-    const body = [
-      first,
-      '',
-      `The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed, but the repository's release workflow has published no release for the package that carries this change. This issue stays open; a later release, once the package has its release, closes it.`,
-      '',
-    ].join('\n')
-    await api.commentOnIssue(s.repository, s.token, issueNumber, body)
+    await deps.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtext(${`${s.repository}#${issueNumber}`}))`,
+      )
+      const seen = await deps.api.listIssueComments(s.repository, s.token, issueNumber, new Date(0))
+      if (seen.some((c) => c.body.startsWith(NOT_AVAILABLE))) return
+      const body = [
+        NOT_AVAILABLE,
+        '',
+        `No release for ${missing.join(', ')}. The promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\` landed, but the repository's release workflow has published none. This issue stays open; a later release, once the package has its release, closes it.`,
+        '',
+      ].join('\n')
+      await deps.api.commentOnIssue(s.repository, s.token, issueNumber, body)
+    })
     return undefined
   } catch (error) {
     return `#${issueNumber}: ${message(error)}`
@@ -125,14 +141,19 @@ export const MISSING_KEY = 'shipment-missing:'
  * Says what the shipment that just finished found with no release, replacing what the one before it found:
  * the panel names it for the owner. It holds nothing back; the next shipment decides again.
  */
-async function recordMissing(db: Database, repository: string, held: Shipped['held']) {
+async function recordMissing(
+  db: Database,
+  s: Shipment,
+  held: Shipped['held'],
+  unpublished: string[],
+) {
   const value = JSON.stringify({
-    taskId: held[0]?.taskId,
-    missing: [...new Set(held.flatMap((h) => h.packages))],
+    taskId: held[0]?.taskId ?? s.askedTaskId,
+    missing: [...new Set([...unpublished, ...held.flatMap((h) => h.packages)])],
   })
   await db
     .insert(setting)
-    .values({ key: MISSING_KEY + repository, value })
+    .values({ key: MISSING_KEY + s.repository, value })
     .onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: new Date() } })
 }
 
@@ -200,7 +221,7 @@ export async function shipContained(
       if (t.stage === 'released') {
         await enterStage(deps.db, t.id, 'done', { missing: lacking })
       }
-      const error = await explainOpen(deps.api, s, t.issueNumber, lacking)
+      const error = await explainOpen(deps, s, t.issueNumber, lacking)
       shipped.held.push({ taskId: t.id, issue: t.issueNumber, packages: lacking })
       if (error) shipped.issueErrors.push(error)
       continue
@@ -228,7 +249,7 @@ export async function shipContained(
     if (issueError) shipped.issueErrors.push(issueError)
   }
   await shipResolved(deps, s, shipped)
-  await recordMissing(deps.db, s.repository, shipped.held)
+  await recordMissing(deps.db, s, shipped.held, published?.unpublished ?? [])
   return shipped
 }
 

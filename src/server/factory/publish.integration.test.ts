@@ -168,12 +168,19 @@ const MANIFESTS = {
   'packages/slack/package.json': '{"name":"@theokit/gateway-slack","version":"0.5.1"}',
   '.changeset/config.json': '{}',
 }
-const commitIn = (sha: string, dir: 'gateway' | 'slack') => {
-  // The promoted trees hold the same packages, so a commit's package is found where it still is.
-  repo().files('promoted1', MANIFESTS).files('promoted2', MANIFESTS).files('main', MANIFESTS)
+const commitIn = (sha: string, ...dirs: ('gateway' | 'slack')[]) => {
+  // The promoted trees and the Version Packages merge hold the same packages, so a commit's package is found
+  // where it still is, at the version the merge cut.
+  const merged = Object.fromEntries(repo().tree(VERSION_MERGE) ?? [])
   repo()
-    .files(`${sha}^`, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'a' })
-    .files(sha, { ...MANIFESTS, [`packages/${dir}/src/a.ts`]: 'b' })
+    .files('promoted1', MANIFESTS)
+    .files('promoted2', MANIFESTS)
+    .files(VERSION_MERGE, { ...merged, ...MANIFESTS })
+  const touch = (content: string) =>
+    Object.fromEntries(dirs.map((dir) => [`packages/${dir}/src/a.ts`, content]))
+  repo()
+    .files(`${sha}^`, { ...MANIFESTS, ...touch('a') })
+    .files(sha, { ...MANIFESTS, ...touch('b') })
 }
 const mergedShaOf = async (id: number) =>
   (await getDb().select().from(task).where(eq(task.id, id)))[0].mergedSha!
@@ -412,6 +419,11 @@ describe('publishing a changesets release', () => {
         /no release for @theokit\/gateway@0\.16\.1 30 minutes after the Version Packages merge/,
       )
       expect(closed()).toHaveLength(1)
+      // No task maps to the missing package, and the owner is still told.
+      expect((await inbox(getDb())).find((i) => i.kind === 'publication_partial')).toMatchObject({
+        task: { id: asked },
+        summary: expect.stringContaining('@theokit/gateway@0.16.1'),
+      })
     })
 
     it('releases the tasks of the published packages and leaves the task of the missing one open, with one comment', async () => {
@@ -440,7 +452,7 @@ describe('publishing a changesets release', () => {
       const heldIssue = await issueOf(gateway)
       const open = comments().filter((c) => c.issue === heldIssue)
       expect(open).toHaveLength(1)
-      expect(open[0].body).toContain('no release for @theokit/gateway@0.16.1')
+      expect(open[0].body).toContain('No release for @theokit/gateway@0.16.1')
     })
 
     it('gives back the task that asked for the publication when its own package is the one missing', async () => {
@@ -464,6 +476,7 @@ describe('publishing a changesets release', () => {
         askedTaskId: 0,
         actor: 'human',
         tags: [{ tag: 'v2', url: 'https://example.test/v2' }],
+        versionedSha: VERSION_MERGE,
       })
       const setUp = async () => {
         await waitingPublication()
@@ -489,6 +502,41 @@ describe('publishing a changesets release', () => {
           task: { id: gateway },
           summary: expect.stringContaining('@theokit/gateway@0.16.1'),
         })
+      })
+
+      it('keeps the version its own promotion cut when a later promotion moved the branch and published the next one', async () => {
+        const gateway = await setUp()
+        // A later promotion advanced `main` to 0.17.0 and published it.
+        repo().files('main', {
+          ...MANIFESTS,
+          'packages/gateway/package.json': '{"name":"@theokit/gateway","version":"0.17.0"}',
+        })
+        releasesAre(...ALL.slice(0, 2).map(published), published('@theokit/gateway@0.17.0'))
+
+        const shipped = await shipContained({ db: getDb(), api }, shipment())
+
+        expect(shipped.held.map((h) => h.taskId)).toEqual([gateway])
+        expect(closed()).not.toContain(await issueOf(gateway))
+      })
+
+      it('comments once on a task whose set of missing packages changes, and once when shipments overlap', async () => {
+        await waitingPublication()
+        const both = await seedTask('done', 'both-merge')
+        commitIn('both-merge', 'gateway', 'slack')
+        releasesAre(published(ALL[0]))
+        await pollPublications(deps(PAST_THE_WAIT))
+        const issue = await issueOf(both)
+        expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
+
+        // The slack release appears; gateway is still missing: the notice is not posted again.
+        releasesAre(published(ALL[0]), published(ALL[1]))
+        await Promise.all([
+          shipContained({ db: getDb(), api }, shipment()),
+          shipContained({ db: getDb(), api }, shipment()),
+        ])
+
+        expect(comments().filter((c) => c.issue === issue)).toHaveLength(1)
+        expect(await stageOf(both)).toBe('done')
       })
 
       it('releases it and closes its issue once the package has its release', async () => {
