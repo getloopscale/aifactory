@@ -231,10 +231,21 @@ describe('packagesOfCommit', () => {
       .files('m1^', tree)
       .files('m1', { ...tree, 'packages/ui/src/a.ts': 'b' })
 
-    // The root package holds every file, as it does for changesets.
+    // A file belongs to the innermost package that holds it, not to the root as well.
+    expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual(['@theokit/ui'])
+  })
+
+  it('names the root package only for files no nested package holds', async () => {
+    const api = new FakeGithub()
+    const tree = { ...theokit, 'packages/ui/src/a.ts': 'a', 'README.md': 'a' }
+    api
+      .repo('o/r')
+      .files('m1^', tree)
+      .files('m1', { ...tree, 'packages/ui/src/a.ts': 'b', 'README.md': 'b' })
+
     expect(await packagesOfCommit(api, 'o/r', 't', 'm1')).toEqual([
-      'theokit-monorepo',
       '@theokit/ui',
+      'theokit-monorepo',
     ])
   })
 })

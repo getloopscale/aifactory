@@ -101,8 +101,8 @@ export async function versionedTags(
 export const packageOfTag = (tag: string) => tag.slice(0, tag.lastIndexOf('@'))
 
 /**
- * The packages the commit of a task changes, by name: every named package one of the files its merge
- * changed against its first parent is under. Whether the package is private or ignored is not asked, since
+ * The packages the commit of a task changes, by name: the named package that carries each file its merge
+ * changed against its first parent (the innermost one that holds it). Whether the package is private or ignored is not asked, since
  * a later commit of the same promotion may have made it publishable, and what a release lacks is named by
  * the package alone.
  */
@@ -114,7 +114,15 @@ export async function packagesOfCommit(
 ): Promise<string[]> {
   const files = touchedPaths(await api.changedFiles(repo, token, `${sha}^`, sha))
   const dirs = packageDirs(await api.filePaths(repo, token, sha))
-  const touched = [...new Set(files.flatMap((file) => enclosingPackages(file, dirs)))]
+  // A file belongs to the innermost package that holds it, so a nested package's change is not the root's.
+  const touched = [
+    ...new Set(
+      files.flatMap((file) => {
+        const own = enclosingPackages(file, dirs).sort((a, b) => b.length - a.length)[0]
+        return own === undefined ? [] : [own]
+      }),
+    ),
+  ]
   const names: string[] = []
   for (const dir of touched) {
     const { name } = parseManifest(await mustRead(api, repo, token, manifestPath(dir), sha), dir)

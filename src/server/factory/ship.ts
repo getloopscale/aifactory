@@ -71,8 +71,9 @@ async function carriedPackages(
   api: GithubApi,
   s: Shipment,
   t: typeof task.$inferSelect,
+  owed: string[],
 ): Promise<Carried | undefined> {
-  if (!s.perPackage && !s.missing?.length) return undefined
+  if (!s.perPackage && owed.length === 0) return undefined
   try {
     return { names: await packagesOfCommit(api, s.repository, s.token, t.mergedSha!) }
   } catch (error) {
@@ -200,7 +201,7 @@ export async function shipContained(
   const owed = await owedReleases(deps.db, s)
   for (const t of candidates) {
     if (!(await belongs(deps, s, t))) continue
-    const carried = await carriedPackages(deps.api, s, t)
+    const carried = await carriedPackages(deps.api, s, t, owed)
     const held = heldFor(carried, owed)
     if (held.length > 0) {
       const error = await explainHold(deps.api, s, t.issueNumber, held, owed)
