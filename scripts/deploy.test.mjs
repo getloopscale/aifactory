@@ -34,6 +34,8 @@ function deploy({
   checkFails = false,
   migrateFails = false,
   envFile,
+  cloudflared = true,
+  installedTunnel,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'deploy-test-'))
   homes.push(root)
@@ -46,9 +48,19 @@ function deploy({
   chmodSync(join(root, 'scripts', 'write-units.sh'), 0o755)
   mkdirSync(join(root, 'ops', 'systemd'), { recursive: true })
   writeFileSync(join(root, 'ops', 'systemd', 'aifactory.service'), 'ExecStart=@ROOT@/run\n')
+  writeFileSync(
+    join(root, 'ops', 'systemd', 'aifactory-tunnel.service'),
+    'ExecStart=@CLOUDFLARED@ run\n',
+  )
   if (envFile !== undefined) writeFileSync(join(root, '.env.local'), envFile)
   const home = join(root, 'home')
   mkdirSync(home)
+  const units = join(home, '.config', 'systemd', 'user')
+  const tunnel = join(units, 'aifactory-tunnel.service')
+  if (installedTunnel !== undefined) {
+    mkdirSync(units, { recursive: true })
+    writeFileSync(tunnel, installedTunnel)
+  }
   const bin = join(root, 'bin')
   mkdirSync(bin)
   const calls = join(root, 'calls.log')
@@ -82,9 +94,14 @@ function deploy({
 esac`,
   )
   fake('curl')
+  // cloudflared is on the PATH of the deploy, or on none of the directories of it.
+  if (cloudflared) fake('cloudflared')
+  const path = process.env.PATH.split(':')
+    .filter((dir) => !existsSync(join(dir, 'cloudflared')))
+    .join(':')
   fake('journalctl')
   const run = spawnSync('bash', [join(root, 'scripts', 'deploy.sh')], {
-    env: { ...withoutDatabase(process.env), HOME: home, PATH: `${bin}:${process.env.PATH}` },
+    env: { ...withoutDatabase(process.env), HOME: home, PATH: `${bin}:${path}` },
     encoding: 'utf8',
   })
   const code = run.status
@@ -96,6 +113,8 @@ esac`,
     pnpm: log.filter((l) => l.startsWith('pnpm ') && !l.startsWith('pnpm sees')),
     pnpmEnv: log.filter((l) => l.startsWith('pnpm sees')),
     root,
+    bin,
+    tunnel: readIfThere(tunnel),
     atReload: readIfThere(join(state, 'at-reload')),
     atRestart: readIfThere(join(state, 'at-restart')),
     enabled: readdirSync(join(state, 'enabled')).sort(),
@@ -195,6 +214,37 @@ describe('the deploy script', () => {
     expect(reload).toBeGreaterThanOrEqual(0)
     expect(reload).toBeLessThan(restart)
     expect(systemctl.filter((l) => /\b(enable|disable)\b/.test(l))).toEqual([])
+  })
+
+  it('keeps the installed tunnel unit when cloudflared is not on the PATH of the deploy', () => {
+    const installed = 'ExecStart=/opt/bin/cloudflared run\n'
+    const { code, tunnel, output, systemctl } = deploy({
+      cloudflared: false,
+      installedTunnel: installed,
+    })
+
+    expect(code).toBe(0)
+    expect(tunnel).toBe(installed)
+    expect(output).toMatch(
+      /cloudflared is not on PATH; aifactory-tunnel.service was left as installed/,
+    )
+    expect(systemctl).toContain('systemctl --user restart aifactory.service')
+  })
+
+  it('stops before the restart when cloudflared is missing and the tunnel unit is not installed', () => {
+    const { code, tunnel, output, systemctl } = deploy({ cloudflared: false })
+
+    expect(code).not.toBe(0)
+    expect(tunnel).toBeUndefined()
+    expect(output).toMatch(/cannot write it/)
+    expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
+  })
+
+  it('renders the tunnel unit with the cloudflared of the PATH when there is one', () => {
+    const { code, tunnel, bin } = deploy({ installedTunnel: 'old\n' })
+
+    expect(code).toBe(0)
+    expect(tunnel).toBe(`ExecStart=${join(bin, 'cloudflared')} run\n`)
   })
 
   it('leaves a unit that was disabled disabled, and one that was enabled enabled', () => {
