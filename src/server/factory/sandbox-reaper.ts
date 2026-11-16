@@ -1,14 +1,14 @@
-import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 
-import { inArray } from 'drizzle-orm'
+import { inArray, lt } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { task } from '../db/schema'
+import { sandboxLease, task } from '../db/schema'
 
 import type { ListedSandbox, SandboxOwner } from './sandbox'
+import { LEASE_STALE_MS, PROCESS_LEASE } from './sandbox-lease'
 
-/** How long a sandbox with no metadata may live before it is taken for nobody's: it may be one still being made. */
+/** How long a sandbox with no owner recorded may live before it is taken for nobody's: it may be one still being made. */
 export const SANDBOX_GRACE_MS = 10 * 60_000
 
 /** How many sandboxes an E2B account allows at once, unless `E2B_MAX_SANDBOXES` says its plan allows more. */
@@ -20,64 +20,25 @@ export const E2B_SANDBOX_LIMIT = 10
  */
 export const SANDBOX_STAGES = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr']
 
-/**
- * When a process started, in epoch milliseconds, so a process id that was reused by another process is told
- * from the one that owned a sandbox. Read from `/proc`; undefined where there is none.
- */
-export function processStartMs(pid: number): number | undefined {
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
-    // The command is in parentheses and may hold spaces: the fields count from the last ")".
-    const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
-    const ticks = Number(fields[19])
-    const boot = /^btime (\d+)$/m.exec(readFileSync('/proc/stat', 'utf8'))
-    if (!Number.isFinite(ticks) || !boot) return undefined
-    // The kernel counts in 1/100 s on every platform Node runs on that has /proc.
-    return Number(boot[1]) * 1000 + ticks * 10
-  } catch {
-    return undefined
-  }
-}
+export type MetadataOptions = { host?: string; lease?: string }
 
-/** How far the recorded start of a process may differ from the one read now. */
-const START_TOLERANCE_MS = 5_000
-
-export type MetadataOptions = {
-  host?: string
-  pid?: number
-  /** When the owning process started. */
-  since?: number
-  /** When the sandbox's own session ends: past it, with the grace, nothing can still be using it. */
-  deadline?: number
-}
-
-/** What E2B stores: string values only, the owner's fields, the host and process that created it. */
+/** What E2B stores: string values only, the owner's fields, the host and the process lease that created it. */
 export function metadataFor(
   owner: SandboxOwner | undefined,
   opts: MetadataOptions = {},
 ): Record<string, string> {
   if (!owner) return {}
-  const pid = opts.pid ?? process.pid
-  const since = opts.since ?? processStartMs(pid)
   const fields = Object.fromEntries(Object.entries(owner).map(([k, v]) => [k, String(v)]))
-  return {
-    ...fields,
-    host: opts.host ?? hostname(),
-    pid: String(pid),
-    ...(since === undefined ? {} : { since: String(since) }),
-    ...(opts.deadline === undefined ? {} : { deadline: String(opts.deadline) }),
-  }
+  return { ...fields, host: opts.host ?? hostname(), lease: opts.lease ?? PROCESS_LEASE }
 }
 
-/** What the reaper knows of the tasks the listing names. */
+/** What the reaper knows of the tasks and the process leases the listing names. */
 export type ReaperFacts = {
   now: Date
   graceMs: number
-  /** This host: only its processes can be asked about. */
-  host: string
   tasks: Map<number, { stage: string; run: string | null }>
-  /** Whether the process of this host with this id, started at `since` when known, is still running. */
-  alive(pid: number, since: number | undefined): boolean
+  /** When each process last said it was alive. */
+  leases: Map<string, Date>
 }
 
 export type Verdict = { id: string; reason: string } | null
@@ -86,10 +47,19 @@ function judge(s: ListedSandbox, facts: ReaperFacts): Verdict {
   const m = s.metadata
   const age = facts.now.getTime() - s.startedAt.getTime()
   const kill = (reason: string) => ({ id: s.id, reason })
-  if (!m.owner) {
-    return age > facts.graceMs
-      ? kill(`no owner recorded and older than ${Math.round(facts.graceMs / 60_000)} minutes`)
-      : null
+  const grace = Math.round(facts.graceMs / 60_000)
+  if (!m.owner)
+    return age > facts.graceMs ? kill(`no owner recorded and older than ${grace} minutes`) : null
+  // The process that made it, on whatever host: one that stopped saying it is alive has no one at work.
+  if (m.lease) {
+    const beat = facts.leases.get(m.lease)
+    if (!beat || facts.now.getTime() - beat.getTime() > LEASE_STALE_MS) {
+      return kill(
+        `${m.owner} process ${m.lease} on ${m.host ?? 'an unknown host'} stopped renewing its lease`,
+      )
+    }
+  } else if (m.owner !== 'task' && age > facts.graceMs) {
+    return kill(`${m.owner} with no process lease and older than ${grace} minutes`)
   }
   if (m.owner === 'task') {
     const row = facts.tasks.get(Number(m.taskId))
@@ -98,20 +68,8 @@ function judge(s: ListedSandbox, facts: ReaperFacts): Verdict {
       return kill(`task ${m.taskId} is in ${row.stage}, which holds no sandbox`)
     }
     if (row.run !== m.run) return kill(`task ${m.taskId} is on another run than ${m.run}`)
-    return null
   }
-  // An evaluation, a proof or a plan lives in a process: when it is gone the sandbox has no one.
-  if (m.host !== facts.host) {
-    // Another host's process cannot be asked about. Its sandbox is stopped once its own session is over,
-    // with the grace, so a host that died does not hold a slot past that.
-    const deadline = Number(m.deadline)
-    const over = Number.isFinite(deadline) && facts.now.getTime() > deadline + facts.graceMs
-    return over ? kill(`${m.owner} of host ${m.host} is past its deadline`) : null
-  }
-  const pid = Number(m.pid)
-  if (!Number.isInteger(pid)) return age > facts.graceMs ? kill(`${m.owner} with no process`) : null
-  const since = m.since === undefined ? undefined : Number(m.since)
-  return facts.alive(pid, since) ? null : kill(`${m.owner} process ${pid} is gone`)
+  return null
 }
 
 /** The sandboxes whose owner is done, each with why. A pure function over the listing and the facts. */
@@ -127,19 +85,7 @@ export function atWork(listing: ListedSandbox[], facts: ReaperFacts): number {
   return listing.filter((s) => s.metadata.owner && judge(s, facts) === null).length
 }
 
-/** Whether the process exists and, when its start was recorded and can be read, is the same one. */
-export function processAlive(pid: number, since?: number): boolean {
-  try {
-    process.kill(pid, 0)
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EPERM') return false
-  }
-  const started = processStartMs(pid)
-  if (since === undefined || started === undefined) return true
-  return Math.abs(started - since) <= START_TOLERANCE_MS
-}
-
-/** Reads the tasks the listing names, after the listing, so a task that began since is seen. */
+/** Reads the tasks and the leases the listing names, after the listing, so a task that began since is seen. */
 export async function readReaperFacts(
   db: Database,
   listing: ListedSandbox[],
@@ -150,18 +96,24 @@ export async function readReaperFacts(
       listing.filter((s) => s.metadata.owner === 'task').map((s) => Number(s.metadata.taskId)),
     ),
   ].filter(Number.isInteger)
+  const leaseIds = [...new Set(listing.map((s) => s.metadata.lease).filter(Boolean))] as string[]
   const rows = ids.length
     ? await db
         .select({ id: task.id, stage: task.stage, run: task.sandboxRun })
         .from(task)
         .where(inArray(task.id, ids))
     : []
+  const leases = leaseIds.length
+    ? await db
+        .select({ id: sandboxLease.id, beatAt: sandboxLease.beatAt })
+        .from(sandboxLease)
+        .where(inArray(sandboxLease.id, leaseIds))
+    : []
   return {
     now,
     graceMs: SANDBOX_GRACE_MS,
-    host: hostname(),
     tasks: new Map(rows.map((r) => [r.id, { stage: r.stage, run: r.run }])),
-    alive: processAlive,
+    leases: new Map(leases.map((l) => [l.id, l.beatAt])),
   }
 }
 
@@ -190,5 +142,9 @@ export async function reapSandboxes(deps: ReaperDeps): Promise<{ id: string; rea
       )
     }
   }
+  // A lease of a process gone for a day names no sandbox that can still be up.
+  await deps.db
+    .delete(sandboxLease)
+    .where(lt(sandboxLease.beatAt, new Date(facts.now.getTime() - 24 * 60 * 60_000)))
   return killed
 }

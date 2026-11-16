@@ -15,6 +15,7 @@ const TRIED: DoctorTriedSentences = {
   installation: (v) => `ler a instalação do GitHub App em ${v.repo}`,
   events: () => 'ler os eventos que o GitHub App assina',
   runs: (v) => `ler as execuções que falharam em ${v.repo}`,
+  sandboxes: () => 'listar os sandboxes que a conta tem ativos',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
 }

@@ -129,7 +129,7 @@ export type SandboxFacts = {
   /** When a sandbox last started for the repository. */
   lastStartedAt?: string
   /** Sandboxes up on the account against its limit, and how many have an owner at work. Unset when it cannot be listed. */
-  slots?: { up: number; limit: number; atWork: number }
+  slots?: Read<{ up: number; limit: number; atWork: number }>
 }
 
 export type DoctorFacts = {
@@ -521,9 +521,14 @@ export function providerRefusal(detail: Record<string, unknown> | null | undefin
 
 export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
   if (!sandbox.read) return unknownItem('sandbox', sandbox)
-  const { refusal, lastStartedAt, slots } = sandbox.value
+  const { refusal, lastStartedAt } = sandbox.value
+  // A listing that failed is not a count: it is said not to be known, with what was tried.
+  const slots = sandbox.value.slots?.read ? sandbox.value.slots.value : undefined
   // With no start to compare, the date is not a number and nothing is at or after the refusal.
   if (!refusal || Date.parse(lastStartedAt ?? '') >= Date.parse(refusal.at)) {
+    if (sandbox.value.slots && !sandbox.value.slots.read) {
+      return unknownItem('sandbox', sandbox.value.slots)
+    }
     return slots
       ? fine('sandbox', 'ok_sandbox_slots', {
           up: String(slots.up),

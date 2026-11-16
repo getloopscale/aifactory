@@ -439,6 +439,16 @@ export const agentEvent = pgTable(
 )
 
 /**
+ * A process that creates sandboxes says it is alive here, every half minute. A sandbox names the process in
+ * its metadata, so the supervisor can tell a sandbox whose owner died, on any host, from one in use.
+ */
+export const sandboxLease = pgTable('sandbox_lease', {
+  id: text('id').primaryKey(),
+  host: text('host').notNull(),
+  beatAt: timestamp('beat_at', { withTimezone: true }).notNull(),
+})
+
+/**
  * What the supervisor found wrong with the factory itself. `stalled` is work that stopped moving.
  * `orphaned` is something that waits for a thing that is gone: a job nobody queued, a resume that never
  * ran, a snapshot no question needs. A finding stays open while it is true and resolves when it is not.

@@ -1,5 +1,3 @@
-import { spawn } from 'node:child_process'
-
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
@@ -7,10 +5,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { finding, ingress, question, stageEvent, task, watch } from '../db/schema'
+import { finding, ingress, question, sandboxLease, stageEvent, task, watch } from '../db/schema'
 
 import { FakeSandbox } from './fake-sandbox'
-import { metadataFor, processStartMs } from './sandbox-reaper'
+import type { SandboxOwner } from './sandbox'
+import { metadataFor } from './sandbox-reaper'
 import { detect, supervise } from './supervise'
 
 const NOW = new Date('2026-11-04T12:00:00Z')
@@ -32,7 +31,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await getPool().query(JOBS)
   await getPool().query(
-    'truncate table finding, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, theokit_jobs restart identity cascade',
+    'truncate table sandbox_lease, finding, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, theokit_jobs restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -325,27 +324,29 @@ describe('supervise', () => {
 })
 
 describe('sandboxes nobody owns', () => {
-  it('leaves none up after a supervise pass once the evaluation that made them is killed', async () => {
+  it('leaves none up after a supervise pass once the process that made them died, on any host', async () => {
     const provider = new FakeSandbox()
     const spec = { egress: [{ domain: 'github.com' }], timeoutMs: 60_000 }
-    // An evaluation process that is started and killed, as in the incident.
-    const child = spawn('sleep', ['60'])
-    await new Promise((resolve) => child.once('spawn', resolve))
-    const pid = child.pid!
-    const since = processStartMs(pid)
-    const owner = { owner: 'eval', caseId: 'a', runId: 'r' } as const
-    await provider.create({ ...spec, owner })
-    await provider.create({ ...spec, owner: { ...owner, caseId: 'b' } })
-    for (const sandbox of provider.up.values()) {
-      sandbox.metadata = metadataFor(
-        { owner: 'eval', caseId: sandbox.metadata.caseId, runId: 'r' },
-        { pid, since, deadline: Date.now() + 60_000 },
-      )
-    }
+    const lease = (id: string, host: string, beatAgoMs: number) =>
+      getDb()
+        .insert(sandboxLease)
+        .values({ id, host, beatAt: new Date(NOW.getTime() - beatAgoMs) })
+    // Two evaluation processes on other hosts and a worker on this one; one of the evaluations dies.
+    await lease('eval-live', 'elsewhere', 10_000)
+    await lease('eval-dead', 'elsewhere', 10 * 60_000)
+    await lease('worker-dead', 'here', 10 * 60_000)
     const taskId = await seed('build', 1)
     await getDb().update(task).set({ sandboxRun: 'run-1' }).where(eq(task.id, taskId))
-    await provider.create({ ...spec, owner: { owner: 'task', taskId, run: 'run-1' } })
-    await provider.create({ ...spec, owner: { owner: 'task', taskId, run: 'run-0' } })
+    const make = async (owner: SandboxOwner, leaseId: string) => {
+      await provider.create({ ...spec, owner })
+      const last = [...provider.up.values()].at(-1)!
+      last.metadata = metadataFor(owner, { host: 'x', lease: leaseId })
+    }
+    await make({ owner: 'eval', caseId: 'a', runId: 'r' }, 'eval-live')
+    await make({ owner: 'eval', caseId: 'b', runId: 'r' }, 'eval-dead')
+    await make({ owner: 'task', taskId, run: 'run-1' }, 'worker-dead')
+    await make({ owner: 'task', taskId, run: 'run-1' }, 'eval-live')
+    await make({ owner: 'task', taskId, run: 'run-0' }, 'eval-live')
     const run = () =>
       supervise({
         db: getDb(),
@@ -354,13 +355,9 @@ describe('sandboxes nobody owns', () => {
         killSandbox: (id) => provider.killSandbox(id),
       })
 
-    // The evaluation lives: its sandboxes stay, and the task's old run goes.
-    expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-4'])
-    expect([...provider.up.keys()]).toEqual(['sbx-1', 'sbx-2', 'sbx-3'])
-
-    child.kill('SIGKILL')
-    await new Promise((resolve) => child.once('exit', resolve))
-    expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-1', 'sbx-2'])
-    expect([...provider.up.keys()]).toEqual(['sbx-3'])
+    // The dead evaluation, the task whose worker died while it was still in build, and the old run go.
+    expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-2', 'sbx-3', 'sbx-5'])
+    expect([...provider.up.keys()]).toEqual(['sbx-1', 'sbx-4'])
+    expect((await run()).reaped).toBeUndefined()
   })
 })

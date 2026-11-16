@@ -52,6 +52,7 @@ export const DOCTOR_TRIED_CODES = [
   'installation',
   'events',
   'runs',
+  'sandboxes',
   'token',
   'merge_settings',
 ] as const
@@ -74,6 +75,7 @@ export const DOCTOR_TRIED_EN: DoctorTriedSentences = {
   installation: (v) => `reading the installation of the GitHub App on ${v.repo}`,
   events: () => 'reading the events the GitHub App subscribes to',
   runs: (v) => `reading the failed runs of ${v.repo}`,
+  sandboxes: () => 'reading the sandboxes the account has up',
   token: (v) => `minting a token for ${v.repo}`,
   merge_settings: (v) => `reading the merge settings of ${v.repo}`,
 }

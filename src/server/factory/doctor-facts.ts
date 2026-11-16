@@ -113,18 +113,15 @@ async function readSlots(
   provider: DoctorSources['sandboxes'],
 ): Promise<SandboxFacts['slots']> {
   if (!provider?.listSandboxes) return undefined
-  try {
-    const listing = await provider.listSandboxes()
-    const facts = await readReaperFacts(db, listing)
+  const list = provider.listSandboxes.bind(provider)
+  return attempt(triedOf('sandboxes'), async () => {
+    const listing = await list()
     return {
       up: listing.length,
       limit: provider.maxSandboxes ?? E2B_SANDBOX_LIMIT,
-      atWork: atWork(listing, facts),
+      atWork: atWork(listing, await readReaperFacts(db, listing)),
     }
-  } catch {
-    // A listing that failed is not a count of zero: the item says nothing of the slots.
-    return undefined
-  }
+  })
 }
 
 async function readSandbox(

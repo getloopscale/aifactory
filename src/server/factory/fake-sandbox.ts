@@ -68,7 +68,7 @@ export class FakeSandbox implements IsolatedSandboxProvider {
     this.up.set(id, {
       id,
       startedAt: new Date(),
-      metadata: metadataFor(spec.owner, { deadline: Date.now() + spec.timeoutMs }),
+      metadata: metadataFor(spec.owner),
     })
     return {
       backend: this.backend,
