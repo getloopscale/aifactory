@@ -710,11 +710,11 @@ describe('actions', () => {
     const [plainRow] = await getDb().select().from(task).where(eq(task.id, plain))
     expect(plainRow.stage).toBe('done')
 
-    // A task that waited for checks may have stopped waiting since: nothing safe is known.
+    // A task that waited for checks goes back to waiting on its head; the cron reconciles it.
     const waiting = await legacy({ awaitingChecks: ['ci'] }, null)
-    await expect(withdrawSendBack(deps(), waiting)).rejects.toThrow()
-    const [stuck] = await getDb().select().from(task).where(eq(task.id, waiting))
-    expect(stuck.stage).toBe('intake')
+    await withdrawSendBack(deps(), waiting)
+    const [waited] = await getDb().select().from(task).where(eq(task.id, waiting))
+    expect(waited).toMatchObject({ stage: 'done', awaitingCiSha: 'abc' })
   })
 
   it('keeps a change a cron made while the send-back waited for the task lock', async () => {

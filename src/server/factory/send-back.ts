@@ -51,7 +51,12 @@ async function legacyRestore(
   before: { stage: string; detail: unknown },
 ): Promise<{ resolvedSha: string | null; awaitingCiSha: string | null } | undefined> {
   const detail = (before.detail ?? {}) as Record<string, unknown>
-  if (before.stage === 'done' && detail.awaitingChecks) return undefined
+  if (before.stage === 'done' && detail.awaitingChecks) {
+    // The wait began on the task's head, and `integrate-after-ci` settles a wait that ended meanwhile
+    // (merged or sent back), so giving it back is safe and leaves the cron to reconcile it.
+    const [row] = await db.select({ sha: task.headSha }).from(task).where(eq(task.id, taskId))
+    return row?.sha ? { resolvedSha: null, awaitingCiSha: row.sha } : undefined
+  }
   if (before.stage === 'done' && detail.resolved === true) {
     return { resolvedSha: text(detail.sha), awaitingCiSha: null }
   }

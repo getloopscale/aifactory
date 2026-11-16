@@ -293,6 +293,8 @@ describe('task actions', () => {
     await waitFor(() => expect(calls).toHaveLength(1))
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: 'Approve this commit' })).toBeNull()
+    // After a withdrawal the failed task can be sent back again with the right note.
+    expect(screen.getByRole('button', { name: 'Send back' })).toBeTruthy()
 
     cleanup()
     const running = detail({ task: { ...base, stage: 'build', column: 'working', headSha: null } })

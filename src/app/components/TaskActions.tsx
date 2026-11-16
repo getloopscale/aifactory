@@ -146,7 +146,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
           </Button>
         ) : null}
       </div>
-      {hasPullRequest && !task.integrated ? (
+      {(hasPullRequest || task.stage === 'failed') && !task.integrated ? (
         <div className="mt-4">
           <label className="block text-sm">
             <span className="text-foreground">{t.taskActions.askChanges}</span>
