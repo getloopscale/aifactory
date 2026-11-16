@@ -173,9 +173,9 @@ reads that file, not a convention.
   fact that could not be read is an exception of kind `unknown`; `decide.ts` is a pure function from an
   exception and the decisions already recorded to one action (`send_back`, `review_again`,
   `retry_from_finding` or `escalate`); `apply.ts` is the only module with side effects and goes through the
-  panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding`), so
+  panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`), so
   `transitions.ts` is asked first. A handoff records its `cause`, and an older one is recognised by the start
-  of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head; a
+  of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
   task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
   calls a merge, and `merges-nothing.test.ts` fails if one does. A new exception is a new kind in

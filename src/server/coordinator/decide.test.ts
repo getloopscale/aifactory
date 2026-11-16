@@ -20,15 +20,31 @@ const recorded = (over: Partial<RecordedAction> = {}): RecordedAction => ({
 })
 
 describe('whether an exception was already decided', () => {
+  const onHead = (outcome: RecordedAction['outcome']) =>
+    recorded({ exceptionKind: 'checks_unchanged', headSha: 'abc1234def', outcome })
+
   it('is decided when a row names its kind on the same head', () => {
-    const row = recorded({ exceptionKind: 'checks_unchanged', headSha: 'abc1234def' })
-    expect(seen(exception(), [row])).toBe(true)
+    expect(seen(exception(), [onHead('applied')], 'auto')).toBe(true)
+    expect(seen(exception(), [onHead('escalated')], 'auto')).toBe(true)
+    expect(seen(exception(), [onHead('refused')], 'trial')).toBe(true)
   })
 
   it('is not decided on another head, or for another kind', () => {
-    expect(seen(exception(), [recorded({ exceptionKind: 'checks_unchanged' })])).toBe(false)
-    expect(seen(exception(), [recorded({ headSha: 'abc1234def' })])).toBe(false)
-    expect(seen(exception(), [])).toBe(false)
+    const otherHead = recorded({ exceptionKind: 'checks_unchanged' })
+    const otherKind = recorded({ headSha: 'abc1234def' })
+    for (const mode of ['trial', 'auto'] as const) {
+      expect(seen(exception(), [otherHead], mode)).toBe(false)
+      expect(seen(exception(), [otherKind], mode)).toBe(false)
+      expect(seen(exception(), [], mode)).toBe(false)
+    }
+  })
+
+  it('leaves the head free for auto when only a trial decided it', () => {
+    expect(seen(exception(), [onHead('trial')], 'auto')).toBe(false)
+  })
+
+  it('counts a trial row as decided while the coordinator is still in trial', () => {
+    expect(seen(exception(), [onHead('trial')], 'trial')).toBe(true)
   })
 })
 

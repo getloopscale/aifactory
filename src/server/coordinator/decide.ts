@@ -1,6 +1,7 @@
 import type { COORDINATOR_ACTIONS, COORDINATOR_OUTCOMES } from '../db/schema'
 
 import type { ExceptionKind, TaskException } from './exceptions'
+import type { CoordinatorMode } from './mode'
 
 /**
  * One action, from a closed set, for an exception of a task. A pure function of the exception and what the
@@ -34,9 +35,22 @@ export const MAX_APPLIED = 2
 
 const short = (sha: string) => sha.slice(0, 7)
 
-/** Whether this exception already has a decision on this head: one exception, one decision per head. */
-export const seen = (exception: TaskException, recorded: RecordedAction[]): boolean =>
-  recorded.some((r) => r.exceptionKind === exception.kind && r.headSha === exception.head)
+/**
+ * Whether this exception already has a decision on this head: one exception, one decision per head. A trial
+ * decision applied nothing, so in `auto` it leaves the head free; in `trial` it counts, or every pass would
+ * record the same exception again.
+ */
+export const seen = (
+  exception: TaskException,
+  recorded: RecordedAction[],
+  mode: CoordinatorMode,
+): boolean =>
+  recorded.some(
+    (r) =>
+      r.exceptionKind === exception.kind &&
+      r.headSha === exception.head &&
+      (mode === 'trial' || r.outcome !== 'trial'),
+  )
 
 const escalate = (reason: string): Decision => ({ action: 'escalate', reason })
 

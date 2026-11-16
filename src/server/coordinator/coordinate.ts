@@ -23,7 +23,7 @@ export async function coordinate(deps: ActionDeps, mode: CoordinatorMode): Promi
   )
   for (const exception of facts.flatMap(recognise)) {
     const forTask = recorded.get(exception.taskId)!
-    if (seen(exception, forTask)) continue
+    if (seen(exception, forTask, mode)) continue
     const decision = decide(exception, forTask)
     const outcome = await applyDecision(deps, exception, decision, mode)
     forTask.push({

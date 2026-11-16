@@ -222,7 +222,7 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
 export async function retry(
   deps: ActionDeps,
   taskId: number,
-  options: { fromFinding?: boolean } = {},
+  options: { fromFinding?: boolean; automatic?: boolean } = {},
 ) {
   const row = await load(deps.db, taskId)
   // A run the supervisor found stalled or lost is in a working stage, which retry otherwise refuses.
@@ -234,7 +234,9 @@ export async function retry(
   )
   const { token } = await deps.github.installationToken(row.repository)
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
-  const decisionId = await requeue(deps, taskId, allowed, 'retry', '', row.headSha)
+  // The coordinator's retry is the factory's own: no decision in anybody's name, and it counts as automatic.
+  const kind = options.automatic ? 'automatic_retry' : 'retry'
+  const decisionId = await requeue(deps, taskId, allowed, kind, '', row.headSha)
   return { decisionId }
 }
 
@@ -415,8 +417,14 @@ const ALLOWED: Record<FindingAction, string[]> = {
  * Resolves a finding the supervisor opened. The action must be one the finding's subject allows, and
  * the finding must still be open, so a stale page cannot, say, delete a snapshot nobody flagged. The
  * supervisor closes the finding on its next pass; it is closed here too so the panel is not stale.
+ * `automatic` is the coordinator resolving it: a retry then records no decision in anybody's name.
  */
-export async function resolveFinding(deps: ActionDeps, findingId: number, action: FindingAction) {
+export async function resolveFinding(
+  deps: ActionDeps,
+  findingId: number,
+  action: FindingAction,
+  options: { automatic?: boolean } = {},
+) {
   const [found] = await deps.db.select().from(finding).where(eq(finding.id, findingId))
   if (!found || found.resolvedAt) throw new ActionRefused('this finding is not open')
   if (!ALLOWED[action].includes(found.subject)) {
@@ -425,7 +433,7 @@ export async function resolveFinding(deps: ActionDeps, findingId: number, action
 
   if (action === 'retry') {
     if (found.taskId === null) throw new ActionRefused('this finding has no task')
-    await retry(deps, found.taskId, { fromFinding: true })
+    await retry(deps, found.taskId, { fromFinding: true, automatic: options.automatic })
   } else if (action === 'resume') {
     const [asked] = await deps.db
       .select()

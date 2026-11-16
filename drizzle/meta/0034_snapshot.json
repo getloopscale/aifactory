@@ -1,5 +1,5 @@
 {
-  "id": "b6890dc4-e5c4-4e67-9645-879bac74a343",
+  "id": "f966898a-be55-466a-8939-e6086b1f7658",
   "prevId": "0a120d15-4bb0-4a65-9a5c-bc5902492c3c",
   "version": "7",
   "dialect": "postgresql",
@@ -521,7 +521,36 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "coordinator_action_once_per_head": {
+          "name": "coordinator_action_once_per_head",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "exception_kind",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "head_sha",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"coordinator_action\".\"outcome\" <> 'trial'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "coordinator_action_task_id_task_id_fk": {
           "name": "coordinator_action_task_id_task_id_fk",
@@ -538,17 +567,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "coordinator_action_once_per_head": {
-          "name": "coordinator_action_once_per_head",
-          "nullsNotDistinct": false,
-          "columns": [
-            "task_id",
-            "exception_kind",
-            "head_sha"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

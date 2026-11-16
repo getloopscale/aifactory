@@ -698,8 +698,8 @@ export const COORDINATOR_OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'e
 
 /**
  * One decision of the coordinator, applied or not, so every action taken with nobody watching can be read
- * afterwards. One exception gets one decision per head of the task: a later pass that sees it again on the
- * same commit records nothing.
+ * afterwards. One exception gets one decision per head of the task, besides the trial one: a later pass that
+ * sees it again on the same commit records nothing.
  */
 export const coordinatorAction = pgTable(
   'coordinator_action',
@@ -720,5 +720,10 @@ export const coordinatorAction = pgTable(
     costUsd: real('cost_usd').notNull().default(0),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique('coordinator_action_once_per_head').on(t.taskId, t.exceptionKind, t.headSha)],
+  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies.
+  (t) => [
+    uniqueIndex('coordinator_action_once_per_head')
+      .on(t.taskId, t.exceptionKind, t.headSha)
+      .where(sql`${t.outcome} <> 'trial'`),
+  ],
 )

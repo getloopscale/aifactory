@@ -149,6 +149,30 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
     ])
   })
 
+  it('records one row for two trial passes over the same exception', async () => {
+    await checksUnchanged()
+
+    await coordinate(deps(), 'trial')
+    await coordinate(deps(), 'trial')
+
+    expect(await actions()).toMatchObject([{ outcome: 'trial' }])
+  })
+
+  it('applies once in auto an exception a trial pass already recorded on the same head', async () => {
+    const id = await checksUnchanged()
+    await coordinate(deps(), 'trial')
+
+    await coordinate(deps(), 'auto')
+    await coordinate(deps(), 'auto')
+
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued).toHaveLength(1)
+    expect(await actions()).toMatchObject([
+      { headSha: 'abc', action: 'send_back', outcome: 'trial' },
+      { headSha: 'abc', action: 'send_back', outcome: 'applied' },
+    ])
+  })
+
   it('does nothing at all when it is off', async () => {
     const id = await checksUnchanged()
 
@@ -285,6 +309,29 @@ describe('the other actions it applies', () => {
     expect(await actions()).toMatchObject([
       { exceptionKind: 'stalled', action: 'retry_from_finding', outcome: 'applied' },
     ])
+  })
+
+  it("retries from a finding as the factory, with no decision in anybody's name", async () => {
+    const id = await seed('build', { headSha: 'abc' }, [{ stage: 'intake' }, { stage: 'build' }])
+    await getDb()
+      .insert(finding)
+      .values({
+        key: `stalled-${id}`,
+        kind: 'stalled',
+        subject: 'run',
+        taskId: id,
+        detail: 'quiet',
+      })
+
+    await coordinate(deps(), 'auto')
+
+    expect(await getDb().select().from(decision)).toEqual([])
+    const intakes = await getDb()
+      .select({ detail: stageEvent.detail })
+      .from(stageEvent)
+      .where(eq(stageEvent.stage, 'intake'))
+    expect(intakes.at(-1)?.detail).toMatchObject({ decision: 'retry', automatic: true })
+    expect(queued).toMatchObject([{ input: { taskId: id } }])
   })
 
   it('records a refusal of the transition table as refused, with its reason', async () => {

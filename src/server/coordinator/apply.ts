@@ -23,7 +23,7 @@ async function perform(deps: ActionDeps, exception: TaskException, decision: Dec
   } else if (decision.action === 'review_again') {
     await sendBackByCoordinator(deps, exception.taskId, '')
   } else if (decision.action === 'retry_from_finding') {
-    await resolveFinding(deps, decision.findingId!, 'retry')
+    await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
   } else {
     throw new Error(`the coordinator has no way to apply ${decision.action}`)
   }
