@@ -5,10 +5,8 @@ export type Candidate = {
   taskId: number
   repository: string
   issueNumber: number
-  /** The commit the first checks ran on: the builder's, or the fix commit on top of it. */
+  /** The first commit the run pushed; its parent is the commit the run started from. */
   firstSha: string
-  /** The builder's first commit, whose parent is the commit the run started from; absent means `firstSha`. */
-  startSha?: string
   mergedSha: string
   costUsd: number
   durationMs: number

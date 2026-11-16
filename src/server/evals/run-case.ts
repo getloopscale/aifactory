@@ -219,7 +219,12 @@ class CaseRun {
     const since = this.committed ?? this.c.baseSha
     const ahead = await must(this.backend, `git -C ${this.repoDir} rev-list --count ${since}..HEAD`)
     if (!uncommitted && !(Number(ahead.stdout.trim()) > 0)) {
-      throw new Stopped('the agent made no change')
+      // The factory lets fixes make the only commit of a run: the same step here, on the starting commit.
+      const head = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+      const fixed = await this.applyFixes(head)
+      if (fixed === head) throw new Stopped('the agent made no change')
+      this.fixCommit = fixed
+      return fixed
     }
     if (uncommitted) {
       await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
@@ -233,6 +238,9 @@ class CaseRun {
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
     return this.committed
   }
+
+  /** The fix commit of a round whose builder changed nothing, until the checks have used it. */
+  private fixCommit: string | undefined
 
   /** The repository's fix commands, then their change as its own commit in the sandbox, as `Run.applyFixes`. */
   private async applyFixes(sha: string): Promise<string> {
@@ -318,7 +326,9 @@ class CaseRun {
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
   async loop(): Promise<CaseEnd> {
     for (;;) {
-      const sha = await this.applyFixes(await this.commit())
+      const built = await this.commit()
+      // When the fixes made the only commit, they have run already.
+      const sha = built === this.fixCommit ? built : await this.applyFixes(built)
       const failed = await this.check(sha)
       if (failed.length > 0) {
         if (!this.canRework()) {

@@ -82,20 +82,26 @@ type World = {
   cleanAfterCommit?: boolean
   /** What a fix command answers (the command contains `fix-it`). */
   fix?: { exitCode?: number; timedOut?: boolean }
+  /** Whether a fix command leaves a change in the checkout. */
+  fixChanges?: boolean
 }
 
 function sandbox(world: World = {}) {
   const exits = [...(world.checkExits ?? [0])]
   let statuses = 0
   let commits = 0
+  let fixed = false
   return new FakeSandbox((command): Reply | undefined => {
     if (command.includes('commit -F')) commits += 1
+    if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
       const changed = afterPlan
         ? world.plannedEdits === true
-        : world.cleanAfterCommit
+        : world.fixChanges
+          ? fixed && commits === 0
+          : world.cleanAfterCommit
           ? commits === 0
           : world.dirty !== false
       return { stdout: changed ? ' M src/cli.ts\n' : '' }
@@ -596,6 +602,27 @@ describe('runCase', () => {
 
     expect(result.passed).toBe(false)
     expect(result.reason).toContain('the change weakens a test that was there before it')
+  })
+
+  it('checks and reviews the fix commit when the builder changed nothing and the fixes did', async () => {
+    const provider = sandbox({ fixChanges: true })
+
+    const result = await runCase(
+      deps(
+        provider,
+        agent('builder', planned(built('nothing to do'))),
+        agent('reviewer', [{ ok: true, summary: APPROVE }]),
+      ),
+      { ...evalCase, fixes: ['fix-it'] },
+    )
+
+    const commands = provider.backend.commands
+    expect(commands.filter((c) => c.endsWith('&& fix-it'))).toHaveLength(1)
+    expect(commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(commands.findIndex((c) => c.includes('pnpm test'))).toBeGreaterThan(
+      commands.findIndex((c) => c.includes('commit -F')),
+    )
+    expect(result.passed).toBe(true)
   })
 
   it('fails a case where the builder changed nothing, and still stops the sandbox', async () => {
