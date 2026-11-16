@@ -78,19 +78,35 @@ type World = {
   testPatch?: string
   /** Whether the builder committed by itself (a merge does), leaving one commit the run did not make. */
   agentCommitted?: boolean
+  /** Whether the checkout is clean once a commit was made, as a real one is. */
+  cleanAfterCommit?: boolean
+  /** What a fix command answers (the command contains `fix-it`). */
+  fix?: { exitCode?: number; timedOut?: boolean }
+  /** Whether a fix command leaves a change in the checkout. */
+  fixChanges?: boolean
 }
 
 function sandbox(world: World = {}) {
   const exits = [...(world.checkExits ?? [0])]
   let statuses = 0
   let commits = 0
+  let fixed = false
   return new FakeSandbox((command): Reply | undefined => {
     if (command.includes('commit -F')) commits += 1
+    if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
+    if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
-      const changed = afterPlan ? world.plannedEdits === true : world.dirty !== false
+      const changed = afterPlan
+        ? world.plannedEdits === true
+        : world.fixChanges
+          ? fixed && commits === 0
+          : world.cleanAfterCommit
+          ? commits === 0
+          : world.dirty !== false
       return { stdout: changed ? ' M src/cli.ts\n' : '' }
     }
+    if (command.endsWith('&& fix-it')) return { ...world.fix } as Reply
     if (command.includes('pnpm test')) return { exitCode: exits.shift() ?? 0, stdout: 'ran' }
     if (command.includes('diff --name-status'))
       return {
@@ -157,6 +173,62 @@ describe('runCase', () => {
     })
     expect(result.costUsd).toBeCloseTo(0.4)
     expect(provider.stopped).toBe(1)
+  })
+
+  it("runs the repository's fixes before the checks and commits what they changed as its own commit", async () => {
+    const provider = sandbox()
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase(deps(provider, builder, reviewer), {
+      ...evalCase,
+      fixes: ['prettier --write .'],
+    })
+
+    const commands = provider.backend.commands
+    const fix = commands.findIndex((c) => c.endsWith('prettier --write .'))
+    expect(fix).toBeGreaterThan(-1)
+    expect(commands.filter((c) => c.includes('commit -F'))).toHaveLength(2)
+    expect(commands.findIndex((c) => c.includes('pnpm test'))).toBeGreaterThan(fix)
+    expect(result.passed).toBe(true)
+  })
+
+  it.each([
+    ['fails', { exitCode: 1 }],
+    ['runs past its limit', { exitCode: 0, timedOut: true }],
+  ])('leaves the work as it was and still checks it when a fix %s', async (_what, fix) => {
+    const provider = sandbox({ cleanAfterCommit: true, fix })
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase(deps(provider, builder, reviewer), {
+      ...evalCase,
+      fixes: ['fix-it'],
+    })
+
+    const commands = provider.backend.commands
+    const fixAt = commands.findIndex((c) => c.endsWith('&& fix-it'))
+    expect(fixAt).toBeGreaterThan(-1)
+    // The work is put back, no commit holds the fix, and the checks ran after it.
+    expect(commands.slice(fixAt).some((c) => c.includes('checkout-index'))).toBe(true)
+    expect(commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(commands.findIndex((c) => c.includes('pnpm test'))).toBeGreaterThan(fixAt)
+    expect(result.passed).toBe(true)
+  })
+
+  it('does not keep what a fix left when the work could not be put back', async () => {
+    const provider = sandbox({ cleanAfterCommit: true, fix: { exitCode: 1 } })
+    const real = provider.backend.execute.bind(provider.backend)
+    provider.backend.execute = async (command: string) =>
+      command.includes('checkout-index') ? { stdout: '', stderr: '', exitCode: 1, timedOut: false } : real(command)
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    await runCase(deps(provider, builder, reviewer), { ...evalCase, fixes: ['fix-it'] })
+
+    const commands = provider.backend.commands
+    expect(commands.some((c) => c.includes('reset -q --hard'))).toBe(true)
+    expect(commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
   })
 
   it('reports the cost of the plan when no time is left for the next pass', async () => {
@@ -530,6 +602,27 @@ describe('runCase', () => {
 
     expect(result.passed).toBe(false)
     expect(result.reason).toContain('the change weakens a test that was there before it')
+  })
+
+  it('checks and reviews the fix commit when the builder changed nothing and the fixes did', async () => {
+    const provider = sandbox({ fixChanges: true })
+
+    const result = await runCase(
+      deps(
+        provider,
+        agent('builder', planned(built('nothing to do'))),
+        agent('reviewer', [{ ok: true, summary: APPROVE }]),
+      ),
+      { ...evalCase, fixes: ['fix-it'] },
+    )
+
+    const commands = provider.backend.commands
+    expect(commands.filter((c) => c.endsWith('&& fix-it'))).toHaveLength(1)
+    expect(commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(commands.findIndex((c) => c.includes('pnpm test'))).toBeGreaterThan(
+      commands.findIndex((c) => c.includes('commit -F')),
+    )
+    expect(result.passed).toBe(true)
   })
 
   it('fails a case where the builder changed nothing, and still stops the sandbox', async () => {
