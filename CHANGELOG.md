@@ -24,6 +24,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A run that fails because the sandbox provider lost the sandbox (`The sandbox could not be reached and its health probe failed`) is now read as a failure of the environment: the task runs again on its own, and the evaluation suite leaves the case unmeasured instead of counting it against the agents (#176)
 - A task stopped by a network outage before any agent ran no longer uses up its automatic retries. When the host loses its network, a run fails with `fetch failed` while it reads the issue or creates the sandbox; that run is no longer counted against the three automatic runs, so the task runs again on its own and finishes once the network is back, where before an outage of a few minutes could leave it failed and waiting for a person. Reading an issue now also asks GitHub again, with a pause, when the network drops the request or GitHub answers with a 5xx (#136)
 - The task board loads in under half a second instead of about 20, and no longer keeps the database busy while the panel is open: `stage_event` gets an index on its task, its stage and its order (#166)
 - The factory no longer integrates a change to its own agents by itself. When approved work in the factory's repository touches agent configuration (the harnesses, `review.ts`, `evidence.ts`, `guards.ts`, the models, the prompts under `src/server/agents/`), the task is handed over as a draft pull request with the cause `agent_configuration`, the paths it changed and what to run, and nothing is merged. Before, the factory merged such a change into `workspace` as soon as the checks passed and the reviewer approved, with no evaluation. A fork names its own repository with `ownRepository` (#139)
@@ -64,6 +65,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A run that fails because the sandbox provider lost the sandbox (`The sandbox could not be reached and its health probe failed`) is now read as a failure of the environment: the task runs again on its own, and the evaluation suite leaves the case unmeasured instead of counting it against the agents (#176)
 - A task sent back whose agent finds nothing to change is no longer delivered, or failed, with work no review approved. When the head of its branch has no approving review (an earlier run fixed what was asked and stopped before a review, or a person pushed the fix), the run goes on to the checks and the review at that head. Work that was already approved is still left as it is, with the agent's reason on the issue (#113)
 - A 5xx from GitHub no longer fails a task for a person. A read is asked again up to three times with a pause; a call that changes something is sent once, and a 5xx from it fails the run as an environment failure, so the task waits under "Will retry itself" and the whole run is repeated. That covers creating the check run, opening the pull request and the GraphQL mutations. A merge is asked again only when GitHub refused it because the base branch moved, never after a 5xx, since the merge may have happened (#83)
 - A task's attempts and its automatic retries are counted from its own events. The count compared against the latest run a person started on any task, so most tasks showed no automatic retry at all: an environment failure was retried past its limit of three, and the board could show the wrong number of attempts (#89)
@@ -112,6 +114,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A run that fails because the sandbox provider lost the sandbox (`The sandbox could not be reached and its health probe failed`) is now read as a failure of the environment: the task runs again on its own, and the evaluation suite leaves the case unmeasured instead of counting it against the agents (#176)
 - A merge GitHub refuses for a moment no longer leaves a task done with its pull request open: a 5xx or a 405 that says the base branch was modified is asked again, up to four times (#14)
 - A run starting while another run makes its docker sandbox no longer removes that run's new network and fails it at the sandbox stage: a network counts as an orphan only once it is as old as a stale container (#15)
 - The factory's squash merges no longer gain a `Co-authored-by` trailer for its own bot: each squash commit is named after its pull request, with no body, instead of the message GitHub composes, which lists every commit author; commits are also signed with the bot user's own email, which needs the new `GITHUB_APP_BOT_USER_ID` (#13)
@@ -144,6 +147,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A run that fails because the sandbox provider lost the sandbox (`The sandbox could not be reached and its health probe failed`) is now read as a failure of the environment: the task runs again on its own, and the evaluation suite leaves the case unmeasured instead of counting it against the agents (#176)
 - Claude Code runs on the Docker sandbox no longer fail with `claude: not found` (#1)
 - A run started again after its process died can push its branch again (#2)
 - A clone that stalls is cut after three minutes and tried again, instead of failing the task after ten (#6)
