@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { CHANGESET_CHECK_SCRIPT } from '../factory/changeset-check'
 import { CHANGESET_CHECK_PATH, withChangesetCheck } from '../factory/changesets'
@@ -113,6 +113,10 @@ const deps = (provider: FakeSandbox, builder: CodingHarness, reviewer: CodingHar
   author: { name: 'aifactory', email: 'factory@example.com' },
 })
 
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
 describe('runCase', () => {
   it("plans the sandbox and the agent's pass against the limits of the repository", async () => {
     const provider = sandbox()
@@ -153,6 +157,31 @@ describe('runCase', () => {
     })
     expect(result.costUsd).toBeCloseTo(0.4)
     expect(provider.stopped).toBe(1)
+  })
+
+  it('reports the cost of the plan when no time is left for the next pass', async () => {
+    const MIN = 60_000
+    const plan = planned()[0]!
+    const builder = agent('builder', [{ ...plan, costUsd: 0.3 }])
+    const run = builder.run
+    const real = Date.now()
+    let now = real
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    builder.run = async (backend, input) => {
+      now += 30 * MIN
+      return run(backend, input)
+    }
+    const reviewer = agent('reviewer', [])
+
+    const result = await runCase(
+      { ...deps(sandbox(), builder, reviewer), timeouts: { sandboxMs: 45 * MIN, agentMs: 30 * MIN } },
+      evalCase,
+    )
+
+    expect(result.passed).toBe(false)
+    expect(result.reason).toContain('no time left for another agent pass')
+    expect(result.costUsd).toBeCloseTo(0.3)
+    expect(builder.prompts).toHaveLength(1)
   })
 
   it('writes the script of the changeset check into the sandbox for a case that runs it', async () => {
