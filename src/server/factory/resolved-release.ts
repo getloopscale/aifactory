@@ -6,6 +6,7 @@ import type { GithubApp } from '../github/app'
 import type { Issue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
+import { errorMessage } from './error-message'
 import { releaseBranchOf } from './branches'
 import { enterStage } from './stages'
 
@@ -54,7 +55,7 @@ export type ResolvedReleased = {
   errors: string[]
 }
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const message = errorMessage
 
 /**
  * Releases each of the tasks whose resolving commit `releaseRef` contains. A commit is compared once,
