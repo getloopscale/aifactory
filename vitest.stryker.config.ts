@@ -52,6 +52,7 @@ export default defineConfig({
       'src/server/factory/e2b-reattach.test.ts',
       'src/server/factory/e2b-sandbox.test.ts',
       'src/server/factory/sandbox-provider.test.ts',
+      'src/server/factory/sandbox-reaper.test.ts',
       'src/server/factory/repo-config.test.ts',
       'src/server/panel/work.test.ts',
       'src/app/lib/format.test.ts',
