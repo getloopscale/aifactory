@@ -1,3 +1,5 @@
+import { retryableFailure } from '../../shared/panel'
+
 import type { CoordinatorMode } from './mode'
 
 /**
@@ -81,6 +83,18 @@ export function signatureOf(reason: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, EVOLVE.signatureLength)
+}
+
+/**
+ * A `failed` event the factory runs again on its own: an outage of the environment, a quota that comes
+ * back, an issue still open. It is not a defect of the factory, so Evolve does not count it. A handoff is
+ * never one.
+ */
+export function isSelfHealing(
+  stage: FailureEvent['stage'],
+  detail: Record<string, unknown> | null,
+): boolean {
+  return stage === 'failed' && retryableFailure(detail) !== null
 }
 
 const text = (value: unknown) => (typeof value === 'string' ? value : '')

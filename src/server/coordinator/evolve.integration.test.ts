@@ -154,6 +154,17 @@ describe('filing a failure that repeats', () => {
     expect(await rows()).toEqual([])
   })
 
+  it('files nothing for an outage the factory retries on its own', async () => {
+    await failure({ error: 'fetch failed' }, ago(1))
+    await failure({ error: 'fetch failed' }, later(ago(1), 2))
+    await failure({ error: 'fetch failed' }, later(ago(1), 4))
+
+    await evolve(github.deps(), 'auto')
+
+    expect(github.opened).toEqual([])
+    expect(await rows()).toEqual([])
+  })
+
   it('files nothing for a signature older than the window', async () => {
     await threeFailures(ago(EVOLVE.windowDays + 1))
 
