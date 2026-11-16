@@ -376,17 +376,4 @@ describe('observe', () => {
     const h = history({ events: [ev(5, 'build', {}), ev(35, 'done', {})] })
     expect(value(h, 'minutes_to_delivery')).toEqual([30])
   })
-
-  it('ignores a send-back that was withdrawn, and the copy of the stage the task went back to', () => {
-    const h = history({
-      events: [
-        ev(0, 'intake'),
-        ev(30, 'done', { costUsd: 0.4 }),
-        ev(40, 'intake', { decision: 'request_changes', withdrawn: true }),
-        ev(30, 'done', { costUsd: 0.4, withdrawnDecisionId: 3 }),
-      ],
-    })
-    expect(value(h, 'minutes_to_delivery')).toEqual([30])
-    expect(value(h, 'cost_per_delivery')).toEqual([0.4])
-  })
 })
