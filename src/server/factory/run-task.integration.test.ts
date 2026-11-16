@@ -2478,7 +2478,7 @@ describe('runTask continuing from a branch a person sent back', () => {
   })
 
   describe('when the recorded pull request is closed and the agent changes nothing', () => {
-    async function sentBackOnClosed(aheadBy: number) {
+    async function sentBackOnClosed(aheadBy: number, plain = false) {
       const id = await seedTask()
       branchPushed()
       repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed' })
@@ -2499,7 +2499,7 @@ describe('runTask continuing from a branch a person sent back', () => {
         deps(new FakeSandbox(changed()), { harness: builder }),
         id,
         undefined,
-        { feedback: 'Merge workspace.', fromChecks: true },
+        plain ? { feedback: '', plain: true } : { feedback: 'Merge workspace.', fromChecks: true },
       )
       return { id, result }
     }
@@ -2512,6 +2512,12 @@ describe('runTask continuing from a branch a person sent back', () => {
       })
       expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
       expect(githubApi.callsTo('reopenPullRequest')).toHaveLength(0)
+    })
+
+    it('hands over without opening a pull request on a plain continuation too', async () => {
+      const { result } = await sentBackOnClosed(0, true)
+      expect(result).toMatchObject({ status: 'handoff' })
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
     })
 
     it('reopens it when the branch is ahead of its base', async () => {
