@@ -502,7 +502,7 @@ export function recipeItem(recipe: Read<RecipeFacts>): DoctorItem {
   )
 }
 
-const NO_CREDIT = /Status code 402|spend_limit|usage limit exceeded/i
+const NO_CREDIT = /Status code 402|spend_limit|usage limit exceeded|template '[^']*' not found/i
 const BAD_KEY = /Status code 401|invalid api key/i
 
 /**

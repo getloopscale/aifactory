@@ -221,8 +221,10 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   sandbox_refused: {
     cause: (v) =>
       `The sandbox provider refused the last run of this repository (task ${v.taskId}, ${v.at}): ${v.error}`,
-    repair: () =>
-      'Add credit to the sandbox provider, or fix its key on the server. The task retries itself once the provider accepts.',
+    repair: (v) =>
+      /template '[^']*' not found/i.test(v.error ?? '')
+        ? 'Build the sandbox template: node --env-file=.env.local scripts/build-e2b-template.mts. The task retries itself once the provider has it.'
+        : 'Add credit to the sandbox provider, or fix its key on the server. The task retries itself once the provider accepts.',
   },
   ok_issues: { cause: () => 'Issues are on.', repair: () => '' },
   ok_app_access: {

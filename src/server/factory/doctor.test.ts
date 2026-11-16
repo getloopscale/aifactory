@@ -692,6 +692,7 @@ describe('a failure that is the sandbox provider refusing', () => {
     expect(providerRefusal({ error: 'the sandbox did not start: Status code 402' })).toBe(true)
     expect(providerRefusal({ error: '403: team is blocked: spend_limit' })).toBe(true)
     expect(providerRefusal({ error: 'usage limit exceeded' })).toBe(true)
+    expect(providerRefusal({ error: "404: template 'aifactory-sandbox' not found" })).toBe(true)
   })
 
   it('is a key the provider does not accept', () => {
