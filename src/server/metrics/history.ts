@@ -39,6 +39,9 @@ const MINUTE = 60_000
 function runsOf(events: HistoryEvent[]): Run[] {
   const runs: Run[] = []
   for (const event of events) {
+    // A withdrawn send-back never ran, and the copy of the stage it went back to is not a new event.
+    if (event.detail?.withdrawn === true || event.detail?.withdrawnDecisionId !== undefined)
+      continue
     if (runs.length === 0 || event.stage === 'intake') {
       runs.push({ start: event.at, end: Infinity, events: [] })
     }
