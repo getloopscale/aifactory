@@ -9,7 +9,13 @@ import type { RoutedCode } from '../ingest/decide'
 
 /** What a person asks for in the panel. `retry_from_finding` is a retry from a supervisor finding. */
 type PanelEvent =
-  'approve' | 'request_changes' | 'retry' | 'retry_from_finding' | 'resolve' | 'release'
+  | 'approve'
+  | 'request_changes'
+  | 'withdraw_send_back'
+  | 'retry'
+  | 'retry_from_finding'
+  | 'resolve'
+  | 'release'
 
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
@@ -50,6 +56,8 @@ export type Action =
   | 'open_follow_up_issue'
   | 're_evaluate_integration'
   | 'cancel'
+  /** A person's send-back that has not started is undone: its queued run goes and the stage before it returns. */
+  | 'withdraw_send_back'
   /** A person merged the work a handoff left: it is integrated, and goes on to the release like any other. */
   | 'adopt_merge'
 
@@ -80,6 +88,8 @@ export type Facts = {
   checksPassed?: boolean
   /** Whoever wrote the comment or the review is someone the repository trusts. */
   trusted?: boolean
+  /** The task waits in `intake` for a run a person asked for with a note, and no run has taken it. */
+  sendBackPending?: boolean
 }
 
 type Rule = Outcome | ((task: Facts) => Outcome)
@@ -118,6 +128,12 @@ const ALREADY_INTEGRATED = refuse(
 const onBranch = (task: Facts) =>
   act(task.branchGone ? 'start_from_integration_branch' : 'continue_on_branch')
 const sendBack: Rule = (task) => (task.mergedSha ? ALREADY_INTEGRATED : onBranch(task))
+
+const NOT_WITHDRAWABLE = refuse('only a send-back that has not started can be withdrawn')
+const withdraw: Rule = (task) =>
+  task.sendBackPending
+    ? act('withdraw_send_back')
+    : refuse('this task waits for no send-back of a person that could be withdrawn')
 
 const NOT_RETRIED = refuse(
   'only a failed or handed-over task, or one whose pull request was never merged, can be retried',
@@ -210,6 +226,13 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     // A run that failed after pushing (out of time, a question the sandbox could not wait for) has work
     // on its branch, which a retry would delete.
     failed: sendBack,
+  },
+  withdraw_send_back: {
+    ...each(
+      [...WORKING, 'waiting', 'done', 'released', 'handoff', 'failed', 'cancelled'],
+      NOT_WITHDRAWABLE,
+    ),
+    intake: withdraw,
   },
   retry: {
     ...each(['intake', ...WORKING, 'waiting', 'released', 'cancelled'], NOT_RETRIED),

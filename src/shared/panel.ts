@@ -336,7 +336,8 @@ export type QuestionView = {
 
 export type DecisionView = {
   id: number
-  kind: 'approve' | 'request_changes' | 'retry' | 'release' | 'would_release' | 'resolve'
+  kind:
+    'approve' | 'request_changes' | 'withdrawn' | 'retry' | 'release' | 'would_release' | 'resolve'
   sha: string | null
   note: string
   at: string
@@ -361,6 +362,8 @@ export type CoordinatorActionView = {
 
 export type TaskDetail = {
   task: TaskCard
+  /** A send-back of the owner waits in `intake` and can still be withdrawn. */
+  sendBackPending?: boolean
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
   reviews: ReviewView[]
