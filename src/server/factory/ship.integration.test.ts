@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, stageEvent, task } from '../db/schema'
+import { ingress, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { shipContained, type Shipment } from './ship'
@@ -69,11 +69,6 @@ function setup(issues: Record<number, 'open' | 'closed'>) {
   return { api, repo, deps: { db: getDb(), api } }
 }
 
-const stageDetail = async (id: number) =>
-  (await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))).find(
-    (e) => e.stage === 'released',
-  )?.detail
-
 describe('shipContained with a resolved task', () => {
   it('closes the open issue of a resolved task with the version', async () => {
     const id = await resolved(REPO, 1, 'aaa111')
@@ -118,7 +113,6 @@ describe('shipContained with a resolved task', () => {
 
     expect(shipped.issueErrors).toEqual(['#4: boom'])
     expect(await stageOf(id)).toBe('released')
-    expect(await stageDetail(id)).toMatchObject({ issueError: '#4: boom' })
   })
 
   it('comments once: a second release finds the task released', async () => {

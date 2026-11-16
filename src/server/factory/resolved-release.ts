@@ -36,7 +36,7 @@ export type ReleaseBranchView = {
   mergeSha?: string
   /**
    * Runs for each task as it is released, with its issue. A release that has a tag uses it to tell the
-   * issue where the fix is; a catch-up has none. It returns what went wrong, never throws.
+   * issue where the fix is; a catch-up has none. It runs after the stage changed. It returns what went wrong, never throws.
    */
   afterRelease?: (row: {
     id: number
@@ -73,14 +73,14 @@ async function releaseEach(
     }
     try {
       if (!(await onBranch.get(sha))) continue
-      const issueError = await view.afterRelease?.(row)
       await enterStage(deps.db, row.id, 'released', {
         actor: view.actor,
         releaseBranch: view.releaseBranch,
         resolvedSha: sha,
         ...(view.mergeSha ? { mergeSha: view.mergeSha } : {}),
-        ...(issueError ? { issueError } : {}),
       })
+      // The issue is told only once the task is released: a transition that failed leaves it for a retry.
+      const issueError = await view.afterRelease?.(row)
       result.released.push(row.id)
       if (issueError) (result.issueErrors ??= []).push(issueError)
     } catch (error) {
@@ -89,9 +89,6 @@ async function releaseEach(
   }
   return result
 }
-
-const caughtUp = (branch: string) =>
-  `The fix is on \`${branch}\`: a person resolved this task by hand, and the release that carries it was made before the factory saw it.\n`
 
 /**
  * Tells an issue where the fix is and closes it, only when it is still open: the agent closed the issue it
@@ -149,17 +146,13 @@ export type CatchUpPage = {
  * each is compared with the head of its repository's release branch (the owner's choice, or the default
  * branch). `next` is where the following pass starts, and 0 once a pass reaches the last task, so a task
  * whose commit is not there yet is looked at again later. A released task no longer matches, so running it
- * again changes nothing. The issue of such a task, when still open, is told the fix is on the release branch and
- * closed, since no tag is known here.
+ * again changes nothing. Its issue is left alone: no tag is known here to tell it the version.
  */
 export async function catchUpResolved(
   deps: {
     db: Database
     app: Pick<GithubApp, 'installationToken'>
-    api: Pick<
-      GithubApi,
-      'contains' | 'defaultBranch' | 'issueState' | 'commentOnIssue' | 'closeIssue'
-    >
+    api: Pick<GithubApi, 'contains' | 'defaultBranch'>
   },
   page: CatchUpPage,
 ): Promise<ResolvedReleased & { next: number }> {
@@ -181,9 +174,6 @@ export async function catchUpResolved(
         token,
         releaseRef: branch,
         releaseBranch: branch,
-        // No tag names the task here: a late release only tells an open issue where the fix is.
-        afterRelease: (row: { issueNumber: number }) =>
-          closeOpenIssue(deps.api, repo, token, row.issueNumber, caughtUp(branch)),
       }
       const done = await releaseEach(deps, { ...view, actor: 'factory' }, mine)
       result.released.push(...done.released)

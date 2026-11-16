@@ -216,18 +216,15 @@ describe('catchUpResolved', () => {
     expect(await stageOf(broken)).toBe('done')
   })
 
-  it('tells an open issue where the fix is and closes it, and leaves a closed one alone', async () => {
+  it('releases without touching the issue: no tag is known in a catch-up', async () => {
     const open = await resolved('paulo/app', 1, 'aaa111')
-    const closed = await resolved('paulo/app', 2, 'aaa111')
     const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
     gh.api.repo('paulo/app').issue(1, { state: 'open' })
-    gh.api.repo('paulo/app').issue(2, { state: 'closed' })
 
     const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
 
-    expect(result.released).toEqual([open, closed])
-    expect(gh.api.repo('paulo/app').issue(1).state).toBe('closed')
-    expect(gh.api.repo('paulo/app').issue(1).comments[0].body).toContain('`main`')
-    expect(gh.api.repo('paulo/app').issue(2).comments).toEqual([])
+    expect(result.released).toEqual([open])
+    expect(gh.api.repo('paulo/app').issue(1).state).toBe('open')
+    expect(gh.api.repo('paulo/app').issue(1).comments).toEqual([])
   })
 })
