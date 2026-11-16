@@ -69,6 +69,8 @@ export function reviewPrompt(input: {
   builderSummary?: string
   /** The factory checks that failed on an earlier attempt and pass now, with the files added since. */
   required?: RequiredByCheck[]
+  /** The review this one follows in the same run, when it asked for changes. */
+  earlier?: EarlierReview
 }): string {
   const required = input.required ?? []
   return `You are an independent code reviewer for the repository ${input.repo}. Another agent implemented the issue below on the branch ${input.branch}. You did not write this code and you must not change it.
@@ -87,12 +89,38 @@ ${
   input.knowledgeDir
     ? `- A change that breaks one of the owner's rules under ${input.knowledgeDir}/knowledge/ is a finding, at least major.\n\n${knowledgeRules(input.knowledgeDir)}\n`
     : ''
-}
+}${input.earlier ? earlierSection(input.earlier) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
 {"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}
 
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
+`
+}
+
+/** A review round that asked for changes: the commit it read and what it found. */
+export type EarlierReview = { sha: string; findings: Finding[] }
+
+/**
+ * What a later round is told about the one before it. A review that reads the whole diff again every round
+ * finds something new every round and never ends (the `review_plateau` handoffs), so a later round checks
+ * the earlier findings first and raises a new blocker only in code that changed since, or one that would
+ * break code already in use. Minor findings never blocked, so they are not carried.
+ */
+function earlierSection(earlier: EarlierReview): string {
+  const blocking = earlier.findings.filter((f) => f.severity !== 'minor')
+  const listed = blocking.length > 0 ? renderFindings(blocking) : '(none that blocked)'
+  return `
+# Your earlier review of ${earlier.sha.slice(0, 7)}
+
+You asked for changes on ${earlier.sha.slice(0, 7)}. What blocked it then:
+
+${listed}
+
+In this round:
+- First check each of those findings at HEAD. One that is not fixed stays, in the same words.
+- Read what changed since then with \`git diff ${earlier.sha} HEAD\`.
+- A new blocker or major finding goes only on code that changed since ${earlier.sha.slice(0, 7)}, or on a bug that would break code that is already in use; say which in the finding. Anything else you notice now and did not raise before is minor.
 `
 }
 
