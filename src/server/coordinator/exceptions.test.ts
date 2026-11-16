@@ -139,6 +139,14 @@ describe('recognising the exceptions of a task', () => {
     ])
   })
 
+  it('gives an unknown exception for a closed pull request that was merged too', () => {
+    const facts = {
+      ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),
+      pullRequest: readOf({ conflicting: false, closed: true, base: 'workspace' }),
+    }
+    expect(recognise(facts)).toMatchObject([{ kind: 'unknown', taskId: 7 }])
+  })
+
   it('gives an unknown exception when the pull request of the failed checks could not be read', () => {
     const facts = {
       ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),
