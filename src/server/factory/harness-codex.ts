@@ -276,6 +276,7 @@ export function parseCodexResult(exitCode: number, stdout: string, stderr: strin
   const unauthorized = !ok && !quota && UNAUTHORIZED.test(text)
   return {
     ...(unauthorized ? { unauthorized } : {}),
+    ...(!ok && exitCode === 124 ? { timedOut: true } : {}),
     ok,
     summary: (ok ? summary : `codex failed: ${text || `exit ${exitCode}`}`).slice(0, SUMMARY_MAX),
     ...(sessionId ? { sessionId } : {}),

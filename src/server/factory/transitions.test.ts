@@ -51,6 +51,7 @@ describe('the transition table', () => {
       retry_due: true,
       conflict_rerun: true,
       send_back_after_ci: true,
+      coordinator_send_back: true,
       hand_over: true,
       integrate: true,
       issue_labeled: true,
@@ -66,7 +67,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(21 * 14)
+    expect(pairs).toHaveLength(22 * 14)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -277,6 +278,21 @@ describe('what the factory does on its own', () => {
     expect(outcome({ stage: 'done', awaitingCiSha: null }, 'send_back_after_ci')).toEqual(
       refused(no),
     )
+  })
+
+  it('lets the coordinator send back only a handed-over task that is not integrated', () => {
+    expect(acting('coordinator_send_back')).toEqual({ handoff: 'continue_on_branch' })
+    expect(outcome({ stage: 'handoff', branchGone: true }, 'coordinator_send_back')).toEqual(
+      act('start_from_integration_branch'),
+    )
+    expect(outcome({ stage: 'handoff', mergedSha: 'm' }, 'coordinator_send_back')).toEqual(
+      refused(
+        'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
+      ),
+    )
+    expect(elsewhere('coordinator_send_back')).toEqual([
+      refused('the coordinator sends back only a task that was handed over to a person'),
+    ])
   })
 
   it('hands over a run that is working, and work whose wait for the checks went wrong', () => {

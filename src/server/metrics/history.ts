@@ -1,4 +1,4 @@
-import type { TaskStage } from '../db/schema'
+import type { decision, TaskStage } from '../db/schema'
 
 import type { MetricName } from './config'
 
@@ -15,8 +15,17 @@ export type TaskHistory = {
   releaseWentRed: boolean
 }
 
-/** One measurement, dated when the run it describes ended. */
-export type Observation = { metric: MetricName; repository: string; at: Date; value: number }
+/**
+ * One measurement, dated when the run it describes ended. `sample: false` adds to the day's sum without
+ * counting as one of its observations: the numerator of a ratio whose samples are something else.
+ */
+export type Observation = {
+  metric: MetricName
+  repository: string
+  at: Date
+  value: number
+  sample?: false
+}
 
 type Run = { start: Date; end: number; events: HistoryEvent[] }
 
@@ -56,9 +65,10 @@ function firstPass(run: Run, evidence: TaskHistory['evidence']): number | undefi
   return checks.every((e) => e.passed) ? 1 : 0
 }
 
-/** What one finished run says about each indicator. */
-function measureRun(run: Run, h: TaskHistory, cameBackLater: boolean) {
+/** What one finished run, which ended in `ended`, says about each indicator. */
+function measureRun(run: Run, h: TaskHistory, ended: TaskStage, cameBackLater: boolean) {
   const values: Partial<Record<MetricName, number>> = {}
+  values.handoff_share = ended === 'handoff' ? 1 : 0
   const builds = run.events.filter((e) => e.stage === 'build')
   if (builds.length > 0)
     values.rework_rounds = builds.filter((e) => e.detail?.rework === true).length
@@ -72,6 +82,8 @@ function measureRun(run: Run, h: TaskHistory, cameBackLater: boolean) {
   if (doneAt >= 0) {
     const done = run.events[doneAt]
     values.minutes_to_delivery = (done.at.getTime() - run.start.getTime()) / MINUTE
+    // The delivery is the sample; the decisions of its day are added by `personDecisions`.
+    values.person_decisions_per_delivery = 0
     const cost = done.detail?.costUsd
     if (typeof cost === 'number') values.cost_per_delivery = cost
     const after = run.events.slice(doneAt + 1)
@@ -94,7 +106,7 @@ export function observe(h: TaskHistory): Observation[] {
     const terminal = run.events.find((e) => TERMINAL.includes(e.stage))
     if (!terminal) return
     if (Array.isArray(terminal.detail?.blockedBy)) return
-    const values = measureRun(run, h, i + 1 < runs.length)
+    const values = measureRun(run, h, terminal.stage, i + 1 < runs.length)
     for (const [metric, value] of Object.entries(values)) {
       if (value === undefined) continue
       out.push({ metric: metric as MetricName, repository: h.repository, at: terminal.at, value })
@@ -110,4 +122,31 @@ export function observe(h: TaskHistory): Observation[] {
     })
   }
   return out
+}
+
+/** A row of `decision`, with the repository of its task. */
+export type DecisionRow = {
+  repository: string
+  kind: (typeof decision.$inferSelect)['kind']
+  note: string
+  at: Date
+}
+
+/**
+ * Whether a person made the decision. The factory records two of its own: what an agent would have released
+ * (`would_release`, in trial mode or when an automatic release was refused), and a release an agent started,
+ * whose note begins with the actor (`agent:<name>`, where a person's is `human`).
+ */
+const byPerson = (d: DecisionRow) =>
+  d.kind !== 'would_release' && !(d.kind === 'release' && d.note.startsWith('agent:'))
+
+/** A person's decisions, each adding one to the decisions per delivery of its day. */
+export function personDecisions(rows: DecisionRow[]): Observation[] {
+  return rows.filter(byPerson).map((d) => ({
+    metric: 'person_decisions_per_delivery',
+    repository: d.repository,
+    at: d.at,
+    value: 1,
+    sample: false,
+  }))
 }

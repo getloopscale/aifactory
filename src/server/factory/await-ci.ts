@@ -3,7 +3,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { CheckReport, GithubApi } from '../github/pulls'
+import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
@@ -22,7 +22,9 @@ import {
   releaseByMode,
   type Handed,
 } from './integration'
+import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
+import { squashTitle } from './run-support'
 
 export type AwaitCiDeps = {
   db: Database
@@ -74,13 +76,13 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
   const { row, verifiedSha, token } = w
   const claimed = await deps.db
     .update(task)
-    .set({ mergedSha, awaitingCiSha: null })
+    .set({ mergedSha, awaitingCiSha: null, integrationHeld: false })
     .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
     .returning({ id: task.id })
   if (claimed.length === 0) return false
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`).catch(() => {})
   const repo = await loadRepoConfig(deps.db, row.repository)
-  const advanced = await advancePreRelease(deps.api, {
+  const advanced = await advancePreRelease(deps, {
     repository: row.repository,
     token,
     integration: integrationBranch(repo),
@@ -150,7 +152,7 @@ async function toPerson(
   const moved = await deps.db.transaction(async (tx) => {
     const claimed = await tx
       .update(task)
-      .set({ stage: 'handoff', awaitingCiSha: null })
+      .set({ stage: 'handoff', awaitingCiSha: null, integrationHeld: false })
       .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
       .returning({ id: task.id })
     if (claimed.length === 0) return false
@@ -196,7 +198,35 @@ async function readFailure(
   return checksFeedback(verifiedSha, failed)
 }
 
-async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: AwaitCiResult) {
+/**
+ * The hold ended on an integration a promotion held out: it is integrated now, as the run would have done.
+ * An integration branch that requires checks gets auto-merge pinned to the verified commit, and the task waits
+ * for them like any other; otherwise, or when GitHub finds the pull request clean, it is merged pinned to the
+ * same commit and finished.
+ */
+async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]): Promise<boolean> {
+  const { row, verifiedSha, token, number } = w
+  const pull = { repo: row.repository, token, number, sha: verifiedSha }
+  if (required.length > 0 && (await autoMergeOrMergeable(deps.api, pull)) === 'waiting') {
+    await deps.db
+      .update(task)
+      .set({ integrationHeld: false })
+      .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
+    return false
+  }
+  const merged = await deps.api.mergePullRequest(row.repository, token, number, verifiedSha, {
+    method: 'squash',
+    title: squashTitle(row.issueTitle, row.issueNumber),
+  })
+  return finish(deps, w, merged.sha)
+}
+
+async function look(
+  deps: AwaitCiDeps,
+  row: typeof task.$inferSelect,
+  result: AwaitCiResult,
+  holding: Set<string>,
+) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
     .select({ detail: stageEvent.detail, at: stageEvent.at })
@@ -213,14 +243,18 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
   const { token } = await deps.github.installationToken(row.repository)
   const repo = await loadRepoConfig(deps.db, row.repository)
   const pull = await deps.api.readPullRequest(row.repository, token, number)
+  const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const step = decideWaitingIntegration({
     verifiedSha,
     pull,
-    required: await deps.api.requiredChecks(row.repository, token, integrationBranch(repo)),
+    required,
     reports: await deps.api.checkReports(row.repository, token, verifiedSha),
     waitedMs:
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
+    ...(row.integrationHeld
+      ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
+      : {}),
   })
   const w: Waiting = {
     row,
@@ -235,6 +269,10 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
+      return
+    case 'integrate':
+      if (await integrateHeld(deps, w, required)) result.merged.push(row.id)
+      else result.waiting += 1
       return
     case 'send_back': {
       const note = await readFailure(deps, w, step.reports, result)
@@ -282,9 +320,12 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     .from(task)
     .where(and(eq(task.stage, 'done'), isNotNull(task.awaitingCiSha)))
     .orderBy(task.id)
+  // Read once, so the integrations held out of one promotion all go in together once its hold ends, though
+  // the first of them pins the promotion again and starts a new hold.
+  const holding = await heldRepositories(deps.db, deps.now?.() ?? new Date())
   for (const row of rows) {
     try {
-      await look(deps, row, result)
+      await look(deps, row, result, holding)
     } catch (error) {
       result.errors.push(
         `task ${row.id}: ${error instanceof Error ? error.message : String(error)}`,

@@ -57,7 +57,7 @@ async function requeue(
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
     const moved = await tx
       .update(task)
-      .set({ stage: 'intake', awaitingCiSha: null, resolvedSha: null })
+      .set({ stage: 'intake', awaitingCiSha: null, integrationHeld: false, resolvedSha: null })
       .where(and(eq(task.id, taskId), inArray(task.stage, from as never)))
       .returning({ id: task.id })
     if (moved.length === 0) {
@@ -222,7 +222,7 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
 export async function retry(
   deps: ActionDeps,
   taskId: number,
-  options: { fromFinding?: boolean } = {},
+  options: { fromFinding?: boolean; automatic?: boolean } = {},
 ) {
   const row = await load(deps.db, taskId)
   // A run the supervisor found stalled or lost is in a working stage, which retry otherwise refuses.
@@ -234,7 +234,9 @@ export async function retry(
   )
   const { token } = await deps.github.installationToken(row.repository)
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`)
-  const decisionId = await requeue(deps, taskId, allowed, 'retry', '', row.headSha)
+  // The coordinator's retry is the factory's own: no decision in anybody's name, and it counts as automatic.
+  const kind = options.automatic ? 'automatic_retry' : 'retry'
+  const decisionId = await requeue(deps, taskId, allowed, kind, '', row.headSha)
   return { decisionId }
 }
 
@@ -350,6 +352,28 @@ export async function sendBackAutomatically(deps: ActionDeps, taskId: number, no
 }
 
 /**
+ * Sends a handed-over task back to its agent because the coordinator decided so, with no person asking:
+ * on its branch with the note as feedback, or, when `note` is empty, as a plain continuation of the branch
+ * that goes through the checks and the review again. Like an automatic send-back, nothing is decided in
+ * anybody's name; the coordinator's own record says why (`coordinator/apply.ts`).
+ */
+export async function sendBackByCoordinator(deps: ActionDeps, taskId: number, note: string) {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'coordinator_send_back')
+  const from = stagesWhere('coordinator_send_back', row)
+  const text = note.slice(0, NOTE_MAX)
+  if (text === '') {
+    await requeue(deps, taskId, from, 'automatic_retry', '', row.headSha, {
+      note: '',
+      plain: true,
+      preAgent: false,
+    })
+    return
+  }
+  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha)
+}
+
+/**
  * Releases a task from the panel: its pull request is merged and a full release is published. The
  * click is the approval, so it is recorded as one. Everything the commit must satisfy is checked in
  * `release`, and a refusal is shown as it is.
@@ -393,8 +417,14 @@ const ALLOWED: Record<FindingAction, string[]> = {
  * Resolves a finding the supervisor opened. The action must be one the finding's subject allows, and
  * the finding must still be open, so a stale page cannot, say, delete a snapshot nobody flagged. The
  * supervisor closes the finding on its next pass; it is closed here too so the panel is not stale.
+ * `automatic` is the coordinator resolving it: a retry then records no decision in anybody's name.
  */
-export async function resolveFinding(deps: ActionDeps, findingId: number, action: FindingAction) {
+export async function resolveFinding(
+  deps: ActionDeps,
+  findingId: number,
+  action: FindingAction,
+  options: { automatic?: boolean } = {},
+) {
   const [found] = await deps.db.select().from(finding).where(eq(finding.id, findingId))
   if (!found || found.resolvedAt) throw new ActionRefused('this finding is not open')
   if (!ALLOWED[action].includes(found.subject)) {
@@ -403,7 +433,7 @@ export async function resolveFinding(deps: ActionDeps, findingId: number, action
 
   if (action === 'retry') {
     if (found.taskId === null) throw new ActionRefused('this finding has no task')
-    await retry(deps, found.taskId, { fromFinding: true })
+    await retry(deps, found.taskId, { fromFinding: true, automatic: options.automatic })
   } else if (action === 'resume') {
     const [asked] = await deps.db
       .select()

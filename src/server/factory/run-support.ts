@@ -168,6 +168,10 @@ export function resolvedComment(input: {
 
 export const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
 
+/** The title of the squash commit that integrates an issue's work: the issue's title on one line, and its number. */
+export const squashTitle = (issueTitle: string, issueNumber: number) =>
+  `${oneLine(issueTitle)} (#${issueNumber})`
+
 /** The commit identity as a git config file. Newlines would start a new setting, so refuse them. */
 export function gitConfig(author: { name: string; email: string }): string {
   if (/[\r\n]/.test(author.name + author.email)) {

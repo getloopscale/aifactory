@@ -11,6 +11,13 @@ import type { CheckSpec } from './evidence'
 import type { CodingHarness } from './harness'
 import type { IsolatedSandboxProvider } from './sandbox'
 
+/**
+ * Why a run handed its work to a person, as the handoff event records it next to its `reason`: the review
+ * did not converge in the attempts, the review gave no verdict, or the required checks failed and the agent
+ * changed nothing. The coordinator reads it (`coordinator/exceptions.ts`).
+ */
+export type HandoffCause = 'review_plateau' | 'review_unusable' | 'checks_unchanged'
+
 export type HarnessChoice = CodingHarness | ((labels: string[]) => CodingHarness)
 
 export type RunTaskDeps = {
