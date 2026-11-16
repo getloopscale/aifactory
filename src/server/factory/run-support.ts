@@ -115,7 +115,9 @@ export function pullRequestBody(input: {
     ? ['<details><summary>Plan</summary>', '', input.plan, '', '</details>', '']
     : []
   return [
-    `Closes #${input.issueNumber}`,
+    // No closing keyword: where the integration branch is the repository's default one, GitHub would close
+    // the issue at integration. The factory closes it when a release ships the change, naming the version.
+    `For #${input.issueNumber}. The factory closes the issue when a release ships this change.`,
     '',
     ...(input.handoff ? [`**This needs a person:** ${input.handoff}.`, ''] : []),
     `Checks the factory ran on \`${input.sha.slice(0, 7)}\`:`,
