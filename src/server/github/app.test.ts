@@ -69,20 +69,21 @@ describe('GitHub App installation tokens', () => {
     expect(waits).toHaveLength(1)
   })
 
-  it('asks again when the network drops the lookup or the mint', async () => {
+  it('asks again when the network drops the installation lookup', async () => {
     const github = fakeGithub()
-    const drops = { lookup: 1, mint: 2 }
-    const flaky: FetchLike = async (url, init) => {
-      const key = url.endsWith('/installation') ? 'lookup' : init?.method === 'POST' ? 'mint' : null
-      if (key && drops[key] > 0) {
-        drops[key] -= 1
+    let failed = false
+    const fetch: FetchLike = async (url, init) => {
+      if (!failed && url.endsWith('/installation')) {
+        failed = true
         throw new TypeError('fetch failed')
       }
       return github.fetch(url, init)
     }
-    const minted = await app(flaky).installationToken('paulohenriquevn/aifactory-playground')
+
+    const minted = await app(fetch).installationToken('paulohenriquevn/aifactory-playground')
+
+    expect(failed).toBe(true)
     expect(minted.token).toBeTruthy()
-    expect(drops).toEqual({ lookup: 0, mint: 0 })
   })
 
   it('never asks the mint again when GitHub answers 502', async () => {

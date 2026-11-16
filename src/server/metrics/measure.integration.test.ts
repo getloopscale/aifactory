@@ -192,9 +192,9 @@ describe('measure', () => {
       )
     expect(points).toHaveLength(20)
     expect(points.find((p) => p.day === '2026-11-08')).toMatchObject({ value: 5, samples: 3 })
-    // Cost, minutes to delivery, change failure, handoff share and decisions per delivery, for the
-    // repository and for all: 20 days each.
-    expect(first.points).toBe(200)
+    // Cost, minutes to delivery, change failure and its four causes, handoff share and decisions per
+    // delivery, for the repository and for all: 20 days each.
+    expect(first.points).toBe(360)
   })
 
   it('records a failure to open the issue and tries again on the next pass', async () => {

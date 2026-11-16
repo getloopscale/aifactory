@@ -11,6 +11,10 @@ export const METRIC_NAMES = [
   'minutes_to_delivery',
   'cost_per_delivery',
   'change_failure',
+  'change_failure_required_checks',
+  'change_failure_merge_conflict',
+  'change_failure_release_red',
+  'change_failure_other',
   'hours_to_release',
   'handoff_share',
   'person_decisions_per_delivery',
@@ -64,6 +68,31 @@ export const METRICS: Record<MetricName, MetricSpec> = {
   },
   change_failure: {
     label: 'Delivered work that came back',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  // The causes of `change_failure`: each delivered run says one of them when it came back, so they add up to it.
+  change_failure_required_checks: {
+    label: 'Delivered work that came back: the required checks failed',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  change_failure_merge_conflict: {
+    label: 'Delivered work that came back: a merge conflict',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  change_failure_release_red: {
+    label: 'Delivered work that came back: the release went red',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  change_failure_other: {
+    label: 'Delivered work that came back: another cause',
     unit: 'share',
     worse: 'up',
     minSamples: 3,

@@ -35,6 +35,18 @@ const event = (reason: string, over: Partial<FailureEvent> = {}): FailureEvent =
 }
 
 describe('signatureOf', () => {
+  it('gives one signature to a fetch failure whatever its cause, and keeps other errors apart', () => {
+    const a = signatureOf('fetch failed (cause: ECONNRESET read ECONNRESET)')
+    const b = signatureOf('fetch failed (cause: getaddrinfo ENOTFOUND api.github.com)')
+    expect(a).toBe(b)
+    expect(a).toBe('fetch failed')
+    expect(signatureOf('fetch failed')).toBe(a)
+    expect(signatureOf('push rejected (cause: x)')).not.toBe(a)
+    expect(signatureOf('operation failed (cause: permission denied)')).not.toBe(
+      signatureOf('operation failed (cause: disk full)'),
+    )
+  })
+
   it('replaces numbers and commit ids, so two reasons that differ only there share it', () => {
     const a = signatureOf('push of 3fa9c01 rejected after 3 attempts')
     const b = signatureOf('push of 0be27d4e9a1 rejected after 12 attempts')
@@ -110,6 +122,16 @@ describe('isDesignedWait', () => {
 })
 
 describe('groupBySignature', () => {
+  it('groups a fetch failure recorded with a cause and one recorded without', () => {
+    const groups = groupBySignature([
+      event('fetch failed'),
+      event('fetch failed (cause: ECONNRESET read ECONNRESET)'),
+      event('fetch failed (cause: getaddrinfo ENOTFOUND api.github.com)'),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ signature: 'fetch failed', tasks: 3 })
+  })
+
   it('groups by signature, counts distinct tasks and keeps the first and last time seen', () => {
     const groups = groupBySignature([
       event('lost 1', { taskId: 1, at: ago(3) }),
@@ -367,5 +389,16 @@ describe('evolveLog', () => {
     expect(
       evolveLog({ ...empty, filed: [{ signature: 'x', issueNumber: 4 }] }, 'auto'),
     ).toHaveLength(1)
+  })
+})
+
+describe('signatureOf fetch causes', () => {
+  it('gives one signature to fetch failed with or without a multiline cause', () => {
+    const a = signatureOf('fetch failed')
+    expect(signatureOf('fetch failed (cause: ENOTFOUND getaddrinfo\nsecond line)')).toBe(a)
+    expect(signatureOf('fetch failed (cause: ECONNRESET read)')).toBe(a)
+  })
+  it('keeps other causes distinct', () => {
+    expect(signatureOf('boom (cause: a)')).not.toBe(signatureOf('boom (cause: b)'))
   })
 })

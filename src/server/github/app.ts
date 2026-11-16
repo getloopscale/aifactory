@@ -2,6 +2,8 @@ import { createSign } from 'node:crypto'
 
 import { z } from 'zod'
 
+import { retryRead } from './retry-read'
+
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
 export type InstallationToken = { token: string; expiresAt: Date }
@@ -110,9 +112,6 @@ const appDescription = z.object({
   events: z.array(z.string()),
 })
 
-const READ_ATTEMPTS = 3
-const READ_RETRY_MS = 2_000
-
 const REPO = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 
 const base64url = (value: unknown) =>
@@ -142,10 +141,10 @@ export function createGithubApp(
 
   async function call(path: string, init: RequestInit = {}): Promise<Response> {
     const isRead = (init.method ?? 'GET') === 'GET'
-    for (let attempt = 1; ; attempt += 1) {
-      let response: Response
-      try {
-        response = await fetchImpl(`${apiUrl}${path}`, {
+    // A read GitHub answers with a 5xx, or the network drops, is asked again with a pause; a call that changes something never is.
+    return retryRead(
+      () =>
+        fetchImpl(`${apiUrl}${path}`, {
           ...init,
           headers: {
             accept: 'application/vnd.github+json',
@@ -153,18 +152,10 @@ export function createGithubApp(
             authorization: `Bearer ${appJwt()}`,
             ...(init.body ? { 'content-type': 'application/json' } : {}),
           },
-        })
-      } catch (error) {
-        // A network blip throws ("fetch failed"), so nothing reached GitHub: a read is asked again, and so
-        // is the mint of an installation token, which only makes a token nobody saw.
-        if (!(isRead || path.endsWith('/access_tokens')) || attempt >= READ_ATTEMPTS) throw error
-        await wait(READ_RETRY_MS * attempt)
-        continue
-      }
-      // A read GitHub answers with a 5xx is asked again with a pause; a call that changes something never is.
-      if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
-      await wait(READ_RETRY_MS * attempt)
-    }
+        }),
+      wait,
+      isRead,
+    )
   }
 
   async function listInstallations(): Promise<AppInstallation[]> {

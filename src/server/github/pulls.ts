@@ -1,4 +1,5 @@
 import type { FetchLike } from './app'
+import { retryRead } from './retry-read'
 
 export type CheckRun = {
   name: string
@@ -335,8 +336,6 @@ function mergeFields(number: number, merge: PullRequestMerge): Record<string, st
 
 /** Runs on the factory host with an installation token, never in the sandbox. */
 /** A read that GitHub answers with a 5xx is asked again this many times, with a pause. Writes never are. */
-const READ_ATTEMPTS = 3
-const READ_RETRY_MS = 2_000
 
 /** How many times a merge is asked for when another merge moved the base a moment before. */
 const MERGE_ATTEMPTS = 4
@@ -372,10 +371,9 @@ export function createGithubApi(
 ): GithubApi {
   const call = async (repo: string, token: string, path: string, init: RequestInit = {}) => {
     const isRead = (init.method ?? 'GET') === 'GET'
-    for (let attempt = 1; ; attempt += 1) {
-      let response: Response
-      try {
-        response = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+    return retryRead(
+      () =>
+        fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
           ...init,
           headers: {
             accept: 'application/vnd.github+json',
@@ -384,16 +382,10 @@ export function createGithubApi(
             ...(init.body ? { 'content-type': 'application/json' } : {}),
             ...(init.headers as Record<string, string> | undefined),
           },
-        })
-      } catch (error) {
-        // A network blip throws ("fetch failed"); only a read is asked again.
-        if (!isRead || attempt >= READ_ATTEMPTS) throw error
-        await wait(READ_RETRY_MS * attempt)
-        continue
-      }
-      if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
-      await wait(READ_RETRY_MS * attempt)
-    }
+        }),
+      wait,
+      isRead,
+    )
   }
 
   async function ensure(response: Response, action: string, status: number[]) {

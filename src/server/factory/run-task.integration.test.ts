@@ -2636,47 +2636,66 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
   })
 
   describe('when the network drops ("fetch failed")', () => {
-    const dropping = (drops: { left: number }) => {
-      const sandbox = new FakeSandbox(changed())
-      const create = sandbox.create.bind(sandbox)
-      sandbox.create = async (...args: Parameters<typeof create>) => {
-        if (drops.left-- > 0) throw new TypeError('fetch failed')
-        return create(...args)
-      }
-      return sandbox
+    // The failures of #136 were recorded in the `sandbox` stage while the host had no network: what the stage
+    // does before an agent runs (the issue read, the sandbox's creation) threw `fetch failed`.
+    const dropped = () => new TypeError('fetch failed')
+    const issue = {
+      number: 7,
+      title: 'Add truncate',
+      body: 'Write truncate(text, max).',
+      labels: [],
     }
-    const runAgain = async (id: number, queued: Queued[], sandbox: FakeSandbox) => {
-      const input = queued.at(-1)!
-      return runTask(
-        deps(sandbox),
-        id,
-        undefined,
-        runContinuation(undefined, input.feedback, input.resume),
-      )
+    const where = {
+      'reading the issue': (drops: { left: number }) =>
+        deps(new FakeSandbox(changed()), {
+          fetchIssue: async () => {
+            if (drops.left-- > 0) throw dropped()
+            return issue
+          },
+        }),
+      'creating the sandbox': (drops: { left: number }) => {
+        const sandbox = new FakeSandbox(changed())
+        const create = sandbox.create.bind(sandbox)
+        sandbox.create = async (...args: Parameters<typeof create>) => {
+          if (drops.left-- > 0) throw dropped()
+          return create(...args)
+        }
+        return deps(sandbox)
+      },
     }
 
-    it('runs again each time without using the allowance, and completes once the network is back', async () => {
-      const id = await seedTask()
-      const queued: Queued[] = []
-      const action = actionDeps(queued, [])
-      const drops = { left: 5 }
-      // More drops than the allowance of automatic runs, and none of them reached any agent.
-      expect(await runTask(deps(dropping(drops)), id)).toMatchObject({
-        status: 'failed',
-        stage: 'sandbox',
-      })
-      for (let i = 0; i < 4; i++) {
+    it.each(Object.keys(where) as (keyof typeof where)[])(
+      'runs again without using the allowance while %s fails, and completes once the network is back',
+      async (point) => {
+        const id = await seedTask()
+        const queued: Queued[] = []
+        const action = actionDeps(queued, [])
+        const drops = { left: 5 }
+        const runAgain = () => {
+          const input = queued.at(-1)!
+          return runTask(
+            where[point](drops),
+            id,
+            undefined,
+            runContinuation(undefined, input.feedback, input.resume),
+          )
+        }
+        // More drops than the allowance of automatic runs, and none of them reached any agent.
+        expect(await runTask(where[point](drops), id)).toMatchObject({
+          status: 'failed',
+          stage: 'sandbox',
+        })
+        for (let i = 0; i < 4; i++) {
+          expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+          expect(await runAgain()).toMatchObject({ status: 'failed', stage: 'sandbox' })
+        }
+        // The network is back: the fifth automatic run reaches the agent and completes.
         expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
-        expect(await runAgain(id, queued, dropping(drops))).toMatchObject({ status: 'failed' })
-        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
-        expect(card.retryAt).not.toBeNull()
-      }
-      // The network is back: the fifth automatic run reaches the agent and completes.
-      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
-      expect(await runAgain(id, queued, dropping(drops))).toMatchObject({ status: 'done' })
-      const [row] = await getDb().select().from(task).where(eq(task.id, id))
-      expect(row.stage).toBe('done')
-    })
+        expect(await runAgain()).toMatchObject({ status: 'done' })
+        const [row] = await getDb().select().from(task).where(eq(task.id, id))
+        expect(row.stage).toBe('done')
+      },
+    )
 
     it('still limits the runs of an agent that fails with it, since that work was attempted', async () => {
       const id = await seedTask()

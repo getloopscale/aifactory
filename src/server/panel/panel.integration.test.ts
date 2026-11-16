@@ -930,12 +930,12 @@ describe('actions', () => {
         : []
       return runContinuation(decided, input.feedback, input.resume)
     }
-    const failAgain = async (id: number, detail: object = outage) => {
+    const failAgain = async (id: number) => {
       await getDb()
         .insert(stageEvent)
         .values([
           { taskId: id, stage: 'sandbox' },
-          { taskId: id, stage: 'failed', detail },
+          { taskId: id, stage: 'failed', detail: outage },
         ])
       await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
     }
