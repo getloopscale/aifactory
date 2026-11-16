@@ -3,16 +3,14 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { PromotionApi } from '../github/promotion-api'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
-import { attachEvidence, runOf, type EvidenceApi } from './check-evidence'
+import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
   checksFeedback,
   type BaseBlame,
-  type RerunRecord,
   decideWaitingIntegration,
   evidenceOfNote,
   type WaitingStep,
@@ -35,7 +33,7 @@ export type AwaitCiDeps = {
   github: GithubApp
   api: GithubApi
   /** Reads the log or annotations of a failed check, so the note carries what the sandbox cannot open. */
-  checks: EvidenceApi & Partial<Pick<PromotionApi, 'rerunFailedJobs'>>
+  checks: EvidenceApi
   /** The factory's release mode, for a repository that sets none. */
   releaseMode: ReleaseMode | undefined
   now?: () => Date
@@ -56,7 +54,7 @@ export type AwaitCiResult = {
   waiting: number
   /** Tasks that wait because every failed required check also fails on the integration branch. */
   waitingOnBase: number[]
-  /** Tasks whose checks, blamed on the base before, ran again once the base was fixed. */
+  /** Tasks started over on the fixed base because their failed checks were blamed on the base. */
   rerun: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
@@ -274,52 +272,9 @@ async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown,
     .where(eq(stageEvent.id, doneId))
 }
 
-/** The earlier blame plus what this pass found: the union of the checks, and the reruns already asked for. */
-function mergeBlame(
-  before: BaseBlame | undefined,
-  baseRed: string[],
-  reruns: Record<string, RerunRecord> = {},
-): BaseBlame {
-  return {
-    checks: [...new Set([...(before?.checks ?? []), ...baseRed])],
-    reruns: { ...before?.reruns, ...reruns },
-  }
-}
-
-/**
- * The checks blamed on the base are fixed there but still show the old failure here: their failed jobs run
- * again. When the factory cannot, a person is told, and the builder is not sent back for a failure that
- * was never the change's.
- */
-async function rerunBlamed(
-  deps: AwaitCiDeps,
-  w: Waiting,
-  reports: CheckReport[],
-  names: string[],
-): Promise<{ asked: Record<string, RerunRecord> } | { refusal: string }> {
-  const { row, token, verifiedSha } = w
-  const { checks } = deps
-  if (!checks.rerunFailedJobs || !checks.jobAttempt) return { refusal: 'it cannot run jobs again' }
-  const runs = await checks.failedChecks(row.repository, token, verifiedSha)
-  const ids = new Set<number>()
-  for (const name of names) {
-    for (const report of reports.filter((r) => r.name === name && r.state === 'failure')) {
-      const run = runOf(runs, report)
-      if (!run) return { refusal: `it could not find the run of ${name}` }
-      ids.add((await checks.jobAttempt(row.repository, token, run.id)).runId)
-    }
-  }
-  for (const id of ids) {
-    const answer = await checks.rerunFailedJobs(row.repository, token, id)
-    if (!answer.started) return { refusal: answer.refusal }
-  }
-  const at = (deps.now?.() ?? new Date()).toISOString()
-  const asked: Record<string, RerunRecord> = {}
-  for (const name of names) {
-    const urls = reports.filter((r) => r.name === name && r.state === 'failure').map((r) => r.url)
-    asked[name] = { at, urls }
-  }
-  return { asked }
+/** The earlier blame plus what this pass found: the union of the checks. */
+function mergeBlame(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
+  return { checks: [...new Set([...(before?.checks ?? []), ...baseRed])] }
 }
 
 async function look(
@@ -347,15 +302,14 @@ async function look(
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
   const blame = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  const nowMs = (deps.now?.() ?? new Date()).getTime()
-  const waitedMs = nowMs - new Date(done?.at ?? row.createdAt).getTime()
+  const waitedMs =
+    (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime()
   const input = {
     verifiedSha,
     pull,
     required,
     reports,
     ...(blame ? { baseBlame: blame } : {}),
-    nowMs,
     waitedMs,
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
@@ -386,25 +340,14 @@ async function look(
         }
       }
       return
-    case 'rerun': {
-      const answer = await rerunBlamed(deps, w, reports, step.checks)
-      if ('asked' in answer) {
-        // Recorded once GitHub accepted it, with the failures it started from: the old one may show a while.
-        await rememberBlame(
-          deps,
-          done!.id,
-          done!.detail,
-          mergeBlame(blame, step.baseRed, answer.asked),
-        )
-        result.rerun.push(row.id)
-        return
-      }
-      const reason = `${step.checks.join(', ')} failed on the base, which is fixed now, but the check still shows that failure here and the factory could not run it again (${answer.refusal}): run it again`
-      if (await toPerson(deps, w, { kind: 'person', reason, stopAutoMerge: false })) {
-        result.toPerson.push(row.id)
-      }
+    case 'refresh':
+      // The union is kept first, so a check red on the base now is still the base's if the next step fails.
+      await rememberBlame(deps, done!.id, done!.detail, mergeBlame(blame, step.baseRed))
+      // Off first: the run merges the fixed base into this pull request, and that merge must be verified.
+      await deps.api.disableAutoMerge(row.repository, token, number)
+      await deps.startOver(row.id)
+      result.rerun.push(row.id)
       return
-    }
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
       return

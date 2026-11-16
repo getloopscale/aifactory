@@ -43,11 +43,11 @@ export type WaitingStep =
    */
   | { kind: 'needs_base' }
   /**
-   * Checks blamed on the base before, which the base no longer fails, still show the old failure on the
-   * verified commit: their failed jobs run again, and the builder is not sent back for them. `baseRed` are
-   * the checks that still fail on the base, kept in the blame.
+   * Checks blamed on the base before, which the base no longer fails, still fail on the verified commit,
+   * which does not hold the fix: the task runs again on the fixed base, and that new commit is verified.
+   * The builder is not sent back for them. `baseRed` are the checks that still fail on the base, kept in the blame.
    */
-  | { kind: 'rerun'; checks: string[]; baseRed: string[] }
+  | { kind: 'refresh'; checks: string[]; baseRed: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
   | { kind: 'finish'; mergedSha: string }
   /**
@@ -64,17 +64,8 @@ export type WaitingStep =
    */
   | { kind: 'integrate' }
 
-/** A rerun asked for a blamed check: when, and the links of the failures it was asked about. */
-export type RerunRecord = { at: string; urls: string[] }
-
-/**
- * Every check ever blamed on the base while the task waited, and the reruns asked for after the base
- * was fixed, per check: a rerun is over only when the check shows a failure the rerun did not start from.
- */
-export type BaseBlame = { checks: string[]; reruns: Record<string, RerunRecord> }
-
-/** How long a rerun may leave the old failure showing before a person is told. */
-export const RERUN_WAIT_MS = 30 * 60_000
+/** Every check blamed on the base while the task waited (`done.detail.baseBlame`). */
+export type BaseBlame = { checks: string[] }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -88,8 +79,6 @@ export type WaitingIntegration = {
   baseReports?: CheckReport[]
   /** The checks an earlier pass blamed on the base for this verified commit (`done.detail.baseBlame`). */
   baseBlame?: BaseBlame
-  /** The time of this look, in milliseconds. */
-  nowMs?: number
   /** How long the pull request has waited. */
   waitedMs: number
   /** Automatic runs since a person last started the task. */
@@ -192,20 +181,13 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   const base = input.baseReports ?? []
   const baseRed = allFailed.filter((name) => failedRuns(base, name).length > 0)
   const blame = input.baseBlame
-  const now = input.nowMs ?? Date.now()
-  const toRerun: string[] = []
+  const toRefresh: string[] = []
   const failed: string[] = []
-  const expired: string[] = []
   for (const name of allFailed) {
     if (baseRed.includes(name)) continue
-    const asked = blame?.reruns[name]
     if (!blame?.checks.includes(name)) failed.push(name)
-    else if (asked) {
-      // The old failure may show while the rerun is queued: only a failure it did not start from is new.
-      const fresh = failedRuns(input.reports, name).some((r) => !asked.urls.includes(r.url))
-      if (fresh) failed.push(name)
-      else if (now - new Date(asked.at).getTime() > RERUN_WAIT_MS) expired.push(name)
-    } else if (!base.some((r) => r.name === name && r.state === 'pending')) toRerun.push(name)
+    // Fixed on the base, and the base is not running it again: this commit lacks the fix.
+    else if (!base.some((r) => r.name === name && r.state === 'pending')) toRefresh.push(name)
   }
   if (failed.length > 0) {
     if (!runsLeft) {
@@ -219,12 +201,14 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
     const reports = failed.flatMap((name) => failedRuns(input.reports, name))
     return { kind: 'send_back', failed, reports }
   }
-  if (expired.length > 0) {
-    return {
-      kind: 'person',
-      reason: `${expired.join(', ')} still shows the failure the base had, ${RERUN_WAIT_MS / 60_000} minutes after the factory ran it again: run it again`,
-      stopAutoMerge: false,
-    }
+  if (toRefresh.length > 0) {
+    return runsLeft
+      ? { kind: 'refresh', checks: toRefresh, baseRed }
+      : {
+          kind: 'person',
+          reason: `${toRefresh.join(', ')} failed on the base, which is fixed now, but the work could not run again on it after ${runs}`,
+          stopAutoMerge: true,
+        }
   }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
     return {
@@ -233,7 +217,6 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       stopAutoMerge: true,
     }
   }
-  if (toRerun.length > 0) return { kind: 'rerun', checks: toRerun, baseRed }
   return baseRed.length > 0 ? { kind: 'wait', baseRed } : { kind: 'wait' }
 }
 

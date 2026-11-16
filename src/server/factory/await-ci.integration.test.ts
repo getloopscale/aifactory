@@ -283,63 +283,41 @@ describe('pollAwaitingIntegrations', () => {
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
   })
 
-  it('remembers the base was blamed: once it is fixed, the failed jobs run again and nothing goes back', async () => {
-    const link = 'https://github.com/paulo/app/actions/runs/431/job/1308'
+  it('remembers the base was blamed: once it is fixed, the task starts over on it and nothing goes back', async () => {
     const BASE = 'b'.repeat(40)
-    reports({ name: 'CI', state: 'failure', detail: 'red', url: link })
-    gh.failedRuns = [{ id: 1308, name: 'CI', url: link, summary: '', actions: true }]
-    gh.jobs = { 1308: { runId: 431, attempt: 1 } }
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
     repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
     const id = await waitingTask()
-    const reran: number[] = []
-    const withRerun = () =>
-      deps({
-        checks: {
-          ...checks,
-          rerunFailedJobs: async (_repo, _token, runId) => {
-            reran.push(runId)
-            return { started: true as const }
-          },
-        },
-      })
 
-    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ waitingOnBase: [id] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })
 
-    // The base is fixed, and the verified commit still shows the old failure.
+    // The base is fixed, and the verified commit does not hold the fix.
     repo().clearChecks(BASE)
     repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
-    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [], rerun: [id] })
-    expect(reran).toEqual([431])
-
-    // The old failure still shows while the rerun is queued: nothing goes back, nothing runs twice.
-    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [], waiting: 1 })
-    expect(reran).toEqual([431])
-
-    // A failure the rerun did not start from is the change's own.
-    reports({ name: 'CI', state: 'failure', detail: 'red', url: `${link}0` })
-    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [id] })
-    expect(reran).toEqual([431])
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
+      sentBack: [],
+      rerun: [id],
+    })
+    expect(autoMergeOff()).toHaveLength(1)
   })
 
-  it('tells a person, and sends nothing back, when the factory cannot run the blamed check again', async () => {
-    const link = 'https://github.com/paulo/app/actions/runs/431/job/1308'
+  it('keeps a check newly red on the base in the blame while another one is refreshed', async () => {
     const BASE = 'b'.repeat(40)
-    reports({ name: 'CI', state: 'failure', detail: 'red', url: link })
-    gh.failedRuns = [{ id: 1308, name: 'CI', url: link, summary: '', actions: true }]
-    gh.jobs = { 1308: { runId: 431, attempt: 1 } }
+    repo().required.set('workspace', ['CI', 'Lint'])
+    reports(
+      { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' },
+      { name: 'Lint', state: 'failure', detail: 'red', url: 'https://ci/2' },
+    )
     repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
     const id = await waitingTask()
     await pollAwaitingIntegrations(deps())
+
     repo().clearChecks(BASE)
     repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
-
-    const refusing = deps({
-      checks: {
-        ...checks,
-        rerunFailedJobs: async () => ({ started: false as const, refusal: '403' }),
-      },
-    })
-    expect(await pollAwaitingIntegrations(refusing)).toMatchObject({ sentBack: [], toPerson: [id] })
+    repo().report(BASE, { name: 'Lint', state: 'failure', detail: 'red', url: 'https://ci/3' })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    const [event] = (await events(id)).filter((e) => e.stage === 'done')
+    expect(JSON.stringify(event)).toContain('Lint')
   })
 
   it('records a failed read of the base and looks again, without blaming the task', async () => {
