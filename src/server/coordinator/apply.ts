@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 
 import { coordinatorAction, repository, task } from '../db/schema'
+import { release, ReleaseRefused } from '../factory/deliver'
 import { outcome as transition } from '../factory/transitions'
 import type { IssuesApi } from '../github/issues-api'
 import {
@@ -14,13 +15,14 @@ import type { CoordinatorOutcome, Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
+import { COORDINATOR_ACTOR } from './release-train'
 import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft } from './scope'
 
 /**
  * The only module of the coordinator with side effects. It applies a decision through the panel's own
  * actions, each of which asks `factory/transitions.ts` first, and records it in `coordinator_action`,
  * applied or not. Its only writes of its own are the two a `scope` needs on GitHub: the issue body and a
- * follow-up issue. It merges nothing and releases nothing.
+ * follow-up issue. It merges nothing itself: a release goes through `release()` and every refusal of it.
  */
 
 export type ApplyDeps = ActionDeps & {
@@ -79,6 +81,8 @@ async function perform(
     await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
   } else if (decision.action === 'scope' && decision.draft) {
     return scope(deps, exception.taskId, decision.draft)
+  } else if (decision.action === 'release' && decision.bump) {
+    await release(deps, exception.taskId, { bump: decision.bump, actor: COORDINATOR_ACTOR })
   } else {
     throw new Error(`the coordinator has no way to apply ${decision.action}`)
   }
@@ -140,7 +144,8 @@ async function carryOut(
     const followUpIssue = await perform(deps, exception, decision)
     return { outcome: 'applied', reason: decision.reason, followUpIssue }
   } catch (error) {
-    const outcome = error instanceof ActionRefused ? 'refused' : 'failed'
+    const refused = error instanceof ActionRefused || error instanceof ReleaseRefused
+    const outcome = refused ? 'refused' : 'failed'
     return notCarried(exception, decision, outcome, message(error))
   }
 }

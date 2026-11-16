@@ -89,7 +89,7 @@ const each = <S extends TaskStage>(stages: readonly S[], rule: Rule) =>
   Object.fromEntries(stages.map((stage) => [stage, rule])) as Record<S, Rule>
 
 /** The stages in which a run is alive. */
-const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
+export const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
 /** The stages the supervisor looks at for a run that stalled or was lost. */
 const SUPERVISED = ['intake', 'sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
 

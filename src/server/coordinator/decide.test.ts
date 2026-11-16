@@ -169,3 +169,64 @@ describe('deciding one action for an exception', () => {
     expect(decide(exception(), [recorded()]).action).toBe('send_back')
   })
 })
+
+describe('deciding a release of a repository', () => {
+  const ready = (labels: string[][], over: Partial<TaskException> = {}) =>
+    exception({
+      kind: 'release_ready',
+      head: 'dev1234567',
+      evidence: '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60',
+      released: labels.map((l, i) => ({ issue: 40 + i, labels: l })),
+      ...over,
+    })
+
+  it('releases the repository with a patch when no issue is a feature', () => {
+    expect(decide(ready([['bug'], []]), [])).toEqual({
+      action: 'release',
+      bump: 'patch',
+      reason:
+        '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60: released as a patch',
+    })
+  })
+
+  it('releases a feature as a minor and breaking work as a major', () => {
+    expect(decide(ready([['enhancement']]), [])).toMatchObject({ action: 'release', bump: 'minor' })
+    expect(decide(ready([['breaking']]), [])).toMatchObject({ action: 'release', bump: 'major' })
+  })
+
+  it('retries a refused release the same way, saying it is the one retry on the head', () => {
+    expect(decide(ready([['bug']], { kind: 'release_retry' }), [])).toEqual({
+      action: 'release',
+      bump: 'patch',
+      reason:
+        '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60: the release on dev1234 was refused for a cause that ends by itself, so it is tried once more, as a patch',
+    })
+  })
+
+  it('escalates a release whose issues it does not know', () => {
+    expect(decide(ready([], { released: undefined }), [])).toMatchObject({ action: 'escalate' })
+  })
+
+  it('escalates a red release branch, calling nothing', () => {
+    const blocked = exception({
+      kind: 'release_blocked',
+      head: 'dev1234567',
+      evidence: 'CI failed',
+    })
+    expect(decide(blocked, [])).toEqual({
+      action: 'escalate',
+      reason:
+        'the release branch is red (CI failed): the release train waits on dev1234 until it is green again, and a person looks at it',
+    })
+  })
+
+  it('is not held by the limit of applied actions of the task it is recorded on', () => {
+    const tried = [recorded(), recorded({ action: 'review_again' })]
+    expect(decide(ready([['bug']]), tried).action).toBe('release')
+  })
+
+  it('does not count a release toward the limit of the task it is recorded on', () => {
+    const released = recorded({ action: 'release', exceptionKind: 'release_ready' })
+    expect(decide(exception(), [released, recorded()]).action).toBe('send_back')
+  })
+})

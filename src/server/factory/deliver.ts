@@ -170,7 +170,8 @@ type Published = {
  * waits instead: auto-merge is turned on, pinned to the same commit, and `pollAwaitingReleases` finishes the
  * release (the tag, or the publication of a changesets repository) once GitHub merges it.
  *
- * `actor` is who decided: `human` from the panel, `agent:<name>` when an agent's approval was enough.
+ * `actor` is who decided: `human` from the panel, `agent:<name>` when an agent's approval was enough, and
+ * `agent:coordinator` for the coordinator's release train.
  */
 export async function release(
   deps: DeliverDeps,

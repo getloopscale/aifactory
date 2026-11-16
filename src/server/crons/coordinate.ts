@@ -5,6 +5,7 @@ import { modelScopeDrafter } from '../coordinator/draft'
 import { evolveLog } from '../coordinator/evolve'
 import { evolve, evolveDeps } from '../coordinator/evolve-apply'
 import { coordinatorModeFromEnv } from '../coordinator/mode'
+import { releaseModeFromEnv } from '../factory/deps'
 import { mainProcessOnly } from '../factory/worker-only'
 import { fetchIssue } from '../github/issues'
 import { createIssuesApi } from '../github/issues-api'
@@ -30,6 +31,7 @@ export default defineCron('coordinate', {
         issues: createIssuesApi(),
         readIssue: (repo: string, number: number, token: string) => fetchIssue(repo, number, token),
         drafter: modelScopeDrafter(),
+        releaseMode: releaseModeFromEnv(process.env),
       }
     } catch (error) {
       console.error(JSON.stringify({ event: 'coordinate_not_configured', error: String(error) }))

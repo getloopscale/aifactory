@@ -42,6 +42,7 @@
     "src/server/coordinator/decide.ts",
     "src/server/coordinator/scope.ts",
     "src/server/coordinator/evolve.ts",
+    "src/server/coordinator/release-train.ts",
     "src/server/factory/changesets.ts",
     "src/server/factory/changeset-check.ts",
     "src/server/factory/ci-wait.ts",

@@ -8,8 +8,9 @@ export type ReleaseStep =
   /** GitHub merged the pinned commit: the release finishes as a direct merge does. */
   | { kind: 'finish'; mergeSha: string }
   /**
-   * The release does not happen. A release is never retried on its own: what the release pull request
-   * carries is everything on the pre-release branch, so a person looks at it and asks again.
+   * The release does not happen. Nothing here retries it: what the release pull request carries is
+   * everything on the pre-release branch, so a person asks again, or the coordinator's release train tries
+   * once more on the same head when the cause ends by itself (`coordinator/release-train.ts`).
    */
   | { kind: 'refuse'; reason: string; stopAutoMerge: boolean; failed?: string[] }
 

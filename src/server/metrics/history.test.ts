@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { COORDINATOR_ACTOR } from '../coordinator/release-train'
+
 import { METRICS } from './config'
 import { observe, personDecisions, type HistoryEvent, type TaskHistory } from './history'
 import { dailySeries } from './series'
@@ -504,6 +506,11 @@ describe('personDecisions', () => {
       decided(2, 'would_release', 'an automatic release was refused: no changes'),
       decided(3, 'release', 'agent:reviewer -> v1.2.0'),
     ]
+    expect(personDecisions(rows)).toEqual([])
+  })
+
+  it("leaves out a release the coordinator's release train started", () => {
+    const rows = [decided(1, 'release', `${COORDINATOR_ACTOR} -> v1.3.0`)]
     expect(personDecisions(rows)).toEqual([])
   })
 })

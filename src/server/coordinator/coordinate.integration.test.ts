@@ -98,6 +98,7 @@ const deps = (): CoordinatorDeps => ({
     if (model.fails) throw new Error(model.fails)
     return { response: model.answer, cost: model.cost }
   },
+  releaseMode: 'manual',
   enqueueResume: async () => undefined,
   deleteSnapshot: async () => undefined,
   inTransaction: (work) =>

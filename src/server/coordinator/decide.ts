@@ -1,8 +1,10 @@
 import type { COORDINATOR_ACTIONS, COORDINATOR_OUTCOMES } from '../db/schema'
+import type { Bump } from '../factory/release'
 import { conflictNote } from '../panel/actions'
 
 import type { ExceptionKind, TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
+import { bumpFor } from './release-train'
 import type { ScopeDraft } from './scope'
 
 /**
@@ -28,6 +30,8 @@ export type Decision = {
   reason: string
   /** The feedback a send-back gives the run. */
   note?: string
+  /** The bump a release asks for (`release-train.ts`). */
+  bump?: Bump
   /** The finding a retry resolves. */
   findingId?: number
   /** What the drafter wrote for a `scope`, filled by `draft.ts` after the decision. */
@@ -89,6 +93,17 @@ function retryFromFinding({ kind, evidence, findingId }: TaskException): Decisio
   return { action: 'retry_from_finding', findingId, reason: `${what}: retried from its finding` }
 }
 
+/** Releases the repository through `release()`, with the bump its issues allow. */
+function releaseRepository({ kind, head, evidence, released }: TaskException): Decision {
+  if (!released) return escalate(`${evidence}, but the issues it would release are not known`)
+  const bump = bumpFor(released.map((issue) => issue.labels))
+  const how =
+    kind === 'release_retry'
+      ? `the release on ${short(head)} was refused for a cause that ends by itself, so it is tried once more, as a ${bump}`
+      : `released as a ${bump}`
+  return { action: 'release', bump, reason: `${evidence}: ${how}` }
+}
+
 const BY_KIND: Partial<Record<ExceptionKind, (exception: TaskException) => Decision>> = {
   checks_unchanged: sendBack,
   review_plateau: ({ head, evidence }) => ({
@@ -106,12 +121,25 @@ const BY_KIND: Partial<Record<ExceptionKind, (exception: TaskException) => Decis
       `the environment failed past its automatic retries (${evidence}): credentials, spend limits and the GitHub App are for a person`,
     ),
   unknown: ({ evidence }) => escalate(`the coordinator could not tell what is wrong: ${evidence}`),
+  release_ready: releaseRepository,
+  release_retry: releaseRepository,
+  release_blocked: ({ head, evidence }) =>
+    escalate(
+      `the release branch is red (${evidence}): the release train waits on ${short(head)} until it is green again, and a person looks at it`,
+    ),
 }
+
+/** A release is the repository's, not a rework of the task it is recorded on, so the limit does not count it. */
+const RELEASE_KINDS: readonly ExceptionKind[] = [
+  'release_ready',
+  'release_retry',
+  'release_blocked',
+]
 
 /** The one action for this exception, given what was already recorded for its task. */
 export function decide(exception: TaskException, recorded: RecordedAction[]): Decision {
-  const applied = recorded.filter((r) => r.outcome === 'applied')
-  if (applied.length >= MAX_APPLIED) {
+  const applied = recorded.filter((r) => r.outcome === 'applied' && r.action !== 'release')
+  if (!RELEASE_KINDS.includes(exception.kind) && applied.length >= MAX_APPLIED) {
     const tried = applied.map((r) => `${r.action} for ${r.exceptionKind} on ${short(r.headSha)}`)
     return escalate(
       `the coordinator already applied ${tried.join(', ')} on this task: a person decides what comes next`,

@@ -285,7 +285,7 @@ export const releaseWait = pgTable(
     /** The branch the release lands on. */
     releaseBranch: text('release_branch').notNull(),
     bump: text('bump', { enum: ['patch', 'minor', 'major'] }).notNull(),
-    /** Who decided the release: `human` or `agent:<name>`. */
+    /** Who decided the release: `human` or `agent:<name>` (`agent:coordinator` for the release train). */
     actor: text('actor').notNull(),
     /** The repository publishes with changesets, so the release becomes a publication once it lands. */
     changesets: boolean('changesets').notNull(),
@@ -668,7 +668,11 @@ export const metricSignal = pgTable(
   (t) => [unique('metric_signal_once').on(t.metric, t.repository, t.day, t.rule)],
 )
 
-/** What the coordinator recognises as an exception of a task (`coordinator/exceptions.ts`). */
+/**
+ * What the coordinator recognises as an exception of a task (`coordinator/exceptions.ts`), and the three of
+ * a repository's release train (`coordinator/release-train.ts`): work ready for a release, the one retry of a
+ * refused release on the same head, and a red release branch that holds the train.
+ */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
   'review_plateau',
@@ -679,6 +683,9 @@ export const EXCEPTION_KINDS = [
   'environment',
   'failure',
   'unknown',
+  'release_ready',
+  'release_retry',
+  'release_blocked',
 ] as const
 
 /** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */
@@ -687,6 +694,7 @@ export const COORDINATOR_ACTIONS = [
   'review_again',
   'retry_from_finding',
   'scope',
+  'release',
   'escalate',
 ] as const
 
@@ -700,7 +708,8 @@ export const COORDINATOR_OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'e
 /**
  * One decision of the coordinator, applied or not, so every action taken with nobody watching can be read
  * afterwards. One exception gets one decision per head of the task, besides the trial one: a later pass that
- * sees it again on the same commit records nothing.
+ * sees it again on the same commit records nothing. A release belongs to a repository, not a task: it is
+ * recorded on the repository's oldest task with integrated work, and its head is the pre-release branch's.
  */
 export const coordinatorAction = pgTable(
   'coordinator_action',

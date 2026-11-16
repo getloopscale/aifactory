@@ -49,7 +49,14 @@ export type TaskException = {
   findingId?: number
   /** The base its pull request conflicts with: the run must merge it before anything else. */
   conflictsWith?: string
+  /** For a release of the repository: every issue it would release, with its labels, which set the bump. */
+  released?: ReleasedIssue[]
+  /** The repository's release mode is `trial`: the decision is recorded and nothing is applied. */
+  trialOnly?: true
 }
+
+/** An issue whose integrated work a release of its repository carries. */
+export type ReleasedIssue = { issue: number; labels: string[] }
 
 const CAUSES: readonly HandoffCause[] = ['review_plateau', 'review_unusable', 'checks_unchanged']
 
