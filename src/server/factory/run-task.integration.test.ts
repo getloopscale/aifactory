@@ -479,6 +479,7 @@ describe('runTask', () => {
     let formatted = false
     const sandbox = new FakeSandbox(
       changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
         if (c.endsWith('prettier --write .')) {
           formatted = true
           dirty = true

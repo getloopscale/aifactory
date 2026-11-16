@@ -385,6 +385,8 @@ export class Run {
   }
   /** What the fix commands did before the round of checks that has not yet recorded it. */
   private fixOutcomes: FixOutcome[] = []
+  /** The builder's commit the latest fix commit sits on, until the checks on it are recorded. */
+  private fixedFrom: string | undefined
   private get checks() {
     return withChangesetCheck(
       this.c.repo.checks ?? this.c.deps.checks ?? DEFAULT_CHECKS,
@@ -723,6 +725,15 @@ export class Run {
     return Number(counted.stdout.trim()) > 0
   }
 
+  /** Commits what is in the checkout, in the sandbox only. The message goes in by file. */
+  private async commitLocally(message: string): Promise<void> {
+    const { backend, git } = this
+    await backend.uploadFile(GITCONFIG, gitConfig(this.c.deps.author))
+    await backend.uploadFile(COMMIT_MESSAGE, `${message}\n`)
+    await must(backend, `${git} add -A`)
+    await must(backend, `${git} commit -F ${COMMIT_MESSAGE}`)
+  }
+
   /** Commits whatever the agent left in the checkout and pushes it. Returns the new head. */
   private async commitAndPush(message: string, detail: Record<string, unknown>): Promise<string> {
     const { deps, taskId, branch, state } = this.c
@@ -743,12 +754,7 @@ export class Run {
     // Text that came from outside (the issue title, the author) goes in by file, so none of it is
     // ever parsed by a shell (the SDK does not export its quoting helper: usetheokit/theokit#1131).
     // What the agent committed by itself (a merge, say) goes as it is, with nothing added to it.
-    if (uncommitted) {
-      await backend.uploadFile(GITCONFIG, gitConfig(deps.author))
-      await backend.uploadFile(COMMIT_MESSAGE, `${message}\n`)
-      await must(backend, `${git} add -A`)
-      await must(backend, `${git} commit -F ${COMMIT_MESSAGE}`)
-    }
+    if (uncommitted) await this.commitLocally(message)
     // What is about to leave the sandbox, kept so a refused push can be explained.
     const since = uncommitted ? 'HEAD~1' : this.remoteHead || this.baseSha
     const files = (await must(backend, `${git} diff --name-status ${since} HEAD`)).stdout.trim()
@@ -1057,7 +1063,7 @@ export class Run {
     await this.keepNoChange()
     const said = `The agent said: ${oneLine(first.summary).slice(0, 700)}`
     const at = this.baseSha.slice(0, 7)
-    const checked = await this.verify(this.baseSha, 1, { publish: false })
+    const checked = await this.verifyWithFixes()
     if (!checked.verdict.open) {
       throw new StageFailure(
         `the agent made no change to the repository, and the checks did not pass at ${at}: ${checked.verdict.reasons.join('; ')}. ${said}`,
@@ -1259,6 +1265,7 @@ export class Run {
    */
   private async applyFixes(sha: string, attempt: number): Promise<string> {
     this.fixOutcomes = []
+    this.fixedFrom = undefined
     if (this.fixes.length === 0) return sha
     this.fixOutcomes = await runFixes(
       this.backend,
@@ -1273,7 +1280,42 @@ export class Run {
       fixes: this.fixOutcomes,
     })
     this.fixOutcomes = []
+    // The commit the checks run on is the fix commit; the one before it is what the builder made.
+    this.fixedFrom = sha
     return pushed
+  }
+
+  /**
+   * The checks on the commit the run started from, for an agent that changed nothing. The repository's fixes
+   * run first, as before any round of checks; what they change is committed in the sandbox only, so the
+   * checks run on a clean commit, and the checkout goes back to the start commit afterwards: nothing is
+   * pushed and the work stays "no change".
+   */
+  private async verifyWithFixes(): Promise<Checked> {
+    this.fixOutcomes = []
+    this.fixedFrom = undefined
+    let sha = this.baseSha
+    if (this.fixes.length > 0) {
+      this.fixOutcomes = await runFixes(
+        this.backend,
+        this.repoDir,
+        this.fixes,
+        this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+      )
+      const dirty = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+      if (dirty.stdout.trim() !== '') {
+        await this.commitLocally(FIX_COMMIT_MESSAGE)
+        sha = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+      }
+    }
+    try {
+      return await this.verify(sha, 1, { publish: false })
+    } finally {
+      this.fixOutcomes = []
+      if (sha !== this.baseSha) {
+        await must(this.backend, `${this.git} reset -q --hard ${this.baseSha}`)
+      }
+    }
   }
 
   /**
@@ -1297,6 +1339,7 @@ export class Run {
         attempt,
         checks: this.checks.map((c) => c.name),
         ...(this.fixOutcomes.length > 0 ? { fixes: this.fixOutcomes } : {}),
+        ...(this.fixedFrom ? { fixedFrom: this.fixedFrom } : {}),
       },
       { headSha: sha },
     )

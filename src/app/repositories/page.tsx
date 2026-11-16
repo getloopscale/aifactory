@@ -97,6 +97,13 @@ function Settings({
           className="mt-1 w-full font-mono"
         />
       </label>
+      <Assist
+        kind="setup"
+        text={fixes}
+        repository={repo.fullName}
+        context={s.fixesAssistContext}
+        onUse={(p) => setFixes(p.text)}
+      />
       <label className="block">
         <span className="text-foreground">{s.fixes}</span>
         <Textarea

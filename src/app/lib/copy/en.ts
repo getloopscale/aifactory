@@ -353,6 +353,8 @@ export const en = {
       checks: 'Checks, one per line as name: command',
       checksPlaceholder: 'Empty runs npm test. For example: unit: pnpm test',
       fixes: 'Fixes, one command per line, run before the checks',
+      fixesAssistContext:
+        'Only the fix commands: one shell command per line that rewrites files and decides nothing (a formatter, a lint autofix), with no name before it. Not checks.',
       fixesPlaceholder: 'Empty runs none. For example: pnpm prettier --write .',
       domains: 'Extra domains the sandbox may reach',
       domainsPlaceholder:

@@ -86,6 +86,7 @@ function sandbox(world: World = {}) {
   let commits = 0
   return new FakeSandbox((command): Reply | undefined => {
     if (command.includes('commit -F')) commits += 1
+    if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
       const changed = afterPlan ? world.plannedEdits === true : world.dirty !== false

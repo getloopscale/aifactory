@@ -13,10 +13,36 @@ export type FixOutcome = {
   output: string
 }
 
+const SNAPSHOT_INDEX = '/tmp/factory-fix-index'
+
+/**
+ * The working tree as it is now, tracked and untracked files, as a git tree built in a private index so the
+ * checkout's own index is not touched. Empty when it could not be taken.
+ */
+async function snapshot(backend: SandboxBackend, repoDir: string, timeoutMs: number) {
+  const git = `GIT_INDEX_FILE=${SNAPSHOT_INDEX} git -C ${repoDir}`
+  const run = await backend.execute(
+    `rm -f ${SNAPSHOT_INDEX} && ${git} add -A && ${git} write-tree`,
+    { timeoutMs },
+  )
+  return run.exitCode === 0 ? run.stdout.trim() : ''
+}
+
+/** Puts the working tree back to the snapshot: the index, staged and new files and deletions included. */
+async function restore(backend: SandboxBackend, repoDir: string, tree: string, timeoutMs: number) {
+  const git = `GIT_INDEX_FILE=${SNAPSHOT_INDEX} git -C ${repoDir}`
+  await backend.execute(
+    `git -C ${repoDir} reset -q && git -C ${repoDir} clean -fdq && rm -f ${SNAPSHOT_INDEX} && ` +
+      `${git} read-tree ${tree} && ${git} checkout-index -a -f`,
+    { timeoutMs },
+  )
+}
+
 /**
  * Runs the repository's fix commands (a formatter, a lint autofix) in the checkout, one after the other.
- * A fix decides nothing: one that fails or runs past its limit is recorded and the work it touched is put
- * back as it was, and the checks that follow still decide. It never throws.
+ * A fix decides nothing: one that fails or runs past its limit is recorded and the checkout goes back to
+ * what it was just before that command, files, index and all, and the checks that follow still decide.
+ * It never throws.
  */
 export async function runFixes(
   backend: SandboxBackend,
@@ -27,7 +53,19 @@ export async function runFixes(
   const outcomes: FixOutcome[] = []
   for (const command of fixes) {
     let outcome: FixOutcome
+    let tree = ''
     try {
+      tree = await snapshot(backend, repoDir, timeoutMs)
+      if (tree === '') {
+        // Without a way back, a command that fails would leave its mess for the commit: it does not run.
+        outcomes.push({
+          command,
+          exitCode: -1,
+          timedOut: false,
+          output: 'not run: the work could not be saved first',
+        })
+        continue
+      }
       const run = await backend.execute(`cd ${repoDir} && ${command}`, { timeoutMs })
       outcome = {
         command,
@@ -45,11 +83,8 @@ export async function runFixes(
     }
     outcomes.push(outcome)
     if (outcome.exitCode !== 0 || outcome.timedOut) {
-      // What a fix half did is not kept: the work stays as the builder left it.
       try {
-        await backend.execute(`git -C ${repoDir} checkout -- . && git -C ${repoDir} clean -fdq`, {
-          timeoutMs,
-        })
+        await restore(backend, repoDir, tree, timeoutMs)
       } catch {
         // The checks run on what is there and judge it.
       }
