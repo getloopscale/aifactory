@@ -102,6 +102,13 @@ describe('runContinuation', () => {
     expect(runContinuation(undefined, 'CI failed', true)).toMatchObject({ fromChecks: true })
   })
 
+  it('merges the integration branch, with no feedback, when the job says so', () => {
+    expect(runContinuation(undefined, undefined, undefined, true)).toEqual({
+      feedback: '',
+      mergeBase: true,
+    })
+  })
+
   it('starts from the beginning for any other decision, or none', () => {
     expect(runContinuation({ kind: 'retry', note: '' }, undefined)).toBeUndefined()
     expect(runContinuation(undefined, undefined)).toBeUndefined()

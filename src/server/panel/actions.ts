@@ -30,7 +30,13 @@ export type ActionDeps = {
     work: (
       tx: Database,
       enqueueRun: (
-        input: { taskId: number; decisionId?: number; feedback?: string; resume?: boolean },
+        input: {
+          taskId: number
+          decisionId?: number
+          feedback?: string
+          resume?: boolean
+          mergeBase?: boolean
+        },
         key: string,
       ) => Promise<void>,
     ) => Promise<T>,
@@ -84,14 +90,7 @@ async function requeue(
           },
         })
         .returning({ id: stageEvent.id })
-      const input = rework?.plain
-        ? { taskId, resume: true }
-        : !changes
-          ? { taskId }
-          : rework?.decisionId
-            ? { taskId, decisionId: rework.decisionId }
-            : { taskId, feedback: note }
-      await enqueueRun(input, `task-${taskId}-auto${event.id}`)
+      await enqueueRun(queuedInput(taskId, note, changes, rework), `task-${taskId}-auto${event.id}`)
       return null
     }
     const [made] = await tx
@@ -117,8 +116,18 @@ type Rework = {
   note: string
   decisionId?: number
   plain?: boolean
+  /** The run merges the integration branch into the work branch itself, and no agent is given the note. */
+  mergeBase?: boolean
   /** The run that failed never started an agent (its sandbox failed), so it was no attempt of the work. */
   preAgent: boolean
+}
+
+/** What an automatic run is queued with: the job reads it to know how the run starts (`runContinuation`). */
+function queuedInput(taskId: number, note: string, changes: boolean, rework?: Rework) {
+  if (rework?.mergeBase) return { taskId, mergeBase: true }
+  if (rework?.plain) return { taskId, resume: true }
+  if (!changes) return { taskId }
+  return rework?.decisionId ? { taskId, decisionId: rework.decisionId } : { taskId, feedback: note }
 }
 
 /**
@@ -349,6 +358,24 @@ export async function sendBackAutomatically(deps: ActionDeps, taskId: number, no
   const row = await load(deps.db, taskId)
   mustAllow(row, 'send_back_after_ci')
   await requeue(deps, taskId, ['done'], 'automatic_changes', note.slice(0, NOTE_MAX), row.headSha)
+}
+
+/**
+ * Runs a task again whose required checks failed only because the integration branch failed them too, now
+ * that it passes them (`merge_base` in `factory/ci-wait.ts`), with no person asking. The run merges that
+ * branch into the work branch itself, with no agent, and the merge goes through the checks and the review
+ * like any work. The note is the record of why; no agent is given it. Only a task whose pull request waits
+ * for those checks qualifies, as for a send-back after them.
+ */
+export async function mergeFixedBase(deps: ActionDeps, taskId: number, note: string) {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'send_back_after_ci')
+  const text = note.slice(0, NOTE_MAX)
+  await requeue(deps, taskId, ['done'], 'automatic_changes', text, row.headSha, {
+    note: text,
+    mergeBase: true,
+    preAgent: false,
+  })
 }
 
 /**
