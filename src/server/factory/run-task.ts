@@ -9,6 +9,7 @@ import { createGithubApi } from '../github/pulls'
 import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
+import { describeError } from './error-message'
 import { resolveTimeouts } from './run-limit'
 import type { Parked, RunResult, RunTaskDeps } from './run-types'
 import { enterStage } from './stages'
@@ -171,9 +172,7 @@ async function fail(
   if (error instanceof Asked) return error.result
   const message = signal?.aborted
     ? 'the job lease expired before the run finished'
-    : error instanceof Error
-      ? error.message
-      : String(error)
+    : describeError(error)
   await enterStage(deps.db, taskId, 'failed', {
     failedAt: state.current,
     error: message,

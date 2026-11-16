@@ -7,7 +7,6 @@ import {
   evolveLog,
   groupBySignature,
   isDesignedWait,
-  isSelfHealing,
   issueForSignature,
   measurable,
   reasonOf,
@@ -92,20 +91,6 @@ describe('reasonOf', () => {
     expect(reasonOf({ reason: 3 })).toBe('')
     expect(reasonOf({ reason: '', error: 'e' })).toBe('e')
     expect(reasonOf(null)).toBe('')
-  })
-})
-
-describe('isSelfHealing', () => {
-  it('is true for a failure the factory retries on its own', () => {
-    expect(isSelfHealing('failed', { error: 'fetch failed' })).toBe(true)
-    expect(isSelfHealing('failed', { quota: true, error: 'x' })).toBe(true)
-    expect(isSelfHealing('failed', { error: 'x', blockedBy: [3] })).toBe(true)
-  })
-
-  it('is false for a failure of the work, a handoff or a missing detail', () => {
-    expect(isSelfHealing('failed', { error: 'push of <sha> rejected' })).toBe(false)
-    expect(isSelfHealing('handoff', { reason: 'fetch failed', error: 'fetch failed' })).toBe(false)
-    expect(isSelfHealing('failed', null)).toBe(false)
   })
 })
 

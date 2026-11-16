@@ -3,7 +3,7 @@ import { and, eq, gte, inArray, lt } from 'drizzle-orm'
 import type { Database } from '../db'
 import { failureSignature, stageEvent, task } from '../db/schema'
 
-import { isSelfHealing, reasonOf, signatureOf, type FailureEvent } from './evolve'
+import { reasonOf, signatureOf, type FailureEvent } from './evolve'
 
 /**
  * What Evolve reads and nothing else: the `failed` and `handoff` events in a window, and the signatures
@@ -36,14 +36,11 @@ export async function readFailureEvents(
       ),
     )
     .orderBy(stageEvent.id)
-  return rows
-    .map(({ detail, stage, ...row }) => {
-      const found = (detail ?? null) as Record<string, unknown> | null
-      const kind = stage as FailureEvent['stage']
-      return { row, kind, found }
-    })
-    .filter(({ kind, found }) => !isSelfHealing(kind, found))
-    .map(({ row, kind, found }) => ({ ...row, stage: kind, reason: reasonOf(found) }))
+  return rows.map(({ detail, stage, ...row }) => ({
+    ...row,
+    stage: stage as FailureEvent['stage'],
+    reason: reasonOf((detail ?? null) as Record<string, unknown> | null),
+  }))
 }
 
 /** How many events in the window carry the signature. */
