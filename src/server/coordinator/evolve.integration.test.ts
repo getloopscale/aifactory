@@ -92,11 +92,14 @@ beforeEach(() => {
 
 const rows = () => getDb().select().from(failureSignature).orderBy(failureSignature.id)
 
-/** Three tasks whose reasons differ only in a number and a commit id. */
+const HOUR = 3_600_000
+const later = (at: Date, hours: number) => new Date(at.getTime() + hours * HOUR)
+
+/** Three tasks hours apart, whose reasons differ only in a number and a commit id. */
 const threeFailures = async (at = ago(1)) => {
   await failure({ error: 'push of 3fa9c01 rejected after 3 attempts' }, at)
-  await failure({ error: 'push of 0be27d4 rejected after 12 attempts' }, at)
-  await failure({ reason: 'push of 9c0ffee rejected after 7 attempts' }, at, 'handoff')
+  await failure({ error: 'push of 0be27d4 rejected after 12 attempts' }, later(at, 2))
+  await failure({ reason: 'push of 9c0ffee rejected after 7 attempts' }, later(at, 4), 'handoff')
 }
 
 describe('filing a failure that repeats', () => {
@@ -161,7 +164,8 @@ describe('filing a failure that repeats', () => {
 
   it('files one issue in a pass with five qualifying signatures, and three in the window', async () => {
     for (const word of ['alpha', 'beta', 'gamma', 'delta', 'epsilon']) {
-      for (const n of [1, 2, 3]) await failure({ error: `${word} broke ${n}` }, ago(1))
+      for (const n of [1, 2, 3])
+        await failure({ error: `${word} broke ${n}` }, later(ago(1), 2 * n))
     }
 
     await evolve(github.deps(), 'auto')

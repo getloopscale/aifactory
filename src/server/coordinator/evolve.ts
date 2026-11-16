@@ -16,6 +16,12 @@ export const EVOLVE = {
   windowDays: 7,
   /** On how many distinct tasks a signature has to be seen to be filed. */
   minTasks: 3,
+  /**
+   * In how many separate incidents. Events less than `incidentGapMs` apart are one incident: an outage that
+   * stops a whole queue at once is one cause, not a failure that keeps coming back.
+   */
+  minIncidents: 2,
+  incidentGapMs: 3_600_000,
   /** How many issues one pass files, and how many the window holds. */
   perPass: 1,
   perWindow: 3,
@@ -44,6 +50,8 @@ export type SignatureGroup = {
   events: FailureEvent[]
   /** How many distinct tasks the events belong to. */
   tasks: number
+  /** How many separate incidents the events make (`EVOLVE.incidentGapMs`). */
+  incidents: number
   firstSeen: Date
   lastSeen: Date
 }
@@ -87,6 +95,15 @@ export function isDesignedWait(signature: string): boolean {
   return DESIGNED_WAITS.some((wait) => lower.startsWith(wait))
 }
 
+/** How many incidents events ordered by time make: a gap of `EVOLVE.incidentGapMs` or more starts one. */
+function incidentsOf(ordered: FailureEvent[]): number {
+  let incidents = 1
+  for (let i = 1; i < ordered.length; i++) {
+    if (ordered[i].at.getTime() - ordered[i - 1].at.getTime() >= EVOLVE.incidentGapMs) incidents++
+  }
+  return incidents
+}
+
 /** The events by signature. An event whose reason has no text has no signature and is left out. */
 export function groupBySignature(events: FailureEvent[]): SignatureGroup[] {
   const bySignature = new Map<string, FailureEvent[]>()
@@ -101,6 +118,7 @@ export function groupBySignature(events: FailureEvent[]): SignatureGroup[] {
       signature,
       events: ordered,
       tasks: new Set(ordered.map((e) => e.taskId)).size,
+      incidents: incidentsOf(ordered),
       firstSeen: ordered[0].at,
       lastSeen: ordered[ordered.length - 1].at,
     }
@@ -108,7 +126,7 @@ export function groupBySignature(events: FailureEvent[]): SignatureGroup[] {
 }
 
 /**
- * The signatures this pass files: on enough tasks, not a designed wait, not filed before, the one on the
+ * The signatures this pass files: on enough tasks, in more than one incident, not a designed wait, not filed before, the one on the
  * most tasks first (then the one seen first, then by name), within what the pass and the window allow.
  */
 export function toFile(
@@ -119,7 +137,11 @@ export function toFile(
   const room = Math.max(0, Math.min(EVOLVE.perPass, EVOLVE.perWindow - filedInWindow))
   return groups
     .filter(
-      (g) => g.tasks >= EVOLVE.minTasks && !isDesignedWait(g.signature) && !filed.has(g.signature),
+      (g) =>
+        g.tasks >= EVOLVE.minTasks &&
+        g.incidents >= EVOLVE.minIncidents &&
+        !isDesignedWait(g.signature) &&
+        !filed.has(g.signature),
     )
     .sort(
       (a, b) =>

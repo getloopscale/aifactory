@@ -128,8 +128,10 @@ describe('groupBySignature', () => {
   })
 })
 
+const HOUR = 3_600_000
+/** Three tasks that failed hours apart: the failure came back, it was not one incident. */
 const threeTasks = (reason: (i: number) => string, at = ago(1)) =>
-  [1, 2, 3].map((i) => event(reason(i), { at: new Date(at.getTime() + i) }))
+  [1, 2, 3].map((i) => event(reason(i), { at: new Date(at.getTime() + i * 2 * HOUR) }))
 
 describe('toFile', () => {
   it('files a signature on three distinct tasks', () => {
@@ -137,6 +139,32 @@ describe('toFile', () => {
     expect(toFile(groups, new Set(), 0).map((g) => g.signature)).toEqual([
       'push of <sha> failed <n>',
     ])
+  })
+
+  it('files nothing for one incident, however many tasks it stopped at once', () => {
+    const burst = Array.from({ length: 48 }, (_, i) =>
+      event('ENOENT: no such file, open .secrets/app.pem', { at: new Date(ago(4).getTime() + i) }),
+    )
+    const groups = groupBySignature(burst)
+    expect(groups[0]).toMatchObject({ tasks: 48, incidents: 1 })
+    expect(toFile(groups, new Set(), 0)).toEqual([])
+  })
+
+  it('counts events less than an hour apart as one incident, and an hour apart as two', () => {
+    const at = ago(2)
+    const near = groupBySignature([
+      event('x', { at }),
+      event('x', { at: new Date(at.getTime() + HOUR - 1) }),
+      event('x', { at: new Date(at.getTime() + 2 * HOUR - 2) }),
+    ])
+    expect(near[0].incidents).toBe(1)
+    const apart = groupBySignature([
+      event('x', { at }),
+      event('x', { at: new Date(at.getTime() + HOUR) }),
+      event('x', { at: new Date(at.getTime() + HOUR + 1) }),
+    ])
+    expect(apart[0].incidents).toBe(2)
+    expect(toFile(apart, new Set(), 0).map((g) => g.signature)).toEqual(['x'])
   })
 
   it('files nothing for two tasks', () => {
@@ -157,7 +185,7 @@ describe('toFile', () => {
   it('files one of five, the one on the most tasks', () => {
     const groups = groupBySignature([
       ...['a', 'b', 'c', 'd'].flatMap((s) => threeTasks(() => s)),
-      ...[1, 2, 3, 4].map(() => event('e', { at: ago(0.5) })),
+      ...[1, 2, 3, 4].map((i) => event('e', { at: new Date(ago(0.9).getTime() + i * 2 * HOUR) })),
     ])
     expect(toFile(groups, new Set(), 0).map((g) => g.signature)).toEqual(['e'])
   })

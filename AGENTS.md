@@ -208,7 +208,7 @@ reads that file, not a convention.
   the same head. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
   `MAX_APPLIED` neither counts a release nor holds one back.
   Evolve (`evolve.ts` pure, `evolve-facts.ts` reads, `evolve-apply.ts` writes) files a failure signature seen on
-  three tasks in a week as a `factory` issue on this repository, once per signature (`failure_signature`), at
+  three tasks in a week, in two incidents an hour or more apart, as a `factory` issue on this repository, once per signature (`failure_signature`), at
   most one per pass and three per week, never a designed wait (`DESIGNED_WAITS`), nothing in `trial` but a
   log line, and a week after the issue closes it records both counts and comments when the signature still
   shows up.
