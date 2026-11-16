@@ -69,7 +69,10 @@ function judge(s: ListedSandbox, facts: ReaperFacts): Verdict {
 }
 
 /** The sandboxes whose owner is done, each with why. A pure function over the listing and the facts. */
-export function reapable(listing: ListedSandbox[], facts: ReaperFacts): { id: string; reason: string }[] {
+export function reapable(
+  listing: ListedSandbox[],
+  facts: ReaperFacts,
+): { id: string; reason: string }[] {
   return listing.flatMap((s) => judge(s, facts) ?? [])
 }
 
@@ -130,7 +133,9 @@ export async function reapSandboxes(deps: ReaperDeps): Promise<{ id: string; rea
     try {
       await deps.killSandbox(verdict.id)
       killed.push(verdict)
-      console.log(JSON.stringify({ event: 'sandbox_reaped', sandbox: verdict.id, reason: verdict.reason }))
+      console.log(
+        JSON.stringify({ event: 'sandbox_reaped', sandbox: verdict.id, reason: verdict.reason }),
+      )
     } catch (error) {
       console.error(
         JSON.stringify({ event: 'sandbox_reap_failed', sandbox: verdict.id, error: String(error) }),

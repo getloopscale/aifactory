@@ -18,8 +18,7 @@ const facts = (over: Partial<ReaperFacts> = {}): ReaperFacts => ({
   alive: () => true,
   ...over,
 })
-const task = (taskId: number, run: string) =>
-  metadataFor({ owner: 'task', taskId, run }, 'here', 1)
+const task = (taskId: number, run: string) => metadataFor({ owner: 'task', taskId, run }, 'here', 1)
 
 describe('metadataFor', () => {
   it('names the owner, the host and the process, as strings', () => {
@@ -51,7 +50,10 @@ describe('reapable', () => {
 
   it('kills a task sandbox whose run is not the one the task names, or whose task is gone', () => {
     const tasks = new Map([[1, { stage: 'build', run: 'new' }]])
-    const killed = reapable([sbx('old', task(1, 'old')), sbx('gone', task(9, 'x'))], facts({ tasks }))
+    const killed = reapable(
+      [sbx('old', task(1, 'old')), sbx('gone', task(9, 'x'))],
+      facts({ tasks }),
+    )
     expect(killed.map((k) => k.id)).toEqual(['old', 'gone'])
     expect(killed[0].reason).toContain('another run')
   })

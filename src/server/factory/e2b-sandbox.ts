@@ -291,7 +291,11 @@ export function e2bSandboxProvider(env: NodeJS.ProcessEnv = process.env): Isolat
       const found: ListedSandbox[] = []
       while (paginator.hasNext) {
         for (const info of await paginator.nextItems()) {
-          found.push({ id: info.sandboxId, startedAt: info.startedAt, metadata: info.metadata ?? {} })
+          found.push({
+            id: info.sandboxId,
+            startedAt: info.startedAt,
+            metadata: info.metadata ?? {},
+          })
         }
       }
       return found
