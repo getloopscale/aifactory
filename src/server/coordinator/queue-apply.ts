@@ -9,7 +9,7 @@ import type { Database } from '../db'
  * no other repository's. The task must still be in `intake` when it writes: a task that a run already took
  * has no job to move. `transitions.ts` has no event for reordering a queue, so the stage is checked in the
  * statement itself. TheoKit's worker takes the job with the earliest `available_at` that is not in the future
- * (`dequeue`), and has no call for this (a gap to file on usetheokit/theokit).
+ * (`dequeue`), and has no call for this: https://github.com/usetheokit/theokit/issues/2117.
  */
 /** Held while a hold is made, kept or released, and while a decision to hold is recorded: one at a time. */
 export const HOLD_LOCK = sql`select pg_advisory_xact_lock(hashtext('prioritise'))`

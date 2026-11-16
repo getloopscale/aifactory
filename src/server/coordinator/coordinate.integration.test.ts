@@ -843,40 +843,45 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     expect(await dequeue()).toEqual([])
   })
 
-  it('keeps the hold while the fix waits for an answer or is handed over, and past any renewal', async () => {
+  const heldJobs = async () =>
+    (
+      await getPool().query(
+        "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' or available_at = 'infinity'",
+      )
+    ).rows[0].n as number
+
+  for (const stage of ['handoff', 'waiting'] as const) {
+    it(`gives the held jobs back on the next pass once the fix is in ${stage}`, async () => {
+      const { fix } = await incident()
+      await coordinate(deps(), 'auto')
+      // A worker takes the fix's job, as it would once the fix is first.
+      expect(await dequeue()).toEqual([`job-${fix}`])
+      expect(await heldJobs()).toBe(2)
+      await getDb().insert(stageEvent).values({ taskId: fix, stage })
+      await getDb().update(task).set({ stage }).where(eq(task.id, fix))
+
+      await coordinate(deps(), 'auto')
+
+      expect(await heldJobs()).toBe(0)
+      expect((await dequeue())[0]).toBeDefined()
+    })
+  }
+
+  it('never brings back by itself a hold that ended with a handoff', async () => {
     const { fix } = await incident()
     await coordinate(deps(), 'auto')
-    // A worker takes the fix's job, as it would once the fix is first.
     expect(await dequeue()).toEqual([`job-${fix}`])
-    await getDb().update(task).set({ stage: 'waiting' }).where(eq(task.id, fix))
-
-    await coordinate(deps(), 'auto')
-
-    const held = await getPool().query(
-      "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' and available_at = 'infinity'",
-    )
-    expect(held.rows[0].n).toBe(2)
-    expect(await dequeue()).toEqual([])
-  })
-
-  it('keeps the hold through a handoff, and never brings an ended one back', async () => {
-    const { fix, other } = await incident()
-    await coordinate(deps(), 'auto')
-    // A worker takes the fix's job, as it would once the fix is first.
-    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'handoff' })
     await getDb().update(task).set({ stage: 'handoff' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
-    expect(await dequeue()).toEqual([])
 
-    // The fix fails: the others are given back, and a retry of the fix does not hold them again.
-    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'failed' })
-    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
-    await coordinate(deps(), 'auto')
+    // The same attempt moves on without a new job: nothing is held again.
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'intake' })
     await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
 
-    expect((await dequeue())[0]).toBeDefined()
-    expect(other).toBeGreaterThan(0)
+    expect(await heldJobs()).toBe(0)
+    expect(await prioritised()).toHaveLength(1)
   })
 
   it('sends back no task whose current failure, older than six hours, names the held test', async () => {

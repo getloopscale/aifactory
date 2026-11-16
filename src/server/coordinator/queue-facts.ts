@@ -20,7 +20,8 @@ import {
 /**
  * What the `prioritise` playbook reads, and nothing else: the failures of the last hours and, only for a
  * repository where one test failed on several tasks, its queued `run-task` jobs and their issues. It decides
- * nothing (`queue-order.ts` does). The queue is TheoKit's `theokit_jobs`; it offers no way to reorder it.
+ * nothing (`queue-order.ts` does). The queue is TheoKit's `theokit_jobs`; it offers no way to reorder it
+ * (https://github.com/usetheokit/theokit/issues/2117).
  */
 
 export type QueueFactsDeps = {
@@ -79,16 +80,23 @@ export async function readQueueFacts(
   )
 }
 
-/** A hold ends with the fix: a failure, a cancellation or a release after the decision, or an integration. */
-const ENDS = ['failed', 'cancelled', 'released'] as const
+/**
+ * A hold ends with the fix: a failure, a cancellation or a release after the decision, or an integration. It
+ * also ends when the fix waits for an answer or is handed to a person: nothing the factory does moves it on
+ * from there, and the repository's other work must not wait on a person.
+ */
+const ENDS = ['failed', 'cancelled', 'released', 'handoff', 'waiting'] as const
 const FINISHED = ['released', 'failed', 'cancelled']
+/** Stages that only a person moves a task out of. */
+const WITH_A_PERSON = ['handoff', 'waiting']
 /** The stages whose event records why a task stopped. */
 const FAILURE_STAGES = ['failed', 'handoff']
 
 /**
- * The tests whose fix the coordinator moved ahead and that has not integrated or failed since: queued, running,
- * waiting for an answer or its checks, or handed to a person. The end is read from what happened after the
- * decision, so a task retried after it ended never brings the hold back.
+ * The tests whose fix the coordinator moved ahead and that is still on its way: queued, running or waiting for
+ * its checks. A fix that integrated, failed, was cancelled, waits for an answer or was handed to a person ends
+ * its hold. The end is read from what happened after the decision, so the same attempt never brings the hold
+ * back; a person's retry queues a new job, which is a new decision (`headOf`) and may hold again.
  */
 export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldTest[]> {
   const rows = await db
@@ -120,6 +128,7 @@ export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldT
     .filter(
       (r) =>
         !ended.some((e) => e.taskId === r.taskId && e.at >= r.at) &&
+        !WITH_A_PERSON.includes(r.stage) &&
         !(
           r.awaiting === null &&
           (FINISHED.includes(r.stage) || (r.stage === 'done' && r.merged !== null))

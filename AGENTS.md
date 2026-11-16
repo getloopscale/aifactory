@@ -216,7 +216,8 @@ reads that file, not a convention.
   repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
   `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
   `run-task` job ahead of the repository's other pending jobs, by `available_at` in `theokit_jobs` (TheoKit has no
-  call for it), and holds that repository's other pending jobs back until the fix integrates or fails. The failures of the same test on
+  call for it, usetheokit/theokit#2117), and holds that repository's other pending jobs back until the fix integrates, fails, waits for an answer or is handed
+  to a person (only a person moves it on from there, so the others do not wait on one). The failures of the same test on
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
   however old) while it is on its way. The decision's head is the test and the fix's job (`headOf`), so a retried
   fix is decided again and an ended hold never comes back. It is not counted by `MAX_APPLIED`, and merges nothing.
