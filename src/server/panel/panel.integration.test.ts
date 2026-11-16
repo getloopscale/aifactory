@@ -8,6 +8,7 @@ import { storageFromUrl } from '../db/config'
 import {
   agentEvent,
   agentRun,
+  coordinatorAction,
   decision,
   delivery,
   finding,
@@ -38,7 +39,7 @@ import {
   sendBackAutomatically,
   type ActionDeps,
 } from './actions'
-import { health, inbox, listTasks, taskDetail } from './queries'
+import { coordinatorActions, health, inbox, listTasks, taskDetail } from './queries'
 import { runContinuation } from '../factory/run-support'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
 import { stageStream } from './stream'
@@ -337,6 +338,79 @@ describe('taskDetail', () => {
 
   it('is nothing for a task that does not exist', async () => {
     expect(await taskDetail(getDb(), 999)).toBeUndefined()
+  })
+})
+
+describe('the coordinator on the panel', () => {
+  it("lists a task's decisions newest first, filters by outcome, and gives the inbox the reason", async () => {
+    const id = await seed('handoff', {}, [{ stage: 'handoff', detail: { reason: 'three' } }])
+    const base = { taskId: id, action: 'send_back' as const, headSha: 'a' }
+    await getDb()
+      .insert(coordinatorAction)
+      .values([
+        {
+          ...base,
+          exceptionKind: 'stalled',
+          outcome: 'applied',
+          reason: 'first',
+          at: new Date(Date.now() + 1000),
+        },
+        {
+          ...base,
+          exceptionKind: 'handoff',
+          action: 'escalate',
+          outcome: 'escalated',
+          reason: 'second',
+          at: new Date(Date.now() + 2000),
+        },
+      ])
+    const detail = await taskDetail(getDb(), id)
+    expect(detail?.coordinatorActions.map((a) => a.reason)).toEqual(['second', 'first'])
+    const only = await coordinatorActions(getDb(), 'escalated')
+    expect(only.actions.map((a) => a.reason)).toEqual(['second'])
+    expect((await coordinatorActions(getDb())).actions).toHaveLength(2)
+    const first = await coordinatorActions(getDb(), undefined, undefined, 1)
+    expect(first.actions.map((a) => a.reason)).toEqual(['second'])
+    expect(first.more).toBe(true)
+    const next = await coordinatorActions(getDb(), undefined, first.actions[0].id, 1)
+    expect(next.actions.map((a) => a.reason)).toEqual(['first'])
+    expect(next.more).toBe(false)
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('second')
+  })
+
+  it('gives the inbox the escalation of a handoff that has no stage event', async () => {
+    const id = await seed('handoff')
+    await getDb().insert(coordinatorAction).values({
+      taskId: id,
+      exceptionKind: 'orphaned',
+      headSha: 'none',
+      action: 'escalate',
+      outcome: 'escalated',
+      reason: 'nothing recorded',
+    })
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('nothing recorded')
+  })
+
+  it('does not give the inbox an escalation from before the task was resumed and failed again', async () => {
+    const id = await seed('failed', {}, [{ stage: 'handoff' }])
+    await getDb()
+      .insert(coordinatorAction)
+      .values({
+        taskId: id,
+        exceptionKind: 'handoff',
+        headSha: 'a',
+        action: 'escalate',
+        outcome: 'escalated',
+        reason: 'old reason',
+        at: new Date(Date.now() - 60_000),
+      })
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'failed', detail: { error: 'boom' }, at: new Date() })
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBeNull()
   })
 })
 
