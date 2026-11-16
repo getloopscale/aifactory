@@ -3,6 +3,7 @@ import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
 import { releaseBranchOf } from './branches'
@@ -38,6 +39,7 @@ export type ReleaseBranchView = {
    * Runs for each task once it is released, with its issue. A release that has a tag uses it to tell the
    * issue where the fix is; a catch-up has none. It returns what went wrong, never throws.
    */
+  holdOpen?: (row: { id: number; repository: string; issueNumber: number }) => Promise<boolean>
   afterRelease?: (row: {
     id: number
     repository: string
@@ -73,6 +75,7 @@ async function releaseEach(
     }
     try {
       if (!(await onBranch.get(sha))) continue
+      if (await view.holdOpen?.(row)) continue
       await enterStage(deps.db, row.id, 'released', {
         actor: view.actor,
         releaseBranch: view.releaseBranch,
@@ -123,13 +126,15 @@ export type CatchUpPage = {
  * each is compared with the head of its repository's release branch (the owner's choice, or the default
  * branch). `next` is where the following pass starts, and 0 once a pass reaches the last task, so a task
  * whose commit is not there yet is looked at again later. A released task no longer matches, so running it
- * again changes nothing.
+ * again changes nothing. A task whose issue is still open is left for the release that names its version
+ * (`shipContained`), so a publication that has not tagged yet does not leave the issue open for good.
  */
 export async function catchUpResolved(
   deps: {
     db: Database
     app: Pick<GithubApp, 'installationToken'>
     api: Pick<GithubApi, 'contains' | 'defaultBranch'>
+    readIssue?: typeof fetchIssue
   },
   page: CatchUpPage,
 ): Promise<ResolvedReleased & { next: number }> {
@@ -146,7 +151,12 @@ export async function catchUpResolved(
     try {
       const { token } = await deps.app.installationToken(repo)
       const branch = await releaseBranchOf(deps.api, repo, token, mine[0])
-      const view = { repository: repo, token, releaseRef: branch, releaseBranch: branch }
+      const read = deps.readIssue ?? fetchIssue
+      // An issue still open waits for a release that names its version (a publication may not have tagged
+      // it yet): `shipContained` releases the task and closes the issue then.
+      const holdOpen = async (row: { issueNumber: number }) =>
+        (await read(repo, row.issueNumber, token)).state === 'open'
+      const view = { repository: repo, token, releaseRef: branch, releaseBranch: branch, holdOpen }
       const done = await releaseEach(deps, { ...view, actor: 'factory' }, mine)
       result.released.push(...done.released)
       result.errors.push(...done.errors)
