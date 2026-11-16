@@ -161,6 +161,32 @@ describe('listTasks', () => {
     expect(card.attempts).toBe(1)
   })
 
+  it('keeps the automatic-run and attempt counts when a send-back is withdrawn', async () => {
+    const auto = { decision: 'retry', automatic: true }
+    const failed = { error: '403: team is blocked: spend_limit' }
+    const id = await seed('failed', {}, [
+      { stage: 'intake' },
+      { stage: 'verify' },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'verify' },
+      { stage: 'failed', detail: failed },
+      // A person sent it back and withdrew it: the task went back to failed.
+      { stage: 'intake', detail: { decision: 'request_changes', withdrawn: true } },
+      { stage: 'failed', detail: { ...failed, withdrawnDecisionId: 1 } },
+    ])
+
+    const card = (await listTasks(getDb())).find((c) => c.id === id)!
+
+    // Still at the limit of automatic retries, and the verify before the withdrawn intake still counts.
+    expect(card.retryAt).toBeNull()
+    expect(card.attempts).toBe(1)
+  })
+
   it('puts every stage in a column that exists on the board', async () => {
     for (const stage of [
       'intake',
