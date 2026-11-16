@@ -1,15 +1,15 @@
-import { hostname } from 'node:os'
-
-import { inArray, lt } from 'drizzle-orm'
-
-import type { Database } from '../db'
-import { sandboxLease, task } from '../db/schema'
-
+// Which sandboxes of the account the factory stops, and which leases it starts to suspect. A pure function over
+// the listing and the facts `sandbox-reaper-facts.ts` reads; `reap-sandboxes.ts` applies what it decides.
 import type { ListedSandbox, SandboxOwner } from './sandbox'
-import { LEASE_STALE_MS, PROCESS_LEASE } from './sandbox-lease'
 
-/** How long a sandbox with no owner recorded may live before it is taken for nobody's: it may be one still being made. */
+/** Marks a sandbox as the factory's. A sandbox without it belongs to someone else, and is never stopped. */
+export const FACTORY_APP = 'aifactory'
+
+/** How long a sandbox with no metadata at all may live before it is taken for nobody's: it may be one still being made. */
 export const SANDBOX_GRACE_MS = 10 * 60_000
+
+/** A lease not renewed for this long is quiet: four beats missed. */
+export const LEASE_STALE_MS = 2 * 60_000
 
 /** How many sandboxes an E2B account allows at once, unless `E2B_MAX_SANDBOXES` says its plan allows more. */
 export const E2B_SANDBOX_LIMIT = 10
@@ -20,16 +20,26 @@ export const E2B_SANDBOX_LIMIT = 10
  */
 export const SANDBOX_STAGES = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr']
 
-export type MetadataOptions = { host?: string; lease?: string }
-
-/** What E2B stores: string values only, the owner's fields, the host and the process lease that created it. */
+/** What E2B stores: string values only, the factory's mark, the owner's fields, and the process that created it. */
 export function metadataFor(
   owner: SandboxOwner | undefined,
-  opts: MetadataOptions = {},
+  by: { host: string; lease: string },
 ): Record<string, string> {
   if (!owner) return {}
   const fields = Object.fromEntries(Object.entries(owner).map(([k, v]) => [k, String(v)]))
-  return { ...fields, host: opts.host ?? hostname(), lease: opts.lease ?? PROCESS_LEASE }
+  return { app: FACTORY_APP, ...fields, host: by.host, lease: by.lease }
+}
+
+/**
+ * A process lease as the supervisor found it. `process` is what the system said of the process: `alive` or
+ * `gone` on the supervisor's own host, `unknown` on another, where only the beat speaks.
+ */
+export type LeaseFact = {
+  host: string
+  pid: number
+  beatAt: Date
+  staleSeenAt: Date | null
+  process: 'alive' | 'gone' | 'unknown'
 }
 
 /** What the reaper knows of the tasks and the process leases the listing names. */
@@ -37,114 +47,78 @@ export type ReaperFacts = {
   now: Date
   graceMs: number
   tasks: Map<number, { stage: string; run: string | null }>
-  /** When each process last said it was alive. */
-  leases: Map<string, Date>
+  leases: Map<string, LeaseFact>
 }
 
-export type Verdict = { id: string; reason: string } | null
+export type Kill = { id: string; reason: string }
+/** A quiet lease no pass suspected yet, with the beat it was seen at, so a beat since keeps it. */
+export type Suspect = { lease: string; beatAt: Date }
+export type ReapPlan = { kill: Kill[]; suspect: Suspect[] }
 
-function judge(s: ListedSandbox, facts: ReaperFacts): Verdict {
+type Judgement = { kill: string } | { suspect: Suspect } | null
+
+function taskReason(m: Record<string, string>, facts: ReaperFacts): string | null {
+  if (m.owner !== 'task') return null
+  const row = facts.tasks.get(Number(m.taskId))
+  if (!row) return `task ${m.taskId} does not exist`
+  if (!SANDBOX_STAGES.includes(row.stage)) {
+    return `task ${m.taskId} is in ${row.stage}, which holds no sandbox`
+  }
+  return row.run === m.run ? null : `task ${m.taskId} is on another run than ${m.run}`
+}
+
+/**
+ * Whether the process that made the sandbox is at work. Its exit, seen on its own host, is death at once. A
+ * quiet beat is only a suspicion the first time: a database outage silences every live process too, and a
+ * process that beats again clears it. A process seen running is at work whatever its beat says.
+ */
+function leaseJudgement(m: Record<string, string>, facts: ReaperFacts): Judgement {
+  const lease = facts.leases.get(m.lease)
+  if (!lease) {
+    return {
+      kill: `${m.owner} process on ${m.host ?? 'an unknown host'} holds no recorded lease ${m.lease ?? '(none named)'}`,
+    }
+  }
+  const who = `${m.owner} process ${lease.pid} on ${lease.host}`
+  if (lease.process === 'gone') return { kill: `${who} exited (lease ${m.lease})` }
+  const now = facts.now.getTime()
+  if (lease.process === 'alive' || now - lease.beatAt.getTime() <= LEASE_STALE_MS) return null
+  if (!lease.staleSeenAt) return { suspect: { lease: m.lease, beatAt: lease.beatAt } }
+  if (now - lease.staleSeenAt.getTime() < LEASE_STALE_MS) return null
+  return { kill: `${who} has not renewed lease ${m.lease} since ${lease.beatAt.toISOString()}` }
+}
+
+function judge(s: ListedSandbox, facts: ReaperFacts): Judgement {
   const m = s.metadata
-  const age = facts.now.getTime() - s.startedAt.getTime()
-  const kill = (reason: string) => ({ id: s.id, reason })
-  const grace = Math.round(facts.graceMs / 60_000)
-  if (!m.owner)
-    return age > facts.graceMs ? kill(`no owner recorded and older than ${grace} minutes`) : null
-  // The process that made it, on whatever host: one that stopped saying it is alive has no one at work.
-  if (m.lease) {
-    const beat = facts.leases.get(m.lease)
-    if (!beat || facts.now.getTime() - beat.getTime() > LEASE_STALE_MS) {
-      return kill(
-        `${m.owner} process ${m.lease} on ${m.host ?? 'an unknown host'} stopped renewing its lease`,
-      )
-    }
-  } else if (m.owner !== 'task' && age > facts.graceMs) {
-    return kill(`${m.owner} with no process lease and older than ${grace} minutes`)
+  if (Object.keys(m).length === 0) {
+    const old = facts.now.getTime() - s.startedAt.getTime() > facts.graceMs
+    const minutes = Math.round(facts.graceMs / 60_000)
+    return old ? { kill: `no metadata and older than ${minutes} minutes` } : null
   }
-  if (m.owner === 'task') {
-    const row = facts.tasks.get(Number(m.taskId))
-    if (!row) return kill(`task ${m.taskId} does not exist`)
-    if (!SANDBOX_STAGES.includes(row.stage)) {
-      return kill(`task ${m.taskId} is in ${row.stage}, which holds no sandbox`)
-    }
-    if (row.run !== m.run) return kill(`task ${m.taskId} is on another run than ${m.run}`)
-  }
-  return null
+  // Another application's sandbox on the same account, whatever words it uses: not the factory's to stop.
+  if (m.app !== FACTORY_APP) return null
+  const reason = taskReason(m, facts)
+  return reason ? { kill: reason } : leaseJudgement(m, facts)
 }
 
-/** The sandboxes whose owner is done, each with why. A pure function over the listing and the facts. */
-export function reapable(
-  listing: ListedSandbox[],
-  facts: ReaperFacts,
-): { id: string; reason: string }[] {
-  return listing.flatMap((s) => judge(s, facts) ?? [])
+/** The sandboxes to stop, each with why, and the quiet leases to suspect. */
+export function reapable(listing: ListedSandbox[], facts: ReaperFacts): ReapPlan {
+  const plan: ReapPlan = { kill: [], suspect: [] }
+  for (const s of listing) {
+    const verdict = judge(s, facts)
+    if (verdict === null) continue
+    if ('kill' in verdict) plan.kill.push({ id: s.id, reason: verdict.kill })
+    else if (!plan.suspect.some((x) => x.lease === verdict.suspect.lease)) {
+      plan.suspect.push(verdict.suspect)
+    }
+  }
+  return plan
 }
 
-/** How many sandboxes have an owner at work: an owner recorded, and not one `reapable` would kill. */
+/** How many sandboxes of the factory have an owner at work: not one `reapable` would stop. */
 export function atWork(listing: ListedSandbox[], facts: ReaperFacts): number {
-  return listing.filter((s) => s.metadata.owner && judge(s, facts) === null).length
-}
-
-/** Reads the tasks and the leases the listing names, after the listing, so a task that began since is seen. */
-export async function readReaperFacts(
-  db: Database,
-  listing: ListedSandbox[],
-  now: Date = new Date(),
-): Promise<ReaperFacts> {
-  const ids = [
-    ...new Set(
-      listing.filter((s) => s.metadata.owner === 'task').map((s) => Number(s.metadata.taskId)),
-    ),
-  ].filter(Number.isInteger)
-  const leaseIds = [...new Set(listing.map((s) => s.metadata.lease).filter(Boolean))] as string[]
-  const rows = ids.length
-    ? await db
-        .select({ id: task.id, stage: task.stage, run: task.sandboxRun })
-        .from(task)
-        .where(inArray(task.id, ids))
-    : []
-  const leases = leaseIds.length
-    ? await db
-        .select({ id: sandboxLease.id, beatAt: sandboxLease.beatAt })
-        .from(sandboxLease)
-        .where(inArray(sandboxLease.id, leaseIds))
-    : []
-  return {
-    now,
-    graceMs: SANDBOX_GRACE_MS,
-    tasks: new Map(rows.map((r) => [r.id, { stage: r.stage, run: r.run }])),
-    leases: new Map(leases.map((l) => [l.id, l.beatAt])),
-  }
-}
-
-export type ReaperDeps = {
-  db: Database
-  listSandboxes: () => Promise<ListedSandbox[]>
-  killSandbox: (id: string) => Promise<void>
-  now?: () => Date
-}
-
-/** Stops every sandbox whose owner is done and logs each with its id and why. */
-export async function reapSandboxes(deps: ReaperDeps): Promise<{ id: string; reason: string }[]> {
-  const listing = await deps.listSandboxes()
-  const facts = await readReaperFacts(deps.db, listing, deps.now?.())
-  const killed: { id: string; reason: string }[] = []
-  for (const verdict of reapable(listing, facts)) {
-    try {
-      await deps.killSandbox(verdict.id)
-      killed.push(verdict)
-      console.log(
-        JSON.stringify({ event: 'sandbox_reaped', sandbox: verdict.id, reason: verdict.reason }),
-      )
-    } catch (error) {
-      console.error(
-        JSON.stringify({ event: 'sandbox_reap_failed', sandbox: verdict.id, error: String(error) }),
-      )
-    }
-  }
-  // A lease of a process gone for a day names no sandbox that can still be up.
-  await deps.db
-    .delete(sandboxLease)
-    .where(lt(sandboxLease.beatAt, new Date(facts.now.getTime() - 24 * 60 * 60_000)))
-  return killed
+  return listing.filter((s) => {
+    const verdict = s.metadata.app === FACTORY_APP ? judge(s, facts) : { kill: 'not the factory' }
+    return verdict === null || !('kill' in verdict)
+  }).length
 }

@@ -31,6 +31,7 @@ import type {
   StreamingOptions,
 } from './sandbox'
 import { assertIsolated } from './sandbox'
+import { THIS_PROCESS } from './sandbox-lease'
 import { E2B_SANDBOX_LIMIT, metadataFor } from './sandbox-reaper'
 
 /** The exit code the TheoKit backends report for a command that hit its timeout. */
@@ -263,7 +264,7 @@ export function sandboxOptions(spec: SandboxSpec, env: NodeJS.ProcessEnv = proce
     timeoutMs: Math.min(spec.timeoutMs, e2bMaxSessionMs(env)),
     envs: SANDBOX_ENV,
     network: networkFor(spec),
-    metadata: metadataFor(spec.owner),
+    metadata: metadataFor(spec.owner, THIS_PROCESS),
   }
 }
 

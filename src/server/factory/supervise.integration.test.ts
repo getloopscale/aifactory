@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
@@ -5,10 +8,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { finding, ingress, question, sandboxLease, stageEvent, task, watch } from '../db/schema'
+import { finding, ingress, question, stageEvent, task, watch } from '../db/schema'
 
 import { FakeSandbox } from './fake-sandbox'
 import type { SandboxOwner } from './sandbox'
+import {
+  beat,
+  identityOf,
+  LEASE_BEAT_MS,
+  THIS_PROCESS,
+  type ProcessIdentity,
+} from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
 import { detect, supervise } from './supervise'
 
@@ -324,40 +334,93 @@ describe('supervise', () => {
 })
 
 describe('sandboxes nobody owns', () => {
-  it('leaves none up after a supervise pass once the process that made them died, on any host', async () => {
-    const provider = new FakeSandbox()
-    const spec = { egress: [{ domain: 'github.com' }], timeoutMs: 60_000 }
-    const lease = (id: string, host: string, beatAgoMs: number) =>
-      getDb()
-        .insert(sandboxLease)
-        .values({ id, host, beatAt: new Date(NOW.getTime() - beatAgoMs) })
-    // Two evaluation processes on other hosts and a worker on this one; one of the evaluations dies.
-    await lease('eval-live', 'elsewhere', 10_000)
-    await lease('eval-dead', 'elsewhere', 10 * 60_000)
-    await lease('worker-dead', 'here', 10 * 60_000)
+  const spec = { egress: [{ domain: 'github.com' }], timeoutMs: 60_000 }
+  /** A sandbox made by the fake provider, as the process `by` would have made it. */
+  async function make(provider: FakeSandbox, owner: SandboxOwner, by: ProcessIdentity) {
+    await provider.create({ ...spec, owner })
+    const last = [...provider.up.values()].at(-1)!
+    last.metadata = metadataFor(owner, by)
+  }
+  const pass = (provider: FakeSandbox, at: Date) =>
+    supervise({
+      db: getDb(),
+      now: () => at,
+      listSandboxes: () => provider.listSandboxes(),
+      killSandbox: (id) => provider.killSandbox(id),
+    })
+
+  it('leaves no sandbox up after one pass once the evaluation process that made them was killed', async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 60_000)'], {
+      stdio: 'ignore',
+    })
+    await once(child, 'spawn')
+    const evaluation = identityOf(child.pid!, 'killed-evaluation')
+    await beat(getDb(), evaluation)
+    await beat(getDb(), THIS_PROCESS)
     const taskId = await seed('build', 1)
     await getDb().update(task).set({ sandboxRun: 'run-1' }).where(eq(task.id, taskId))
-    const make = async (owner: SandboxOwner, leaseId: string) => {
-      await provider.create({ ...spec, owner })
-      const last = [...provider.up.values()].at(-1)!
-      last.metadata = metadataFor(owner, { host: 'x', lease: leaseId })
-    }
-    await make({ owner: 'eval', caseId: 'a', runId: 'r' }, 'eval-live')
-    await make({ owner: 'eval', caseId: 'b', runId: 'r' }, 'eval-dead')
-    await make({ owner: 'task', taskId, run: 'run-1' }, 'worker-dead')
-    await make({ owner: 'task', taskId, run: 'run-1' }, 'eval-live')
-    await make({ owner: 'task', taskId, run: 'run-0' }, 'eval-live')
-    const run = () =>
-      supervise({
-        db: getDb(),
-        now,
-        listSandboxes: () => provider.listSandboxes(),
-        killSandbox: (id) => provider.killSandbox(id),
-      })
+    const provider = new FakeSandbox()
+    await make(provider, { owner: 'eval', caseId: 'a', runId: 'r' }, evaluation)
+    await make(provider, { owner: 'task', taskId, run: 'run-1' }, evaluation)
+    await make(provider, { owner: 'eval', caseId: 'b', runId: 'r' }, THIS_PROCESS)
 
-    // The dead evaluation, the task whose worker died while it was still in build, and the old run go.
-    expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-2', 'sbx-3', 'sbx-5'])
-    expect([...provider.up.keys()]).toEqual(['sbx-1', 'sbx-4'])
-    expect((await run()).reaped).toBeUndefined()
+    // Killed a moment before the pass: its last beat is fresh, and only its exit says it is gone.
+    child.kill('SIGKILL')
+    await once(child, 'exit')
+    const result = await pass(provider, new Date())
+
+    expect(result.reaped?.map((k) => k.id)).toEqual(['sbx-1', 'sbx-2'])
+    expect([...provider.up.keys()]).toEqual(['sbx-3'])
+  })
+
+  it('kills nothing whose process lives after a database outage longer than the lease window', async () => {
+    const recovered = new Date()
+    const lastBeat = new Date(recovered.getTime() - 10 * 60_000)
+    const remote: ProcessIdentity = {
+      lease: 'remote-worker',
+      host: 'another-host',
+      pid: 7,
+      started: '1',
+    }
+    await beat(getDb(), THIS_PROCESS, lastBeat)
+    await beat(getDb(), remote, lastBeat)
+    const provider = new FakeSandbox()
+    await make(provider, { owner: 'eval', caseId: 'a', runId: 'r' }, THIS_PROCESS)
+    await make(provider, { owner: 'prove-checks', repository: 'a/b' }, remote)
+    // Another application on the same account, with words the factory also uses: never the factory's to stop.
+    provider.up.set('theirs', {
+      id: 'theirs',
+      startedAt: lastBeat,
+      metadata: { owner: 'eval', lease: 'their-own-lease' },
+    })
+
+    // The first pass after the outage sees both leases quiet; the remote worker beats again before the next.
+    const first = await pass(provider, recovered)
+    await beat(getDb(), remote, new Date(recovered.getTime() + LEASE_BEAT_MS))
+    const second = await pass(provider, new Date(recovered.getTime() + 5 * 60_000))
+
+    expect(first.reaped).toBeUndefined()
+    expect(second.reaped).toBeUndefined()
+    expect([...provider.up.keys()]).toEqual(['sbx-1', 'sbx-2', 'theirs'])
+  })
+
+  it('kills the sandboxes of a process on another host that stays quiet a lease window after a pass suspected it', async () => {
+    const at = new Date()
+    const remote: ProcessIdentity = {
+      lease: 'remote-gone',
+      host: 'another-host',
+      pid: 7,
+      started: '1',
+    }
+    await beat(getDb(), remote, new Date(at.getTime() - 10 * 60_000))
+    const provider = new FakeSandbox()
+    await make(provider, { owner: 'eval', caseId: 'a', runId: 'r' }, remote)
+
+    const first = await pass(provider, at)
+    const second = await pass(provider, new Date(at.getTime() + 5 * 60_000))
+
+    expect(first.reaped).toBeUndefined()
+    expect(second.reaped?.map((k) => k.id)).toEqual(['sbx-1'])
+    expect(provider.up.size).toBe(0)
   })
 })

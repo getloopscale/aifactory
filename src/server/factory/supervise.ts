@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { finding, question, stageEvent, task, watch } from '../db/schema'
 
-import { reapSandboxes } from './sandbox-reaper'
+import { reapSandboxes } from './reap-sandboxes'
 import type { ListedSandbox } from './sandbox'
 import { WATCH_WINDOW_MS } from './watch'
 

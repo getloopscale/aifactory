@@ -33,7 +33,8 @@ import {
   withRecipe,
   type Recipe,
 } from './recipe'
-import { E2B_SANDBOX_LIMIT, atWork, readReaperFacts } from './sandbox-reaper'
+import { E2B_SANDBOX_LIMIT, atWork } from './sandbox-reaper'
+import { readReaperFacts } from './sandbox-reaper-facts'
 import type { IsolatedSandboxProvider } from './sandbox'
 import { loadRepoConfig, type RepoConfig } from './repo-config'
 

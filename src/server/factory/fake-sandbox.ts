@@ -7,6 +7,7 @@ import type {
   SandboxSpec,
   StreamingOptions,
 } from './sandbox'
+import { THIS_PROCESS } from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
 
 export type Reply = { stdout?: string; stderr?: string; exitCode?: number }
@@ -68,7 +69,7 @@ export class FakeSandbox implements IsolatedSandboxProvider {
     this.up.set(id, {
       id,
       startedAt: new Date(),
-      metadata: metadataFor(spec.owner),
+      metadata: metadataFor(spec.owner, THIS_PROCESS),
     })
     return {
       backend: this.backend,

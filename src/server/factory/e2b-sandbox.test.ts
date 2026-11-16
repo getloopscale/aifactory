@@ -19,6 +19,7 @@ import {
   SANDBOX_ENV,
   sandboxOptions,
 } from './e2b-sandbox'
+import { THIS_PROCESS } from './sandbox-lease'
 
 const spec = (egress: { domain: string; headers?: Record<string, string> }[]) => ({
   egress,
@@ -316,8 +317,13 @@ describe('sandboxOptions', () => {
       { ...spec([{ domain: 'github.com' }]), owner: { owner: 'task', taskId: 7, run: 'abc' } },
       { E2B_API_KEY: 'k' },
     )
-    expect(options.metadata).toMatchObject({ owner: 'task', taskId: '7', run: 'abc' })
-    expect(options.metadata.host).toBeTruthy()
+    expect(options.metadata).toMatchObject({
+      app: 'aifactory',
+      owner: 'task',
+      taskId: '7',
+      run: 'abc',
+    })
+    expect(options.metadata).toMatchObject({ host: THIS_PROCESS.host, lease: THIS_PROCESS.lease })
     expect(options.apiKey).toBe('k')
   })
 
