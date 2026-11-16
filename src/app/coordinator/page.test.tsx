@@ -59,6 +59,7 @@ describe('the coordinator list', () => {
         actions: url.includes('outcome=escalated')
           ? [row({ id: 2, outcome: 'escalated', reason: 'only this' })]
           : [row({ id: 1 })],
+        more: false,
       }),
     )
     vi.stubGlobal('fetch', fetchMock)
@@ -67,5 +68,41 @@ describe('the coordinator list', () => {
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'escalated' } })
     await waitFor(() => expect(screen.getByText(/only this/)).toBeTruthy())
     expect(fetchMock.mock.calls.some(([u]) => String(u).includes('?outcome=escalated'))).toBe(true)
+  })
+
+  it('drops the answer to an earlier filter that arrives last', async () => {
+    let releaseAll: (r: Response) => void = () => {}
+    const slow = new Promise<Response>((resolve) => (releaseAll = resolve))
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        String(url).includes('outcome=escalated')
+          ? Promise.resolve(
+              Response.json({ actions: [row({ id: 2, reason: 'escalated one' })], more: false }),
+            )
+          : slow,
+      ),
+    )
+    render(<Page />)
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'escalated' } })
+    await screen.findByText(/escalated one/)
+    releaseAll(Response.json({ actions: [row({ id: 1, reason: 'unfiltered one' })], more: false }))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.queryByText(/unfiltered one/)).toBeNull()
+  })
+
+  it('loads older decisions with the count it already has', async () => {
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).includes('offset=1')
+        ? Response.json({ actions: [row({ id: 1, reason: 'older' })], more: false })
+        : Response.json({ actions: [row({ id: 2, reason: 'newer' })], more: true }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    render(<Page />)
+    await screen.findByText(/newer/)
+    fireEvent.click(screen.getByText(en.coordinator.loadMore))
+    await screen.findByText(/older/)
+    expect(screen.getByText(/newer/)).toBeTruthy()
+    expect(screen.queryByText(en.coordinator.loadMore)).toBeNull()
   })
 })

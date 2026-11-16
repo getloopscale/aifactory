@@ -367,10 +367,36 @@ describe('the coordinator on the panel', () => {
     const detail = await taskDetail(getDb(), id)
     expect(detail?.coordinatorActions.map((a) => a.reason)).toEqual(['second', 'first'])
     const only = await coordinatorActions(getDb(), 'escalated')
-    expect(only.map((a) => a.reason)).toEqual(['second'])
-    expect(await coordinatorActions(getDb())).toHaveLength(2)
+    expect(only.actions.map((a) => a.reason)).toEqual(['second'])
+    expect((await coordinatorActions(getDb())).actions).toHaveLength(2)
+    const first = await coordinatorActions(getDb(), undefined, 0, 1)
+    expect(first.actions.map((a) => a.reason)).toEqual(['second'])
+    expect(first.more).toBe(true)
+    const next = await coordinatorActions(getDb(), undefined, 1, 1)
+    expect(next.actions.map((a) => a.reason)).toEqual(['first'])
+    expect(next.more).toBe(false)
     const items = await inbox(getDb())
     expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('second')
+  })
+
+  it('does not give the inbox an escalation from before the task was resumed and failed again', async () => {
+    const id = await seed('failed', {}, [{ stage: 'handoff' }])
+    await getDb()
+      .insert(coordinatorAction)
+      .values({
+        taskId: id,
+        exceptionKind: 'handoff',
+        headSha: 'a',
+        action: 'escalate',
+        outcome: 'escalated',
+        reason: 'old reason',
+        at: new Date(Date.now() - 60_000),
+      })
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'failed', detail: { error: 'boom' }, at: new Date() })
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBeNull()
   })
 })
 

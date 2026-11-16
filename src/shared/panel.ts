@@ -371,7 +371,7 @@ export type InboxItem = {
   /** One line that says what is wanted. */
   summary: string
   /** Why the coordinator escalated the task, when it did. */
-  coordinatorReason: string | null
+  coordinatorReason?: string | null
   at: string
 }
 

@@ -615,6 +615,7 @@ export const en = {
     filter: 'Outcome',
     all: 'All',
     empty: 'The coordinator has decided nothing yet.',
+    loadMore: 'Show older decisions',
     reasonLabel: 'Reason',
     draftLabel: 'Drafted text',
     escalatedBy: (reason: string) => `The coordinator escalated it: ${reason}`,

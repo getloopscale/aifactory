@@ -8,6 +8,11 @@ import { coordinatorActions } from '../../panel/queries'
 
 export const GET = route()
   .policy(ownerOnly)
-  .query(z.object({ outcome: z.enum(COORDINATOR_OUTCOMES).optional() }))
-  .handler(async ({ query }) => ({ actions: await coordinatorActions(getDb(), query.outcome) }))
+  .query(
+    z.object({
+      outcome: z.enum(COORDINATOR_OUTCOMES).optional(),
+      offset: z.coerce.number().int().min(0).default(0),
+    }),
+  )
+  .handler(async ({ query }) => coordinatorActions(getDb(), query.outcome, query.offset))
   .build()

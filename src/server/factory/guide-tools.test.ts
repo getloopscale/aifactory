@@ -37,7 +37,6 @@ describe('what the guides read', () => {
       task,
       kind: 'review',
       summary: `s${i}`.repeat(100),
-      coordinatorReason: null,
       at: 'now',
     }))
     const out = inboxForGuide(items)

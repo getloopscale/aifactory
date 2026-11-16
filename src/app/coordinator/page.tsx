@@ -1,20 +1,65 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router'
 
 import type { CoordinatorActionView } from '../../shared/panel'
 import { CoordinatorActions } from '../components/CoordinatorActions'
+import { get } from '../lib/api'
 import { useCopy } from '../lib/copy'
-import { useResource } from '../lib/live'
 
 const OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated']
+
+type Page = { actions: CoordinatorActionView[]; more: boolean }
+
+const address = (outcome: string, offset: number) => {
+  const query = new URLSearchParams()
+  if (outcome) query.set('outcome', outcome)
+  if (offset > 0) query.set('offset', String(offset))
+  const text = query.toString()
+  return `/api/panel/coordinator${text ? `?${text}` : ''}`
+}
 
 /** What the coordinator decided across tasks, newest first, filtered by what became of it. */
 export default function CoordinatorPage() {
   const { t } = useCopy()
   const [outcome, setOutcome] = useState('')
-  const list = useResource<{ actions: CoordinatorActionView[] }>(
-    `/api/panel/coordinator${outcome ? `?outcome=${outcome}` : ''}`,
-  )
+  const [rows, setRows] = useState<CoordinatorActionView[]>()
+  const [more, setMore] = useState(false)
+  const [error, setError] = useState<string>()
+  // The outcome the page is asking about now: an answer to an earlier one is dropped.
+  const current = useRef(outcome)
+
+  useEffect(() => {
+    current.current = outcome
+    setRows(undefined)
+    setMore(false)
+    setError(undefined)
+    get<Page>(address(outcome, 0))
+      .then((page) => {
+        if (current.current !== outcome) return
+        setRows(page.actions)
+        setMore(page.more)
+      })
+      .catch((e: unknown) => {
+        if (current.current === outcome) setError(e instanceof Error ? e.message : String(e))
+      })
+  }, [outcome])
+
+  const loadMore = useCallback(() => {
+    const asked = outcome
+    get<Page>(address(asked, rows?.length ?? 0))
+      .then((page) => {
+        if (current.current !== asked) return
+        setRows((have) => {
+          const ids = new Set((have ?? []).map((r) => r.id))
+          return [...(have ?? []), ...page.actions.filter((r) => !ids.has(r.id))]
+        })
+        setMore(page.more)
+      })
+      .catch((e: unknown) => {
+        if (current.current === asked) setError(e instanceof Error ? e.message : String(e))
+      })
+  }, [outcome, rows])
+
   return (
     <>
       <Link to="/inbox" className="text-sm text-muted-foreground hover:text-foreground">
@@ -37,12 +82,23 @@ export default function CoordinatorPage() {
           ))}
         </select>
       </label>
-      {list.error ? <p className="text-sm text-destructive">{list.error}</p> : null}
-      {list.data ? (
-        list.data.actions.length === 0 ? (
+      {error ? <p className="text-sm text-destructive">{error}</p> : null}
+      {rows ? (
+        rows.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t.coordinator.empty}</p>
         ) : (
-          <CoordinatorActions actions={list.data.actions} withTask />
+          <>
+            <CoordinatorActions actions={rows} withTask />
+            {more ? (
+              <button
+                type="button"
+                onClick={loadMore}
+                className="mt-3 rounded-md border border-border px-3 py-1 text-sm"
+              >
+                {t.coordinator.loadMore}
+              </button>
+            ) : null}
+          </>
         )
       ) : (
         <p className="text-sm text-muted-foreground">{t.layout.loading}</p>

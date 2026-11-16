@@ -226,20 +226,31 @@ const actionView = (a: ActionRow, owner: TaskRow): CoordinatorActionView => ({
   at: iso(a.at),
 })
 
-/** The coordinator's decisions across tasks, newest first, all of them or only those with one outcome. */
+/** A page of the coordinator's decisions: `more` says there are older ones after the last. */
+export type CoordinatorPage = { actions: CoordinatorActionView[]; more: boolean }
+
+/**
+ * The coordinator's decisions across tasks, newest first, all of them or only those with one outcome, a page
+ * at a time: `offset` is how many the reader already has.
+ */
 export async function coordinatorActions(
   db: Database,
   outcome?: ActionRow['outcome'],
-  limit = 200,
-): Promise<CoordinatorActionView[]> {
+  offset = 0,
+  limit = 50,
+): Promise<CoordinatorPage> {
   const rows = await db
     .select({ action: coordinatorAction, owner: task })
     .from(coordinatorAction)
     .innerJoin(task, eq(task.id, coordinatorAction.taskId))
     .where(outcome ? eq(coordinatorAction.outcome, outcome) : undefined)
     .orderBy(desc(coordinatorAction.at), desc(coordinatorAction.id))
-    .limit(limit)
-  return rows.map((r) => actionView(r.action, r.owner))
+    .limit(limit + 1)
+    .offset(offset)
+  return {
+    actions: rows.slice(0, limit).map((r) => actionView(r.action, r.owner)),
+    more: rows.length > limit,
+  }
 }
 
 export async function taskDetail(db: Database, id: number): Promise<TaskDetail | undefined> {
@@ -373,10 +384,10 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
     .from(coordinatorAction)
     .where(eq(coordinatorAction.outcome, 'escalated'))
     .orderBy(asc(coordinatorAction.at), asc(coordinatorAction.id))
-  // The latest escalation of each task, because that is the one that left it with a person.
-  const reasons = new Map(escalated.map((a) => [a.taskId, a.reason]))
+  // The latest escalation of each task: it is the current one only when it came after the stage event the
+  // item is about, because a task a person resumed and that later failed is another incident.
+  const latest = new Map(escalated.map((a) => [a.taskId, a]))
   for (const card of all) {
-    const coordinatorReason = reasons.get(card.id) ?? null
     const [last] = await db
       .select()
       .from(stageEvent)
@@ -385,6 +396,9 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
       .limit(1)
     const detail = (last?.detail ?? {}) as Record<string, unknown>
     const at = last ? iso(last.at) : card.updatedAt
+    const escalation = latest.get(card.id)
+    const coordinatorReason =
+      last && escalation && escalation.at >= last.at ? escalation.reason : null
     if (card.stage === 'waiting') {
       items.push({
         task: card,

@@ -845,6 +845,7 @@ export const ptBR: Copy = {
     filter: 'Resultado',
     all: 'Todos',
     empty: 'O coordenador ainda não decidiu nada.',
+    loadMore: 'Mostrar decisões mais antigas',
     reasonLabel: 'Motivo',
     draftLabel: 'Texto redigido',
     escalatedBy: (reason: string) => `O coordenador encaminhou para uma pessoa: ${reason}`,
