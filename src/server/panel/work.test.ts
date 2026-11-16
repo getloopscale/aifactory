@@ -69,6 +69,13 @@ describe('patchProblem', () => {
     }
   })
 
+  it('takes a run limit from 50 to 240 minutes, and null to go back to the default', () => {
+    const refused = 'a run may last from 50 to 240 minutes'
+    for (const ok of [null, 50, 240])
+      expect(problem({ runLimitMinutes: ok }), `${ok}`).toBeUndefined()
+    for (const bad of [49, 241]) expect(problem({ runLimitMinutes: bad }), `${bad}`).toBe(refused)
+  })
+
   it('accepts a domain in any case, and refuses what is not a hostname', () => {
     expect(problem({ egress: ['PyPI.ORG'] })).toBeUndefined()
     expect(problem({ egress: ['pypi.org', 'localhost'] })).toBe('"localhost" is not a domain name')
