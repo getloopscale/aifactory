@@ -15,7 +15,7 @@ type PanelEvent =
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
  * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over task back to its
- * agent (`coordinator/apply.ts`).
+ * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left.
  */
 type AutomaticEvent =
   | 'retry_due'
@@ -24,6 +24,7 @@ type AutomaticEvent =
   | 'coordinator_send_back'
   | 'hand_over'
   | 'integrate'
+  | 'merged_by_person'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
 type WebhookEvent = 'issue_labeled' | RoutedCode
@@ -49,6 +50,8 @@ export type Action =
   | 'open_follow_up_issue'
   | 're_evaluate_integration'
   | 'cancel'
+  /** A person merged the work a handoff left: it is integrated, and goes on to the release like any other. */
+  | 'adopt_merge'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -275,6 +278,13 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
       ['waiting', 'done', 'released', 'handoff', 'failed', 'cancelled'],
       NOT_AT_ITS_PULL_REQUEST,
     ),
+  },
+  merged_by_person: {
+    ...each(
+      ['intake', ...WORKING, 'waiting', 'done', 'released', 'failed', 'cancelled'],
+      ignore('only the pull request a handoff left waits for a person to merge it'),
+    ),
+    handoff: act('adopt_merge'),
   },
 
   issue_labeled: {

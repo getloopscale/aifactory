@@ -36,7 +36,7 @@ import {
   type Handed,
   type Integrated,
 } from './integration'
-import { heldForEvaluation } from '../evals/cases'
+import { heldForEvaluation, heldForReview } from '../evals/cases'
 import { integrationHeldUntil } from './promotion-merge'
 import {
   DEFAULT_CHECKS,
@@ -152,12 +152,24 @@ const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
 /** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
 type Held = { headline: string; reason: string; cause: HandoffCause }
 
-/** The hold of approved work that changes the agents' configuration (#139). */
-const heldFor = (paths: string[]): Held => ({
-  headline: 'The reviewer approved this, and it waits for a person',
-  reason: `it changes agent configuration (${paths.join(', ')}), which the factory never integrates on its own: run \`pnpm evals:check\` against the recorded baseline, then merge the pull request yourself`,
-  cause: 'agent_configuration',
-})
+/**
+ * The hold of approved work that changes the agents' configuration or the quality gates (#139), or nothing.
+ * The first waits for an evaluation; the second for the owner's reading, since no evaluation measures a gate.
+ */
+export function heldFor(evaluated: string[], reviewed: string[]): Held | undefined {
+  const steps = [
+    evaluated.length > 0 &&
+      `run \`pnpm evals:check\` against the recorded baseline for the agent configuration (${evaluated.join(', ')})`,
+    reviewed.length > 0 &&
+      `read the change to the quality gates (${reviewed.join(', ')}), which no evaluation measures`,
+  ].filter((step): step is string => typeof step === 'string')
+  if (steps.length === 0) return undefined
+  return {
+    headline: 'The reviewer approved this, and it waits for a person',
+    reason: `it changes what the factory never integrates on its own: ${steps.join(', and ')}; then merge the pull request yourself, and the factory takes it to the release`,
+    cause: 'agent_configuration',
+  }
+}
 
 /** The stages that end a run; a task goes through them again when a person sends it back. */
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
@@ -1483,8 +1495,11 @@ export class Run {
     outcome: ReviewVerdict,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
-    const held = heldForEvaluation(row.repository, this.touched, deps.ownRepository)
-    if (held.length > 0) return this.handOver(sha, attempt, here, outcome, [], heldFor(held))
+    const held = heldFor(
+      heldForEvaluation(row.repository, this.touched, deps.ownRepository),
+      heldForReview(row.repository, this.touched, deps.ownRepository),
+    )
+    if (held) return this.handOver(sha, attempt, here, outcome, [], held)
     state.current = 'pr'
     await enterStage(deps.db, taskId, 'pr', { branch, sha })
     const pull = await api.openPullRequest(row.repository, this.c.token, {

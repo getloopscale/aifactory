@@ -1,6 +1,6 @@
 import { defineCron } from 'theokit/server/cron'
 
-import { pollAwaitingIntegrations } from '../factory/await-ci'
+import { adoptMergedHandoffs, pollAwaitingIntegrations } from '../factory/await-ci'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { releaseModeFromEnv } from '../factory/deps'
 import { adoptPromotions, pollPromotionWaits } from '../factory/promotion-merge'
@@ -20,6 +20,7 @@ import { actionDeps } from '../panel/deps'
  * Promotions into the pre-release branch are looked at first: one GitHub merged ends its hold, so the
  * integrations it held out go in on the same pass, and one whose head moved is pinned to the new head. An
  * open promotion that nothing waits on, while integrated work waits for a release, is pinned the same way.
+ * A pull request a handoff left, once a person merged it, is integrated from that merge (`adoptMergedHandoffs`).
  */
 export default defineCron('integrate-after-ci', {
   schedule: '*/2 * * * *',
@@ -49,6 +50,10 @@ export default defineCron('integrate-after-ci', {
             sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
             startOver: (taskId) => retryAutomatically(actions, taskId),
           }),
+      ],
+      [
+        'handoff_merged',
+        () => adoptMergedHandoffs({ ...github, releaseMode: releaseModeFromEnv(process.env) }),
       ],
       ['release_after_ci', () => pollAwaitingReleases(github)],
     ]
