@@ -283,6 +283,77 @@ describe('pollAwaitingIntegrations', () => {
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
   })
 
+  it('remembers the base was blamed: once it is fixed, the failed jobs run again and nothing goes back', async () => {
+    const link = 'https://github.com/paulo/app/actions/runs/431/job/1308'
+    const BASE = 'b'.repeat(40)
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: link })
+    gh.failedRuns = [{ id: 1308, name: 'CI', url: link, summary: '', actions: true }]
+    gh.jobs = { 1308: { runId: 431, attempt: 1 } }
+    repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
+    const id = await waitingTask()
+    const reran: number[] = []
+    const withRerun = () =>
+      deps({
+        checks: {
+          ...checks,
+          rerunFailedJobs: async (_repo, _token, runId) => {
+            reran.push(runId)
+            return { started: true as const }
+          },
+        },
+      })
+
+    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ waitingOnBase: [id] })
+
+    // The base is fixed, and the verified commit still shows the old failure.
+    repo().clearChecks(BASE)
+    repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
+    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [], rerun: [id] })
+    expect(reran).toEqual([431])
+
+    // Failing again after the rerun is the change's own failure.
+    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [id] })
+    expect(reran).toEqual([431])
+  })
+
+  it('tells a person, and sends nothing back, when the factory cannot run the blamed check again', async () => {
+    const link = 'https://github.com/paulo/app/actions/runs/431/job/1308'
+    const BASE = 'b'.repeat(40)
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: link })
+    gh.failedRuns = [{ id: 1308, name: 'CI', url: link, summary: '', actions: true }]
+    gh.jobs = { 1308: { runId: 431, attempt: 1 } }
+    repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    repo().clearChecks(BASE)
+    repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
+
+    const refusing = deps({
+      checks: { ...checks, rerunFailedJobs: async () => ({ started: false as const, refusal: '403' }) },
+    })
+    expect(await pollAwaitingIntegrations(refusing)).toMatchObject({ sentBack: [], toPerson: [id] })
+  })
+
+  it('records a failed read of the base and looks again, without blaming the task', async () => {
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
+    const id = await waitingTask()
+    const broken = deps()
+    const realApi = broken.api
+    const failing = {
+      ...broken,
+      api: Object.assign(Object.create(realApi), {
+        branchHead: async () => {
+          throw new Error('GitHub answered 502')
+        },
+      }),
+    } as AwaitCiDeps
+
+    const result = await pollAwaitingIntegrations(failing)
+    expect(result).toMatchObject({ sentBack: [] })
+    expect(result.errors).toEqual([`task ${id}: GitHub answered 502`])
+    expect(sentBack).toEqual([])
+  })
+
   it('sends the work back when the check passes on the integration branch', async () => {
     reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
     repo().report('b'.repeat(40), { name: 'CI', state: 'success', url: 'https://ci/0' })

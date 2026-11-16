@@ -37,6 +37,11 @@ export type FailedReport = CheckReport & {
 export type WaitingStep =
   /** `baseRed` names the required checks that fail on the base too: the task waits for the base, not for a fix. */
   | { kind: 'wait'; baseRed?: string[] }
+  /**
+   * Checks blamed on the base before, which the base no longer fails, still show the old failure on the
+   * verified commit: their failed jobs run again, and the builder is not sent back for them.
+   */
+  | { kind: 'rerun'; checks: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
   | { kind: 'finish'; mergedSha: string }
   /**
@@ -63,6 +68,11 @@ export type WaitingIntegration = {
   reports: CheckReport[]
   /** Every check reported on the head of the integration branch, when it could be read. */
   baseReports?: CheckReport[]
+  /**
+   * The checks an earlier pass blamed on the base for this verified commit (`done.detail.baseBlame`), and
+   * whether their jobs were already run again.
+   */
+  baseBlame?: { checks: string[]; rerun: boolean }
   /** How long the pull request has waited. */
   waitedMs: number
   /** Automatic runs since a person last started the task. */
@@ -163,8 +173,11 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   // A check that fails on the base too is not this change's failure: nothing the builder does fixes it.
   const base = input.baseReports ?? []
   const baseRed = allFailed.filter((name) => failedRuns(base, name).length > 0)
-  const failed = allFailed.filter((name) => !baseRed.includes(name))
-  if (failed.length === 0 && baseRed.length > 0) return { kind: 'wait', baseRed }
+  // Blamed on the base before, and the base no longer fails it: the failure on this commit is old news.
+  const blamed = input.baseBlame && !input.baseBlame.rerun ? input.baseBlame.checks : []
+  const healed = allFailed.filter((name) => blamed.includes(name) && !baseRed.includes(name))
+  const settling = healed.filter((name) => base.some((r) => r.name === name && r.state === 'pending'))
+  const failed = allFailed.filter((name) => !baseRed.includes(name) && !healed.includes(name))
   if (failed.length > 0) {
     if (!runsLeft) {
       return {
@@ -184,7 +197,9 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       stopAutoMerge: true,
     }
   }
-  return { kind: 'wait' }
+  const rerun = healed.filter((name) => !settling.includes(name))
+  if (rerun.length > 0) return { kind: 'rerun', checks: rerun }
+  return baseRed.length > 0 ? { kind: 'wait', baseRed } : { kind: 'wait' }
 }
 
 const unread = (r: FailedReport) => r.evidence !== undefined && 'unreadable' in r.evidence

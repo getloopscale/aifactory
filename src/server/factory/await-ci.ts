@@ -3,11 +3,12 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import type { PromotionApi } from '../github/promotion-api'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
-import { attachEvidence, type EvidenceApi } from './check-evidence'
+import { attachEvidence, runOf, type EvidenceApi } from './check-evidence'
 import {
   checksFeedback,
   decideWaitingIntegration,
@@ -32,7 +33,7 @@ export type AwaitCiDeps = {
   github: GithubApp
   api: GithubApi
   /** Reads the log or annotations of a failed check, so the note carries what the sandbox cannot open. */
-  checks: EvidenceApi
+  checks: EvidenceApi & Partial<Pick<PromotionApi, 'rerunFailedJobs'>>
   /** The factory's release mode, for a repository that sets none. */
   releaseMode: ReleaseMode | undefined
   now?: () => Date
@@ -53,6 +54,8 @@ export type AwaitCiResult = {
   waiting: number
   /** Tasks that wait because every failed required check also fails on the integration branch. */
   waitingOnBase: number[]
+  /** Tasks whose checks, blamed on the base before, ran again once the base was fixed. */
+  rerun: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
   /** Failed checks whose evidence GitHub would not give: the work went back with their links only. */
@@ -247,7 +250,8 @@ async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]):
 
 /**
  * What the integration branch's head reports, read only when a check failed on the pull request. A read that
- * fails is no answer: the task is then judged on its own checks, as before.
+ * fails throws: the pass records it and looks at the task again, rather than blaming the task for a failure
+ * it cannot tell from the base's.
  */
 async function readBase(
   deps: AwaitCiDeps,
@@ -257,12 +261,49 @@ async function readBase(
   reports: CheckReport[],
 ): Promise<CheckReport[] | undefined> {
   if (!reports.some((r) => r.state === 'failure')) return undefined
-  try {
-    const head = await deps.api.branchHead(repository, token, branch)
-    return head ? await deps.api.checkReports(repository, token, head) : undefined
-  } catch {
-    return undefined
+  const head = await deps.api.branchHead(repository, token, branch)
+  if (!head) throw new Error(`the integration branch ${branch} has no head to compare the checks with`)
+  return deps.api.checkReports(repository, token, head)
+}
+
+type BaseBlame = { checks: string[]; rerun: boolean }
+
+/** Remembers on the `done` event which checks were blamed on the base, so a later pass still knows. */
+async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown, blame: BaseBlame) {
+  await deps.db
+    .update(stageEvent)
+    .set({ detail: { ...(detail as Record<string, unknown>), baseBlame: blame } })
+    .where(eq(stageEvent.id, doneId))
+}
+
+/**
+ * The checks blamed on the base are fixed there but still show the old failure here: their failed jobs run
+ * again. When the factory cannot, a person is told, and the builder is not sent back for a failure that
+ * was never the change's.
+ */
+async function rerunBlamed(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  reports: CheckReport[],
+  names: string[],
+): Promise<string | undefined> {
+  const { row, token, verifiedSha } = w
+  const { checks } = deps
+  if (!checks.rerunFailedJobs || !checks.jobAttempt) return 'it cannot run jobs again'
+  const runs = await checks.failedChecks(row.repository, token, verifiedSha)
+  const ids = new Set<number>()
+  for (const name of names) {
+    for (const report of reports.filter((r) => r.name === name && r.state === 'failure')) {
+      const run = runOf(runs, report)
+      if (!run) return `it could not find the run of ${name}`
+      ids.add((await checks.jobAttempt(row.repository, token, run.id)).runId)
+    }
   }
+  for (const id of ids) {
+    const answer = await checks.rerunFailedJobs(row.repository, token, id)
+    if (!answer.started) return answer.refusal
+  }
+  return undefined
 }
 
 async function look(
@@ -273,7 +314,7 @@ async function look(
 ) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
-    .select({ detail: stageEvent.detail, at: stageEvent.at })
+    .select({ id: stageEvent.id, detail: stageEvent.detail, at: stageEvent.at })
     .from(stageEvent)
     .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'done')))
     .orderBy(desc(stageEvent.id))
@@ -289,11 +330,13 @@ async function look(
   const pull = await deps.api.readPullRequest(row.repository, token, number)
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
+  const blame = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
   const step = decideWaitingIntegration({
     verifiedSha,
     pull,
     required,
     reports,
+    ...(blame ? { baseBlame: blame } : {}),
     baseReports: await readBase(deps, row.repository, token, integrationBranch(repo), reports),
     waitedMs:
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
@@ -312,8 +355,27 @@ async function look(
   switch (step.kind) {
     case 'wait':
       result.waiting += 1
-      if (step.baseRed) result.waitingOnBase.push(row.id)
+      if (step.baseRed) {
+        result.waitingOnBase.push(row.id)
+        if (done && (!blame || blame.rerun)) {
+          await rememberBlame(deps, done.id, done.detail, { checks: step.baseRed, rerun: false })
+        }
+      }
       return
+    case 'rerun': {
+      // Recorded first: a second pass must not run them again, whatever the rerun answers.
+      await rememberBlame(deps, done!.id, done!.detail, { checks: step.checks, rerun: true })
+      const refused = await rerunBlamed(deps, w, reports, step.checks)
+      if (refused === undefined) {
+        result.rerun.push(row.id)
+        return
+      }
+      const reason = `${step.checks.join(', ')} failed on the base, which is fixed now, but the check still shows that failure here and the factory could not run it again (${refused}): run it again`
+      if (await toPerson(deps, w, { kind: 'person', reason, stopAutoMerge: false })) {
+        result.toPerson.push(row.id)
+      }
+      return
+    }
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
       return
@@ -360,6 +422,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     toPerson: [],
     waiting: 0,
     waitingOnBase: [],
+    rerun: [],
     errors: [],
     unreadEvidence: [],
   }
