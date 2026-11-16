@@ -27,6 +27,7 @@ function Settings({
   const { t } = useCopy()
   const s = t.repositories.settings
   const [checks, setChecks] = useState(formatChecks(repo.checks))
+  const [fixes, setFixes] = useState((repo.fixes ?? []).join('\n'))
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
@@ -53,6 +54,10 @@ function Settings({
       const parsed = parseChecks(checks)
       await put(`/api/panel/repositories/${repo.fullName}`, {
         checks: parsed.length > 0 ? parsed : null,
+        fixes: fixes
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean),
         egress: parseDomains(domains),
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,
@@ -89,6 +94,16 @@ function Settings({
           onChange={(e) => setChecks(e.target.value)}
           rows={3}
           placeholder={s.checksPlaceholder}
+          className="mt-1 w-full font-mono"
+        />
+      </label>
+      <label className="block">
+        <span className="text-foreground">{s.fixes}</span>
+        <Textarea
+          value={fixes}
+          onChange={(e) => setFixes(e.target.value)}
+          rows={2}
+          placeholder={s.fixesPlaceholder}
           className="mt-1 w-full font-mono"
         />
       </label>

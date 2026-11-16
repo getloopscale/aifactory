@@ -56,6 +56,8 @@ export type RepositoryPatch = {
   enabled?: boolean
   /** `null` clears the owner's checks, so the default (`npm test`) applies. */
   checks?: { name: string; command: string }[] | null
+  /** The commands that rewrite files before each round of checks; empty clears them. */
+  fixes?: string[]
   egress?: string[]
   /** `null` clears it, so the default branch applies. */
   baseBranch?: string | null
@@ -87,6 +89,15 @@ export function patchProblem(patch: RepositoryPatch, agents: string[]): string |
       const command = check.command.trim()
       if (command === '' || command.length > 500 || command.includes('\n')) {
         return `the command of "${check.name}" must be one line of at most 500 characters`
+      }
+    }
+  }
+  if (patch.fixes) {
+    if (patch.fixes.length > MAX_CHECKS) return `at most ${MAX_CHECKS} fixes`
+    for (const fix of patch.fixes) {
+      const command = fix.trim()
+      if (command === '' || command.length > 500 || command.includes('\n')) {
+        return 'each fix must be one line of at most 500 characters'
       }
     }
   }
@@ -144,6 +155,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       reachable: github !== undefined,
       enabled: row?.enabled ?? false,
       checks: row?.checks ?? null,
+      fixes: row?.fixes ?? [],
       egress: row?.egress ?? [],
       baseBranch: row?.baseBranch ?? null,
       releaseBranch: row?.releaseBranch ?? null,
@@ -264,6 +276,7 @@ export async function saveRepository(
   const values = {
     ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
     ...checks.values,
+    ...(patch.fixes === undefined ? {} : { fixes: patch.fixes.map((f) => f.trim()) }),
     ...(patch.egress === undefined
       ? {}
       : { egress: [...new Set(patch.egress.map((d) => d.toLowerCase()))] }),

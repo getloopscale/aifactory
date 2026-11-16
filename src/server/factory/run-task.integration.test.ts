@@ -466,6 +466,55 @@ describe('runTask', () => {
     expect(sandbox.stopped).toBe(1)
   })
 
+  it("passes format on the first round when the repository's fix commits what the builder left unformatted", async () => {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: [{ name: 'format', command: 'prettier --check .' }],
+        fixes: ['prettier --write .'],
+      })
+    const id = await seedTask()
+    let formatted = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.endsWith('prettier --write .')) {
+          formatted = true
+          dirty = true
+          return { stdout: 'src/truncate.js' }
+        }
+        if (c.endsWith('prettier --check .')) return formatted ? {} : { exitCode: 1 }
+        return undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'push',
+      'verify',
+      'review',
+      'pr',
+      'done',
+    ])
+    const [row] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'push')))
+      .orderBy(desc(stageEvent.id))
+    expect(JSON.stringify(row.detail)).toContain('prettier --write .')
+    expect(sandbox.backend.files.get('/tmp/factory-commit-message.txt')).toBe(
+      "style: apply the repository's fixes\n",
+    )
+    const stored = await getDb().select().from(evidence).where(eq(evidence.taskId, id))
+    expect(stored.every((e) => e.passed)).toBe(true)
+  })
+
   it('records the whole cost and the branch on the done stage', async () => {
     const id = await seedTask()
     await runTask(deps(new FakeSandbox(changed())), id)

@@ -18,6 +18,7 @@ import {
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
 import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
+import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
 import { diffFacts } from '../factory/diff-facts'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
 import {
@@ -233,6 +234,21 @@ class CaseRun {
     return this.committed
   }
 
+  /** The repository's fix commands, then their change as its own commit in the sandbox, as `Run.applyFixes`. */
+  private async applyFixes(sha: string): Promise<string> {
+    const fixes = this.c.fixes ?? []
+    if (fixes.length === 0) return sha
+    await runFixes(this.backend, this.repoDir, fixes, this.limits.checkMs ?? DEFAULT_CHECK_MS)
+    const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    if (changes.stdout.trim() === '') return sha
+    await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
+    await this.backend.uploadFile(COMMIT_MESSAGE, `${FIX_COMMIT_MESSAGE}\n`)
+    await must(this.backend, `${this.git} add -A`)
+    await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
+    this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+    return this.committed
+  }
+
   /** Runs the checks on the commit and keeps every result, as the factory keeps its evidence. */
   private async check(sha: string): Promise<CheckResult[]> {
     await must(this.backend, `git -C ${this.repoDir} clean -fdxq`)
@@ -292,7 +308,7 @@ class CaseRun {
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
   async loop(): Promise<CaseEnd> {
     for (;;) {
-      const sha = await this.commit()
+      const sha = await this.applyFixes(await this.commit())
       const failed = await this.check(sha)
       if (failed.length > 0) {
         if (!this.canRework()) {

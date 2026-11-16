@@ -352,6 +352,8 @@ export const en = {
       saved: 'Saved.',
       checks: 'Checks, one per line as name: command',
       checksPlaceholder: 'Empty runs npm test. For example: unit: pnpm test',
+      fixes: 'Fixes, one command per line, run before the checks',
+      fixesPlaceholder: 'Empty runs none. For example: pnpm prettier --write .',
       domains: 'Extra domains the sandbox may reach',
       domainsPlaceholder:
         'GitHub, the agent and the npm registry are always open. For Python: pypi.org, files.pythonhosted.org',

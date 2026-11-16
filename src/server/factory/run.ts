@@ -46,6 +46,7 @@ import {
   type CheckResult,
   type Verdict,
 } from './evidence'
+import { FIX_COMMIT_MESSAGE, runFixes, type FixOutcome } from './fixes'
 import { diffFacts } from './diff-facts'
 import {
   changePlanPrompt,
@@ -379,6 +380,11 @@ export class Run {
   private get title() {
     return squashTitle(this.c.issue.title, this.c.row.issueNumber)
   }
+  private get fixes(): string[] {
+    return this.c.repo.fixes ?? []
+  }
+  /** What the fix commands did before the round of checks that has not yet recorded it. */
+  private fixOutcomes: FixOutcome[] = []
   private get checks() {
     return withChangesetCheck(
       this.c.repo.checks ?? this.c.deps.checks ?? DEFAULT_CHECKS,
@@ -1247,6 +1253,30 @@ export class Run {
   }
 
   /**
+   * Runs the repository's fix commands on the work and, when they changed files, commits and pushes that
+   * change as its own commit. A fix that fails changes nothing; the checks that follow decide. Returns the
+   * head the checks run on.
+   */
+  private async applyFixes(sha: string, attempt: number): Promise<string> {
+    this.fixOutcomes = []
+    if (this.fixes.length === 0) return sha
+    this.fixOutcomes = await runFixes(
+      this.backend,
+      this.repoDir,
+      this.fixes,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
+    const dirty = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    if (dirty.stdout.trim() === '') return sha
+    const pushed = await this.commitAndPush(FIX_COMMIT_MESSAGE, {
+      attempt,
+      fixes: this.fixOutcomes,
+    })
+    this.fixOutcomes = []
+    return pushed
+  }
+
+  /**
    * Runs the checks on the pushed commit and nothing else, stores each result, and publishes what they
    * add up to as a check run on the commit.
    */
@@ -1262,7 +1292,12 @@ export class Run {
       db,
       taskId,
       'verify',
-      { sha, attempt, checks: this.checks.map((c) => c.name) },
+      {
+        sha,
+        attempt,
+        checks: this.checks.map((c) => c.name),
+        ...(this.fixOutcomes.length > 0 ? { fixes: this.fixOutcomes } : {}),
+      },
       { headSha: sha },
     )
     const head = (await must(this.backend, `git -C ${this.repoDir} rev-parse HEAD`)).stdout.trim()
@@ -1707,6 +1742,7 @@ export class Run {
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
+      sha = await this.applyFixes(sha, attempt)
       const checked = await this.verify(sha, attempt)
 
       if (!checked.verdict.open) {

@@ -71,6 +71,7 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       reachable: true,
       enabled: false,
       checks: null,
+      fixes: [],
       egress: [],
       baseBranch: null,
       releaseBranch: null,

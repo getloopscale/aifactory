@@ -28,6 +28,8 @@ export type EvalCase = {
   integrationBranch: string
   baseSha: string
   checks: CheckSpec[]
+  /** The repository's fix commands, run before each round of checks; absent means none. */
+  fixes?: string[]
   /** Domains the repository's checks reach besides the registry, as the owner set them. */
   egress: string[]
   /** What the factory's own run of this task came to, for comparison. */

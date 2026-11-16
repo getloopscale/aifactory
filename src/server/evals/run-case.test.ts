@@ -159,6 +159,24 @@ describe('runCase', () => {
     expect(provider.stopped).toBe(1)
   })
 
+  it("runs the repository's fixes before the checks and commits what they changed as its own commit", async () => {
+    const provider = sandbox()
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase(deps(provider, builder, reviewer), {
+      ...evalCase,
+      fixes: ['prettier --write .'],
+    })
+
+    const commands = provider.backend.commands
+    const fix = commands.findIndex((c) => c.endsWith('prettier --write .'))
+    expect(fix).toBeGreaterThan(-1)
+    expect(commands.filter((c) => c.includes('commit -F'))).toHaveLength(2)
+    expect(commands.findIndex((c) => c.includes('pnpm test'))).toBeGreaterThan(fix)
+    expect(result.passed).toBe(true)
+  })
+
   it('reports the cost of the plan when no time is left for the next pass', async () => {
     const MIN = 60_000
     const plan = planned()[0]!
