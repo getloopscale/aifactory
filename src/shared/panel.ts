@@ -41,8 +41,19 @@ export const COLUMNS: { id: Column; title: string }[] = [
  */
 export type Retryable = 'quota' | 'environment' | 'blocked' | null
 
-const ENVIRONMENT =
+/**
+ * The sandbox provider has no template of the factory's (E2B answers `404: template 'aifactory-sandbox:4' not
+ * found`). Bound to the factory's own template name, so an application failure that says a template of its own
+ * is missing is not taken for it.
+ */
+export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
+
+const ENVIRONMENT_PATTERN =
   /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
+
+const ENVIRONMENT = {
+  test: (error: string) => ENVIRONMENT_PATTERN.test(error) || SANDBOX_TEMPLATE_MISSING.test(error),
+}
 
 /**
  * An agent that used all the time a run gives it. Nothing around it failed: a new run of the same issue on
@@ -332,6 +343,23 @@ export type DecisionView = {
   at: string
 }
 
+/** One decision of the coordinator, as the panel shows it. */
+export type CoordinatorActionView = {
+  id: number
+  taskId: number
+  /** The task it belongs to, for the list across tasks. */
+  repository: string
+  issueNumber: number
+  title: string
+  exceptionKind: string
+  action: string
+  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated'
+  reason: string
+  /** What a model drafted, as text, or null when nothing was. */
+  draft: string | null
+  at: string
+}
+
 export type TaskDetail = {
   task: TaskCard
   /** A send-back of the owner waits in `intake` and can still be withdrawn. */
@@ -343,6 +371,8 @@ export type TaskDetail = {
   plans: ChangePlanView[]
   questions: QuestionView[]
   decisions: DecisionView[]
+  /** Newest first. */
+  coordinatorActions: CoordinatorActionView[]
   deliveries: DeliveryView[]
   watches: WatchView[]
   runs: RunView[]
@@ -354,6 +384,8 @@ export type InboxItem = {
   kind: 'question' | 'review' | 'handoff' | 'failed' | 'main_red'
   /** One line that says what is wanted. */
   summary: string
+  /** Why the coordinator escalated the task, when it did. */
+  coordinatorReason?: string | null
   at: string
 }
 

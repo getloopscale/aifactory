@@ -3,6 +3,7 @@ import type { SandboxBackend } from '@theokit/agents/sandbox'
 import {
   DEFAULT_CHECK_MS,
   DEFAULT_REVIEW_MS,
+  NoTimeForAgent,
   agentTimeLeft,
   fitToSession,
 } from '../factory/agent-time'
@@ -412,7 +413,7 @@ export async function runCase(deps: EvalDeps, c: EvalCase): Promise<CaseResult> 
       await run.build()
       return run.result(await run.loop())
     } catch (error) {
-      if (!(error instanceof Stopped)) throw error
+      if (!(error instanceof Stopped || error instanceof NoTimeForAgent)) throw error
       return run.result({ stopped: error.message })
     }
   } catch (error) {

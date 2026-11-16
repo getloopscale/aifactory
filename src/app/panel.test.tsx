@@ -100,6 +100,7 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   plans: [],
   questions: [],
   decisions: [],
+  coordinatorActions: [],
   deliveries: [],
   watches: [],
   runs: [],
@@ -1127,12 +1128,14 @@ describe('inbox', () => {
         task: { ...base, id: 1, stage: 'waiting' },
         kind: 'question',
         summary: 'Should max count the ellipsis?',
+        coordinatorReason: null,
         at: '2026-11-04T10:00:00Z',
       },
       {
         task: { ...base, id: 2, stage: 'failed' },
         kind: 'failed',
         summary: 'Out of quota. resets tomorrow',
+        coordinatorReason: null,
         at: '2026-11-04T10:01:00Z',
       },
     ]

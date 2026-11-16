@@ -1,3 +1,4 @@
+import { SANDBOX_TEMPLATE_MISSING } from '../../../shared/panel'
 import { settingsOff, type DoctorTriedSentences } from '../../../shared/doctor-say'
 
 import type { Copy } from './en'
@@ -422,8 +423,10 @@ export const ptBR: Copy = {
       sandbox_refused: {
         cause: (v) =>
           `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}`,
-        repair: () =>
-          'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
+        repair: (v) =>
+          SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
+            ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
+            : 'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
       },
       ok_issues: { cause: () => 'As Issues estão ligadas.', repair: () => '' },
       ok_app_access: {
@@ -839,6 +842,58 @@ export const ptBR: Copy = {
     alsoReceives: 'Também recebe:',
     whereInCode: 'Onde está no código',
     readOnly: 'As instruções só se leem aqui: para mudar uma, o texto está nesses arquivos.',
+  },
+  coordinator: {
+    heading: 'Coordenador',
+    sectionTitle: 'O que o coordenador decidiu',
+    intro: 'Cada decisão do coordenador, da mais nova para a mais antiga.',
+    openList: 'Todas as decisões do coordenador',
+    back: 'Voltar para a caixa de entrada',
+    filter: 'Resultado',
+    all: 'Todos',
+    empty: 'O coordenador ainda não decidiu nada.',
+    loadMore: 'Mostrar decisões mais antigas',
+    reasonLabel: 'Motivo',
+    draftLabel: 'Texto redigido',
+    escalatedBy: (reason: string) => `O coordenador encaminhou para uma pessoa: ${reason}`,
+    outcomes: {
+      applied: 'Aplicada',
+      trial: 'Teste',
+      refused: 'Recusada',
+      failed: 'Falhou',
+      escalated: 'Encaminhada',
+    } as Record<string, string>,
+    actions: {
+      send_back: 'Devolver',
+      review_again: 'Revisar de novo',
+      retry_from_finding: 'Tentar de novo a partir de um achado',
+      scope: 'Delimitar uma continuação',
+      release: 'Publicar',
+      escalate: 'Encaminhar',
+    } as Record<string, string>,
+    exceptions: {
+      checks_unchanged: 'Os checks não mudaram',
+      review_plateau: 'A revisão não avançou',
+      review_unusable: 'Revisão inutilizável',
+      handoff: 'Entregue a uma pessoa',
+      stalled: 'Parada',
+      orphaned: 'Órfã',
+      environment: 'Problema de ambiente',
+      failure: 'Falha',
+      unknown: 'Desconhecida',
+      release_ready: 'Pronta para publicar',
+      release_retry: 'Publicação a repetir',
+      release_blocked: 'Publicação bloqueada',
+    } as Record<string, string>,
+  },
+  inbox: {
+    heading: 'Caixa de entrada',
+    nothing: 'Nada espera por você.',
+    question: 'Responder a uma pergunta',
+    review: 'Revisar o pull request',
+    handoff: 'Precisa de uma pessoa',
+    failed: 'Falhou',
+    main_red: 'A branch padrão está vermelha',
   },
   plans: {
     heading: 'Planos',

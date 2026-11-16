@@ -28,6 +28,9 @@ const FILES = [
   'src/app/components/chat/PillComposer.tsx',
   'src/app/components/chat/ChatgptConnect.tsx',
   'src/app/components/chat/ChatView.tsx',
+  'src/app/components/CoordinatorActions.tsx',
+  'src/app/coordinator/page.tsx',
+  'src/app/inbox/page.tsx',
 ]
 
 // The name of the GitHub label, not a word of either language.

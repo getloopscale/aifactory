@@ -8,6 +8,7 @@ import { storageFromUrl } from '../db/config'
 import {
   agentEvent,
   agentRun,
+  coordinatorAction,
   decision,
   delivery,
   finding,
@@ -39,8 +40,9 @@ import {
   sendBackAutomatically,
   type ActionDeps,
 } from './actions'
-import { health, inbox, listTasks, taskDetail } from './queries'
+import { coordinatorActions, health, inbox, listTasks, taskDetail } from './queries'
 import { runContinuation } from '../factory/run-support'
+import { sendBackWithdrawn } from '../factory/send-back'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
 import { stageStream } from './stream'
 import { eventsOf, pruneTranscripts } from '../factory/transcript-store'
@@ -157,6 +159,32 @@ describe('listTasks', () => {
     const card = (await listTasks(getDb())).find((c) => c.id === first)!
 
     // Three automatic retries are the limit: it does not run again on its own.
+    expect(card.retryAt).toBeNull()
+    expect(card.attempts).toBe(1)
+  })
+
+  it('keeps the automatic-run and attempt counts when a send-back is withdrawn', async () => {
+    const auto = { decision: 'retry', automatic: true }
+    const failed = { error: '403: team is blocked: spend_limit' }
+    const id = await seed('failed', {}, [
+      { stage: 'intake' },
+      { stage: 'verify' },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'verify' },
+      { stage: 'failed', detail: failed },
+      // A person sent it back and withdrew it: the task went back to failed.
+      { stage: 'intake', detail: { decision: 'request_changes', withdrawn: true } },
+      { stage: 'failed', detail: { ...failed, withdrawnDecisionId: 1 } },
+    ])
+
+    const card = (await listTasks(getDb())).find((c) => c.id === id)!
+
+    // Still at the limit of automatic retries, and the verify before the withdrawn intake still counts.
     expect(card.retryAt).toBeNull()
     expect(card.attempts).toBe(1)
   })
@@ -364,6 +392,79 @@ describe('taskDetail', () => {
 
   it('is nothing for a task that does not exist', async () => {
     expect(await taskDetail(getDb(), 999)).toBeUndefined()
+  })
+})
+
+describe('the coordinator on the panel', () => {
+  it("lists a task's decisions newest first, filters by outcome, and gives the inbox the reason", async () => {
+    const id = await seed('handoff', {}, [{ stage: 'handoff', detail: { reason: 'three' } }])
+    const base = { taskId: id, action: 'send_back' as const, headSha: 'a' }
+    await getDb()
+      .insert(coordinatorAction)
+      .values([
+        {
+          ...base,
+          exceptionKind: 'stalled',
+          outcome: 'applied',
+          reason: 'first',
+          at: new Date(Date.now() + 1000),
+        },
+        {
+          ...base,
+          exceptionKind: 'handoff',
+          action: 'escalate',
+          outcome: 'escalated',
+          reason: 'second',
+          at: new Date(Date.now() + 2000),
+        },
+      ])
+    const detail = await taskDetail(getDb(), id)
+    expect(detail?.coordinatorActions.map((a) => a.reason)).toEqual(['second', 'first'])
+    const only = await coordinatorActions(getDb(), 'escalated')
+    expect(only.actions.map((a) => a.reason)).toEqual(['second'])
+    expect((await coordinatorActions(getDb())).actions).toHaveLength(2)
+    const first = await coordinatorActions(getDb(), undefined, undefined, 1)
+    expect(first.actions.map((a) => a.reason)).toEqual(['second'])
+    expect(first.more).toBe(true)
+    const next = await coordinatorActions(getDb(), undefined, first.actions[0].id, 1)
+    expect(next.actions.map((a) => a.reason)).toEqual(['first'])
+    expect(next.more).toBe(false)
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('second')
+  })
+
+  it('gives the inbox the escalation of a handoff that has no stage event', async () => {
+    const id = await seed('handoff')
+    await getDb().insert(coordinatorAction).values({
+      taskId: id,
+      exceptionKind: 'orphaned',
+      headSha: 'none',
+      action: 'escalate',
+      outcome: 'escalated',
+      reason: 'nothing recorded',
+    })
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('nothing recorded')
+  })
+
+  it('does not give the inbox an escalation from before the task was resumed and failed again', async () => {
+    const id = await seed('failed', {}, [{ stage: 'handoff' }])
+    await getDb()
+      .insert(coordinatorAction)
+      .values({
+        taskId: id,
+        exceptionKind: 'handoff',
+        headSha: 'a',
+        action: 'escalate',
+        outcome: 'escalated',
+        reason: 'old reason',
+        at: new Date(Date.now() - 60_000),
+      })
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'failed', detail: { error: 'boom' }, at: new Date() })
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBeNull()
   })
 })
 
@@ -679,6 +780,19 @@ describe('actions', () => {
     expect(queued).toHaveLength(1)
   })
 
+  it('tells a run taken before the withdrawal that its send-back was withdrawn', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'failed', detail: {} })
+    const wrong = await requestChanges(deps(), id, 'wrong note')
+    expect(await sendBackWithdrawn(getDb(), id, wrong.decisionId!)).toBe(false)
+
+    await withdrawSendBack(deps(), id)
+    const right = await requestChanges(deps(), id, 'regenerate the docs')
+
+    expect(await sendBackWithdrawn(getDb(), id, wrong.decisionId!)).toBe(true)
+    expect(await sendBackWithdrawn(getDb(), id, right.decisionId!)).toBe(false)
+  })
+
   it('gives back what the send-back cleared, and finds the decision of an older intake', async () => {
     const id = await seed('done', { headSha: 'abc', resolvedSha: 'abc', awaitingCiSha: 'abc' })
     await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
@@ -722,6 +836,33 @@ describe('actions', () => {
     await withdrawSendBack(deps(), finished)
     const [over] = await getDb().select().from(task).where(eq(task.id, finished))
     expect(over).toMatchObject({ stage: 'done', awaitingCiSha: null, mergedSha: 'm1' })
+  })
+
+  it('refuses a send-back when the integration finished while it waited for the task lock', async () => {
+    const id = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
+    let sent: Promise<unknown> | undefined
+    await getDb().transaction(async (tx) => {
+      await tx.update(task).set({ awaitingCiSha: 'abc' }).where(eq(task.id, id))
+      sent = requestChanges(deps(), id, 'note')
+      await new Promise((r) => setTimeout(r, 200))
+      // The integrate-after-ci cron claims the merge as `finish` does, while the send-back waits at the lock.
+      await tx
+        .update(task)
+        .set({ mergedSha: 'm1', awaitingCiSha: null })
+        .where(and(eq(task.id, id), eq(task.awaitingCiSha, 'abc')))
+    })
+
+    await expect(sent).rejects.toThrow(ActionRefused)
+
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'done', mergedSha: 'm1', awaitingCiSha: null })
+    const intakes = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'intake')))
+    expect(intakes).toEqual([])
+    expect(queued).toEqual([])
   })
 
   it('keeps a change a cron made while the send-back waited for the task lock', async () => {
@@ -1227,6 +1368,41 @@ describe('actions', () => {
     const intake = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, conflicted))
     expect(intake.at(-1)?.detail).toMatchObject({ decision: 'retry', automatic: true })
     expect(queued.map((q) => q.input)).toEqual([{ taskId: conflicted }])
+  })
+
+  it('starts no retry of an exhausted task after a send-back was withdrawn', async () => {
+    const auto = { decision: 'retry', automatic: true }
+    const withdrawn = { decision: 'request_changes', withdrawn: true }
+    const conflictError =
+      'GitHub answered 405 merging paulo/app#95: {"message":"Pull Request has merge conflicts"}'
+    const conflicted = await seed('done', { issueNumber: 95 }, [
+      { stage: 'intake', detail: auto },
+      { stage: 'intake', detail: auto },
+      { stage: 'intake', detail: auto },
+      { stage: 'done', detail: { integrationError: conflictError } },
+      { stage: 'intake', detail: withdrawn },
+      { stage: 'done', detail: { integrationError: conflictError, withdrawnDecisionId: 1 } },
+    ])
+    const failed = { error: '403: team is blocked: spend_limit' }
+    const exhausted = await seed('failed', { issueNumber: 96 }, [
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: withdrawn },
+      { stage: 'failed', detail: { ...failed, withdrawnDecisionId: 1 } },
+    ])
+
+    const later = { limit: 5, now: new Date(Date.now() + 24 * 3600_000) }
+    expect(await runConflictRetries(deps(), { limit: 5 })).toEqual({ started: 0, skipped: 0 })
+    expect(await runDueRetries(deps(), later)).toEqual({ started: 0, skipped: 0 })
+
+    expect(queued).toEqual([])
+    const stages = new Map((await getDb().select().from(task)).map((t) => [t.id, t.stage] as const))
+    expect(stages.get(conflicted)).toBe('done')
+    expect(stages.get(exhausted)).toBe('failed')
   })
 
   it('sends back on its own branch a finished task whose pull request conflicts with its base, to merge the base', async () => {

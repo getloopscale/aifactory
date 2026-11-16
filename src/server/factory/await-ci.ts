@@ -3,9 +3,10 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { CheckReport, GithubApi } from '../github/pulls'
+import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
+import { errorMessage } from './error-message'
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
@@ -22,7 +23,10 @@ import {
   releaseByMode,
   type Handed,
 } from './integration'
+import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
+import { outcome } from './transitions'
+import { squashTitle } from './run-support'
 
 export type AwaitCiDeps = {
   db: Database
@@ -38,6 +42,9 @@ export type AwaitCiDeps = {
   /** Runs the task again: on its branch to merge the new base, or from it when the branch is gone (`retryAutomatically`). */
   startOver: (taskId: number) => Promise<void>
 }
+
+/** What an integration needs once the merge exists. */
+type IntegrationDeps = Pick<AwaitCiDeps, 'db' | 'github' | 'api' | 'releaseMode'>
 
 export type AwaitCiResult = {
   merged: number[]
@@ -71,16 +78,35 @@ const pullNumber = (url: string | null): number => {
  * The task is claimed by clearing its wait, so a second pass that sees the same merge does nothing.
  */
 async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise<boolean> {
-  const { row, verifiedSha, token } = w
+  const { row, verifiedSha } = w
   const claimed = await deps.db
     .update(task)
-    .set({ mergedSha, awaitingCiSha: null })
+    .set({ mergedSha, awaitingCiSha: null, integrationHeld: false })
     .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
     .returning({ id: task.id })
   if (claimed.length === 0) return false
+  await completeIntegration(deps, w, mergedSha, 'auto-merge')
+  return true
+}
+
+/** What made the merge: GitHub's auto-merge of the verified commit, or a person merging a handoff's pull request. */
+type IntegratedBy = 'auto-merge' | 'person'
+
+/**
+ * What follows a merge into the integration branch, once the task is claimed: the branch goes, the pre-release
+ * branch advances and the pre-release is made. Only the factory's own merge starts a release by mode; work a
+ * person merged waits for the release train, or for a person, like any other integrated work.
+ */
+async function completeIntegration(
+  deps: IntegrationDeps,
+  w: Waiting,
+  mergedSha: string,
+  integratedBy: IntegratedBy,
+): Promise<void> {
+  const { row, verifiedSha, token } = w
   await deps.api.deleteBranch(row.repository, token, `factory/${row.issueNumber}`).catch(() => {})
   const repo = await loadRepoConfig(deps.db, row.repository)
-  const advanced = await advancePreRelease(deps.api, {
+  const advanced = await advancePreRelease(deps, {
     repository: row.repository,
     token,
     integration: integrationBranch(repo),
@@ -105,7 +131,7 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
       },
     )
   } catch (error) {
-    handed = { error: error instanceof Error ? error.message : String(error) }
+    handed = { error: errorMessage(error) }
   }
   await deps.db.insert(stageEvent).values({
     taskId: row.id,
@@ -113,13 +139,13 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
     detail: {
       sha: verifiedSha,
       pullRequestUrl: row.pullRequestUrl,
-      integratedBy: 'auto-merge',
+      integratedBy,
       ...describeIntegration({ mergedSha, ...advanced }),
       ...describeDelivery(handed),
     },
   })
   // A release follows only a delivery that was made, as after a direct merge.
-  if ('tag' in handed) {
+  if ('tag' in handed && integratedBy === 'auto-merge') {
     const [reviewed] = await deps.db
       .select({ reviewer: review.reviewer })
       .from(review)
@@ -136,7 +162,6 @@ async function finish(deps: AwaitCiDeps, w: Waiting, mergedSha: string): Promise
       },
     )
   }
-  return true
 }
 
 /** The work goes to a person: the pull request stays as it is, and the issue says why. */
@@ -150,7 +175,7 @@ async function toPerson(
   const moved = await deps.db.transaction(async (tx) => {
     const claimed = await tx
       .update(task)
-      .set({ stage: 'handoff', awaitingCiSha: null })
+      .set({ stage: 'handoff', awaitingCiSha: null, integrationHeld: false })
       .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
       .returning({ id: task.id })
     if (claimed.length === 0) return false
@@ -196,7 +221,35 @@ async function readFailure(
   return checksFeedback(verifiedSha, failed)
 }
 
-async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: AwaitCiResult) {
+/**
+ * The hold ended on an integration a promotion held out: it is integrated now, as the run would have done.
+ * An integration branch that requires checks gets auto-merge pinned to the verified commit, and the task waits
+ * for them like any other; otherwise, or when GitHub finds the pull request clean, it is merged pinned to the
+ * same commit and finished.
+ */
+async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]): Promise<boolean> {
+  const { row, verifiedSha, token, number } = w
+  const pull = { repo: row.repository, token, number, sha: verifiedSha }
+  if (required.length > 0 && (await autoMergeOrMergeable(deps.api, pull)) === 'waiting') {
+    await deps.db
+      .update(task)
+      .set({ integrationHeld: false })
+      .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
+    return false
+  }
+  const merged = await deps.api.mergePullRequest(row.repository, token, number, verifiedSha, {
+    method: 'squash',
+    title: squashTitle(row.issueTitle, row.issueNumber),
+  })
+  return finish(deps, w, merged.sha)
+}
+
+async function look(
+  deps: AwaitCiDeps,
+  row: typeof task.$inferSelect,
+  result: AwaitCiResult,
+  holding: Set<string>,
+) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
     .select({ detail: stageEvent.detail, at: stageEvent.at })
@@ -213,14 +266,18 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
   const { token } = await deps.github.installationToken(row.repository)
   const repo = await loadRepoConfig(deps.db, row.repository)
   const pull = await deps.api.readPullRequest(row.repository, token, number)
+  const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const step = decideWaitingIntegration({
     verifiedSha,
     pull,
-    required: await deps.api.requiredChecks(row.repository, token, integrationBranch(repo)),
+    required,
     reports: await deps.api.checkReports(row.repository, token, verifiedSha),
     waitedMs:
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
+    ...(row.integrationHeld
+      ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
+      : {}),
   })
   const w: Waiting = {
     row,
@@ -235,6 +292,10 @@ async function look(deps: AwaitCiDeps, row: typeof task.$inferSelect, result: Aw
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
+      return
+    case 'integrate':
+      if (await integrateHeld(deps, w, required)) result.merged.push(row.id)
+      else result.waiting += 1
       return
     case 'send_back': {
       const note = await readFailure(deps, w, step.reports, result)
@@ -282,14 +343,73 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     .from(task)
     .where(and(eq(task.stage, 'done'), isNotNull(task.awaitingCiSha)))
     .orderBy(task.id)
+  // Read once, so the integrations held out of one promotion all go in together once its hold ends, though
+  // the first of them pins the promotion again and starts a new hold.
+  const holding = await heldRepositories(deps.db, deps.now?.() ?? new Date())
   for (const row of rows) {
     try {
-      await look(deps, row, result)
+      await look(deps, row, result, holding)
     } catch (error) {
-      result.errors.push(
-        `task ${row.id}: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      result.errors.push(`task ${row.id}: ${errorMessage(error)}`)
     }
   }
   return result
+}
+
+export type AdoptResult = {
+  adopted: number[]
+  /** What stopped a task on this pass; it is looked at again on the next one. */
+  errors: string[]
+}
+
+/**
+ * A person merged the pull request a handoff left, as the owner does with work the factory holds for them
+ * (paulohenriquevn/aifactory#139): the task is integrated from that merge as from the factory's own, so the
+ * pre-release is made and a release ships it and closes its issue. Nothing is merged here.
+ */
+export async function adoptMergedHandoffs(deps: IntegrationDeps): Promise<AdoptResult> {
+  const result: AdoptResult = { adopted: [], errors: [] }
+  const rows = await deps.db
+    .select()
+    .from(task)
+    .where(and(eq(task.stage, 'handoff'), isNotNull(task.pullRequestUrl)))
+    .orderBy(task.id)
+  for (const row of rows) {
+    try {
+      if (await adopt(deps, row)) result.adopted.push(row.id)
+    } catch (error) {
+      result.errors.push(`task ${row.id}: ${errorMessage(error)}`)
+    }
+  }
+  return result
+}
+
+async function adopt(deps: IntegrationDeps, row: typeof task.$inferSelect): Promise<boolean> {
+  if (outcome(row, 'merged_by_person').kind !== 'action') return false
+  const number = pullNumber(row.pullRequestUrl)
+  const { token } = await deps.github.installationToken(row.repository)
+  const pull = await deps.api.readPullRequest(row.repository, token, number)
+  if (!pull.merged || !pull.mergeCommitSha) return false
+  const [handed] = await deps.db
+    .select({ detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'handoff')))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  // Claimed by its stage, so a second pass that sees the same merge does nothing.
+  const claimed = await deps.db
+    .update(task)
+    .set({ stage: 'done', mergedSha: pull.mergeCommitSha })
+    .where(and(eq(task.id, row.id), eq(task.stage, 'handoff')))
+    .returning({ id: task.id })
+  if (claimed.length === 0) return false
+  const w: Waiting = {
+    row,
+    verifiedSha: pull.headSha,
+    number,
+    token,
+    done: (handed?.detail ?? {}) as Record<string, unknown>,
+  }
+  await completeIntegration(deps, w, pull.mergeCommitSha, 'person')
+  return true
 }

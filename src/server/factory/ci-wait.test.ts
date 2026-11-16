@@ -221,6 +221,40 @@ describe('decideWaitingIntegration', () => {
   })
 })
 
+describe('decideWaitingIntegration for an integration a promotion holds out', () => {
+  const held = { ...open, autoMerge: false, mergeableState: 'clean' }
+
+  it('waits while the promotion still holds it', () => {
+    expect(decide({ pull: held, held: 'holding' })).toEqual({ kind: 'wait' })
+  })
+
+  it('integrates it once the hold expired', () => {
+    expect(decide({ pull: held, held: 'released' })).toEqual({ kind: 'integrate' })
+  })
+
+  it('still sends a held pull request that conflicts with its base to merge the base', () => {
+    expect(decide({ pull: { ...held, mergeableState: 'dirty' }, held: 'released' })).toEqual({
+      kind: 'start_over',
+      reason: 'the pull request conflicts with its base',
+    })
+  })
+
+  it('still goes to a person when something was pushed after the verified commit', () => {
+    expect(decide({ pull: { ...held, headSha: 'f00ba12' }, held: 'released' })).toMatchObject({
+      kind: 'person',
+      stopAutoMerge: true,
+    })
+  })
+
+  it('reads a held integration whose auto-merge is on like any other', () => {
+    expect(decide({ held: 'holding' })).toEqual({ kind: 'wait' })
+  })
+
+  it('still goes to a person when auto-merge is off on an integration nothing holds', () => {
+    expect(decide({ pull: held })).toMatchObject({ kind: 'person', stopAutoMerge: false })
+  })
+})
+
 describe('readRequired', () => {
   // A workflow that runs on both push and pull_request leaves two runs of the same name on the head.
   const passed = report('CI', 'success')

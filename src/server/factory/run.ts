@@ -36,6 +36,8 @@ import {
   type Handed,
   type Integrated,
 } from './integration'
+import { heldForEvaluation, heldForReview } from '../evals/cases'
+import { integrationHeldUntil } from './promotion-merge'
 import {
   DEFAULT_CHECKS,
   failingChecks,
@@ -78,6 +80,7 @@ import {
   mergeEgress,
   must,
   oneLine,
+  squashTitle,
   pullRequestBody,
   pushWithRetry,
   resolvedComment,
@@ -96,7 +99,7 @@ import {
 } from './agent-time'
 import type { RepoConfig } from './repo-config'
 import { labelsWithRepoChoice } from './repo-config'
-import type { Parked, RunResult, RunTaskDeps } from './run-types'
+import type { HandoffCause, Parked, RunResult, RunTaskDeps } from './run-types'
 import {
   createIsolatedSandbox,
   restoreIsolatedSandbox,
@@ -146,6 +149,28 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 /** GitHub failing: not a refusal of the work, so the run fails and repeats. */
 const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
 
+/** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
+type Held = { headline: string; reason: string; cause: HandoffCause }
+
+/**
+ * The hold of approved work that changes the agents' configuration or the quality gates (#139), or nothing.
+ * The first waits for an evaluation; the second for the owner's reading, since no evaluation measures a gate.
+ */
+export function heldFor(evaluated: string[], reviewed: string[]): Held | undefined {
+  const steps = [
+    evaluated.length > 0 &&
+      `run \`pnpm evals:check\` against the recorded baseline for the agent configuration (${evaluated.join(', ')})`,
+    reviewed.length > 0 &&
+      `read the change to the quality gates (${reviewed.join(', ')}), which no evaluation measures`,
+  ].filter((step): step is string => typeof step === 'string')
+  if (steps.length === 0) return undefined
+  return {
+    headline: 'The reviewer approved this, and it waits for a person',
+    reason: `it changes what the factory never integrates on its own: ${steps.join(', and ')}; then merge the pull request yourself, and the factory takes it to the release`,
+    cause: 'agent_configuration',
+  }
+}
+
 /** The stages that end a run; a task goes through them again when a person sends it back. */
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
@@ -183,6 +208,8 @@ export class Run {
   plan: ChangePlan | undefined
   /** This run wrote the plan, so the first build pass continues the planning session. */
   private planned: { discarded: boolean } | undefined
+  /** Every path the change under review touches, as the last review read it. */
+  private touched: string[] = []
   /** What the agents of this task do, written while they work. Opened by the first agent run. */
   private transcript: Transcript | undefined
 
@@ -350,7 +377,7 @@ export class Run {
     })
   }
   private get title() {
-    return `${oneLine(this.c.issue.title)} (#${this.c.row.issueNumber})`
+    return squashTitle(this.c.issue.title, this.c.row.issueNumber)
   }
   private get checks() {
     return withChangesetCheck(
@@ -530,14 +557,16 @@ export class Run {
       quota: result.quota !== undefined,
       sessionId: result.sessionId ?? null,
     })
-    if (result.quota) {
-      const resets = result.quota.resetsAt ? `, resets ${result.quota.resetsAt}` : ''
-      throw new QuotaStop(
-        `the ${who.name} quota ran out${resets}: ${result.quota.message}`,
-        result.quota.resetsAt,
-      )
-    }
+    // A builder cut at its limit goes on to `failUnfinished`, which keeps what it wrote before the quota is told.
+    if (result.quota && !(role === 'builder' && result.timedOut)) throw this.quotaStop(who, result)
     return result
+  }
+
+  private quotaStop(who: CodingHarness, result: HarnessResult): QuotaStop {
+    const quota = result.quota
+    if (!quota) throw new Error('a quota stop needs a quota')
+    const resets = quota.resetsAt ? `, resets ${quota.resetsAt}` : ''
+    return new QuotaStop(`the ${who.name} quota ran out${resets}: ${quota.message}`, quota.resetsAt)
   }
 
   /**
@@ -731,6 +760,38 @@ export class Run {
     }
     this.remoteHead = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
     return this.remoteHead
+  }
+
+  /**
+   * A pass that did not finish fails the run. One cut at its time limit leaves what it wrote in the
+   * checkout, which the sandbox takes away: it is committed and pushed first, and the reason names it.
+   */
+  private async failUnfinished(result: HarnessResult, what: string): Promise<never> {
+    const plain = `${what}: ${result.summary}`
+    // A quota stop keeps its reset, so the retry still waits for it, whatever became of the work.
+    const stop = (note: string) =>
+      result.quota
+        ? new QuotaStop(
+            `${this.quotaStop(this.builder, result).message}\n${note}`,
+            result.quota.resetsAt,
+          )
+        : new StageFailure(`${plain}\n${note}`)
+    if (!result.timedOut || (await this.hasNothingToCommit())) {
+      throw result.quota ? this.quotaStop(this.builder, result) : new StageFailure(plain)
+    }
+    let sha: string
+    try {
+      sha = await this.commitAndPush(
+        `${this.title}: work in progress, the agent reached its time limit`,
+        { timedOut: true },
+      )
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error)
+      throw stop(`the work could not be kept: ${reason}`)
+    }
+    throw stop(
+      `the work was kept in commit ${sha} on ${this.c.branch}; send the task back to continue from it`,
+    )
   }
 
   /** The first pass of the builder: a new one, or the session resumed with the answer it was waiting for. */
@@ -962,6 +1023,7 @@ export class Run {
       branch,
       sha: row.headSha,
       reason,
+      cause: 'checks_unchanged' satisfies HandoffCause,
       pullRequestUrl: row.pullRequestUrl,
       unchanged: true,
       agentSummary: first.summary.slice(0, 4_000),
@@ -1063,7 +1125,7 @@ export class Run {
         }),
       }),
     )
-    if (!result.ok) throw new StageFailure(`the agent did not finish: ${result.summary}`)
+    if (!result.ok) await this.failUnfinished(result, 'the agent did not finish')
     await this.keepLearned(result.summary)
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(withoutLearned(result.summary))
@@ -1124,7 +1186,7 @@ export class Run {
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()
-    if (!first.ok) throw new StageFailure(`the agent did not finish: ${first.summary}`)
+    if (!first.ok) await this.failUnfinished(first, 'the agent did not finish')
     await this.keepLearned(first.summary)
     // A fact the agent left is not part of its question, wherever it put it.
     const asked = parseQuestion(withoutLearned(first.summary))
@@ -1172,7 +1234,7 @@ export class Run {
         prompt: reworkPrompt({ findings, failedChecks: failed, checks: this.checks }),
       }),
     )
-    if (!result.ok) throw new StageFailure(`the agent did not finish the rework: ${result.summary}`)
+    if (!result.ok) await this.failUnfinished(result, 'the agent did not finish the rework')
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(result.summary)
     if (asked) await this.ask(asked, attempt)
@@ -1251,7 +1313,7 @@ export class Run {
     const { deps, taskId, row, issue, branch, state } = this.c
     state.current = 'review'
     await enterStage(deps.db, taskId, 'review', { sha, attempt, reviewer: this.reviewer.name })
-    const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
+    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
       baseSha: this.baseSha,
       plan: this.plan,
       issue,
@@ -1277,6 +1339,7 @@ export class Run {
         }),
       }),
     )
+    this.touched = touched
     // The reviewer reads and does not write. If it wrote anyway, none of it counts.
     await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
     await must(this.backend, `git -C ${this.repoDir} clean -fd`)
@@ -1334,6 +1397,8 @@ export class Run {
     const restored = titleToRestore(opened, this.title)
     if (restored !== undefined) await markReady(restored)
     const integration = integrationBranch(this.c.repo)
+    const heldUntil = await integrationHeldUntil(deps.db, row.repository, new Date())
+    if (heldUntil) return { heldUntil }
     const required = await api.requiredChecks(row.repository, this.c.token, integration)
     const pull = { repo: row.repository, token: this.c.token, number: pullNumber, sha }
     if (
@@ -1361,12 +1426,15 @@ export class Run {
         throw error
       }
     })
-    const advanced = await advancePreRelease(api, {
-      repository: row.repository,
-      token: this.c.token,
-      integration,
-      mergedSha: merged.sha,
-    })
+    const advanced = await advancePreRelease(
+      { api, db: deps.db },
+      {
+        repository: row.repository,
+        token: this.c.token,
+        integration,
+        mergedSha: merged.sha,
+      },
+    )
     return { mergedSha: merged.sha, ...advanced }
   }
 
@@ -1427,6 +1495,11 @@ export class Run {
     outcome: ReviewVerdict,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
+    const held = heldFor(
+      heldForEvaluation(row.repository, this.touched, deps.ownRepository),
+      heldForReview(row.repository, this.touched, deps.ownRepository),
+    )
+    if (held) return this.handOver(sha, attempt, here, outcome, [], held)
     state.current = 'pr'
     await enterStage(deps.db, taskId, 'pr', { branch, sha })
     const pull = await api.openPullRequest(row.repository, this.c.token, {
@@ -1443,7 +1516,9 @@ export class Run {
       }),
     })
     const integrated = await this.integrate(sha, pull)
-    if (integrated.awaitingChecks) return this.awaitChecks(sha, attempt, pull.url, integrated)
+    if (integrated.awaitingChecks || integrated.heldUntil) {
+      return this.awaitChecks(sha, attempt, pull.url, integrated)
+    }
     const handed = await this.deliver(sha, pull.url, attempt, integrated)
     await enterStage(
       deps.db,
@@ -1499,7 +1574,11 @@ export class Run {
         agentSummary: this.summary,
         ...describeIntegration(integrated),
       },
-      { pullRequestUrl, awaitingCiSha: sha },
+      {
+        pullRequestUrl,
+        awaitingCiSha: sha,
+        integrationHeld: integrated.heldUntil !== undefined,
+      },
     )
     return { status: 'done', branch, sha, pullRequestUrl, summary: this.summary }
   }
@@ -1514,12 +1593,14 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
     counts: number[] = [],
+    held?: Held,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
     const reason =
-      outcome.verdict === 'invalid'
+      held?.reason ??
+      (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
     state.current = 'pr'
     const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,
@@ -1541,7 +1622,9 @@ export class Run {
       this.c.token,
       row.issueNumber,
       [
-        `The factory could not get this approved: ${reason}.`,
+        held
+          ? `${held.headline}: ${reason}.`
+          : `The factory could not get this approved: ${reason}.`,
         '',
         `Its work is in the draft pull request ${pull.url}, with the checks that passed and what the reviewer still found.`,
         '',
@@ -1557,6 +1640,11 @@ export class Run {
         branch,
         sha,
         reason,
+        cause:
+          held?.cause ??
+          ((outcome.verdict === 'invalid'
+            ? 'review_unusable'
+            : 'review_plateau') satisfies HandoffCause),
         pullRequestUrl: pull.url,
         findings: outcome.findings,
         costUsd: this.cost,

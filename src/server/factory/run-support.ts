@@ -115,7 +115,9 @@ export function pullRequestBody(input: {
     ? ['<details><summary>Plan</summary>', '', input.plan, '', '</details>', '']
     : []
   return [
-    `Closes #${input.issueNumber}`,
+    // No closing keyword: where the integration branch is the repository's default one, GitHub would close
+    // the issue at integration. The factory closes it when a release ships the change, naming the version.
+    `For #${input.issueNumber}. The factory closes the issue when a release ships this change.`,
     '',
     ...(input.handoff ? [`**This needs a person:** ${input.handoff}.`, ''] : []),
     `Checks the factory ran on \`${input.sha.slice(0, 7)}\`:`,
@@ -167,6 +169,10 @@ export function resolvedComment(input: {
 }
 
 export const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
+
+/** The title of the squash commit that integrates an issue's work: the issue's title on one line, and its number. */
+export const squashTitle = (issueTitle: string, issueNumber: number) =>
+  `${oneLine(issueTitle)} (#${issueNumber})`
 
 /** The commit identity as a git config file. Newlines would start a new setting, so refuse them. */
 export function gitConfig(author: { name: string; email: string }): string {

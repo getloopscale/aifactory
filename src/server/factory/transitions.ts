@@ -20,10 +20,17 @@ type PanelEvent =
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
- * reaching its pull request.
+ * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over task back to its
+ * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left.
  */
 type AutomaticEvent =
-  'retry_due' | 'conflict_rerun' | 'send_back_after_ci' | 'hand_over' | 'integrate'
+  | 'retry_due'
+  | 'conflict_rerun'
+  | 'send_back_after_ci'
+  | 'coordinator_send_back'
+  | 'hand_over'
+  | 'integrate'
+  | 'merged_by_person'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
 type WebhookEvent = 'issue_labeled' | RoutedCode
@@ -51,6 +58,8 @@ export type Action =
   | 'cancel'
   /** A person's send-back that has not started is undone: its queued run goes and the stage before it returns. */
   | 'withdraw_send_back'
+  /** A person merged the work a handoff left: it is integrated, and goes on to the release like any other. */
+  | 'adopt_merge'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -93,7 +102,7 @@ const each = <S extends TaskStage>(stages: readonly S[], rule: Rule) =>
   Object.fromEntries(stages.map((stage) => [stage, rule])) as Record<S, Rule>
 
 /** The stages in which a run is alive. */
-const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
+export const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
 /** The stages the supervisor looks at for a run that stalled or was lost. */
 const SUPERVISED = ['intake', 'sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
 
@@ -145,6 +154,10 @@ const NOT_RUN_AGAIN = refuse(
 )
 const NOT_AWAITING_CHECKS = refuse(
   'only work that waits for the repository checks is sent back on its own',
+)
+
+const NOT_HANDED_OVER = refuse(
+  'the coordinator sends back only a task that was handed over to a person',
 )
 
 const NOBODY_WORKING = ignore(
@@ -266,6 +279,13 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     ),
     done: (task) => (task.awaitingCiSha ? act('continue_on_branch') : NOT_AWAITING_CHECKS),
   },
+  coordinator_send_back: {
+    ...each(
+      ['intake', ...WORKING, 'waiting', 'done', 'released', 'failed', 'cancelled'],
+      NOT_HANDED_OVER,
+    ),
+    handoff: sendBack,
+  },
   hand_over: {
     ...each(WORKING, act('hand_over')),
     ...each(['intake', 'waiting', 'released', 'handoff', 'failed', 'cancelled'], NOBODY_WORKING),
@@ -281,6 +301,13 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
       ['waiting', 'done', 'released', 'handoff', 'failed', 'cancelled'],
       NOT_AT_ITS_PULL_REQUEST,
     ),
+  },
+  merged_by_person: {
+    ...each(
+      ['intake', ...WORKING, 'waiting', 'done', 'released', 'failed', 'cancelled'],
+      ignore('only the pull request a handoff left waits for a person to merge it'),
+    ),
+    handoff: act('adopt_merge'),
   },
 
   issue_labeled: {

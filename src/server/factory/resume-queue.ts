@@ -64,7 +64,8 @@ export const inTransactionForRun: ActionDeps['inTransaction'] = async (work) => 
         },
         async (key) => {
           // Only a job no worker ever took: a lease, even an expired one, may belong to a run that is going on,
-          // and a job that failed or was tried keeps its row with a null lease.
+          // and a job that failed or was tried keeps its row with a null lease. SQL on the backend's table
+          // because `JobBackend` cannot cancel a job yet (usetheokit/theokit#2118).
           const removed = await client.query(
             `DELETE FROM ${JOBS_TABLE} WHERE name = 'run-task' AND idempotency_key = $1
                AND locked_until IS NULL AND failed_at IS NULL AND attempts = 0 RETURNING id`,
