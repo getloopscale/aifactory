@@ -23,6 +23,15 @@ describe('describeError', () => {
     expect(describeError(new Error('boom', { cause: new Error('') }))).toBe('boom')
   })
 
+  it('lists the errors inside an AggregateError cause with an empty message', () => {
+    const a = Object.assign(new Error('connect ECONNREFUSED ::1:443'), { code: 'ECONNREFUSED' })
+    const b = Object.assign(new Error('connect ETIMEDOUT 1.2.3.4:443'), { code: 'ETIMEDOUT' })
+    const cause = Object.assign(new AggregateError([a, b], ''), { code: 'ECONNREFUSED' })
+    expect(describeError(new TypeError('fetch failed', { cause }))).toBe(
+      'fetch failed: ECONNREFUSED; connect ECONNREFUSED ::1:443; connect ETIMEDOUT 1.2.3.4:443',
+    )
+  })
+
   it('does not repeat a cause the message already carries', () => {
     expect(describeError(new Error('x: oops', { cause: new Error('oops') }))).toBe('x: oops')
   })
