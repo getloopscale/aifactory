@@ -692,6 +692,7 @@ describe('a failure that is the sandbox provider refusing', () => {
     expect(providerRefusal({ error: 'the sandbox did not start: Status code 402' })).toBe(true)
     expect(providerRefusal({ error: '403: team is blocked: spend_limit' })).toBe(true)
     expect(providerRefusal({ error: 'usage limit exceeded' })).toBe(true)
+    expect(providerRefusal({ error: "404: template 'aifactory-sandbox' not found" })).toBe(true)
   })
 
   it('is a key the provider does not accept', () => {
@@ -704,6 +705,7 @@ describe('a failure that is the sandbox provider refusing', () => {
     expect(providerRefusal({ error: 'the checks did not pass' })).toBe(false)
     expect(providerRefusal({ error: 'usage limit exceeded', quota: true })).toBe(false)
     expect(providerRefusal({ quota: true })).toBe(false)
+    expect(providerRefusal({ error: "404: template 'invoice' not found" })).toBe(false)
     expect(providerRefusal(null)).toBe(false)
   })
 })
@@ -728,6 +730,16 @@ describe('sandbox', () => {
     })
     expect(sandboxItem(readOf({ refusal, lastStartedAt: '2026-11-13T09:59:59.000Z' })).status).toBe(
       'blocked',
+    )
+  })
+
+  it('names the command that builds the template when the provider has none', () => {
+    const error = "404: template 'aifactory-sandbox:4' not found"
+    const item = sandboxItem(readOf({ refusal: { ...refusal, error } }))
+    expect(item.status).toBe('blocked')
+    expect(item.repair).toContain('scripts/build-e2b-template.mts')
+    expect(ptBR.doctor.say.sandbox_refused.repair(item.say!.values)).toContain(
+      'scripts/build-e2b-template.mts',
     )
   })
 
