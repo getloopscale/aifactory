@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -891,7 +891,11 @@ describe('actions', () => {
     await requestChanges(deps(), id, 'wrong note')
     await withdrawSendBack(deps(), id)
 
-    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const events = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(asc(stageEvent.id))
     const last = events.at(-1)!
     expect(last).toMatchObject({ stage: 'failed', detail: { reason: 'quota' } })
     expect(last.at).toEqual(at)
@@ -910,9 +914,13 @@ describe('actions', () => {
     await requestChanges(deps(), id, 'note')
     await withdrawSendBack(deps(), id)
 
-    const [last] = (await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))).slice(
-      -1,
-    )
+    // In the order they were written: the withdrawal updates the intake, which moves its row in the table.
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
     expect(last).toMatchObject({ stage: 'done', detail: { integrationError: 'conflict' } })
   })
 
