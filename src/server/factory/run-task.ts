@@ -3,6 +3,7 @@ import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import { question as questionTable, task } from '../db/schema'
 import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
 import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
+import { errorMessage } from './error-message'
 import { withRecipe } from './recipe'
 import { createGithubApi } from '../github/pulls'
 
@@ -171,9 +172,7 @@ async function fail(
   if (error instanceof Asked) return error.result
   const message = signal?.aborted
     ? 'the job lease expired before the run finished'
-    : error instanceof Error
-      ? error.message
-      : String(error)
+    : errorMessage(error)
   await enterStage(deps.db, taskId, 'failed', {
     failedAt: state.current,
     error: message,

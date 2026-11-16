@@ -42,6 +42,9 @@ describe('signatureOf', () => {
     expect(a).toBe('fetch failed (cause: <cause>)')
     expect(signatureOf('fetch failed')).not.toBe(a)
     expect(signatureOf('push rejected (cause: x)')).not.toBe(a)
+    expect(signatureOf('operation failed (cause: permission denied)')).not.toBe(
+      signatureOf('operation failed (cause: disk full)'),
+    )
   })
 
   it('replaces numbers and commit ids, so two reasons that differ only there share it', () => {

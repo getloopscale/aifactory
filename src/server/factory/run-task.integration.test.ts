@@ -574,6 +574,33 @@ describe('runTask', () => {
     ).toEqual(new Date('2026-11-13T23:20:00Z'))
   })
 
+  it('records the cause of a fetch that failed for good', async () => {
+    const id = await seedTask()
+    const cause = Object.assign(new Error('getaddrinfo ENOTFOUND api.github.com'), {
+      code: 'ENOTFOUND',
+    })
+
+    const result = await runTask(
+      {
+        ...deps(new FakeSandbox(changed())),
+        fetchIssue: async () => {
+          throw new TypeError('fetch failed', { cause })
+        },
+      },
+      id,
+    )
+
+    const expected = 'fetch failed (cause: getaddrinfo ENOTFOUND api.github.com)'
+    expect(result).toMatchObject({ status: 'failed', error: expected })
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect((last!.detail as Record<string, unknown>).error).toBe(expected)
+  })
+
   it('fails as an environment failure when GitHub answers 5xx merging the pull request', async () => {
     const id = await seedTask()
     githubApi.fail('mergePullRequest', new Error('GitHub answered 502 merging paulo/app#12: {}'))
