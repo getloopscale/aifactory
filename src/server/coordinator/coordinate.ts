@@ -9,7 +9,7 @@ import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions } from './exception-facts'
 import { readHeldTests, readQueueFacts } from './queue-facts'
 import { QUEUE, isHeld, recogniseQueue } from './queue-order'
-import { releaseHolds } from './queue-apply'
+import { holdOthers, releaseHolds } from './queue-apply'
 import { readFailureEvents } from './evolve-facts'
 import { recognise, type TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
@@ -62,6 +62,12 @@ export async function coordinate(
   const exceptions = await exceptionsOf(deps)
   const repositories = await repositoriesOf(deps.db, exceptions)
   const held = await readHeldTests(deps.db)
+  // The hold lasts until the fix is done: a job queued after the decision is held too.
+  for (const h of held) {
+    if (h.taskId !== undefined && h.at) {
+      await holdOthers(deps.db, h.taskId, new Date(h.at.getTime() + QUEUE.holdMs))
+    }
+  }
   await releaseHolds(deps.db, [...new Set(held.map((h) => h.repository))])
   const now = new Date()
   const reasons = new Map<number, string[]>()

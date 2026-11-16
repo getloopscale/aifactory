@@ -13,31 +13,50 @@ import { QUEUE } from './queue-order'
  * statement itself. TheoKit's worker takes the job with the earliest `available_at` that is not in the future
  * (`dequeue`), and has no call for this (a gap to file on usetheokit/theokit).
  */
-export async function moveAhead(db: Database, taskId: number): Promise<boolean> {
-  const moved = await db.execute<{ moved: number }>(
-    sql`with pending as (
-          select j.id, j.available_at, t.id as task_id
+export type QueueDb = Pick<Database, 'execute'>
+
+/** Pending `run-task` jobs of the repository of `taskId` that no worker holds, of tasks still in `intake`. */
+const PENDING = (taskId: number) => sql`select j.id, j.available_at, t.id as task_id
           from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
           where j.name = 'run-task' and j.failed_at is null
             and (j.locked_until is null or j.locked_until < now()) and t.stage = 'intake'
             and t.repository = (select repository from task where id = ${taskId})
-          for update of j skip locked
-        ), fix as (
+          for update of j skip locked`
+
+/**
+ * Holds the pending jobs of the repository's other tasks until `until`, keeping the `available_at` each had in
+ * its input as `heldFrom`. It is run again on every pass while the fix is on its way, so a job queued after
+ * the decision is held too.
+ */
+export async function holdOthers(db: QueueDb, fixTaskId: number, until: Date): Promise<void> {
+  const at = until.toISOString()
+  await db.execute(
+    sql`with pending as (${PENDING(fixTaskId)})
+        update theokit_jobs set
+          input = input || jsonb_build_object('heldFrom', coalesce(input->>'heldFrom', available_at::text)),
+          available_at = ${at}::timestamptz
+        where id in (select id from pending where task_id <> ${fixTaskId})
+          and available_at < ${at}::timestamptz`,
+  )
+}
+
+export async function moveAhead(
+  db: QueueDb,
+  taskId: number,
+  now: Date = new Date(),
+): Promise<boolean> {
+  const moved = await db.execute<{ moved: number }>(
+    sql`with pending as (${PENDING(taskId)}), fix as (
           update theokit_jobs set available_at = least(available_at,
             coalesce((select min(available_at) from pending where task_id <> ${taskId}), available_at)
               - interval '1 second')
           where id in (select id from pending where task_id = ${taskId}) returning id
-        ), held as (
-          update theokit_jobs set
-            input = input || jsonb_build_object('heldFrom', coalesce(input->>'heldFrom', available_at::text)),
-            available_at = now() + make_interval(secs => ${QUEUE.holdMs / 1000})
-          where id in (select id from pending where task_id <> ${taskId})
-            and available_at < now() + make_interval(secs => ${QUEUE.holdMs / 1000})
-            and exists (select 1 from fix) returning id
         )
         select (select count(*) from fix)::int as moved`,
   )
-  return (moved.rows[0]?.moved ?? 0) > 0
+  if ((moved.rows[0]?.moved ?? 0) === 0) return false
+  await holdOthers(db, taskId, new Date(now.getTime() + QUEUE.holdMs))
+  return true
 }
 
 /**
@@ -45,7 +64,7 @@ export async function moveAhead(db: Database, taskId: number): Promise<boolean> 
  * schema ignores) once no fix of their repository is still on its way: it integrated, failed or its hold ran
  * out. `held` lists the repositories whose fix still is. A job a worker holds is left alone.
  */
-export async function releaseHolds(db: Database, held: string[]): Promise<number> {
+export async function releaseHolds(db: QueueDb, held: string[]): Promise<number> {
   const keep = held.length
     ? sql`and (select repository from task where id = (input->>'taskId')::int) not in (${sql.join(
         held.map((r) => sql`${r}`),

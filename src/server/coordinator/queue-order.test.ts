@@ -85,8 +85,20 @@ describe('a test that failed on several tasks of a repository', () => {
       taskId: 7,
     })
   })
-  it('is nothing when the fix is alone, or no queued task carries the test', () => {
-    expect(recogniseQueue(facts({ queue: readOf([queued(7, fixBody)]) }))).toBeUndefined()
+  it('holds the failed tasks even when the fix is alone in the queue', () => {
+    expect(recogniseQueue(facts({ queue: readOf([queued(7, fixBody)]) }))).toMatchObject({
+      kind: 'queue_blocked',
+      taskId: 7,
+    })
+  })
+  it('is nothing when failures quote the same text under different signatures', () => {
+    const odd = (id: number, line: string) =>
+      failure(id, { reason: `${line}\nthe test "${TEST}" came up` })
+    expect(
+      recogniseQueue(facts({ failures: [odd(1, 'lint failed'), odd(2, 'the build broke')] })),
+    ).toBeUndefined()
+  })
+  it('is nothing when no queued task carries the test', () => {
     expect(recogniseQueue(facts({ queue: readOf([queued(5), queued(6)]) }))).toBeUndefined()
   })
   it('never counts the task that carries the test as one that failed on it', () => {

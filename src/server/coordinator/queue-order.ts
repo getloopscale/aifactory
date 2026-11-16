@@ -52,17 +52,24 @@ export function testsNamedBy(issue: Pick<QueuedTask, 'title' | 'body'>): string[
   return [...new Set(found)]
 }
 
-/** The distinct tasks whose failure in the window says something that holds `test`, apart from `except`. */
+/**
+ * The distinct tasks whose failure in the window says something that holds `test`, apart from `except`: the
+ * largest group of them with one failure signature, so two unrelated failures that quote the same text are
+ * not one failing test.
+ */
 function failedOn(test: string, failures: FailureEvent[], except: number): Set<number> {
-  const tasks = failures
-    .filter((e) => e.taskId !== except && !isDesignedWait(signatureOf(e.reason)))
-    .filter((e) => normal(e.reason).includes(test))
-    .map((e) => e.taskId)
-  return new Set(tasks)
+  const bySignature = new Map<string, Set<number>>()
+  for (const e of failures) {
+    const signature = signatureOf(e.reason)
+    if (e.taskId === except || isDesignedWait(signature) || !normal(e.reason).includes(test))
+      continue
+    bySignature.set(signature, (bySignature.get(signature) ?? new Set()).add(e.taskId))
+  }
+  return [...bySignature.values()].reduce((a, b) => (b.size > a.size ? b : a), new Set<number>())
 }
 
 /** A test whose fix was moved ahead, and is still on its way to integration: its repository's other work waits. */
-export type HeldTest = { repository: string; test: string }
+export type HeldTest = { repository: string; test: string; taskId?: number; at?: Date }
 
 /** Whether an exception of a task of `repository` is the failure of a test whose fix is still on its way. */
 export const isHeld = (
@@ -106,7 +113,6 @@ export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | und
     }
   }
   const queue = facts.queue.value
-  if (queue.length < 2) return undefined
   // A test is named by what the failures say; the issue of the fix may write it in plain text.
   const tests = [
     ...new Set(facts.failures.flatMap((e) => testsNamedBy({ title: '', body: e.reason }))),

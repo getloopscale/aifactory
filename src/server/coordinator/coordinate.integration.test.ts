@@ -705,8 +705,8 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     expect(await dequeue()).toEqual([`job-${fix}`])
   })
 
-  it('leaves the queue alone when the fix is already first', async () => {
-    const { fix } = await incident()
+  it('holds the others when the fix is already first, and keeps a job queued later held', async () => {
+    const { fix, other } = await incident()
     await getPool().query(
       "update theokit_jobs set available_at = now() - interval '2 hours' where id = $1",
       [`job-${fix}`],
@@ -714,7 +714,42 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
 
     await coordinate(deps(), 'auto')
 
-    expect(await prioritised()).toEqual([])
+    expect(await prioritised()).toMatchObject([{ taskId: fix, outcome: 'applied' }])
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+
+    const late = await seed('intake')
+    await enqueue(late, 5)
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([])
+    expect(other).toBeGreaterThan(0)
+  })
+
+  it('gives the held jobs their availability back once the fix is no longer on its way', async () => {
+    const { fix, other } = await incident()
+    const before = await getPool().query('select available_at from theokit_jobs where id = $1', [
+      `job-${other}`,
+    ])
+
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+
+    const after = await getPool().query(
+      "select available_at, input->>'heldFrom' as held from theokit_jobs where id = $1",
+      [`job-${other}`],
+    )
+    expect(after.rows[0].available_at).toEqual(before.rows[0].available_at)
+    expect(after.rows[0].held).toBeNull()
+  })
+
+  it('applies one decision once when two passes run at the same time', async () => {
+    await incident()
+
+    await Promise.all([coordinate(deps(), 'auto'), coordinate(deps(), 'auto')])
+
+    expect(await prioritised()).toHaveLength(1)
   })
 
   it('moves no job for a task that a run already took', async () => {

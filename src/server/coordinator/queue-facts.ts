@@ -78,7 +78,12 @@ export async function readQueueFacts(
  */
 export async function readHeldTests(db: Database, now: Date = new Date()): Promise<HeldTest[]> {
   const rows = await db
-    .select({ repository: task.repository, test: coordinatorAction.headSha })
+    .select({
+      repository: task.repository,
+      test: coordinatorAction.headSha,
+      taskId: task.id,
+      at: coordinatorAction.at,
+    })
     .from(coordinatorAction)
     .innerJoin(task, eq(task.id, coordinatorAction.taskId))
     .where(
