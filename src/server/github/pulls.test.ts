@@ -94,6 +94,18 @@ describe('a 5xx from GitHub', () => {
     expect(JSON.stringify(settings)).toContain('trunk')
   })
 
+  it('asks a read again after the network dropped it', async () => {
+    let calls = 0
+    const fetch = async () => {
+      calls += 1
+      if (calls === 1) throw new TypeError('fetch failed')
+      return new Response(JSON.stringify({ default_branch: 'trunk' }), { status: 200 })
+    }
+    const settings = await createGithubApi(fetch, noWait).repositorySettings('o/r', 't')
+    expect(calls).toBe(2)
+    expect(JSON.stringify(settings)).toContain('trunk')
+  })
+
   it('gives up on a read that keeps failing after 3 tries and says GitHub answered 502', async () => {
     const { fetch, count } = sequence([502])
     await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(

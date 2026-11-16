@@ -63,6 +63,7 @@ const URL = /\bhttps?:\/\/\S+/g
 const PATH = /~?\/?(?:[\w.-]+\/)+[\w.-]+/g
 // A commit id has a digit: a word made only of the letters a to f is a word.
 const COMMIT = /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/gi
+const CAUSE = /\(cause: .*\)/g
 const NUMBER = /\d+/g
 const LONG_DASH = /[\u2013\u2014]/g
 
@@ -76,6 +77,7 @@ export function signatureOf(reason: string): string {
   const line = reason.split('\n').find((l) => l.trim() !== '') ?? ''
   return hyphens(
     line
+      .replace(CAUSE, '(cause: <cause>)')
       .replace(URL, '<url>')
       .replace(PATH, '<path>')
       .replace(COMMIT, '<sha>')

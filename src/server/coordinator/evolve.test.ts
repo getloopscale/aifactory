@@ -35,6 +35,15 @@ const event = (reason: string, over: Partial<FailureEvent> = {}): FailureEvent =
 }
 
 describe('signatureOf', () => {
+  it('gives one signature to a fetch failure whatever its cause, and keeps other errors apart', () => {
+    const a = signatureOf('fetch failed (cause: ECONNRESET read ECONNRESET)')
+    const b = signatureOf('fetch failed (cause: getaddrinfo ENOTFOUND api.github.com)')
+    expect(a).toBe(b)
+    expect(a).toBe('fetch failed (cause: <cause>)')
+    expect(signatureOf('fetch failed')).not.toBe(a)
+    expect(signatureOf('push rejected (cause: x)')).not.toBe(a)
+  })
+
   it('replaces numbers and commit ids, so two reasons that differ only there share it', () => {
     const a = signatureOf('push of 3fa9c01 rejected after 3 attempts')
     const b = signatureOf('push of 0be27d4e9a1 rejected after 12 attempts')

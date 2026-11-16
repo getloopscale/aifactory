@@ -5,6 +5,7 @@ import { promotionWait, repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { autoMergeOrMergeable, type GithubApi, type OpenPullRequest } from '../github/pulls'
 
+import { errorMessage } from './error-message'
 import { integrationBranch, PRE_RELEASE_BRANCH } from './branches'
 import {
   decidePromotionWait,
@@ -40,7 +41,7 @@ export type Pinned = {
   developAutoMergeError?: string
 }
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const message = errorMessage
 
 const waitingIn = async (db: Database, repository: string) =>
   (
