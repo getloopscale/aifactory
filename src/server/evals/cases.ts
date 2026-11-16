@@ -5,8 +5,13 @@ export type Candidate = {
   taskId: number
   repository: string
   issueNumber: number
-  /** The first commit the run pushed; its parent is the commit the run started from. */
+  /** The commit the first checks ran on: the builder's, or the fix commit on top of it. */
   firstSha: string
+  /**
+   * The builder's first commit when the first checks ran on a fix commit on top of it: its parent is the
+   * commit the run started from. Absent when the first checks ran on the builder's commit (`firstSha`).
+   */
+  startSha?: string
   mergedSha: string
   costUsd: number
   durationMs: number
@@ -28,6 +33,8 @@ export type EvalCase = {
   integrationBranch: string
   baseSha: string
   checks: CheckSpec[]
+  /** The repository's fix commands, run before each round of checks; absent means none. */
+  fixes?: string[]
   /** Domains the repository's checks reach besides the registry, as the owner set them. */
   egress: string[]
   /** What the factory's own run of this task came to, for comparison. */

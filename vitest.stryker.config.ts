@@ -30,6 +30,7 @@ export default defineConfig({
       'src/server/factory/change-plan.test.ts',
       'src/server/factory/promotion.test.ts',
       'src/server/factory/evidence.test.ts',
+      'src/server/factory/fixes.test.ts',
       'src/server/factory/release.test.ts',
       'src/server/factory/review.test.ts',
       'src/server/factory/required-files.test.ts',

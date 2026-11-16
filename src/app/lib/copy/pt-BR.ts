@@ -589,6 +589,10 @@ export const ptBR: Copy = {
       saved: 'Salvo.',
       checks: 'Verificações, uma por linha no formato nome: comando',
       checksPlaceholder: 'Vazio roda npm test. Por exemplo: unit: pnpm test',
+      fixes: 'Correções, um comando por linha, rodadas antes das verificações',
+      fixesAssistContext:
+        'Só os comandos de correção: um comando de shell por linha que reescreve arquivos e não decide nada (um formatador, um autofix de lint), sem nome na frente. Não são verificações.',
+      fixesPlaceholder: 'Vazio não roda nenhuma. Por exemplo: pnpm prettier --write .',
       domains: 'Domínios extras que o sandbox pode acessar',
       domainsPlaceholder:
         'GitHub, o agente e o registro do npm ficam sempre abertos. Para Python: pypi.org, files.pythonhosted.org',
