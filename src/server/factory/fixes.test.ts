@@ -99,6 +99,12 @@ describe('runFixes', () => {
       expect(await git('status', '--porcelain')).toBe(' M a.txt\n')
     })
 
+    it('does not bring back a file an earlier fix deleted when a later fix fails', async () => {
+      await runFixes(new LocalBackend(), dir, ['rm b.txt', 'echo again > b.txt && exit 1'], 5000)
+      expect(existsSync(join(dir, 'b.txt'))).toBe(false)
+      expect(await git('status', '--porcelain')).toBe(' D b.txt\n')
+    })
+
     it('restores a file a failing fix deleted', async () => {
       await runFixes(new LocalBackend(), dir, ['rm b.txt && exit 1'], 5000)
       expect(read('b.txt')).toBe('b0\n')

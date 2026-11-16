@@ -39,8 +39,10 @@ async function restore(
 ): Promise<boolean> {
   const git = `GIT_INDEX_FILE=${SNAPSHOT_INDEX} git -C ${repoDir}`
   const run = await backend.execute(
-    `git -C ${repoDir} reset -q && git -C ${repoDir} clean -fdq && rm -f ${SNAPSHOT_INDEX} && ` +
-      `${git} read-tree ${tree} && ${git} checkout-index -a -f`,
+    `git -C ${repoDir} reset -q --hard && git -C ${repoDir} clean -fdq && rm -f ${SNAPSHOT_INDEX} && ` +
+      `${git} read-tree ${tree} && ${git} checkout-index -a -f && ` +
+      // A tracked file the snapshot lacks (an earlier fix deleted it) comes back with the reset: remove it.
+      `cd ${repoDir} && git diff-tree -r -z --name-only --diff-filter=D HEAD ${tree} | xargs -0 rm -f --`,
     { timeoutMs },
   )
   return run.exitCode === 0 && !run.timedOut

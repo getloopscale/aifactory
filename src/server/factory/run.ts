@@ -385,6 +385,8 @@ export class Run {
   }
   /** What the fix commands did before the round of checks that has not yet recorded it. */
   private fixOutcomes: FixOutcome[] = []
+  /** The fix commit pushed for an agent that changed nothing: the work is that commit. */
+  private pushedFix: string | undefined
   /** The builder's commit the latest fix commit sits on, until the checks on it are recorded. */
   private fixedFrom: string | undefined
   private get checks() {
@@ -1062,7 +1064,15 @@ export class Run {
     if (!(await this.hasNothingToCommit())) return undefined
     // Fixes that change the start commit make this a change after all: it goes on to be committed, checked
     // and reviewed like any other, instead of a claim the checks backed only after the fix.
-    if (await this.fixesChange(this.baseSha)) return undefined
+    if (await this.fixesChange(this.baseSha)) {
+      this.pushedFix = await this.commitAndPush(FIX_COMMIT_MESSAGE, {
+        costUsd: first.costUsd,
+        agentSummary: first.summary.slice(0, 4_000),
+        sessionId: this.sessionId,
+        fixes: this.fixOutcomes,
+      })
+      return undefined
+    }
     await this.keepNoChange()
     const said = `The agent said: ${oneLine(first.summary).slice(0, 700)}`
     const at = this.baseSha.slice(0, 7)
@@ -1215,6 +1225,7 @@ export class Run {
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)
     if (resolved) return { result: resolved }
+    if (this.pushedFix) return { sha: this.pushedFix }
     // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed.
     if (this.c.continuation?.plain && (await this.hasNothingToCommit())) {
       return { sha: this.remoteHead }
