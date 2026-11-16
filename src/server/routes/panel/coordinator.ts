@@ -11,8 +11,8 @@ export const GET = route()
   .query(
     z.object({
       outcome: z.enum(COORDINATOR_OUTCOMES).optional(),
-      offset: z.coerce.number().int().min(0).default(0),
+      before: z.coerce.number().int().positive().optional(),
     }),
   )
-  .handler(async ({ query }) => coordinatorActions(getDb(), query.outcome, query.offset))
+  .handler(async ({ query }) => coordinatorActions(getDb(), query.outcome, query.before))
   .build()

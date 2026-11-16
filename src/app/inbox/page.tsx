@@ -32,7 +32,9 @@ export default function InboxPage() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-sm font-semibold">{t.inbox[kind]}</span>
-                    <span className="text-xs text-muted-foreground">{ago(at)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {ago(at, Date.now(), t.time)}
+                    </span>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {task.repository} #{task.issueNumber} · {task.title}

@@ -93,7 +93,7 @@ describe('the coordinator list', () => {
 
   it('loads older decisions with the count it already has', async () => {
     const fetchMock = vi.fn(async (url: string) =>
-      String(url).includes('offset=1')
+      String(url).includes('before=2')
         ? Response.json({ actions: [row({ id: 1, reason: 'older' })], more: false })
         : Response.json({ actions: [row({ id: 2, reason: 'newer' })], more: true }),
     )
@@ -104,5 +104,32 @@ describe('the coordinator list', () => {
     await screen.findByText(/older/)
     expect(screen.getByText(/newer/)).toBeTruthy()
     expect(screen.queryByText(en.coordinator.loadMore)).toBeNull()
+  })
+
+  it('keeps the newest filter when All, Escalated and All again answer out of order', async () => {
+    const resolvers: ((r: Response) => void)[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolvers.push(resolve)
+          }),
+      ),
+    )
+    render(<Page />)
+    const select = screen.getByRole('combobox')
+    fireEvent.change(select, { target: { value: 'escalated' } })
+    fireEvent.change(select, { target: { value: '' } })
+    await waitFor(() => expect(resolvers).toHaveLength(3))
+    const answer = (reason: string) =>
+      Response.json({ actions: [row({ id: 1, reason })], more: false })
+    resolvers[2](answer('third request'))
+    await screen.findByText(/third request/)
+    resolvers[0](answer('first request'))
+    resolvers[1](answer('second request'))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(screen.getByText(/third request/)).toBeTruthy()
+    expect(screen.queryByText(/first request|second request/)).toBeNull()
   })
 })

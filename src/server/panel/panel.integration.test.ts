@@ -353,7 +353,7 @@ describe('the coordinator on the panel', () => {
           exceptionKind: 'stalled',
           outcome: 'applied',
           reason: 'first',
-          at: new Date(1000),
+          at: new Date(Date.now() + 1000),
         },
         {
           ...base,
@@ -361,7 +361,7 @@ describe('the coordinator on the panel', () => {
           action: 'escalate',
           outcome: 'escalated',
           reason: 'second',
-          at: new Date(2000),
+          at: new Date(Date.now() + 2000),
         },
       ])
     const detail = await taskDetail(getDb(), id)
@@ -369,14 +369,28 @@ describe('the coordinator on the panel', () => {
     const only = await coordinatorActions(getDb(), 'escalated')
     expect(only.actions.map((a) => a.reason)).toEqual(['second'])
     expect((await coordinatorActions(getDb())).actions).toHaveLength(2)
-    const first = await coordinatorActions(getDb(), undefined, 0, 1)
+    const first = await coordinatorActions(getDb(), undefined, undefined, 1)
     expect(first.actions.map((a) => a.reason)).toEqual(['second'])
     expect(first.more).toBe(true)
-    const next = await coordinatorActions(getDb(), undefined, 1, 1)
+    const next = await coordinatorActions(getDb(), undefined, first.actions[0].id, 1)
     expect(next.actions.map((a) => a.reason)).toEqual(['first'])
     expect(next.more).toBe(false)
     const items = await inbox(getDb())
     expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('second')
+  })
+
+  it('gives the inbox the escalation of a handoff that has no stage event', async () => {
+    const id = await seed('handoff')
+    await getDb().insert(coordinatorAction).values({
+      taskId: id,
+      exceptionKind: 'orphaned',
+      headSha: 'none',
+      action: 'escalate',
+      outcome: 'escalated',
+      reason: 'nothing recorded',
+    })
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('nothing recorded')
   })
 
   it('does not give the inbox an escalation from before the task was resumed and failed again', async () => {

@@ -10,10 +10,10 @@ const OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated']
 
 type Page = { actions: CoordinatorActionView[]; more: boolean }
 
-const address = (outcome: string, offset: number) => {
+const address = (outcome: string, before?: number) => {
   const query = new URLSearchParams()
   if (outcome) query.set('outcome', outcome)
-  if (offset > 0) query.set('offset', String(offset))
+  if (before !== undefined) query.set('before', String(before))
   const text = query.toString()
   return `/api/panel/coordinator${text ? `?${text}` : ''}`
 }
@@ -25,30 +25,30 @@ export default function CoordinatorPage() {
   const [rows, setRows] = useState<CoordinatorActionView[]>()
   const [more, setMore] = useState(false)
   const [error, setError] = useState<string>()
-  // The outcome the page is asking about now: an answer to an earlier one is dropped.
-  const current = useRef(outcome)
+  // Each filter change is a new generation: an answer to an older one is dropped, whatever outcome it asked for.
+  const generation = useRef(0)
 
   useEffect(() => {
-    current.current = outcome
+    const mine = ++generation.current
     setRows(undefined)
     setMore(false)
     setError(undefined)
-    get<Page>(address(outcome, 0))
+    get<Page>(address(outcome))
       .then((page) => {
-        if (current.current !== outcome) return
+        if (generation.current !== mine) return
         setRows(page.actions)
         setMore(page.more)
       })
       .catch((e: unknown) => {
-        if (current.current === outcome) setError(e instanceof Error ? e.message : String(e))
+        if (generation.current === mine) setError(e instanceof Error ? e.message : String(e))
       })
   }, [outcome])
 
   const loadMore = useCallback(() => {
-    const asked = outcome
-    get<Page>(address(asked, rows?.length ?? 0))
+    const mine = generation.current
+    get<Page>(address(outcome, rows?.at(-1)?.id))
       .then((page) => {
-        if (current.current !== asked) return
+        if (generation.current !== mine) return
         setRows((have) => {
           const ids = new Set((have ?? []).map((r) => r.id))
           return [...(have ?? []), ...page.actions.filter((r) => !ids.has(r.id))]
@@ -56,7 +56,7 @@ export default function CoordinatorPage() {
         setMore(page.more)
       })
       .catch((e: unknown) => {
-        if (current.current === asked) setError(e instanceof Error ? e.message : String(e))
+        if (generation.current === mine) setError(e instanceof Error ? e.message : String(e))
       })
   }, [outcome, rows])
 

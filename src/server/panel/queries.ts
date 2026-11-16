@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -231,22 +231,27 @@ export type CoordinatorPage = { actions: CoordinatorActionView[]; more: boolean 
 
 /**
  * The coordinator's decisions across tasks, newest first, all of them or only those with one outcome, a page
- * at a time: `offset` is how many the reader already has.
+ * at a time: `before` is the id of the last decision the reader has, so a decision recorded meanwhile moves
+ * nothing. The id grows with each decision, so it is the order they were made in.
  */
 export async function coordinatorActions(
   db: Database,
   outcome?: ActionRow['outcome'],
-  offset = 0,
+  before?: number,
   limit = 50,
 ): Promise<CoordinatorPage> {
   const rows = await db
     .select({ action: coordinatorAction, owner: task })
     .from(coordinatorAction)
     .innerJoin(task, eq(task.id, coordinatorAction.taskId))
-    .where(outcome ? eq(coordinatorAction.outcome, outcome) : undefined)
-    .orderBy(desc(coordinatorAction.at), desc(coordinatorAction.id))
+    .where(
+      and(
+        outcome ? eq(coordinatorAction.outcome, outcome) : undefined,
+        before === undefined ? undefined : lt(coordinatorAction.id, before),
+      ),
+    )
+    .orderBy(desc(coordinatorAction.id))
     .limit(limit + 1)
-    .offset(offset)
   return {
     actions: rows.slice(0, limit).map((r) => actionView(r.action, r.owner)),
     more: rows.length > limit,
@@ -272,7 +277,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
         .select()
         .from(coordinatorAction)
         .where(eq(coordinatorAction.taskId, id))
-        .orderBy(desc(coordinatorAction.at), desc(coordinatorAction.id)),
+        .orderBy(desc(coordinatorAction.id)),
     ])
   return {
     task: card,
@@ -398,7 +403,7 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
     const at = last ? iso(last.at) : card.updatedAt
     const escalation = latest.get(card.id)
     const coordinatorReason =
-      last && escalation && escalation.at >= last.at ? escalation.reason : null
+      escalation && (!last || escalation.at >= last.at) ? escalation.reason : null
     if (card.stage === 'waiting') {
       items.push({
         task: card,
