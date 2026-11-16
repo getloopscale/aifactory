@@ -144,7 +144,12 @@ describe.runIf(mode === 'cases')('the cases', () => {
           },
           config: async (repo) => {
             const config = await loadRepoConfig(getDb(), repo)
-            return { integrationBranch: integrationBranch(config), egress: config.egress }
+            // The fixes go into the case too: the run applies them before each round of checks, as the factory does.
+            return {
+              integrationBranch: integrationBranch(config),
+              egress: config.egress,
+              fixes: config.fixes,
+            }
           },
         }),
       )

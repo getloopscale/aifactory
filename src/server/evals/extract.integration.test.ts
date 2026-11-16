@@ -168,4 +168,33 @@ describe('toCase', () => {
       original: { taskId: 3, costUsd: 0.4, durationMs: 60_000, attempts: 1, mergedSha: 'm' },
     })
   })
+
+  it('carries the repository fixes into the case, and leaves the field out when there are none', async () => {
+    const candidate = {
+      taskId: 4,
+      repository: 'o/r',
+      issueNumber: 10,
+      firstSha: 'f'.repeat(40),
+      mergedSha: 'm',
+      costUsd: 0.1,
+      durationMs: 1000,
+      attempts: 1,
+      checks: [],
+    }
+    const base = {
+      issue: async () => ({ title: 't', body: 'b', labels: ['factory'] }),
+      parentOf: async () => 'b'.repeat(40),
+    }
+    const withFixes = await toCase(candidate, {
+      ...base,
+      config: async () => ({ integrationBranch: 'workspace', egress: [], fixes: ['pnpm format'] }),
+    })
+    const without = await toCase(candidate, {
+      ...base,
+      config: async () => ({ integrationBranch: 'workspace', egress: [], fixes: [] }),
+    })
+
+    expect(withFixes.fixes).toEqual(['pnpm format'])
+    expect('fixes' in without).toBe(false)
+  })
 })

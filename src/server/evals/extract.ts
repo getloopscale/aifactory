@@ -71,7 +71,10 @@ export type CaseSources = {
   ): Promise<{ title: string; body: string; labels: string[] }>
   /** The first parent of `sha`: the commit the run started from. */
   parentOf(repository: string, sha: string): Promise<string>
-  config(repository: string): Promise<{ integrationBranch: string; egress: string[] }>
+  /** `fixes` are the repository's fix commands; a case carries them so its run applies them as the factory's does. */
+  config(
+    repository: string,
+  ): Promise<{ integrationBranch: string; egress: string[]; fixes?: string[] }>
 }
 
 export async function toCase(candidate: Candidate, sources: CaseSources): Promise<EvalCase> {
@@ -89,6 +92,8 @@ export async function toCase(candidate: Candidate, sources: CaseSources): Promis
     integrationBranch: config.integrationBranch,
     baseSha: await sources.parentOf(repository, candidate.firstSha),
     checks: candidate.checks,
+    // Only when the repository has some, so a case of a repository without fixes reads as it always did.
+    ...(config.fixes && config.fixes.length > 0 ? { fixes: config.fixes } : {}),
     egress: config.egress,
     original: {
       taskId: candidate.taskId,
