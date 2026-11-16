@@ -47,8 +47,9 @@ export type WaitingStep =
   | { kind: 'needs_base' }
   /**
    * Every failed required check was blamed on the base, and the base passes them now. The pull request's
-   * runs still carry the old failure and only a new commit runs them again, so the task goes back to its
-   * branch to merge the fixed base (`fixedBaseNote`), and that merge is verified and reviewed like any work.
+   * runs still carry the old failure and only a new commit runs them again, so a run merges the fixed base
+   * into the task's branch with no agent (`mergeIntegration`), and that merge is verified and reviewed like
+   * any work.
    */
   | { kind: 'merge_base'; checks: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
@@ -155,8 +156,8 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
  * lets GitHub merge the commit it verified; anything else (a new push, a closed pull request, auto-merge
  * turned off by somebody) goes to a person. A failed check and a conflict run again on their own, as many
  * times as an environment failure, then go to a person too. A failed check that fails on the head of the
- * integration branch too is the base's: the task waits, and once the base passes it the task merges the base
- * on its branch rather than being told to fix it. A pull request a promotion held out has no
+ * integration branch too is the base's: the task waits, and once the base passes it the factory merges the
+ * base into its branch, with no agent told to fix anything. A pull request a promotion held out has no
  * auto-merge yet: it waits while the hold runs and is integrated once it ends.
  */
 export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep {
@@ -243,16 +244,16 @@ function blameFailures(failed: string[], base: CheckReport[], blamed: string[]):
 }
 
 /**
- * What a run is told when the checks its pull request failed were the base's and the base passes them now:
- * merge it, so the checks run again on a commit that has the fix. It is not told to fix anything.
+ * What the task's record says when the checks its pull request failed were the base's and the base passes
+ * them now: the factory merges the base into the branch itself (`mergeIntegration`), so the checks run again
+ * on a commit that has the fix. No agent reads it, and nobody is told to fix anything.
  */
 export function fixedBaseNote(base: string, checks: string[]): string {
   const one = checks.length === 1
   return [
     `The required check${one ? '' : 's'} ${checks.join(', ')} failed on this pull request while ${one ? 'it' : 'they'} failed on ${base} too, so the failure was not this change's.`,
     `${base} passes ${one ? 'it' : 'them'} now, and a check runs again only on a new commit.`,
-    `Merge it into this branch: git fetch origin ${base} && git merge origin/${base}.`,
-    'Commit the merge and change nothing else.',
+    `The factory merges ${base} into this branch and checks and reviews the merge.`,
   ].join(' ')
 }
 

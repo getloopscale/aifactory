@@ -48,6 +48,7 @@ const gh = {
 }
 const sentBack: { taskId: number; note: string }[] = []
 const startedOver: number[] = []
+const mergedBase: { taskId: number; note: string }[] = []
 
 /** Sets how the task's pull request stands on GitHub. */
 const pull = (over: Partial<FakePullRequest> = {}) =>
@@ -82,6 +83,7 @@ beforeEach(async () => {
   Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
   sentBack.length = 0
   startedOver.length = 0
+  mergedBase.length = 0
 })
 
 const checks: EvidenceApi = {
@@ -119,6 +121,9 @@ const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
   },
   startOver: async (taskId) => {
     startedOver.push(taskId)
+  },
+  mergeBase: async (taskId, note) => {
+    mergedBase.push({ taskId, note })
   },
   ...over,
 })
@@ -298,7 +303,7 @@ describe('pollAwaitingIntegrations', () => {
     expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
   })
 
-  it('sends the work to merge the base, not to fix the check, once the base passes it', async () => {
+  it('runs the task to merge the base, with no agent sent back, once the base passes the check', async () => {
     reports(failure('CI'))
     baseIs(failure('CI', 'https://ci/0'))
     const id = await waitingTask()
@@ -308,7 +313,8 @@ describe('pollAwaitingIntegrations', () => {
     const result = await pollAwaitingIntegrations(deps())
 
     expect(result).toMatchObject({ baseFixed: [id], sentBack: [] })
-    expect(sentBack).toEqual([{ taskId: id, note: fixedBaseNote('workspace', ['CI']) }])
+    expect(sentBack).toEqual([])
+    expect(mergedBase).toEqual([{ taskId: id, note: fixedBaseNote('workspace', ['CI']) }])
     expect(autoMergeOff()).toEqual([12])
   })
 
@@ -325,11 +331,11 @@ describe('pollAwaitingIntegrations', () => {
 
     baseIs(success('CI'), failure('Lint', 'https://ci/0'))
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })
-    expect(sentBack).toEqual([])
+    expect(mergedBase).toEqual([])
 
     baseIs(success('CI'), success('Lint'))
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ baseFixed: [id] })
-    expect(sentBack).toEqual([{ taskId: id, note: fixedBaseNote('workspace', ['CI', 'Lint']) }])
+    expect(mergedBase).toEqual([{ taskId: id, note: fixedBaseNote('workspace', ['CI', 'Lint']) }])
   })
 
   it('does not take a blame stored for another commit as this one', async () => {

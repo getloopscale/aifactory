@@ -41,6 +41,11 @@ export type AwaitCiDeps = {
   now?: () => Date
   /** Runs the task again on its branch with the note as feedback (the panel's `sendBackAutomatically`). */
   sendBack: (taskId: number, note: string) => Promise<void>
+  /**
+   * Runs the task again to merge the integration branch, which passes again the checks it had failed, into
+   * its branch, with no agent; `note` is the record of why (the panel's `mergeFixedBase`).
+   */
+  mergeBase: (taskId: number, note: string) => Promise<void>
   /** Runs the task again: on its branch to merge the new base, or from it when the branch is gone (`retryAutomatically`). */
   startOver: (taskId: number) => Promise<void>
 }
@@ -56,7 +61,7 @@ export type AwaitCiResult = {
   waiting: number
   /** Tasks that wait because the required checks they failed fail on the head of the integration branch too. */
   waitingOnBase: number[]
-  /** Tasks sent to their branch to merge the integration branch, which passes now the checks it had failed. */
+  /** Tasks run again to merge the integration branch, which passes now the checks it had failed, into their branch. */
   baseFixed: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
@@ -383,9 +388,9 @@ async function take(
       return
     }
     case 'merge_base':
-      // Off first: the merge the agent pushes is a new commit, verified and reviewed before it lands.
+      // Off first: the merge the run pushes is a new commit, verified and reviewed before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
-      await deps.sendBack(row.id, fixedBaseNote(at.base, step.checks))
+      await deps.mergeBase(row.id, fixedBaseNote(at.base, step.checks))
       result.baseFixed.push(row.id)
       return
     case 'needs_base':

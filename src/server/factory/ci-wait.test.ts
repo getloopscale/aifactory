@@ -216,9 +216,13 @@ describe('fixedBaseNote', () => {
     expect(note).toContain('workspace')
   })
 
-  it('asks for the merge and nothing else', () => {
-    expect(note).toContain('git fetch origin workspace && git merge origin/workspace')
-    expect(note).toContain('change nothing else')
+  it('gives no git command for an agent to run: the factory merges', () => {
+    expect(note).not.toMatch(/\bgit\b/)
+  })
+
+  it('says the factory merges the branch, and that the merge is checked and reviewed', () => {
+    expect(note).toContain('The factory merges workspace into this branch')
+    expect(note).toContain('checks and reviews the merge')
   })
 
   it('speaks of a single check in the singular', () => {

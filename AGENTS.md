@@ -127,8 +127,10 @@ reads that file, not a convention.
   after GitHub merges, or sends the work back when a required check fails. A required check that fails on the head of
   the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`): the
   task keeps waiting, the checks blamed on the base are kept on its `done` event (`baseBlame`, for the verified commit),
-  and once the base passes all of them the task goes back to its branch only to merge the base (`fixedBaseNote`), so
-  the checks run again on a commit that is verified and reviewed. The base is read only when a required check failed.
+  and once the base passes all of them the task runs again only to merge the base (`mergeFixedBase`, the job's
+  `mergeBase`): `Run.mergeBase` merges the head of the integration branch into the work branch itself, with no agent,
+  and pushes it, so the checks run again on a commit that is verified and reviewed. A conflict, or a branch that
+  already holds that head, fails the run for a person. The base is read only when a required check failed.
   When GitHub refuses auto-merge because
   the pull request is already clean (its checks passed first), the factory merges it at once, pinned to the
   same commit, as if no check were required (`autoMergeOrMergeable` in `github/pulls.ts`). A pull request that is

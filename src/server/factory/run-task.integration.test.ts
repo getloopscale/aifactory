@@ -53,7 +53,13 @@ import type { CodingHarness } from './harness'
 import type { Finding } from './review'
 import { mergeEgress, resumeTask, runTask, type RunTaskDeps } from './run-task'
 import { runContinuation } from './run-support'
-import { requestChanges, retryAutomatically, type ActionDeps } from '../panel/actions'
+import { fixedBaseNote } from './ci-wait'
+import {
+  mergeFixedBase,
+  requestChanges,
+  retryAutomatically,
+  type ActionDeps,
+} from '../panel/actions'
 import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
@@ -2569,6 +2575,140 @@ describe('runTask continuing from a branch a person sent back', () => {
     }
     await runTask(deps(new FakeSandbox(changed()), { harness: builder }), id)
     expect(prompts[0]).not.toContain('A person reviewed')
+  })
+})
+
+describe('runTask merging an integration branch that passes the checks again', () => {
+  const base = 'c'.repeat(40)
+  const verified = 'a'.repeat(40)
+  const merge = 'b'.repeat(40)
+  type Queued = { taskId: number; feedback?: string; resume?: boolean; mergeBase?: boolean }
+
+  /** A done task waiting on its checks, sent to merge the fixed base as the cron does, and what that queued. */
+  async function sentToMergeTheBase(): Promise<{ id: number; queued: Queued[] }> {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'done', headSha: verified, awaitingCiSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+    await mergeFixedBase(
+      {
+        db: getDb(),
+        github,
+        api: githubApi,
+        enqueueResume: async () => {},
+        deleteSnapshot: async () => {},
+        inTransaction: (work) =>
+          getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+      },
+      id,
+      fixedBaseNote('workspace', ['CI']),
+    )
+    return { id, queued }
+  }
+
+  /** A clone of the integration branch at `base`, then the work branch at `verified`, which a merge moves on. */
+  function mergingSandbox() {
+    let onBranch = false
+    let merged = false
+    dirty = false
+    return new FakeSandbox(
+      changed((command) => {
+        if (command.includes('checkout -B factory/7')) onBranch = true
+        if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
+        if (command.includes(`merge --no-edit ${base}`)) merged = true
+        if (command.includes('rev-list --count')) return { stdout: merged ? '1\n' : '0\n' }
+        if (command.endsWith('rev-parse HEAD')) {
+          return { stdout: `${!onBranch ? base : merged ? merge : verified}\n` }
+        }
+        return undefined
+      }),
+    )
+  }
+
+  it('queues a run that merges the base, with no feedback for an agent', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+
+    expect(queued).toEqual([{ taskId: id, mergeBase: true }])
+  })
+
+  it('records a note with no git command in it', async () => {
+    const { id } = await sentToMergeTheBase()
+
+    const [intake] = (await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'intake')))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)) as { detail: { note: string } }[]
+    expect(intake!.detail.note).toBe(fixedBaseNote('workspace', ['CI']))
+    expect(intake!.detail.note).not.toMatch(/\bgit\b/)
+  })
+
+  it('merges the base it cloned, pushes the merge with no agent asked anything, and checks and reviews it', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const sandbox = mergingSandbox()
+    const built: string[] = []
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        built.push(input.prompt)
+        return { ok: true, summary: 'built' }
+      },
+    }
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(sandbox, { harness: builder }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(built).toEqual([])
+    const commands = sandbox.backend.commands
+    const merging = commands.findIndex((c) => c.includes(`merge --no-edit ${base}`))
+    const pushing = commands.findIndex((c) =>
+      c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
+    )
+    expect(merging).toBeGreaterThan(-1)
+    expect(pushing).toBeGreaterThan(merging)
+    expect(commands.some((c) => c.includes('commit -F'))).toBe(false)
+    const stages = await stagesOf(id)
+    expect(stages).toContain('verify')
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('build')
+  })
+
+  it('fails for a person, naming the files, when the base conflicts with the branch', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
+        if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
+        if (command.includes('--diff-filter=U')) return { stdout: 'CHANGELOG.md\n' }
+        return undefined
+      }),
+    )
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(sandbox),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('CHANGELOG.md'),
+    })
+    expect(pushesOf(sandbox)).toEqual([])
+    expect(retryableFailure({ error: (result as { error: string }).error })).toBeNull()
   })
 })
 

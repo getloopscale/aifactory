@@ -19,6 +19,8 @@ export default defineJob('run-task', {
     feedback: z.string().max(4_000).optional(),
     /** Continue the branch an earlier run pushed before it finished, with nothing to change. */
     resume: z.boolean().optional(),
+    /** Merge the integration branch into the work branch, which now passes the checks it had failed. */
+    mergeBase: z.boolean().optional(),
   }),
   // A run that fails is recorded as the `failed` stage and goes to a person. Retrying it on its
   // own would spend the agent's budget again on the same issue.
@@ -31,7 +33,7 @@ export default defineJob('run-task', {
       const [decided] = input.decisionId
         ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
         : []
-      const continuation = runContinuation(decided, input.feedback, input.resume)
+      const continuation = runContinuation(decided, input.feedback, input.resume, input.mergeBase)
       const result = await runTask(deps, input.taskId, signal, continuation)
       console.log(JSON.stringify({ event: 'task_finished', taskId: input.taskId, ...result }))
     })
