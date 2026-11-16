@@ -10,8 +10,9 @@ import { enterStage } from './stages'
 
 /**
  * A task that finished with no change: `done`, resolved at a commit of the integration branch, nothing
- * merged. Its issue was closed when it was resolved, and no tag carries it, so what makes it released is
- * its resolving commit reaching the release branch.
+ * merged. Its issue was closed when it was resolved by the agent, but not when a person resolved it from the
+ * panel, and no tag carries it, so what makes it released is its resolving commit reaching the release
+ * branch. A release closes the issue that is still open (`afterRelease`).
  */
 const resolvedNotReleased = and(
   eq(task.stage, 'done'),
@@ -33,10 +34,21 @@ export type ReleaseBranchView = {
   actor: string
   /** The commit a release promoted, when a release is what brought the commit there. */
   mergeSha?: string
+  /**
+   * Runs for each task once it is released, with its issue. A release that has a tag uses it to tell the
+   * issue where the fix is; a catch-up has none. It returns what went wrong, never throws.
+   */
+  afterRelease?: (row: {
+    id: number
+    repository: string
+    issueNumber: number
+  }) => Promise<string | undefined>
 }
 
 export type ResolvedReleased = {
   released: number[]
+  /** What `afterRelease` reported, as `#<issue>: <why>`. The release stands. */
+  issueErrors?: string[]
   /** Tasks that could not be checked, as `task <id> (<repo>#<issue>): <why>`. A later pass tries again. */
   errors: string[]
 }
@@ -68,6 +80,8 @@ async function releaseEach(
         ...(view.mergeSha ? { mergeSha: view.mergeSha } : {}),
       })
       result.released.push(row.id)
+      const issueError = await view.afterRelease?.(row)
+      if (issueError) (result.issueErrors ??= []).push(issueError)
     } catch (error) {
       result.errors.push(`task ${row.id} (${row.repository}#${row.issueNumber}): ${message(error)}`)
     }
