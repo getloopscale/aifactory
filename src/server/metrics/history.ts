@@ -26,6 +26,10 @@ const TERMINAL: TaskStage[] = ['done', 'failed', 'handoff', 'cancelled']
 const CAME_BACK: TaskStage[] = ['failed', 'handoff']
 const MINUTE = 60_000
 
+/** An intake a person withdrew, or the copy of the earlier event written when it was. */
+const withdrawal = (e: HistoryEvent) =>
+  e.detail?.withdrawn === true || e.detail?.withdrawnDecisionId !== undefined
+
 /** A task's runs: one starts at each intake (the first at the first event) and lasts until the next. */
 function runsOf(events: HistoryEvent[]): Run[] {
   const runs: Run[] = []
@@ -87,8 +91,10 @@ function measureRun(run: Run, h: TaskHistory, cameBackLater: boolean) {
  * The observations one task gives: one set per finished run, and the hours to its first release. A run that
  * only waited for another issue measures nothing, and neither does a run still going.
  */
-export function observe(h: TaskHistory): Observation[] {
+export function observe(history: TaskHistory): Observation[] {
   const out: Observation[] = []
+  // A withdrawn send-back and the copy of the stage it went back to are not a run: the work is as it was.
+  const h = { ...history, events: history.events.filter((e) => !withdrawal(e)) }
   const runs = runsOf(h.events)
   runs.forEach((run, i) => {
     const terminal = run.events.find((e) => TERMINAL.includes(e.stage))

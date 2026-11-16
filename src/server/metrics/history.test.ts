@@ -65,6 +65,19 @@ describe('observe', () => {
     expect(observe(delivered)).toHaveLength(7)
   })
 
+  it('ignores a withdrawn send-back of a delivered task: no second delivery, no come-back', () => {
+    const h = history({
+      ...delivered,
+      events: [
+        ...delivered.events,
+        ev(40, 'intake', { decision: 'request_changes', withdrawn: true }),
+        ev(30, 'done', { sha: 'a1', costUsd: 0.4, mergedSha: 'm1', withdrawnDecisionId: 3 }),
+      ],
+    })
+    expect(observe(h)).toEqual(observe(delivered))
+    expect(value(h, 'change_failure')).toEqual([0])
+  })
+
   it('counts the first verification as red when any of its checks failed', () => {
     const h = history({
       ...delivered,
