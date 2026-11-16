@@ -3,7 +3,6 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { RerunAnswer } from '../github/promotion-api'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
@@ -11,12 +10,11 @@ import { errorMessage } from './error-message'
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
-  MAX_RERUNS,
-  type BaseBlame,
   checksFeedback,
-  type RerunAsk,
   decideWaitingIntegration,
   evidenceOfNote,
+  fixedBaseNote,
+  type WaitingIntegration,
   type WaitingStep,
 } from './ci-wait'
 import { createPreRelease, type ReleaseMode } from './deliver'
@@ -38,8 +36,6 @@ export type AwaitCiDeps = {
   api: GithubApi
   /** Reads the log or annotations of a failed check, so the note carries what the sandbox cannot open. */
   checks: EvidenceApi
-  /** Runs the failed jobs of a GitHub Actions run again (`PromotionApi.rerunFailedJobs`). */
-  rerun: (repo: string, token: string, runId: number) => Promise<RerunAnswer>
   /** The factory's release mode, for a repository that sets none. */
   releaseMode: ReleaseMode | undefined
   now?: () => Date
@@ -58,10 +54,10 @@ export type AwaitCiResult = {
   startedOver: number[]
   toPerson: number[]
   waiting: number
-  /** Tasks that wait because every failed required check also fails on the integration branch. */
+  /** Tasks that wait because the required checks they failed fail on the head of the integration branch too. */
   waitingOnBase: number[]
-  /** Tasks whose old failure, blamed on a base that is fixed now, was run again instead of sent back. */
-  rerun: number[]
+  /** Tasks sent to their branch to merge the integration branch, which passes now the checks it had failed. */
+  baseFixed: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
   /** Failed checks whose evidence GitHub would not give: the work went back with their links only. */
@@ -265,58 +261,41 @@ async function readBase(
   branch: string,
 ): Promise<CheckReport[]> {
   const head = await deps.api.branchHead(repository, token, branch)
-  if (!head)
+  if (!head) {
     throw new Error(`the integration branch ${branch} has no head to compare the checks with`)
+  }
   return deps.api.checkReports(repository, token, head)
 }
 
-/** Remembers on the `done` event which checks were blamed on the base, so a later pass still knows. */
-async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown, blame: BaseBlame) {
-  await deps.db
-    .update(stageEvent)
-    .set({ detail: { ...(detail as Record<string, unknown>), baseBlame: blame } })
-    .where(eq(stageEvent.id, doneId))
-}
+/**
+ * What a pass stores on the `done` event of the verified commit (`detail.baseBlame`): every required check
+ * found red on the base while it failed on that commit.
+ */
+type BaseBlame = { sha: string; checks: string[] }
 
-/** The earlier blame plus the checks this pass found red on the base: the union, never fewer. */
-function withBaseRed(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
-  const checks = [...new Set([...(before?.checks ?? []), ...baseRed])]
-  return { ...before, checks }
+/** The checks blamed on the base for the verified commit; a blame stored for another commit counts for nothing. */
+function blamedOnBase(detail: unknown, verifiedSha: string): string[] {
+  const blame = (detail as { baseBlame?: Partial<BaseBlame> } | null | undefined)?.baseBlame
+  return blame?.sha === verifiedSha && Array.isArray(blame.checks) ? blame.checks : []
 }
 
 /**
- * Asks GitHub to run the failed jobs again. Each ask is written on the `done` event first, so a pass that
- * dies before or during the call leaves it known, and a later one asks again once the patience is over. A
- * request that throws puts the earlier entry back and is thrown after the others were tried; one GitHub
- * refuses is recorded as exhausted, so the old failure becomes the task's.
+ * Adds the checks this pass found red on the base to the ones blamed before, so a later pass still knows
+ * whose their failure is once the base passes them. The list only grows while the commit waits.
  */
-async function rerunChecks(
+async function rememberBaseRed(
   deps: AwaitCiDeps,
-  w: Waiting,
   done: { id: number; detail: unknown },
-  before: BaseBlame,
-  asks: RerunAsk[],
-  at: Date,
+  verifiedSha: string,
+  before: string[],
+  red: string[],
 ): Promise<void> {
-  const reruns = { ...before.reruns }
-  for (const ask of asks)
-    reruns[ask.name] = { url: ask.url, at: at.toISOString(), tries: ask.tries }
-  await rememberBlame(deps, done.id, done.detail, { ...before, reruns })
-  let failure: unknown
-  for (const ask of asks) {
-    try {
-      const answer = await deps.rerun(w.row.repository, w.token, ask.runId)
-      if (!answer.started) {
-        reruns[ask.name] = { url: ask.url, at: new Date(0).toISOString(), tries: MAX_RERUNS }
-      }
-    } catch (error) {
-      failure ??= error
-      if (before.reruns?.[ask.name]) reruns[ask.name] = before.reruns[ask.name]!
-      else delete reruns[ask.name]
-    }
-  }
-  await rememberBlame(deps, done.id, done.detail, { ...before, reruns })
-  if (failure) throw failure
+  if (red.every((name) => before.includes(name))) return
+  const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
+  await deps.db
+    .update(stageEvent)
+    .set({ detail: { ...(done.detail as Record<string, unknown>), baseBlame } })
+    .where(eq(stageEvent.id, done.id))
 }
 
 async function look(
@@ -339,31 +318,30 @@ async function look(
     .groupBy(stageEvent.taskId)
   const number = pullNumber(row.pullRequestUrl)
   const { token } = await deps.github.installationToken(row.repository)
-  const repo = await loadRepoConfig(deps.db, row.repository)
-  const pull = await deps.api.readPullRequest(row.repository, token, number)
-  const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
-  const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
-  const now = deps.now?.() ?? new Date()
-  const stored = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  const waitedMs = now.getTime() - new Date(done?.at ?? row.createdAt).getTime()
-  const input = {
+  const base = integrationBranch(await loadRepoConfig(deps.db, row.repository))
+  const required = await deps.api.requiredChecks(row.repository, token, base)
+  const blamed = blamedOnBase(done?.detail, verifiedSha)
+  const input: WaitingIntegration = {
     verifiedSha,
-    pull,
+    pull: await deps.api.readPullRequest(row.repository, token, number),
     required,
-    reports,
-    ...(stored ? { baseBlame: stored } : {}),
-    nowMs: now.getTime(),
-    waitedMs,
+    reports: await deps.api.checkReports(row.repository, token, verifiedSha),
+    blamedOnBase: blamed,
+    waitedMs:
+      (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
       ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
       : {}),
   }
   let step = decideWaitingIntegration(input)
-  // The base is read only when a required check failed and its blame is the question.
+  // The base is read only when a required check failed: whose failure it is is the question.
   if (step.kind === 'needs_base') {
-    const baseReports = await readBase(deps, row.repository, token, integrationBranch(repo))
+    const baseReports = await readBase(deps, row.repository, token, base)
     step = decideWaitingIntegration({ ...input, baseReports })
+  }
+  if (done && step.kind === 'wait' && step.baseRed) {
+    await rememberBaseRed(deps, done, verifiedSha, blamed, step.baseRed)
   }
   const w: Waiting = {
     row,
@@ -372,29 +350,28 @@ async function look(
     token,
     done: (done?.detail ?? {}) as Record<string, unknown>,
   }
-  // Every check seen red on the base joins the stored blame before anything else is done about the task.
-  let blame = stored
-  const seen = 'baseRed' in step ? (step.baseRed ?? []) : []
-  if (done && seen.some((name) => !stored?.checks.includes(name))) {
-    blame = withBaseRed(stored, seen)
-    await rememberBlame(deps, done.id, done.detail, blame)
-  }
+  await take(deps, w, step, { required, base, result })
+}
+
+/** Takes the step decided for a waiting integration. */
+async function take(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  step: WaitingStep,
+  at: { required: string[]; base: string; result: AwaitCiResult },
+) {
+  const { row, token, number } = w
+  const { result } = at
   switch (step.kind) {
     case 'wait':
       result.waiting += 1
-      if (step.baseRed) {
-        result.waitingOnBase.push(row.id)
-      }
-      return
-    case 'rerun':
-      await rerunChecks(deps, w, done!, blame ?? { checks: [] }, step.checks, now)
-      result.rerun.push(row.id)
+      if (step.baseRed) result.waitingOnBase.push(row.id)
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
       return
     case 'integrate':
-      if (await integrateHeld(deps, w, required)) result.merged.push(row.id)
+      if (await integrateHeld(deps, w, at.required)) result.merged.push(row.id)
       else result.waiting += 1
       return
     case 'send_back': {
@@ -405,8 +382,14 @@ async function look(
       result.sentBack.push(row.id)
       return
     }
+    case 'merge_base':
+      // Off first: the merge the agent pushes is a new commit, verified and reviewed before it lands.
+      await deps.api.disableAutoMerge(row.repository, token, number)
+      await deps.sendBack(row.id, fixedBaseNote(at.base, step.checks))
+      result.baseFixed.push(row.id)
+      return
     case 'needs_base':
-      throw new Error('the base was not read')
+      throw new Error('the integration branch was read and the base is still asked for')
     case 'start_over':
       // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
@@ -438,7 +421,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     toPerson: [],
     waiting: 0,
     waitingOnBase: [],
-    rerun: [],
+    baseFixed: [],
     errors: [],
     unreadEvidence: [],
   }

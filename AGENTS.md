@@ -124,7 +124,12 @@ reads that file, not a convention.
   request there, pinned to the verified commit, once the checks pass and the review approves. When the
   integration branch requires status checks, the factory merges nothing itself: it turns on auto-merge pinned
   to the verified commit (`task.awaiting_ci_sha`), and the `integrate-after-ci` cron finishes the integration
-  after GitHub merges, or sends the work back when a required check fails. When GitHub refuses auto-merge because
+  after GitHub merges, or sends the work back when a required check fails. A required check that fails on the head of
+  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`): the
+  task keeps waiting, the checks blamed on the base are kept on its `done` event (`baseBlame`, for the verified commit),
+  and once the base passes all of them the task goes back to its branch only to merge the base (`fixedBaseNote`), so
+  the checks run again on a commit that is verified and reviewed. The base is read only when a required check failed.
+  When GitHub refuses auto-merge because
   the pull request is already clean (its checks passed first), the factory merges it at once, pinned to the
   same commit, as if no check were required (`autoMergeOrMergeable` in `github/pulls.ts`). A pull request that is
   still the draft a handoff left is marked ready for review first, with its title restored (`titleToRestore`), on
