@@ -536,7 +536,16 @@ export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
     'sandbox',
     'blocked',
     'sandbox_refused',
-    { taskId: String(refusal.taskId), at: refusal.at, error: refusal.error },
+    {
+      taskId: String(refusal.taskId),
+      at: refusal.at,
+      error: refusal.error,
+      ...(slots && {
+        up: String(slots.up),
+        limit: String(slots.limit),
+        atWork: String(slots.atWork),
+      }),
+    },
     { link: `/tasks/${refusal.taskId}` },
   )
 }

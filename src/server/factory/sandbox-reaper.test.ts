@@ -18,16 +18,20 @@ const facts = (over: Partial<ReaperFacts> = {}): ReaperFacts => ({
   alive: () => true,
   ...over,
 })
-const task = (taskId: number, run: string) => metadataFor({ owner: 'task', taskId, run }, 'here', 1)
+const task = (taskId: number, run: string) =>
+  metadataFor({ owner: 'task', taskId, run }, { host: 'here', pid: 1, since: 1 })
 
 describe('metadataFor', () => {
   it('names the owner, the host and the process, as strings', () => {
-    expect(metadataFor({ owner: 'task', taskId: 4, run: 'r' }, 'h', 9)).toEqual({
+    expect(
+      metadataFor({ owner: 'task', taskId: 4, run: 'r' }, { host: 'h', pid: 9, since: 100 }),
+    ).toEqual({
       owner: 'task',
       taskId: '4',
       run: 'r',
       host: 'h',
       pid: '9',
+      since: '100',
     })
     expect(metadataFor(undefined)).toEqual({})
   })
@@ -60,17 +64,50 @@ describe('reapable', () => {
 
   it('kills an evaluation, a proof or a plan whose process is gone, and keeps one that lives', () => {
     const listing = [
-      sbx('eval', metadataFor({ owner: 'eval', caseId: 'c', runId: 'r' }, 'here', 5)),
-      sbx('proof', metadataFor({ owner: 'prove-checks', repository: 'a/b' }, 'here', 6)),
-      sbx('plan', metadataFor({ owner: 'plan', planId: 1 }, 'here', 7)),
+      sbx(
+        'eval',
+        metadataFor({ owner: 'eval', caseId: 'c', runId: 'r' }, { host: 'here', pid: 5, since: 1 }),
+      ),
+      sbx(
+        'proof',
+        metadataFor(
+          { owner: 'prove-checks', repository: 'a/b' },
+          { host: 'here', pid: 6, since: 1 },
+        ),
+      ),
+      sbx('plan', metadataFor({ owner: 'plan', planId: 1 }, { host: 'here', pid: 7, since: 1 })),
     ]
     const killed = reapable(listing, facts({ alive: (pid) => pid === 6 }))
     expect(killed.map((k) => k.id)).toEqual(['eval', 'plan'])
   })
 
-  it('leaves alone a sandbox another host made, which this one cannot ask about', () => {
-    const other = metadataFor({ owner: 'eval', caseId: 'c', runId: 'r' }, 'elsewhere', 5)
+  it('leaves alone a sandbox another host made before its session is over', () => {
+    const other = metadataFor(
+      { owner: 'eval', caseId: 'c', runId: 'r' },
+      { host: 'elsewhere', pid: 5, deadline: NOW.getTime() + 60_000 },
+    )
     expect(reapable([sbx('x', other)], facts({ alive: () => false }))).toEqual([])
+  })
+
+  it('kills what another host made once its session is over, and not before', () => {
+    const made = (deadline: number) =>
+      metadataFor(
+        { owner: 'prove-checks', repository: 'a/b' },
+        { host: 'elsewhere', pid: 5, deadline },
+      )
+    const open = sbx('open', made(NOW.getTime() + 1))
+    const over = sbx('over', made(NOW.getTime() - SANDBOX_GRACE_MS - 1))
+    expect(reapable([open, over], facts()).map((k) => k.id)).toEqual(['over'])
+  })
+
+  it('does not take a process that reused the id for the owner', () => {
+    const mine = sbx(
+      'x',
+      metadataFor({ owner: 'plan', planId: 1 }, { host: 'here', pid: 5, since: 1000 }),
+    )
+    const seen: (number | undefined)[] = []
+    reapable([mine], facts({ alive: (_, since) => (seen.push(since), false) }))
+    expect(seen).toEqual([1000])
   })
 
   it('counts the sandboxes with an owner at work', () => {

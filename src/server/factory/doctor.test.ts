@@ -719,6 +719,12 @@ describe('sandbox', () => {
     expect(item.cause).toContain('8 of 10 sandboxes are up, 2 with an owner at work')
   })
 
+  it('keeps the slot counts when the latest run was refused', () => {
+    const item = sandboxItem(readOf({ refusal, slots: { up: 10, limit: 10, atWork: 2 } }))
+    expect(item.status).toBe('blocked')
+    expect(item.cause).toContain('10 of 10 sandboxes are up, 2 with an owner at work')
+  })
+
   it('blocks on a refusal with no run started since, and links to the task', () => {
     expect(sandboxItem(readOf({ refusal }))).toEqual({
       id: 'sandbox',

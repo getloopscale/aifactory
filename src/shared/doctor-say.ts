@@ -223,7 +223,7 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   },
   sandbox_refused: {
     cause: (v) =>
-      `The sandbox provider refused the last run of this repository (task ${v.taskId}, ${v.at}): ${v.error}`,
+      `The sandbox provider refused the last run of this repository (task ${v.taskId}, ${v.at}): ${v.error}${v.up ? ` ${v.up} of ${v.limit} sandboxes are up, ${v.atWork} with an owner at work.` : ''}`,
     repair: (v) =>
       SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
         ? 'Build the sandbox template: node --env-file=.env.local scripts/build-e2b-template.mts. The task retries itself once the provider has it.'

@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
@@ -8,7 +10,7 @@ import { storageFromUrl } from '../db/config'
 import { finding, ingress, question, stageEvent, task, watch } from '../db/schema'
 
 import { FakeSandbox } from './fake-sandbox'
-import { reapSandboxes } from './sandbox-reaper'
+import { metadataFor, processStartMs } from './sandbox-reaper'
 import { detect, supervise } from './supervise'
 
 const NOW = new Date('2026-11-04T12:00:00Z')
@@ -323,26 +325,42 @@ describe('supervise', () => {
 })
 
 describe('sandboxes nobody owns', () => {
-  it('leaves none up after a pass once the evaluation that made them is killed', async () => {
+  it('leaves none up after a supervise pass once the evaluation that made them is killed', async () => {
     const provider = new FakeSandbox()
     const spec = { egress: [{ domain: 'github.com' }], timeoutMs: 60_000 }
-    // Two evaluation sandboxes whose process is gone, and one of this process that is alive.
-    for (const caseId of ['a', 'b']) {
-      await provider.create({ ...spec, owner: { owner: 'eval', caseId, runId: 'r' } })
+    // An evaluation process that is started and killed, as in the incident.
+    const child = spawn('sleep', ['60'])
+    await new Promise((resolve) => child.once('spawn', resolve))
+    const pid = child.pid!
+    const since = processStartMs(pid)
+    const owner = { owner: 'eval', caseId: 'a', runId: 'r' } as const
+    await provider.create({ ...spec, owner })
+    await provider.create({ ...spec, owner: { ...owner, caseId: 'b' } })
+    for (const sandbox of provider.up.values()) {
+      sandbox.metadata = metadataFor(
+        { owner: 'eval', caseId: sandbox.metadata.caseId, runId: 'r' },
+        { pid, since, deadline: Date.now() + 60_000 },
+      )
     }
-    for (const sandbox of provider.up.values()) sandbox.metadata.pid = '2147483646'
     const taskId = await seed('build', 1)
     await getDb().update(task).set({ sandboxRun: 'run-1' }).where(eq(task.id, taskId))
     await provider.create({ ...spec, owner: { owner: 'task', taskId, run: 'run-1' } })
     await provider.create({ ...spec, owner: { owner: 'task', taskId, run: 'run-0' } })
+    const run = () =>
+      supervise({
+        db: getDb(),
+        now,
+        listSandboxes: () => provider.listSandboxes(),
+        killSandbox: (id) => provider.killSandbox(id),
+      })
 
-    const killed = await reapSandboxes({
-      db: getDb(),
-      listSandboxes: () => provider.listSandboxes(),
-      killSandbox: (id) => provider.killSandbox(id),
-    })
+    // The evaluation lives: its sandboxes stay, and the task's old run goes.
+    expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-4'])
+    expect([...provider.up.keys()]).toEqual(['sbx-1', 'sbx-2', 'sbx-3'])
 
-    expect(killed.map((k) => k.id)).toEqual(['sbx-1', 'sbx-2', 'sbx-4'])
+    child.kill('SIGKILL')
+    await new Promise((resolve) => child.once('exit', resolve))
+    expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-1', 'sbx-2'])
     expect([...provider.up.keys()]).toEqual(['sbx-3'])
   })
 })

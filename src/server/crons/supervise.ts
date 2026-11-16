@@ -3,7 +3,6 @@ import { defineCron } from 'theokit/server/cron'
 import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
 import { supervise } from '../factory/supervise'
-import { reapSandboxes } from '../factory/sandbox-reaper'
 import { mainProcessOnly } from '../factory/worker-only'
 
 /**
@@ -26,20 +25,10 @@ export default defineCron('supervise', {
       db: getDb(),
       // A provider that cannot be asked leaves the snapshot check out, and nothing gets resolved by that.
       listSnapshots: provider.listSnapshots?.bind(provider),
+      listSandboxes: provider.listSandboxes?.bind(provider),
+      killSandbox: provider.killSandbox?.bind(provider),
     })
-    // Sandboxes whose owner is done hold the account's slots and bill: stop them. Failing here leaves the rest.
-    if (provider.listSandboxes && provider.killSandbox) {
-      try {
-        await reapSandboxes({
-          db: getDb(),
-          listSandboxes: provider.listSandboxes.bind(provider),
-          killSandbox: provider.killSandbox.bind(provider),
-        })
-      } catch (error) {
-        console.error(JSON.stringify({ event: 'sandbox_reap_failed', error: String(error) }))
-      }
-    }
-    if (result.opened.length > 0 || result.resolved.length > 0) {
+    if (result.opened.length > 0 || result.resolved.length > 0 || result.reaped) {
       console.log(JSON.stringify({ event: 'supervise', ...result }))
     }
   }),

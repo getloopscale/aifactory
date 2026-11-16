@@ -65,7 +65,11 @@ export class FakeSandbox implements IsolatedSandboxProvider {
   async create(spec: SandboxSpec): Promise<IsolatedSandbox> {
     this.specs.push(spec)
     const id = `sbx-${++this.created}`
-    this.up.set(id, { id, startedAt: new Date(), metadata: metadataFor(spec.owner) })
+    this.up.set(id, {
+      id,
+      startedAt: new Date(),
+      metadata: metadataFor(spec.owner, { deadline: Date.now() + spec.timeoutMs }),
+    })
     return {
       backend: this.backend,
       stop: async () => {

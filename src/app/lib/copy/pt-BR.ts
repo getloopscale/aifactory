@@ -418,7 +418,7 @@ export const ptBR: Copy = {
       },
       sandbox_refused: {
         cause: (v) =>
-          `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}`,
+          `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}${v.up ? ` ${v.up} de ${v.limit} sandboxes estão ativos, ${v.atWork} com dono trabalhando.` : ''}`,
         repair: (v) =>
           SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'

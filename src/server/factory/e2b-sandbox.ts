@@ -263,7 +263,7 @@ export function sandboxOptions(spec: SandboxSpec, env: NodeJS.ProcessEnv = proce
     timeoutMs: Math.min(spec.timeoutMs, e2bMaxSessionMs(env)),
     envs: SANDBOX_ENV,
     network: networkFor(spec),
-    metadata: metadataFor(spec.owner),
+    metadata: metadataFor(spec.owner, { deadline: Date.now() + spec.timeoutMs }),
   }
 }
 
