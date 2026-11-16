@@ -142,6 +142,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
               throw new Error(`GitHub answered ${answer.status} reading ${repo}@${sha}`)
             return ((await answer.json()) as { parents: { sha: string }[] }).parents[0].sha
           },
+          // Must return what `CaseSources.config` (extract.ts) asks for; `toCase` is the only reader.
           config: async (repo) => {
             const config = await loadRepoConfig(getDb(), repo)
             return { integrationBranch: integrationBranch(config), egress: config.egress }

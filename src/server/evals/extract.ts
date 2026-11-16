@@ -71,9 +71,18 @@ export type CaseSources = {
   ): Promise<{ title: string; body: string; labels: string[] }>
   /** The first parent of `sha`: the commit the run started from. */
   parentOf(repository: string, sha: string): Promise<string>
+  /**
+   * The owner's settings a case carries: the branch work starts from and the domains the sandbox may reach.
+   * A new `RepoConfig` field that cases need is added here, in `toCase` and in the `config` callback of
+   * `suite.evals.test.ts`.
+   */
   config(repository: string): Promise<{ integrationBranch: string; egress: string[] }>
 }
 
+/**
+ * Turns a delivered task into an evaluation case: the issue as it reads now, the commit the run started from
+ * and the repository's settings. It is the only place those settings become an `EvalCase`.
+ */
 export async function toCase(candidate: Candidate, sources: CaseSources): Promise<EvalCase> {
   const { repository, issueNumber } = candidate
   const issue = await sources.issue(repository, issueNumber)
