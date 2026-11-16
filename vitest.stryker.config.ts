@@ -60,6 +60,7 @@ export default defineConfig({
       'src/app/panel.test.tsx',
       'src/app/page.test.tsx',
       'src/server/metrics/bands.test.ts',
+      'src/server/metrics/comparison.test.ts',
       'src/server/metrics/history.test.ts',
       'src/server/metrics/series.test.ts',
     ],

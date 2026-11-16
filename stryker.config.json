@@ -53,6 +53,7 @@
     "src/server/evals/cases.ts",
     "src/server/evals/suite.ts",
     "src/server/metrics/bands.ts",
+    "src/server/metrics/comparison.ts",
     "src/server/metrics/history.ts",
     "src/server/metrics/series.ts",
     "src/server/github/pulls.ts:108-167"
