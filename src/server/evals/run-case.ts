@@ -238,7 +238,17 @@ class CaseRun {
   private async applyFixes(sha: string): Promise<string> {
     const fixes = this.c.fixes ?? []
     if (fixes.length === 0) return sha
-    await runFixes(this.backend, this.repoDir, fixes, this.limits.checkMs ?? DEFAULT_CHECK_MS)
+    const outcomes = await runFixes(
+      this.backend,
+      this.repoDir,
+      fixes,
+      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    )
+    if (outcomes.some((o) => o.restoreFailed)) {
+      await must(this.backend, `${this.git} reset -q --hard ${sha}`)
+      await must(this.backend, `${this.git} clean -fdq`)
+      return sha
+    }
     const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     if (changes.stdout.trim() === '') return sha
     await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))

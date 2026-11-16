@@ -11,6 +11,8 @@ export type FixOutcome = {
   exitCode: number
   timedOut: boolean
   output: string
+  /** Set when the checkout could not be put back after this command: what it left is not to be kept. */
+  restoreFailed?: true
 }
 
 const SNAPSHOT_INDEX = '/tmp/factory-fix-index'
@@ -29,13 +31,19 @@ async function snapshot(backend: SandboxBackend, repoDir: string, timeoutMs: num
 }
 
 /** Puts the working tree back to the snapshot: the index, staged and new files and deletions included. */
-async function restore(backend: SandboxBackend, repoDir: string, tree: string, timeoutMs: number) {
+async function restore(
+  backend: SandboxBackend,
+  repoDir: string,
+  tree: string,
+  timeoutMs: number,
+): Promise<boolean> {
   const git = `GIT_INDEX_FILE=${SNAPSHOT_INDEX} git -C ${repoDir}`
-  await backend.execute(
+  const run = await backend.execute(
     `git -C ${repoDir} reset -q && git -C ${repoDir} clean -fdq && rm -f ${SNAPSHOT_INDEX} && ` +
       `${git} read-tree ${tree} && ${git} checkout-index -a -f`,
     { timeoutMs },
   )
+  return run.exitCode === 0 && !run.timedOut
 }
 
 /**
@@ -52,20 +60,19 @@ export async function runFixes(
 ): Promise<FixOutcome[]> {
   const outcomes: FixOutcome[] = []
   for (const command of fixes) {
+    // Without a way back, a command that fails would leave its mess for the commit: it does not run.
+    const tree = await snapshot(backend, repoDir, timeoutMs).catch(() => '')
+    if (tree === '') {
+      outcomes.push({
+        command,
+        exitCode: -1,
+        timedOut: false,
+        output: 'not run: the work could not be saved first',
+      })
+      continue
+    }
     let outcome: FixOutcome
-    let tree = ''
     try {
-      tree = await snapshot(backend, repoDir, timeoutMs)
-      if (tree === '') {
-        // Without a way back, a command that fails would leave its mess for the commit: it does not run.
-        outcomes.push({
-          command,
-          exitCode: -1,
-          timedOut: false,
-          output: 'not run: the work could not be saved first',
-        })
-        continue
-      }
       const run = await backend.execute(`cd ${repoDir} && ${command}`, { timeoutMs })
       outcome = {
         command,
@@ -82,12 +89,12 @@ export async function runFixes(
       }
     }
     outcomes.push(outcome)
-    if (outcome.exitCode !== 0 || outcome.timedOut) {
-      try {
-        await restore(backend, repoDir, tree, timeoutMs)
-      } catch {
-        // The checks run on what is there and judge it.
-      }
+    if (outcome.exitCode === 0 && !outcome.timedOut) continue
+    const back = await restore(backend, repoDir, tree, timeoutMs).catch(() => false)
+    if (!back) {
+      // What is in the checkout is unknown: the caller throws it away, and no other fix runs on it.
+      outcome.restoreFailed = true
+      break
     }
   }
   return outcomes

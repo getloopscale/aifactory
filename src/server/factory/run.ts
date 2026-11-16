@@ -1060,10 +1060,13 @@ export class Run {
     const { deps, taskId, row, api, continuation, state } = this.c
     if (continuation) return undefined
     if (!(await this.hasNothingToCommit())) return undefined
+    // Fixes that change the start commit make this a change after all: it goes on to be committed, checked
+    // and reviewed like any other, instead of a claim the checks backed only after the fix.
+    if (await this.fixesChange(this.baseSha)) return undefined
     await this.keepNoChange()
     const said = `The agent said: ${oneLine(first.summary).slice(0, 700)}`
     const at = this.baseSha.slice(0, 7)
-    const checked = await this.verifyWithFixes()
+    const checked = await this.verify(this.baseSha, 1, { publish: false })
     if (!checked.verdict.open) {
       throw new StageFailure(
         `the agent made no change to the repository, and the checks did not pass at ${at}: ${checked.verdict.reasons.join('; ')}. ${said}`,
@@ -1259,22 +1262,36 @@ export class Run {
   }
 
   /**
-   * Runs the repository's fix commands on the work and, when they changed files, commits and pushes that
-   * change as its own commit. A fix that fails changes nothing; the checks that follow decide. Returns the
-   * head the checks run on.
+   * Runs the repository's fix commands on the checkout, which is at `sha` and clean, and answers whether
+   * they left a change. A fix that could not be undone leaves the checkout at `sha` again: what it left
+   * is never committed.
    */
-  private async applyFixes(sha: string, attempt: number): Promise<string> {
+  private async fixesChange(sha: string): Promise<boolean> {
     this.fixOutcomes = []
     this.fixedFrom = undefined
-    if (this.fixes.length === 0) return sha
+    if (this.fixes.length === 0) return false
     this.fixOutcomes = await runFixes(
       this.backend,
       this.repoDir,
       this.fixes,
       this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
     )
+    if (this.fixOutcomes.some((o) => o.restoreFailed)) {
+      await must(this.backend, `${this.git} reset -q --hard ${sha}`)
+      await must(this.backend, `${this.git} clean -fdq`)
+      return false
+    }
     const dirty = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    if (dirty.stdout.trim() === '') return sha
+    return dirty.stdout.trim() !== ''
+  }
+
+  /**
+   * Runs the repository's fix commands on the work and, when they changed files, commits and pushes that
+   * change as its own commit. A fix that fails changes nothing; the checks that follow decide. Returns the
+   * head the checks run on.
+   */
+  private async applyFixes(sha: string, attempt: number): Promise<string> {
+    if (!(await this.fixesChange(sha))) return sha
     const pushed = await this.commitAndPush(FIX_COMMIT_MESSAGE, {
       attempt,
       fixes: this.fixOutcomes,
@@ -1283,39 +1300,6 @@ export class Run {
     // The commit the checks run on is the fix commit; the one before it is what the builder made.
     this.fixedFrom = sha
     return pushed
-  }
-
-  /**
-   * The checks on the commit the run started from, for an agent that changed nothing. The repository's fixes
-   * run first, as before any round of checks; what they change is committed in the sandbox only, so the
-   * checks run on a clean commit, and the checkout goes back to the start commit afterwards: nothing is
-   * pushed and the work stays "no change".
-   */
-  private async verifyWithFixes(): Promise<Checked> {
-    this.fixOutcomes = []
-    this.fixedFrom = undefined
-    let sha = this.baseSha
-    if (this.fixes.length > 0) {
-      this.fixOutcomes = await runFixes(
-        this.backend,
-        this.repoDir,
-        this.fixes,
-        this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
-      )
-      const dirty = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-      if (dirty.stdout.trim() !== '') {
-        await this.commitLocally(FIX_COMMIT_MESSAGE)
-        sha = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
-      }
-    }
-    try {
-      return await this.verify(sha, 1, { publish: false })
-    } finally {
-      this.fixOutcomes = []
-      if (sha !== this.baseSha) {
-        await must(this.backend, `${this.git} reset -q --hard ${this.baseSha}`)
-      }
-    }
   }
 
   /**

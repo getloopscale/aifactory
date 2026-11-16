@@ -45,6 +45,18 @@ describe('runFixes', () => {
     expect(backend.commands.some((c) => c.endsWith('&& fmt'))).toBe(false)
   })
 
+  it('marks a command whose rollback failed and runs no other after it', async () => {
+    const backend = new FakeBackend((c) => {
+      if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+      if (c.endsWith('&& bad')) return { exitCode: 1 }
+      if (c.includes('checkout-index')) return { exitCode: 1 }
+      return {}
+    })
+    const out = await runFixes(backend, '/w/r', ['bad', 'next'], 1000)
+    expect(out).toHaveLength(1)
+    expect(out[0]?.restoreFailed).toBe(true)
+  })
+
   describe('in a real checkout', () => {
     let dir = ''
     const read = (f: string) => readFileSync(join(dir, f), 'utf8')
