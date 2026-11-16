@@ -6,6 +6,7 @@ import type { GithubApp } from '../github/app'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
+import { errorMessage } from './error-message'
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
@@ -130,7 +131,7 @@ async function completeIntegration(
       },
     )
   } catch (error) {
-    handed = { error: error instanceof Error ? error.message : String(error) }
+    handed = { error: errorMessage(error) }
   }
   await deps.db.insert(stageEvent).values({
     taskId: row.id,
@@ -349,9 +350,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     try {
       await look(deps, row, result, holding)
     } catch (error) {
-      result.errors.push(
-        `task ${row.id}: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      result.errors.push(`task ${row.id}: ${errorMessage(error)}`)
     }
   }
   return result
@@ -379,9 +378,7 @@ export async function adoptMergedHandoffs(deps: IntegrationDeps): Promise<AdoptR
     try {
       if (await adopt(deps, row)) result.adopted.push(row.id)
     } catch (error) {
-      result.errors.push(
-        `task ${row.id}: ${error instanceof Error ? error.message : String(error)}`,
-      )
+      result.errors.push(`task ${row.id}: ${errorMessage(error)}`)
     }
   }
   return result

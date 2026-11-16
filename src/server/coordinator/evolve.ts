@@ -63,6 +63,8 @@ const URL = /\bhttps?:\/\/\S+/g
 const PATH = /~?\/?(?:[\w.-]+\/)+[\w.-]+/g
 // A commit id has a digit: a word made only of the letters a to f is a word.
 const COMMIT = /\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b/gi
+/** The cause `errorMessage` adds to a failed fetch: it varies by network state, so the signature stays `fetch failed`, as before the cause was recorded. */
+const FETCH_CAUSE = /^(\s*fetch failed) \(cause: [\s\S]*\)\s*$/
 const NUMBER = /\d+/g
 const LONG_DASH = /[\u2013\u2014]/g
 
@@ -73,9 +75,14 @@ const hyphens = (text: string) => text.replace(LONG_DASH, '-')
  * text, with URLs, paths, commit ids and numbers replaced by placeholders, spaces collapsed, cut to a length.
  */
 export function signatureOf(reason: string): string {
-  const line = reason.split('\n').find((l) => l.trim() !== '') ?? ''
+  const line =
+    reason
+      .replace(FETCH_CAUSE, '$1')
+      .split('\n')
+      .find((l) => l.trim() !== '') ?? ''
   return hyphens(
     line
+      .replace(FETCH_CAUSE, '$1')
       .replace(URL, '<url>')
       .replace(PATH, '<path>')
       .replace(COMMIT, '<sha>')
