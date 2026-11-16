@@ -136,6 +136,7 @@ export async function proveChecks(
     ...config.egress.map((domain) => ({ domain })),
   ]
   const started = await createIsolatedSandbox(deps.sandbox, {
+    owner: { owner: 'prove-checks', repository: fullName },
     timeoutMs: fitToSession(
       { sandboxMs: deps.sandboxMs ?? PROOF_SANDBOX_MS },
       deps.sandbox.maxSessionMs,
