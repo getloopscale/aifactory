@@ -54,7 +54,7 @@ export type WaitingStep =
    * A required check failed: the same agent works again on its branch, with a note on what each failed
    * check reported (`checksFeedback`) as feedback.
    */
-  | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
+  | { kind: 'send_back'; failed: string[]; reports: CheckReport[]; baseRed?: string[] }
   /** The pull request conflicts with its base: the task runs again to merge the new base into its branch. */
   | { kind: 'start_over'; reason: string }
   | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
@@ -70,7 +70,7 @@ export type WaitingStep =
  * failure between turning auto-merge off and starting over is retried, and the blame that is not
  * `refreshing` goes on to the next verified commit.
  */
-export type BaseBlame = { checks: string[]; refreshing?: string[] }
+export type BaseBlame = { checks: string[]; refreshing?: string[]; carry?: true }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -219,7 +219,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       }
     }
     const reports = failed.flatMap((name) => failedRuns(input.reports, name))
-    return { kind: 'send_back', failed, reports }
+    return { kind: 'send_back', failed, reports, ...(baseRed.length > 0 ? { baseRed } : {}) }
   }
   if (toRefresh.length > 0) {
     return runsLeft

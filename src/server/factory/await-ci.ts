@@ -282,6 +282,11 @@ function mergeBlame(
   return refreshing ? { checks, refreshing } : { checks }
 }
 
+/** What a send-back leaves for the next run: the checks the base failed, which that run must not be blamed for. */
+function carried(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
+  return { checks: mergeBlame(before, baseRed).checks, carry: true }
+}
+
 /**
  * The blame that applies to the verified commit: the one on its `done` event, or, when the task was just
  * started over to take a base fix, what that start-over left unresolved. The checks it refreshed were
@@ -291,7 +296,7 @@ function blameOf(dones: { detail: unknown }[]): BaseBlame | undefined {
   const own = (dones[0]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
   if (own) return own
   const before = (dones[1]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  if (!before?.refreshing?.length) return undefined
+  if (!before?.carry && !before?.refreshing?.length) return undefined
   const checks = before.checks.filter((name) => !before.refreshing!.includes(name))
   return checks.length > 0 ? { checks } : undefined
 }
@@ -363,14 +368,13 @@ async function look(
       return
     case 'refresh':
       // The union is kept first, so a check red on the base now is still the base's if the next step fails.
-      await rememberBlame(
-        deps,
-        done!.id,
-        done!.detail,
-        mergeBlame(blame, step.baseRed, step.checks),
-      )
+      await rememberBlame(deps, done!.id, done!.detail, {
+        ...mergeBlame(blame, step.baseRed, step.checks),
+        carry: true,
+      })
       // Off first: the run merges the fixed base into this pull request, and that merge must be verified.
-      await deps.api.disableAutoMerge(row.repository, token, number)
+      // Already off when an earlier pass got this far and the start-over failed: GitHub may refuse twice.
+      if (pull.autoMerge) await deps.api.disableAutoMerge(row.repository, token, number)
       await deps.startOver(row.id)
       result.rerun.push(row.id)
       return
@@ -383,6 +387,9 @@ async function look(
       return
     case 'send_back': {
       const note = await readFailure(deps, w, step.reports, result)
+      if (step.baseRed && done) {
+        await rememberBlame(deps, done.id, done.detail, carried(blame, step.baseRed))
+      }
       // Off first: the new commit the agent pushes must not merge before the factory verifies it.
       await deps.api.disableAutoMerge(row.repository, token, number)
       await deps.sendBack(row.id, note)

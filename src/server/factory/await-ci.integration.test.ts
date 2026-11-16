@@ -350,11 +350,51 @@ describe('pollAwaitingIntegrations', () => {
     expect((await pollAwaitingIntegrations(failing)).errors).toHaveLength(1)
 
     pull({ autoMerge: false })
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
+    const base = deps()
+    const strict = {
+      ...base,
+      api: Object.assign(Object.create(base.api), {
+        disableAutoMerge: async () => {
+          throw new Error('auto-merge is already disabled')
+        },
+      }),
+    } as AwaitCiDeps
+    expect(await pollAwaitingIntegrations(strict)).toMatchObject({
       rerun: [id],
       toPerson: [],
       sentBack: [],
+      errors: [],
     })
+  })
+
+  it('keeps a base-red check blamed when another check sends the work back', async () => {
+    const BASE = 'b'.repeat(40)
+    repo().required.set('workspace', ['CI', 'Lint'])
+    const red = (name: string, url: string) =>
+      ({ name, state: 'failure', detail: 'red', url }) as const
+    reports(red('CI', 'https://ci/1'), red('Lint', 'https://ci/2'))
+    repo().report(BASE, red('CI', 'https://ci/3'))
+    repo().report(BASE, { name: 'Lint', state: 'success', detail: '', url: 'https://ci/4' })
+    const id = await waitingTask()
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
+
+    // The builder's new commit: CI still shows the base's failure, and the base is fixed meanwhile.
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'done', detail: { sha: VERIFIED, pullRequestUrl: PR_URL } })
+    await getDb()
+      .update(task)
+      .set({ stage: 'done', awaitingCiSha: VERIFIED })
+      .where(eq(task.id, id))
+    reports(red('CI', 'https://ci/5'), {
+      name: 'Lint',
+      state: 'success',
+      detail: '',
+      url: 'https://ci/6',
+    })
+    repo().clearChecks(BASE)
+    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/3' })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
   })
 
   it('waits while the base has not reported the check yet', async () => {
