@@ -329,7 +329,10 @@ describe('pollAwaitingIntegrations', () => {
     repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
 
     const refusing = deps({
-      checks: { ...checks, rerunFailedJobs: async () => ({ started: false as const, refusal: '403' }) },
+      checks: {
+        ...checks,
+        rerunFailedJobs: async () => ({ started: false as const, refusal: '403' }),
+      },
     })
     expect(await pollAwaitingIntegrations(refusing)).toMatchObject({ sentBack: [], toPerson: [id] })
   })

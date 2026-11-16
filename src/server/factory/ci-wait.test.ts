@@ -74,19 +74,23 @@ describe('decideWaitingIntegration after the base was blamed', () => {
   const blame = { checks: ['CI'], rerun: false }
 
   it('runs the check again once the base no longer fails it', () => {
-    expect(decide({ reports: failing, baseReports: [report('CI', 'success')], baseBlame: blame })).toEqual({
+    expect(
+      decide({ reports: failing, baseReports: [report('CI', 'success')], baseBlame: blame }),
+    ).toEqual({
       kind: 'rerun',
       checks: ['CI'],
     })
   })
 
   it('waits while the base is still running the check', () => {
-    expect(decide({ reports: failing, baseReports: [report('CI', 'pending')], baseBlame: blame })).toEqual({
+    expect(
+      decide({ reports: failing, baseReports: [report('CI', 'pending')], baseBlame: blame }),
+    ).toEqual({
       kind: 'wait',
     })
   })
 
-  it('takes a failure after the rerun as the change\'s own', () => {
+  it("takes a failure after the rerun as the change's own", () => {
     const step = decide({
       reports: failing,
       baseReports: [report('CI', 'success')],

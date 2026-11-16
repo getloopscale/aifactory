@@ -262,7 +262,8 @@ async function readBase(
 ): Promise<CheckReport[] | undefined> {
   if (!reports.some((r) => r.state === 'failure')) return undefined
   const head = await deps.api.branchHead(repository, token, branch)
-  if (!head) throw new Error(`the integration branch ${branch} has no head to compare the checks with`)
+  if (!head)
+    throw new Error(`the integration branch ${branch} has no head to compare the checks with`)
   return deps.api.checkReports(repository, token, head)
 }
 

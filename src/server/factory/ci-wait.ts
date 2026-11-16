@@ -176,7 +176,9 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   // Blamed on the base before, and the base no longer fails it: the failure on this commit is old news.
   const blamed = input.baseBlame && !input.baseBlame.rerun ? input.baseBlame.checks : []
   const healed = allFailed.filter((name) => blamed.includes(name) && !baseRed.includes(name))
-  const settling = healed.filter((name) => base.some((r) => r.name === name && r.state === 'pending'))
+  const settling = healed.filter((name) =>
+    base.some((r) => r.name === name && r.state === 'pending'),
+  )
   const failed = allFailed.filter((name) => !baseRed.includes(name) && !healed.includes(name))
   if (failed.length > 0) {
     if (!runsLeft) {
