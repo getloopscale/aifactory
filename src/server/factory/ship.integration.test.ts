@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { ingress, task } from '../db/schema'
+import type { Issue } from '../github/issues'
 import { FakeGithub } from '../../test/fake-github'
 
 import { shipContained, type Shipment } from './ship'
@@ -72,7 +73,7 @@ function setup(issues: Record<number, 'open' | 'closed'>) {
   const repo = api.repo(REPO)
   repo.holds('p1', ['aaa111'])
   for (const [n, state] of Object.entries(issues)) repo.issue(Number(n), { state })
-  const fetchIssue = async (_repo: string, n: number) => ({
+  const fetchIssue = async (_repo: string, n: number): Promise<Issue> => ({
     number: n,
     title: '',
     body: '',
@@ -108,7 +109,12 @@ describe('shipContained with a resolved task', () => {
   it('does not take an unknown state as open', async () => {
     await resolved(REPO, 3, 'aaa111')
     const gh = setup({ 3: 'open' })
-    gh.deps.fetchIssue = async (_r: string, n: number) => ({ number: n, title: '', body: '', labels: [] })
+    gh.deps.fetchIssue = async (_r: string, n: number) => ({
+      number: n,
+      title: '',
+      body: '',
+      labels: [],
+    })
 
     await shipContained(gh.deps, shipment())
 
