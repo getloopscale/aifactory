@@ -723,6 +723,14 @@ export class Run {
    */
   private async failUnfinished(result: HarnessResult, what: string): Promise<never> {
     const plain = `${what}: ${result.summary}`
+    // A quota stop keeps its reset, so the retry still waits for it, whatever became of the work.
+    const stop = (note: string) =>
+      result.quota
+        ? new QuotaStop(
+            `${this.quotaStop(this.builder, result).message}\n${note}`,
+            result.quota.resetsAt,
+          )
+        : new StageFailure(`${plain}\n${note}`)
     if (!result.timedOut || (await this.hasNothingToCommit())) {
       throw result.quota ? this.quotaStop(this.builder, result) : new StageFailure(plain)
     }
@@ -734,10 +742,10 @@ export class Run {
       )
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error)
-      throw new StageFailure(`${plain}\nthe work could not be kept: ${reason}`)
+      throw stop(`the work could not be kept: ${reason}`)
     }
-    throw new StageFailure(
-      `${plain}\nthe work was kept in commit ${sha} on ${this.c.branch}; send the task back to continue from it`,
+    throw stop(
+      `the work was kept in commit ${sha} on ${this.c.branch}; send the task back to continue from it`,
     )
   }
 

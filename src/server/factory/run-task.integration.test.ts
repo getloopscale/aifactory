@@ -831,6 +831,40 @@ describe('runTask', () => {
     expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(true)
   })
 
+  it.each([
+    ['the push succeeds', undefined, 'kept in commit'],
+    [
+      'the push fails',
+      (c: string) => (c.includes('push origin') ? { exitCode: 1, stderr: 'rejected' } : undefined),
+      'the work could not be kept',
+    ],
+  ])('keeps the quota reset of a pass cut at its limit when %s', async (_n, script, text) => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed(script))
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({
+        ok: false,
+        timedOut: true,
+        summary: 'codex exited 124',
+        quota: { message: 'usage limit', resetsAt: 'Nov 5th, 2026 11:48 AM' },
+      }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result.status === 'failed' && result.error).toContain(text)
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).toMatchObject({
+      quota: true,
+      resetsAt: 'Nov 5th, 2026 11:48 AM',
+      resumesAt: '2026-11-05T11:48:00.000Z',
+    })
+  })
+
   it('pushes nothing when a pass cut at its limit left a clean checkout', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox((c) =>
