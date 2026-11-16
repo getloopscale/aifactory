@@ -105,6 +105,18 @@ describe('runFixes', () => {
       expect(await git('status', '--porcelain')).toBe(' D b.txt\n')
     })
 
+    it('keeps a tracked file that an ignore rule matches when a failing fix is undone', async () => {
+      writeFileSync(join(dir, 'gen.log'), 'tracked\n')
+      await git('add', '-f', 'gen.log')
+      writeFileSync(join(dir, '.gitignore'), '*.log\n')
+      await git('add', '.gitignore')
+      await git('commit', '-qm', 'ignored but tracked')
+      await runFixes(new LocalBackend(), dir, ['echo a1 > a.txt', 'exit 1'], 5000)
+      expect(read('gen.log')).toBe('tracked\n')
+      expect(read('a.txt')).toBe('a1\n')
+      expect(await git('status', '--porcelain')).toBe(' M a.txt\n')
+    })
+
     it('restores a file a failing fix deleted', async () => {
       await runFixes(new LocalBackend(), dir, ['rm b.txt && exit 1'], 5000)
       expect(read('b.txt')).toBe('b0\n')

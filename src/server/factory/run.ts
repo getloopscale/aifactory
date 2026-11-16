@@ -1071,6 +1071,9 @@ export class Run {
         sessionId: this.sessionId,
         fixes: this.fixOutcomes,
       })
+      // The first round of checks runs on this commit as it is: the fixes already ran on it.
+      this.fixOutcomes = []
+      this.fixedFrom = this.baseSha
       return undefined
     }
     await this.keepNoChange()
@@ -1302,6 +1305,11 @@ export class Run {
    * head the checks run on.
    */
   private async applyFixes(sha: string, attempt: number): Promise<string> {
+    // The fix commit made for an agent that changed nothing already holds the fixes' work: not run twice.
+    if (this.pushedFix !== undefined && sha === this.pushedFix) {
+      this.pushedFix = undefined
+      return sha
+    }
     if (!(await this.fixesChange(sha))) return sha
     const pushed = await this.commitAndPush(FIX_COMMIT_MESSAGE, {
       attempt,

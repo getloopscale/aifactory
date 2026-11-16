@@ -24,7 +24,9 @@ const SNAPSHOT_INDEX = '/tmp/factory-fix-index'
 async function snapshot(backend: SandboxBackend, repoDir: string, timeoutMs: number) {
   const git = `GIT_INDEX_FILE=${SNAPSHOT_INDEX} git -C ${repoDir}`
   const run = await backend.execute(
-    `rm -f ${SNAPSHOT_INDEX} && ${git} add -A && ${git} write-tree`,
+    // Seeded from HEAD so a tracked file that matches an ignore rule stays in the tree: `add -A` alone would
+    // leave it out, and a restore from that tree would delete it.
+    `rm -f ${SNAPSHOT_INDEX} && ${git} read-tree HEAD && ${git} add -A && ${git} write-tree`,
     { timeoutMs },
   )
   return run.exitCode === 0 ? run.stdout.trim() : ''

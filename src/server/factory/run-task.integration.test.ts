@@ -516,6 +516,45 @@ describe('runTask', () => {
     expect(stored.every((e) => e.passed)).toBe(true)
   })
 
+  it('runs the fixes once, and commits once, when the builder changed nothing and the fixes did', async () => {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: [{ name: 'format', command: 'prettier --check .' }],
+        fixes: ['prettier --write .'],
+      })
+    const id = await seedTask()
+    let formatted = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+        if (c.endsWith('prettier --write .')) {
+          formatted = true
+          dirty = true
+          return {}
+        }
+        if (c.endsWith('prettier --check .')) return formatted ? {} : { exitCode: 1 }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'Nothing to change.' }
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(sandbox.backend.commands.filter((c) => c.endsWith('prettier --write .'))).toHaveLength(1)
+    expect(sandbox.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+  })
+
   it('records the whole cost and the branch on the done stage', async () => {
     const id = await seedTask()
     await runTask(deps(new FakeSandbox(changed())), id)
