@@ -283,98 +283,94 @@ describe('pollAwaitingIntegrations', () => {
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
   })
 
-  it('remembers the base was blamed: once it is fixed, the task starts over on it and nothing goes back', async () => {
-    const BASE = 'b'.repeat(40)
-    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
-    repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
-    const id = await waitingTask()
+  const red = (name: string, url: string) =>
+    ({ name, state: 'failure', detail: 'red', url }) as const
+  const green = (name: string, url: string) =>
+    ({ name, state: 'success', detail: '', url }) as const
+  const BASE = 'b'.repeat(40)
+  const NEW_HEAD = `${VERIFIED}${'e'.repeat(20)}`
+  const updates = () => api.answered('updateBranch').map(([, sha]) => sha)
 
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })
-
-    // The base is fixed, and the verified commit does not hold the fix.
-    repo().clearChecks(BASE)
-    repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
-      sentBack: [],
-      rerun: [id],
-    })
-    expect(autoMergeOff()).toHaveLength(1)
-  })
-
-  it('carries the base blame across the start-over, and clears it once the fix is held', async () => {
-    const BASE = 'b'.repeat(40)
-    repo().required.set('workspace', ['CI', 'Lint'])
-    const red = (name: string, url: string) =>
-      ({ name, state: 'failure', detail: 'red', url }) as const
-    reports(red('CI', 'https://ci/1'), red('Lint', 'https://ci/2'))
-    repo().report(BASE, red('CI', 'https://ci/3'))
-    repo().report(BASE, red('Lint', 'https://ci/4'))
+  it('remembers the base was blamed: once it is fixed, the branch takes the fix without a builder run', async () => {
+    reports(red('CI', 'https://ci/1'))
+    repo().report(BASE, red('CI', 'https://ci/0'))
     const id = await waitingTask()
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })
 
-    // CI is fixed on the base, Lint is not: the task starts over for CI, and Lint stays the base's.
     repo().clearChecks(BASE)
-    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/3' })
-    repo().report(BASE, red('Lint', 'https://ci/4'))
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    repo().report(BASE, green('CI', 'https://ci/0'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [], rerun: [id] })
+    expect(updates()).toEqual([VERIFIED])
+    expect(startedOver).toEqual([])
 
-    // The new run left a new `done` event; Lint is fixed on the base before the next poll.
-    await getDb()
-      .insert(stageEvent)
-      .values({ taskId: id, stage: 'done', detail: { sha: VERIFIED, pullRequestUrl: PR_URL } })
-    reports(
-      { name: 'CI', state: 'success', detail: '', url: 'https://ci/5' },
-      red('Lint', 'https://ci/6'),
-    )
-    pull({ autoMerge: true })
-    repo().clearChecks(BASE)
-    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/3' })
-    repo().report(BASE, { name: 'Lint', state: 'success', detail: '', url: 'https://ci/4' })
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    // The old failure still shows on the old head, and the branch is not asked again.
+    pull({ headSha: VERIFIED })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [], rerun: [] })
+    expect(updates()).toEqual([VERIFIED])
   })
 
-  it('retries a refresh whose start-over failed after auto-merge was turned off', async () => {
-    const BASE = 'b'.repeat(40)
-    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
-    repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
+  it('verifies the new head GitHub made: its failure is the change’s own, its silence is waited for', async () => {
+    reports(red('CI', 'https://ci/1'))
+    repo().report(BASE, red('CI', 'https://ci/0'))
     const id = await waitingTask()
     await pollAwaitingIntegrations(deps())
     repo().clearChecks(BASE)
-    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/0' })
+    repo().report(BASE, green('CI', 'https://ci/0'))
+    await pollAwaitingIntegrations(deps())
 
-    const failing = deps({
-      startOver: async () => {
-        throw new Error('GitHub answered 502')
-      },
-    })
-    expect((await pollAwaitingIntegrations(failing)).errors).toHaveLength(1)
+    // The new head has not reported yet: nothing goes back, and the old failure is not read on it.
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [], waiting: 1 })
+    expect((await row(id)).awaitingCiSha).toBe(NEW_HEAD)
 
-    pull({ autoMerge: false })
-    const base = deps()
-    const strict = {
-      ...base,
-      api: Object.assign(Object.create(base.api), {
-        disableAutoMerge: async () => {
-          throw new Error('auto-merge is already disabled')
-        },
-      }),
-    } as AwaitCiDeps
-    expect(await pollAwaitingIntegrations(strict)).toMatchObject({
-      rerun: [id],
-      toPerson: [],
-      sentBack: [],
-      errors: [],
-    })
+    repo().report(NEW_HEAD, red('CI', 'https://ci/9'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
+  })
+
+  it('keeps a check still red on the base blamed while another one is refreshed', async () => {
+    repo().required.set('workspace', ['CI', 'Lint'])
+    reports(red('CI', 'https://ci/1'), red('Lint', 'https://ci/2'))
+    repo().report(BASE, red('CI', 'https://ci/3'))
+    repo().report(BASE, red('Lint', 'https://ci/4'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+
+    repo().clearChecks(BASE)
+    repo().report(BASE, green('CI', 'https://ci/3'))
+    repo().report(BASE, red('Lint', 'https://ci/4'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    await pollAwaitingIntegrations(deps())
+
+    // On the new head Lint shows the old failure and the base fixes it before the next poll.
+    repo().report(NEW_HEAD, green('CI', 'https://ci/5'))
+    repo().report(NEW_HEAD, red('Lint', 'https://ci/6'))
+    repo().clearChecks(BASE)
+    repo().report(BASE, green('CI', 'https://ci/3'))
+    repo().report(BASE, green('Lint', 'https://ci/4'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect(updates()).toEqual([VERIFIED, NEW_HEAD])
+  })
+
+  it('asks again for the update when GitHub refused it, without blaming the task', async () => {
+    reports(red('CI', 'https://ci/1'))
+    repo().report(BASE, red('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    repo().clearChecks(BASE)
+    repo().report(BASE, green('CI', 'https://ci/0'))
+
+    api.fail('updateBranch', new Error('GitHub answered 502'))
+    const first = await pollAwaitingIntegrations(deps())
+    expect(first.errors).toHaveLength(1)
+    expect(first.sentBack).toEqual([])
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
   })
 
   it('keeps a base-red check blamed when another check sends the work back', async () => {
-    const BASE = 'b'.repeat(40)
     repo().required.set('workspace', ['CI', 'Lint'])
-    const red = (name: string, url: string) =>
-      ({ name, state: 'failure', detail: 'red', url }) as const
     reports(red('CI', 'https://ci/1'), red('Lint', 'https://ci/2'))
     repo().report(BASE, red('CI', 'https://ci/3'))
-    repo().report(BASE, { name: 'Lint', state: 'success', detail: '', url: 'https://ci/4' })
+    repo().report(BASE, green('Lint', 'https://ci/4'))
     const id = await waitingTask()
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
 
@@ -386,14 +382,9 @@ describe('pollAwaitingIntegrations', () => {
       .update(task)
       .set({ stage: 'done', awaitingCiSha: VERIFIED })
       .where(eq(task.id, id))
-    reports(red('CI', 'https://ci/5'), {
-      name: 'Lint',
-      state: 'success',
-      detail: '',
-      url: 'https://ci/6',
-    })
+    reports(red('CI', 'https://ci/5'), green('Lint', 'https://ci/6'))
     repo().clearChecks(BASE)
-    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/3' })
+    repo().report(BASE, green('CI', 'https://ci/3'))
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
   })
 

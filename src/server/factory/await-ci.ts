@@ -288,17 +288,44 @@ function carried(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
 }
 
 /**
- * The blame that applies to the verified commit: the one on its `done` event, or, when the task was just
- * started over to take a base fix, what that start-over left unresolved. The checks it refreshed were
- * evaluated on a commit holding their fix, so they are no longer the base's.
+ * The blame that applies to the verified commit: the one on its `done` event, or, when a send-back made
+ * the run before it carry one, that one.
  */
 function blameOf(dones: { detail: unknown }[]): BaseBlame | undefined {
   const own = (dones[0]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
   if (own) return own
   const before = (dones[1]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  if (!before?.carry && !before?.refreshing?.length) return undefined
-  const checks = before.checks.filter((name) => !before.refreshing!.includes(name))
-  return checks.length > 0 ? { checks } : undefined
+  return before?.carry ? { checks: before.checks } : undefined
+}
+
+/**
+ * The branch GitHub was asked to update has a new head holding the verified commit: that head is the one
+ * the checks now verify, and auto-merge is pinned to it. The checks that were refreshed leave the blame,
+ * and any other stays until its own fix is held. Returns whether this pass dealt with the task.
+ */
+async function adoptRefreshed(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  doneId: number,
+  pull: Awaited<ReturnType<GithubApi['readPullRequest']>>,
+  stored: BaseBlame | undefined,
+  required: string[],
+  result: AwaitCiResult,
+): Promise<boolean> {
+  const { row, verifiedSha, token } = w
+  if (!stored?.refreshing?.length || pull.merged || pull.state !== 'open') return false
+  if (pull.headSha === verifiedSha) return false
+  if (!(await deps.api.contains(row.repository, token, pull.headSha, verifiedSha))) return false
+  const left = stored.checks.filter((name) => !stored.refreshing!.includes(name))
+  await rememberBlame(deps, doneId, w.done, left.length > 0 ? { checks: left } : { checks: [] })
+  await deps.db
+    .update(task)
+    .set({ awaitingCiSha: pull.headSha })
+    .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
+  const adopted = { ...w, verifiedSha: pull.headSha, row: { ...row, awaitingCiSha: pull.headSha } }
+  if (await integrateHeld(deps, adopted, required)) result.merged.push(row.id)
+  else result.waiting += 1
+  return true
 }
 
 async function look(
@@ -342,6 +369,19 @@ async function look(
       ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
       : {}),
   }
+  if (
+    done &&
+    (await adoptRefreshed(
+      deps,
+      { row, verifiedSha, number, token, done: (done.detail ?? {}) as Record<string, unknown> },
+      done.id,
+      pull,
+      stored,
+      required,
+      result,
+    ))
+  )
+    return
   let step = decideWaitingIntegration(input)
   // The base is read only when a required check failed and its blame is the question.
   if (step.kind === 'needs_base') {
@@ -368,14 +408,13 @@ async function look(
       return
     case 'refresh':
       // The union is kept first, so a check red on the base now is still the base's if the next step fails.
+      await rememberBlame(deps, done!.id, done!.detail, mergeBlame(blame, step.baseRed))
+      await deps.api.updateBranch(row.repository, token, number, verifiedSha)
+      // Asked once: the task waits for the new head and its checks, and does not blame the old failure.
       await rememberBlame(deps, done!.id, done!.detail, {
         ...mergeBlame(blame, step.baseRed, step.checks),
         carry: true,
       })
-      // Off first: the run merges the fixed base into this pull request, and that merge must be verified.
-      // Already off when an earlier pass got this far and the start-over failed: GitHub may refuse twice.
-      if (pull.autoMerge) await deps.api.disableAutoMerge(row.repository, token, number)
-      await deps.startOver(row.id)
       result.rerun.push(row.id)
       return
     case 'finish':

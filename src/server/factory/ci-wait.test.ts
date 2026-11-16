@@ -86,7 +86,7 @@ describe('decideWaitingIntegration after the base was blamed', () => {
     })
   })
 
-  it('starts the task over on the fixed base once the base no longer fails the check', () => {
+  it('updates the branch from the fixed base once the base no longer fails the check', () => {
     expect(
       decide({ reports: failing, baseReports: [report('CI', 'success')], baseBlame: blame }),
     ).toEqual({ kind: 'refresh', checks: ['CI'], baseRed: [] })
@@ -109,25 +109,14 @@ describe('decideWaitingIntegration after the base was blamed', () => {
     expect(decide({ reports: failing, baseReports, baseBlame: blame })).toEqual({ kind: 'wait' })
   })
 
-  it('retries a refresh that began, whatever auto-merge shows now', () => {
-    expect(
-      decide({
-        pull: { ...open, autoMerge: false },
-        reports: failing,
-        baseBlame: { checks: ['CI'], refreshing: ['CI'] },
-      }),
-    ).toEqual({ kind: 'refresh', checks: ['CI'], baseRed: [] })
-  })
-
-  it('tells a person when the automatic runs are spent', () => {
+  it('waits while GitHub is merging the base into the branch for a check already asked about', () => {
     expect(
       decide({
         reports: failing,
         baseReports: [report('CI', 'success')],
-        baseBlame: blame,
-        automaticRuns: AUTOMATIC_RETRIES,
+        baseBlame: { checks: ['CI'], refreshing: ['CI'] },
       }),
-    ).toMatchObject({ kind: 'person', stopAutoMerge: true })
+    ).toEqual({ kind: 'wait' })
   })
 
   it('still tells a person of a required check that never reported while the base is red', () => {

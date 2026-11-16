@@ -44,8 +44,9 @@ export type WaitingStep =
   | { kind: 'needs_base' }
   /**
    * Checks blamed on the base before, which the base no longer fails, still fail on the verified commit,
-   * which does not hold the fix: the task runs again on the fixed base, and that new commit is verified.
-   * The builder is not sent back for them. `baseRed` are the checks that still fail on the base, kept in the blame.
+   * which does not hold the fix: GitHub merges the base into the branch, and the checks run again on that
+   * commit. No builder run is paid and the builder is not sent back. `baseRed` are the checks that still
+   * fail on the base, kept in the blame.
    */
   | { kind: 'refresh'; checks: string[]; baseRed: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
@@ -66,9 +67,8 @@ export type WaitingStep =
 
 /**
  * Every check blamed on the base while the task waited (`done.detail.baseBlame`). `refreshing` names the
- * ones whose fix the task is being started over to take: an intent kept until the start-over happens, so a
- * failure between turning auto-merge off and starting over is retried, and the blame that is not
- * `refreshing` goes on to the next verified commit.
+ * ones whose fix GitHub was asked to merge into the branch: the task waits for the new head and for its
+ * checks, and does not ask again. `carry` hands the blame to the next run's commit.
  */
 export type BaseBlame = { checks: string[]; refreshing?: string[]; carry?: true }
 
@@ -170,17 +170,6 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
           stopAutoMerge: true,
         }
   }
-  const refreshing = input.baseBlame?.refreshing ?? []
-  if (refreshing.length > 0 && !input.pull.autoMerge) {
-    // The refresh began (auto-merge is off) and did not finish: it is not somebody else turning it off.
-    return runsLeft
-      ? { kind: 'refresh', checks: refreshing, baseRed: [] }
-      : {
-          kind: 'person',
-          reason: `${refreshing.join(', ')} failed on the base, which is fixed now, but the work could not run again on it after ${runs}`,
-          stopAutoMerge: true,
-        }
-  }
   if (input.held && !input.pull.autoMerge) {
     return input.held === 'holding' ? { kind: 'wait' } : { kind: 'integrate' }
   }
@@ -202,6 +191,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   for (const name of allFailed) {
     if (baseRed.includes(name)) continue
     if (!blame?.checks.includes(name)) failed.push(name)
+    else if (blame.refreshing?.includes(name)) continue
     // Fixed on the base: it reports, and every run of it passed. Absent or running, the base is not known fixed.
     else if (
       base.some((r) => r.name === name) &&
@@ -221,15 +211,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
     const reports = failed.flatMap((name) => failedRuns(input.reports, name))
     return { kind: 'send_back', failed, reports, ...(baseRed.length > 0 ? { baseRed } : {}) }
   }
-  if (toRefresh.length > 0) {
-    return runsLeft
-      ? { kind: 'refresh', checks: toRefresh, baseRed }
-      : {
-          kind: 'person',
-          reason: `${toRefresh.join(', ')} failed on the base, which is fixed now, but the work could not run again on it after ${runs}`,
-          stopAutoMerge: true,
-        }
-  }
+  if (toRefresh.length > 0) return { kind: 'refresh', checks: toRefresh, baseRed }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
     return {
       kind: 'person',

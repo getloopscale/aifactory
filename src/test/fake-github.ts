@@ -896,6 +896,24 @@ export class FakeGithub implements GithubApi {
     )
   }
 
+  async updateBranch(
+    repo: string,
+    token: string,
+    number: number,
+    expectedHeadSha: string,
+  ): Promise<void> {
+    return this.call(
+      { method: 'updateBranch', repo, token, args: [number, expectedHeadSha], failed: false },
+      (r) => {
+        const pull = this.pullOrRefuse(r, number, `updating the branch of ${repo}#${number}`)
+        if (r.headOf(pull) !== expectedHeadSha)
+          throw githubAnswered(422, `updating the branch of ${repo}#${number}`, 'the head moved')
+        // The merge of the base is a new commit on top of the head.
+        pull.headSha = `${expectedHeadSha.slice(0, 20)}${'e'.repeat(20)}`
+      },
+    )
+  }
+
   async checkReports(repo: string, token: string, sha: string) {
     return this.call({ method: 'checkReports', repo, token, args: [sha], failed: false }, (r) =>
       r.reports(sha),
