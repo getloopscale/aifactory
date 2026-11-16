@@ -256,6 +256,16 @@ describe('observe', () => {
     expect(causes(held)).toEqual({ total: [0], checks: [0], conflict: [0], red: [0], other: [0] })
   })
 
+  it('gives a red release only to the last delivery; an earlier return is another cause', () => {
+    const h = history({
+      releaseWentRed: true,
+      events: [ev(0, 'intake'), ev(30, 'done', {}), ev(60, 'intake'), ev(90, 'done', {})],
+    })
+    expect(value(h, 'change_failure')).toEqual([1, 1])
+    expect(value(h, 'change_failure_release_red')).toEqual([0, 1])
+    expect(value(h, 'change_failure_other')).toEqual([1, 0])
+  })
+
   it('measures a cancelled run as a run that ended, and never as a delivery', () => {
     const h = history({
       events: [ev(0, 'intake'), ev(2, 'build', { attempt: 1 }), ev(9, 'cancelled', {})],

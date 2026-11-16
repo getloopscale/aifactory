@@ -42,7 +42,7 @@ type Cause = 'required_checks' | 'merge_conflict' | 'release_red' | 'other'
 
 /**
  * Why a delivery came back, one cause each: a merge conflict at integration, the required checks (the note
- * that opened the next run), a red release, or anything else. Meaningful only for a delivery that came back.
+ * that opened the next run), a red release (only the last delivery's: an earlier return came before it), or anything else. Meaningful only for a delivery that came back.
  */
 function causeOfReturn(done: HistoryEvent, next: Run | undefined, releaseWentRed: boolean): Cause {
   if (isMergeConflict(done.detail?.integrationError)) return 'merge_conflict'
@@ -110,7 +110,9 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     const failed =
       next !== undefined || after.some((e) => CAME_BACK.includes(e.stage)) || h.releaseWentRed
     values.change_failure = failed ? 1 : 0
-    const cause = failed ? causeOfReturn(done, next, h.releaseWentRed) : undefined
+    const cause = failed
+      ? causeOfReturn(done, next, h.releaseWentRed && next === undefined)
+      : undefined
     values.change_failure_required_checks = cause === 'required_checks' ? 1 : 0
     values.change_failure_merge_conflict = cause === 'merge_conflict' ? 1 : 0
     values.change_failure_release_red = cause === 'release_red' ? 1 : 0
