@@ -17,6 +17,7 @@ import type { ReadIssue } from './draft'
 import type { TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
 import { HOLD_LOCK, moveAhead } from './queue-apply'
+import { readHeldTests } from './queue-facts'
 import { COORDINATOR_ACTOR } from './release-train'
 import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft } from './scope'
 
@@ -204,6 +205,15 @@ async function prioritiseAtomically(
         ),
       )
     if (done) return 'applied'
+    // One fix at a time per repository: a second one waits for its turn, and is decided again then.
+    const [own] = await tx
+      .select({ repository: task.repository })
+      .from(task)
+      .where(eq(task.id, exception.taskId))
+    const active = (await readHeldTests(tx)).find(
+      (h) => h.repository === own?.repository && h.taskId !== exception.taskId,
+    )
+    if (active) return 'refused'
     const moved = await moveAhead(tx, exception.taskId)
     const carried: Carried = moved
       ? { outcome: 'applied', reason: decision.reason }

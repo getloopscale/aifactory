@@ -14,8 +14,11 @@ export const QUEUE = {
   windowMs: 6 * 3_600_000,
   /** On how many distinct tasks of the repository a test has to fail. */
   minTasks: 2,
-  /** How far past now (or past the fix's own start) the other queued tasks are held; renewed each pass. */
-  holdMs: 60 * 60_000,
+  /**
+   * How far past now the other queued tasks are held: a backstop long enough that a coordinator that is down
+   * does not free them while the fix runs. `releaseHolds` ends the hold when the fix integrates or fails.
+   */
+  holdMs: 30 * 24 * 3_600_000,
 } as const
 
 /** A task of the repository whose `run-task` job waits in the queue, in the order the queue serves them. */
@@ -47,6 +50,12 @@ const FROM_FAILURE: ReadonlySet<string> = new Set([
   'failure',
 ])
 
+/** Whether `text` holds the whole test name: not inside a longer word or number ("501" is not in "5010"). */
+export function mentions(text: string, test: string): boolean {
+  const escaped = test.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(normal(text))
+}
+
 /**
  * The tests an issue names, normalised: the end of a `file > name` path, with spaces (so a word or a check
  * name alone is not one) and at least 12 characters.
@@ -71,8 +80,7 @@ function failedOn(test: string, failures: FailureEvent[], except: number): Set<n
   const bySignature = new Map<string, Set<number>>()
   for (const e of failures) {
     const signature = signatureOf(e.reason)
-    if (e.taskId === except || isDesignedWait(signature) || !normal(e.reason).includes(test))
-      continue
+    if (e.taskId === except || isDesignedWait(signature) || !mentions(e.reason, test)) continue
     bySignature.set(signature, (bySignature.get(signature) ?? new Set()).add(e.taskId))
   }
   return [...bySignature.values()].reduce((a, b) => (b.size > a.size ? b : a), new Set<number>())
@@ -92,7 +100,7 @@ export const isHeld = (
   held.some(
     (h) =>
       h.repository === repository &&
-      [exception.evidence, ...reasons].some((text) => normal(text).includes(h.test)),
+      [exception.evidence, ...reasons].some((text) => mentions(text, h.test)),
   )
 
 /** Whether tasks of the repository failed on enough distinct tasks to make its queue worth reading. */
@@ -128,9 +136,9 @@ export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | und
     ...new Set(facts.failures.flatMap((e) => testsNamedBy({ title: '', body: e.reason }))),
   ]
   for (const [at, fix] of queue.entries()) {
-    const written = normal(`${fix.title}\n${fix.body}`)
+    const written = `${fix.title}\n${fix.body}`
     for (const test of tests) {
-      if (!written.includes(test)) continue
+      if (!mentions(written, test)) continue
       const failed = failedOn(test, facts.failures, fix.taskId)
       if (failed.size < QUEUE.minTasks) continue
       const where =

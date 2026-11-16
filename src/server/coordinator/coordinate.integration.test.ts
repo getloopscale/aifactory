@@ -20,6 +20,7 @@ import { FakeGithub } from '../../test/fake-github'
 import { jobBackend } from '../factory/job-backend'
 import { conflictNote } from '../panel/actions'
 
+import { applyDecision } from './apply'
 import { coordinate, type CoordinatorDeps } from './coordinate'
 import { moveAhead } from './queue-apply'
 import { holdNewJob } from './queue-hold'
@@ -803,6 +804,37 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
 
     await coordinate(deps(), 'auto')
 
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('keeps the hold while the fix waits for an answer, and after a missed renewal', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    await getDb().update(task).set({ stage: 'waiting' }).where(eq(task.id, fix))
+
+    await coordinate(deps(), 'auto')
+
+    const held = await getPool().query(
+      "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' and available_at > now() + interval '29 days'",
+    )
+    expect(held.rows[0].n).toBe(2)
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('defers a second fix of the repository until the first is done', async () => {
+    const { fix, other } = await incident()
+    await coordinate(deps(), 'auto')
+
+    const outcome = await applyDecision(
+      deps(),
+      { kind: 'queue_blocked', taskId: other, head: 'another test of 7 words', evidence: 'x' },
+      { action: 'prioritise', reason: 'second' },
+      'auto',
+    )
+
+    expect(outcome).toBe('refused')
+    expect(await prioritised()).toMatchObject([{ taskId: fix }])
     expect(await dequeue()).toEqual([`job-${fix}`])
     expect(await dequeue()).toEqual([])
   })

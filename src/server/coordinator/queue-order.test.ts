@@ -6,6 +6,7 @@ import type { TaskException } from './exceptions'
 import type { FailureEvent } from './evolve'
 import {
   isHeld,
+  mentions,
   recogniseQueue,
   repositoriesWithRepeatedTests,
   testsNamedBy,
@@ -141,6 +142,15 @@ describe('work held behind a fix', () => {
   })
   it('is not an exception that is no failure, whatever its task failed on before', () => {
     expect(isHeld(exception({ kind: 'stalled' }), 'o/sdk', held, [said()])).toBe(false)
+  })
+  it('matches the whole test name: 501 is not in 5010', () => {
+    expect(mentions('the test remphase reports one fact left out of 5010', held[0].test)).toBe(
+      false,
+    )
+    expect(mentions('the test remPhase reports one fact left out of 501.', held[0].test)).toBe(true)
+    expect(
+      isHeld(exception({ evidence: 'remphase reports one fact left out of 5010' }), 'o/sdk', held),
+    ).toBe(false)
   })
   it('is also read from the recorded failure reason of the task', () => {
     expect(isHeld(exception({ evidence: 'no change' }), 'o/sdk', held, [said()])).toBe(true)

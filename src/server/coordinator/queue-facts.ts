@@ -89,7 +89,7 @@ export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldT
       and(
         eq(coordinatorAction.action, 'prioritise'),
         eq(coordinatorAction.outcome, 'applied'),
-        or(inArray(task.stage, ['intake', ...WORKING]), isNotNull(task.awaitingCiSha)),
+        or(inArray(task.stage, ['intake', ...WORKING, 'waiting']), isNotNull(task.awaitingCiSha)),
       ),
     )
   return rows
