@@ -21,7 +21,7 @@ export const E2B_SANDBOX_LIMIT = 10
 export const SANDBOX_STAGES = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr']
 
 /** The owners the factory writes; metadata of any other kind is somebody else's sandbox. */
-export const FACTORY_OWNERS = ['task', 'eval', 'prove-checks']
+export const FACTORY_OWNERS = ['task', 'eval', 'prove-checks', 'plan']
 
 export type MetadataOptions = { host?: string; lease?: string }
 
