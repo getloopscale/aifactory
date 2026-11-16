@@ -69,29 +69,6 @@ describe('readRecipe', () => {
     expect(asked[0].headers.accept).toBe('application/vnd.github.raw+json')
   })
 
-  it('is asked again when the connection drops (fetch failed), so the run goes on', async () => {
-    let calls = 0
-    const fetchImpl = async () => {
-      calls += 1
-      if (calls === 1) throw new TypeError('fetch failed')
-      return new Response('{"egress":["pypi.org"]}', { status: 200 })
-    }
-    expect(await readRecipe(REPO, 'tok', fetchImpl, async () => {})).toEqual({
-      egress: ['pypi.org'],
-    })
-    expect(calls).toBe(2)
-  })
-
-  it('gives up after 3 dropped connections and keeps the error', async () => {
-    let calls = 0
-    const fetchImpl = async () => {
-      calls += 1
-      throw new TypeError('fetch failed')
-    }
-    await expect(readRecipe(REPO, 'tok', fetchImpl, async () => {})).rejects.toThrow('fetch failed')
-    expect(calls).toBe(3)
-  })
-
   it('is nothing when the project has no recipe', async () => {
     expect(await readRecipe(REPO, 'tok', answering(404).fetchImpl)).toBeUndefined()
   })

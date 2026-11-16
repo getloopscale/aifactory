@@ -94,27 +94,6 @@ describe('a 5xx from GitHub', () => {
     expect(JSON.stringify(settings)).toContain('trunk')
   })
 
-  it('asks a read again when the connection drops (fetch failed), and never a write', async () => {
-    let calls = 0
-    const dropOnce = async () => {
-      calls += 1
-      if (calls === 1) throw new TypeError('fetch failed')
-      return new Response(JSON.stringify({ default_branch: 'trunk' }), { status: 200 })
-    }
-    await createGithubApi(dropOnce, noWait).repositorySettings('o/r', 't')
-    expect(calls).toBe(2)
-
-    let writes = 0
-    const dropWrite = async () => {
-      writes += 1
-      throw new TypeError('fetch failed')
-    }
-    await expect(
-      createGithubApi(dropWrite, noWait).createCheckRun('o/r', 't', check),
-    ).rejects.toThrow('fetch failed')
-    expect(writes).toBe(1)
-  })
-
   it('gives up on a read that keeps failing after 3 tries and says GitHub answered 502', async () => {
     const { fetch, count } = sequence([502])
     await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(

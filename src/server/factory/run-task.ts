@@ -177,8 +177,16 @@ async function fail(
   await enterStage(deps.db, taskId, 'failed', {
     failedAt: state.current,
     error: message,
+    // A dropped connection before any sandbox exists spent nothing, so it waits for the network without
+    // using up the task's automatic runs (`retryAt`).
+    ...(!state.sandbox && !signal?.aborted && isNetworkDrop(error) ? { unstarted: true } : {}),
     ...(error instanceof QuotaStop ? quotaDetail(error, new Date()) : {}),
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
   })
   return { status: 'failed', stage: state.current, error: message }
+}
+
+/** Node's `fetch` rejects with a `TypeError` whose message is only "fetch failed" when the request never got an answer. */
+function isNetworkDrop(error: unknown): boolean {
+  return error instanceof TypeError && /fetch failed/i.test(error.message)
 }

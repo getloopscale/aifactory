@@ -81,6 +81,7 @@ function nextRun(
     resumesAt: typeof detail.resumesAt === 'string' ? detail.resumesAt : undefined,
     resetsAt: typeof detail.resetsAt === 'string' ? detail.resetsAt : undefined,
     automaticRetries,
+    unstarted: detail.unstarted === true,
   })
   return at ? { retryable, at } : null
 }

@@ -1036,6 +1036,34 @@ describe('runTask', () => {
     expect(retryableFailure(last!.detail as Record<string, unknown>)).toBe('blocked')
   })
 
+  it('waits for the network, without using its automatic runs, when the connection drops before any sandbox', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const fetchIssue: RunTaskDeps['fetchIssue'] = async () => {
+      throw new TypeError('fetch failed')
+    }
+
+    const result = await runTask(deps(sandbox, { fetchIssue }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
+    expect(sandbox.specs).toHaveLength(0)
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    const detail = last!.detail as Record<string, unknown>
+    expect(detail).toMatchObject({ error: 'fetch failed', unstarted: true })
+    const retryable = retryableFailure(detail)
+    expect(retryable).toBe('environment')
+    // However many automatic runs it used before, a run that spent nothing is asked for again.
+    const failedAt = new Date('2026-11-13T23:15:00Z')
+    expect(retryAt({ retryable, failedAt, automaticRetries: 9, unstarted: true })).toEqual(
+      new Date('2026-11-13T23:20:00Z'),
+    )
+  })
+
   it('runs once every issue it is blocked by is closed', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())

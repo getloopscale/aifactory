@@ -111,20 +111,13 @@ export async function readRecipe(
 ): Promise<Recipe | undefined> {
   let response: Response
   for (let attempt = 1; ; attempt += 1) {
-    try {
-      response = await fetchImpl(`https://api.github.com/repos/${repo}/contents/${RECIPE_PATH}`, {
-        headers: {
-          accept: 'application/vnd.github.raw+json',
-          'x-github-api-version': '2022-11-28',
-          authorization: `Bearer ${token}`,
-        },
-      })
-    } catch (error) {
-      // A read that never reached GitHub (`fetch failed`) is asked again with a pause, like a 5xx.
-      if (attempt >= 3) throw error
-      await wait(2_000 * attempt)
-      continue
-    }
+    response = await fetchImpl(`https://api.github.com/repos/${repo}/contents/${RECIPE_PATH}`, {
+      headers: {
+        accept: 'application/vnd.github.raw+json',
+        'x-github-api-version': '2022-11-28',
+        authorization: `Bearer ${token}`,
+      },
+    })
     // A read GitHub answers with a 5xx is asked again with a pause.
     if (response.status < 500 || attempt >= 3) break
     await wait(2_000 * attempt)

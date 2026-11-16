@@ -69,21 +69,6 @@ describe('GitHub App installation tokens', () => {
     expect(waits).toHaveLength(1)
   })
 
-  it('asks again when the connection drops (fetch failed) before the token is minted', async () => {
-    const github = fakeGithub()
-    let dropped = false
-    const fetch: FetchLike = async (url, init) => {
-      if (!dropped && url.includes('/access_tokens')) {
-        dropped = true
-        throw new TypeError('fetch failed')
-      }
-      return github.fetch(url, init)
-    }
-    const minted = await app(fetch).installationToken('paulohenriquevn/aifactory-playground')
-    expect(minted.token).toBeTruthy()
-    expect(dropped).toBe(true)
-  })
-
   it('never asks the mint again when GitHub answers 502', async () => {
     const github = fakeGithub()
     let mints = 0

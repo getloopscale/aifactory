@@ -18,6 +18,8 @@ export type FailureToRetry = {
   resetsAt?: string
   /** Automatic runs since a person last started the task. */
   automaticRetries: number
+  /** The run failed on the network before it had spent anything: no sandbox, no agent (`unstarted`). */
+  unstarted?: boolean
 }
 
 /**
@@ -38,6 +40,11 @@ export function retryAt(failure: FailureToRetry): Date | null {
   }
   // Waiting is what unblocks it, so it is not limited like an environment failure.
   if (failure.retryable === 'blocked') return new Date(failed + BLOCKED_WAIT_MS)
+  // Nothing was spent, so trying again costs a few reads. A network that is down for an hour must not use up
+  // the runs of every task that was waiting in the queue: it waits for the network, like a blocked task.
+  if (failure.retryable === 'environment' && failure.unstarted) {
+    return new Date(failed + ENVIRONMENT_WAIT_MS)
+  }
   if (failure.retryable === 'environment' && automaticRunsLeft(failure.automaticRetries)) {
     return new Date(failed + ENVIRONMENT_WAIT_MS * 2 ** failure.automaticRetries)
   }

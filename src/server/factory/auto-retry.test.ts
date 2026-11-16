@@ -27,6 +27,12 @@ describe('when a failed task runs again on its own', () => {
     expect(iso(at)).toBe('2026-11-06T01:13:00.000Z')
   })
 
+  it('waits for the network without a limit when the run failed before it spent anything', () => {
+    const at = retryAt({ retryable: 'environment', failedAt, automaticRetries: 9, unstarted: true })
+    expect(iso(at)).toBe('2026-11-06T00:18:00.000Z')
+    expect(retryAt({ retryable: 'environment', failedAt, automaticRetries: 9 })).toBeNull()
+  })
+
   it('backs off an environment failure, doubling the wait each time', () => {
     const waits = [0, 1, 2].map((automaticRetries) =>
       iso(retryAt({ retryable: 'environment', failedAt, automaticRetries })),
