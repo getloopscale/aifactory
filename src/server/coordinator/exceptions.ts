@@ -19,7 +19,13 @@ export type LastEvent = { stage: TaskStage; detail: Record<string, unknown> | nu
 export type OpenFinding = { id: number; kind: 'stalled' | 'orphaned'; detail: string }
 
 /** What GitHub says of the pull request of a task: whether it conflicts with its base, and which base. */
-export type PullRequestFacts = { conflicting: boolean; base: string }
+export type PullRequestFacts = {
+  conflicting: boolean
+  base: string
+  /** A closed pull request keeps the head it had, so its merge state says nothing of the branch. */
+  closed?: boolean
+  url?: string
+}
 
 /** What is known of one task when the coordinator looks at it. */
 export type TaskFacts = {
@@ -112,6 +118,12 @@ function lastOf(facts: TaskFacts): LastEvent | Found {
 function checksUnchanged(reason: string, pullRequest: TaskFacts['pullRequest']): Found {
   if (pullRequest && !pullRequest.read) {
     return unknown(`could not read ${pullRequest.tried}: ${pullRequest.error}`)
+  }
+  if (pullRequest?.value?.closed) {
+    const { url } = pullRequest.value
+    return unknown(
+      `the pull request of the task${url ? ` (${url})` : ''} is closed, so its merge state and checks are those of a head the branch left behind`,
+    )
   }
   const found: Found = { kind: 'checks_unchanged', evidence: failedChecksOutput(reason) }
   const pull = pullRequest?.value

@@ -969,6 +969,31 @@ export class Run {
   }
 
   /**
+   * Whether the pull request the task records is closed without a merge. GitHub does not move the head of a
+   * closed pull request, so what it says of checks and conflicts is about a commit the branch left behind.
+   * A pull request that cannot be read is not called closed.
+   */
+  private async recordedPullIsClosed(): Promise<boolean> {
+    const { continuation, row } = this.c
+    if (!continuation || !row.pullRequestUrl) return false
+    this.closedPull ??= await this.readRecordedPull(row.repository, row.pullRequestUrl)
+    return this.closedPull
+  }
+
+  private closedPull: boolean | undefined
+
+  private async readRecordedPull(repository: string, url: string): Promise<boolean> {
+    const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1])
+    if (!number) return false
+    try {
+      const pull = await this.c.api.readPullRequest(repository, this.c.token, number)
+      return pull.state === 'closed' && !pull.merged
+    } catch {
+      return false
+    }
+  }
+
+  /**
    * A person asked for a change and the agent found nothing to change (the test was already there,
    * say). That is an answer, not a failure: the pull request stays as it was, and the person reads why.
    */
@@ -977,6 +1002,8 @@ export class Run {
     // A plain continuation was asked nothing, so leaving the pull request as it is answers nothing.
     if (!continuation || continuation.plain || !row.pullRequestUrl || !row.headSha) return undefined
     if (!(await this.hasNothingToCommit())) return undefined
+    // A closed pull request keeps its old head and merge state: nothing about it says how the branch is.
+    if (await this.recordedPullIsClosed()) return undefined
     if (continuation.fromChecks) return this.checksUnanswered(first)
     await api.commentOnIssue(
       row.repository,
@@ -1200,8 +1227,10 @@ export class Run {
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)
     if (resolved) return { result: resolved }
-    // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed.
-    if (this.c.continuation?.plain && (await this.hasNothingToCommit())) {
+    // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed, and so
+    // does one whose recorded pull request is closed: the checks and the review judge the branch's head.
+    const goOn = this.c.continuation?.plain || (await this.recordedPullIsClosed())
+    if (goOn && (await this.hasNothingToCommit())) {
       return { sha: this.remoteHead }
     }
     const sha = await this.commitAndPush(this.firstMessage(), {

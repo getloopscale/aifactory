@@ -108,8 +108,11 @@ async function pullRequestOf(
       .where(eq(repository.fullName, row.repository))
     const { token } = await deps.github.installationToken(row.repository)
     const pull = await deps.api.readPullRequest(row.repository, token, number)
+    const closed = pull.state === 'closed' && !pull.merged
     return readOf({
-      conflicting: pull.mergeableState === 'dirty',
+      conflicting: !closed && pull.mergeableState === 'dirty',
+      closed,
+      url: row.pullRequestUrl,
       base: integrationBranch(config ?? {}),
     })
   } catch (error) {

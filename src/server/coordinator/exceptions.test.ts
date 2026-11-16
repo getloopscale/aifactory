@@ -119,6 +119,26 @@ describe('recognising the exceptions of a task', () => {
     ])
   })
 
+  it('gives an unknown exception, naming the pull request, when it is closed', () => {
+    const facts = {
+      ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),
+      pullRequest: readOf({
+        conflicting: false,
+        closed: true,
+        url: 'https://github.com/o/r/pull/7',
+        base: 'workspace',
+      }),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'unknown',
+        taskId: 7,
+        head: 'abc',
+        evidence: expect.stringContaining('https://github.com/o/r/pull/7) is closed'),
+      },
+    ])
+  })
+
   it('gives an unknown exception when the pull request of the failed checks could not be read', () => {
     const facts = {
       ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),

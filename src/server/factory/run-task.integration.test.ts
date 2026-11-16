@@ -2477,6 +2477,35 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  it('goes on from the branch when the pull request it was sent back on is closed', async () => {
+    const id = await seedTask()
+    branchPushed()
+    repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed' })
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'Nothing to merge.' }
+      },
+    }
+
+    const result = await runTask(
+      deps(new FakeSandbox(changed()), { harness: builder }),
+      id,
+      undefined,
+      { feedback: 'CI failed:\n- CI: u', fromChecks: true },
+    )
+
+    expect(result.status).not.toBe('handoff')
+    expect(result).not.toMatchObject({ reason: expect.stringContaining('agent changed nothing') })
+    expect(seen.pulls).toEqual(['factory/7'])
+  })
+
   it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
     const id = await seedTask()
     branchPushed()
