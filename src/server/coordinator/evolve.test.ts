@@ -39,8 +39,8 @@ describe('signatureOf', () => {
     const a = signatureOf('fetch failed (cause: ECONNRESET read ECONNRESET)')
     const b = signatureOf('fetch failed (cause: getaddrinfo ENOTFOUND api.github.com)')
     expect(a).toBe(b)
-    expect(a).toBe('fetch failed (cause: <cause>)')
-    expect(signatureOf('fetch failed')).not.toBe(a)
+    expect(a).toBe('fetch failed')
+    expect(signatureOf('fetch failed')).toBe(a)
     expect(signatureOf('push rejected (cause: x)')).not.toBe(a)
     expect(signatureOf('operation failed (cause: permission denied)')).not.toBe(
       signatureOf('operation failed (cause: disk full)'),
@@ -122,6 +122,16 @@ describe('isDesignedWait', () => {
 })
 
 describe('groupBySignature', () => {
+  it('groups a fetch failure recorded with a cause and one recorded without', () => {
+    const groups = groupBySignature([
+      event('fetch failed'),
+      event('fetch failed (cause: ECONNRESET read ECONNRESET)'),
+      event('fetch failed (cause: getaddrinfo ENOTFOUND api.github.com)'),
+    ])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ signature: 'fetch failed', tasks: 3 })
+  })
+
   it('groups by signature, counts distinct tasks and keeps the first and last time seen', () => {
     const groups = groupBySignature([
       event('lost 1', { taskId: 1, at: ago(3) }),
