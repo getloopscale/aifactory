@@ -976,7 +976,8 @@ export class Run {
     // A pull request that is gone is not one to reopen. One that could not be read is not judged as if its
     // state were known: the error fails the run, which repeats when GitHub was only failing.
     return api.readPullRequest(row.repository, this.c.token, number).catch((error: unknown) => {
-      if (/^GitHub answered 404\b/.test(error instanceof Error ? error.message : '')) return undefined
+      if (/^GitHub answered 404\b/.test(error instanceof Error ? error.message : ''))
+        return undefined
       throw error
     })
   }
@@ -1011,7 +1012,18 @@ export class Run {
     if (ahead && ahead.aheadBy > 0) {
       // A merged one stays merged; a closed one that GitHub will not reopen is replaced by a new one.
       if (!pull.merged) {
-        await api.reopenPullRequest(row.repository, this.c.token, pull.number).catch(() => {})
+        await api.reopenPullRequest(row.repository, this.c.token, pull.number).catch((error) =>
+          console.warn(
+            JSON.stringify({
+              event: 'pull_request_reopen_failed',
+              taskId,
+              repository: row.repository,
+              pullRequest: pull.number,
+              fallback: 'a new pull request is opened from the branch',
+              error: String(error),
+            }),
+          ),
+        )
       }
       return undefined
     }

@@ -2495,8 +2495,15 @@ describe('runTask continuing from a branch a person sent back', () => {
           return { ok: true, summary: 'Nothing to merge.' }
         },
       }
+      // The branch moved on after its pull request was closed: its head is not the pull request's.
+      const head = 'f'.repeat(40)
+      const branchHead = (command: string) => {
+        if (command.includes('ls-remote')) return { stdout: `${head}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${head}\n` }
+        return undefined
+      }
       const result = await runTask(
-        deps(new FakeSandbox(changed()), { harness: builder }),
+        deps(new FakeSandbox(changed(branchHead)), { harness: builder }),
         id,
         undefined,
         plain ? { feedback: '', plain: true } : { feedback: 'Merge workspace.', fromChecks: true },
@@ -2522,8 +2529,20 @@ describe('runTask continuing from a branch a person sent back', () => {
 
     it('opens a new pull request when GitHub will not reopen the closed one', async () => {
       githubApi.fail('reopenPullRequest', new Error('GitHub answered 422 reopening paulo/app#12'))
-      const { result } = await sentBackOnClosed(2)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const { id, result } = await sentBackOnClosed(2)
       expect(result.status).not.toBe('failed')
+      const logged = warn.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes('pull_request_reopen_failed'))
+      warn.mockRestore()
+      expect(logged).toHaveLength(1)
+      expect(JSON.parse(logged[0])).toMatchObject({
+        taskId: id,
+        repository: 'paulo/app',
+        pullRequest: 12,
+        error: expect.stringContaining('GitHub answered 422'),
+      })
     })
 
     it('reopens it when the branch is ahead of its base', async () => {
