@@ -128,3 +128,19 @@ export function agentConfigurationChanged(changed: string[]): string[] {
       !isTest(path) && (AGENT_CONFIGURATION.includes(path) || path.startsWith(AGENTS_FOLDER)),
   )
 }
+
+/** The factory's own repository: the one whose code `AGENT_CONFIGURATION` names. */
+export const FACTORY_REPOSITORY = 'paulohenriquevn/aifactory'
+
+/**
+ * The agent configuration a change of `repository` touches. The factory never integrates such a change on
+ * its own: it waits for `pnpm evals:check` and the owner. Another repository's files of the same name are
+ * its own code, so nothing there is held. `own` is the factory's repository, another name for a fork.
+ */
+export function heldForEvaluation(
+  repository: string,
+  changed: string[],
+  own: string = FACTORY_REPOSITORY,
+): string[] {
+  return repository === own ? agentConfigurationChanged(changed) : []
+}

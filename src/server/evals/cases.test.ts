@@ -8,6 +8,8 @@ import {
   selectCandidates,
   type Candidate,
   type EvalCase,
+  FACTORY_REPOSITORY,
+  heldForEvaluation,
 } from './cases'
 
 const candidate = (taskId: number, repository: string, durationMs = 600_000): Candidate => ({
@@ -142,5 +144,26 @@ describe('agentConfigurationChanged', () => {
         'ops/sandbox/Dockerfile',
       ]),
     )
+  })
+})
+
+describe('the change the factory holds for an evaluation', () => {
+  it('is the agent configuration a change of the factory itself touches', () => {
+    expect(
+      heldForEvaluation(FACTORY_REPOSITORY, [
+        'src/server/factory/harness-codex.ts',
+        'src/server/factory/run.ts',
+        'src/server/agents/prompts/build.md',
+        'src/server/factory/review.test.ts',
+      ]),
+    ).toEqual(['src/server/factory/harness-codex.ts', 'src/server/agents/prompts/build.md'])
+  })
+
+  it('is nothing for a change that leaves the agent configuration alone', () => {
+    expect(heldForEvaluation(FACTORY_REPOSITORY, ['src/server/factory/run.ts'])).toEqual([])
+  })
+
+  it('is nothing in another repository, whose files of the same name are its own code', () => {
+    expect(heldForEvaluation('usetheokit/theokit-examples', ['src/server/agents/chat.ts'])).toEqual([])
   })
 })

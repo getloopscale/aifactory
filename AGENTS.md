@@ -228,6 +228,11 @@ reads that file, not a convention.
   reads. A panel action or a cron that checks a stage calls `outcome()` instead of comparing stages itself,
   and a new stage or event gets a row for every pair, which the types and a test require. Events nothing
   acts on yet are listed in `NOT_WIRED`.
+- **The factory never integrates a change to its own agents.** When a task of the factory's own repository
+  (`FACTORY_REPOSITORY` in `evals/cases.ts`, `ownRepository` for a fork) touches a file in `AGENT_CONFIGURATION`
+  or under `src/server/agents/`, approved work is handed over (`cause: agent_configuration`) as a draft pull
+  request, and nothing is merged: the owner runs `pnpm evals:check` against the recorded baseline and merges it.
+  The coordinator has no playbook for that cause, so it escalates it (`heldForEvaluation`, #139).
 - **Commits carry no co-author trailer.**
 - **Validate at the boundary.** A route validates input with Zod once, then trusts it.
 - **Side effects get a human.** A tool that touches the real world is gated with `.approval(...)`

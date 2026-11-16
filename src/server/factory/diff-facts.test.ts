@@ -30,7 +30,7 @@ describe('diffFacts', () => {
   it('finds nothing in a branch behind the integration branch that changed only what it planned', async () => {
     const facts = await factsOf(divergedRepository({ behind: true }))
 
-    expect(facts).toEqual({ guards: [], unplanned: [], required: [] })
+    expect(facts).toEqual({ guards: [], unplanned: [], required: [], touched: ['src/truncate.js'] })
   })
 
   it('still reports what the branch itself did when the integration branch moved past it', async () => {
@@ -55,6 +55,8 @@ describe('diffFacts', () => {
       ],
       unplanned: ['src/extra.js', 'src/shared.test.js'],
       required: [],
+      // Only what the branch itself changed, not what the integration branch did after it.
+      touched: ['src/extra.js', 'src/shared.test.js', 'src/truncate.js'],
     })
   })
 
