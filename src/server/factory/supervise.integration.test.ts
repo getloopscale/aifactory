@@ -7,6 +7,8 @@ import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { finding, ingress, question, stageEvent, task, watch } from '../db/schema'
 
+import { FakeSandbox } from './fake-sandbox'
+import { reapSandboxes } from './sandbox-reaper'
 import { detect, supervise } from './supervise'
 
 const NOW = new Date('2026-11-04T12:00:00Z')
@@ -317,5 +319,30 @@ describe('supervise', () => {
 
     const sighted = await supervise({ db: getDb(), now, listSnapshots: async () => [] })
     expect(sighted.resolved).toEqual(['orphaned:snapshot:snap-x'])
+  })
+})
+
+describe('sandboxes nobody owns', () => {
+  it('leaves none up after a pass once the evaluation that made them is killed', async () => {
+    const provider = new FakeSandbox()
+    const spec = { egress: [{ domain: 'github.com' }], timeoutMs: 60_000 }
+    // Two evaluation sandboxes whose process is gone, and one of this process that is alive.
+    for (const caseId of ['a', 'b']) {
+      await provider.create({ ...spec, owner: { owner: 'eval', caseId, runId: 'r' } })
+    }
+    for (const sandbox of provider.up.values()) sandbox.metadata.pid = '2147483646'
+    const taskId = await seed('build', 1)
+    await getDb().update(task).set({ sandboxRun: 'run-1' }).where(eq(task.id, taskId))
+    await provider.create({ ...spec, owner: { owner: 'task', taskId, run: 'run-1' } })
+    await provider.create({ ...spec, owner: { owner: 'task', taskId, run: 'run-0' } })
+
+    const killed = await reapSandboxes({
+      db: getDb(),
+      listSandboxes: () => provider.listSandboxes(),
+      killSandbox: (id) => provider.killSandbox(id),
+    })
+
+    expect(killed.map((k) => k.id)).toEqual(['sbx-1', 'sbx-2', 'sbx-4'])
+    expect([...provider.up.keys()]).toEqual(['sbx-3'])
   })
 })

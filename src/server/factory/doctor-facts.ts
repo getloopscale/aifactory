@@ -33,6 +33,8 @@ import {
   withRecipe,
   type Recipe,
 } from './recipe'
+import { E2B_SANDBOX_LIMIT, atWork, readReaperFacts } from './sandbox-reaper'
+import type { IsolatedSandboxProvider } from './sandbox'
 import { loadRepoConfig, type RepoConfig } from './repo-config'
 
 /**
@@ -46,6 +48,8 @@ import { loadRepoConfig, type RepoConfig } from './repo-config'
  */
 export type DoctorSources = {
   db: Database
+  /** The sandbox provider, when it can list what the account has up. */
+  sandboxes?: Pick<IsolatedSandboxProvider, 'listSandboxes' | 'maxSandboxes'>
   github: Pick<GithubApp, 'installationToken'> & AppEvents & AppAccess
   api: Pick<
     GithubApi,
@@ -104,7 +108,30 @@ async function readAccess(github: AppAccess, name: string): Promise<AccessFacts>
 }
 
 /** The latest run the sandbox provider refused, among the last failures, and when a sandbox last started. */
-async function readSandbox(db: Database, name: string): Promise<SandboxFacts> {
+async function readSlots(
+  db: Database,
+  provider: DoctorSources['sandboxes'],
+): Promise<SandboxFacts['slots']> {
+  if (!provider?.listSandboxes) return undefined
+  try {
+    const listing = await provider.listSandboxes()
+    const facts = await readReaperFacts(db, listing)
+    return {
+      up: listing.length,
+      limit: provider.maxSandboxes ?? E2B_SANDBOX_LIMIT,
+      atWork: atWork(listing, facts),
+    }
+  } catch {
+    // A listing that failed is not a count of zero: the item says nothing of the slots.
+    return undefined
+  }
+}
+
+async function readSandbox(
+  db: Database,
+  name: string,
+  provider?: DoctorSources['sandboxes'],
+): Promise<SandboxFacts> {
   const ofTheRepository = sql`lower(${task.repository}) = lower(${name})`
   const failures = await db
     .select({ taskId: stageEvent.taskId, detail: stageEvent.detail, at: stageEvent.at })
@@ -127,6 +154,7 @@ async function readSandbox(db: Database, name: string): Promise<SandboxFacts> {
       error: String((refused.detail as { error: unknown }).error),
     },
     lastStartedAt: started?.at?.toISOString(),
+    slots: await readSlots(db, provider),
   }
 }
 
@@ -256,7 +284,7 @@ export async function collectFacts(sources: DoctorSources, name: string): Promis
   const [access, events, sandbox, token] = await Promise.all([
     attempt(triedOf('installation', { repo: name }), () => readAccess(github, name)),
     attempt(triedOf('events'), () => github.subscriptions()),
-    attempt(triedOf('runs', { repo: name }), () => readSandbox(db, name)),
+    attempt(triedOf('runs', { repo: name }), () => readSandbox(db, name, sources.sandboxes)),
     attempt(
       triedOf('token', { repo: name }),
       async () => (await github.installationToken(name)).token,

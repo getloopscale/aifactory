@@ -92,6 +92,8 @@ export const task = pgTable(
      * `awaiting_ci_sha` set, and the `integrate-after-ci` cron integrates it once the hold ends.
      */
     integrationHeld: boolean('integration_held').notNull().default(false),
+    /** The run that holds the task's sandbox, written before it starts one: the sandbox's metadata names it. */
+    sandboxRun: text('sandbox_run'),
     /** What the run has spent so far, agents included. It grows while the run is going. */
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

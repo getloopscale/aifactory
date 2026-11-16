@@ -37,6 +37,7 @@ export const DOCTOR_SAY_CODES = [
   'ok_none',
   'ok_recipe',
   'ok_sandbox',
+  'ok_sandbox_slots',
 ] as const
 
 /** Every thing the doctor tries to read; an item it could not read says which, so the panel can name it. */
@@ -285,6 +286,11 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   },
   ok_sandbox: {
     cause: () => 'The sandbox provider has not refused the latest run.',
+    repair: () => '',
+  },
+  ok_sandbox_slots: {
+    cause: (v) =>
+      `The sandbox provider has not refused the latest run. ${v.up} of ${v.limit} sandboxes are up, ${v.atWork} with an owner at work.`,
     repair: () => '',
   },
 }

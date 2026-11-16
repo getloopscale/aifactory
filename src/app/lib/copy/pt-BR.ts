@@ -483,6 +483,11 @@ export const ptBR: Copy = {
         cause: () => 'O provedor de sandbox não recusou a última execução.',
         repair: () => '',
       },
+      ok_sandbox_slots: {
+        cause: (v) =>
+          `O provedor de sandbox não recusou a última execução. ${v.up} de ${v.limit} sandboxes estão ativos, ${v.atWork} com dono trabalhando.`,
+        repair: () => '',
+      },
     },
     tried: TRIED,
   },

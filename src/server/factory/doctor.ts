@@ -128,6 +128,8 @@ export type SandboxFacts = {
   refusal?: { taskId: number; at: string; error: string }
   /** When a sandbox last started for the repository. */
   lastStartedAt?: string
+  /** Sandboxes up on the account against its limit, and how many have an owner at work. Unset when it cannot be listed. */
+  slots?: { up: number; limit: number; atWork: number }
 }
 
 export type DoctorFacts = {
@@ -519,10 +521,16 @@ export function providerRefusal(detail: Record<string, unknown> | null | undefin
 
 export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
   if (!sandbox.read) return unknownItem('sandbox', sandbox)
-  const { refusal, lastStartedAt } = sandbox.value
+  const { refusal, lastStartedAt, slots } = sandbox.value
   // With no start to compare, the date is not a number and nothing is at or after the refusal.
   if (!refusal || Date.parse(lastStartedAt ?? '') >= Date.parse(refusal.at)) {
-    return fine('sandbox', 'ok_sandbox')
+    return slots
+      ? fine('sandbox', 'ok_sandbox_slots', {
+          up: String(slots.up),
+          limit: String(slots.limit),
+          atWork: String(slots.atWork),
+        })
+      : fine('sandbox', 'ok_sandbox')
   }
   return problem(
     'sandbox',
