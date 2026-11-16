@@ -102,6 +102,11 @@ describe('isDesignedWait', () => {
     expect(isDesignedWait('waiting for an answer')).toBe(true)
     expect(isDesignedWait('the push was blocked by a hook')).toBe(false)
   })
+
+  it('is true for a provider limit', () => {
+    expect(isDesignedWait('<n>: team is blocked: spend_limit')).toBe(true)
+    expect(isDesignedWait('usage limit exceeded')).toBe(true)
+  })
 })
 
 describe('groupBySignature', () => {
@@ -179,6 +184,11 @@ describe('toFile', () => {
 
   it('files nothing for a designed wait', () => {
     const groups = groupBySignature(threeTasks((i) => `blocked by #${i}, still open`))
+    expect(toFile(groups, new Set(), 0)).toEqual([])
+  })
+
+  it('files nothing for a provider spend limit', () => {
+    const groups = groupBySignature(threeTasks(() => '403: team is blocked: spend_limit'))
     expect(toFile(groups, new Set(), 0)).toEqual([])
   })
 
