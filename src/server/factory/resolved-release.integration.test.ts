@@ -9,7 +9,6 @@ import { ingress, repository, stageEvent, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { catchUpResolved, resolvedCatchUp } from './resolved-release'
-import { shipContained } from './ship'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -29,18 +28,7 @@ function fakeGithub(onBranch: Record<string, string[]>) {
     const [repo, branch] = key.split(':')
     api.repo(repo).holds(branch, shas)
   }
-  /** The issues, as `owner/name#number`, a person left open; every other one is closed. */
-  const open = new Set<string>()
-  const readIssue = async (repo: string, number: number) => ({
-    number,
-    title: 't',
-    body: '',
-    labels: [],
-    state: open.has(`${repo}#${number}`) ? ('open' as const) : ('closed' as const),
-  })
   return {
-    open,
-    readIssue,
     /** The comparisons asked for, as `owner/name:ancestor...descendant`. */
     get compared() {
       return api
@@ -217,7 +205,7 @@ describe('catchUpResolved', () => {
     })
 
     const result = await catchUpResolved(
-      { db: getDb(), app: gh.app, api: gh.api, readIssue: gh.readIssue },
+      { db: getDb(), app: gh.app, api: gh.api },
       { after: 0, limit: 10 },
     )
 
@@ -228,30 +216,18 @@ describe('catchUpResolved', () => {
     expect(await stageOf(broken)).toBe('done')
   })
 
-  it('leaves a task whose issue is still open for the release that names its version', async () => {
-    const id = await resolved('paulo/app', 1, 'aaa111')
+  it('tells an open issue where the fix is and closes it, and leaves a closed one alone', async () => {
+    const open = await resolved('paulo/app', 1, 'aaa111')
+    const closed = await resolved('paulo/app', 2, 'aaa111')
     const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
-    gh.open.add('paulo/app#1')
+    gh.api.repo('paulo/app').issue(1, { state: 'open' })
+    gh.api.repo('paulo/app').issue(2, { state: 'closed' })
 
-    const before = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+    const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
 
-    expect(before.released).toEqual([])
-    expect(await stageOf(id)).toBe('done')
-
-    const shipped = await shipContained(
-      { db: getDb(), api: gh.api, readIssue: gh.readIssue },
-      {
-        repository: 'paulo/app',
-        token: 't',
-        promotedSha: 'aaa111',
-        releaseBranch: 'main',
-        askedTaskId: 0,
-        actor: 'factory',
-        tags: [{ tag: 'v1.0.0', url: 'https://example.test/v1.0.0' }],
-      },
-    )
-
-    expect(shipped.resolved).toEqual([id])
+    expect(result.released).toEqual([open, closed])
     expect(gh.api.repo('paulo/app').issue(1).state).toBe('closed')
+    expect(gh.api.repo('paulo/app').issue(1).comments[0].body).toContain('`main`')
+    expect(gh.api.repo('paulo/app').issue(2).comments).toEqual([])
   })
 })

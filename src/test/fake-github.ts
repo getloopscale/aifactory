@@ -1062,6 +1062,17 @@ export class FakeGithub implements GithubApi {
     )
   }
 
+  async issueState(
+    repo: string,
+    token: string,
+    issueNumber: number,
+  ): Promise<'open' | 'closed' | undefined> {
+    return this.call(
+      { method: 'issueState', repo, token, args: [issueNumber], failed: false },
+      (r) => r.issue(issueNumber).state,
+    )
+  }
+
   async commentOnIssue(repo: string, token: string, issueNumber: number, body: string) {
     return this.call(
       { method: 'commentOnIssue', repo, token, args: [issueNumber, body], failed: false },

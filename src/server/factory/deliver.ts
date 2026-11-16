@@ -19,7 +19,6 @@ import { PRE_RELEASE_BRANCH, releaseBranchOf } from './branches'
 import { changesetsWaiting, publishedPackagesChanged } from './changed-packages'
 import { usesChangesets } from './changesets'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
-import type { fetchIssue } from '../github/issues'
 import { shipContained } from './ship'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
@@ -33,12 +32,7 @@ export type ReleaseMode =
   /** The factory releases a commit that has green checks and an approving review. */
   | 'auto'
 
-export type DeliverDeps = {
-  db: Database
-  github: GithubApp
-  api: GithubApi
-  readIssue?: typeof fetchIssue
-}
+export type DeliverDeps = { db: Database; github: GithubApp; api: GithubApi }
 
 /** The latest result of each check on a commit. Empty means nothing was verified. */
 async function latestChecks(db: Database, taskId: number, sha: string) {

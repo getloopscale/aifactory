@@ -15,18 +15,10 @@ import {
   type ReleasesRead,
 } from './changesets'
 import { endWithoutVersionPullRequest, type Ending } from './publication-end'
-import type { fetchIssue } from '../github/issues'
 import { shipContained, unclosedNote } from './ship'
 import { classify } from './watch'
 
-export type PublishDeps = {
-  db: Database
-  github: GithubApp
-  api: GithubApi
-  /** Reads an issue; tests inject one, and a release reads GitHub when none is given. */
-  readIssue?: typeof fetchIssue
-  now?: () => Date
-}
+export type PublishDeps = { db: Database; github: GithubApp; api: GithubApi; now?: () => Date }
 
 export type PublishResult = {
   /** Publications whose Version Packages pull request was merged, by the factory or seen merged. */

@@ -94,13 +94,7 @@ beforeEach(async () => {
 const github: GithubApp = { installationToken: async () => ({ token: 't', expiresAt: new Date() }) }
 /** A minute after the promotion: the release workflow has had no time to run. */
 const SOON = new Date(STARTED.getTime() + 60_000)
-const deps = (now = SOON) => ({
-  db: getDb(),
-  github,
-  api,
-  readIssue: api.readIssue,
-  now: () => now,
-})
+const deps = (now = SOON) => ({ db: getDb(), github, api, now: () => now })
 
 let seeded = 0
 async function seedTask(stage: 'done' | 'released', mergedSha: string | null = `m${seeded + 1}`) {

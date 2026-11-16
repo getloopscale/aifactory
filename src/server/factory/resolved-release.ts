@@ -3,7 +3,6 @@ import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
 import { releaseBranchOf } from './branches'
@@ -36,10 +35,9 @@ export type ReleaseBranchView = {
   /** The commit a release promoted, when a release is what brought the commit there. */
   mergeSha?: string
   /**
-   * Runs for each task once it is released, with its issue. A release that has a tag uses it to tell the
+   * Runs for each task as it is released, with its issue. A release that has a tag uses it to tell the
    * issue where the fix is; a catch-up has none. It returns what went wrong, never throws.
    */
-  holdOpen?: (row: { id: number; repository: string; issueNumber: number }) => Promise<boolean>
   afterRelease?: (row: {
     id: number
     repository: string
@@ -75,21 +73,46 @@ async function releaseEach(
     }
     try {
       if (!(await onBranch.get(sha))) continue
-      if (await view.holdOpen?.(row)) continue
+      const issueError = await view.afterRelease?.(row)
       await enterStage(deps.db, row.id, 'released', {
         actor: view.actor,
         releaseBranch: view.releaseBranch,
         resolvedSha: sha,
         ...(view.mergeSha ? { mergeSha: view.mergeSha } : {}),
+        ...(issueError ? { issueError } : {}),
       })
       result.released.push(row.id)
-      const issueError = await view.afterRelease?.(row)
       if (issueError) (result.issueErrors ??= []).push(issueError)
     } catch (error) {
       result.errors.push(`task ${row.id} (${row.repository}#${row.issueNumber}): ${message(error)}`)
     }
   }
   return result
+}
+
+const caughtUp = (branch: string) =>
+  `The fix is on \`${branch}\`: a person resolved this task by hand, and the release that carries it was made before the factory saw it.\n`
+
+/**
+ * Tells an issue where the fix is and closes it, only when it is still open: the agent closed the issue it
+ * found fixed, a person resolving from the panel did not. A state GitHub does not say is not taken as open.
+ * A failure is returned as `#<issue>: <why>`, not thrown: the release already happened.
+ */
+export async function closeOpenIssue(
+  api: Pick<GithubApi, 'issueState' | 'commentOnIssue' | 'closeIssue'>,
+  repo: string,
+  token: string,
+  issueNumber: number,
+  body: string,
+): Promise<string | undefined> {
+  try {
+    if ((await api.issueState(repo, token, issueNumber)) !== 'open') return undefined
+    await api.commentOnIssue(repo, token, issueNumber, body)
+    await api.closeIssue(repo, token, issueNumber)
+    return undefined
+  } catch (error) {
+    return `#${issueNumber}: ${message(error)}`
+  }
 }
 
 const columns = {
@@ -126,15 +149,17 @@ export type CatchUpPage = {
  * each is compared with the head of its repository's release branch (the owner's choice, or the default
  * branch). `next` is where the following pass starts, and 0 once a pass reaches the last task, so a task
  * whose commit is not there yet is looked at again later. A released task no longer matches, so running it
- * again changes nothing. A task whose issue is still open is left for the release that names its version
- * (`shipContained`), so a publication that has not tagged yet does not leave the issue open for good.
+ * again changes nothing. The issue of such a task, when still open, is told the fix is on the release branch and
+ * closed, since no tag is known here.
  */
 export async function catchUpResolved(
   deps: {
     db: Database
     app: Pick<GithubApp, 'installationToken'>
-    api: Pick<GithubApi, 'contains' | 'defaultBranch'>
-    readIssue?: typeof fetchIssue
+    api: Pick<
+      GithubApi,
+      'contains' | 'defaultBranch' | 'issueState' | 'commentOnIssue' | 'closeIssue'
+    >
   },
   page: CatchUpPage,
 ): Promise<ResolvedReleased & { next: number }> {
@@ -151,12 +176,15 @@ export async function catchUpResolved(
     try {
       const { token } = await deps.app.installationToken(repo)
       const branch = await releaseBranchOf(deps.api, repo, token, mine[0])
-      const read = deps.readIssue ?? fetchIssue
-      // An issue still open waits for a release that names its version (a publication may not have tagged
-      // it yet): `shipContained` releases the task and closes the issue then.
-      const holdOpen = async (row: { issueNumber: number }) =>
-        (await read(repo, row.issueNumber, token)).state === 'open'
-      const view = { repository: repo, token, releaseRef: branch, releaseBranch: branch, holdOpen }
+      const view = {
+        repository: repo,
+        token,
+        releaseRef: branch,
+        releaseBranch: branch,
+        // No tag names the task here: a late release only tells an open issue where the fix is.
+        afterRelease: (row: { issueNumber: number }) =>
+          closeOpenIssue(deps.api, repo, token, row.issueNumber, caughtUp(branch)),
+      }
       const done = await releaseEach(deps, { ...view, actor: 'factory' }, mine)
       result.released.push(...done.released)
       result.errors.push(...done.errors)

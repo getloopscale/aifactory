@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, task } from '../db/schema'
+import { ingress, stageEvent, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { shipContained, type Shipment } from './ship'
@@ -61,20 +61,18 @@ const shipment = (): Shipment => ({
   tags: [{ tag: 'v1.0.0', url: 'https://example.test/v1.0.0' }],
 })
 
-function setup(issues: Record<number, 'open' | 'closed' | undefined>) {
+function setup(issues: Record<number, 'open' | 'closed'>) {
   const api = new FakeGithub()
   const repo = api.repo(REPO)
   repo.holds('p1', ['aaa111'])
-  for (const [n, state] of Object.entries(issues)) repo.issue(Number(n), { state: state ?? 'open' })
-  const readIssue = async (_r: string, number: number) => ({
-    number,
-    title: 't',
-    body: '',
-    labels: [],
-    state: issues[number],
-  })
-  return { api, repo, deps: { db: getDb(), api, readIssue } }
+  for (const [n, state] of Object.entries(issues)) repo.issue(Number(n), { state })
+  return { api, repo, deps: { db: getDb(), api } }
 }
+
+const stageDetail = async (id: number) =>
+  (await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))).find(
+    (e) => e.stage === 'released',
+  )?.detail
 
 describe('shipContained with a resolved task', () => {
   it('closes the open issue of a resolved task with the version', async () => {
@@ -101,27 +99,26 @@ describe('shipContained with a resolved task', () => {
 
   it('does not take an unknown state as open', async () => {
     await resolved(REPO, 3, 'aaa111')
-    const gh = setup({ 3: undefined })
+    const gh = setup({ 3: 'open' })
+    gh.api.issueState = async () => undefined
 
     await shipContained(gh.deps, shipment())
 
     expect(gh.api.recorded('commentOnIssue')).toEqual([])
   })
 
-  it('records an issue it cannot read and keeps the release', async () => {
+  it('keeps an issue it cannot close on the released stage and returns it', async () => {
     const id = await resolved(REPO, 4, 'aaa111')
     const gh = setup({ 4: 'open' })
-    const deps = {
-      ...gh.deps,
-      readIssue: async () => {
-        throw new Error('boom')
-      },
+    gh.api.closeIssue = async () => {
+      throw new Error('boom')
     }
 
-    const shipped = await shipContained(deps, shipment())
+    const shipped = await shipContained(gh.deps, shipment())
 
     expect(shipped.issueErrors).toEqual(['#4: boom'])
     expect(await stageOf(id)).toBe('released')
+    expect(await stageDetail(id)).toMatchObject({ issueError: '#4: boom' })
   })
 
   it('comments once: a second release finds the task released', async () => {

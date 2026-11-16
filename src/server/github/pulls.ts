@@ -310,6 +310,12 @@ export type GithubApi = {
   commentOnIssue(repo: string, token: string, issueNumber: number, body: string): Promise<string>
   /** Closes an issue as completed: what it asked for is in the code. */
   closeIssue(repo: string, token: string, issueNumber: number): Promise<void>
+  /** Whether an issue is open or closed; `undefined` when GitHub does not say. */
+  issueState(
+    repo: string,
+    token: string,
+    issueNumber: number,
+  ): Promise<'open' | 'closed' | undefined>
   /** The comments on an issue made since a time, oldest first. */
   listIssueComments(
     repo: string,
@@ -1067,6 +1073,16 @@ export function createGithubApi(
         `closing ${repo}#${issueNumber}`,
         [200],
       )
+    },
+
+    async issueState(repo, token, issueNumber) {
+      const response = await ensure(
+        await call(repo, token, `/issues/${issueNumber}`),
+        `reading ${repo}#${issueNumber}`,
+        [200],
+      )
+      const state = ((await response.json()) as { state?: string }).state
+      return state === 'open' || state === 'closed' ? state : undefined
     },
 
     async listIssueComments(repo, token, issueNumber, since) {

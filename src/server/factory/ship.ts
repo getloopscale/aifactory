@@ -2,10 +2,9 @@ import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, task } from '../db/schema'
-import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
-import { releaseResolved } from './resolved-release'
+import { closeOpenIssue, releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
 
 /** A release that reached the release branch: what it promoted, under which tags, and who decided. */
@@ -90,7 +89,7 @@ async function belongs(
  * `released` stage and returned; the release is not undone.
  */
 export async function shipContained(
-  deps: { db: Database; api: GithubApi; readIssue?: typeof fetchIssue },
+  deps: { db: Database; api: GithubApi },
   s: Shipment,
 ): Promise<Shipped> {
   const candidates = await deps.db
@@ -135,25 +134,14 @@ export async function shipContained(
 /**
  * Releases the tasks resolved with no change that the promotion carries. An issue the agent closed when it
  * resolved gets nothing; one still open (a person resolved the task from the panel) is told where the fix is
- * and closed. A state that cannot be read is not taken as open. A task that could not be compared is
+ * and closed; a state that cannot be read is not taken as open, and a failure is kept on the `released`
+ * stage and returned. A task that could not be compared is
  * logged and left for the `catch-up` cron; the release stands.
  */
-async function shipResolved(
-  deps: { db: Database; api: GithubApi; readIssue?: typeof fetchIssue },
-  s: Shipment,
-  shipped: Shipped,
-) {
-  const read = deps.readIssue ?? fetchIssue
+async function shipResolved(deps: { db: Database; api: GithubApi }, s: Shipment, shipped: Shipped) {
   const resolved = await releaseResolved(deps, {
-    afterRelease: async (row) => {
-      try {
-        const issue = await read(s.repository, row.issueNumber, s.token)
-        if (issue.state !== 'open') return undefined
-      } catch (error) {
-        return `#${row.issueNumber}: ${message(error)}`
-      }
-      return announce(deps.api, s, row.issueNumber)
-    },
+    afterRelease: (row) =>
+      closeOpenIssue(deps.api, s.repository, s.token, row.issueNumber, availableIn(s)),
     repository: s.repository,
     token: s.token,
     releaseRef: s.promotedSha,
