@@ -8,6 +8,7 @@ import { storageFromUrl } from '../db/config'
 import {
   agentEvent,
   agentRun,
+  coordinatorAction,
   decision,
   delivery,
   finding,
@@ -38,7 +39,7 @@ import {
   sendBackAutomatically,
   type ActionDeps,
 } from './actions'
-import { health, inbox, listTasks, taskDetail } from './queries'
+import { coordinatorActions, health, inbox, listTasks, taskDetail } from './queries'
 import { runContinuation } from '../factory/run-support'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
 import { stageStream } from './stream'
@@ -337,6 +338,39 @@ describe('taskDetail', () => {
 
   it('is nothing for a task that does not exist', async () => {
     expect(await taskDetail(getDb(), 999)).toBeUndefined()
+  })
+})
+
+describe('the coordinator on the panel', () => {
+  it("lists a task's decisions newest first, filters by outcome, and gives the inbox the reason", async () => {
+    const id = await seed('handoff', {}, [{ stage: 'handoff', detail: { reason: 'three' } }])
+    const base = { taskId: id, action: 'send_back' as const, headSha: 'a' }
+    await getDb()
+      .insert(coordinatorAction)
+      .values([
+        {
+          ...base,
+          exceptionKind: 'stalled',
+          outcome: 'applied',
+          reason: 'first',
+          at: new Date(1000),
+        },
+        {
+          ...base,
+          exceptionKind: 'handoff',
+          action: 'escalate',
+          outcome: 'escalated',
+          reason: 'second',
+          at: new Date(2000),
+        },
+      ])
+    const detail = await taskDetail(getDb(), id)
+    expect(detail?.coordinatorActions.map((a) => a.reason)).toEqual(['second', 'first'])
+    const only = await coordinatorActions(getDb(), 'escalated')
+    expect(only.map((a) => a.reason)).toEqual(['second'])
+    expect(await coordinatorActions(getDb())).toHaveLength(2)
+    const items = await inbox(getDb())
+    expect(items.find((i) => i.task.id === id)?.coordinatorReason).toBe('second')
   })
 })
 

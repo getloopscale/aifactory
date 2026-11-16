@@ -331,6 +331,23 @@ export type DecisionView = {
   at: string
 }
 
+/** One decision of the coordinator, as the panel shows it. */
+export type CoordinatorActionView = {
+  id: number
+  taskId: number
+  /** The task it belongs to, for the list across tasks. */
+  repository: string
+  issueNumber: number
+  title: string
+  exceptionKind: string
+  action: string
+  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated'
+  reason: string
+  /** What a model drafted, as text, or null when nothing was. */
+  draft: string | null
+  at: string
+}
+
 export type TaskDetail = {
   task: TaskCard
   timeline: TimelineEvent[]
@@ -340,6 +357,8 @@ export type TaskDetail = {
   plans: ChangePlanView[]
   questions: QuestionView[]
   decisions: DecisionView[]
+  /** Newest first. */
+  coordinatorActions: CoordinatorActionView[]
   deliveries: DeliveryView[]
   watches: WatchView[]
   runs: RunView[]
@@ -351,6 +370,8 @@ export type InboxItem = {
   kind: 'question' | 'review' | 'handoff' | 'failed' | 'main_red'
   /** One line that says what is wanted. */
   summary: string
+  /** Why the coordinator escalated the task, when it did. */
+  coordinatorReason: string | null
   at: string
 }
 

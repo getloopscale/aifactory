@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import {
   agentRun,
   changePlan,
+  coordinatorAction,
   decision,
   delivery,
   evidence,
@@ -20,6 +21,7 @@ import {
   columnOf,
   retryableFailure,
   type ChangePlanView,
+  type CoordinatorActionView,
   type DecisionView,
   type Retryable,
   type DeliveryView,
@@ -203,11 +205,48 @@ export async function listTasks(db: Database): Promise<TaskCard[]> {
   return (await cards(db, rows)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
+type ActionRow = typeof coordinatorAction.$inferSelect
+
+const draftText = (draft: unknown): string | null => {
+  if (draft === null || draft === undefined) return null
+  return typeof draft === 'string' ? draft : JSON.stringify(draft, null, 2)
+}
+
+const actionView = (a: ActionRow, owner: TaskRow): CoordinatorActionView => ({
+  id: a.id,
+  taskId: a.taskId,
+  repository: owner.repository,
+  issueNumber: owner.issueNumber,
+  title: owner.issueTitle,
+  exceptionKind: a.exceptionKind,
+  action: a.action,
+  outcome: a.outcome,
+  reason: a.reason,
+  draft: draftText(a.draft),
+  at: iso(a.at),
+})
+
+/** The coordinator's decisions across tasks, newest first, all of them or only those with one outcome. */
+export async function coordinatorActions(
+  db: Database,
+  outcome?: ActionRow['outcome'],
+  limit = 200,
+): Promise<CoordinatorActionView[]> {
+  const rows = await db
+    .select({ action: coordinatorAction, owner: task })
+    .from(coordinatorAction)
+    .innerJoin(task, eq(task.id, coordinatorAction.taskId))
+    .where(outcome ? eq(coordinatorAction.outcome, outcome) : undefined)
+    .orderBy(desc(coordinatorAction.at), desc(coordinatorAction.id))
+    .limit(limit)
+  return rows.map((r) => actionView(r.action, r.owner))
+}
+
 export async function taskDetail(db: Database, id: number): Promise<TaskDetail | undefined> {
   const [row] = await db.select().from(task).where(eq(task.id, id))
   if (!row) return undefined
   const [card] = await cards(db, [row])
-  const [events, checks, reviews, questions, decisions, deliveries, watches, runs, plans] =
+  const [events, checks, reviews, questions, decisions, deliveries, watches, runs, plans, actions] =
     await Promise.all([
       db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
       db.select().from(evidence).where(eq(evidence.taskId, id)).orderBy(asc(evidence.id)),
@@ -218,6 +257,11 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       db.select().from(watch).where(eq(watch.taskId, id)).orderBy(asc(watch.id)),
       db.select().from(agentRun).where(eq(agentRun.taskId, id)).orderBy(asc(agentRun.id)),
       db.select().from(changePlan).where(eq(changePlan.taskId, id)).orderBy(asc(changePlan.id)),
+      db
+        .select()
+        .from(coordinatorAction)
+        .where(eq(coordinatorAction.taskId, id))
+        .orderBy(desc(coordinatorAction.at), desc(coordinatorAction.id)),
     ])
   return {
     task: card,
@@ -271,6 +315,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       note: d.note,
       at: iso(d.at),
     })),
+    coordinatorActions: actions.map((a) => actionView(a, row)),
     runs: runs.map((r): RunView => ({
       id: r.id,
       role: r.role,
@@ -323,7 +368,15 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
     .where(inArray(task.stage, ['waiting', 'done', 'handoff', 'failed']))
   const all = await cards(db, rows)
   const items: InboxItem[] = []
+  const escalated = await db
+    .select()
+    .from(coordinatorAction)
+    .where(eq(coordinatorAction.outcome, 'escalated'))
+    .orderBy(asc(coordinatorAction.at), asc(coordinatorAction.id))
+  // The latest escalation of each task, because that is the one that left it with a person.
+  const reasons = new Map(escalated.map((a) => [a.taskId, a.reason]))
   for (const card of all) {
+    const coordinatorReason = reasons.get(card.id) ?? null
     const [last] = await db
       .select()
       .from(stageEvent)
@@ -337,6 +390,7 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
         task: card,
         kind: 'question',
         summary: oneLine(String(detail.question ?? 'A question')),
+        coordinatorReason: null,
         at,
       })
     } else if (card.stage === 'handoff') {
@@ -344,6 +398,7 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
         task: card,
         kind: 'handoff',
         summary: oneLine(String(detail.reason ?? 'Needs a person')),
+        coordinatorReason,
         at,
       })
     } else if (card.stage === 'failed') {
@@ -353,10 +408,17 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
         task: card,
         kind: 'failed',
         summary: quota ? `Out of quota. ${error}` : error,
+        coordinatorReason,
         at,
       })
     } else if (card.stage === 'done' && !card.approved && !card.resolved) {
-      items.push({ task: card, kind: 'review', summary: 'Pull request ready to review', at })
+      items.push({
+        task: card,
+        kind: 'review',
+        summary: 'Pull request ready to review',
+        coordinatorReason: null,
+        at,
+      })
     }
   }
   const red = await db
@@ -380,6 +442,7 @@ export async function inbox(db: Database): Promise<InboxItem[]> {
         summary: `The default branch went red after ${w.tag ?? 'a release'}. ${
           w.revertUrl ? 'A revert pull request is open.' : 'No revert pull request could be opened.'
         } ${oneLine(w.detail ?? '')}`.trim(),
+        coordinatorReason: null,
         at: iso(w.endedAt ?? w.startedAt),
       })
     }
