@@ -174,25 +174,28 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
   it.each([
     ['closed', false],
     ['merged', true],
-  ])('escalates as unknown, sending nothing back, when its pull request is %s', async (_, merged) => {
-    const id = await checksUnchanged()
-    api.repo('paulo/app').pullRequest({
-      number: 3,
-      headRef: 'factory/3',
-      mergeableState: 'dirty',
-      state: 'closed',
-      merged,
-    })
+  ])(
+    'escalates as unknown, sending nothing back, when its pull request is %s',
+    async (_, merged) => {
+      const id = await checksUnchanged()
+      api.repo('paulo/app').pullRequest({
+        number: 3,
+        headRef: 'factory/3',
+        mergeableState: 'dirty',
+        state: 'closed',
+        merged,
+      })
 
-    const result = await coordinate(deps(), 'auto')
+      const result = await coordinate(deps(), 'auto')
 
-    expect(result).toMatchObject({ escalated: 1, applied: 0 })
-    expect(await stageOf(id)).toBe('handoff')
-    expect(queued).toEqual([])
-    const [row] = await actions()
-    expect(row).toMatchObject({ exceptionKind: 'unknown', action: 'escalate' })
-    expect(row.reason).toContain('is closed')
-  })
+      expect(result).toMatchObject({ escalated: 1, applied: 0 })
+      expect(await stageOf(id)).toBe('handoff')
+      expect(queued).toEqual([])
+      const [row] = await actions()
+      expect(row).toMatchObject({ exceptionKind: 'unknown', action: 'escalate' })
+      expect(row.reason).toContain('is closed')
+    },
+  )
 
   it('records nothing new and queues nothing for the same exception on the same head', async () => {
     const id = await checksUnchanged()

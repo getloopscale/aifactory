@@ -2509,7 +2509,9 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
 
     expect(result).toMatchObject({ status: 'done', sha: pushed })
-    expect(result.pullRequestUrl).not.toBe(PR_URL)
+    const opened = 'pullRequestUrl' in result ? result.pullRequestUrl : undefined
+    expect(opened).toBeTruthy()
+    expect(opened).not.toBe(PR_URL)
     expect(seen.pulls).toEqual(['factory/7'])
     const stages = await stagesOf(id)
     expect(stages).toContain('verify')
@@ -2518,7 +2520,7 @@ describe('runTask continuing from a branch a person sent back', () => {
     const reviews = await getDb().select().from(review).where(eq(review.taskId, id))
     expect(reviews.at(-1)).toMatchObject({ sha: pushed, verdict: 'approve' })
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(row.pullRequestUrl).toBe(result.pullRequestUrl)
+    expect(row.pullRequestUrl).toBe(opened)
   })
 
   it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
