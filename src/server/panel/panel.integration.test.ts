@@ -676,6 +676,40 @@ describe('actions', () => {
     expect(again.stage).toBe('done')
   })
 
+  it('keeps the failure a withdrawn send-back came from, and runs again from the right work', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    const at = new Date('2026-01-01T10:00:00Z')
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'failed', detail: { reason: 'quota' }, at })
+    await requestChanges(deps(), id, 'wrong note')
+    await withdrawSendBack(deps(), id)
+
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const last = events.at(-1)!
+    expect(last).toMatchObject({ stage: 'failed', detail: { reason: 'quota' } })
+    expect(last.at).toEqual(at)
+
+    // A retry on its own no longer finds the withdrawn note.
+    await retryAutomatically(deps(), id)
+    expect(queued.at(-1)?.input).not.toHaveProperty('decisionId')
+    expect(queued.at(-1)?.input).not.toHaveProperty('feedback')
+  })
+
+  it('keeps the integration error of a done task that was sent back and withdrawn', async () => {
+    const id = await seed('done', { headSha: 'abc' })
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'done', detail: { integrationError: 'conflict' } })
+    await requestChanges(deps(), id, 'note')
+    await withdrawSendBack(deps(), id)
+
+    const [last] = (await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))).slice(
+      -1,
+    )
+    expect(last).toMatchObject({ stage: 'done', detail: { integrationError: 'conflict' } })
+  })
+
   it('refuses to withdraw when nothing waits, when it was automatic, or when its run was taken', async () => {
     const idle = await seed('done', { headSha: 'abc' })
     await expect(withdrawSendBack(deps(), idle)).rejects.toThrow(ActionRefused)

@@ -8,6 +8,8 @@ export type PendingSendBack = {
   decisionId: number
   /** The stage the task was in before it was sent back. */
   back: (typeof TASK_STAGES)[number]
+  /** The event before the send-back, whose detail and time the task goes back to. */
+  previous: { detail: unknown; at: Date }
   /** What sending back cleared, when the intake recorded it; an older intake did not. */
   restore?: { resolvedSha: string | null; awaitingCiSha: string | null }
 }
@@ -24,14 +26,14 @@ export async function pendingSendBack(
   taskId: number,
 ): Promise<PendingSendBack | undefined> {
   const [latest, before] = await db
-    .select({ stage: stageEvent.stage, detail: stageEvent.detail })
+    .select({ stage: stageEvent.stage, detail: stageEvent.detail, at: stageEvent.at })
     .from(stageEvent)
     .where(eq(stageEvent.taskId, taskId))
     .orderBy(desc(stageEvent.id))
     .limit(2)
   const detail = (latest?.detail ?? {}) as Record<string, unknown>
   if (latest?.stage !== 'intake' || detail.decision !== 'request_changes') return undefined
-  if (detail.automatic === true || !before) return undefined
+  if (detail.automatic === true || detail.withdrawn === true || !before) return undefined
   let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
   if (decisionId === undefined) {
     const [asked] = await db
@@ -47,6 +49,7 @@ export async function pendingSendBack(
   return {
     decisionId,
     back: before.stage,
+    previous: { detail: before.detail, at: before.at },
     restore: kept
       ? { resolvedSha: text(kept.resolvedSha), awaitingCiSha: text(kept.awaitingCiSha) }
       : undefined,
