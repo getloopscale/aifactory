@@ -3053,6 +3053,36 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
       },
     )
 
+    it('counts the runs again once the network has been down longer than any outage, and a person is called', async () => {
+      const id = await seedTask()
+      const queued: Queued[] = []
+      const action = actionDeps(queued, [])
+      const drops = { left: 1000 }
+      const failing = () => where['reading the issue'](drops)
+      expect(await runTask(failing(), id)).toMatchObject({ status: 'failed', stage: 'sandbox' })
+      // The failure is older than the span when the next runs begin.
+      await getDb()
+        .update(stageEvent)
+        .set({ at: new Date(Date.now() - 2 * 3600_000) })
+        .where(eq(stageEvent.taskId, id))
+      let runs = 0
+      for (; runs < 20; runs++) {
+        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+        if (card.retryAt === null) break
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        const input = queued.at(-1)!
+        await runTask(
+          failing(),
+          id,
+          undefined,
+          runContinuation(undefined, input.feedback, input.resume),
+        )
+      }
+      expect(runs).toBe(3)
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.retryAt).toBeNull()
+    })
+
     it('still limits the runs of an agent that fails with it, since that work was attempted', async () => {
       const id = await seedTask()
       const queued: Queued[] = []
