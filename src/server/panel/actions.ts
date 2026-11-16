@@ -7,6 +7,7 @@ import { integrationBranch } from '../factory/branches'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
+import { pendingSendBack } from '../factory/send-back'
 import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
@@ -56,6 +57,14 @@ async function requeue(
   rework?: Rework,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
+    // What a person's send-back clears is kept on its intake, so withdrawing it can give it back.
+    const [before] =
+      kind === 'request_changes'
+        ? await tx
+            .select({ resolvedSha: task.resolvedSha, awaitingCiSha: task.awaitingCiSha })
+            .from(task)
+            .where(eq(task.id, taskId))
+        : []
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
     const moved = await tx
       .update(task)
@@ -106,7 +115,7 @@ async function requeue(
       detail: {
         decision: kind,
         note,
-        ...(kind === 'request_changes' ? { decisionId: made.id } : {}),
+        ...(kind === 'request_changes' ? { decisionId: made.id, restore: before } : {}),
       },
     })
     await enqueueRun({ taskId, decisionId: made.id }, `task-${taskId}-d${made.id}`)
@@ -222,30 +231,18 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
  */
 export async function withdrawSendBack(deps: ActionDeps, taskId: number) {
   const row = await load(deps.db, taskId)
-  const [latest, before] = await deps.db
-    .select({ stage: stageEvent.stage, detail: stageEvent.detail })
-    .from(stageEvent)
-    .where(eq(stageEvent.taskId, taskId))
-    .orderBy(desc(stageEvent.id))
-    .limit(2)
-  const detail = (latest?.detail ?? {}) as Record<string, unknown>
-  const decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
-  const pending =
-    latest?.stage === 'intake' &&
-    detail.decision === 'request_changes' &&
-    detail.automatic !== true &&
-    decisionId !== undefined &&
-    before !== undefined
-  const facts: Facts = { ...row, sendBackPending: pending }
+  const pending = await pendingSendBack(deps.db, taskId)
+  const facts: Facts = { ...row, sendBackPending: pending !== undefined }
   mustAllow(facts, 'withdraw_send_back')
-  const back = before!.stage
+  const { decisionId, back, restore } = pending!
   return deps.inTransaction(async (tx, _enqueueRun, dequeueRun) => {
     const moved = await tx
       .update(task)
-      .set({ stage: back })
+      .set({ stage: back, ...restore })
       .where(and(eq(task.id, taskId), eq(task.stage, 'intake')))
       .returning({ id: task.id })
-    // A run a worker already took is not withdrawn: the transaction ends here and changes nothing.
+    // The run goes only while no worker holds its job, and only the job of this very decision: a run
+    // already taken is not withdrawn, and the transaction ends here changing nothing.
     if (moved.length === 0 || !dequeueRun || !(await dequeueRun(`task-${taskId}-d${decisionId}`))) {
       throw new ActionRefused(
         'the run of this send-back already started, so it cannot be withdrawn',

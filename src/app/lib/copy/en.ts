@@ -212,6 +212,10 @@ export const en = {
     changesPlaceholder: 'What should change? The agent continues from the branch it pushed.',
     sendBack: 'Send back',
     sentBack: 'Sent back to the agent.',
+    sendBackWaiting: 'A send-back waits for its run to start. Withdraw it to correct the note.',
+    withdraw: 'Withdraw send-back',
+    confirmWithdraw: 'Withdraw this send-back? The run does not start and the task goes back.',
+    withdrawn: 'Send-back withdrawn.',
     changesContext: (title: string, n: number, repository: string) =>
       `Pull request for the issue "${title}" (#${n}) in ${repository}`,
     resolvedAnotherWay: 'Resolved another way',

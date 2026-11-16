@@ -7,6 +7,7 @@ import { getDb } from '../db'
 import { decision } from '../db/schema'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
+import { sendBackWithdrawn } from '../factory/send-back'
 import { runTask } from '../factory/run-task'
 import { runContinuation } from '../factory/run-support'
 
@@ -24,6 +25,11 @@ export default defineJob('run-task', {
   // own would spend the agent's budget again on the same issue.
   maxAttempts: 1,
   async handler({ input, signal, extendLease }) {
+    // A send-back the owner withdrew does not run, even when a worker took its job before it was removed.
+    if (input.decisionId && (await sendBackWithdrawn(getDb(), input.taskId, input.decisionId))) {
+      console.log(JSON.stringify({ event: 'task_skipped', taskId: input.taskId, why: 'withdrawn' }))
+      return
+    }
     const deps = await jobDeps(input.taskId)
 
     // The lease is two minutes and a run up to half an hour: renew it while the run is alive.

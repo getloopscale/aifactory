@@ -334,6 +334,8 @@ export type DecisionView = {
 
 export type TaskDetail = {
   task: TaskCard
+  /** A send-back of the owner waits in `intake` and can still be withdrawn. */
+  sendBackPending?: boolean
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
   reviews: ReviewView[]

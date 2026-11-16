@@ -63,10 +63,10 @@ export const inTransactionForRun: ActionDeps['inTransaction'] = async (work) => 
           })
         },
         async (key) => {
-          // Only a job no worker holds: a lease still running belongs to a run that has started.
+          // Only a job no worker ever leased: an expired lease may still belong to a run that is going on.
           const removed = await client.query(
             `DELETE FROM ${JOBS_TABLE} WHERE name = 'run-task' AND idempotency_key = $1
-               AND (locked_until IS NULL OR locked_until < NOW()) RETURNING id`,
+               AND locked_until IS NULL RETURNING id`,
             [key],
           )
           return (removed.rowCount ?? 0) > 0

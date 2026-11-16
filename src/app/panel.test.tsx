@@ -301,6 +301,29 @@ describe('task actions', () => {
   })
 })
 
+describe('withdrawing a send-back from the panel', () => {
+  it('offers the withdrawal only for a send-back that waits in intake, and asks first', async () => {
+    const waiting = {
+      ...detail({ task: { ...base, stage: 'intake', column: 'working', headSha: 'abc' } }),
+      sendBackPending: true,
+    }
+    const calls = serve({ 'POST /api/panel/tasks/5/withdraw': { decisionId: 3 } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false).mockReturnValueOnce(true)
+    render(<TaskActions detail={waiting} onDone={() => {}} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw send-back' }))
+    expect(calls).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Withdraw send-back' }))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(confirm).toHaveBeenCalledTimes(2)
+
+    cleanup()
+    const plain = detail({ task: { ...base, stage: 'intake', column: 'working', headSha: null } })
+    const { container } = render(<TaskActions detail={plain} onDone={() => {}} />)
+    expect(container.textContent).toBe('')
+  })
+})
+
 describe('releasing from the panel', () => {
   const noop = () => {}
 

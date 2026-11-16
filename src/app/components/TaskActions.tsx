@@ -32,6 +32,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
   const canResolve = task.stage === 'failed' || task.stage === 'handoff'
   // Done but never merged (GitHub refused the pull request): the work is not delivered.
   const canRetry = canResolve || (task.stage === 'done' && !task.integrated && !task.resolved)
+  const canWithdraw = task.stage === 'intake' && detail.sendBackPending === true
   const releaseWaiting = task.releaseWait?.status === 'waiting'
   const releaseRefused = task.releaseWait?.status === 'refused' ? task.releaseWait.reason : null
   const canRelease = task.stage === 'done' && task.preRelease !== null && !releaseWaiting
@@ -52,7 +53,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
     }
   }
 
-  if (!hasPullRequest && !canRetry && !canRelease && !releaseWaiting) return null
+  if (!hasPullRequest && !canRetry && !canRelease && !releaseWaiting && !canWithdraw) return null
 
   return (
     <section
@@ -76,6 +77,23 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         <p className="mb-3 text-sm text-foreground">
           {t.taskActions.releaseRefused(releaseRefused)}
         </p>
+      ) : null}
+      {canWithdraw ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <p className="text-sm text-muted-foreground">{t.taskActions.sendBackWaiting}</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            onClick={() => {
+              if (window.confirm(t.taskActions.confirmWithdraw)) {
+                void run('withdraw', undefined, t.taskActions.withdrawn)
+              }
+            }}
+          >
+            {t.taskActions.withdraw}
+          </Button>
+        </div>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
         {hasPullRequest ? (

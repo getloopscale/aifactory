@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -651,6 +651,29 @@ describe('actions', () => {
 
     await requestChanges(deps(), id, 'regenerate the docs')
     expect(queued).toHaveLength(1)
+  })
+
+  it('gives back what the send-back cleared, and finds the decision of an older intake', async () => {
+    const id = await seed('done', { headSha: 'abc', resolvedSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
+    await requestChanges(deps(), id, 'note')
+
+    await withdrawSendBack(deps(), id)
+
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'done', resolvedSha: 'abc', awaitingCiSha: 'abc' })
+
+    // An intake written before it named its decision is matched to the person's latest request.
+    const old = await seed('done', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: old, stage: 'done', detail: {} })
+    await requestChanges(deps(), old, 'note')
+    await getDb()
+      .update(stageEvent)
+      .set({ detail: { decision: 'request_changes', note: 'note' } })
+      .where(and(eq(stageEvent.taskId, old), eq(stageEvent.stage, 'intake')))
+    await withdrawSendBack(deps(), old)
+    const [again] = await getDb().select().from(task).where(eq(task.id, old))
+    expect(again.stage).toBe('done')
   })
 
   it('refuses to withdraw when nothing waits, when it was automatic, or when its run was taken', async () => {
