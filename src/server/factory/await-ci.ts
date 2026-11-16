@@ -51,6 +51,8 @@ export type AwaitCiResult = {
   startedOver: number[]
   toPerson: number[]
   waiting: number
+  /** Tasks that wait because every failed required check also fails on the integration branch. */
+  waitingOnBase: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
   /** Failed checks whose evidence GitHub would not give: the work went back with their links only. */
@@ -243,6 +245,26 @@ async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]):
   return finish(deps, w, merged.sha)
 }
 
+/**
+ * What the integration branch's head reports, read only when a check failed on the pull request. A read that
+ * fails is no answer: the task is then judged on its own checks, as before.
+ */
+async function readBase(
+  deps: AwaitCiDeps,
+  repository: string,
+  token: string,
+  branch: string,
+  reports: CheckReport[],
+): Promise<CheckReport[] | undefined> {
+  if (!reports.some((r) => r.state === 'failure')) return undefined
+  try {
+    const head = await deps.api.branchHead(repository, token, branch)
+    return head ? await deps.api.checkReports(repository, token, head) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function look(
   deps: AwaitCiDeps,
   row: typeof task.$inferSelect,
@@ -266,11 +288,13 @@ async function look(
   const repo = await loadRepoConfig(deps.db, row.repository)
   const pull = await deps.api.readPullRequest(row.repository, token, number)
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
+  const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
   const step = decideWaitingIntegration({
     verifiedSha,
     pull,
     required,
-    reports: await deps.api.checkReports(row.repository, token, verifiedSha),
+    reports,
+    baseReports: await readBase(deps, row.repository, token, integrationBranch(repo), reports),
     waitedMs:
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
@@ -288,6 +312,7 @@ async function look(
   switch (step.kind) {
     case 'wait':
       result.waiting += 1
+      if (step.baseRed) result.waitingOnBase.push(row.id)
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
@@ -334,6 +359,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     startedOver: [],
     toPerson: [],
     waiting: 0,
+    waitingOnBase: [],
     errors: [],
     unreadEvidence: [],
   }

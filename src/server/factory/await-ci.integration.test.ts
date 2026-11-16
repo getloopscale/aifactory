@@ -262,6 +262,35 @@ describe('pollAwaitingIntegrations', () => {
     expect((await events(id)).filter((e) => e.stage === 'done')).toHaveLength(2)
   })
 
+  it('waits, and sends nothing back, when the failed check also fails on the integration branch', async () => {
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
+    repo().report('b'.repeat(40), {
+      name: 'CI',
+      state: 'failure',
+      detail: 'red',
+      url: 'https://ci/0',
+    })
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
+      sentBack: [],
+      waiting: 1,
+      waitingOnBase: [id],
+    })
+
+    expect(sentBack).toEqual([])
+    expect(autoMergeOff()).toEqual([])
+    expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
+  })
+
+  it('sends the work back when the check passes on the integration branch', async () => {
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
+    repo().report('b'.repeat(40), { name: 'CI', state: 'success', url: 'https://ci/0' })
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
+  })
+
   it('turns auto-merge off and sends the work back with each failed check', async () => {
     reports({ name: 'CI', state: 'failure', detail: 'foo.test.ts failed', url: 'https://ci/1' })
     const id = await waitingTask()

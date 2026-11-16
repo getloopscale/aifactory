@@ -33,6 +33,42 @@ const decide = (over: Partial<Parameters<typeof decideWaitingIntegration>[0]> = 
     ...over,
   })
 
+describe('decideWaitingIntegration with a red base', () => {
+  const failing = [report('CI', 'failure', 'boom'), report('Lint', 'success')]
+
+  it('waits, and names the check, when it fails on the base too', () => {
+    expect(decide({ reports: failing, baseReports: [report('CI', 'failure')] })).toEqual({
+      kind: 'wait',
+      baseRed: ['CI'],
+    })
+  })
+
+  it('sends back only the checks the base does not fail', () => {
+    const step = decide({
+      reports: [report('CI', 'failure'), report('Lint', 'failure')],
+      baseReports: [report('CI', 'failure')],
+    })
+    expect(step).toMatchObject({ kind: 'send_back', failed: ['Lint'] })
+  })
+
+  it.each([
+    ['green', [report('CI', 'success')]],
+    ['pending', [report('CI', 'pending')]],
+    ['absent', []],
+  ])('sends back when the check is %s on the base', (_name, baseReports) => {
+    expect(decide({ reports: failing, baseReports })).toMatchObject({ kind: 'send_back' })
+  })
+
+  it('does not hand to a person after the automatic runs while the base is red', () => {
+    const step = decide({
+      reports: failing,
+      baseReports: [report('CI', 'failure')],
+      automaticRuns: AUTOMATIC_RETRIES,
+    })
+    expect(step).toEqual({ kind: 'wait', baseRed: ['CI'] })
+  })
+})
+
 describe('decideWaitingIntegration', () => {
   it('waits while a required check is still running', () => {
     expect(decide()).toEqual({ kind: 'wait' })

@@ -35,7 +35,8 @@ export type FailedReport = CheckReport & {
 
 /** What to do about a task whose pull request waits for the repository's required checks. */
 export type WaitingStep =
-  | { kind: 'wait' }
+  /** `baseRed` names the required checks that fail on the base too: the task waits for the base, not for a fix. */
+  | { kind: 'wait'; baseRed?: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
   | { kind: 'finish'; mergedSha: string }
   /**
@@ -60,6 +61,8 @@ export type WaitingIntegration = {
   required: string[]
   /** Every check reported on the verified commit. */
   reports: CheckReport[]
+  /** Every check reported on the head of the integration branch, when it could be read. */
+  baseReports?: CheckReport[]
   /** How long the pull request has waited. */
   waitedMs: number
   /** Automatic runs since a person last started the task. */
@@ -156,7 +159,12 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       stopAutoMerge: false,
     }
   }
-  const { failed, silent } = readRequired(input)
+  const { failed: allFailed, silent } = readRequired(input)
+  // A check that fails on the base too is not this change's failure: nothing the builder does fixes it.
+  const base = input.baseReports ?? []
+  const baseRed = allFailed.filter((name) => failedRuns(base, name).length > 0)
+  const failed = allFailed.filter((name) => !baseRed.includes(name))
+  if (failed.length === 0 && baseRed.length > 0) return { kind: 'wait', baseRed }
   if (failed.length > 0) {
     if (!runsLeft) {
       return {
