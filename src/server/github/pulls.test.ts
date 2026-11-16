@@ -102,6 +102,27 @@ describe('a 5xx from GitHub', () => {
     expect(count()).toBe(3)
   })
 
+  it('asks a read again after "fetch failed" and never a write', async () => {
+    let calls = 0
+    const flaky = async () => {
+      if (++calls === 1) throw new TypeError('fetch failed')
+      return new Response(JSON.stringify({ default_branch: 'trunk' }), { status: 200 })
+    }
+    const settings = await createGithubApi(flaky, noWait).repositorySettings('o/r', 't')
+    expect(calls).toBe(2)
+    expect(JSON.stringify(settings)).toContain('trunk')
+
+    calls = 0
+    const down = async (): Promise<Response> => {
+      calls += 1
+      throw new TypeError('fetch failed')
+    }
+    await expect(createGithubApi(down, noWait).createCheckRun('o/r', 't', check)).rejects.toThrow(
+      'fetch failed',
+    )
+    expect(calls).toBe(1)
+  })
+
   it('never asks a write again', async () => {
     const { fetch, count } = sequence([502, 201])
     await expect(createGithubApi(fetch, noWait).createCheckRun('o/r', 't', check)).rejects.toThrow(

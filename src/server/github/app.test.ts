@@ -69,6 +69,34 @@ describe('GitHub App installation tokens', () => {
     expect(waits).toHaveLength(1)
   })
 
+  it('asks again when the network drops the lookup, and never the mint', async () => {
+    const github = fakeGithub()
+    let dropped = false
+    const lookup: FetchLike = async (url, init) => {
+      if (!dropped && url.endsWith('/installation')) {
+        dropped = true
+        throw new TypeError('fetch failed')
+      }
+      return github.fetch(url, init)
+    }
+    expect(
+      (await app(lookup).installationToken('paulohenriquevn/aifactory-playground')).token,
+    ).toBeTruthy()
+
+    let mints = 0
+    const mint: FetchLike = async (url, init) => {
+      if (init?.method === 'POST') {
+        mints += 1
+        throw new TypeError('fetch failed')
+      }
+      return github.fetch(url, init)
+    }
+    await expect(
+      app(mint).installationToken('paulohenriquevn/aifactory-playground'),
+    ).rejects.toThrow('fetch failed')
+    expect(mints).toBe(1)
+  })
+
   it('never asks the mint again when GitHub answers 502', async () => {
     const github = fakeGithub()
     let mints = 0
