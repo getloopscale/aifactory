@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { type SandboxBackend } from '@theokit/agents/sandbox'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
@@ -428,6 +430,11 @@ export class Run {
         ...c.repo.egress.map((domain) => ({ domain })),
       ],
     }
+    // The run is named on the task before the sandbox exists, so the supervisor never sees a sandbox whose
+    // run the task does not know.
+    const sandboxRun = randomUUID()
+    await deps.db.update(task).set({ sandboxRun }).where(eq(task.id, c.taskId))
+    spec.owner = { owner: 'task', taskId: c.taskId, run: sandboxRun }
     const startedAt = Date.now()
     const started = resuming
       ? await restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)

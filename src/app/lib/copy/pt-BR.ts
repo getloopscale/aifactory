@@ -15,6 +15,7 @@ const TRIED: DoctorTriedSentences = {
   installation: (v) => `ler a instalação do GitHub App em ${v.repo}`,
   events: () => 'ler os eventos que o GitHub App assina',
   runs: (v) => `ler as execuções que falharam em ${v.repo}`,
+  sandboxes: () => 'listar os sandboxes que a conta tem ativos',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
 }
@@ -418,7 +419,7 @@ export const ptBR: Copy = {
       },
       sandbox_refused: {
         cause: (v) =>
-          `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}`,
+          `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}${v.up ? ` ${v.up} de ${v.limit} sandboxes estão ativos, ${v.atWork} com dono trabalhando.` : ''}`,
         repair: (v) =>
           SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
@@ -481,6 +482,11 @@ export const ptBR: Copy = {
       },
       ok_sandbox: {
         cause: () => 'O provedor de sandbox não recusou a última execução.',
+        repair: () => '',
+      },
+      ok_sandbox_slots: {
+        cause: (v) =>
+          `O provedor de sandbox não recusou a última execução. ${v.up} de ${v.limit} sandboxes estão ativos, ${v.atWork} com dono trabalhando.`,
         repair: () => '',
       },
     },
@@ -869,6 +875,7 @@ export const ptBR: Copy = {
       retry_from_finding: 'Tentar de novo a partir de um achado',
       scope: 'Delimitar uma continuação',
       release: 'Publicar',
+      prioritise: 'Passar à frente na fila',
       escalate: 'Encaminhar',
     } as Record<string, string>,
     exceptions: {
@@ -884,6 +891,7 @@ export const ptBR: Copy = {
       release_ready: 'Pronta para publicar',
       release_retry: 'Publicação a repetir',
       release_blocked: 'Publicação bloqueada',
+      queue_blocked: 'Correção esperando na fila',
     } as Record<string, string>,
   },
   inbox: {

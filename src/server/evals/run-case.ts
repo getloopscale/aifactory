@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import {
@@ -378,12 +380,16 @@ class CaseRun {
 
 const names = (checks: CheckResult[]) => [...new Set(checks.map((c) => c.name))]
 
+/** Names this process's evaluation runs; the sandbox's metadata also carries the process, which says whether it lives. */
+const PROCESS_RUN = randomUUID()
+
 /** What the sandbox of a case may reach: GitHub without a credential, the agents, the registry. */
 async function specFor(deps: EvalDeps, c: EvalCase): Promise<SandboxSpec> {
   const agents =
     deps.reviewer.name === deps.builder.name ? [deps.builder] : [deps.builder, deps.reviewer]
   const agentEgress = (await Promise.all(agents.map((a) => a.egress()))).flat()
   return {
+    owner: { owner: 'eval', caseId: c.id, runId: PROCESS_RUN },
     timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs).sandboxMs,
     cacheKey: c.repository,
     egress: [

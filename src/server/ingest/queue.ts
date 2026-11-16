@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import type { QueueClient } from 'theokit/server/jobs'
 
+import { holdNewJob } from '../coordinator/queue-hold'
 import { getPool } from '../db'
 import * as schema from '../db/schema'
 
@@ -14,12 +15,9 @@ export async function recordAndQueue(delivery: Delivery, queue: QueueClient) {
   const client = await getPool().connect()
   try {
     return await recordDelivery(drizzle(client, { schema }), delivery, (taskId) =>
-      queue.enqueueInTransaction(
-        client,
-        'run-task',
-        { taskId },
-        { idempotencyKey: `task-${taskId}` },
-      ),
+      queue
+        .enqueueInTransaction(client, 'run-task', { taskId }, { idempotencyKey: `task-${taskId}` })
+        .then(() => holdNewJob(drizzle(client, { schema }), taskId)),
     )
   } finally {
     client.release()

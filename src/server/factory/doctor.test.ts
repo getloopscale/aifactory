@@ -713,6 +713,23 @@ describe('a failure that is the sandbox provider refusing', () => {
 describe('sandbox', () => {
   const refusal = { taskId: 7, at: '2026-11-13T10:00:00.000Z', error: 'Status code 402' }
 
+  it('says how many sandboxes are up against the limit, and how many have an owner at work', () => {
+    const item = sandboxItem(readOf({ slots: readOf({ up: 8, limit: 10, atWork: 2 }) }))
+    expect(item.status).toBe('ok')
+    expect(item.cause).toContain('8 of 10 sandboxes are up, 2 with an owner at work')
+  })
+
+  it('says it does not know when the sandboxes could not be listed', () => {
+    const slots = unread('reading the sandboxes the account has up', 'Status code 500')
+    expect(sandboxItem(readOf({ slots })).status).toBe('unknown')
+  })
+
+  it('keeps the slot counts when the latest run was refused', () => {
+    const item = sandboxItem(readOf({ refusal, slots: readOf({ up: 10, limit: 10, atWork: 2 }) }))
+    expect(item.status).toBe('blocked')
+    expect(item.cause).toContain('10 of 10 sandboxes are up, 2 with an owner at work')
+  })
+
   it('blocks on a refusal with no run started since, and links to the task', () => {
     expect(sandboxItem(readOf({ refusal }))).toEqual({
       id: 'sandbox',

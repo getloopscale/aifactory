@@ -92,6 +92,8 @@ export const task = pgTable(
      * `awaiting_ci_sha` set, and the `integrate-after-ci` cron integrates it once the hold ends.
      */
     integrationHeld: boolean('integration_held').notNull().default(false),
+    /** The run that holds the task's sandbox, written before it starts one: the sandbox's metadata names it. */
+    sandboxRun: text('sandbox_run'),
     /** What the run has spent so far, agents included. It grows while the run is going. */
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -437,6 +439,25 @@ export const agentEvent = pgTable(
 )
 
 /**
+ * A process that creates sandboxes says it is alive here, every half minute. A sandbox names the process in
+ * its metadata, so the supervisor can tell a sandbox whose owner died, on any host, from one in use. On its own
+ * host the supervisor asks the system whether `pid` still runs since `started`; elsewhere it goes by the beat.
+ */
+export const sandboxLease = pgTable('sandbox_lease', {
+  id: text('id').primaryKey(),
+  host: text('host').notNull(),
+  pid: integer('pid').notNull(),
+  /** When the process started, in clock ticks since boot, so a later process with the same id is not taken for it. */
+  started: text('started'),
+  beatAt: timestamp('beat_at', { withTimezone: true }).notNull(),
+  /**
+   * When a supervisor pass first found the lease quiet. A beat clears it. A quiet lease is killed only once it
+   * stays quiet for a lease window after this, so a process that comes back after an outage keeps its sandboxes.
+   */
+  staleSeenAt: timestamp('stale_seen_at', { withTimezone: true }),
+})
+
+/**
  * What the supervisor found wrong with the factory itself. `stalled` is work that stopped moving.
  * `orphaned` is something that waits for a thing that is gone: a job nobody queued, a resume that never
  * ran, a snapshot no question needs. A finding stays open while it is true and resolves when it is not.
@@ -734,6 +755,7 @@ export const EXCEPTION_KINDS = [
   'release_ready',
   'release_retry',
   'release_blocked',
+  'queue_blocked',
 ] as const
 
 /** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */
@@ -743,6 +765,7 @@ export const COORDINATOR_ACTIONS = [
   'retry_from_finding',
   'scope',
   'release',
+  'prioritise',
   'escalate',
 ] as const
 

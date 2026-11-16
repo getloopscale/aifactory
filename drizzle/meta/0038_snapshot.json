@@ -1,5 +1,5 @@
 {
-  "id": "461659a0-4e65-4224-a1fe-43d32cd13f28",
+  "id": "6554d407-5121-4b33-b955-0ecda7bd3415",
   "prevId": "b35b531a-1528-4de0-8e7c-f50dbfca01c9",
   "version": "7",
   "dialect": "postgresql",
@@ -2241,13 +2241,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "fixes": {
-          "name": "fixes",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2342,6 +2335,55 @@
           "onUpdate": "no action"
         }
       },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sandbox_lease": {
+      "name": "sandbox_lease",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "host": {
+          "name": "host",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pid": {
+          "name": "pid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started": {
+          "name": "started",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "beat_at": {
+          "name": "beat_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "stale_seen_at": {
+          "name": "stale_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -2543,6 +2585,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": false
+        },
+        "sandbox_run": {
+          "name": "sandbox_run",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "cost_usd": {
           "name": "cost_usd",
