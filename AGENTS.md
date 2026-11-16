@@ -136,7 +136,7 @@ reads that file, not a convention.
   only through a pull request, the factory opens its promotion from the integration branch and turns on
   auto-merge pinned to the head it saw (`pinPromotion` in `factory/promotion-merge.ts`), only on a pull request
   from the integration branch of the same repository into `develop` (`isFactoryPromotion`: never a fork, never
-  another head); a clean one is merged at once with a merge commit pinned to the same head. While it waits in
+  another head); a clean one is merged at once with a merge commit pinned to the same head. An open promotion that nothing waits on, in a repository whose integrated work waits for a release, is pinned the same way by the `integrate-after-ci` cron (`adoptPromotions`). While it waits in
   `promotion_wait`, new integrations are held out of the integration branch until `hold_until`
   (`PROMOTION_HOLD_MS`), so its checks can finish: the task waits in `done` with `awaiting_ci_sha` and
   `integration_held`, and the `integrate-after-ci` cron integrates it on the first pass after the hold expires
@@ -198,7 +198,7 @@ reads that file, not a convention.
   around it.
   The release train (ADR 0010) is the `release_ready` playbook: `release-facts.ts` reads each enabled repository,
   `release-train.ts` decides over it and reads nothing. A repository in `auto` (its `release_mode`, or
-  `FACTORY_RELEASE_MODE` when it has none) with integrated work (`done` with a `merged_sha`), no task queued, running or
+  `FACTORY_RELEASE_MODE` when it has none) with integrated work (`done` with a `merged_sha`) that has reached `develop` (it holds commits the release branch lacks), no task queued, running or
   waiting for CI, no release or publication in flight and its release branch not red or still watched by
   `watch-main` gets one `release()` call per head of `develop`, as `agent:coordinator`, so `personDecisions` does
   not count it. The row is recorded on the repository's oldest such task, with the head of `develop`. The bump is

@@ -42,6 +42,11 @@ export type RepositoryReleaseFacts = {
   branch: { state: ReleaseBranchState; detail: string }
   /** The facts below are read only when the train does not hold the repository (`trainHolds`). */
   head?: Read<string>
+  /**
+   * How many commits the pre-release branch holds that the release branch lacks, read with its head. None
+   * means integrated work has not been promoted into it yet, so there is nothing to release.
+   */
+  ahead?: number
   attempts?: ReleaseAttempt[]
   /** Why the release that waited for the release branch's checks on this head was refused, if it was. */
   waitRefusal?: string
@@ -126,7 +131,7 @@ const unknown = (taskId: number, head: string, evidence: string) => ({
  * the issues are worth reading at all.
  */
 export function attemptDue(f: RepositoryReleaseFacts) {
-  if (trainHolds(f) || !f.head?.read || f.branch.state === 'red') return undefined
+  if (trainHolds(f) || !f.head?.read || f.ahead === 0 || f.branch.state === 'red') return undefined
   return nextAttempt(f.attempts ?? [], f.waitRefusal)
 }
 
@@ -136,6 +141,7 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   const taskId = f.releasable[0].taskId
   if (!f.head?.read)
     return unknown(taskId, 'none', notRead(f.head, 'the head of the pre-release branch'))
+  if (f.ahead === 0) return undefined
   const head = f.head.value
   const at = { taskId, head, ...(f.mode === 'trial' ? { trialOnly: true as const } : {}) }
   if (f.branch.state === 'red') return { kind: 'release_blocked', ...at, evidence: f.branch.detail }

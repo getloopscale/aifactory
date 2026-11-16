@@ -1,11 +1,11 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, isNotNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { promotionWait } from '../db/schema'
+import { promotionWait, repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { autoMergeOrMergeable, type GithubApi, type OpenPullRequest } from '../github/pulls'
 
-import { PRE_RELEASE_BRANCH } from './branches'
+import { integrationBranch, PRE_RELEASE_BRANCH } from './branches'
 import {
   decidePromotionWait,
   holdsIntegrations,
@@ -265,4 +265,51 @@ export async function pollPromotionWaits(
     }
   }
   return result
+}
+
+/** What a pass of `adoptPromotions` pinned, and the repositories it could not look at. */
+export type AdoptedPromotions = { adopted: string[]; errors: string[] }
+
+/**
+ * Pins the promotions nothing waits on. A repository with integrated work that no release holds yet, no
+ * promotion waiting, and an open promotion pull request from the factory gets it pinned, as `pinPromotion`
+ * pins one at integration: auto-merge pinned to the head it has, or a merge at once when GitHub finds it
+ * clean. That is how a promotion opened before promotions were pinned, or one whose pin was refused, reaches
+ * the pre-release branch without a person. A repository that cannot be looked at is recorded and looked at
+ * again on the next pass.
+ */
+export async function adoptPromotions(
+  deps: PromotionDeps & { github: GithubApp },
+): Promise<AdoptedPromotions> {
+  const result: AdoptedPromotions = { adopted: [], errors: [] }
+  const candidates = await deps.db
+    .selectDistinct({ fullName: repository.fullName, baseBranch: repository.baseBranch })
+    .from(task)
+    .innerJoin(repository, eq(repository.fullName, task.repository))
+    .where(and(eq(repository.enabled, true), eq(task.stage, 'done'), isNotNull(task.mergedSha)))
+    .orderBy(repository.fullName)
+  for (const repo of candidates) {
+    if (await waitingIn(deps.db, repo.fullName)) continue
+    try {
+      if (await adopt(deps, repo.fullName, integrationBranch(repo)))
+        result.adopted.push(repo.fullName)
+    } catch (error) {
+      result.errors.push(`${repo.fullName}: ${message(error)}`)
+    }
+  }
+  return result
+}
+
+async function adopt(
+  deps: PromotionDeps & { github: GithubApp },
+  repo: string,
+  integration: string,
+): Promise<boolean> {
+  const { token } = await deps.github.installationToken(repo)
+  const pulls = await deps.api.openPullRequestsBetween(repo, token, integration, PRE_RELEASE_BRANCH)
+  const pull = pulls.find((p) => isFactoryPromotion(p, repo, integration))
+  if (!pull) return false
+  const pinned = await pin(deps, repo, token, pull)
+  if (pinned.developAutoMergeError) throw new Error(pinned.developAutoMergeError)
+  return true
 }

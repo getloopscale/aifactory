@@ -25,6 +25,7 @@ const facts = (over: Partial<RepositoryReleaseFacts> = {}): RepositoryReleaseFac
   inFlight: undefined,
   branch: { state: 'green', detail: '' },
   head: readOf(HEAD),
+  ahead: 2,
   attempts: [],
   labels: readOf([
     { issue: 40, labels: ['factory'] },
@@ -162,6 +163,13 @@ describe('recognising that a repository is ready for a release', () => {
       trialOnly: true,
     })
     expect(recogniseRelease(facts())).not.toHaveProperty('trialOnly')
+  })
+
+  it('releases nothing while the pre-release branch holds nothing the release branch lacks', () => {
+    // The work is integrated but its promotion into develop has not merged: there is nothing to release yet.
+    const unpromoted = facts({ ahead: 0 })
+    expect(attemptDue(unpromoted)).toBeUndefined()
+    expect(recogniseRelease(unpromoted)).toBeUndefined()
   })
 
   it('recognises a red release branch as blocking the train, with what watch-main saw', () => {

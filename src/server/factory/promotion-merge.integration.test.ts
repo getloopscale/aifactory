@@ -5,14 +5,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, promotionWait, review, stageEvent, task } from '../db/schema'
+import { ingress, promotionWait, repository, review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { FakeGithub } from '../../test/fake-github'
 
 import { pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
 import { advancePreRelease } from './integration'
 import { PROMOTION_HOLD_MS } from './promotion-hold'
-import { pollPromotionWaits } from './promotion-merge'
+import { adoptPromotions, pollPromotionWaits } from './promotion-merge'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -167,6 +167,86 @@ describe('pollPromotionWaits', () => {
 
     expect(pass.waiting).toBe(1)
     expect(pinned()).toHaveLength(1)
+  })
+})
+
+describe('adoptPromotions', () => {
+  /** A repository with integrated work, whose promotion was opened before promotions were pinned. */
+  async function integratedWork(stage: 'done' | 'released' = 'done') {
+    const db = getDb()
+    await db.insert(repository).values({ fullName: REPO, enabled: true })
+    const [i] = await db
+      .insert(ingress)
+      .values({
+        deliveryId: 'd-adopt',
+        event: 'issues',
+        payload: {},
+        outcome: 'task_created',
+        code: 'issue_labeled',
+        reason: 'r',
+      })
+      .returning({ id: ingress.id })
+    await db.insert(task).values({
+      ingressId: i.id,
+      repository: REPO,
+      issueNumber: 7,
+      issueTitle: 'Add truncate',
+      stage,
+      headSha: INTEGRATED,
+      mergedSha: INTEGRATED,
+    })
+  }
+  const unpinnedPromotion = () =>
+    api.openPullRequest(REPO, 't', {
+      head: 'workspace',
+      base: 'develop',
+      title: 'Promote',
+      body: '',
+    })
+  const adopt = () => adoptPromotions({ db: getDb(), github, api, now: () => NOW })
+
+  it('pins a promotion nothing waits on, for a repository with integrated work, and records its wait', async () => {
+    await integratedWork()
+    await unpinnedPromotion()
+    api.calls.length = 0
+
+    expect(await adopt()).toEqual({ adopted: [REPO], errors: [] })
+    expect(pinned()).toEqual([{ number: 13, sha: INTEGRATED }])
+    expect(await waits()).toMatchObject([{ repository: REPO, sha: INTEGRATED, status: 'waiting' }])
+  })
+
+  it('merges at once a promotion GitHub finds clean, pinned to its head', async () => {
+    await integratedWork()
+    await unpinnedPromotion()
+    repo().required.delete('develop')
+
+    expect(await adopt()).toEqual({ adopted: [REPO], errors: [] })
+    expect(merges()).toEqual([{ number: 13, sha: INTEGRATED, how: { method: 'merge' } }])
+  })
+
+  it('leaves alone a repository whose promotion already waits', async () => {
+    await integratedWork()
+    await unpinnedPromotion()
+    await adopt()
+    api.calls.length = 0
+
+    expect(await adopt()).toEqual({ adopted: [], errors: [] })
+    expect(pinned()).toEqual([])
+  })
+
+  it('pins nothing for a repository with no integrated work waiting for a release', async () => {
+    await integratedWork('released')
+    await unpinnedPromotion()
+
+    expect(await adopt()).toEqual({ adopted: [], errors: [] })
+    expect(pinned()).toEqual([])
+  })
+
+  it('pins nothing when no promotion is open, and says nothing', async () => {
+    await integratedWork()
+
+    expect(await adopt()).toEqual({ adopted: [], errors: [] })
+    expect(pinned()).toEqual([])
   })
 })
 

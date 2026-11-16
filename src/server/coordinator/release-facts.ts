@@ -2,7 +2,7 @@ import { and, asc, count, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-o
 
 import type { Database } from '../db'
 import { coordinatorAction, publication, releaseWait, repository, task, watch } from '../db/schema'
-import { PRE_RELEASE_BRANCH } from '../factory/branches'
+import { PRE_RELEASE_BRANCH, releaseBranchOf } from '../factory/branches'
 import type { ReleaseMode } from '../factory/deliver'
 import { readOf, unread, type Read } from '../factory/doctor'
 import { WORKING } from '../factory/transitions'
@@ -30,7 +30,7 @@ import {
 export type ReleaseFactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
-  api: Pick<GithubApi, 'branchHead'>
+  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch'>
   readIssue: ReadIssue
   /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
   releaseMode: ReleaseMode
@@ -131,17 +131,21 @@ async function waitRefusal(db: Database, repo: string, head: string) {
   return refused?.detail ?? undefined
 }
 
+/** The head of the pre-release branch and how many commits it holds that the release branch lacks. */
 async function readHead(
   deps: ReleaseFactsDeps,
-  repo: string,
+  repo: { fullName: string; releaseBranch: string | null },
   token: string,
-): Promise<Read<string>> {
-  const tried = `the head of ${PRE_RELEASE_BRANCH} of ${repo}`
+): Promise<{ head: Read<string>; ahead?: number }> {
+  const tried = `the head of ${PRE_RELEASE_BRANCH} of ${repo.fullName}`
   try {
-    const head = await deps.api.branchHead(repo, token, PRE_RELEASE_BRANCH)
-    return head ? readOf(head) : unread(tried, `${repo} has no ${PRE_RELEASE_BRANCH} branch`)
+    const base = await releaseBranchOf(deps.api, repo.fullName, token, repo)
+    const branch = await deps.api.branchAhead(repo.fullName, token, base, PRE_RELEASE_BRANCH)
+    if (!branch)
+      return { head: unread(tried, `${repo.fullName} has no ${PRE_RELEASE_BRANCH} branch`) }
+    return { head: readOf(branch.sha), ahead: branch.aheadBy }
   } catch (error) {
-    return unread(tried, message(error))
+    return { head: unread(tried, message(error)) }
   }
 }
 
@@ -164,6 +168,7 @@ async function readLabels(
 async function lookFurther(
   deps: ReleaseFactsDeps,
   f: RepositoryReleaseFacts,
+  releaseBranch: string | null,
 ): Promise<RepositoryReleaseFacts> {
   let token: string
   try {
@@ -171,11 +176,12 @@ async function lookFurther(
   } catch (error) {
     return { ...f, head: unread(`a token for ${f.repository}`, message(error)) }
   }
-  const head = await readHead(deps, f.repository, token)
+  const { head, ahead } = await readHead(deps, { fullName: f.repository, releaseBranch }, token)
   if (!head.read) return { ...f, head }
   const seen: RepositoryReleaseFacts = {
     ...f,
     head,
+    ahead,
     attempts: await attempts(deps.db, f.repository, head.value),
     waitRefusal: await waitRefusal(deps.db, f.repository, head.value),
   }
@@ -185,7 +191,11 @@ async function lookFurther(
 /** The release facts of every enabled repository whose release mode is not `manual`. */
 export async function readReleaseFacts(deps: ReleaseFactsDeps): Promise<RepositoryReleaseFacts[]> {
   const repos = await deps.db
-    .select({ fullName: repository.fullName, releaseMode: repository.releaseMode })
+    .select({
+      fullName: repository.fullName,
+      releaseMode: repository.releaseMode,
+      releaseBranch: repository.releaseBranch,
+    })
     .from(repository)
     .where(eq(repository.enabled, true))
     .orderBy(asc(repository.id))
@@ -201,7 +211,7 @@ export async function readReleaseFacts(deps: ReleaseFactsDeps): Promise<Reposito
       inFlight: await inFlight(deps.db, repo.fullName),
       branch: await branchState(deps.db, repo.fullName),
     }
-    out.push(trainHolds(f) ? f : await lookFurther(deps, f))
+    out.push(trainHolds(f) ? f : await lookFurther(deps, f, repo.releaseBranch))
   }
   return out
 }

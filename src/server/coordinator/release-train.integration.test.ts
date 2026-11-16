@@ -42,7 +42,7 @@ let api = new FakeGithub()
 const repo = () => api.repo(REPO)
 beforeEach(() => {
   api = new FakeGithub()
-  repo().prepare().tags.add('v1.2.3')
+  repo().prepare().ahead('main', 'develop', 1).tags.add('v1.2.3')
 })
 
 const deps = (releaseMode: ReleaseMode = 'manual'): CoordinatorDeps => ({
@@ -123,6 +123,18 @@ const stageOf = async (id: number) =>
   (await getDb().select({ stage: task.stage }).from(task).where(eq(task.id, id)))[0].stage
 
 describe('the release train in a repository in auto', () => {
+  it('calls nothing while develop holds nothing the release branch lacks, and records nothing', async () => {
+    await enable('auto')
+    await integrated()
+    repo().ahead('main', 'develop', 0)
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 0, refused: 0, failed: 0 })
+    expect(promotions()).toEqual([])
+    expect(await actions()).toEqual([])
+  })
+
   it('releases integrated work once in one pass and records one applied row on the oldest task', async () => {
     await enable('auto')
     const oldest = await integrated()
