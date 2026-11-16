@@ -42,8 +42,7 @@ export async function latestSendBackDecision(
 /**
  * What an intake written before it kept what it cleared gave up, read from the event it went back to: a
  * resolved task says so on its event (or by its `resolve` decision), and a task that waited for checks
- * names them there. When the event says the task waited for checks, the wait may have ended since without
- * an event, so nothing safe is known and the send-back is not withdrawable.
+ * names them there. A task that waited for checks goes back to waiting unless its merge was recorded since.
  */
 async function legacyRestore(
   db: Database,
@@ -52,9 +51,14 @@ async function legacyRestore(
 ): Promise<{ resolvedSha: string | null; awaitingCiSha: string | null } | undefined> {
   const detail = (before.detail ?? {}) as Record<string, unknown>
   if (before.stage === 'done' && detail.awaitingChecks) {
-    // The wait began on the task's head, and `integrate-after-ci` settles a wait that ended meanwhile
-    // (merged or sent back), so giving it back is safe and leaves the cron to reconcile it.
-    const [row] = await db.select({ sha: task.headSha }).from(task).where(eq(task.id, taskId))
+    // The wait may have ended since without an event: the integration cron records the merge on the task.
+    // A merged task is not waiting any more, and giving the wait back would finish it a second time;
+    // one that is still waiting goes back to waiting on its head, which the cron settles.
+    const [row] = await db
+      .select({ sha: task.headSha, merged: task.mergedSha })
+      .from(task)
+      .where(eq(task.id, taskId))
+    if (row?.merged) return { resolvedSha: null, awaitingCiSha: null }
     return row?.sha ? { resolvedSha: null, awaitingCiSha: row.sha } : undefined
   }
   if (before.stage === 'done' && detail.resolved === true) {

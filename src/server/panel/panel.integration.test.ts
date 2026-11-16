@@ -715,6 +715,13 @@ describe('actions', () => {
     await withdrawSendBack(deps(), waiting)
     const [waited] = await getDb().select().from(task).where(eq(task.id, waiting))
     expect(waited).toMatchObject({ stage: 'done', awaitingCiSha: 'abc' })
+
+    // One whose wait finished since (the merge is recorded) does not wait again: that would finish it twice.
+    const finished = await legacy({ awaitingChecks: ['ci'] }, null)
+    await getDb().update(task).set({ mergedSha: 'm1' }).where(eq(task.id, finished))
+    await withdrawSendBack(deps(), finished)
+    const [over] = await getDb().select().from(task).where(eq(task.id, finished))
+    expect(over).toMatchObject({ stage: 'done', awaitingCiSha: null, mergedSha: 'm1' })
   })
 
   it('keeps a change a cron made while the send-back waited for the task lock', async () => {
