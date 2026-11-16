@@ -2,9 +2,10 @@ import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, task } from '../db/schema'
+import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
-import { releaseResolved } from './resolved-release'
+import { closeOpenIssue, releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
 
 /** A release that reached the release branch: what it promoted, under which tags, and who decided. */
@@ -89,7 +90,7 @@ async function belongs(
  * `released` stage and returned; the release is not undone.
  */
 export async function shipContained(
-  deps: { db: Database; api: GithubApi },
+  deps: { db: Database; api: GithubApi; fetchIssue?: typeof fetchIssue },
   s: Shipment,
 ): Promise<Shipped> {
   const candidates = await deps.db
@@ -132,12 +133,28 @@ export async function shipContained(
 }
 
 /**
- * Releases the tasks resolved with no change that the promotion carries. Their issues were closed when
- * they were resolved and no tag names them, so nothing is commented. A task that could not be compared is
+ * Releases the tasks resolved with no change that the promotion carries. An issue the agent closed when it
+ * resolved gets nothing; one still open (a person resolved the task from the panel) is told where the fix is
+ * and closed; a state that cannot be read is not taken as open, and a failure is kept on the `released`
+ * stage and returned. A task that could not be compared is
  * logged and left for the `catch-up` cron; the release stands.
  */
-async function shipResolved(deps: { db: Database; api: GithubApi }, s: Shipment, shipped: Shipped) {
+async function shipResolved(
+  deps: { db: Database; api: GithubApi; fetchIssue?: typeof fetchIssue },
+  s: Shipment,
+  shipped: Shipped,
+) {
+  const read = deps.fetchIssue ?? fetchIssue
   const resolved = await releaseResolved(deps, {
+    afterRelease: (row) =>
+      closeOpenIssue(
+        deps.api,
+        (n) => read(s.repository, n, s.token),
+        s.repository,
+        s.token,
+        row.issueNumber,
+        availableIn(s),
+      ),
     repository: s.repository,
     token: s.token,
     releaseRef: s.promotedSha,
@@ -146,6 +163,7 @@ async function shipResolved(deps: { db: Database; api: GithubApi }, s: Shipment,
     mergeSha: s.promotedSha,
   })
   shipped.resolved = resolved.released
+  shipped.issueErrors.push(...(resolved.issueErrors ?? []))
   if (resolved.errors.length > 0) {
     console.error(
       JSON.stringify({
