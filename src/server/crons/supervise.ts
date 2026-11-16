@@ -25,8 +25,10 @@ export default defineCron('supervise', {
       db: getDb(),
       // A provider that cannot be asked leaves the snapshot check out, and nothing gets resolved by that.
       listSnapshots: provider.listSnapshots?.bind(provider),
+      listSandboxes: provider.listSandboxes?.bind(provider),
+      killSandbox: provider.killSandbox?.bind(provider),
     })
-    if (result.opened.length > 0 || result.resolved.length > 0) {
+    if (result.opened.length > 0 || result.resolved.length > 0 || result.reaped) {
       console.log(JSON.stringify({ event: 'supervise', ...result }))
     }
   }),
