@@ -1,3 +1,8 @@
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { and, desc, eq } from 'drizzle-orm'
 import { getStorageManager } from 'theokit/server/storage'
@@ -41,7 +46,7 @@ import type { NewNote } from '../knowledge/store'
 import { githubEgress } from './credential-renewal'
 import { CHANGESET_CHECK_SCRIPT } from './changeset-check'
 import { CHANGESET_CHECK_PATH } from './changesets'
-import { FakeSandbox, type Reply } from './fake-sandbox'
+import { FakeBackend, FakeSandbox, type Reply } from './fake-sandbox'
 import { eventsOf } from './transcript-store'
 import { parseRecipe } from './recipe'
 import type { CodingHarness } from './harness'
@@ -342,6 +347,95 @@ const stagesOf = async (taskId: number) =>
 
 /** GitHub has the task's branch: an earlier run pushed it and nothing deleted it since. */
 const branchPushed = (issueNumber = 7) => repo().heads.set(`factory/${issueNumber}`, 'f'.repeat(40))
+
+/** A fake backend that also writes the files it is given, as a sandbox does. */
+class WritingBackend extends FakeBackend {
+  /** `dir` stands for the sandbox's /tmp, so no upload lands on the host's own paths. */
+  constructor(
+    script: ConstructorParameters<typeof FakeBackend>[0],
+    private readonly dir: string,
+  ) {
+    super(script)
+  }
+
+  override async uploadFile(path: string, content: string | Buffer) {
+    await super.uploadFile(path, content)
+    await writeFile(path.replace(/^\/tmp\//, `${this.dir}/`), content)
+  }
+}
+
+/** A sandbox whose commands run in a real directory, against a real bare repository standing for GitHub. */
+class RealGit {
+  baseHead = ''
+  readonly sandbox: FakeSandbox
+
+  private constructor(
+    private readonly root: string,
+    readonly work: string,
+    private readonly remote: string,
+  ) {
+    const backend = new WritingBackend((command) => {
+      const ran = spawnSync(
+        'bash',
+        [
+          '-c',
+          command
+            .replaceAll('https://github.com/paulo/app.git', `file://${remote}`)
+            .replaceAll('/tmp/factory', `${root}/factory`),
+        ],
+        { cwd: work, encoding: 'utf8' },
+      )
+      return { stdout: ran.stdout, stderr: ran.stderr, exitCode: ran.status ?? 1 }
+    }, root)
+    this.sandbox = new FakeSandbox()
+    const create = this.sandbox.create.bind(this.sandbox)
+    this.sandbox.create = async (spec) => ({ ...(await create(spec)), backend })
+  }
+
+  static async open(): Promise<RealGit> {
+    const root = await mkdtemp(join(tmpdir(), 'aifactory-git-'))
+    const remote = join(root, 'remote.git')
+    const work = join(root, 'work')
+    const seed = join(root, 'seed')
+    const run = (cwd: string, ...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd,
+        encoding: 'utf8',
+      }).trim()
+    execFileSync('mkdir', ['-p', work, seed])
+    run(root, 'init', '--bare', '-b', 'workspace', remote)
+    run(seed, 'init', '-b', 'workspace')
+    await writeFile(join(seed, 'README.md'), 'hello\n')
+    run(seed, 'add', '-A')
+    run(seed, 'commit', '-m', 'base')
+    run(seed, 'push', remote, 'workspace')
+    const git = new RealGit(root, work, remote)
+    git.baseHead = run(seed, 'rev-parse', 'HEAD')
+    return git
+  }
+
+  private git(...args: string[]): string {
+    return execFileSync('git', ['--git-dir', this.remote, ...args], { encoding: 'utf8' }).trim()
+  }
+
+  remoteHead(branch: string): string {
+    return this.git('rev-parse', `refs/heads/${branch}`)
+  }
+
+  show(sha: string, path: string): string {
+    return execFileSync('git', ['--git-dir', this.remote, 'show', `${sha}:${path}`], {
+      encoding: 'utf8',
+    })
+  }
+
+  parentOf(sha: string): string {
+    return this.git('rev-parse', `${sha}^`)
+  }
+
+  close() {
+    return rm(this.root, { recursive: true, force: true })
+  }
+}
 
 describe('runTask', () => {
   it('pushes factory/<issue> and records the stages in order', async () => {
@@ -665,6 +759,143 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'failed', stage: 'build' })
     expect(result.status === 'failed' && result.error).toContain('Invalid API key')
     expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(false)
+  })
+
+  it('keeps the work of a pass cut at its limit: the failure names the commit that is on factory/<issue>', async () => {
+    const id = await seedTask()
+    const git = await RealGit.open()
+    try {
+      const cut: CodingHarness = {
+        name: 'f',
+        egress: agentEgress,
+        run: async (_backend, input) => {
+          await writeFile(join(input.cwd, 'kept.txt'), 'half done\n')
+          return { ok: false, timedOut: true, summary: 'claude exited 124' }
+        },
+      }
+
+      const result = await runTask(deps(git.sandbox, { harness: cut }), id)
+
+      const remote = git.remoteHead('factory/7')
+      expect(remote).toMatch(/^[0-9a-f]{40}$/)
+      expect(result).toMatchObject({ status: 'failed', stage: 'push' })
+      expect(result.status === 'failed' && result.error).toContain(
+        `the work was kept in commit ${remote} on factory/7`,
+      )
+      expect(git.show(remote, 'kept.txt')).toBe('half done\n')
+      expect(git.parentOf(remote)).toBe(git.baseHead)
+      expect(result.status === 'failed' && result.error).toContain('send the task back')
+    } finally {
+      await git.close()
+    }
+  })
+
+  it('keeps the work of a pass cut at its limit: commits and pushes it, and the failure names the commit', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({ ok: false, timedOut: true, summary: 'claude exited 124' }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'push' })
+    expect(result.status === 'failed' && result.error).toMatch(/kept in commit \S+ on factory\//)
+    expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(true)
+  })
+
+  it('names no commit when the push of a pass cut at its limit fails', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) => (c.includes('push origin') ? { exitCode: 1, stderr: 'rejected' } : undefined)),
+    )
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({ ok: false, timedOut: true, summary: 'claude exited 124' }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result.status).toBe('failed')
+    expect(result.status === 'failed' && result.error).toContain('the work could not be kept')
+    expect(result.status === 'failed' && result.error).not.toContain('kept in commit')
+  })
+
+  it('keeps the work of a pass cut at its limit even when the provider also reported its quota', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({
+        ok: false,
+        timedOut: true,
+        summary: 'codex exited 124',
+        quota: { message: 'usage limit', resetsAt: 'tomorrow' },
+      }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'push' })
+    expect(result.status === 'failed' && result.error).toMatch(/kept in commit \S+ on factory\//)
+    expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(true)
+  })
+
+  it.each([
+    ['the push succeeds', undefined, 'kept in commit'],
+    [
+      'the push fails',
+      (c: string) => (c.includes('push origin') ? { exitCode: 1, stderr: 'rejected' } : undefined),
+      'the work could not be kept',
+    ],
+  ])('keeps the quota reset of a pass cut at its limit when %s', async (_n, script, text) => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed(script))
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({
+        ok: false,
+        timedOut: true,
+        summary: 'codex exited 124',
+        quota: { message: 'usage limit', resetsAt: 'Nov 5th, 2026 11:48 AM' },
+      }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result.status === 'failed' && result.error).toContain(text)
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).toMatchObject({
+      quota: true,
+      resetsAt: 'Nov 5th, 2026 11:48 AM',
+      resumesAt: '2026-11-05T11:48:00.000Z',
+    })
+  })
+
+  it('pushes nothing when a pass cut at its limit left a clean checkout', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox((c) =>
+      c.includes('status --porcelain') ? { stdout: '' } : undefined,
+    )
+    const cut: CodingHarness = {
+      name: 'f',
+      egress: agentEgress,
+      run: async () => ({ ok: false, timedOut: true, summary: 'claude exited 124' }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: cut }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'build' })
+    expect(result.status === 'failed' && result.error).not.toContain('kept in commit')
+    expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(false)
+    expect(sandbox.backend.commands.some((c) => / commit /.test(c))).toBe(false)
   })
 
   it('starts from the integration branch, workspace, and opens against it by default', async () => {
