@@ -58,3 +58,29 @@ describe('reading an issue', () => {
     )
   })
 })
+
+describe('a read that never reached GitHub', () => {
+  const reset = () => new TypeError('fetch failed')
+
+  it('is asked again, so one dropped connection does not end the run', async () => {
+    let calls = 0
+    const fetch = async () => {
+      calls += 1
+      if (calls === 1) throw reset()
+      return answering({ number: 3, title: 'T', body: 'b', labels: [] })()
+    }
+    const issue = await fetchIssue('o/r', 3, 'tok', fetch, async () => {})
+    expect(issue.title).toBe('T')
+    expect(calls).toBe(2)
+  })
+
+  it('gives up after 3 tries and keeps the error', async () => {
+    let calls = 0
+    const fetch = async () => {
+      calls += 1
+      throw reset()
+    }
+    await expect(fetchIssue('o/r', 3, 'tok', fetch, async () => {})).rejects.toThrow('fetch failed')
+    expect(calls).toBe(3)
+  })
+})

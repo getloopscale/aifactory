@@ -143,15 +143,25 @@ export function createGithubApp(
   async function call(path: string, init: RequestInit = {}): Promise<Response> {
     const isRead = (init.method ?? 'GET') === 'GET'
     for (let attempt = 1; ; attempt += 1) {
-      const response = await fetchImpl(`${apiUrl}${path}`, {
-        ...init,
-        headers: {
-          accept: 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          authorization: `Bearer ${appJwt()}`,
-          ...(init.body ? { 'content-type': 'application/json' } : {}),
-        },
-      })
+      let response: Response
+      try {
+        response = await fetchImpl(`${apiUrl}${path}`, {
+          ...init,
+          headers: {
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2022-11-28',
+            authorization: `Bearer ${appJwt()}`,
+            ...(init.body ? { 'content-type': 'application/json' } : {}),
+          },
+        })
+      } catch (error) {
+        // A read that never reached GitHub (`fetch failed`: a reset, a refused connection, a DNS blip) is
+        // asked again with a pause, like a 5xx. Minting a token is safe to repeat; any other call that
+        // changes something never is: it may have landed.
+        if (!(isRead || path.endsWith('/access_tokens')) || attempt >= READ_ATTEMPTS) throw error
+        await wait(READ_RETRY_MS * attempt)
+        continue
+      }
       // A read GitHub answers with a 5xx is asked again with a pause; a call that changes something never is.
       if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
       await wait(READ_RETRY_MS * attempt)

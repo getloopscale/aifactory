@@ -11,20 +11,36 @@ export type Issue = {
   closedAt?: Date
 }
 
+const READ_ATTEMPTS = 3
+const READ_RETRY_MS = 2_000
+
 /** Reads an issue with an installation token. Runs on the factory host, never in the sandbox. */
 export async function fetchIssue(
   repo: string,
   number: number,
   token: string,
   fetchImpl: FetchLike = (url, init) => fetch(url, init),
+  wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): Promise<Issue> {
-  const response = await fetchImpl(`https://api.github.com/repos/${repo}/issues/${number}`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      'x-github-api-version': '2022-11-28',
-      authorization: `Bearer ${token}`,
-    },
-  })
+  const request = () =>
+    fetchImpl(`https://api.github.com/repos/${repo}/issues/${number}`, {
+      headers: {
+        accept: 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+        authorization: `Bearer ${token}`,
+      },
+    })
+  // A read that never reached GitHub (`fetch failed`) is asked again with a pause; the run waits on it.
+  let response: Response
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      response = await request()
+      break
+    } catch (error) {
+      if (attempt >= READ_ATTEMPTS) throw error
+      await wait(READ_RETRY_MS * attempt)
+    }
+  }
   if (!response.ok) {
     throw new Error(`GitHub answered ${response.status} reading ${repo}#${number}`)
   }

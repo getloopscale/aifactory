@@ -373,16 +373,25 @@ export function createGithubApi(
   const call = async (repo: string, token: string, path: string, init: RequestInit = {}) => {
     const isRead = (init.method ?? 'GET') === 'GET'
     for (let attempt = 1; ; attempt += 1) {
-      const response = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
-        ...init,
-        headers: {
-          accept: 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          authorization: `Bearer ${token}`,
-          ...(init.body ? { 'content-type': 'application/json' } : {}),
-          ...(init.headers as Record<string, string> | undefined),
-        },
-      })
+      let response: Response
+      try {
+        response = await fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
+          ...init,
+          headers: {
+            accept: 'application/vnd.github+json',
+            'x-github-api-version': '2022-11-28',
+            authorization: `Bearer ${token}`,
+            ...(init.body ? { 'content-type': 'application/json' } : {}),
+            ...(init.headers as Record<string, string> | undefined),
+          },
+        })
+      } catch (error) {
+        // A read that never reached GitHub (`fetch failed`: a reset, a refused connection, a DNS blip) is
+        // asked again with a pause, like a 5xx. A call that changes something never is: it may have landed.
+        if (!isRead || attempt >= READ_ATTEMPTS) throw error
+        await wait(READ_RETRY_MS * attempt)
+        continue
+      }
       if (!isRead || response.status < 500 || attempt >= READ_ATTEMPTS) return response
       await wait(READ_RETRY_MS * attempt)
     }
