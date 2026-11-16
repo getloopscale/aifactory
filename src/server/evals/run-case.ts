@@ -221,9 +221,9 @@ class CaseRun {
     if (!uncommitted && !(Number(ahead.stdout.trim()) > 0)) {
       // The factory lets fixes make the only commit of a run: the same step here, on the starting commit.
       const head = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+      this.fixCommit = undefined
       const fixed = await this.applyFixes(head)
-      if (fixed === head) throw new Stopped('the agent made no change')
-      this.fixCommit = fixed
+      if (this.fixCommit === undefined) throw new Stopped('the agent made no change')
       return fixed
     }
     if (uncommitted) {
@@ -264,6 +264,7 @@ class CaseRun {
     await must(this.backend, `${this.git} add -A`)
     await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+    this.fixCommit = this.committed
     return this.committed
   }
 
@@ -326,9 +327,10 @@ class CaseRun {
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
   async loop(): Promise<CaseEnd> {
     for (;;) {
+      this.fixCommit = undefined
       const built = await this.commit()
       // When the fixes made the only commit, they have run already.
-      const sha = built === this.fixCommit ? built : await this.applyFixes(built)
+      const sha = this.fixCommit !== undefined ? built : await this.applyFixes(built)
       const failed = await this.check(sha)
       if (failed.length > 0) {
         if (!this.canRework()) {
