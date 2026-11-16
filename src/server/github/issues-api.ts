@@ -1,4 +1,4 @@
-import type { FetchLike } from './app'
+import type { FetchLike, GithubApp } from './app'
 
 export type NewIssue = {
   title: string
@@ -94,5 +94,19 @@ export function createIssuesApi(fetchImpl: FetchLike = (url, init) => fetch(url,
         [200],
       )
     },
+  }
+}
+
+/**
+ * Opens an issue as the App, with a token scoped to the repository the issue goes to. What the factory
+ * files on its own (a metric out of its band, a failure that repeats) goes through here.
+ */
+export function issueOpener(
+  github: Pick<GithubApp, 'installationToken'>,
+  issues: Pick<IssuesApi, 'createIssue'>,
+): (repository: string, issue: NewIssue) => Promise<CreatedIssue> {
+  return async (repository, issue) => {
+    const { token } = await github.installationToken(repository)
+    return issues.createIssue(repository, token, issue)
   }
 }

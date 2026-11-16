@@ -3,7 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
 import { mainProcessOnly } from '../factory/worker-only'
-import { createIssuesApi } from '../github/issues-api'
+import { createIssuesApi, issueOpener } from '../github/issues-api'
 import { baselineFromEnv } from '../metrics/comparison'
 import { measure, measureLog } from '../metrics/measure'
 
@@ -25,15 +25,11 @@ export default defineCron('measure', {
       console.error(JSON.stringify({ event: 'measure_not_configured', error: String(error) }))
       return
     }
-    const github = deps.github
-    const issues = createIssuesApi()
+    const open = issueOpener(deps.github, createIssuesApi())
     const result = await measure({
       db: getDb(),
       baselineFrom,
-      openIssue: async (repository, title, body) => {
-        const { token } = await github.installationToken(repository)
-        return (await issues.createIssue(repository, token, { title, body })).url
-      },
+      openIssue: async (repository, title, body) => (await open(repository, { title, body })).url,
     })
     for (const line of measureLog(result, baselineFrom)) console.log(line)
   }),

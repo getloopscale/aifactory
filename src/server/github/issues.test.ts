@@ -30,6 +30,26 @@ describe('reading an issue', () => {
     expect(issue.state).toBeUndefined()
   })
 
+  it('says when a closed issue closed, and nothing for one that never did', async () => {
+    const issue = { number: 3, title: 'T', body: '' }
+
+    const closed = await fetchIssue(
+      'o/r',
+      3,
+      'tok',
+      answering({ ...issue, state: 'closed', closed_at: '2026-11-08T10:00:00Z' }),
+    )
+    const open = await fetchIssue(
+      'o/r',
+      3,
+      'tok',
+      answering({ ...issue, state: 'open', closed_at: null }),
+    )
+
+    expect(closed.closedAt).toEqual(new Date('2026-11-08T10:00:00Z'))
+    expect(open).not.toHaveProperty('closedAt')
+  })
+
   it('fails with the repository and number when GitHub refuses', async () => {
     const refused = async () => new Response('nope', { status: 404 })
 

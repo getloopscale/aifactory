@@ -7,6 +7,8 @@ export type Issue = {
   labels: string[]
   /** Whether it is still open. A reader that does not say is taken as not knowing, never as closed. */
   state?: 'open' | 'closed'
+  /** When a closed issue closed. */
+  closedAt?: Date
 }
 
 /** Reads an issue with an installation token. Runs on the factory host, never in the sandbox. */
@@ -32,6 +34,7 @@ export async function fetchIssue(
     body: string | null
     labels?: { name: string }[]
     state?: string
+    closed_at?: string | null
   }
   return {
     number: data.number,
@@ -39,5 +42,6 @@ export async function fetchIssue(
     body: data.body ?? '',
     labels: (data.labels ?? []).map((l) => l.name),
     ...(data.state === 'open' || data.state === 'closed' ? { state: data.state } : {}),
+    ...(data.closed_at ? { closedAt: new Date(data.closed_at) } : {}),
   }
 }

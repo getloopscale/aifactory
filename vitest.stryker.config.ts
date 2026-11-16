@@ -17,6 +17,7 @@ export default defineConfig({
       'src/server/coordinator/exceptions.test.ts',
       'src/server/coordinator/decide.test.ts',
       'src/server/coordinator/scope.test.ts',
+      'src/server/coordinator/evolve.test.ts',
       'src/server/factory/changesets.test.ts',
       'src/server/factory/changeset-check.test.ts',
       'src/server/factory/ci-wait.test.ts',

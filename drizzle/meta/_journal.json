@@ -225,6 +225,13 @@
       "when": 1794787420710,
       "tag": "0034_coordinator_action",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794789641685,
+      "tag": "0035_failure_signature",
+      "breakpoints": true
     }
   ]
 }

@@ -2,6 +2,8 @@ import { defineCron } from 'theokit/server/cron'
 
 import { coordinate } from '../coordinator/coordinate'
 import { modelScopeDrafter } from '../coordinator/draft'
+import { evolveLog } from '../coordinator/evolve'
+import { evolve, evolveDeps } from '../coordinator/evolve-apply'
 import { coordinatorModeFromEnv } from '../coordinator/mode'
 import { mainProcessOnly } from '../factory/worker-only'
 import { fetchIssue } from '../github/issues'
@@ -10,8 +12,10 @@ import { actionDeps } from '../panel/deps'
 
 /**
  * The coordinator's pass, every ten minutes: the exceptions of the factory's tasks, one action from a
- * closed set for each, applied through the panel's own actions and recorded (`coordinator/`). In `trial`,
- * the default, it records what it would do and applies nothing; `off` skips the pass.
+ * closed set for each, applied through the panel's own actions and recorded (`coordinator/`). Then Evolve:
+ * a failure that repeats on three tasks in a week becomes an issue for the factory, and its effect is
+ * measured a week after it closes (`coordinator/evolve.ts`). In `trial`, the default, it records what it
+ * would do and applies nothing, and Evolve only logs what it would file; `off` skips the pass.
  */
 export default defineCron('coordinate', {
   schedule: '*/10 * * * *',
@@ -35,5 +39,7 @@ export default defineCron('coordinate', {
     if (Object.values(result).some((n) => n > 0)) {
       console.log(JSON.stringify({ event: 'coordinate', mode, ...result }))
     }
+    const evolution = evolveDeps({ db: deps.db, github: deps.github, api: deps.api }, deps.issues)
+    for (const line of evolveLog(await evolve(evolution, mode), mode)) console.log(line)
   }),
 })

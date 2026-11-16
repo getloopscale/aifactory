@@ -728,3 +728,23 @@ export const coordinatorAction = pgTable(
       .where(sql`${t.outcome} <> 'trial'`),
   ],
 )
+
+/**
+ * A failure that repeated across tasks and the issue the coordinator filed for it on the factory's own
+ * repository (`coordinator/evolve.ts`): one row per signature, so it is filed once. The row is written
+ * before the issue is opened and removed when opening fails, so two passes never file the same signature.
+ * When the issue has been closed for a week, both counts and `measured_at` are recorded.
+ */
+export const failureSignature = pgTable('failure_signature', {
+  id: serial('id').primaryKey(),
+  signature: text('signature').notNull().unique(),
+  /** The repository the issue was filed on. */
+  repository: text('repository').notNull(),
+  /** Empty only while the issue is being opened. */
+  issueNumber: integer('issue_number'),
+  filedAt: timestamp('filed_at', { withTimezone: true }).notNull().defaultNow(),
+  /** The signature's events in the week before `filed_at`, and in the week after the issue closed. */
+  countBefore: integer('count_before'),
+  countAfter: integer('count_after'),
+  measuredAt: timestamp('measured_at', { withTimezone: true }),
+})

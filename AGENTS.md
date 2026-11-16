@@ -184,6 +184,11 @@ reads that file, not a convention.
   calls a merge, and `merges-nothing.test.ts` fails if one does. A new exception is a new kind in
   `EXCEPTION_KINDS` and a new entry in `BY_KIND`; a new action goes through an action of the panel, never
   around it.
+  Evolve (`evolve.ts` pure, `evolve-facts.ts` reads, `evolve-apply.ts` writes) files a failure signature seen on
+  three tasks in a week as a `factory` issue on this repository, once per signature (`failure_signature`), at
+  most one per pass and three per week, never a designed wait (`DESIGNED_WAITS`), nothing in `trial` but a
+  log line, and a week after the issue closes it records both counts and comments when the signature still
+  shows up.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

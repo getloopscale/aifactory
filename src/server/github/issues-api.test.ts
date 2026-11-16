@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { FetchLike } from './app'
-import { createIssuesApi } from './issues-api'
+import { createIssuesApi, issueOpener } from './issues-api'
 
 type Call = { url: string; method: string; auth: string; body: unknown }
 
@@ -105,5 +105,28 @@ describe('rewriting the body of an issue', () => {
     await expect(api.updateIssueBody('o/r', 't', 9, 'b')).rejects.toThrow(
       /GitHub answered 410 updating the body of o\/r#9: .*gone/,
     )
+  })
+})
+
+describe('opening an issue as the App', () => {
+  it('asks for a token of the repository it opens the issue on, and uses it', async () => {
+    const { api, calls } = serve(201, { number: 9, html_url: 'https://github.com/o/r/issues/9' })
+    const asked: string[] = []
+    const github = {
+      installationToken: async (repo: string) => {
+        asked.push(repo)
+        return { token: `tok-${repo}`, expiresAt: new Date() }
+      },
+    }
+
+    const created = await issueOpener(github, api)('o/r', {
+      title: 'T',
+      body: 'B',
+      labels: ['factory'],
+    })
+
+    expect(created).toEqual({ number: 9, url: 'https://github.com/o/r/issues/9' })
+    expect(asked).toEqual(['o/r'])
+    expect(calls[0]).toMatchObject({ auth: 'Bearer tok-o/r', body: { labels: ['factory'] } })
   })
 })
