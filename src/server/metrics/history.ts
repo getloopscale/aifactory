@@ -26,10 +26,17 @@ const TERMINAL: TaskStage[] = ['done', 'failed', 'handoff', 'cancelled']
 const CAME_BACK: TaskStage[] = ['failed', 'handoff']
 const MINUTE = 60_000
 
+/**
+ * What withdrawing a send-back leaves: its intake, marked, and the copy of the stage the task went back to.
+ * The send-back never ran, so neither is a run or an outcome.
+ */
+const isWithdrawal = (e: HistoryEvent) =>
+  e.detail?.withdrawn === true || e.detail?.withdrawnDecisionId !== undefined
+
 /** A task's runs: one starts at each intake (the first at the first event) and lasts until the next. */
 function runsOf(events: HistoryEvent[]): Run[] {
   const runs: Run[] = []
-  for (const event of events) {
+  for (const event of events.filter((e) => !isWithdrawal(e))) {
     if (runs.length === 0 || event.stage === 'intake') {
       runs.push({ start: event.at, end: Infinity, events: [] })
     }

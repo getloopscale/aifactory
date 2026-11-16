@@ -280,6 +280,32 @@ describe('listTasks and the retries the factory makes on its own', () => {
   })
 })
 
+describe('the automatic retries after a send-back was withdrawn', () => {
+  it('does not count the withdrawn send-back as a person starting the task', async () => {
+    const automatic = { stage: 'intake', detail: { decision: 'retry', automatic: true } }
+    const failure = { stage: 'failed', detail: { error: 'git push: remote rejected' } }
+    await seed('failed', {}, [
+      failure,
+      automatic,
+      failure,
+      automatic,
+      failure,
+      automatic,
+      failure,
+      {
+        stage: 'intake',
+        detail: { decision: 'request_changes', note: 'x', decisionId: 1, withdrawn: true },
+      },
+      { stage: 'failed', detail: { ...failure.detail, withdrawnDecisionId: 1 } },
+    ])
+
+    const [card] = await listTasks(getDb())
+
+    // Three automatic retries are the limit, and withdrawing did not give them back.
+    expect(card.retryAt).toBeNull()
+  })
+})
+
 describe('taskDetail', () => {
   it('returns the timeline, the evidence, the reviews, the questions and the decisions', async () => {
     const id = await seed('done', { headSha: 'abc' }, [
