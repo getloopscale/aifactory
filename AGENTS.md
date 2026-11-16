@@ -216,7 +216,9 @@ reads that file, not a convention.
   repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
   `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
   `run-task` job ahead of the repository's other pending jobs, by `available_at` in `theokit_jobs` (TheoKit has no
-  call for it). It is not counted by `MAX_APPLIED`, and sends back or merges nothing.
+  call for it), and holds that repository's other pending jobs back for an hour at most. The failures of the same test on
+  other tasks wait for the fix too (`isHeld`) while it is queued, running or waiting for its checks. It is not
+  counted by `MAX_APPLIED`, and merges nothing.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

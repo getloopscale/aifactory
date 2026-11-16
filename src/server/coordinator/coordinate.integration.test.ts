@@ -17,18 +17,21 @@ import {
   task,
 } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
+import { jobBackend } from '../factory/job-backend'
 import { conflictNote } from '../panel/actions'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
+import { moveAhead } from './queue-apply'
 import type { ScopeDraft } from './scope'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table theokit_jobs, coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -630,5 +633,95 @@ describe('scoping a review that does not converge', () => {
     const [row] = await actions()
     expect(row).toMatchObject({ action: 'scope', outcome: 'refused' })
     expect(row.reason).toContain('this work is already integrated')
+  })
+})
+
+describe('the coordinator on a test that fails the tasks of a repository', () => {
+  const TEST = 'remPhase reports one fact left out of 501'
+  const SAID = `the agent made no change to the repository, and the checks did not pass at 1a2b3c4: sdk-memory failed. The agent said: the test "${TEST}" timed out at 5s`
+
+  const enqueue = (id: number, minutes: number) =>
+    getPool().query(
+      `insert into theokit_jobs (id, name, input, available_at)
+       values ($1, 'run-task', $2, now() - ($3 || ' minutes')::interval)`,
+      [`job-${id}`, JSON.stringify({ taskId: id }), String(minutes)],
+    )
+  const dequeue = async () => (await jobBackend().dequeue({ batchSize: 1 })).map((l) => l.jobId)
+  const prioritised = async () => (await actions()).filter((a) => a.action === 'prioritise')
+
+  /** Two tasks failed on the test; two others and the one that fixes it wait in the queue, the fix last. */
+  async function incident() {
+    const failed = [] as number[]
+    for (let i = 0; i < 2; i++) {
+      failed.push(await seed('failed', {}, [{ stage: 'failed', detail: { error: SAID } }]))
+    }
+    const other = await seed('intake')
+    const another = await seed('intake')
+    const fix = await seed('intake')
+    const [{ issueNumber }] = await getDb().select().from(task).where(eq(task.id, fix))
+    api
+      .repo('paulo/app')
+      .issue(issueNumber, { title: 'Fix the flaky test', body: `\`${TEST}\` is flaky` })
+    await enqueue(other, 30)
+    await enqueue(another, 20)
+    await enqueue(fix, 10)
+    return { failed, other, another, fix }
+  }
+
+  it('moves the fix ahead and holds the others, and sends no failed task back to fail again', async () => {
+    const { fix } = await incident()
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result.applied).toBe(1)
+    expect(await prioritised()).toMatchObject([
+      { taskId: fix, exceptionKind: 'queue_blocked', outcome: 'applied' },
+    ])
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+    // The failed tasks' own exceptions wait for the fix: nothing was decided on them.
+    expect(await actions()).toHaveLength(1)
+    expect(queued).toEqual([])
+  })
+
+  it('records the decision and moves nothing in trial', async () => {
+    const { other } = await incident()
+
+    await coordinate(deps(), 'trial')
+
+    expect(await prioritised()).toMatchObject([
+      { exceptionKind: 'queue_blocked', outcome: 'trial' },
+    ])
+    expect(await dequeue()).toEqual([`job-${other}`])
+  })
+
+  it('records nothing more on a second pass', async () => {
+    const { fix } = await incident()
+
+    await coordinate(deps(), 'auto')
+    await coordinate(deps(), 'auto')
+
+    expect(await prioritised()).toHaveLength(1)
+    expect(await dequeue()).toEqual([`job-${fix}`])
+  })
+
+  it('leaves the queue alone when the fix is already first', async () => {
+    const { fix } = await incident()
+    await getPool().query(
+      "update theokit_jobs set available_at = now() - interval '2 hours' where id = $1",
+      [`job-${fix}`],
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect(await prioritised()).toEqual([])
+  })
+
+  it('moves no job for a task that a run already took', async () => {
+    const { fix } = await incident()
+    await getDb().update(task).set({ stage: 'sandbox' }).where(eq(task.id, fix))
+
+    expect(await moveAhead(getDb(), fix)).toBe(false)
+    expect((await dequeue())[0]).not.toBe(`job-${fix}`)
   })
 })

@@ -84,8 +84,8 @@ async function perform(
     return scope(deps, exception.taskId, decision.draft)
   } else if (decision.action === 'release' && decision.bump) {
     await release(deps, exception.taskId, { bump: decision.bump, actor: COORDINATOR_ACTOR })
-  } else if (decision.action === 'prioritise' && exception.repository) {
-    if (!(await moveAhead(deps.db, exception.taskId, exception.repository))) {
+  } else if (decision.action === 'prioritise') {
+    if (!(await moveAhead(deps.db, exception.taskId))) {
       throw new ActionRefused('its job is no longer waiting in the queue')
     }
   } else {

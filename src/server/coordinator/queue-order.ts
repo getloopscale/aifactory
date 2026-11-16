@@ -14,6 +14,8 @@ export const QUEUE = {
   windowMs: 6 * 3_600_000,
   /** On how many distinct tasks of the repository a test has to fail. */
   minTasks: 2,
+  /** How long the repository's other queued tasks wait behind the fix, at most. */
+  holdMs: 60 * 60_000,
 } as const
 
 /** A task of the repository whose `run-task` job waits in the queue, in the order the queue serves them. */
@@ -28,53 +30,69 @@ export type RepositoryQueueFacts = {
   queue: Read<QueuedTask[]>
 }
 
-/** The line of a failure that names the failing test, as a test runner prints it. */
-const TEST_LINE = /^\s*(?:FAIL|FAILED|✗|×|✕)\s+(.+?)\s*$/m
+/** What an issue quotes as a test: a code span, a quoted text, or a line a runner prints for a failure. */
+const NAMED = /`([^`\n]+)`|"([^"\n]+)"|^\s*(?:FAIL|FAILED|✗|×|✕)\s+(.+?)\s*$/gm
 
-const normal = (text: string) =>
+/** What differs from one task to the next is taken out, as a signature does: case, numbers, spaces. */
+export const normal = (text: string) =>
   text.replace(/\d+/g, '<n>').replace(/\s+/g, ' ').trim().toLowerCase()
 
-/** The test a reason names, with numbers replaced as a signature does, or nothing. */
-export function failingTestOf(reason: string): string | undefined {
-  const line = TEST_LINE.exec(reason)?.[1]
-  return line ? normal(line) : undefined
+/**
+ * The tests an issue names, normalised: the end of a `file > name` path, with spaces (so a word or a check
+ * name alone is not one) and at least 12 characters.
+ */
+export function testsNamedBy(issue: Pick<QueuedTask, 'title' | 'body'>): string[] {
+  const found = [...`${issue.title}\n${issue.body}`.matchAll(NAMED)]
+    .map((m) =>
+      normal(m[1] ?? m[2] ?? m[3] ?? '')
+        .split(' > ')
+        .at(-1)!,
+    )
+    .filter((name) => name.length >= 12 && name.includes(' '))
+  return [...new Set(found)]
 }
 
-/** Whether the issue names the test: its title or body holds the test's name, or the end of it after the file. */
-export function issueNames(test: string, issue: Pick<QueuedTask, 'title' | 'body'>): boolean {
-  const text = normal(`${issue.title}\n${issue.body}`)
-  const name = test.split(' > ').at(-1) ?? test
-  return name.length >= 8 && text.includes(name)
+/** The distinct tasks whose failure in the window says something that holds `test`, apart from `except`. */
+function failedOn(test: string, failures: FailureEvent[], except: number): Set<number> {
+  const tasks = failures
+    .filter((e) => e.taskId !== except && !isDesignedWait(signatureOf(e.reason)))
+    .filter((e) => normal(e.reason).includes(test))
+    .map((e) => e.taskId)
+  return new Set(tasks)
 }
 
-/** The tests that failed on at least `QUEUE.minTasks` distinct tasks, with the tasks. */
-function repeatedTests(failures: FailureEvent[]): Map<string, Set<number>> {
-  const byTest = new Map<string, Set<number>>()
-  for (const e of failures) {
-    if (isDesignedWait(signatureOf(e.reason))) continue
-    const test = failingTestOf(e.reason)
-    if (test) byTest.set(test, (byTest.get(test) ?? new Set()).add(e.taskId))
-  }
-  return new Map([...byTest].filter(([, tasks]) => tasks.size >= QUEUE.minTasks))
-}
+/** A test whose fix was moved ahead, and is still on its way to integration: its repository's other work waits. */
+export type HeldTest = { repository: string; test: string }
 
-/** The repositories with a test that failed on several tasks: the only ones whose queue is worth reading. */
-export const repositoriesWithRepeatedTests = (failures: FailureEvent[]): string[] => {
-  const repositories = [...new Set(failures.map((e) => e.repository))]
-  return repositories.filter(
-    (r) => repeatedTests(failures.filter((e) => e.repository === r)).size > 0,
+/** Whether an exception of a task of `repository` is the failure of a test whose fix is still on its way. */
+export const isHeld = (
+  exception: TaskException,
+  repository: string | undefined,
+  held: HeldTest[],
+) =>
+  exception.kind !== 'queue_blocked' &&
+  held.some((h) => h.repository === repository && normal(exception.evidence).includes(h.test))
+
+/** Whether tasks of the repository failed on enough distinct tasks to make its queue worth reading. */
+export const worthReading = (failures: FailureEvent[]): boolean =>
+  new Set(failures.filter((e) => !isDesignedWait(signatureOf(e.reason))).map((e) => e.taskId))
+    .size >= QUEUE.minTasks
+
+/** The repositories whose queue is worth reading. */
+export const repositoriesWithRepeatedTests = (failures: FailureEvent[]): string[] =>
+  [...new Set(failures.map((e) => e.repository))].filter((r) =>
+    worthReading(failures.filter((e) => e.repository === r)),
   )
-}
 
 /**
- * The exception of a repository whose queue holds the fix of a repeated failing test behind other tasks, or
- * nothing. It sits on the task that fixes the test. A queue that could not be read is an `unknown` exception.
+ * The exception of a repository whose queue holds the fix of a test that failed on several tasks behind other
+ * tasks, or nothing. It sits on the task that fixes the test, and its head is the test. A queue that could not
+ * be read is an `unknown` exception.
  */
 export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | undefined {
-  const repeated = repeatedTests(facts.failures)
-  if (repeated.size === 0) return undefined
-  const last = facts.failures[facts.failures.length - 1]
+  if (!worthReading(facts.failures)) return undefined
   if (!facts.queue.read) {
+    const last = facts.failures[facts.failures.length - 1]
     return {
       kind: 'unknown',
       taskId: last.taskId,
@@ -83,16 +101,17 @@ export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | und
     }
   }
   const queue = facts.queue.value
-  for (const [test, failed] of repeated) {
-    const at = queue.findIndex((q) => !failed.has(q.taskId) && issueNames(test, q))
-    if (at <= 0) continue
-    const fix = queue[at]
-    return {
-      kind: 'queue_blocked',
-      taskId: fix.taskId,
-      head: test,
-      repository: facts.repository,
-      evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and #${fix.issueNumber}, which carries it, waits behind ${at} queued ${at === 1 ? 'task' : 'tasks'}`,
+  for (const [at, fix] of queue.entries()) {
+    if (at === 0) continue
+    for (const test of testsNamedBy(fix)) {
+      const failed = failedOn(test, facts.failures, fix.taskId)
+      if (failed.size < QUEUE.minTasks) continue
+      return {
+        kind: 'queue_blocked',
+        taskId: fix.taskId,
+        head: test,
+        evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and #${fix.issueNumber}, which carries it, waits behind ${at} queued ${at === 1 ? 'task' : 'tasks'}`,
+      }
     }
   }
   return undefined
