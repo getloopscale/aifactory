@@ -91,6 +91,8 @@ class CaseRun {
   private readonly blockingCounts: number[] = []
   /** The last commit this case made or found, from which the next round counts what the builder committed. */
   private committed: string | undefined
+  /** The last commit the fixes ran on or made, so they never run twice on the same commit, as in `Run`. */
+  private fixedHead: string | undefined
   private sessionId: string | undefined
   /** What the builder meant to change, written before it changed anything. */
   private plan: ChangePlan | undefined
@@ -219,6 +221,9 @@ class CaseRun {
     const since = this.committed ?? this.c.baseSha
     const ahead = await must(this.backend, `git -C ${this.repoDir} rev-list --count ${since}..HEAD`)
     if (!uncommitted && !(Number(ahead.stdout.trim()) > 0)) {
+      // As `Run.resolvedAlready`: on the first pass, fixes that change the starting commit make the change.
+      const fixed = this.committed === undefined ? await this.applyFixes(this.c.baseSha) : undefined
+      if (fixed && fixed !== this.c.baseSha) return fixed
       throw new Stopped('the agent made no change')
     }
     if (uncommitted) await this.commitAll(`evaluation of ${this.c.id}, attempt ${this.attempts}`)
@@ -237,16 +242,18 @@ class CaseRun {
   /** The repository's fix commands, then their change as its own commit in the sandbox, as `Run.applyFixes`. */
   private async applyFixes(sha: string): Promise<string> {
     const fixes = this.c.fixes ?? []
-    if (fixes.length === 0) return sha
+    if (fixes.length === 0 || sha === this.fixedHead) return sha
     const { changed } = await runFixes(
       this.backend,
       this.repoDir,
       fixes,
       this.limits.checkMs ?? DEFAULT_CHECK_MS,
     )
+    this.fixedHead = sha
     if (!changed) return sha
     await this.commitAll(FIX_COMMIT_MESSAGE)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+    this.fixedHead = this.committed
     return this.committed
   }
 

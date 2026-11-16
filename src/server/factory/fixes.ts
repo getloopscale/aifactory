@@ -88,12 +88,21 @@ async function runOne(
   }
 }
 
+const notRun = (command: string, why: string): FixOutcome => ({
+  command,
+  exitCode: -1,
+  timedOut: false,
+  output: `not run: ${why}`,
+})
+
 /**
  * Runs the repository's fix commands (a formatter, a lint autofix) in the checkout, which must be clean at
- * HEAD, one after the other. A fix decides nothing: one that fails or runs past its limit is recorded and
- * the checkout goes back to what it was just before that command, files, index and all, and the checks
- * that follow still decide. When it cannot go back, every fix is thrown away and the checkout is HEAD
- * again; when even that fails, it throws, since checks on an unknown checkout would prove nothing.
+ * HEAD, one after the other. A fix decides nothing: one that fails or runs past its limit is recorded, the
+ * checkout goes back to what it was just before that command, files, index and all, and no fix runs after
+ * it, since what it left in ignored files (the dependencies, a cache) is not put back and could change what
+ * a later fix writes. The checks that follow still decide, on a checkout they clean of ignored files first.
+ * When it cannot go back, every fix is thrown away and the checkout is HEAD again; when even that fails, it
+ * throws, since checks on an unknown checkout would prove nothing.
  */
 export async function runFixes(
   backend: SandboxBackend,
@@ -102,22 +111,20 @@ export async function runFixes(
   timeoutMs: number,
 ): Promise<FixRound> {
   const outcomes: FixOutcome[] = []
-  for (const command of fixes) {
+  for (const [at, command] of fixes.entries()) {
     // Without a way back, a command that fails would leave its mess for the commit: it does not run.
     const tree = await snapshot(backend, repoDir, timeoutMs)
     if (tree === '') {
-      outcomes.push({
-        command,
-        exitCode: -1,
-        timedOut: false,
-        output: 'not run: the work could not be saved first',
-      })
+      outcomes.push(notRun(command, 'the work could not be saved first'))
       continue
     }
     const outcome = await runOne(backend, repoDir, command, timeoutMs)
     outcomes.push(outcome)
     if (outcome.exitCode === 0 && !outcome.timedOut) continue
-    if (await restore(backend, repoDir, tree, timeoutMs)) continue
+    if (await restore(backend, repoDir, tree, timeoutMs)) {
+      outcomes.push(...fixes.slice(at + 1).map((c) => notRun(c, 'an earlier fix failed')))
+      break
+    }
     outcome.restoreFailed = true
     await must(backend, `git -C ${repoDir} reset -q --hard HEAD`)
     await must(backend, `git -C ${repoDir} clean -fdq`)

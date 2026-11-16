@@ -164,5 +164,28 @@ describe('runFixes', () => {
       await runFixes(new LocalBackend(), dir, ['rm b.txt && exit 1'], 5000)
       expect(read('b.txt')).toBe('b0\n')
     })
+
+    it('runs no fix after one that failed, so what it left in ignored files reaches no other fix', async () => {
+      writeFileSync(join(dir, '.gitignore'), 'node_modules/\n')
+      await git('add', '.gitignore')
+      await git('commit', '-qm', 'ignore the dependencies')
+      mkdirSync(join(dir, 'node_modules'))
+      writeFileSync(join(dir, 'node_modules/dep.js'), 'v1\n')
+
+      const { outcomes, changed } = await runFixes(
+        new LocalBackend(),
+        dir,
+        ['echo v2 > node_modules/dep.js && exit 1', 'cp node_modules/dep.js a.txt'],
+        5000,
+      )
+
+      expect(outcomes.map((o) => [o.command.slice(0, 7), o.exitCode])).toEqual([
+        ['echo v2', 1],
+        ['cp node', -1],
+      ])
+      expect(outcomes[1]?.output).toBe('not run: an earlier fix failed')
+      expect(read('a.txt')).toBe('a0\n')
+      expect(changed).toBe(false)
+    })
   })
 })
