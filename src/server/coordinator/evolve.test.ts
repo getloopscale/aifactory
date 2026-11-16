@@ -35,13 +35,6 @@ const event = (reason: string, over: Partial<FailureEvent> = {}): FailureEvent =
 }
 
 describe('signatureOf', () => {
-  it('keeps the signature of a fetch failure whatever cause follows', () => {
-    expect(signatureOf('fetch failed')).toBe('fetch failed')
-    expect(signatureOf('fetch failed: ECONNREFUSED connect ECONNREFUSED 1.2.3.4:443')).toBe(
-      'fetch failed',
-    )
-  })
-
   it('replaces numbers and commit ids, so two reasons that differ only there share it', () => {
     const a = signatureOf('push of 3fa9c01 rejected after 3 attempts')
     const b = signatureOf('push of 0be27d4e9a1 rejected after 12 attempts')

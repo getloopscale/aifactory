@@ -293,37 +293,6 @@ describe('measuring the effect of a closed issue', () => {
     expect(github.comments[0].body).toContain('5 in the 7 days after')
   })
 
-  it('counts a fetch failure with a cause as the same signature before and after', async () => {
-    await getDb()
-      .insert(failureSignature)
-      .values({ signature: 'fetch failed', repository: EVOLVE.repository, issueNumber: 9, filedAt })
-    for (let i = 0; i < 3; i++) {
-      await failure({ error: 'fetch failed' }, new Date(filedAt.getTime() - ((i + 1) * DAY) / 2))
-    }
-    await failure(
-      { error: 'fetch failed: ECONNREFUSED connect ECONNREFUSED 1.2.3.4:443' },
-      new Date(closedAt.getTime() + DAY),
-    )
-    github.states.set(9, { state: 'closed', closedAt })
-
-    await evolve(github.deps(), 'auto')
-
-    expect(await rows()).toMatchObject([{ countBefore: 3, countAfter: 1 }])
-    expect(github.comments).toHaveLength(1)
-  })
-
-  it('files a fetch failure once, whatever causes follow its words', async () => {
-    await failure({ error: 'fetch failed' }, ago(1))
-    await failure({ error: 'fetch failed: ECONNREFUSED connect refused' }, later(ago(1), 2))
-    await failure({ error: 'fetch failed: ENOTFOUND getaddrinfo failed' }, later(ago(1), 4))
-
-    await evolve(github.deps(), 'auto')
-    await evolve(github.deps(), 'auto')
-
-    expect(github.opened).toHaveLength(1)
-    expect(await rows()).toMatchObject([{ signature: 'fetch failed' }])
-  })
-
   it('measures a row once', async () => {
     await filed(6, 5)
     await evolve(github.deps(), 'auto')

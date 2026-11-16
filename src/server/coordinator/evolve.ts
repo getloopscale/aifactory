@@ -70,10 +70,7 @@ const hyphens = (text: string) => text.replace(LONG_DASH, '-')
  * text, with URLs, paths, commit ids and numbers replaced by placeholders, spaces collapsed, cut to a length.
  */
 export function signatureOf(reason: string): string {
-  const first = reason.split('\n').find((l) => l.trim() !== '') ?? ''
-  // The cause a failed `fetch` carries after its words (`describeError`) is detail, not another failure:
-  // the signature stays the one earlier events had, so counts before and after a change of wording agree.
-  const line = first.replace(/^(fetch failed)\b.*$/i, '$1')
+  const line = reason.split('\n').find((l) => l.trim() !== '') ?? ''
   return hyphens(
     line
       .replace(URL, '<url>')
