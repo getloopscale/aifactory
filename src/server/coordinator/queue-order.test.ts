@@ -74,10 +74,19 @@ describe('a test that failed on several tasks of a repository', () => {
     const waiting = (id: number) => failure(id, { reason: `blocked by #4: ${TEST}` })
     expect(recogniseQueue(facts({ failures: [waiting(1), waiting(2)] }))).toBeUndefined()
   })
-  it('is nothing when the fix is already first, or no queued task carries the test', () => {
-    expect(
-      recogniseQueue(facts({ queue: readOf([queued(7, fixBody), queued(5)]) })),
-    ).toBeUndefined()
+  it('holds the others even when the fix is already first', () => {
+    expect(recogniseQueue(facts({ queue: readOf([queued(7, fixBody), queued(5)]) }))).toMatchObject(
+      { kind: 'queue_blocked', taskId: 7 },
+    )
+  })
+  it('recognises a fix that writes the test name in plain text', () => {
+    const plain = queued(7, `${TEST} is flaky under load.`)
+    expect(recogniseQueue(facts({ queue: readOf([queued(5), plain]) }))).toMatchObject({
+      taskId: 7,
+    })
+  })
+  it('is nothing when the fix is alone, or no queued task carries the test', () => {
+    expect(recogniseQueue(facts({ queue: readOf([queued(7, fixBody)]) }))).toBeUndefined()
     expect(recogniseQueue(facts({ queue: readOf([queued(5), queued(6)]) }))).toBeUndefined()
   })
   it('never counts the task that carries the test as one that failed on it', () => {
@@ -106,6 +115,9 @@ describe('work held behind a fix', () => {
   })
   it('is a failure of the same test in the same repository', () => {
     expect(isHeld(exception(), 'o/sdk', held)).toBe(true)
+  })
+  it('is also read from the recorded failure reason of the task', () => {
+    expect(isHeld(exception({ evidence: 'no change' }), 'o/sdk', held, [said()])).toBe(true)
   })
   it('is not another repository, another failure, or the decision itself', () => {
     expect(isHeld(exception(), 'o/other', held)).toBe(false)

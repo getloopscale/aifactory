@@ -8,7 +8,9 @@ import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions } from './exception-facts'
 import { readHeldTests, readQueueFacts } from './queue-facts'
-import { isHeld, recogniseQueue } from './queue-order'
+import { QUEUE, isHeld, recogniseQueue } from './queue-order'
+import { releaseHolds } from './queue-apply'
+import { readFailureEvents } from './evolve-facts'
 import { recognise, type TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
 import { readReleaseFacts, type ReleaseFactsDeps } from './release-facts'
@@ -60,10 +62,17 @@ export async function coordinate(
   const exceptions = await exceptionsOf(deps)
   const repositories = await repositoriesOf(deps.db, exceptions)
   const held = await readHeldTests(deps.db)
+  await releaseHolds(deps.db, [...new Set(held.map((h) => h.repository))])
+  const now = new Date()
+  const reasons = new Map<number, string[]>()
+  for (const e of await readFailureEvents(deps.db, new Date(now.getTime() - QUEUE.windowMs), now)) {
+    reasons.set(e.taskId, [...(reasons.get(e.taskId) ?? []), e.reason])
+  }
   const recorded = await readRecordedActions(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   for (const exception of exceptions) {
     // The fix of this failure is on its way: the task waits for it, not sent back to fail the same way.
-    if (isHeld(exception, repositories.get(exception.taskId), held)) continue
+    const repository = repositories.get(exception.taskId)
+    if (isHeld(exception, repository, held, reasons.get(exception.taskId))) continue
     const forTask = recorded.get(exception.taskId)!
     const applying = exception.trialOnly ? 'trial' : mode
     if (seen(exception, forTask, applying)) continue

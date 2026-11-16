@@ -69,9 +69,14 @@ export const isHeld = (
   exception: TaskException,
   repository: string | undefined,
   held: HeldTest[],
+  reasons: string[] = [],
 ) =>
   exception.kind !== 'queue_blocked' &&
-  held.some((h) => h.repository === repository && normal(exception.evidence).includes(h.test))
+  held.some(
+    (h) =>
+      h.repository === repository &&
+      [exception.evidence, ...reasons].some((text) => normal(text).includes(h.test)),
+  )
 
 /** Whether tasks of the repository failed on enough distinct tasks to make its queue worth reading. */
 export const worthReading = (failures: FailureEvent[]): boolean =>
@@ -101,16 +106,26 @@ export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | und
     }
   }
   const queue = facts.queue.value
+  if (queue.length < 2) return undefined
+  // A test is named by what the failures say; the issue of the fix may write it in plain text.
+  const tests = [
+    ...new Set(facts.failures.flatMap((e) => testsNamedBy({ title: '', body: e.reason }))),
+  ]
   for (const [at, fix] of queue.entries()) {
-    if (at === 0) continue
-    for (const test of testsNamedBy(fix)) {
+    const written = normal(`${fix.title}\n${fix.body}`)
+    for (const test of tests) {
+      if (!written.includes(test)) continue
       const failed = failedOn(test, facts.failures, fix.taskId)
       if (failed.size < QUEUE.minTasks) continue
+      const where =
+        at === 0
+          ? 'is first, and the other queued tasks must wait for it'
+          : `waits behind ${at} queued ${at === 1 ? 'task' : 'tasks'}`
       return {
         kind: 'queue_blocked',
         taskId: fix.taskId,
         head: test,
-        evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and #${fix.issueNumber}, which carries it, waits behind ${at} queued ${at === 1 ? 'task' : 'tasks'}`,
+        evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and #${fix.issueNumber}, which carries it, ${where}`,
       }
     }
   }

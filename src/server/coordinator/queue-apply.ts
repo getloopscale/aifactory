@@ -21,18 +21,45 @@ export async function moveAhead(db: Database, taskId: number): Promise<boolean> 
           where j.name = 'run-task' and j.failed_at is null
             and (j.locked_until is null or j.locked_until < now()) and t.stage = 'intake'
             and t.repository = (select repository from task where id = ${taskId})
+          for update of j skip locked
         ), fix as (
           update theokit_jobs set available_at = least(available_at,
             coalesce((select min(available_at) from pending where task_id <> ${taskId}), available_at)
               - interval '1 second')
           where id in (select id from pending where task_id = ${taskId}) returning id
         ), held as (
-          update theokit_jobs set available_at = greatest(available_at,
-            now() + make_interval(secs => ${QUEUE.holdMs / 1000}))
+          update theokit_jobs set
+            input = input || jsonb_build_object('heldFrom', coalesce(input->>'heldFrom', available_at::text)),
+            available_at = now() + make_interval(secs => ${QUEUE.holdMs / 1000})
           where id in (select id from pending where task_id <> ${taskId})
+            and available_at < now() + make_interval(secs => ${QUEUE.holdMs / 1000})
             and exists (select 1 from fix) returning id
         )
         select (select count(*) from fix)::int as moved`,
   )
   return (moved.rows[0]?.moved ?? 0) > 0
+}
+
+/**
+ * Gives the held jobs back the `available_at` they had (kept in their input as `heldFrom`, which the job's
+ * schema ignores) once no fix of their repository is still on its way: it integrated, failed or its hold ran
+ * out. `held` lists the repositories whose fix still is. A job a worker holds is left alone.
+ */
+export async function releaseHolds(db: Database, held: string[]): Promise<number> {
+  const keep = held.length
+    ? sql`and (select repository from task where id = (input->>'taskId')::int) not in (${sql.join(
+        held.map((r) => sql`${r}`),
+        sql`, `,
+      )})`
+    : sql``
+  const released = await db.execute(
+    sql`update theokit_jobs set available_at = (input->>'heldFrom')::timestamptz, input = input - 'heldFrom'
+        where id in (
+          select id from theokit_jobs
+          where name = 'run-task' and failed_at is null and input->>'heldFrom' is not null
+            and (locked_until is null or locked_until < now()) ${keep}
+          for update skip locked
+        )`,
+  )
+  return released.rowCount ?? 0
 }
