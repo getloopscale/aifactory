@@ -46,6 +46,7 @@
     "src/server/factory/changesets.ts",
     "src/server/factory/changeset-check.ts",
     "src/server/factory/ci-wait.ts",
+    "src/server/factory/promotion-hold.ts",
     "src/server/factory/check-evidence.ts",
     "src/server/factory/release-wait.ts",
     "src/server/factory/agent-time.ts",

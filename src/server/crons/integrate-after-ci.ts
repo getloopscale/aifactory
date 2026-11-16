@@ -3,6 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { pollAwaitingIntegrations } from '../factory/await-ci'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { releaseModeFromEnv } from '../factory/deps'
+import { pollPromotionWaits } from '../factory/promotion-merge'
 import { mainProcessOnly } from '../factory/worker-only'
 import { createPromotionApi } from '../github/promotion-api'
 import { retryAutomatically, sendBackAutomatically } from '../panel/actions'
@@ -15,6 +16,8 @@ import { actionDeps } from '../panel/deps'
  * what the factory may not decide goes to a person.
  * Releases that wait for the release branch's required checks are finished the same way: once GitHub merged
  * the release pull request, the release is made; a failed check refuses it, with the reason, for a person.
+ * Promotions into the pre-release branch are looked at first: one GitHub merged ends its hold, so the
+ * integrations it held out go in on the same pass, and one whose head moved is pinned to the new head.
  */
 export default defineCron('integrate-after-ci', {
   schedule: '*/2 * * * *',
@@ -30,6 +33,17 @@ export default defineCron('integrate-after-ci', {
       return
     }
     const actions = deps
+    const promotions = await pollPromotionWaits({ db: deps.db, github: deps.github, api: deps.api })
+    const { waiting: promotionsWaiting, ...promotionsMoved } = promotions
+    if (Object.values(promotionsMoved).some((list) => list.length > 0)) {
+      console.log(
+        JSON.stringify({
+          event: 'promotion_after_ci',
+          waiting: promotionsWaiting,
+          ...promotionsMoved,
+        }),
+      )
+    }
     const result = await pollAwaitingIntegrations({
       db: deps.db,
       github: deps.github,

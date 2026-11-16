@@ -36,6 +36,7 @@ import {
   type Handed,
   type Integrated,
 } from './integration'
+import { integrationHeldUntil } from './promotion-merge'
 import {
   DEFAULT_CHECKS,
   failingChecks,
@@ -78,6 +79,7 @@ import {
   mergeEgress,
   must,
   oneLine,
+  squashTitle,
   pullRequestBody,
   pushWithRetry,
   resolvedComment,
@@ -350,7 +352,7 @@ export class Run {
     })
   }
   private get title() {
-    return `${oneLine(this.c.issue.title)} (#${this.c.row.issueNumber})`
+    return squashTitle(this.c.issue.title, this.c.row.issueNumber)
   }
   private get checks() {
     return withChangesetCheck(
@@ -1335,6 +1337,8 @@ export class Run {
     const restored = titleToRestore(opened, this.title)
     if (restored !== undefined) await markReady(restored)
     const integration = integrationBranch(this.c.repo)
+    const heldUntil = await integrationHeldUntil(deps.db, row.repository, new Date())
+    if (heldUntil) return { heldUntil }
     const required = await api.requiredChecks(row.repository, this.c.token, integration)
     const pull = { repo: row.repository, token: this.c.token, number: pullNumber, sha }
     if (
@@ -1362,12 +1366,15 @@ export class Run {
         throw error
       }
     })
-    const advanced = await advancePreRelease(api, {
-      repository: row.repository,
-      token: this.c.token,
-      integration,
-      mergedSha: merged.sha,
-    })
+    const advanced = await advancePreRelease(
+      { api, db: deps.db },
+      {
+        repository: row.repository,
+        token: this.c.token,
+        integration,
+        mergedSha: merged.sha,
+      },
+    )
     return { mergedSha: merged.sha, ...advanced }
   }
 
@@ -1444,7 +1451,9 @@ export class Run {
       }),
     })
     const integrated = await this.integrate(sha, pull)
-    if (integrated.awaitingChecks) return this.awaitChecks(sha, attempt, pull.url, integrated)
+    if (integrated.awaitingChecks || integrated.heldUntil) {
+      return this.awaitChecks(sha, attempt, pull.url, integrated)
+    }
     const handed = await this.deliver(sha, pull.url, attempt, integrated)
     await enterStage(
       deps.db,
@@ -1500,7 +1509,11 @@ export class Run {
         agentSummary: this.summary,
         ...describeIntegration(integrated),
       },
-      { pullRequestUrl, awaitingCiSha: sha },
+      {
+        pullRequestUrl,
+        awaitingCiSha: sha,
+        integrationHeld: integrated.heldUntil !== undefined,
+      },
     )
     return { status: 'done', branch, sha, pullRequestUrl, summary: this.summary }
   }

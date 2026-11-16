@@ -232,6 +232,13 @@
       "when": 1794789641685,
       "tag": "0035_failure_signature",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1794794240870,
+      "tag": "0036_promotion_wait",
+      "breakpoints": true
     }
   ]
 }

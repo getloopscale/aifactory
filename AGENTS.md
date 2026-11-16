@@ -132,7 +132,16 @@ reads that file, not a convention.
   exception: after a changesets release, `publish-changesets` merges the repository's back-merge, the open pull
   request from the release branch into the integration branch of the same repository (never a fork), with a
   merge commit pinned to its head once its checks are green (`pickBackMerge` in `factory/changesets.ts`). `develop` is
-  the pre-release: it advances to each integration, which gets a pre-release tag. The default branch
+  the pre-release: it advances to each integration, which gets a pre-release tag. When `develop` takes changes
+  only through a pull request, the factory opens its promotion from the integration branch and turns on
+  auto-merge pinned to the head it saw (`pinPromotion` in `factory/promotion-merge.ts`), only on a pull request
+  from the integration branch of the same repository into `develop` (`isFactoryPromotion`: never a fork, never
+  another head); a clean one is merged at once with a merge commit pinned to the same head. While it waits in
+  `promotion_wait`, new integrations are held out of the integration branch until `hold_until`
+  (`PROMOTION_HOLD_MS`), so its checks can finish: the task waits in `done` with `awaiting_ci_sha` and
+  `integration_held`, and the `integrate-after-ci` cron integrates it on the first pass after the hold expires
+  or after GitHub merged the promotion. A head that moved before the pin is not merged; the next pass pins the new
+  head. Nothing else merges a pull request into `develop`. The default branch
   (`main`) is the release. The factory never merges into it on its own account: a release is a promotion of
   `develop`, goes through `release()` in `factory/deliver.ts` with its refusals, and only a person, an agent's
   verdict in `FACTORY_RELEASE_MODE=auto`, or the coordinator's release train in a repository whose release mode

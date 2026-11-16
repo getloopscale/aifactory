@@ -58,6 +58,8 @@ export const AUTO_MERGE_REFUSALS = {
   clean: 'Pull request Pull request is in clean status',
   unstable: 'Pull request Pull request is in unstable status',
   draft: 'Pull request Pull request is a draft',
+  /** What the fake answers when the head is no longer the one auto-merge was asked to be pinned to. */
+  headMoved: 'Pull request head is not the expected head',
 } as const
 
 export type FakeIssue = {
@@ -856,6 +858,8 @@ export class FakeGithub implements GithubApi {
         const refuse = (why: string) => new AutoMergeRefused(repo, number, why)
         if (pull.draft) throw refuse(AUTO_MERGE_REFUSALS.draft)
         if (!r.allowAutoMerge) throw refuse(AUTO_MERGE_REFUSALS.notAllowed)
+        const head = r.headOf(pull)
+        if (head && head !== sha) throw refuse(AUTO_MERGE_REFUSALS.headMoved)
         const state = r.mergeableState(pull)
         if (state === 'clean') throw refuse(AUTO_MERGE_REFUSALS.clean)
         if (state === 'unstable') throw refuse(AUTO_MERGE_REFUSALS.unstable)

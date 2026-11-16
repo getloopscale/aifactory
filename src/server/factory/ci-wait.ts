@@ -46,6 +46,11 @@ export type WaitingStep =
   /** The pull request conflicts with its base: the task runs again to merge the new base into its branch. */
   | { kind: 'start_over'; reason: string }
   | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
+  /**
+   * A promotion into the pre-release branch held the integration out and the hold expired: the verified
+   * commit is integrated now, as the run would have done.
+   */
+  | { kind: 'integrate' }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -59,6 +64,11 @@ export type WaitingIntegration = {
   waitedMs: number
   /** Automatic runs since a person last started the task. */
   automaticRuns: number
+  /**
+   * Whether a promotion into the pre-release branch held the integration out (`task.integration_held`):
+   * `holding` while the hold runs, `released` once it expired. Undefined for an integration never held.
+   */
+  held?: 'holding' | 'released'
 }
 
 const short = (sha: string) => sha.slice(0, 7)
@@ -119,7 +129,8 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
  * The next step for a pull request that waits for the repository's required checks. The factory only ever
  * lets GitHub merge the commit it verified; anything else (a new push, a closed pull request, auto-merge
  * turned off by somebody) goes to a person. A failed check and a conflict run again on their own, as many
- * times as an environment failure, then go to a person too.
+ * times as an environment failure, then go to a person too. A pull request a promotion held out has no
+ * auto-merge yet: it waits while the hold runs and is integrated once it ends.
  */
 export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep {
   const done = settled(input)
@@ -134,6 +145,9 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
           reason: `the pull request conflicts with its base after ${runs}`,
           stopAutoMerge: true,
         }
+  }
+  if (input.held && !input.pull.autoMerge) {
+    return input.held === 'holding' ? { kind: 'wait' } : { kind: 'integrate' }
   }
   if (!input.pull.autoMerge) {
     return {

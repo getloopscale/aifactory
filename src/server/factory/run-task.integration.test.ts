@@ -12,6 +12,7 @@ import {
   delivery,
   evidence,
   ingress,
+  promotionWait,
   publication,
   question,
   releaseWait,
@@ -62,7 +63,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -3023,6 +3024,7 @@ describe('the factory always makes a pre-release', () => {
 
   it('keeps the work integrated and says why when develop cannot be advanced', async () => {
     repo().restricted.add('develop')
+    repo().required.set('develop', ['CI'])
     const id = await seedTask()
 
     const result = await runTask(deps(new FakeSandbox(changed())), id)
@@ -3037,7 +3039,8 @@ describe('the factory always makes a pre-release', () => {
       developError: expect.stringContaining('protected'),
       developPullRequest: RELEASE_PR_URL,
     })
-    // A protected branch takes a pull request, which the factory opens and never merges.
+    // A protected branch takes a pull request, which the factory opens and GitHub merges once develop's
+    // checks pass: the factory merges nothing into develop itself while they run.
     expect(seen.pulls).toEqual(['factory/7', 'workspace'])
     expect(seen.bases).toEqual(['workspace', 'develop'])
     expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
@@ -3056,6 +3059,110 @@ describe('the factory always makes a pre-release', () => {
     const done = (await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'done')))[0]
     expect(done.detail).toMatchObject({ mergedSha: 'merge0001' })
     expect((done.detail as Record<string, unknown>).developPullRequest).toBeUndefined()
+  })
+
+  describe('when develop takes changes only through a pull request', () => {
+    beforeEach(() => {
+      repo().restricted.add('develop')
+      repo().required.set('develop', ['CI'])
+    })
+    const waits = () => getDb().select().from(promotionWait)
+
+    it('turns auto-merge on for the promotion, pinned to the integration head it saw', async () => {
+      const id = await seedTask()
+
+      await runTask(deps(new FakeSandbox(changed())), id)
+
+      // The integration made `merge0001` the head of workspace; the promotion is #13.
+      expect(seen.autoMerges).toEqual([{ number: 13, sha: 'merge0001' }])
+      const [wait] = await waits()
+      expect(wait).toMatchObject({
+        repository: 'paulo/app',
+        pullRequestNumber: 13,
+        sha: 'merge0001',
+        status: 'waiting',
+      })
+      expect(wait.holdUntil.getTime()).toBeGreaterThan(Date.now())
+      const done = (await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'done')))[0]
+      expect(done.detail).toMatchObject({ developAutoMerge: 'merge0001' })
+    })
+
+    it('never turns auto-merge on for a promotion from a fork', async () => {
+      repo().pullRequest({
+        number: 5,
+        headRef: 'workspace',
+        headRepo: 'someone/app',
+        baseRef: 'develop',
+      })
+      const id = await seedTask()
+
+      await runTask(deps(new FakeSandbox(changed())), id)
+
+      expect(seen.autoMerges.map((pinned) => pinned.number)).not.toContain(5)
+    })
+
+    it('turns auto-merge on for nothing when only a fork proposes the promotion', async () => {
+      repo().pullRequest({
+        number: 5,
+        headRef: 'workspace',
+        headRepo: 'someone/app',
+        baseRef: 'develop',
+      })
+      githubApi.fail('openPullRequest', new Error('GitHub answered 422 opening a pull request'), {
+        when: (pull) => pull.head === 'workspace',
+      })
+      const id = await seedTask()
+
+      await runTask(deps(new FakeSandbox(changed())), id)
+
+      expect(seen.autoMergeAsks).toBe(0)
+      expect(await waits()).toEqual([])
+    })
+
+    it('holds the integration out while a promotion waits, and merges nothing into workspace', async () => {
+      await getDb()
+        .insert(promotionWait)
+        .values({
+          repository: 'paulo/app',
+          pullRequestNumber: 11,
+          pullRequestUrl: 'https://github.com/paulo/app/pull/11',
+          sha: 'b'.repeat(40),
+          holdUntil: new Date(Date.now() + 30 * 60_000),
+        })
+      const id = await seedTask()
+
+      const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+      expect(result).toMatchObject({ status: 'done' })
+      expect(seen.merges).toEqual([])
+      expect(seen.autoMergeAsks).toBe(0)
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row).toMatchObject({
+        stage: 'done',
+        awaitingCiSha: 'abc123def',
+        integrationHeld: true,
+        mergedSha: null,
+      })
+    })
+
+    it('integrates as before once the hold of the waiting promotion expired', async () => {
+      await getDb()
+        .insert(promotionWait)
+        .values({
+          repository: 'paulo/app',
+          pullRequestNumber: 11,
+          pullRequestUrl: 'https://github.com/paulo/app/pull/11',
+          sha: 'b'.repeat(40),
+          holdUntil: new Date(Date.now() - 60_000),
+        })
+      const id = await seedTask()
+
+      await runTask(deps(new FakeSandbox(changed())), id)
+
+      expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row).toMatchObject({ integrationHeld: false, mergedSha: 'merge0001' })
+    })
   })
 
   it('never merges work that was handed over to a person', async () => {

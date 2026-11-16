@@ -85,6 +85,12 @@ export const task = pgTable(
      * it is merged, sent back or handed to a person.
      */
     awaitingCiSha: text('awaiting_ci_sha'),
+    /**
+     * The verified pull request was not merged into the integration branch because a promotion into the
+     * pre-release branch held new integrations out (`promotion_wait.hold_until`). It waits with
+     * `awaiting_ci_sha` set, and the `integrate-after-ci` cron integrates it once the hold ends.
+     */
+    integrationHeld: boolean('integration_held').notNull().default(false),
     /** What the run has spent so far, agents included. It grows while the run is going. */
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -301,6 +307,39 @@ export const releaseWait = pgTable(
   },
   (table) => [
     uniqueIndex('release_wait_one_per_repository')
+      .on(table.repository)
+      .where(sql`${table.status} = 'waiting'`),
+  ],
+)
+
+/**
+ * The promotion of the integration branch into the pre-release branch when the pre-release branch takes
+ * changes only through a pull request. The factory turns auto-merge on, pinned to the head it saw, on its
+ * own pull request from the integration branch of the same repository, and GitHub merges it once the
+ * required checks pass. Until `hold_until` new integrations are held out of the integration branch, so those
+ * checks can finish; the hold expires on its own. A repository has at most one waiting promotion.
+ */
+export const promotionWait = pgTable(
+  'promotion_wait',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    pullRequestNumber: integer('pull_request_number').notNull(),
+    pullRequestUrl: text('pull_request_url').notNull(),
+    /** The head of the promotion pull request the factory saw: auto-merge is pinned to it. */
+    sha: text('sha').notNull(),
+    /** Until when new integrations are held out of the integration branch. */
+    holdUntil: timestamp('hold_until', { withTimezone: true }).notNull(),
+    status: text('status', { enum: ['waiting', 'merged', 'closed'] })
+      .notNull()
+      .default('waiting'),
+    /** What the last look found: why auto-merge could not be pinned, or how the wait ended. */
+    detail: text('detail'),
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('promotion_wait_one_per_repository')
       .on(table.repository)
       .where(sql`${table.status} = 'waiting'`),
   ],

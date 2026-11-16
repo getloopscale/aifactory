@@ -57,7 +57,7 @@ async function requeue(
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
     const moved = await tx
       .update(task)
-      .set({ stage: 'intake', awaitingCiSha: null, resolvedSha: null })
+      .set({ stage: 'intake', awaitingCiSha: null, integrationHeld: false, resolvedSha: null })
       .where(and(eq(task.id, taskId), inArray(task.stage, from as never)))
       .returning({ id: task.id })
     if (moved.length === 0) {
