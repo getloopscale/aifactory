@@ -7,6 +7,7 @@
 //   EVALS_CASES     comma-separated case ids, instead of a set
 //   EVALS_BUDGET_USD    no case starts once this is spent (default 15)
 //   EVALS_CONCURRENCY   cases at a time (default 2)
+//   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default 75)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -30,7 +31,15 @@ import { markQuick, selectCandidates, type EvalCase } from './cases'
 import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } from './compare'
 import { deliveredCandidates, toCase } from './extract'
 import { runCase } from './run-case'
-import { E2B_USD_PER_MS, agentSetup, checkBeforeDeploy, runSuite, spentOn } from './suite'
+import {
+  DEFAULT_START_MARGIN_MS,
+  E2B_USD_PER_MS,
+  SUITE_TIMEOUT_MS,
+  agentSetup,
+  checkBeforeDeploy,
+  runSuite,
+  spentOn,
+} from './suite'
 
 const CASES = 'evals/cases.json'
 const BASELINE = 'evals/baseline.json'
@@ -80,6 +89,7 @@ async function currentSetup(cases: EvalCase[]) {
 }
 
 async function runCases(cases: EvalCase[]) {
+  const startedAt = Date.now()
   const byId = new Map(cases.map((c) => [c.id, c]))
   const ran = await runSuite(
     cases.map((c) => c.id),
@@ -95,6 +105,10 @@ async function runCases(cases: EvalCase[]) {
       budgetUsd: Number(env.EVALS_BUDGET_USD ?? 15),
       concurrency: Number(env.EVALS_CONCURRENCY ?? 2),
       sandboxUsdPerMs: E2B_USD_PER_MS,
+      deadlineMs: startedAt + SUITE_TIMEOUT_MS,
+      startMarginMs: env.EVALS_START_MARGIN_MIN
+        ? Number(env.EVALS_START_MARGIN_MIN) * 60_000
+        : DEFAULT_START_MARGIN_MS,
     },
   )
   const record = {
@@ -164,13 +178,20 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
         setup: record.setup,
         results: record.results,
       }
-      writeJson(BASELINE, { ...baseline, spentUsd: record.spentUsd, summary: record.summary })
+      if (record.skipped.length > 0)
+        console.log(JSON.stringify({ event: 'eval_baseline_partial', skipped: record.skipped }))
+      writeJson(BASELINE, {
+        ...baseline,
+        spentUsd: record.spentUsd,
+        summary: record.summary,
+        skipped: record.skipped,
+      })
     } else if (env.EVALS_COMPARE !== '0') {
       const compared = compareWithBaseline(record.results, readJson<Baseline>(BASELINE))
       console.log(JSON.stringify({ event: 'eval_compared', ...compared }))
     }
     expect(record.results.length).toBeGreaterThan(0)
-  })
+  }, SUITE_TIMEOUT_MS)
 })
 
 describe.runIf(mode === 'check')('the agent configuration', () => {

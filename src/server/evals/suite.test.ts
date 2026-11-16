@@ -117,6 +117,67 @@ describe('runSuite', () => {
   })
 })
 
+describe('runSuite time limit', () => {
+  const MIN = 60_000
+  it('starts no case once the time left is below the margin, and names the ones it left', async () => {
+    let clock = 0
+    const ran = await runSuite(
+      ['a', 'b', 'c'],
+      async (id) => {
+        clock += 50 * MIN
+        return result(id, 0)
+      },
+      {
+        budgetUsd: 10,
+        concurrency: 1,
+        sandboxUsdPerMs: 0,
+        deadlineMs: 120 * MIN,
+        startMarginMs: 30 * MIN,
+        now: () => clock,
+      },
+    )
+
+    // a starts at 0, b at 50 (70 left), c at 100 (20 left, below 30)
+    expect(ran.results.map((r) => r.id)).toEqual(['a', 'b'])
+    expect(ran.skipped).toEqual(['c'])
+  })
+
+  it('does not run again an environment failure inside the margin', async () => {
+    let clock = 0
+    const calls: string[] = []
+    const ran = await runSuite(
+      ['a'],
+      async (id) => {
+        calls.push(id)
+        clock += 100 * MIN
+        return { ...result(id, 0), passed: false, reason: 'fetch failed' }
+      },
+      {
+        budgetUsd: 10,
+        concurrency: 1,
+        sandboxUsdPerMs: 0,
+        deadlineMs: 120 * MIN,
+        startMarginMs: 30 * MIN,
+        now: () => clock,
+      },
+    )
+
+    expect(calls).toEqual(['a'])
+    expect(ran.results.map((r) => r.id)).toEqual(['a'])
+  })
+
+  it('has no time limit without a deadline', async () => {
+    const ran = await runSuite(['a', 'b'], async (id) => result(id, 0), {
+      budgetUsd: 10,
+      concurrency: 1,
+      sandboxUsdPerMs: 0,
+      now: () => Number.MAX_SAFE_INTEGER,
+    })
+
+    expect(ran.skipped).toEqual([])
+  })
+})
+
 const baseline: Baseline = {
   commit: 'abc1234',
   ranAt: '2026-11-11T20:00:00.000Z',

@@ -14,6 +14,10 @@ import {
  */
 export const E2B_USD_PER_MS = (4 * 0.000014 + 8 * 0.0000045) / 1000
 
+/** The time the suite's test gets (vitest fails it after this), and the default time before it ends when no case starts. */
+export const SUITE_TIMEOUT_MS = 4 * 60 * 60_000
+export const DEFAULT_START_MARGIN_MS = 75 * 60_000
+
 /** What the cases cost: what the agents reported plus the time their sandboxes ran. */
 export function spentOn(results: CaseResult[], sandboxUsdPerMs: number): number {
   return results.reduce((sum, r) => sum + r.costUsd + r.durationMs * sandboxUsdPerMs, 0)
@@ -24,11 +28,20 @@ export function spentOn(results: CaseResult[], sandboxUsdPerMs: number): number 
  * stands; what the first cost still counts against the budget. Before a case starts, what the finished ones cost is added up, and
  * once it reaches `budgetUsd` no other case starts: the ones left are named in `skipped`. A case already
  * running finishes, so the total can pass the budget by what the cases in flight cost.
+ * With a `deadlineMs`, no case starts (nor reruns) once less than `startMarginMs` is left before it: the same way,
+ * the ones left are named in `skipped`, so the caller can write what finished before its time runs out.
  */
 export async function runSuite(
   ids: string[],
   runOne: (id: string) => Promise<CaseResult>,
-  options: { budgetUsd: number; concurrency: number; sandboxUsdPerMs: number },
+  options: {
+    budgetUsd: number
+    concurrency: number
+    sandboxUsdPerMs: number
+    deadlineMs?: number
+    startMarginMs?: number
+    now?: () => number
+  },
 ): Promise<{ results: CaseResult[]; skipped: string[] }> {
   const done = new Map<string, CaseResult>()
   // Runs the environment failed, whose results were replaced but whose cost was spent.
@@ -36,14 +49,18 @@ export async function runSuite(
   const skipped: string[] = []
   const queue = [...ids]
   const spent = () => spentOn([...done.values(), ...discarded], options.sandboxUsdPerMs)
+  const now = options.now ?? Date.now
+  const outOfTime = () =>
+    options.deadlineMs !== undefined &&
+    now() >= options.deadlineMs - (options.startMarginMs ?? DEFAULT_START_MARGIN_MS)
   const worker = async () => {
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
-      if (spent() >= options.budgetUsd) {
+      if (spent() >= options.budgetUsd || outOfTime()) {
         skipped.push(id)
         continue
       }
       let result = await runOne(id)
-      if (failedForEnvironment(result)) {
+      if (failedForEnvironment(result) && !outOfTime()) {
         discarded.push(result)
         result = await runOne(id)
       }
