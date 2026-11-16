@@ -14,7 +14,7 @@ export const QUEUE = {
   windowMs: 6 * 3_600_000,
   /** On how many distinct tasks of the repository a test has to fail. */
   minTasks: 2,
-  /** How long the repository's other queued tasks wait behind the fix, at most. */
+  /** How far past now (or past the fix's own start) the other queued tasks are held; renewed each pass. */
   holdMs: 60 * 60_000,
 } as const
 
@@ -31,7 +31,8 @@ export type RepositoryQueueFacts = {
 }
 
 /** What an issue quotes as a test: a code span, a quoted text, or a line a runner prints for a failure. */
-const NAMED = /`([^`\n]+)`|"([^"\n]+)"|^\s*(?:FAIL|FAILED|✗|×|✕)\s+(.+?)\s*$/gm
+const NAMED =
+  /`([^`\n]+)`|"([^"\n]+)"|^\s*(?:FAIL|FAILED|✗|×|✕)\s+(.+?)\s*$|\btests?\s+([^\s"`][^\n]*?)(?=\s+(?:timed out|times out|failed|fails|failing|flaked|is flaky|was flaky|exceeded|threw)\b|[.,;:]|$)/gim
 
 /** What differs from one task to the next is taken out, as a signature does: case, numbers, spaces. */
 export const normal = (text: string) =>
@@ -44,7 +45,7 @@ export const normal = (text: string) =>
 export function testsNamedBy(issue: Pick<QueuedTask, 'title' | 'body'>): string[] {
   const found = [...`${issue.title}\n${issue.body}`.matchAll(NAMED)]
     .map((m) =>
-      normal(m[1] ?? m[2] ?? m[3] ?? '')
+      normal(m[1] ?? m[2] ?? m[3] ?? m[4] ?? '')
         .split(' > ')
         .at(-1)!,
     )

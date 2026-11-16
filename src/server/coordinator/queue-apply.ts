@@ -6,7 +6,7 @@ import { QUEUE } from './queue-order'
 
 /**
  * The write of the `prioritise` playbook: the pending `run-task` job of a task goes just ahead of the
- * pending jobs of the other tasks of its repository, and those jobs wait `QUEUE.holdMs` at most, so they do
+ * pending jobs of the other tasks of its repository, and those jobs wait until it is done, so they do
  * not start and fail on the same test while the fix runs. It touches no job a worker holds or that failed, and
  * no other repository's. The task must still be in `intake` when it writes: a task that a run already took
  * has no job to move. `transitions.ts` has no event for reordering a queue, so the stage is checked in the
@@ -27,27 +27,28 @@ const PENDING = (taskId: number) => sql`select j.id, j.available_at, t.id as tas
           for update of j skip locked`
 
 /**
- * Holds the pending jobs of the repository's other tasks until `until`, keeping the `available_at` each had in
- * its input as `heldFrom`. It is run again on every pass while the fix is on its way, so a job queued after
- * the decision is held too.
+ * Holds the pending jobs of the repository's other tasks for `QUEUE.holdMs` past now, or past the moment the
+ * fix's own job becomes available when that is later, keeping the `available_at` each had in its input as
+ * `heldFrom`. It is run again on every pass and as a job is queued, so the hold lasts until the fix integrates
+ * or fails (`releaseHolds` ends it) and covers a job queued after the decision.
  */
-export async function holdOthers(db: QueueDb, fixTaskId: number, until: Date): Promise<void> {
-  const at = until.toISOString()
+export async function holdOthers(db: QueueDb, fixTaskId: number): Promise<void> {
+  const hold = sql`make_interval(secs => ${QUEUE.holdMs / 1000})`
   await db.execute(
-    sql`with pending as (${PENDING(fixTaskId)})
+    sql`with pending as (${PENDING(fixTaskId)}),
+        until as (
+          select greatest(now(), coalesce((select max(available_at) from theokit_jobs
+            where name = 'run-task' and failed_at is null and input->>'taskId' = ${String(fixTaskId)}), now())) + ${hold} as at
+        )
         update theokit_jobs set
           input = input || jsonb_build_object('heldFrom', coalesce(input->>'heldFrom', available_at::text)),
-          available_at = ${at}::timestamptz
+          available_at = (select at from until)
         where id in (select id from pending where task_id <> ${fixTaskId})
-          and available_at < ${at}::timestamptz`,
+          and available_at < (select at from until)`,
   )
 }
 
-export async function moveAhead(
-  db: QueueDb,
-  taskId: number,
-  now: Date = new Date(),
-): Promise<boolean> {
+export async function moveAhead(db: QueueDb, taskId: number): Promise<boolean> {
   const moved = await db.execute<{ moved: number }>(
     sql`with pending as (${PENDING(taskId)}), fix as (
           update theokit_jobs set available_at = least(available_at,
@@ -59,7 +60,7 @@ export async function moveAhead(
         select (select count(*) from pending where task_id = ${taskId})::int as moved`,
   )
   if ((moved.rows[0]?.moved ?? 0) === 0) return false
-  await holdOthers(db, taskId, new Date(now.getTime() + QUEUE.holdMs))
+  await holdOthers(db, taskId)
   return true
 }
 

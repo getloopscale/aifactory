@@ -6,20 +6,20 @@ import { task } from '../db/schema'
 import type { CoordinatorMode } from './mode'
 import { HOLD_LOCK, holdOthers, releaseHolds } from './queue-apply'
 import { readHeldTests } from './queue-facts'
-import { QUEUE, type HeldTest } from './queue-order'
+import type { HeldTest } from './queue-order'
 
 /**
  * Keeps the hold of a `prioritise` decision in step with the queue, always under `HOLD_LOCK`, the lock the
  * decision itself is recorded under: the held list is read inside the lock, so a decision committed by another
  * pass is never undone by a stale one. It does nothing outside `auto`.
  */
-export async function maintainHolds(db: Database, now: Date = new Date()): Promise<HeldTest[]> {
+export async function maintainHolds(db: Database): Promise<HeldTest[]> {
   return db.transaction(async (tx) => {
     await tx.execute(HOLD_LOCK)
-    const held = await readHeldTests(tx, now)
+    const held = await readHeldTests(tx)
     for (const h of held) {
-      if (h.taskId !== undefined && h.at) {
-        await holdOthers(tx, h.taskId, new Date(h.at.getTime() + QUEUE.holdMs))
+      if (h.taskId !== undefined) {
+        await holdOthers(tx, h.taskId)
       }
     }
     await releaseHolds(tx, [...new Set(held.map((h) => h.repository))])
@@ -35,7 +35,6 @@ export async function holdNewJob(
   db: Pick<Database, 'select' | 'execute'>,
   taskId: number,
   mode: CoordinatorMode,
-  now: Date = new Date(),
 ): Promise<void> {
   if (mode !== 'auto') return
   await db.execute(HOLD_LOCK)
@@ -44,10 +43,10 @@ export async function holdNewJob(
     .from(task)
     .where(eq(task.id, taskId))
   if (!row) return
-  for (const h of await readHeldTests(db, now)) {
-    if (h.repository !== row.repository || h.taskId === undefined || !h.at || h.taskId === taskId) {
+  for (const h of await readHeldTests(db)) {
+    if (h.repository !== row.repository || h.taskId === undefined || h.taskId === taskId) {
       continue
     }
-    await holdOthers(db, h.taskId, new Date(h.at.getTime() + QUEUE.holdMs))
+    await holdOthers(db, h.taskId)
   }
 }

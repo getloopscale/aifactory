@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, or, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, task } from '../db/schema'
@@ -73,13 +73,9 @@ export async function readQueueFacts(
 }
 
 /**
- * The tests whose fix the coordinator moved ahead less than `QUEUE.holdMs` ago and that has not reached the
- * integration branch yet (queued, running, or waiting for its checks), and the repository of each.
+ * The tests whose fix the coordinator moved ahead and that has not integrated or failed yet (queued, running, or waiting for its checks), and the repository of each.
  */
-export async function readHeldTests(
-  db: Pick<Database, 'select'>,
-  now: Date = new Date(),
-): Promise<HeldTest[]> {
+export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldTest[]> {
   const rows = await db
     .select({
       repository: task.repository,
@@ -93,7 +89,6 @@ export async function readHeldTests(
       and(
         eq(coordinatorAction.action, 'prioritise'),
         eq(coordinatorAction.outcome, 'applied'),
-        gte(coordinatorAction.at, new Date(now.getTime() - QUEUE.holdMs)),
         or(inArray(task.stage, ['intake', ...WORKING]), isNotNull(task.awaitingCiSha)),
       ),
     )

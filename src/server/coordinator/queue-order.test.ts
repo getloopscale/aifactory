@@ -79,6 +79,13 @@ describe('a test that failed on several tasks of a repository', () => {
       { kind: 'queue_blocked', taskId: 7 },
     )
   })
+  it('reads a test named in plain prose in the failure reasons', () => {
+    const prose = (id: number) => failure(id, { reason: `test ${TEST} timed out at 5s` })
+    expect(recogniseQueue(facts({ failures: [prose(1), prose(2)] }))).toMatchObject({
+      kind: 'queue_blocked',
+      taskId: 7,
+    })
+  })
   it('recognises a fix that writes the test name in plain text', () => {
     const plain = queued(7, `${TEST} is flaky under load.`)
     expect(recogniseQueue(facts({ queue: readOf([queued(5), plain]) }))).toMatchObject({

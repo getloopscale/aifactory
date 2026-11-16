@@ -796,6 +796,17 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     expect(fix).toBeGreaterThan(0)
   })
 
+  it('keeps the hold past an hour while the fix is still queued', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    await getPool().query("update coordinator_action set at = now() - interval '3 hours'")
+
+    await coordinate(deps(), 'auto')
+
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
   it('does not bring a fix scheduled for later ahead of its time', async () => {
     const { fix } = await incident()
     await getPool().query(

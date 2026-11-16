@@ -63,9 +63,10 @@ export async function coordinate(
   const repositories = await repositoriesOf(deps.db, exceptions)
   const held = mode === 'auto' ? await maintainHolds(deps.db) : await readHeldTests(deps.db)
   const now = new Date()
+  // The reason of the failure the task is in now: its latest one, not every one of the window.
   const reasons = new Map<number, string[]>()
   for (const e of await readFailureEvents(deps.db, new Date(now.getTime() - QUEUE.windowMs), now)) {
-    reasons.set(e.taskId, [...(reasons.get(e.taskId) ?? []), e.reason])
+    reasons.set(e.taskId, [e.reason])
   }
   const recorded = await readRecordedActions(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   for (const exception of exceptions) {
