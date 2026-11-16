@@ -349,9 +349,17 @@ const branchPushed = (issueNumber = 7) => repo().heads.set(`factory/${issueNumbe
 
 /** A fake backend that also writes the files it is given, as a sandbox does. */
 class WritingBackend extends FakeBackend {
+  /** `dir` stands for the sandbox's /tmp, so no upload lands on the host's own paths. */
+  constructor(
+    script: ConstructorParameters<typeof FakeBackend>[0],
+    private readonly dir: string,
+  ) {
+    super(script)
+  }
+
   override async uploadFile(path: string, content: string | Buffer) {
     await super.uploadFile(path, content)
-    await writeFile(path, content)
+    await writeFile(path.replace(/^\/tmp\//, `${this.dir}/`), content)
   }
 }
 
@@ -368,11 +376,16 @@ class RealGit {
     const backend = new WritingBackend((command) => {
       const ran = spawnSync(
         'bash',
-        ['-c', command.replaceAll('https://github.com/paulo/app.git', `file://${remote}`)],
+        [
+          '-c',
+          command
+            .replaceAll('https://github.com/paulo/app.git', `file://${remote}`)
+            .replaceAll('/tmp/factory', `${root}/factory`),
+        ],
         { cwd: work, encoding: 'utf8' },
       )
       return { stdout: ran.stdout, stderr: ran.stderr, exitCode: ran.status ?? 1 }
-    })
+    }, root)
     this.sandbox = new FakeSandbox()
     const create = this.sandbox.create.bind(this.sandbox)
     this.sandbox.create = async (spec) => ({ ...(await create(spec)), backend })
@@ -881,6 +894,7 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'failed', stage: 'build' })
     expect(result.status === 'failed' && result.error).not.toContain('kept in commit')
     expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(false)
+    expect(sandbox.backend.commands.some((c) => / commit /.test(c))).toBe(false)
   })
 
   it('starts from the integration branch, workspace, and opens against it by default', async () => {
