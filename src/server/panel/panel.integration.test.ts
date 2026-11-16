@@ -689,17 +689,34 @@ describe('actions', () => {
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ stage: 'done', resolvedSha: 'abc', awaitingCiSha: 'abc' })
 
-    // An intake written before it named its decision is matched to the person's latest request.
-    const old = await seed('done', { headSha: 'abc' })
+    // An intake written before it kept what it cleared cannot be undone safely: it is refused.
+    const old = await seed('done', { headSha: 'abc', resolvedSha: 'abc' })
     await getDb().insert(stageEvent).values({ taskId: old, stage: 'done', detail: {} })
     await requestChanges(deps(), old, 'note')
     await getDb()
       .update(stageEvent)
       .set({ detail: { decision: 'request_changes', note: 'note' } })
       .where(and(eq(stageEvent.taskId, old), eq(stageEvent.stage, 'intake')))
-    await withdrawSendBack(deps(), old)
+    await expect(withdrawSendBack(deps(), old)).rejects.toThrow()
     const [again] = await getDb().select().from(task).where(eq(task.id, old))
-    expect(again.stage).toBe('done')
+    expect(again.stage).toBe('intake')
+  })
+
+  it('keeps a change a cron made while the send-back waited for the task lock', async () => {
+    const id = await seed('done', { headSha: 'abc', resolvedSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
+    let sent: Promise<unknown> | undefined
+    await getDb().transaction(async (tx) => {
+      await tx.update(task).set({ awaitingCiSha: 'abc' }).where(eq(task.id, id))
+      sent = requestChanges(deps(), id, 'note')
+      await new Promise((r) => setTimeout(r, 200))
+      // The integration finishes while the send-back is held at the lock.
+      await tx.update(task).set({ awaitingCiSha: null }).where(eq(task.id, id))
+    })
+    await sent
+    await withdrawSendBack(deps(), id)
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'done', awaitingCiSha: null })
   })
 
   it('keeps the failure a withdrawn send-back came from, and runs again from the right work', async () => {

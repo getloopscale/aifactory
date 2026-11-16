@@ -57,13 +57,15 @@ async function requeue(
   rework?: Rework,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
-    // What a person's send-back clears is kept on its intake, so withdrawing it can give it back.
+    // What a person's send-back clears is kept on its intake, so withdrawing it can give it back. It is read
+    // under a lock held until the commit, so a cron that changes it meanwhile waits and is never overwritten.
     const [before] =
       kind === 'request_changes'
         ? await tx
             .select({ resolvedSha: task.resolvedSha, awaitingCiSha: task.awaitingCiSha })
             .from(task)
             .where(eq(task.id, taskId))
+            .for('update')
         : []
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
     const moved = await tx

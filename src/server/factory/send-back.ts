@@ -10,8 +10,8 @@ export type PendingSendBack = {
   back: (typeof TASK_STAGES)[number]
   /** The event before the send-back, whose detail and time the task goes back to. */
   previous: { detail: unknown; at: Date }
-  /** What sending back cleared, when the intake recorded it; an older intake did not. */
-  restore?: { resolvedSha: string | null; awaitingCiSha: string | null }
+  /** What sending back cleared, as the intake recorded it under the task's lock. */
+  restore: { resolvedSha: string | null; awaitingCiSha: string | null }
 }
 
 const text = (value: unknown) => (typeof value === 'string' ? value : null)
@@ -60,14 +60,14 @@ export async function pendingSendBack(
   let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
   if (decisionId === undefined) decisionId = await latestSendBackDecision(db, taskId)
   if (decisionId === undefined) return undefined
+  // An intake written before it kept what it cleared cannot be undone safely: nothing else records it.
   const kept = detail.restore as Record<string, unknown> | undefined
+  if (!kept) return undefined
   return {
     decisionId,
     back: before.stage,
     previous: { detail: before.detail, at: before.at },
-    restore: kept
-      ? { resolvedSha: text(kept.resolvedSha), awaitingCiSha: text(kept.awaitingCiSha) }
-      : undefined,
+    restore: { resolvedSha: text(kept.resolvedSha), awaitingCiSha: text(kept.awaitingCiSha) },
   }
 }
 
