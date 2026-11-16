@@ -15,6 +15,7 @@ const TRIED: DoctorTriedSentences = {
   installation: (v) => `ler a instalação do GitHub App em ${v.repo}`,
   events: () => 'ler os eventos que o GitHub App assina',
   runs: (v) => `ler as execuções que falharam em ${v.repo}`,
+  sandboxes: () => 'listar os sandboxes que a conta tem ativos',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
 }
@@ -418,7 +419,7 @@ export const ptBR: Copy = {
       },
       sandbox_refused: {
         cause: (v) =>
-          `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}`,
+          `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}${v.up ? ` ${v.up} de ${v.limit} sandboxes estão ativos, ${v.atWork} com dono trabalhando.` : ''}`,
         repair: (v) =>
           SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
@@ -481,6 +482,11 @@ export const ptBR: Copy = {
       },
       ok_sandbox: {
         cause: () => 'O provedor de sandbox não recusou a última execução.',
+        repair: () => '',
+      },
+      ok_sandbox_slots: {
+        cause: (v) =>
+          `O provedor de sandbox não recusou a última execução. ${v.up} de ${v.limit} sandboxes estão ativos, ${v.atWork} com dono trabalhando.`,
         repair: () => '',
       },
     },
@@ -583,6 +589,10 @@ export const ptBR: Copy = {
       saved: 'Salvo.',
       checks: 'Verificações, uma por linha no formato nome: comando',
       checksPlaceholder: 'Vazio roda npm test. Por exemplo: unit: pnpm test',
+      fixes: 'Correções, um comando por linha, rodadas antes das verificações',
+      fixesAssistContext:
+        'Só os comandos de correção: um comando de shell por linha que reescreve arquivos e não decide nada (um formatador, um autofix de lint), sem nome na frente. Não são verificações.',
+      fixesPlaceholder: 'Vazio não roda nenhuma. Por exemplo: pnpm prettier --write .',
       domains: 'Domínios extras que o sandbox pode acessar',
       domainsPlaceholder:
         'GitHub, o agente e o registro do npm ficam sempre abertos. Para Python: pypi.org, files.pythonhosted.org',

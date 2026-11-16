@@ -885,6 +885,16 @@ export class FakeGithub implements GithubApi {
     )
   }
 
+  async reopenPullRequest(repo: string, token: string, number: number): Promise<void> {
+    return this.call(
+      { method: 'reopenPullRequest', repo, token, args: [number], failed: false },
+      (r) => {
+        const pull = this.pullOrRefuse(r, number, `reading ${repo}#${number}`)
+        pull.state = 'open'
+      },
+    )
+  }
+
   async disableAutoMerge(repo: string, token: string, number: number): Promise<void> {
     return this.call(
       { method: 'disableAutoMerge', repo, token, args: [number], failed: false },
