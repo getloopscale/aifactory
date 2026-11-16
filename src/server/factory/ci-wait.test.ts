@@ -3,7 +3,14 @@ import { describe, expect, it } from 'vitest'
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import { AUTOMATIC_RETRIES } from './transitions'
-import { CI_SILENCE_MS, checksFeedback, decideWaitingIntegration, readRequired } from './ci-wait'
+import {
+  CI_SILENCE_MS,
+  MAX_RERUNS,
+  RERUN_PATIENCE_MS,
+  checksFeedback,
+  decideWaitingIntegration,
+  readRequired,
+} from './ci-wait'
 
 const VERIFIED = 'abc1234def'
 const open: PullRequestDetail = {
@@ -22,6 +29,8 @@ const report = (name: string, state: CheckReport['state'], detail = ''): CheckRe
   url: `https://github.com/o/r/runs/${name}`,
 })
 
+const NOW_MS = Date.parse('2026-11-11T12:00:00Z')
+
 const decide = (over: Partial<Parameters<typeof decideWaitingIntegration>[0]> = {}) =>
   decideWaitingIntegration({
     verifiedSha: VERIFIED,
@@ -29,6 +38,7 @@ const decide = (over: Partial<Parameters<typeof decideWaitingIntegration>[0]> = 
     required: ['CI', 'Lint'],
     reports: [report('CI', 'pending'), report('Lint', 'success')],
     waitedMs: 60_000,
+    nowMs: NOW_MS,
     automaticRuns: 0,
     baseReports: [],
     ...over,
@@ -91,6 +101,82 @@ describe('decideWaitingIntegration before the base is read', () => {
       waitedMs: CI_SILENCE_MS + 1,
     })
     expect(step).toMatchObject({ kind: 'person', stopAutoMerge: true })
+  })
+})
+
+describe('decideWaitingIntegration after the base was blamed', () => {
+  const run = (url: string) => ({ ...report('CI', 'failure', 'boom'), url })
+  const old = 'https://github.com/o/r/actions/runs/5/job/50'
+  const fixed = [report('CI', 'success')]
+  const okLint = report('Lint', 'success')
+  const asked = (over: object = {}) => ({
+    checks: ['CI'],
+    reruns: { CI: { url: old, at: new Date(NOW_MS - 60_000).toISOString(), tries: 1, ...over } },
+  })
+
+  it('runs the old failure again once the base is fixed, not the builder', () => {
+    expect(
+      decide({ reports: [run(old), okLint], baseReports: fixed, baseBlame: { checks: ['CI'] } }),
+    ).toEqual({
+      kind: 'rerun',
+      checks: [{ name: 'CI', url: old, runId: 5, tries: 1 }],
+      baseRed: [],
+    })
+  })
+
+  it('keeps blaming the base while it has not reported or still runs the check', () => {
+    for (const baseReports of [[], [report('CI', 'pending')]]) {
+      expect(
+        decide({ reports: [run(old), okLint], baseReports, baseBlame: { checks: ['CI'] } }),
+      ).toEqual({ kind: 'wait' })
+    }
+  })
+
+  it('tracks each blamed check on its own', () => {
+    const step = decide({
+      reports: [run(old), report('Lint', 'failure')],
+      baseReports: [report('CI', 'success'), report('Lint', 'failure')],
+      baseBlame: { checks: ['CI', 'Lint'] },
+    })
+    expect(step).toMatchObject({ kind: 'rerun', baseRed: ['Lint'] })
+  })
+
+  it('waits for the new conclusion while the old failure still shows', () => {
+    expect(decide({ reports: [run(old), okLint], baseReports: fixed, baseBlame: asked() })).toEqual(
+      { kind: 'wait' },
+    )
+  })
+
+  it('blames the task for a different failed run: that is a fresh result', () => {
+    const fresh = 'https://github.com/o/r/actions/runs/5/job/51'
+    expect(
+      decide({ reports: [run(fresh), okLint], baseReports: fixed, baseBlame: asked() }),
+    ).toMatchObject({ kind: 'send_back', failed: ['CI'] })
+  })
+
+  it('asks again when the rerun left no trace after the patience, up to the limit', () => {
+    const at = new Date(NOW_MS - RERUN_PATIENCE_MS - 1).toISOString()
+    const again = decide({
+      reports: [run(old), okLint],
+      baseReports: fixed,
+      baseBlame: asked({ at }),
+    })
+    expect(again).toMatchObject({ kind: 'rerun', checks: [{ tries: 2 }] })
+    const spent = decide({
+      reports: [run(old), okLint],
+      baseReports: fixed,
+      baseBlame: asked({ at, tries: MAX_RERUNS }),
+    })
+    expect(spent).toMatchObject({ kind: 'send_back' })
+  })
+
+  it('blames the task for a failure that is not a GitHub Actions run', () => {
+    const step = decide({
+      reports: [report('CI', 'failure'), okLint],
+      baseReports: fixed,
+      baseBlame: { checks: ['CI'] },
+    })
+    expect(step).toMatchObject({ kind: 'send_back' })
   })
 })
 

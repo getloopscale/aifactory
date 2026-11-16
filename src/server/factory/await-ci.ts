@@ -3,13 +3,17 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import type { RerunAnswer } from '../github/promotion-api'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
+  MAX_RERUNS,
+  type BaseBlame,
   checksFeedback,
+  type RerunAsk,
   decideWaitingIntegration,
   evidenceOfNote,
   type WaitingStep,
@@ -33,6 +37,8 @@ export type AwaitCiDeps = {
   api: GithubApi
   /** Reads the log or annotations of a failed check, so the note carries what the sandbox cannot open. */
   checks: EvidenceApi
+  /** Runs the failed jobs of a GitHub Actions run again (`PromotionApi.rerunFailedJobs`). */
+  rerun: (repo: string, token: string, runId: number) => Promise<RerunAnswer>
   /** The factory's release mode, for a repository that sets none. */
   releaseMode: ReleaseMode | undefined
   now?: () => Date
@@ -53,6 +59,8 @@ export type AwaitCiResult = {
   waiting: number
   /** Tasks that wait because every failed required check also fails on the integration branch. */
   waitingOnBase: number[]
+  /** Tasks whose old failure, blamed on a base that is fixed now, was run again instead of sent back. */
+  rerun: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
   /** Failed checks whose evidence GitHub would not give: the work went back with their links only. */
@@ -261,6 +269,55 @@ async function readBase(
   return deps.api.checkReports(repository, token, head)
 }
 
+/** Remembers on the `done` event which checks were blamed on the base, so a later pass still knows. */
+async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown, blame: BaseBlame) {
+  await deps.db
+    .update(stageEvent)
+    .set({ detail: { ...(detail as Record<string, unknown>), baseBlame: blame } })
+    .where(eq(stageEvent.id, doneId))
+}
+
+/** The earlier blame plus the checks this pass found red on the base: the union, never fewer. */
+function withBaseRed(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
+  const checks = [...new Set([...(before?.checks ?? []), ...baseRed])]
+  return { ...before, checks }
+}
+
+/**
+ * Asks GitHub to run the failed jobs again. Each ask is written on the `done` event first, so a pass that
+ * dies before or during the call leaves it known, and a later one asks again once the patience is over. A
+ * request that throws puts the earlier entry back and is thrown after the others were tried; one GitHub
+ * refuses is recorded as exhausted, so the old failure becomes the task's.
+ */
+async function rerunChecks(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  done: { id: number; detail: unknown },
+  before: BaseBlame,
+  asks: RerunAsk[],
+  at: Date,
+): Promise<void> {
+  const reruns = { ...before.reruns }
+  for (const ask of asks)
+    reruns[ask.name] = { url: ask.url, at: at.toISOString(), tries: ask.tries }
+  await rememberBlame(deps, done.id, done.detail, { ...before, reruns })
+  let failure: unknown
+  for (const ask of asks) {
+    try {
+      const answer = await deps.rerun(w.row.repository, w.token, ask.runId)
+      if (!answer.started) {
+        reruns[ask.name] = { url: ask.url, at: new Date(0).toISOString(), tries: MAX_RERUNS }
+      }
+    } catch (error) {
+      failure ??= error
+      if (before.reruns?.[ask.name]) reruns[ask.name] = before.reruns[ask.name]!
+      else delete reruns[ask.name]
+    }
+  }
+  await rememberBlame(deps, done.id, done.detail, { ...before, reruns })
+  if (failure) throw failure
+}
+
 async function look(
   deps: AwaitCiDeps,
   row: typeof task.$inferSelect,
@@ -269,7 +326,7 @@ async function look(
 ) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
-    .select({ detail: stageEvent.detail, at: stageEvent.at })
+    .select({ id: stageEvent.id, detail: stageEvent.detail, at: stageEvent.at })
     .from(stageEvent)
     .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'done')))
     .orderBy(desc(stageEvent.id))
@@ -285,13 +342,16 @@ async function look(
   const pull = await deps.api.readPullRequest(row.repository, token, number)
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
-  const waitedMs =
-    (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime()
+  const now = deps.now?.() ?? new Date()
+  const stored = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
+  const waitedMs = now.getTime() - new Date(done?.at ?? row.createdAt).getTime()
   const input = {
     verifiedSha,
     pull,
     required,
     reports,
+    ...(stored ? { baseBlame: stored } : {}),
+    nowMs: now.getTime(),
     waitedMs,
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
@@ -311,12 +371,23 @@ async function look(
     token,
     done: (done?.detail ?? {}) as Record<string, unknown>,
   }
+  // Every check seen red on the base joins the stored blame before anything else is done about the task.
+  let blame = stored
+  const seen = 'baseRed' in step ? (step.baseRed ?? []) : []
+  if (done && seen.some((name) => !stored?.checks.includes(name))) {
+    blame = withBaseRed(stored, seen)
+    await rememberBlame(deps, done.id, done.detail, blame)
+  }
   switch (step.kind) {
     case 'wait':
       result.waiting += 1
       if (step.baseRed) {
         result.waitingOnBase.push(row.id)
       }
+      return
+    case 'rerun':
+      await rerunChecks(deps, w, done!, blame ?? { checks: [] }, step.checks, now)
+      result.rerun.push(row.id)
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
@@ -366,6 +437,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     toPerson: [],
     waiting: 0,
     waitingOnBase: [],
+    rerun: [],
     errors: [],
     unreadEvidence: [],
   }

@@ -46,6 +46,7 @@ export default defineCron('integrate-after-ci', {
           pollAwaitingIntegrations({
             ...github,
             checks: createPromotionApi(),
+            rerun: (repo, token, runId) => createPromotionApi().rerunFailedJobs(repo, token, runId),
             releaseMode: releaseModeFromEnv(process.env),
             sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
             startOver: (taskId) => retryAutomatically(actions, taskId),

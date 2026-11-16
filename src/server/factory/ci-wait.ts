@@ -42,13 +42,19 @@ export type WaitingStep =
    * is. Asked only then, so a base that cannot be read blocks no other step.
    */
   | { kind: 'needs_base' }
+  /**
+   * Checks blamed on the base before, which the base no longer fails, still show their old failure on the
+   * verified commit: their failed jobs are run again, on the same commit, so nothing about what merges
+   * changes. `baseRed` are the checks that still fail on the base.
+   */
+  | { kind: 'rerun'; checks: RerunAsk[]; baseRed: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
   | { kind: 'finish'; mergedSha: string }
   /**
    * A required check failed: the same agent works again on its branch, with a note on what each failed
    * check reported (`checksFeedback`) as feedback.
    */
-  | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
+  | { kind: 'send_back'; failed: string[]; reports: CheckReport[]; baseRed?: string[] }
   /** The pull request conflicts with its base: the task runs again to merge the new base into its branch. */
   | { kind: 'start_over'; reason: string }
   | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
@@ -57,6 +63,24 @@ export type WaitingStep =
    * commit is integrated now, as the run would have done.
    */
   | { kind: 'integrate' }
+
+/** A failed check to run again: `url` is the failed run the old failure came from, `tries` counts the asks. */
+export type RerunAsk = { name: string; url: string; runId: number; tries: number }
+
+/**
+ * Every check blamed on the base while the task waited (`done.detail.baseBlame`), kept as a union. `reruns`
+ * holds, per check, the rerun that was asked for before GitHub was called: the failed run it answers, when,
+ * and how many times. The old failure is not the task's until a different run, a fresh result, says it.
+ */
+export type BaseBlame = {
+  checks: string[]
+  reruns?: Record<string, { url: string; at: string; tries: number }>
+}
+
+/** How long a rerun is given to replace the old failure before it is asked for again. */
+export const RERUN_PATIENCE_MS = 10 * 60_000
+/** The most reruns asked for one check: after that its failure is the task's. */
+export const MAX_RERUNS = 3
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -68,6 +92,10 @@ export type WaitingIntegration = {
   reports: CheckReport[]
   /** Every check reported on the head of the integration branch, when it could be read. */
   baseReports?: CheckReport[]
+  /** The checks an earlier pass blamed on the base for this verified commit. */
+  baseBlame?: BaseBlame
+  /** The time of this decision, in milliseconds. */
+  nowMs: number
   /** How long the pull request has waited. */
   waitedMs: number
   /** Automatic runs since a person last started the task. */
@@ -169,7 +197,40 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   if (allFailed.length > 0 && input.baseReports === undefined) return { kind: 'needs_base' }
   const base = input.baseReports ?? []
   const baseRed = allFailed.filter((name) => failedRuns(base, name).length > 0)
-  const failed = allFailed.filter((name) => !baseRed.includes(name))
+  const blame = input.baseBlame
+  const failed: string[] = []
+  const toRerun: RerunAsk[] = []
+  for (const name of allFailed) {
+    if (baseRed.includes(name)) continue
+    if (!blame?.checks.includes(name)) {
+      failed.push(name)
+      continue
+    }
+    const urls = failedRuns(input.reports, name).map((r) => r.url)
+    const entry = blame.reruns?.[name]
+    if (entry) {
+      // A different failed run is a new conclusion: the rerun happened and the change still fails it.
+      if (urls.join(' ') !== entry.url) failed.push(name)
+      else if (input.nowMs - Date.parse(entry.at) < RERUN_PATIENCE_MS) continue
+      else if (entry.tries >= MAX_RERUNS) failed.push(name)
+    } else if (
+      // Not fixed on the base yet (absent, running or red): the old failure is still the base's.
+      !base.some((r) => r.name === name) ||
+      base.some((r) => r.name === name && r.state !== 'success')
+    )
+      continue
+    const runId = /\/actions\/runs\/(\d+)/.exec(urls[0] ?? '')?.[1]
+    if (failed.includes(name)) continue
+    // Only a GitHub Actions run can be run again; any other check's failure is the change's.
+    if (!runId) failed.push(name)
+    else
+      toRerun.push({
+        name,
+        url: urls.join(' '),
+        runId: Number(runId),
+        tries: (entry?.tries ?? 0) + 1,
+      })
+  }
   if (failed.length > 0) {
     if (!runsLeft) {
       return {
@@ -180,8 +241,9 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       }
     }
     const reports = failed.flatMap((name) => failedRuns(input.reports, name))
-    return { kind: 'send_back', failed, reports }
+    return { kind: 'send_back', failed, reports, ...(baseRed.length > 0 ? { baseRed } : {}) }
   }
+  if (toRerun.length > 0) return { kind: 'rerun', checks: toRerun, baseRed }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
     return {
       kind: 'person',

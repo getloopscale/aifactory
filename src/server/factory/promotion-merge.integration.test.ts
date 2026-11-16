@@ -325,6 +325,7 @@ describe('an integration a promotion held out', () => {
       annotations: async () => [],
       jobAttempt: async () => ({ runId: 1, attempt: 1 }),
     },
+    rerun: async () => ({ started: true }),
     releaseMode: undefined,
     now: () => at,
     sendBack: async () => {},

@@ -48,6 +48,7 @@ const gh = {
 }
 const sentBack: { taskId: number; note: string }[] = []
 const startedOver: number[] = []
+const rerun = { runs: [] as number[], answer: 'started' as 'started' | 'refused' | 'throws' }
 
 /** Sets how the task's pull request stands on GitHub. */
 const pull = (over: Partial<FakePullRequest> = {}) =>
@@ -82,6 +83,8 @@ beforeEach(async () => {
   Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
   sentBack.length = 0
   startedOver.length = 0
+  rerun.runs.length = 0
+  rerun.answer = 'started'
 })
 
 const checks: EvidenceApi = {
@@ -108,6 +111,11 @@ const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
     return api
   },
   checks,
+  rerun: async (_repo, _token, runId) => {
+    rerun.runs.push(runId)
+    if (rerun.answer === 'throws') throw new Error('GitHub answered 502')
+    return rerun.answer === 'started' ? { started: true } : { started: false, refusal: 'no' }
+  },
   releaseMode: undefined,
   now: () => NOW,
   sendBack: async (taskId, note) => {
@@ -281,6 +289,117 @@ describe('pollAwaitingIntegrations', () => {
     expect(sentBack).toEqual([])
     expect(autoMergeOff()).toEqual([])
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
+  })
+
+  const OLD = 'https://github.com/paulo/app/actions/runs/5/job/50'
+  const BASE = 'b'.repeat(40)
+  const failure = (name: string, url = OLD) =>
+    ({ name, state: 'failure', detail: 'red', url }) as const
+  const baseIs = (...list: CheckReport[]) => {
+    repo().clearChecks(BASE)
+    for (const report of list) repo().report(BASE, report)
+  }
+  const blameOf = async (id: number) =>
+    (
+      (await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as {
+        baseBlame?: { checks: string[]; reruns?: Record<string, { tries: number; url: string }> }
+      }
+    ).baseBlame
+
+  it('runs the old failure again once the base is fixed, and does not send the task back', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    expect((await blameOf(id))?.checks).toEqual(['CI'])
+
+    baseIs({ name: 'CI', state: 'success', detail: '', url: 'https://ci/0' })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect(rerun.runs).toEqual([5])
+    expect((await blameOf(id))?.reruns?.CI).toMatchObject({ url: OLD, tries: 1 })
+
+    // The old failure still shows: the task waits for the new conclusion.
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [], sentBack: [] })
+    expect(rerun.runs).toEqual([5])
+
+    // A new failed run is the change's own.
+    reports(failure('CI', 'https://github.com/paulo/app/actions/runs/5/job/51'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
+  })
+
+  it('keeps the checks blamed on the base as a union while the task waits', async () => {
+    repo().required.set('workspace', ['CI', 'Lint'])
+    reports(failure('CI'), { name: 'Lint', state: 'pending', detail: '', url: 'u' })
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+
+    reports(failure('CI'), failure('Lint', 'https://github.com/paulo/app/actions/runs/6/job/60'))
+    baseIs(failure('CI', 'https://ci/0'), failure('Lint', 'https://ci/1'))
+    await pollAwaitingIntegrations(deps())
+    expect((await blameOf(id))?.checks).toEqual(['CI', 'Lint'])
+
+    // CI is fixed on the base; Lint is not. Only CI runs again.
+    baseIs(
+      { name: 'CI', state: 'success', detail: '', url: 'https://ci/0' },
+      failure('Lint', 'https://ci/1'),
+    )
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect(rerun.runs).toEqual([5])
+  })
+
+  it('records the ask before GitHub is called, and asks again when the call failed', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    baseIs({ name: 'CI', state: 'success', detail: '', url: 'https://ci/0' })
+
+    rerun.answer = 'throws'
+    const first = await pollAwaitingIntegrations(deps())
+    expect(first.errors).toHaveLength(1)
+    expect(first.sentBack).toEqual([])
+    expect((await blameOf(id))?.reruns?.CI).toBeUndefined()
+
+    rerun.answer = 'started'
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect(rerun.runs).toEqual([5, 5])
+  })
+
+  it('asks again after a pass that died with the ask recorded and never sent', async () => {
+    reports(failure('CI'))
+    baseIs({ name: 'CI', state: 'success', detail: '', url: 'https://ci/0' })
+    const id = await waitingTask()
+    const [done] = await events(id).then((all) => all.filter((e) => e.stage === 'done'))
+    await getDb()
+      .update(stageEvent)
+      .set({
+        detail: {
+          ...(done!.detail as object),
+          baseBlame: {
+            checks: ['CI'],
+            reruns: {
+              CI: { url: OLD, at: new Date(NOW.getTime() - 11 * 60_000).toISOString(), tries: 1 },
+            },
+          },
+        },
+      })
+      .where(eq(stageEvent.id, done!.id))
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+    expect((await blameOf(id))?.reruns?.CI?.tries).toBe(2)
+  })
+
+  it('sends the work back when GitHub refuses to run the check again', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    baseIs({ name: 'CI', state: 'success', detail: '', url: 'https://ci/0' })
+
+    rerun.answer = 'refused'
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
   })
 
   it('records a failed read of the base and looks again, without blaming the task', async () => {
@@ -525,6 +644,7 @@ describe('pollAwaitingIntegrations', () => {
       toPerson: [],
       waiting: 0,
       waitingOnBase: [],
+      rerun: [],
       errors: [],
       unreadEvidence: [],
     })
