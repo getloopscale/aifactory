@@ -41,8 +41,19 @@ export const COLUMNS: { id: Column; title: string }[] = [
  */
 export type Retryable = 'quota' | 'environment' | 'blocked' | null
 
-const ENVIRONMENT =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|template '[^']*' not found|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
+/**
+ * The sandbox provider has no template of the factory's (E2B answers `404: template 'aifactory-sandbox:4' not
+ * found`). Bound to the factory's own template name, so an application failure that says a template of its own
+ * is missing is not taken for it.
+ */
+export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
+
+const ENVIRONMENT_PATTERN =
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
+
+const ENVIRONMENT = {
+  test: (error: string) => ENVIRONMENT_PATTERN.test(error) || SANDBOX_TEMPLATE_MISSING.test(error),
+}
 
 /**
  * An agent that used all the time a run gives it. Nothing around it failed: a new run of the same issue on

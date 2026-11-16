@@ -1,3 +1,4 @@
+import { SANDBOX_TEMPLATE_MISSING } from '../../../shared/panel'
 import { settingsOff, type DoctorTriedSentences } from '../../../shared/doctor-say'
 
 import type { Copy } from './en'
@@ -419,7 +420,7 @@ export const ptBR: Copy = {
         cause: (v) =>
           `O provedor de sandbox recusou a última execução deste repositório (tarefa ${v.taskId}, ${v.at}): ${v.error}`,
         repair: (v) =>
-          /template '[^']*' not found/i.test(v.error ?? '')
+          SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
             : 'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
       },

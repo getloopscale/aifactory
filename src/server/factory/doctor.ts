@@ -2,6 +2,7 @@ import { parseDocument } from 'yaml'
 
 import {
   retryableFailure,
+  SANDBOX_TEMPLATE_MISSING,
   type DoctorItem,
   type DoctorItemId,
   type PublishMode,
@@ -502,7 +503,7 @@ export function recipeItem(recipe: Read<RecipeFacts>): DoctorItem {
   )
 }
 
-const NO_CREDIT = /Status code 402|spend_limit|usage limit exceeded|template '[^']*' not found/i
+const NO_CREDIT = /Status code 402|spend_limit|usage limit exceeded/i
 const BAD_KEY = /Status code 401|invalid api key/i
 
 /**
@@ -512,7 +513,8 @@ const BAD_KEY = /Status code 401|invalid api key/i
 export function providerRefusal(detail: Record<string, unknown> | null | undefined): boolean {
   const error = String(detail?.error ?? '')
   if (BAD_KEY.test(error)) return true
-  return retryableFailure(detail) === 'environment' && NO_CREDIT.test(error)
+  if (retryableFailure(detail) !== 'environment') return false
+  return NO_CREDIT.test(error) || SANDBOX_TEMPLATE_MISSING.test(error)
 }
 
 export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {

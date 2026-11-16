@@ -1,3 +1,5 @@
+import { SANDBOX_TEMPLATE_MISSING } from './panel'
+
 /**
  * The sentences of the repository doctor for an item that is not fine. The doctor sends the code and the
  * values with each item, so the panel can say the same thing in the owner's language; the English here is
@@ -222,7 +224,7 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
     cause: (v) =>
       `The sandbox provider refused the last run of this repository (task ${v.taskId}, ${v.at}): ${v.error}`,
     repair: (v) =>
-      /template '[^']*' not found/i.test(v.error ?? '')
+      SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
         ? 'Build the sandbox template: node --env-file=.env.local scripts/build-e2b-template.mts. The task retries itself once the provider has it.'
         : 'Add credit to the sandbox provider, or fix its key on the server. The task retries itself once the provider accepts.',
   },
