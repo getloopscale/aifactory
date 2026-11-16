@@ -975,6 +975,79 @@ export class Run {
     return !approved
   }
 
+  /** The task's recorded pull request, read by its number; undefined when none is recorded or it cannot be read as one. */
+  private async recordedPullRequest() {
+    const { row, api } = this.c
+    const number = Number(/\/pull\/(\d+)$/.exec(row.pullRequestUrl ?? '')?.[1])
+    if (!this.c.continuation || !number) return undefined
+    // A pull request that is gone is not one to reopen. One that could not be read is not judged as if its
+    // state were known: the error fails the run, which repeats when GitHub was only failing.
+    return api.readPullRequest(row.repository, this.c.token, number).catch((error: unknown) => {
+      if (/^GitHub answered 404\b/.test(error instanceof Error ? error.message : ''))
+        return undefined
+      throw error
+    })
+  }
+
+  /**
+   * A task sent back on its branch whose recorded pull request is closed (not merged): GitHub keeps the old
+   * head of a closed pull request, so judging it would judge a stale commit. When the agent changed nothing,
+   * the run goes on with the branch's head to the checks and the review; `reopenedOrEmpty` then settles the
+   * pull request before one is opened.
+   */
+  private async closedPullRequestContinued(): Promise<{ sha: string } | undefined> {
+    const { continuation } = this.c
+    if (!continuation || continuation.plain || !this.remoteHead) return undefined
+    const pull = await this.recordedPullRequest()
+    if (!pull || pull.state !== 'closed' || pull.merged) return undefined
+    if (!(await this.hasNothingToCommit())) return undefined
+    return { sha: this.remoteHead }
+  }
+
+  /**
+   * Before a pull request is opened for a run sent back: when the recorded one is closed and unmerged, it is
+   * reopened (GitHub moves its head to the branch) if the branch has something ahead of its base. A branch
+   * with nothing ahead can have no pull request (GitHub rejects an empty one), so the task is handed over
+   * with that said instead of failing after the checks and the review.
+   */
+  private async reopenedOrEmpty(sha: string): Promise<RunResult | undefined> {
+    const { deps, taskId, row, api, branch } = this.c
+    const pull = await this.recordedPullRequest()
+    if (!pull || pull.state === 'open') return undefined
+    const base = integrationBranch(this.c.repo)
+    const ahead = await api.branchAhead(row.repository, this.c.token, base, branch)
+    if (ahead && ahead.aheadBy > 0) {
+      // A merged one stays merged; a closed one that GitHub will not reopen is replaced by a new one.
+      if (!pull.merged) {
+        await api.reopenPullRequest(row.repository, this.c.token, pull.number).catch((error) =>
+          console.warn(
+            JSON.stringify({
+              event: 'pull_request_reopen_failed',
+              taskId,
+              repository: row.repository,
+              pullRequest: pull.number,
+              fallback: 'a new pull request is opened from the branch',
+              error: String(error),
+            }),
+          ),
+        )
+      }
+      return undefined
+    }
+    const reason = `the pull request ${pull.url} is ${pull.merged ? 'merged' : 'closed'} and the branch has nothing ahead of ${base}, so there is nothing to open a pull request for`
+    await enterStage(deps.db, taskId, 'handoff', {
+      branch,
+      sha,
+      reason,
+      cause: 'checks_unchanged' satisfies HandoffCause,
+      pullRequestUrl: pull.url,
+      unchanged: true,
+      agentSummary: this.summary.slice(0, 4_000),
+      costUsd: this.cost,
+    })
+    return { status: 'handoff', branch, sha, pullRequestUrl: pull.url, reason }
+  }
+
   /**
    * A person asked for a change and the agent found nothing to change (the test was already there,
    * say). That is an answer, not a failure: the pull request stays as it was, and the person reads why.
@@ -1203,6 +1276,8 @@ export class Run {
 
     // Work a review never approved is not left as it is: it goes on to the checks and the review.
     if (await this.unreviewedHeadLeftAsItIs()) return { sha: this.remoteHead }
+    const closed = await this.closedPullRequestContinued()
+    if (closed) return closed
     const unchanged = await this.answeredWithNoChange(first)
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)
@@ -1507,6 +1582,8 @@ export class Run {
       heldForReview(row.repository, this.touched, deps.ownRepository),
     )
     if (held) return this.handOver(sha, attempt, here, outcome, [], held)
+    const empty = await this.reopenedOrEmpty(sha)
+    if (empty) return empty
     state.current = 'pr'
     await enterStage(deps.db, taskId, 'pr', { branch, sha })
     const pull = await api.openPullRequest(row.repository, this.c.token, {
@@ -1608,6 +1685,8 @@ export class Run {
       (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
         : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
+    const empty = await this.reopenedOrEmpty(sha)
+    if (empty) return empty
     state.current = 'pr'
     const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,

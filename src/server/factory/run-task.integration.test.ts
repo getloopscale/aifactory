@@ -2477,6 +2477,87 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  describe('when the recorded pull request is closed and the agent changes nothing', () => {
+    async function sentBackOnClosed(aheadBy: number, plain = false) {
+      const id = await seedTask()
+      branchPushed()
+      repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed' })
+      repo().ahead('workspace', 'factory/7', aheadBy)
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async () => {
+          dirty = false
+          return { ok: true, summary: 'Nothing to merge.' }
+        },
+      }
+      // The branch moved on after its pull request was closed: its head is not the pull request's.
+      const head = 'f'.repeat(40)
+      const branchHead = (command: string) => {
+        if (command.includes('ls-remote')) return { stdout: `${head}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${head}\n` }
+        return undefined
+      }
+      const result = await runTask(
+        deps(new FakeSandbox(changed(branchHead)), { harness: builder }),
+        id,
+        undefined,
+        plain ? { feedback: '', plain: true } : { feedback: 'Merge workspace.', fromChecks: true },
+      )
+      return { id, result }
+    }
+
+    it('hands over without opening a pull request when the branch has nothing ahead of its base', async () => {
+      const { result } = await sentBackOnClosed(0)
+      expect(result).toMatchObject({
+        status: 'handoff',
+        reason: expect.stringContaining('nothing ahead of workspace'),
+      })
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
+      expect(githubApi.callsTo('reopenPullRequest')).toHaveLength(0)
+    })
+
+    it('hands over without opening a pull request on a plain continuation too', async () => {
+      const { result } = await sentBackOnClosed(0, true)
+      expect(result).toMatchObject({ status: 'handoff' })
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
+    })
+
+    it('opens a new pull request when GitHub will not reopen the closed one', async () => {
+      githubApi.fail('reopenPullRequest', new Error('GitHub answered 422 reopening paulo/app#12'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const { id, result } = await sentBackOnClosed(2)
+      expect(result.status).not.toBe('failed')
+      const logged = warn.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes('pull_request_reopen_failed'))
+      warn.mockRestore()
+      expect(logged).toHaveLength(1)
+      expect(JSON.parse(logged[0])).toMatchObject({
+        taskId: id,
+        repository: 'paulo/app',
+        pullRequest: 12,
+        error: expect.stringContaining('GitHub answered 422'),
+      })
+    })
+
+    it('reopens it when the branch is ahead of its base', async () => {
+      const { id, result } = await sentBackOnClosed(2)
+      expect(githubApi.answered('reopenPullRequest').map(([number]) => number)).toEqual([12])
+      expect(result.status).not.toBe('failed')
+      const stages = await stagesOf(id)
+      expect(stages).toContain('verify')
+      expect(stages).toContain('review')
+      // The checks judged the branch's head, not the closed pull request's old one.
+      expect(seen.checkRuns.map((c) => c.headSha)).toContain('f'.repeat(40))
+      expect(seen.checkRuns.map((c) => c.headSha)).not.toContain('oldsha1')
+    })
+  })
+
   it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
     const id = await seedTask()
     branchPushed()

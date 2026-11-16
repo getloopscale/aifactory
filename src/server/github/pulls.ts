@@ -265,6 +265,8 @@ export type GithubApi = {
   /** Takes a draft pull request out of draft and gives it `title`. Throws when GitHub will not. */
   markReadyForReview(repo: string, token: string, number: number, title: string): Promise<void>
   disableAutoMerge(repo: string, token: string, number: number): Promise<void>
+  /** Reopens a closed pull request; GitHub then moves its head to the branch's. Throws when GitHub will not. */
+  reopenPullRequest(repo: string, token: string, number: number): Promise<void>
   /** Every check run and commit status on a commit, with what each said. */
   checkReports(repo: string, token: string, sha: string): Promise<CheckReport[]>
   /** The check runs and commit statuses a commit has so far. */
@@ -1056,6 +1058,17 @@ export function createGithubApi(
         [201],
       )
       return String(((await response.json()) as { id: number }).id)
+    },
+
+    async reopenPullRequest(repo, token, number) {
+      await ensure(
+        await call(repo, token, `/pulls/${number}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ state: 'open' }),
+        }),
+        `reopening ${repo}#${number}`,
+        [200],
+      )
     },
 
     async closeIssue(repo, token, issueNumber) {
