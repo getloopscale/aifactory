@@ -6,16 +6,19 @@ import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { coordinatorAction, ingress, stageEvent, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
+import { jobBackend } from '../factory/job-backend'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  // A pass reads and keeps the holds of the `prioritise` playbook, which live in TheoKit's job table.
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table theokit_jobs, coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
