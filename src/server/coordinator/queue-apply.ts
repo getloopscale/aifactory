@@ -2,8 +2,6 @@ import { sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 
-import { QUEUE } from './queue-order'
-
 /**
  * The write of the `prioritise` playbook: the pending `run-task` job of a task goes just ahead of the
  * pending jobs of the other tasks of its repository, and those jobs wait until it is done, so they do
@@ -40,20 +38,16 @@ async function releaseOwn(db: QueueDb, fixTaskId: number): Promise<void> {
 }
 
 /**
- * Holds the pending jobs of the repository's other tasks for `QUEUE.holdMs` past now, or past the moment the
- * fix's own job becomes available when that is later, keeping the `available_at` each had in its input as
+ * Holds the pending jobs of the repository's other tasks until `releaseHolds` gives them back, which no clock
+ * does for it ('infinity'), keeping the `available_at` each had in its input as
  * `heldFrom`. It is run again on every pass and as a job is queued, so the hold lasts until the fix integrates
  * or fails (`releaseHolds` ends it) and covers a job queued after the decision.
  */
 export async function holdOthers(db: QueueDb, fixTaskId: number): Promise<void> {
   await releaseOwn(db, fixTaskId)
-  const hold = sql`make_interval(secs => ${QUEUE.holdMs / 1000})`
   await db.execute(
     sql`with pending as (${PENDING(fixTaskId)}),
-        until as (
-          select greatest(now(), coalesce((select max(available_at) from theokit_jobs
-            where name = 'run-task' and failed_at is null and input->>'taskId' = ${String(fixTaskId)}), now())) + ${hold} as at
-        )
+        until as (select 'infinity'::timestamptz as at)
         update theokit_jobs set
           input = input || jsonb_build_object('heldFrom', coalesce(input->>'heldFrom', available_at::text)),
           available_at = (select at from until)

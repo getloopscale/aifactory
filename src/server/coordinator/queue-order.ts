@@ -14,11 +14,6 @@ export const QUEUE = {
   windowMs: 6 * 3_600_000,
   /** On how many distinct tasks of the repository a test has to fail. */
   minTasks: 2,
-  /**
-   * How far past now the other queued tasks are held: a backstop long enough that a coordinator that is down
-   * does not free them while the fix runs. `releaseHolds` ends the hold when the fix integrates or fails.
-   */
-  holdMs: 30 * 24 * 3_600_000,
 } as const
 
 /** A task of the repository whose `run-task` job waits in the queue, in the order the queue serves them. */

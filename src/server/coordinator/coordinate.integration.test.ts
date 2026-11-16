@@ -808,7 +808,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     expect(await dequeue()).toEqual([])
   })
 
-  it('keeps the hold while the fix waits for an answer, and after a missed renewal', async () => {
+  it('keeps the hold while the fix waits for an answer or is handed over, and past any renewal', async () => {
     const { fix } = await incident()
     await coordinate(deps(), 'auto')
     await getDb().update(task).set({ stage: 'waiting' }).where(eq(task.id, fix))
@@ -816,10 +816,28 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     await coordinate(deps(), 'auto')
 
     const held = await getPool().query(
-      "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' and available_at > now() + interval '29 days'",
+      "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' and available_at = 'infinity'",
     )
     expect(held.rows[0].n).toBe(2)
     expect(await dequeue()).toEqual([])
+  })
+
+  it('keeps the hold through a handoff, and never brings an ended one back', async () => {
+    const { fix, other } = await incident()
+    await coordinate(deps(), 'auto')
+    await getDb().update(task).set({ stage: 'handoff' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([])
+
+    // The fix fails: the others are given back, and a retry of the fix does not hold them again.
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'failed' })
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+
+    expect((await dequeue())[0]).toBeDefined()
+    expect(other).toBeGreaterThan(0)
   })
 
   it('defers a second fix of the repository until the first is done', async () => {

@@ -7,7 +7,7 @@ import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions } from './exception-facts'
-import { readHeldTests, readQueueFacts } from './queue-facts'
+import { readHeldTests, readLatestEvents, readQueueFacts } from './queue-facts'
 import { QUEUE, isHeld, recogniseQueue } from './queue-order'
 import { maintainHolds } from './queue-hold'
 import { readFailureEvents } from './evolve-facts'
@@ -65,8 +65,13 @@ export async function coordinate(
   const now = new Date()
   // The reason of the failure the task is in now: its latest one, not every one of the window.
   const reasons = new Map<number, string[]>()
+  const latest = await readLatestEvents(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   for (const e of await readFailureEvents(deps.db, new Date(now.getTime() - QUEUE.windowMs), now)) {
-    reasons.set(e.taskId, [e.reason])
+    // Only the event the task is in now: a failure it moved on from says nothing of its present exception.
+    const current = latest.get(e.taskId)
+    if (current?.stage === e.stage && current.at.getTime() === e.at.getTime()) {
+      reasons.set(e.taskId, [e.reason])
+    }
   }
   const recorded = await readRecordedActions(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   for (const exception of exceptions) {
