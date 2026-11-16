@@ -40,6 +40,34 @@ export async function latestSendBackDecision(
 }
 
 /**
+ * What an intake written before it kept what it cleared gave up, read from the event it went back to: a
+ * resolved task says so on its event (or by its `resolve` decision), and a task that waited for checks
+ * names them there. When the event says the task waited for checks, the wait may have ended since without
+ * an event, so nothing safe is known and the send-back is not withdrawable.
+ */
+async function legacyRestore(
+  db: Database,
+  taskId: number,
+  before: { stage: string; detail: unknown },
+): Promise<{ resolvedSha: string | null; awaitingCiSha: string | null } | undefined> {
+  const detail = (before.detail ?? {}) as Record<string, unknown>
+  if (before.stage === 'done' && detail.awaitingChecks) return undefined
+  if (before.stage === 'done' && detail.resolved === true) {
+    return { resolvedSha: text(detail.sha), awaitingCiSha: null }
+  }
+  if (before.stage === 'done' && detail.decision === 'resolve') {
+    const [resolved] = await db
+      .select({ sha: decision.sha })
+      .from(decision)
+      .where(and(eq(decision.taskId, taskId), eq(decision.kind, 'resolve')))
+      .orderBy(desc(decision.id))
+      .limit(1)
+    return resolved?.sha ? { resolvedSha: resolved.sha, awaitingCiSha: null } : undefined
+  }
+  return { resolvedSha: null, awaitingCiSha: null }
+}
+
+/**
  * The send-back of a person that waits in `intake`: the latest event of the task is its intake, which
  * asks for changes and is not the factory's own. An intake written before it named its decision is
  * matched to the person's latest request, as `workToKeep` does.
@@ -60,14 +88,16 @@ export async function pendingSendBack(
   let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
   if (decisionId === undefined) decisionId = await latestSendBackDecision(db, taskId)
   if (decisionId === undefined) return undefined
-  // An intake written before it kept what it cleared cannot be undone safely: nothing else records it.
   const kept = detail.restore as Record<string, unknown> | undefined
-  if (!kept) return undefined
+  const restore = kept
+    ? { resolvedSha: text(kept.resolvedSha), awaitingCiSha: text(kept.awaitingCiSha) }
+    : await legacyRestore(db, taskId, before)
+  if (!restore) return undefined
   return {
     decisionId,
     back: before.stage,
     previous: { detail: before.detail, at: before.at },
-    restore: { resolvedSha: text(kept.resolvedSha), awaitingCiSha: text(kept.awaitingCiSha) },
+    restore,
   }
 }
 

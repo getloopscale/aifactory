@@ -689,17 +689,32 @@ describe('actions', () => {
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ stage: 'done', resolvedSha: 'abc', awaitingCiSha: 'abc' })
 
-    // An intake written before it kept what it cleared cannot be undone safely: it is refused.
-    const old = await seed('done', { headSha: 'abc', resolvedSha: 'abc' })
-    await getDb().insert(stageEvent).values({ taskId: old, stage: 'done', detail: {} })
-    await requestChanges(deps(), old, 'note')
-    await getDb()
-      .update(stageEvent)
-      .set({ detail: { decision: 'request_changes', note: 'note' } })
-      .where(and(eq(stageEvent.taskId, old), eq(stageEvent.stage, 'intake')))
-    await expect(withdrawSendBack(deps(), old)).rejects.toThrow()
-    const [again] = await getDb().select().from(task).where(eq(task.id, old))
-    expect(again.stage).toBe('intake')
+    // An intake written before it kept what it cleared: what it gave up is read from the event it went back to.
+    const legacy = async (stageDetail: Record<string, unknown>, sha: string | null) => {
+      const old = await seed('done', { headSha: 'abc', resolvedSha: sha })
+      await getDb().insert(stageEvent).values({ taskId: old, stage: 'done', detail: stageDetail })
+      await requestChanges(deps(), old, 'note')
+      await getDb()
+        .update(stageEvent)
+        .set({ detail: { decision: 'request_changes', note: 'note' } })
+        .where(and(eq(stageEvent.taskId, old), eq(stageEvent.stage, 'intake')))
+      return old
+    }
+    const resolved = await legacy({ resolved: true, sha: 'r1' }, 'r1')
+    await withdrawSendBack(deps(), resolved)
+    const [back] = await getDb().select().from(task).where(eq(task.id, resolved))
+    expect(back).toMatchObject({ stage: 'done', resolvedSha: 'r1', awaitingCiSha: null })
+
+    const plain = await legacy({}, null)
+    await withdrawSendBack(deps(), plain)
+    const [plainRow] = await getDb().select().from(task).where(eq(task.id, plain))
+    expect(plainRow.stage).toBe('done')
+
+    // A task that waited for checks may have stopped waiting since: nothing safe is known.
+    const waiting = await legacy({ awaitingChecks: ['ci'] }, null)
+    await expect(withdrawSendBack(deps(), waiting)).rejects.toThrow()
+    const [stuck] = await getDb().select().from(task).where(eq(task.id, waiting))
+    expect(stuck.stage).toBe('intake')
   })
 
   it('keeps a change a cron made while the send-back waited for the task lock', async () => {
