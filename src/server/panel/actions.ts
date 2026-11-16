@@ -350,6 +350,28 @@ export async function sendBackAutomatically(deps: ActionDeps, taskId: number, no
 }
 
 /**
+ * Sends a handed-over task back to its agent because the coordinator decided so, with no person asking:
+ * on its branch with the note as feedback, or, when `note` is empty, as a plain continuation of the branch
+ * that goes through the checks and the review again. Like an automatic send-back, nothing is decided in
+ * anybody's name; the coordinator's own record says why (`coordinator/apply.ts`).
+ */
+export async function sendBackByCoordinator(deps: ActionDeps, taskId: number, note: string) {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'coordinator_send_back')
+  const from = stagesWhere('coordinator_send_back', row)
+  const text = note.slice(0, NOTE_MAX)
+  if (text === '') {
+    await requeue(deps, taskId, from, 'automatic_retry', '', row.headSha, {
+      note: '',
+      plain: true,
+      preAgent: false,
+    })
+    return
+  }
+  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha)
+}
+
+/**
  * Releases a task from the panel: its pull request is merged and a full release is published. The
  * click is the approval, so it is recorded as one. Everything the commit must satisfy is checked in
  * `release`, and a refusal is shown as it is.

@@ -96,7 +96,7 @@ import {
 } from './agent-time'
 import type { RepoConfig } from './repo-config'
 import { labelsWithRepoChoice } from './repo-config'
-import type { Parked, RunResult, RunTaskDeps } from './run-types'
+import type { HandoffCause, Parked, RunResult, RunTaskDeps } from './run-types'
 import {
   createIsolatedSandbox,
   restoreIsolatedSandbox,
@@ -962,6 +962,7 @@ export class Run {
       branch,
       sha: row.headSha,
       reason,
+      cause: 'checks_unchanged' satisfies HandoffCause,
       pullRequestUrl: row.pullRequestUrl,
       unchanged: true,
       agentSummary: first.summary.slice(0, 4_000),
@@ -1557,6 +1558,9 @@ export class Run {
         branch,
         sha,
         reason,
+        cause: (outcome.verdict === 'invalid'
+          ? 'review_unusable'
+          : 'review_plateau') satisfies HandoffCause,
         pullRequestUrl: pull.url,
         findings: outcome.findings,
         costUsd: this.cost,

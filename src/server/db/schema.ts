@@ -667,3 +667,58 @@ export const metricSignal = pgTable(
   },
   (t) => [unique('metric_signal_once').on(t.metric, t.repository, t.day, t.rule)],
 )
+
+/** What the coordinator recognises as an exception of a task (`coordinator/exceptions.ts`). */
+export const EXCEPTION_KINDS = [
+  'checks_unchanged',
+  'review_plateau',
+  'review_unusable',
+  'handoff',
+  'stalled',
+  'orphaned',
+  'environment',
+  'failure',
+  'unknown',
+] as const
+
+/** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */
+export const COORDINATOR_ACTIONS = [
+  'send_back',
+  'review_again',
+  'retry_from_finding',
+  'escalate',
+] as const
+
+/**
+ * What became of a decision: `applied` went through the panel's own action, `trial` was only recorded
+ * because the coordinator runs in trial mode, `refused` was refused by the transition table, `failed` threw,
+ * and `escalated` left the task with a person.
+ */
+export const COORDINATOR_OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated'] as const
+
+/**
+ * One decision of the coordinator, applied or not, so every action taken with nobody watching can be read
+ * afterwards. One exception gets one decision per head of the task: a later pass that sees it again on the
+ * same commit records nothing.
+ */
+export const coordinatorAction = pgTable(
+  'coordinator_action',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    exceptionKind: text('exception_kind', { enum: EXCEPTION_KINDS }).notNull(),
+    /** The head the exception was seen on, or `none` for a task that never pushed. */
+    headSha: text('head_sha').notNull(),
+    action: text('action', { enum: COORDINATOR_ACTIONS }).notNull(),
+    /** Why, as a person reads it. */
+    reason: text('reason').notNull(),
+    /** What a model drafted for the action. Nothing drafts in this version. */
+    draft: jsonb('draft'),
+    outcome: text('outcome', { enum: COORDINATOR_OUTCOMES }).notNull(),
+    costUsd: real('cost_usd').notNull().default(0),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique('coordinator_action_once_per_head').on(t.taskId, t.exceptionKind, t.headSha)],
+)

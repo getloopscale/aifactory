@@ -41,11 +41,12 @@ src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
-                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`)
+                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`, `coordinate`)
   metrics/          the factory's own indicators, their daily points and control bands (`config.ts`)
   knowledge/        the owner's knowledge repository: mirror, sync, the slice each agent gets, notes
   db/               Postgres config, pool, Drizzle schema, health probe
   ingest/           GitHub delivery: decide, record (ingress + task), signed webhook handler
+  coordinator/      the factory's exceptions: facts, recognition, one decision, applying it (ADR 0011)
   factory/          one task end to end: sandbox, agent, push, stage history; the repository doctor
   github/           GitHub App auth (repository-scoped tokens) and issue reads
   jobs/             defineJob files; `run-task` runs a task, `prove-checks` proves proposed checks
@@ -167,6 +168,19 @@ reads that file, not a convention.
   changeset that names no package; a change only to private or ignored packages passes with no changeset.
   The script repeats the rules of `changesets.ts` in JavaScript a sandbox can run, so a change to which
   package counts as published goes into both.
+- **The coordinator decides from a closed set and records every decision.** `coordinator/exception-facts.ts`
+  reads and decides nothing; `exceptions.ts` recognises exceptions over those facts and reads nothing, and a
+  fact that could not be read is an exception of kind `unknown`; `decide.ts` is a pure function from an
+  exception and the decisions already recorded to one action (`send_back`, `review_again`,
+  `retry_from_finding` or `escalate`); `apply.ts` is the only module with side effects and goes through the
+  panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding`), so
+  `transitions.ts` is asked first. A handoff records its `cause`, and an older one is recognised by the start
+  of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head; a
+  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. `FACTORY_COORDINATOR_MODE`
+  is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
+  calls a merge, and `merges-nothing.test.ts` fails if one does. A new exception is a new kind in
+  `EXCEPTION_KINDS` and a new entry in `BY_KIND`; a new action goes through an action of the panel, never
+  around it.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

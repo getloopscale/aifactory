@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A coordinator looks at the factory's exceptions every ten minutes (the `coordinate` cron) and decides one action for each from a closed set. Required checks that failed on a run that changed nothing send the task back on its branch with what the checks reported; a review with no usable verdict sends the branch through the checks and the review again; a run the supervisor found stalled or orphaned is retried from its finding, as the panel does. An environment failure past its automatic retries, a fact it could not read and anything else stay with a person. Each decision is recorded once per exception and head in `coordinator_action` with its reason and outcome (`applied`, `trial`, `refused`, `failed` or `escalated`), and a task gets at most two applied actions before the next one is escalated with the two it tried. `FACTORY_COORDINATOR_MODE` is `off`, `trial` (decide and record, apply nothing) or `auto`, and starts in `trial`. A handoff now records its `cause` (`review_plateau`, `review_unusable` or `checks_unchanged`) next to its reason. The coordinator merges nothing and uses no model (#124)
+
 ### Fixed
 
 - Approved work whose pull request conflicts with the integration branch is no longer thrown away. Before, the factory deleted the task's branch, which closed the pull request, and ran the task again from the start. Now the task goes back on its own branch with a note to merge the integration branch, regenerate generated files with their scripts, and change nothing else; auto-merge is turned off first, and the merge then goes through the checks and the review. A task whose branch is gone still starts over. A commit the agent makes by itself, as `git merge` does, is now pushed as it is, where before a clean checkout read as no change (#122)

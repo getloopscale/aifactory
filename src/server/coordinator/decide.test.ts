@@ -1,0 +1,130 @@
+import { describe, expect, it } from 'vitest'
+
+import { decide, MAX_APPLIED, seen, type RecordedAction } from './decide'
+import type { TaskException } from './exceptions'
+
+const exception = (over: Partial<TaskException> = {}): TaskException => ({
+  kind: 'checks_unchanged',
+  taskId: 7,
+  head: 'abc1234def',
+  evidence: 'CI:\n~~~~text\nERROR: lint exited with 1\n~~~~',
+  ...over,
+})
+
+const recorded = (over: Partial<RecordedAction> = {}): RecordedAction => ({
+  exceptionKind: 'stalled',
+  headSha: 'old0000',
+  action: 'retry_from_finding',
+  outcome: 'applied',
+  ...over,
+})
+
+describe('whether an exception was already decided', () => {
+  it('is decided when a row names its kind on the same head', () => {
+    const row = recorded({ exceptionKind: 'checks_unchanged', headSha: 'abc1234def' })
+    expect(seen(exception(), [row])).toBe(true)
+  })
+
+  it('is not decided on another head, or for another kind', () => {
+    expect(seen(exception(), [recorded({ exceptionKind: 'checks_unchanged' })])).toBe(false)
+    expect(seen(exception(), [recorded({ headSha: 'abc1234def' })])).toBe(false)
+    expect(seen(exception(), [])).toBe(false)
+  })
+})
+
+describe('deciding one action for an exception', () => {
+  it('sends work back on its branch with the output of the checks that failed', () => {
+    const decided = decide(exception(), [])
+    expect(decided).toEqual({
+      action: 'send_back',
+      reason:
+        'the required checks failed on abc1234 and the last run changed nothing: sent back on its branch with what the checks reported',
+      note: "The coordinator sent this back: the repository's required checks failed on abc1234 and the last run changed nothing. Fix what they report.\n\nCI:\n~~~~text\nERROR: lint exited with 1\n~~~~",
+    })
+  })
+
+  it('escalates failed checks whose output the handoff did not keep', () => {
+    expect(decide(exception({ evidence: '' }), [])).toEqual({
+      action: 'escalate',
+      reason:
+        'the required checks failed on abc1234 and the last run changed nothing, but the handoff kept no output of the checks to send back',
+    })
+  })
+
+  it('reviews again work whose review gave no usable verdict', () => {
+    const unusable = exception({ kind: 'review_unusable', evidence: 'the review gave no verdict' })
+    expect(decide(unusable, [])).toEqual({
+      action: 'review_again',
+      reason:
+        'the review gave no usable verdict on abc1234 (the review gave no verdict): the same branch runs again to be reviewed',
+    })
+  })
+
+  it('retries a stalled or orphaned run from the finding, as the panel does', () => {
+    const stalled = exception({
+      kind: 'stalled',
+      evidence: 'no event for 50 minutes',
+      findingId: 11,
+    })
+    expect(decide(stalled, [])).toEqual({
+      action: 'retry_from_finding',
+      findingId: 11,
+      reason:
+        'the supervisor found the run stalled (no event for 50 minutes): retried from its finding',
+    })
+    const orphaned = exception({ kind: 'orphaned', evidence: 'the job is gone', findingId: 12 })
+    expect(decide(orphaned, [])).toMatchObject({ action: 'retry_from_finding', findingId: 12 })
+  })
+
+  it('escalates a finding that names none, since there is nothing to retry from', () => {
+    expect(decide(exception({ kind: 'stalled', evidence: 'x' }), [])).toEqual({
+      action: 'escalate',
+      reason: 'the supervisor found the run stalled (x), but no finding was named to retry from',
+    })
+  })
+
+  it('leaves the environment to a person past its automatic retries', () => {
+    expect(decide(exception({ kind: 'environment', evidence: 'Status code 402' }), [])).toEqual({
+      action: 'escalate',
+      reason:
+        'the environment failed past its automatic retries (Status code 402): credentials, spend limits and the GitHub App are for a person',
+    })
+  })
+
+  it('escalates a fact it could not read', () => {
+    expect(decide(exception({ kind: 'unknown', evidence: 'could not read x: y' }), [])).toEqual({
+      action: 'escalate',
+      reason: 'the coordinator could not tell what is wrong: could not read x: y',
+    })
+  })
+
+  it('escalates every other exception, saying it has no action for it', () => {
+    for (const kind of ['review_plateau', 'handoff', 'failure'] as const) {
+      expect(decide(exception({ kind, evidence: 'why' }), [])).toEqual({
+        action: 'escalate',
+        reason: `the coordinator has no action for ${kind} yet: why`,
+      })
+    }
+  })
+
+  it('escalates the exception after two applied actions, naming them', () => {
+    expect(MAX_APPLIED).toBe(2)
+    const tried = [
+      recorded({ action: 'retry_from_finding', exceptionKind: 'stalled', headSha: 'old0000aa' }),
+      recorded({ action: 'review_again', exceptionKind: 'review_unusable', headSha: 'mid1111bb' }),
+    ]
+    expect(decide(exception(), tried)).toEqual({
+      action: 'escalate',
+      reason:
+        'the coordinator already applied retry_from_finding for stalled on old0000, review_again for review_unusable on mid1111 on this task: a person decides what comes next',
+    })
+  })
+
+  it('counts only applied actions toward the limit', () => {
+    const notApplied = (['trial', 'refused', 'failed', 'escalated'] as const).map((outcome) =>
+      recorded({ outcome }),
+    )
+    expect(decide(exception(), notApplied).action).toBe('send_back')
+    expect(decide(exception(), [recorded()]).action).toBe('send_back')
+  })
+})

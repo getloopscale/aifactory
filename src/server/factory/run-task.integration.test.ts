@@ -1,5 +1,5 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -1100,6 +1100,15 @@ describe('runTask', () => {
   })
 })
 
+/** What the run recorded when it handed the task over. */
+const handoffDetail = async (taskId: number) =>
+  (
+    await getDb()
+      .select({ detail: stageEvent.detail })
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, taskId), eq(stageEvent.stage, 'handoff')))
+  )[0]?.detail
+
 const reviewsOf = async (taskId: number) =>
   getDb().select().from(review).where(eq(review.taskId, taskId)).orderBy(review.id)
 
@@ -1269,6 +1278,7 @@ describe('runTask review loop', () => {
     expect(stages).not.toContain('done')
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ stage: 'handoff', pullRequestUrl: PR_URL })
+    expect(await handoffDetail(id)).toMatchObject({ cause: 'review_plateau' })
   })
 
   const roundsOf = (...sizes: number[]) =>
@@ -1343,6 +1353,7 @@ describe('runTask review loop', () => {
     expect(builder.resumed).toHaveLength(0)
     expect((await reviewsOf(id))[0]).toMatchObject({ verdict: 'invalid' })
     expect(seen.drafts).toEqual([true])
+    expect(await handoffDetail(id)).toMatchObject({ cause: 'review_unusable' })
   })
 
   it('does not take an approval that lists a blocking finding', async () => {
@@ -2229,6 +2240,7 @@ describe('runTask continuing from a branch a person sent back', () => {
     )[0]
     expect(handoff.detail).toMatchObject({
       reason: expect.stringMatching(/required checks failed and the agent changed nothing/),
+      cause: 'checks_unchanged',
       unchanged: true,
     })
   })

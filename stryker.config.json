@@ -38,6 +38,8 @@
     "src/server/factory/recipe.ts",
     "src/server/factory/auto-retry.ts",
     "src/server/factory/transitions.ts",
+    "src/server/coordinator/exceptions.ts",
+    "src/server/coordinator/decide.ts",
     "src/server/factory/changesets.ts",
     "src/server/factory/changeset-check.ts",
     "src/server/factory/ci-wait.ts",
