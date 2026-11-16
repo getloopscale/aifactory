@@ -4,6 +4,7 @@ import { pollAwaitingIntegrations } from '../factory/await-ci'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { releaseModeFromEnv } from '../factory/deps'
 import { adoptPromotions, pollPromotionWaits } from '../factory/promotion-merge'
+import { passLine } from '../factory/pass-line'
 import { mainProcessOnly } from '../factory/worker-only'
 import { createPromotionApi } from '../github/promotion-api'
 import { retryAutomatically, sendBackAutomatically } from '../panel/actions'
@@ -34,40 +35,27 @@ export default defineCron('integrate-after-ci', {
       return
     }
     const actions = deps
-    const promotions = await pollPromotionWaits({ db: deps.db, github: deps.github, api: deps.api })
-    const { waiting: promotionsWaiting, ...promotionsMoved } = promotions
-    if (Object.values(promotionsMoved).some((list) => list.length > 0)) {
-      console.log(
-        JSON.stringify({
-          event: 'promotion_after_ci',
-          waiting: promotionsWaiting,
-          ...promotionsMoved,
-        }),
-      )
-    }
-    const adopted = await adoptPromotions({ db: deps.db, github: deps.github, api: deps.api })
-    if (adopted.adopted.length > 0 || adopted.errors.length > 0) {
-      console.log(JSON.stringify({ event: 'promotion_adopted', ...adopted }))
-    }
-    const result = await pollAwaitingIntegrations({
-      db: deps.db,
-      github: deps.github,
-      api: deps.api,
-      checks: createPromotionApi(),
-      releaseMode: releaseModeFromEnv(process.env),
-      sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
-      startOver: (taskId) => retryAutomatically(actions, taskId),
-    })
-    const { waiting, ...moved } = result
-    if (Object.values(moved).some((list) => list.length > 0)) {
-      console.log(JSON.stringify({ event: 'integrate_after_ci', waiting, ...moved }))
-    }
-    const releases = await pollAwaitingReleases({ db: deps.db, github: deps.github, api: deps.api })
-    const { waiting: releasesWaiting, ...releasesMoved } = releases
-    if (Object.values(releasesMoved).some((list) => list.length > 0)) {
-      console.log(
-        JSON.stringify({ event: 'release_after_ci', waiting: releasesWaiting, ...releasesMoved }),
-      )
+    const github = { db: deps.db, github: deps.github, api: deps.api }
+    const passes: [string, () => Promise<Record<string, unknown>>][] = [
+      ['promotion_after_ci', () => pollPromotionWaits(github)],
+      ['promotion_adopted', () => adoptPromotions(github)],
+      [
+        'integrate_after_ci',
+        () =>
+          pollAwaitingIntegrations({
+            ...github,
+            checks: createPromotionApi(),
+            releaseMode: releaseModeFromEnv(process.env),
+            sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
+            startOver: (taskId) => retryAutomatically(actions, taskId),
+          }),
+      ],
+      ['release_after_ci', () => pollAwaitingReleases(github)],
+    ]
+    // In this order: a promotion GitHub merged ends its hold, so the integrations it held go in on this pass.
+    for (const [event, pass] of passes) {
+      const line = passLine(event, await pass())
+      if (line) console.log(line)
     }
   }),
 })
