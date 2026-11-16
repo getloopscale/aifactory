@@ -114,6 +114,18 @@ describe('a 5xx from GitHub', () => {
     expect(count()).toBe(3)
   })
 
+  it('never asks a write again after the network dropped it', async () => {
+    let calls = 0
+    const down = async (): Promise<Response> => {
+      calls += 1
+      throw new TypeError('fetch failed')
+    }
+    await expect(createGithubApi(down, noWait).createCheckRun('o/r', 't', check)).rejects.toThrow(
+      'fetch failed',
+    )
+    expect(calls).toBe(1)
+  })
+
   it('never asks a write again', async () => {
     const { fetch, count } = sequence([502, 201])
     await expect(createGithubApi(fetch, noWait).createCheckRun('o/r', 't', check)).rejects.toThrow(

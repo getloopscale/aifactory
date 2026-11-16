@@ -871,6 +871,7 @@ export const ptBR: Copy = {
       retry_from_finding: 'Tentar de novo a partir de um achado',
       scope: 'Delimitar uma continuação',
       release: 'Publicar',
+      prioritise: 'Passar à frente na fila',
       escalate: 'Encaminhar',
     } as Record<string, string>,
     exceptions: {
@@ -886,6 +887,7 @@ export const ptBR: Copy = {
       release_ready: 'Pronta para publicar',
       release_retry: 'Publicação a repetir',
       release_blocked: 'Publicação bloqueada',
+      queue_blocked: 'Correção esperando na fila',
     } as Record<string, string>,
   },
   inbox: {
