@@ -632,6 +632,7 @@ export const en = {
       retry_from_finding: 'Retry from a finding',
       scope: 'Scope a follow-up',
       release: 'Release',
+      prioritise: 'Move ahead in the queue',
       escalate: 'Escalate',
     } as Record<string, string>,
     exceptions: {
@@ -647,6 +648,7 @@ export const en = {
       release_ready: 'Ready to release',
       release_retry: 'Release to retry',
       release_blocked: 'Release blocked',
+      queue_blocked: 'Fix waiting in the queue',
     } as Record<string, string>,
   },
   inbox: {

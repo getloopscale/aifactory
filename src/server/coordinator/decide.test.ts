@@ -230,3 +230,20 @@ describe('deciding a release of a repository', () => {
     expect(decide(exception(), [released, recorded()]).action).toBe('send_back')
   })
 })
+
+describe('prioritising a task in the queue', () => {
+  const blocked = exception({ kind: 'queue_blocked', head: 'a test', evidence: 'the test failed' })
+
+  it('moves the task ahead', () => {
+    expect(decide(blocked, [])).toMatchObject({ action: 'prioritise' })
+  })
+
+  it('is not counted by the limit of applied actions', () => {
+    const applied = recorded({ action: 'prioritise', exceptionKind: 'queue_blocked' })
+    const two = [recorded(), recorded({ headSha: 'o2' })]
+    expect(decide(blocked, two)).toMatchObject({ action: 'prioritise' })
+    expect(
+      decide(exception({ kind: 'stalled', findingId: 1 }), [applied, applied, applied]),
+    ).toMatchObject({ action: 'retry_from_finding' })
+  })
+})
