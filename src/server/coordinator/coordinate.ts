@@ -2,6 +2,8 @@ import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions } from './exception-facts'
+import { readQueueFacts } from './queue-facts'
+import { recogniseQueue } from './queue-order'
 import { recognise, type TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
 import { readReleaseFacts, type ReleaseFactsDeps } from './release-facts'
@@ -16,7 +18,12 @@ export type CoordinatorDeps = ApplyDeps & DraftDeps & Pick<ReleaseFactsDeps, 're
 async function exceptionsOf(deps: CoordinatorDeps): Promise<TaskException[]> {
   const ofTasks = (await readExceptionFacts(deps)).flatMap(recognise)
   const ofReleases = (await readReleaseFacts(deps)).map(recogniseRelease)
-  return [...ofTasks, ...ofReleases.filter((e): e is TaskException => e !== undefined)]
+  const ofQueues = (await readQueueFacts(deps)).map(recogniseQueue)
+  return [
+    ...ofTasks,
+    ...ofQueues.filter((e): e is TaskException => e !== undefined),
+    ...ofReleases.filter((e): e is TaskException => e !== undefined),
+  ]
 }
 
 /**

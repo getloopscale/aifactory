@@ -212,6 +212,11 @@ reads that file, not a convention.
   most one per pass and three per week, never a designed wait (`DESIGNED_WAITS`), nothing in `trial` but a
   log line, and a week after the issue closes it records both counts and comments when the signature still
   shows up.
+- **A fix for a test that fails the repository's tasks goes ahead of them.** When one test fails on two tasks of a
+  repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
+  `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
+  `run-task` job ahead of the repository's other pending jobs, by `available_at` in `theokit_jobs` (TheoKit has no
+  call for it). It is not counted by `MAX_APPLIED`, and sends back or merges nothing.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

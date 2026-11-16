@@ -15,6 +15,7 @@ import type { CoordinatorOutcome, Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
+import { moveAhead } from './queue-apply'
 import { COORDINATOR_ACTOR } from './release-train'
 import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft } from './scope'
 
@@ -83,6 +84,10 @@ async function perform(
     return scope(deps, exception.taskId, decision.draft)
   } else if (decision.action === 'release' && decision.bump) {
     await release(deps, exception.taskId, { bump: decision.bump, actor: COORDINATOR_ACTOR })
+  } else if (decision.action === 'prioritise' && exception.repository) {
+    if (!(await moveAhead(deps.db, exception.taskId, exception.repository))) {
+      throw new ActionRefused('its job is no longer waiting in the queue')
+    }
   } else {
     throw new Error(`the coordinator has no way to apply ${decision.action}`)
   }

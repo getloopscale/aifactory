@@ -51,6 +51,8 @@ export type TaskException = {
   conflictsWith?: string
   /** For a release of the repository: every issue it would release, with its labels, which set the bump. */
   released?: ReleasedIssue[]
+  /** The repository whose queue holds the fix, for `queue_blocked`. */
+  repository?: string
   /** The repository's release mode is `trial`: the decision is recorded and nothing is applied. */
   trialOnly?: true
 }
