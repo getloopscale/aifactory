@@ -391,3 +391,14 @@ describe('evolveLog', () => {
     ).toHaveLength(1)
   })
 })
+
+describe('signatureOf fetch causes', () => {
+  it('gives one signature to fetch failed with or without a multiline cause', () => {
+    const a = signatureOf('fetch failed')
+    expect(signatureOf('fetch failed (cause: ENOTFOUND getaddrinfo\nsecond line)')).toBe(a)
+    expect(signatureOf('fetch failed (cause: ECONNRESET read)')).toBe(a)
+  })
+  it('keeps other causes distinct', () => {
+    expect(signatureOf('boom (cause: a)')).not.toBe(signatureOf('boom (cause: b)'))
+  })
+})

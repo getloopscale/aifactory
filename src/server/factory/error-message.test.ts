@@ -57,3 +57,16 @@ describe('isTransientFetchError', () => {
     expect(isTransientFetchError('fetch failed')).toBe(false)
   })
 })
+
+describe('errorMessage with an AggregateError', () => {
+  it('lists every nested error', () => {
+    const e = new AggregateError(
+      [new Error('ECONNREFUSED 1.1.1.1'), new Error('ETIMEDOUT 2.2.2.2')],
+      'fetch failed',
+    )
+    const text = errorMessage(e)
+    expect(text).toContain('ECONNREFUSED 1.1.1.1')
+    expect(text).toContain('ETIMEDOUT 2.2.2.2')
+    expect(text.startsWith('fetch failed')).toBe(true)
+  })
+})

@@ -26,6 +26,13 @@ export function errorMessage(error: unknown): string {
     if (text !== '') causes.push(text)
     cause = cause instanceof Error ? cause.cause : undefined
   }
+  if (error instanceof AggregateError) {
+    for (const inner of error.errors) {
+      if (causes.length >= MAX_DEPTH * 2) break
+      const text = describe(inner)
+      if (text !== '' && !causes.includes(text)) causes.push(text)
+    }
+  }
   const own = describe(error)
   return causes.length === 0 ? own : `${own} (cause: ${causes.join(' <- ')})`
 }
