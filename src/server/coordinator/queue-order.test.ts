@@ -10,6 +10,8 @@ import {
   recogniseQueue,
   repositoriesWithRepeatedTests,
   testsNamedBy,
+  headOf,
+  testOf,
   type QueuedTask,
   type RepositoryQueueFacts,
 } from './queue-order'
@@ -31,6 +33,7 @@ const failure = (taskId: number, over: Partial<FailureEvent> = {}): FailureEvent
 
 const queued = (taskId: number, body = 'unrelated'): QueuedTask => ({
   taskId,
+  jobId: `job-${taskId}`,
   issueNumber: taskId + 1000,
   title: `issue ${taskId}`,
   body,
@@ -59,12 +62,24 @@ describe('the tests an issue names', () => {
   })
 })
 
+describe('the head of a prioritise decision', () => {
+  it('names the job of the fix, so a retried fix is a new head', () => {
+    expect(headOf('a long test name', 'j1')).not.toBe(headOf('a long test name', 'j2'))
+  })
+  it('gives back the test it names, and leaves a head without a job as it is', () => {
+    expect(testOf(headOf('reports one fact (left) out of 501', 'a-b'))).toBe(
+      'reports one fact (left) out of 501',
+    )
+    expect(testOf('another test of 7 words')).toBe('another test of 7 words')
+  })
+})
+
 describe('a test that failed on several tasks of a repository', () => {
   it('puts the task that carries it ahead of the queue, reading it from the recorded failure', () => {
     expect(recogniseQueue(facts())).toMatchObject({
       kind: 'queue_blocked',
       taskId: 7,
-      head: 'remphase reports one fact left out of 501',
+      head: 'remphase reports one fact left out of 501 (job job-7)',
     })
   })
   it('is nothing on one task, or on the same task twice', () => {

@@ -6,6 +6,7 @@ import { readOf, unread, type Read } from '../factory/doctor'
 import type { GithubApp } from '../github/app'
 
 import type { ReadIssue } from './draft'
+import { reasonOf } from './evolve'
 import { readFailureEvents } from './evolve-facts'
 import {
   QUEUE,
@@ -13,6 +14,7 @@ import {
   repositoriesWithRepeatedTests,
   type QueuedTask,
   type RepositoryQueueFacts,
+  testOf,
 } from './queue-order'
 
 /**
@@ -28,8 +30,8 @@ export type QueueFactsDeps = {
 }
 
 async function queuedTasks(deps: QueueFactsDeps, repository: string): Promise<QueuedTask[]> {
-  const rows = await deps.db.execute<{ id: number; issue_number: number }>(
-    sql`select t.id, t.issue_number
+  const rows = await deps.db.execute<{ id: number; job_id: string; issue_number: number }>(
+    sql`select t.id, j.id as job_id, t.issue_number
         from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
         where j.name = 'run-task' and j.failed_at is null
           and (j.locked_until is null or j.locked_until < now()) and t.stage = 'intake' and t.repository = ${repository}
@@ -39,7 +41,13 @@ async function queuedTasks(deps: QueueFactsDeps, repository: string): Promise<Qu
   return Promise.all(
     rows.rows.map(async (r) => {
       const issue = await deps.readIssue(repository, r.issue_number, token)
-      return { taskId: r.id, issueNumber: r.issue_number, title: issue.title, body: issue.body }
+      return {
+        taskId: r.id,
+        jobId: r.job_id,
+        issueNumber: r.issue_number,
+        title: issue.title,
+        body: issue.body,
+      }
     }),
   )
 }
@@ -74,6 +82,8 @@ export async function readQueueFacts(
 /** A hold ends with the fix: a failure, a cancellation or a release after the decision, or an integration. */
 const ENDS = ['failed', 'cancelled', 'released'] as const
 const FINISHED = ['released', 'failed', 'cancelled']
+/** The stages whose event records why a task stopped. */
+const FAILURE_STAGES = ['failed', 'handoff']
 
 /**
  * The tests whose fix the coordinator moved ahead and that has not integrated or failed since: queued, running,
@@ -115,25 +125,37 @@ export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldT
           (FINISHED.includes(r.stage) || (r.stage === 'done' && r.merged !== null))
         ),
     )
-    .map(({ repository, test, taskId, at }) => ({ repository, test, taskId, at }))
+    .map(({ repository, test, taskId, at }) => ({ repository, test: testOf(test), taskId, at }))
 }
 
-/** The latest stage event of each task: what the task is in now, as the history says it. */
-export async function readLatestEvents(
+/**
+ * The reason of the failure each task is in now: its latest stage event, when that is a failure or a handoff,
+ * however old it is. A failure the task moved on from says nothing of its present exception, and a hold can
+ * outlast the window failures are discovered in.
+ */
+export async function readCurrentReasons(
   db: Pick<Database, 'select'>,
   taskIds: number[],
-): Promise<Map<number, { stage: string; at: Date }>> {
-  const latest = new Map<number, { stage: string; at: Date; id: number }>()
-  if (taskIds.length === 0) return latest
+): Promise<Map<number, string>> {
+  const latest = new Map<number, { id: number; stage: string; reason: string }>()
+  if (taskIds.length === 0) return new Map()
   const rows = await db
     .select({
       id: stageEvent.id,
       taskId: stageEvent.taskId,
       stage: stageEvent.stage,
-      at: stageEvent.at,
+      detail: stageEvent.detail,
     })
     .from(stageEvent)
     .where(inArray(stageEvent.taskId, taskIds))
-  for (const r of rows) if (r.id > (latest.get(r.taskId)?.id ?? 0)) latest.set(r.taskId, r)
-  return latest
+  for (const r of rows) {
+    if (r.id <= (latest.get(r.taskId)?.id ?? 0)) continue
+    const reason = reasonOf((r.detail ?? null) as Record<string, unknown> | null)
+    latest.set(r.taskId, { id: r.id, stage: r.stage, reason })
+  }
+  return new Map(
+    [...latest]
+      .filter(([, e]) => FAILURE_STAGES.includes(e.stage))
+      .map(([taskId, e]) => [taskId, e.reason]),
+  )
 }

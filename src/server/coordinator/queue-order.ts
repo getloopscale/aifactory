@@ -17,7 +17,23 @@ export const QUEUE = {
 } as const
 
 /** A task of the repository whose `run-task` job waits in the queue, in the order the queue serves them. */
-export type QueuedTask = { taskId: number; issueNumber: number; title: string; body: string }
+export type QueuedTask = {
+  taskId: number
+  /** The id of its pending `run-task` job: a retry of the task is a new job, and a new attempt. */
+  jobId: string
+  issueNumber: number
+  title: string
+  body: string
+}
+
+/**
+ * The head a `prioritise` decision is recorded on: the test and the job of the fix. A retried fix has a new job,
+ * so it gets a decision of its own, while the decision of an attempt that ended never applies again.
+ */
+export const headOf = (test: string, jobId: string) => `${test} (job ${jobId})`
+
+/** The test a `prioritise` head names. */
+export const testOf = (head: string) => head.replace(/ \(job [^()]*\)$/, '')
 
 /** What is known of one repository when the queue is looked at. */
 export type RepositoryQueueFacts = {
@@ -111,7 +127,7 @@ export const repositoriesWithRepeatedTests = (failures: FailureEvent[]): string[
 
 /**
  * The exception of a repository whose queue holds the fix of a test that failed on several tasks behind other
- * tasks, or nothing. It sits on the task that fixes the test, and its head is the test. A queue that could not
+ * tasks, or nothing. It sits on the task that fixes the test, and its head is the test and the fix's job (`headOf`). A queue that could not
  * be read is an `unknown` exception.
  */
 export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | undefined {
@@ -143,7 +159,7 @@ export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | und
       return {
         kind: 'queue_blocked',
         taskId: fix.taskId,
-        head: test,
+        head: headOf(test, fix.jobId),
         evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and #${fix.issueNumber}, which carries it, ${where}`,
       }
     }

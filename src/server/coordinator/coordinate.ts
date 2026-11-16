@@ -7,10 +7,9 @@ import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions } from './exception-facts'
-import { readLatestEvents, readQueueFacts } from './queue-facts'
-import { QUEUE, isHeld, recogniseQueue } from './queue-order'
+import { readCurrentReasons, readQueueFacts } from './queue-facts'
+import { isHeld, recogniseQueue, testOf } from './queue-order'
 import { maintainHolds } from './queue-hold'
-import { readFailureEvents } from './evolve-facts'
 import { recognise, type TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
 import { readReleaseFacts, type ReleaseFactsDeps } from './release-facts'
@@ -66,22 +65,13 @@ export async function coordinate(
   const exceptions = await exceptionsOf(deps)
   const repositories = await repositoriesOf(deps.db, exceptions)
   const held = await maintainHolds(deps.db)
-  const now = new Date()
-  // The reason of the failure the task is in now: its latest one, not every one of the window.
-  const reasons = new Map<number, string[]>()
-  const latest = await readLatestEvents(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
-  for (const e of await readFailureEvents(deps.db, new Date(now.getTime() - QUEUE.windowMs), now)) {
-    // Only the event the task is in now: a failure it moved on from says nothing of its present exception.
-    const current = latest.get(e.taskId)
-    if (current?.stage === e.stage && current.at.getTime() === e.at.getTime()) {
-      reasons.set(e.taskId, [e.reason])
-    }
-  }
+  const reasons = await readCurrentReasons(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   const recorded = await readRecordedActions(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   for (const exception of exceptions) {
     // The fix of this failure is on its way: the task waits for it, not sent back to fail the same way.
     const repository = repositories.get(exception.taskId)
-    if (isHeld(exception, repository, held, reasons.get(exception.taskId))) continue
+    const reason = reasons.get(exception.taskId)
+    if (isHeld(exception, repository, held, reason === undefined ? [] : [reason])) continue
     const forTask = recorded.get(exception.taskId)!
     const applying = exception.trialOnly ? 'trial' : mode
     if (seen(exception, forTask, applying)) continue
@@ -95,7 +85,7 @@ export async function coordinate(
     })
     result[outcome] += 1
     if (decision.action === 'prioritise' && outcome === 'applied') {
-      held.push({ repository: repositories.get(exception.taskId)!, test: exception.head })
+      held.push({ repository: repositories.get(exception.taskId)!, test: testOf(exception.head) })
     }
   }
   return result

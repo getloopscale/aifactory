@@ -798,6 +798,8 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   it('keeps a hold made in auto through trial and off, holds a new job, and ends it with the fix', async () => {
     const { fix, other } = await incident()
     await coordinate(deps(), 'auto')
+    // A worker takes the fix's job, as it would once the fix is first.
+    expect(await dequeue()).toEqual([`job-${fix}`])
     const late = await seed('intake')
     await enqueue(late, 5)
 
@@ -819,6 +821,8 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   it('keeps the hold of a fix that is done without a merge, and ends it once merged', async () => {
     const { fix } = await incident()
     await coordinate(deps(), 'auto')
+    // A worker takes the fix's job, as it would once the fix is first.
+    expect(await dequeue()).toEqual([`job-${fix}`])
     await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
     expect(await dequeue()).toEqual([])
@@ -842,6 +846,8 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   it('keeps the hold while the fix waits for an answer or is handed over, and past any renewal', async () => {
     const { fix } = await incident()
     await coordinate(deps(), 'auto')
+    // A worker takes the fix's job, as it would once the fix is first.
+    expect(await dequeue()).toEqual([`job-${fix}`])
     await getDb().update(task).set({ stage: 'waiting' }).where(eq(task.id, fix))
 
     await coordinate(deps(), 'auto')
@@ -856,6 +862,8 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   it('keeps the hold through a handoff, and never brings an ended one back', async () => {
     const { fix, other } = await incident()
     await coordinate(deps(), 'auto')
+    // A worker takes the fix's job, as it would once the fix is first.
+    expect(await dequeue()).toEqual([`job-${fix}`])
     await getDb().update(task).set({ stage: 'handoff' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
     expect(await dequeue()).toEqual([])
@@ -869,6 +877,48 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
 
     expect((await dequeue())[0]).toBeDefined()
     expect(other).toBeGreaterThan(0)
+  })
+
+  it('sends back no task whose current failure, older than six hours, names the held test', async () => {
+    await incident()
+    await coordinate(deps(), 'auto')
+    const said = `the repository's required checks failed and the agent changed nothing, saying why below: the test "${TEST}" timed out. What the failed checks reported:\n\n${OUTPUT}`
+    const old = await checksUnchanged({ reason: said, cause: 'checks_unchanged' })
+    await getPool().query(
+      "update stage_event set at = now() - interval '7 hours' where task_id = $1",
+      [old],
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect((await actions()).filter((a) => a.taskId === old)).toEqual([])
+    expect(await stageOf(old)).toBe('handoff')
+    expect(queued).toEqual([])
+  })
+
+  it('holds again for the new job of a fix retried after its first attempt failed', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'failed' })
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    // The fix is retried: a new run-task job, queued behind the others again.
+    await getPool().query('delete from theokit_jobs where id = $1', [`job-${fix}`])
+    await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, fix))
+    await getPool().query(
+      `insert into theokit_jobs (id, name, input, available_at) values ('retry-${fix}', 'run-task', $1, now())`,
+      [JSON.stringify({ taskId: fix })],
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect(await prioritised()).toMatchObject([
+      { taskId: fix, outcome: 'applied' },
+      { taskId: fix, outcome: 'applied' },
+    ])
+    expect(await dequeue()).toEqual([`retry-${fix}`])
+    expect(await dequeue()).toEqual([])
   })
 
   it('defers a second fix of the repository until the first is done', async () => {
