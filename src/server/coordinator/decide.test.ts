@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { conflictNote } from '../panel/actions'
+
 import { decide, MAX_APPLIED, seen, type RecordedAction } from './decide'
 import type { TaskException } from './exceptions'
 
@@ -65,6 +67,17 @@ describe('deciding one action for an exception', () => {
       reason:
         'the required checks failed on abc1234 and the last run changed nothing, but the handoff kept no output of the checks to send back',
     })
+  })
+
+  it('sends work whose pull request conflicts with its base back to merge it, not with the check output', () => {
+    for (const evidence of ['CI:\nnothing failed', '']) {
+      expect(decide(exception({ evidence, conflictsWith: 'workspace' }), [])).toEqual({
+        action: 'send_back',
+        reason:
+          'the required checks failed on abc1234 and the last run changed nothing, and its pull request conflicts with workspace: sent back on its branch to merge it',
+        note: conflictNote('workspace'),
+      })
+    }
   })
 
   it('reviews again work whose review gave no usable verdict', () => {

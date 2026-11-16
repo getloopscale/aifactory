@@ -88,6 +88,52 @@ describe('recognising the exceptions of a task', () => {
     ])
   })
 
+  it('recognises failed checks on a pull request that conflicts with its base, naming the base', () => {
+    const facts = {
+      ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),
+      pullRequest: readOf({ conflicting: true, base: 'workspace' }),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc',
+        evidence: 'CI:\n~~~~text\nERROR: lint exited with 1\n~~~~',
+        conflictsWith: 'workspace',
+      },
+    ])
+  })
+
+  it('names no base when the pull request of the failed checks merges cleanly', () => {
+    const facts = {
+      ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),
+      pullRequest: readOf({ conflicting: false, base: 'workspace' }),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc',
+        evidence: 'CI:\n~~~~text\nERROR: lint exited with 1\n~~~~',
+      },
+    ])
+  })
+
+  it('gives an unknown exception when the pull request of the failed checks could not be read', () => {
+    const facts = {
+      ...handedOver({ reason: CHECKS_REASON, cause: 'checks_unchanged' }),
+      pullRequest: unread('the pull request of task 7', 'GitHub answered 502'),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'unknown',
+        taskId: 7,
+        head: 'abc',
+        evidence: 'could not read the pull request of task 7: GitHub answered 502',
+      },
+    ])
+  })
+
   it('recognises a review that gave no verdict and one that did not converge, with the reason', () => {
     const unusable = 'the review gave no usable verdict: nothing'
     expect(recognise(handedOver({ reason: unusable, cause: 'review_unusable' }))).toEqual([

@@ -17,6 +17,7 @@ import {
   task,
 } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
+import { conflictNote } from '../panel/actions'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
 import type { ScopeDraft } from './scope'
@@ -73,11 +74,14 @@ async function seed(
 }
 
 /** A task the run handed over because the required checks failed and the agent changed nothing. */
-const checksUnchanged = (detail: object = { reason: CHECKS_REASON, cause: 'checks_unchanged' }) =>
-  seed('handoff', { headSha: 'abc', pullRequestUrl: 'https://github.com/paulo/app/pull/3' }, [
-    { stage: 'intake' },
-    { stage: 'handoff', detail },
-  ])
+const checksUnchanged = (detail: object = { reason: CHECKS_REASON, cause: 'checks_unchanged' }) => {
+  api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', baseRef: 'workspace' })
+  return seed(
+    'handoff',
+    { headSha: 'abc', pullRequestUrl: 'https://github.com/paulo/app/pull/3' },
+    [{ stage: 'intake' }, { stage: 'handoff', detail }],
+  )
+}
 
 const queued: { input: Record<string, unknown>; key: string }[] = []
 let api = new FakeGithub()
@@ -133,6 +137,37 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
     ])
     // Nobody decided it, so no decision is recorded in anybody's name.
     expect(await getDb().select().from(decision)).toEqual([])
+  })
+
+  it('sends a task whose pull request conflicts with its base back to merge it, not with the check output', async () => {
+    const id = await checksUnchanged()
+    api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', mergeableState: 'dirty' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued).toHaveLength(1)
+    expect(queued[0].input.feedback).toBe(conflictNote('workspace'))
+    expect(await actions()).toMatchObject([{ action: 'send_back', outcome: 'applied' }])
+  })
+
+  it('escalates as unknown, sending nothing back, when the pull request could not be read', async () => {
+    const id = await checksUnchanged()
+    api.fail('readPullRequest', new Error('GitHub answered 502 reading paulo/app#3'))
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ escalated: 1, applied: 0 })
+    expect(await stageOf(id)).toBe('handoff')
+    expect(queued).toEqual([])
+    const [row] = await actions()
+    expect(row).toMatchObject({
+      exceptionKind: 'unknown',
+      action: 'escalate',
+      outcome: 'escalated',
+    })
+    expect(row.reason).toContain('GitHub answered 502 reading paulo/app#3')
   })
 
   it('records nothing new and queues nothing for the same exception on the same head', async () => {

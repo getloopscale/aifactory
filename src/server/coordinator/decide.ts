@@ -1,4 +1,5 @@
 import type { COORDINATOR_ACTIONS, COORDINATOR_OUTCOMES } from '../db/schema'
+import { conflictNote } from '../panel/actions'
 
 import type { ExceptionKind, TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
@@ -63,8 +64,15 @@ export const seen = (
 
 const escalate = (reason: string): Decision => ({ action: 'escalate', reason })
 
-function sendBack({ head, evidence }: TaskException): Decision {
+function sendBack({ head, evidence, conflictsWith }: TaskException): Decision {
   const what = `the required checks failed on ${short(head)} and the last run changed nothing`
+  if (conflictsWith !== undefined) {
+    return {
+      action: 'send_back',
+      reason: `${what}, and its pull request conflicts with ${conflictsWith}: sent back on its branch to merge it`,
+      note: conflictNote(conflictsWith),
+    }
+  }
   if (evidence === '') {
     return escalate(`${what}, but the handoff kept no output of the checks to send back`)
   }

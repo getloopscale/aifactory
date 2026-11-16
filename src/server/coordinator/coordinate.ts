@@ -22,7 +22,7 @@ export async function coordinate(
 ): Promise<PassResult> {
   const result: PassResult = { applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 }
   if (mode === 'off') return result
-  const facts = await readExceptionFacts(deps.db)
+  const facts = await readExceptionFacts(deps)
   const recorded = await readRecordedActions(
     deps.db,
     facts.map((f) => f.taskId),

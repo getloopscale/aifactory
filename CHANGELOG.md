@@ -16,6 +16,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - Approved work whose pull request conflicts with the integration branch is no longer thrown away. Before, the factory deleted the task's branch, which closed the pull request, and ran the task again from the start. Now the task goes back on its own branch with a note to merge the integration branch, regenerate generated files with their scripts, and change nothing else; auto-merge is turned off first, and the merge then goes through the checks and the review. A task whose branch is gone still starts over. A commit the agent makes by itself, as `git merge` does, is now pushed as it is, where before a clean checkout read as no change (#122)
+- The coordinator no longer sends a task back with the output of its failed checks when its pull request conflicts with the integration branch. For a handoff on failed checks the agent did not answer, it now reads the pull request, and when GitHub reports a conflict the note tells the run to merge the integration branch and regenerate generated files, the same note the panel gives approved work that conflicts. A pull request it cannot read is escalated as `unknown` and nothing is sent back (#132)
 
 ## [0.3.0] - 2026-11-15
 

@@ -18,6 +18,9 @@ export type LastEvent = { stage: TaskStage; detail: Record<string, unknown> | nu
 /** An open finding of the supervisor about a run of the task. */
 export type OpenFinding = { id: number; kind: 'stalled' | 'orphaned'; detail: string }
 
+/** What GitHub says of the pull request of a task: whether it conflicts with its base, and which base. */
+export type PullRequestFacts = { conflicting: boolean; base: string }
+
 /** What is known of one task when the coordinator looks at it. */
 export type TaskFacts = {
   taskId: number
@@ -28,6 +31,11 @@ export type TaskFacts = {
   /** The automatic runs since a person last started it. */
   automaticRuns: Read<number>
   findings: OpenFinding[]
+  /**
+   * Its pull request, read only for a handoff on failed checks, where the note depends on it: absent for any
+   * other task, null for one with no pull request.
+   */
+  pullRequest?: Read<PullRequestFacts | null>
 }
 
 /** One exception: its kind, the task, the head it was seen on and what it was recognised by. */
@@ -39,6 +47,8 @@ export type TaskException = {
   evidence: string
   /** The supervisor finding it came from. */
   findingId?: number
+  /** The base its pull request conflicts with: the run must merge it before anything else. */
+  conflictsWith?: string
 }
 
 const CAUSES: readonly HandoffCause[] = ['review_plateau', 'review_unusable', 'checks_unchanged']
@@ -70,7 +80,7 @@ export function failedChecksOutput(reason: string): string {
 
 const unknown = (evidence: string) => ({ kind: 'unknown' as const, evidence })
 
-type Found = Pick<TaskException, 'kind' | 'evidence'>
+type Found = Pick<TaskException, 'kind' | 'evidence' | 'conflictsWith'>
 
 /** The event that put the task in its stage, or the unknown exception that stands for it. */
 function lastOf(facts: TaskFacts): LastEvent | Found {
@@ -83,10 +93,20 @@ function lastOf(facts: TaskFacts): LastEvent | Found {
   return last
 }
 
-function handedOver(last: LastEvent): Found {
+/** Failed checks the agent did not answer, with the base to merge when their pull request conflicts with it. */
+function checksUnchanged(reason: string, pullRequest: TaskFacts['pullRequest']): Found {
+  if (pullRequest && !pullRequest.read) {
+    return unknown(`could not read ${pullRequest.tried}: ${pullRequest.error}`)
+  }
+  const found: Found = { kind: 'checks_unchanged', evidence: failedChecksOutput(reason) }
+  const pull = pullRequest?.value
+  return pull?.conflicting ? { ...found, conflictsWith: pull.base } : found
+}
+
+function handedOver(last: LastEvent, pullRequest: TaskFacts['pullRequest']): Found {
   const kind = causeOf(last.detail)
   const reason = text(last.detail?.reason)
-  if (kind === 'checks_unchanged') return { kind, evidence: failedChecksOutput(reason) }
+  if (kind === 'checks_unchanged') return checksUnchanged(reason, pullRequest)
   return { kind, evidence: reason || 'the handoff recorded no reason' }
 }
 
@@ -111,7 +131,9 @@ function ofStage(facts: TaskFacts): Found | undefined {
   if (facts.stage !== 'handoff' && facts.stage !== 'failed') return undefined
   const last = lastOf(facts)
   if (isFound(last)) return last
-  return facts.stage === 'handoff' ? handedOver(last) : failed(last, facts.automaticRuns)
+  return facts.stage === 'handoff'
+    ? handedOver(last, facts.pullRequest)
+    : failed(last, facts.automaticRuns)
 }
 
 /** Every exception of a task: one for each open finding, and one for its stage when it has one. */
@@ -124,7 +146,5 @@ export function recognise(facts: TaskFacts): TaskException[] {
     findingId: f.id,
   }))
   const stage = ofStage(facts)
-  return stage
-    ? [...fromFindings, { kind: stage.kind, ...at, evidence: stage.evidence }]
-    : fromFindings
+  return stage ? [...fromFindings, { ...stage, ...at }] : fromFindings
 }
