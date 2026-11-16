@@ -11,17 +11,30 @@ import type { IsolatedSandboxProvider } from './sandbox'
 export const PROCESS_LEASE = randomUUID()
 
 /** How often a live process says so. */
-export const LEASE_BEAT_MS = 30_000
+export const LEASE_BEAT_MS = 10_000
 
-/** A lease not renewed for this long belongs to a process that is gone: four beats missed. */
-export const LEASE_STALE_MS = 2 * 60_000
+/** A lease not renewed for this long belongs to a process that is gone: four beats missed (a process killed is seen on the next supervise pass). */
+export const LEASE_STALE_MS = 45_000
 
-async function beat(db: Database): Promise<void> {
+let failedAt: number | undefined
+
+/** Says this process is alive. A failure is remembered: while the database was out, no process could renew. */
+export async function beat(db: Database): Promise<void> {
   const beatAt = new Date()
-  await db
-    .insert(sandboxLease)
-    .values({ id: PROCESS_LEASE, host: hostname(), beatAt })
-    .onConflictDoUpdate({ target: sandboxLease.id, set: { beatAt } })
+  try {
+    await db
+      .insert(sandboxLease)
+      .values({ id: PROCESS_LEASE, host: hostname(), beatAt })
+      .onConflictDoUpdate({ target: sandboxLease.id, set: { beatAt } })
+  } catch (error) {
+    failedAt = Date.now()
+    throw error
+  }
+}
+
+/** Whether a stale lease means a dead process: not while this process could not renew its own lately. */
+export function leasesTrustworthy(now: number = Date.now()): boolean {
+  return failedAt === undefined || now - failedAt > LEASE_STALE_MS + LEASE_BEAT_MS
 }
 
 let beating: ReturnType<typeof setInterval> | undefined

@@ -6,7 +6,7 @@ import type { Database } from '../db'
 import { sandboxLease, task } from '../db/schema'
 
 import type { ListedSandbox, SandboxOwner } from './sandbox'
-import { LEASE_STALE_MS, PROCESS_LEASE } from './sandbox-lease'
+import { beat, LEASE_STALE_MS, leasesTrustworthy, PROCESS_LEASE } from './sandbox-lease'
 
 /** How long a sandbox with no owner recorded may live before it is taken for nobody's: it may be one still being made. */
 export const SANDBOX_GRACE_MS = 10 * 60_000
@@ -19,6 +19,9 @@ export const E2B_SANDBOX_LIMIT = 10
  * the review and the end of the run, which use the same sandbox, so killing it there would fail the run.
  */
 export const SANDBOX_STAGES = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr']
+
+/** The owners the factory writes; metadata of any other kind is somebody else's sandbox. */
+export const FACTORY_OWNERS = ['task', 'eval', 'prove-checks']
 
 export type MetadataOptions = { host?: string; lease?: string }
 
@@ -39,6 +42,8 @@ export type ReaperFacts = {
   tasks: Map<number, { stage: string; run: string | null }>
   /** When each process last said it was alive. */
   leases: Map<string, Date>
+  /** False when this process could not renew its own lease lately: a stale lease then proves nothing. */
+  leasesTrusted?: boolean
 }
 
 export type Verdict = { id: string; reason: string } | null
@@ -48,12 +53,16 @@ function judge(s: ListedSandbox, facts: ReaperFacts): Verdict {
   const age = facts.now.getTime() - s.startedAt.getTime()
   const kill = (reason: string) => ({ id: s.id, reason })
   const grace = Math.round(facts.graceMs / 60_000)
-  if (!m.owner)
+  if (Object.keys(m).length === 0)
     return age > facts.graceMs ? kill(`no owner recorded and older than ${grace} minutes`) : null
+  // Metadata the factory did not write: not ours to stop.
+  if (!m.owner || !FACTORY_OWNERS.includes(m.owner)) return null
   // The process that made it, on whatever host: one that stopped saying it is alive has no one at work.
   if (m.lease) {
-    const beat = facts.leases.get(m.lease)
-    if (!beat || facts.now.getTime() - beat.getTime() > LEASE_STALE_MS) {
+    const last = facts.leases.get(m.lease)
+    if (facts.leasesTrusted === false) {
+      // The database was out: a lease not renewed says nothing of the process.
+    } else if (!last || facts.now.getTime() - last.getTime() > LEASE_STALE_MS) {
       return kill(
         `${m.owner} process ${m.lease} on ${m.host ?? 'an unknown host'} stopped renewing its lease`,
       )
@@ -82,7 +91,10 @@ export function reapable(
 
 /** How many sandboxes have an owner at work: an owner recorded, and not one `reapable` would kill. */
 export function atWork(listing: ListedSandbox[], facts: ReaperFacts): number {
-  return listing.filter((s) => s.metadata.owner && judge(s, facts) === null).length
+  return listing.filter(
+    (s) =>
+      s.metadata.owner && FACTORY_OWNERS.includes(s.metadata.owner) && judge(s, facts) === null,
+  ).length
 }
 
 /** Reads the tasks and the leases the listing names, after the listing, so a task that began since is seen. */
@@ -112,6 +124,7 @@ export async function readReaperFacts(
   return {
     now,
     graceMs: SANDBOX_GRACE_MS,
+    leasesTrusted: leasesTrustworthy(),
     tasks: new Map(rows.map((r) => [r.id, { stage: r.stage, run: r.run }])),
     leases: new Map(leases.map((l) => [l.id, l.beatAt])),
   }
@@ -122,10 +135,14 @@ export type ReaperDeps = {
   listSandboxes: () => Promise<ListedSandbox[]>
   killSandbox: (id: string) => Promise<void>
   now?: () => Date
+  /** Tests with no lease table to write to. */
+  skipBeat?: boolean
 }
 
 /** Stops every sandbox whose owner is done and logs each with its id and why. */
 export async function reapSandboxes(deps: ReaperDeps): Promise<{ id: string; reason: string }[]> {
+  // Proof the database answers now; when it does not, nothing is stopped.
+  if (!deps.skipBeat) await beat(deps.db)
   const listing = await deps.listSandboxes()
   const facts = await readReaperFacts(deps.db, listing, deps.now?.())
   const killed: { id: string; reason: string }[] = []

@@ -92,4 +92,13 @@ describe('reapable', () => {
     const listing = [sbx('running', task(2, 'b')), sbx('none', {}), sbx('done', task(3, 'c'))]
     expect(atWork(listing, facts({ tasks }))).toBe(1)
   })
+
+  it('keeps a sandbox with metadata the factory did not write, and trusts no stale lease after an outage', () => {
+    const other = sbx('other', { team: 'x' }, SANDBOX_GRACE_MS * 2)
+    const strange = sbx('strange', { owner: 'someone', lease: 'gone' }, SANDBOX_GRACE_MS * 2)
+    expect(reapable([other, strange], facts())).toEqual([])
+    const dead = sbx('dead', made({ owner: 'eval', caseId: 'a', runId: 'r' }, 'gone'))
+    expect(reapable([dead], facts()).map((k) => k.id)).toEqual(['dead'])
+    expect(reapable([dead], facts({ leasesTrusted: false }))).toEqual([])
+  })
 })

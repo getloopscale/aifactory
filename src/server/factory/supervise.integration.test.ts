@@ -9,6 +9,7 @@ import { finding, ingress, question, sandboxLease, stageEvent, task, watch } fro
 
 import { FakeSandbox } from './fake-sandbox'
 import type { SandboxOwner } from './sandbox'
+import { LEASE_STALE_MS } from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
 import { detect, supervise } from './supervise'
 
@@ -359,5 +360,29 @@ describe('sandboxes nobody owns', () => {
     expect((await run()).reaped?.map((k) => k.id)).toEqual(['sbx-2', 'sbx-3', 'sbx-5'])
     expect([...provider.up.keys()]).toEqual(['sbx-1', 'sbx-4'])
     expect((await run()).reaped).toBeUndefined()
+  })
+
+  it('keeps the sandbox of an evaluation alive and stops it on the pass after its process dies', async () => {
+    const provider = new FakeSandbox()
+    const spec = { egress: [{ domain: 'github.com' }], timeoutMs: 60_000 }
+    const owner: SandboxOwner = { owner: 'eval', caseId: 'a', runId: 'r' }
+    await getDb()
+      .insert(sandboxLease)
+      .values({ id: 'eval-now', host: 'elsewhere', beatAt: new Date(NOW.getTime() - 5_000) })
+    await provider.create({ ...spec, owner })
+    ;[...provider.up.values()][0]!.metadata = metadataFor(owner, { host: 'x', lease: 'eval-now' })
+    const run = (at: Date) =>
+      supervise({
+        db: getDb(),
+        now: () => at,
+        listSandboxes: () => provider.listSandboxes(),
+        killSandbox: (id) => provider.killSandbox(id),
+      })
+
+    // It beat 5 seconds ago and is alive; it then stops beating, as a killed process does.
+    expect((await run(NOW)).reaped).toBeUndefined()
+    const later = new Date(NOW.getTime() + LEASE_STALE_MS + 1_000)
+    expect((await run(later)).reaped?.map((k) => k.id)).toEqual(['sbx-1'])
+    expect(provider.up.size).toBe(0)
   })
 })
