@@ -17,18 +17,23 @@ import {
   task,
 } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
+import { jobBackend } from '../factory/job-backend'
 import { conflictNote } from '../panel/actions'
 
+import { applyDecision } from './apply'
 import { coordinate, type CoordinatorDeps } from './coordinate'
+import { moveAhead } from './queue-apply'
+import { holdNewJob } from './queue-hold'
 import type { ScopeDraft } from './scope'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table theokit_jobs, coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -630,5 +635,338 @@ describe('scoping a review that does not converge', () => {
     const [row] = await actions()
     expect(row).toMatchObject({ action: 'scope', outcome: 'refused' })
     expect(row.reason).toContain('this work is already integrated')
+  })
+})
+
+describe('the coordinator on a test that fails the tasks of a repository', () => {
+  const TEST = 'remPhase reports one fact left out of 501'
+  const SAID = `the agent made no change to the repository, and the checks did not pass at 1a2b3c4: sdk-memory failed. The agent said: the test "${TEST}" timed out at 5s`
+
+  const enqueue = (id: number, minutes: number) =>
+    getPool().query(
+      `insert into theokit_jobs (id, name, input, available_at)
+       values ($1, 'run-task', $2, now() - ($3 || ' minutes')::interval)`,
+      [`job-${id}`, JSON.stringify({ taskId: id }), String(minutes)],
+    )
+  const dequeue = async () => (await jobBackend().dequeue({ batchSize: 1 })).map((l) => l.jobId)
+  const prioritised = async () => (await actions()).filter((a) => a.action === 'prioritise')
+
+  /** Two tasks failed on the test; two others and the one that fixes it wait in the queue, the fix last. */
+  async function incident() {
+    const failed = [] as number[]
+    for (let i = 0; i < 2; i++) {
+      failed.push(await seed('failed', {}, [{ stage: 'failed', detail: { error: SAID } }]))
+    }
+    const other = await seed('intake')
+    const another = await seed('intake')
+    const fix = await seed('intake')
+    const [{ issueNumber }] = await getDb().select().from(task).where(eq(task.id, fix))
+    api
+      .repo('paulo/app')
+      .issue(issueNumber, { title: 'Fix the flaky test', body: `\`${TEST}\` is flaky` })
+    await enqueue(other, 30)
+    await enqueue(another, 20)
+    await enqueue(fix, 10)
+    return { failed, other, another, fix }
+  }
+
+  it('moves the fix ahead and holds the others, and sends no failed task back to fail again', async () => {
+    const { fix } = await incident()
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result.applied).toBe(1)
+    expect(await prioritised()).toMatchObject([
+      { taskId: fix, exceptionKind: 'queue_blocked', outcome: 'applied' },
+    ])
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+    // The failed tasks' own exceptions wait for the fix: nothing was decided on them.
+    expect(await actions()).toHaveLength(1)
+    expect(queued).toEqual([])
+  })
+
+  it('records the decision and moves nothing in trial', async () => {
+    const { other } = await incident()
+
+    await coordinate(deps(), 'trial')
+
+    expect(await prioritised()).toMatchObject([
+      { exceptionKind: 'queue_blocked', outcome: 'trial' },
+    ])
+    expect(await dequeue()).toEqual([`job-${other}`])
+  })
+
+  it('records nothing more on a second pass', async () => {
+    const { fix } = await incident()
+
+    await coordinate(deps(), 'auto')
+    await coordinate(deps(), 'auto')
+
+    expect(await prioritised()).toHaveLength(1)
+    expect(await dequeue()).toEqual([`job-${fix}`])
+  })
+
+  it('holds the others when the fix is already first, and keeps a job queued later held', async () => {
+    const { fix, other } = await incident()
+    await getPool().query(
+      "update theokit_jobs set available_at = now() - interval '2 hours' where id = $1",
+      [`job-${fix}`],
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect(await prioritised()).toMatchObject([{ taskId: fix, outcome: 'applied' }])
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+
+    const late = await seed('intake')
+    await enqueue(late, 5)
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([])
+    expect(other).toBeGreaterThan(0)
+  })
+
+  it('gives the held jobs their availability back once the fix is no longer on its way', async () => {
+    const { fix, other } = await incident()
+    const before = await getPool().query('select available_at from theokit_jobs where id = $1', [
+      `job-${other}`,
+    ])
+
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+
+    const after = await getPool().query(
+      "select available_at, input->>'heldFrom' as held from theokit_jobs where id = $1",
+      [`job-${other}`],
+    )
+    expect(after.rows[0].available_at).toEqual(before.rows[0].available_at)
+    expect(after.rows[0].held).toBeNull()
+  })
+
+  it('applies one decision once when two passes run at the same time', async () => {
+    const { fix } = await incident()
+
+    await Promise.all([coordinate(deps(), 'auto'), coordinate(deps(), 'auto')])
+
+    expect(await prioritised()).toHaveLength(1)
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('keeps a hold made by one pass when another pass that began before it finishes', async () => {
+    const { fix } = await incident()
+
+    await Promise.all([
+      coordinate(deps(), 'auto'),
+      coordinate(deps(), 'auto'),
+      coordinate(deps(), 'auto'),
+    ])
+
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('holds a job queued after the decision as it is queued, with no pass in between', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    const late = await seed('intake')
+    await enqueue(late, 5)
+
+    await holdNewJob(getDb(), late)
+
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('changes no job in trial when no hold exists, whether or not a job was queued later', async () => {
+    await incident()
+    const late = await seed('intake')
+    await enqueue(late, 5)
+    const state = () =>
+      getPool().query('select id, available_at, input from theokit_jobs order by id')
+
+    const before = await state()
+    await coordinate(deps(), 'trial')
+    await holdNewJob(getDb(), late)
+
+    expect((await state()).rows).toEqual(before.rows)
+  })
+
+  it('keeps a hold made in auto through trial and off, holds a new job, and ends it with the fix', async () => {
+    const { fix, other } = await incident()
+    await coordinate(deps(), 'auto')
+    // A worker takes the fix's job, as it would once the fix is first.
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    const late = await seed('intake')
+    await enqueue(late, 5)
+
+    for (const mode of ['trial', 'off'] as const) {
+      await coordinate(deps(), mode)
+      await holdNewJob(getDb(), late)
+      expect(await dequeue()).toEqual([])
+    }
+
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'failed' })
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'off')
+
+    const [job] = await dequeue()
+    expect(job).toBeDefined()
+    expect(other).toBeGreaterThan(0)
+  })
+
+  it('keeps the hold of a fix that is done without a merge, and ends it once merged', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    // A worker takes the fix's job, as it would once the fix is first.
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([])
+
+    await getDb().update(task).set({ mergedSha: 'abc' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    expect((await dequeue())[0]).toBeDefined()
+  })
+
+  it('keeps the hold past an hour while the fix is still queued', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    await getPool().query("update coordinator_action set at = now() - interval '3 hours'")
+
+    await coordinate(deps(), 'auto')
+
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  const heldJobs = async () =>
+    (
+      await getPool().query(
+        "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' or available_at = 'infinity'",
+      )
+    ).rows[0].n as number
+
+  for (const stage of ['handoff', 'waiting'] as const) {
+    it(`gives the held jobs back on the next pass once the fix is in ${stage}`, async () => {
+      const { fix } = await incident()
+      await coordinate(deps(), 'auto')
+      // A worker takes the fix's job, as it would once the fix is first.
+      expect(await dequeue()).toEqual([`job-${fix}`])
+      expect(await heldJobs()).toBe(2)
+      await getDb().insert(stageEvent).values({ taskId: fix, stage })
+      await getDb().update(task).set({ stage }).where(eq(task.id, fix))
+
+      await coordinate(deps(), 'auto')
+
+      expect(await heldJobs()).toBe(0)
+      expect((await dequeue())[0]).toBeDefined()
+    })
+  }
+
+  it('never brings back by itself a hold that ended with a handoff', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'handoff' })
+    await getDb().update(task).set({ stage: 'handoff' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+
+    // The same attempt moves on without a new job: nothing is held again.
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'intake' })
+    await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+
+    expect(await heldJobs()).toBe(0)
+    expect(await prioritised()).toHaveLength(1)
+  })
+
+  it('sends back no task whose current failure, older than six hours, names the held test', async () => {
+    await incident()
+    await coordinate(deps(), 'auto')
+    const said = `the repository's required checks failed and the agent changed nothing, saying why below: the test "${TEST}" timed out. What the failed checks reported:\n\n${OUTPUT}`
+    const old = await checksUnchanged({ reason: said, cause: 'checks_unchanged' })
+    await getPool().query(
+      "update stage_event set at = now() - interval '7 hours' where task_id = $1",
+      [old],
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect((await actions()).filter((a) => a.taskId === old)).toEqual([])
+    expect(await stageOf(old)).toBe('handoff')
+    expect(queued).toEqual([])
+  })
+
+  it('holds again for the new job of a fix retried after its first attempt failed', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'failed' })
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    // The fix is retried: a new run-task job, queued behind the others again.
+    await getPool().query('delete from theokit_jobs where id = $1', [`job-${fix}`])
+    await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, fix))
+    await getPool().query(
+      `insert into theokit_jobs (id, name, input, available_at) values ('retry-${fix}', 'run-task', $1, now())`,
+      [JSON.stringify({ taskId: fix })],
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect(await prioritised()).toMatchObject([
+      { taskId: fix, outcome: 'applied' },
+      { taskId: fix, outcome: 'applied' },
+    ])
+    expect(await dequeue()).toEqual([`retry-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('defers a second fix of the repository until the first is done', async () => {
+    const { fix, other } = await incident()
+    await coordinate(deps(), 'auto')
+
+    const outcome = await applyDecision(
+      deps(),
+      { kind: 'queue_blocked', taskId: other, head: 'another test of 7 words', evidence: 'x' },
+      { action: 'prioritise', reason: 'second' },
+      'auto',
+    )
+
+    expect(outcome).toBe('refused')
+    expect(await prioritised()).toMatchObject([{ taskId: fix }])
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('does not bring a fix scheduled for later ahead of its time', async () => {
+    const { fix } = await incident()
+    await getPool().query(
+      "update theokit_jobs set available_at = now() + interval '30 minutes' where id = $1",
+      [`job-${fix}`],
+    )
+    const before = await getPool().query('select available_at from theokit_jobs where id = $1', [
+      `job-${fix}`,
+    ])
+
+    await coordinate(deps(), 'auto')
+
+    const after = await getPool().query('select available_at from theokit_jobs where id = $1', [
+      `job-${fix}`,
+    ])
+    expect(after.rows[0].available_at).toEqual(before.rows[0].available_at)
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('moves no job for a task that a run already took', async () => {
+    const { fix } = await incident()
+    await getDb().update(task).set({ stage: 'sandbox' }).where(eq(task.id, fix))
+
+    expect(await moveAhead(getDb(), fix)).toBe(false)
+    expect((await dequeue())[0]).not.toBe(`job-${fix}`)
   })
 })
