@@ -62,7 +62,7 @@ const OUTER = {
  * is not counted: nothing of the work was attempted.
  */
 export function automaticRunsSincePerson() {
-  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true'), 0) and not ((${OUTER.detail}->>'decision') is not distinct from 'request_changes' and exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage from stage_event f where f.task_id = ${OUTER.taskId} and f.id > s.id order by f.id limit 1) = 'failed')))`
+  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not ((${OUTER.detail}->>'decision') is not distinct from 'request_changes' and exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage from stage_event f where f.task_id = ${OUTER.taskId} and f.id > s.id order by f.id limit 1) = 'failed')))`
 }
 
 const iso = (date: Date) => date.toISOString()
@@ -99,7 +99,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
       // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
       // same run again, so the checks before it still count.
-      verifies: sql<number>`count(*) filter (where ${OUTER.stage} = 'verify' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true'), 0))`,
+      verifies: sql<number>`count(*) filter (where ${OUTER.stage} = 'verify' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0))`,
       automatic: automaticRunsSincePerson(),
     })
     .from(stageEvent)

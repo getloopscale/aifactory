@@ -159,6 +159,24 @@ describe('observe', () => {
     expect(value(h, 'minutes_to_first_review')).toEqual([21])
   })
 
+  it('does not start a run at a withdrawn send-back, nor count the stage it went back to twice', () => {
+    const h = history({
+      events: [
+        ev(0, 'intake'),
+        ev(5, 'verify', { sha: 'a1' }),
+        ev(10, 'failed', { error: 'checks' }),
+        ev(20, 'intake', { decision: 'request_changes', withdrawn: true }),
+        ev(10, 'failed', { error: 'checks', withdrawnDecisionId: 1 }),
+      ],
+      evidence: [{ sha: 'a1', passed: false, at: at(8) }],
+      reviews: [{ verdict: 'changes', at: at(9) }],
+    })
+    expect(observe(h).filter((o) => o.metric === 'first_pass_checks')).toEqual([
+      { metric: 'first_pass_checks', repository: 'o/r', at: at(10), value: 0 },
+    ])
+    expect(value(h, 'first_review_approval')).toEqual([0])
+  })
+
   it('splits a task into runs at each intake and measures each one alone', () => {
     const h = history({
       events: [
