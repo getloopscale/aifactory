@@ -996,34 +996,6 @@ describe('actions', () => {
       expect(deleted()).toEqual(Array(runs).fill('factory/97'))
     })
 
-    it('does not count runs the network dropped before any agent ran, and recovers once it is back', async () => {
-      const dropped = { error: 'fetch failed' }
-      const id = await seed('failed', { issueNumber: 98 }, [
-        { stage: 'intake', detail: { decision: 'retry', note: '' } },
-        { stage: 'sandbox' },
-        { stage: 'failed', detail: dropped },
-      ])
-      // More drops than the allowance of automatic runs: none of them started any work.
-      for (let run = 0; run < 6; run++) {
-        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
-        expect(card.retryAt).not.toBeNull()
-        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
-        await failAgain(id, dropped)
-      }
-      // The network is back, the run reaches the agent and fails there: now it counts.
-      expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
-      await getDb()
-        .insert(stageEvent)
-        .values([
-          { taskId: id, stage: 'sandbox' },
-          { taskId: id, stage: 'plan' },
-        ])
-      await getDb().insert(stageEvent).values({ taskId: id, stage: 'failed', detail: dropped })
-      await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
-      const [after] = (await listTasks(getDb())).filter((c) => c.id === id)
-      expect(after.retryAt).not.toBeNull()
-    })
-
     it('keeps the branch of a first run that pushed before the environment failed', async () => {
       const id = await seed('failed', { issueNumber: 95 }, [
         { stage: 'intake', detail: { decision: 'retry', note: '' } },

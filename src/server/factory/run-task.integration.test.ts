@@ -2635,6 +2635,81 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
     expect(card.retryAt).not.toBeNull()
   })
 
+  describe('when the network drops ("fetch failed")', () => {
+    const dropping = (drops: { left: number }) => {
+      const sandbox = new FakeSandbox(changed())
+      const create = sandbox.create.bind(sandbox)
+      sandbox.create = async (...args: Parameters<typeof create>) => {
+        if (drops.left-- > 0) throw new TypeError('fetch failed')
+        return create(...args)
+      }
+      return sandbox
+    }
+    const runAgain = async (id: number, queued: Queued[], sandbox: FakeSandbox) => {
+      const input = queued.at(-1)!
+      return runTask(
+        deps(sandbox),
+        id,
+        undefined,
+        runContinuation(undefined, input.feedback, input.resume),
+      )
+    }
+
+    it('runs again each time without using the allowance, and completes once the network is back', async () => {
+      const id = await seedTask()
+      const queued: Queued[] = []
+      const action = actionDeps(queued, [])
+      const drops = { left: 5 }
+      // More drops than the allowance of automatic runs, and none of them reached any agent.
+      expect(await runTask(deps(dropping(drops)), id)).toMatchObject({
+        status: 'failed',
+        stage: 'sandbox',
+      })
+      for (let i = 0; i < 4; i++) {
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runAgain(id, queued, dropping(drops))).toMatchObject({ status: 'failed' })
+        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+        expect(card.retryAt).not.toBeNull()
+      }
+      // The network is back: the fifth automatic run reaches the agent and completes.
+      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+      expect(await runAgain(id, queued, dropping(drops))).toMatchObject({ status: 'done' })
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.stage).toBe('done')
+    })
+
+    it('still limits the runs of an agent that fails with it, since that work was attempted', async () => {
+      const id = await seedTask()
+      const queued: Queued[] = []
+      const action = actionDeps(queued, [])
+      const failing = () =>
+        deps(new FakeSandbox(changed()), {
+          harness: {
+            name: 'fake-agent',
+            egress: agentEgress,
+            run: async () => {
+              throw new TypeError('fetch failed')
+            },
+          },
+        })
+      expect(await runTask(failing(), id)).toMatchObject({ status: 'failed' })
+      let runs = 0
+      for (; runs < 10; runs++) {
+        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+        if (card.retryAt === null) break
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        const input = queued.at(-1)!
+        await runTask(
+          failing(),
+          id,
+          undefined,
+          runContinuation(undefined, input.feedback, input.resume),
+        )
+      }
+      expect(runs).toBe(3)
+    })
+  })
+
   it('starts a first run that failed at the sandbox over, with a new branch', async () => {
     const id = await seedTask()
     const queued: Queued[] = []
