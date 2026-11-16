@@ -42,20 +42,13 @@ export type WaitingStep =
    * is. Asked only then, so a base that cannot be read blocks no other step.
    */
   | { kind: 'needs_base' }
-  /**
-   * Checks blamed on the base before, which the base no longer fails, still fail on the verified commit,
-   * which does not hold the fix: GitHub merges the base into the branch, and the checks run again on that
-   * commit. No builder run is paid and the builder is not sent back. `baseRed` are the checks that still
-   * fail on the base, kept in the blame.
-   */
-  | { kind: 'refresh'; checks: string[]; baseRed: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
   | { kind: 'finish'; mergedSha: string }
   /**
    * A required check failed: the same agent works again on its branch, with a note on what each failed
    * check reported (`checksFeedback`) as feedback.
    */
-  | { kind: 'send_back'; failed: string[]; reports: CheckReport[]; baseRed?: string[] }
+  | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
   /** The pull request conflicts with its base: the task runs again to merge the new base into its branch. */
   | { kind: 'start_over'; reason: string }
   | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
@@ -64,13 +57,6 @@ export type WaitingStep =
    * commit is integrated now, as the run would have done.
    */
   | { kind: 'integrate' }
-
-/**
- * Every check blamed on the base while the task waited (`done.detail.baseBlame`). `refreshing` names the
- * ones whose fix GitHub was asked to merge into the branch: the task waits for the new head and for its
- * checks, and does not ask again. `carry` hands the blame to the next run's commit.
- */
-export type BaseBlame = { checks: string[]; refreshing?: string[]; carry?: true }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -82,8 +68,6 @@ export type WaitingIntegration = {
   reports: CheckReport[]
   /** Every check reported on the head of the integration branch, when it could be read. */
   baseReports?: CheckReport[]
-  /** The checks an earlier pass blamed on the base for this verified commit (`done.detail.baseBlame`). */
-  baseBlame?: BaseBlame
   /** How long the pull request has waited. */
   waitedMs: number
   /** Automatic runs since a person last started the task. */
@@ -185,20 +169,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   if (allFailed.length > 0 && input.baseReports === undefined) return { kind: 'needs_base' }
   const base = input.baseReports ?? []
   const baseRed = allFailed.filter((name) => failedRuns(base, name).length > 0)
-  const blame = input.baseBlame
-  const toRefresh: string[] = []
-  const failed: string[] = []
-  for (const name of allFailed) {
-    if (baseRed.includes(name)) continue
-    if (!blame?.checks.includes(name)) failed.push(name)
-    else if (blame.refreshing?.includes(name)) continue
-    // Fixed on the base: it reports, and every run of it passed. Absent or running, the base is not known fixed.
-    else if (
-      base.some((r) => r.name === name) &&
-      base.every((r) => r.name !== name || r.state === 'success')
-    )
-      toRefresh.push(name)
-  }
+  const failed = allFailed.filter((name) => !baseRed.includes(name))
   if (failed.length > 0) {
     if (!runsLeft) {
       return {
@@ -209,9 +180,8 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       }
     }
     const reports = failed.flatMap((name) => failedRuns(input.reports, name))
-    return { kind: 'send_back', failed, reports, ...(baseRed.length > 0 ? { baseRed } : {}) }
+    return { kind: 'send_back', failed, reports }
   }
-  if (toRefresh.length > 0) return { kind: 'refresh', checks: toRefresh, baseRed }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
     return {
       kind: 'person',

@@ -264,11 +264,6 @@ export type GithubApi = {
   /** Takes a draft pull request out of draft and gives it `title`. Throws when GitHub will not. */
   markReadyForReview(repo: string, token: string, number: number, title: string): Promise<void>
   disableAutoMerge(repo: string, token: string, number: number): Promise<void>
-  /**
-   * Has GitHub merge the base into the pull request's branch, when the head is still `expectedHeadSha`.
-   * GitHub does it a moment later: the head changes then, not with the answer.
-   */
-  updateBranch(repo: string, token: string, number: number, expectedHeadSha: string): Promise<void>
   /** Every check run and commit status on a commit, with what each said. */
   checkReports(repo: string, token: string, sha: string): Promise<CheckReport[]>
   /** The check runs and commit statuses a commit has so far. */
@@ -997,17 +992,6 @@ export function createGithubApi(
       if (answer.why) {
         throw new Error(`GitHub could not turn auto-merge off on ${repo}#${number}: ${answer.why}`)
       }
-    },
-
-    async updateBranch(repo, token, number, expectedHeadSha) {
-      await ensure(
-        await call(repo, token, `/pulls/${number}/update-branch`, {
-          method: 'PUT',
-          body: JSON.stringify({ expected_head_sha: expectedHeadSha }),
-        }),
-        `updating the branch of ${repo}#${number}`,
-        [202],
-      )
     },
 
     async checkReports(repo, token, sha) {

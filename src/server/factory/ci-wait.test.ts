@@ -70,53 +70,17 @@ describe('decideWaitingIntegration with a red base', () => {
   })
 })
 
-describe('decideWaitingIntegration after the base was blamed', () => {
+describe('decideWaitingIntegration before the base is read', () => {
   const failing = [report('CI', 'failure', 'boom'), report('Lint', 'success')]
-  const blame = { checks: ['CI'] }
 
   it('asks for the base before it blames anyone', () => {
-    expect(decide({ reports: failing, baseReports: undefined })).toEqual({
-      kind: 'needs_base',
-    })
+    expect(decide({ reports: failing, baseReports: undefined })).toEqual({ kind: 'needs_base' })
   })
 
   it('does not ask for the base when no required check failed', () => {
     expect(decide({ reports: [report('CI', 'success'), report('Lint', 'success')] })).toEqual({
       kind: 'wait',
     })
-  })
-
-  it('updates the branch from the fixed base once the base no longer fails the check', () => {
-    expect(
-      decide({ reports: failing, baseReports: [report('CI', 'success')], baseBlame: blame }),
-    ).toEqual({ kind: 'refresh', checks: ['CI'], baseRed: [] })
-  })
-
-  it('keeps a check still red on the base in the blame while another one is refreshed', () => {
-    expect(
-      decide({
-        reports: [report('CI', 'failure'), report('Lint', 'failure')],
-        baseReports: [report('Lint', 'failure'), report('CI', 'success')],
-        baseBlame: blame,
-      }),
-    ).toEqual({ kind: 'refresh', checks: ['CI'], baseRed: ['Lint'] })
-  })
-
-  it.each([
-    ['running', [report('CI', 'pending')]],
-    ['not reported yet', []],
-  ])('waits while the base has the check %s', (_name, baseReports) => {
-    expect(decide({ reports: failing, baseReports, baseBlame: blame })).toEqual({ kind: 'wait' })
-  })
-
-  it('waits while GitHub is merging the base into the branch for a check already asked about', () => {
-    expect(
-      decide({
-        reports: failing,
-        baseReports: [report('CI', 'success')],
-        baseBlame: { checks: ['CI'], refreshing: ['CI'] },
-      }),
-    ).toEqual({ kind: 'wait' })
   })
 
   it('still tells a person of a required check that never reported while the base is red', () => {

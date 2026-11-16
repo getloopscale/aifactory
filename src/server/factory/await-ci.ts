@@ -10,7 +10,6 @@ import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
   checksFeedback,
-  type BaseBlame,
   decideWaitingIntegration,
   evidenceOfNote,
   type WaitingStep,
@@ -54,8 +53,6 @@ export type AwaitCiResult = {
   waiting: number
   /** Tasks that wait because every failed required check also fails on the integration branch. */
   waitingOnBase: number[]
-  /** Tasks started over on the fixed base because their failed checks were blamed on the base. */
-  rerun: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
   /** Failed checks whose evidence GitHub would not give: the work went back with their links only. */
@@ -264,79 +261,6 @@ async function readBase(
   return deps.api.checkReports(repository, token, head)
 }
 
-/** Remembers on the `done` event which checks were blamed on the base, so a later pass still knows. */
-async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown, blame: BaseBlame) {
-  await deps.db
-    .update(stageEvent)
-    .set({ detail: { ...(detail as Record<string, unknown>), baseBlame: blame } })
-    .where(eq(stageEvent.id, doneId))
-}
-
-/** The earlier blame plus what this pass found: the union of the checks. */
-function mergeBlame(
-  before: BaseBlame | undefined,
-  baseRed: string[],
-  refreshing?: string[],
-): BaseBlame {
-  const checks = [...new Set([...(before?.checks ?? []), ...baseRed])]
-  // A refresh in flight stays marked, except for a check that is red on the base again.
-  const inFlight = [...new Set([...(before?.refreshing ?? []), ...(refreshing ?? [])])].filter(
-    (name) => !baseRed.includes(name),
-  )
-  return inFlight.length > 0 ? { checks, refreshing: inFlight } : { checks }
-}
-
-/** What a send-back leaves for the next run: the checks the base failed, which that run must not be blamed for. */
-function carried(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
-  return { checks: mergeBlame(before, baseRed).checks, carry: true }
-}
-
-/**
- * The blame that applies to the verified commit: the one on its `done` event, or, when a send-back made
- * the run before it carry one, that one.
- */
-function blameOf(dones: { detail: unknown }[]): BaseBlame | undefined {
-  const own = (dones[0]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  if (own) return own
-  const before = (dones[1]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  return before?.carry ? { checks: before.checks } : undefined
-}
-
-/**
- * The branch GitHub was asked to update has a new head holding the verified commit: that head is the one
- * the checks now verify, and auto-merge is pinned to it. The checks that were refreshed leave the blame,
- * and any other stays until its own fix is held. Returns whether this pass dealt with the task.
- */
-async function adoptRefreshed(
-  deps: AwaitCiDeps,
-  w: Waiting,
-  doneId: number,
-  pull: Awaited<ReturnType<GithubApi['readPullRequest']>>,
-  stored: BaseBlame | undefined,
-  required: string[],
-  branch: string,
-  result: AwaitCiResult,
-): Promise<boolean> {
-  const { row, verifiedSha, token } = w
-  if (!stored?.refreshing?.length || pull.merged || pull.state !== 'open') return false
-  if (pull.headSha === verifiedSha) return false
-  if (!(await deps.api.contains(row.repository, token, pull.headSha, verifiedSha))) return false
-  // Exactly what was asked for: the verified commit with the integration branch merged in, nothing else.
-  const baseHead = await deps.api.branchHead(row.repository, token, branch)
-  if (!baseHead || !(await deps.api.contains(row.repository, token, pull.headSha, baseHead)))
-    return false
-  const left = stored.checks.filter((name) => !stored.refreshing!.includes(name))
-  await rememberBlame(deps, doneId, w.done, left.length > 0 ? { checks: left } : { checks: [] })
-  await deps.db
-    .update(task)
-    .set({ awaitingCiSha: pull.headSha })
-    .where(and(eq(task.id, row.id), eq(task.awaitingCiSha, verifiedSha)))
-  const adopted = { ...w, verifiedSha: pull.headSha, row: { ...row, awaitingCiSha: pull.headSha } }
-  if (await integrateHeld(deps, adopted, required)) result.merged.push(row.id)
-  else result.waiting += 1
-  return true
-}
-
 async function look(
   deps: AwaitCiDeps,
   row: typeof task.$inferSelect,
@@ -344,13 +268,12 @@ async function look(
   holding: Set<string>,
 ) {
   const verifiedSha = row.awaitingCiSha!
-  const dones = await deps.db
-    .select({ id: stageEvent.id, detail: stageEvent.detail, at: stageEvent.at })
+  const [done] = await deps.db
+    .select({ detail: stageEvent.detail, at: stageEvent.at })
     .from(stageEvent)
     .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'done')))
     .orderBy(desc(stageEvent.id))
-    .limit(2)
-  const done = dones[0]
+    .limit(1)
   const [runs] = await deps.db
     .select({ automatic: automaticRunsSincePerson() })
     .from(stageEvent)
@@ -362,8 +285,6 @@ async function look(
   const pull = await deps.api.readPullRequest(row.repository, token, number)
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
-  const blame = blameOf(dones)
-  const stored = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
   const waitedMs =
     (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime()
   const input = {
@@ -371,27 +292,12 @@ async function look(
     pull,
     required,
     reports,
-    ...(blame ? { baseBlame: blame } : {}),
     waitedMs,
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
       ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
       : {}),
   }
-  if (
-    done &&
-    (await adoptRefreshed(
-      deps,
-      { row, verifiedSha, number, token, done: (done.detail ?? {}) as Record<string, unknown> },
-      done.id,
-      pull,
-      stored,
-      required,
-      integrationBranch(repo),
-      result,
-    ))
-  )
-    return
   let step = decideWaitingIntegration(input)
   // The base is read only when a required check failed and its blame is the question.
   if (step.kind === 'needs_base') {
@@ -410,27 +316,7 @@ async function look(
       result.waiting += 1
       if (step.baseRed) {
         result.waitingOnBase.push(row.id)
-        const merged = mergeBlame(blame, step.baseRed)
-        if (done && merged.checks.length !== (stored?.checks.length ?? 0)) {
-          await rememberBlame(deps, done.id, done.detail, merged)
-        }
       }
-      return
-    case 'refresh':
-      // The union is kept first, so a check red on the base now is still the base's if the next step fails.
-      // The attempt is written before the call, so a pass that dies in between still knows it was made.
-      await rememberBlame(deps, done!.id, done!.detail, {
-        ...mergeBlame(blame, step.baseRed, step.checks),
-        carry: true,
-      })
-      try {
-        await deps.api.updateBranch(row.repository, token, number, verifiedSha)
-      } catch (error) {
-        // Not accepted: the blame goes back without the refresh, and the next pass asks again.
-        await rememberBlame(deps, done!.id, done!.detail, mergeBlame(blame, step.baseRed))
-        throw error
-      }
-      result.rerun.push(row.id)
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
@@ -441,9 +327,6 @@ async function look(
       return
     case 'send_back': {
       const note = await readFailure(deps, w, step.reports, result)
-      if (step.baseRed && done) {
-        await rememberBlame(deps, done.id, done.detail, carried(blame, step.baseRed))
-      }
       // Off first: the new commit the agent pushes must not merge before the factory verifies it.
       await deps.api.disableAutoMerge(row.repository, token, number)
       await deps.sendBack(row.id, note)
@@ -483,7 +366,6 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     toPerson: [],
     waiting: 0,
     waitingOnBase: [],
-    rerun: [],
     errors: [],
     unreadEvidence: [],
   }

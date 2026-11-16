@@ -1297,19 +1297,6 @@ describe('what integrating through the repository CI needs', () => {
     })
   })
 
-  it('asks GitHub to merge the base into the branch, pinned to the head it saw', async () => {
-    const { fetch, calls } = fakeFetch({
-      'PUT /pulls/12/update-branch': {
-        status: 202,
-        body: { message: 'Updating pull request branch.' },
-      },
-    })
-
-    await createGithubApi(fetch).updateBranch('o/r', 't', 12, 'abc')
-
-    expect(calls[0].body).toEqual({ expected_head_sha: 'abc' })
-  })
-
   it('turns auto-merge off', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /pulls/12': { status: 200, body: { node_id: 'PR_12' } },
