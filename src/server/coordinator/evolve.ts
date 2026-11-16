@@ -31,8 +31,11 @@ export const EVOLVE = {
   eventsListed: 20,
 } as const
 
-/** The waits the factory was designed to have: a signature that starts with one is never filed. */
+/** The waits the factory was designed to have: a signature that starts with one, or that names a provider limit, is never filed. */
 export const DESIGNED_WAITS = ['blocked by', 'waiting for an answer'] as const
+
+/** The provider refusing to serve the account (spend or usage limit, matched on the signature, where numbers are already `<n>`): a state of the account, not a defect to fix here. */
+const PROVIDER_LIMIT = /spend_limit|usage limit exceeded/i
 
 /** A `failed` or `handoff` event of a task, with the reason it recorded. */
 export type FailureEvent = {
@@ -92,7 +95,7 @@ export function reasonOf(detail: Record<string, unknown> | null): string {
 
 export function isDesignedWait(signature: string): boolean {
   const lower = signature.toLowerCase()
-  return DESIGNED_WAITS.some((wait) => lower.startsWith(wait))
+  return PROVIDER_LIMIT.test(signature) || DESIGNED_WAITS.some((wait) => lower.startsWith(wait))
 }
 
 /** How many incidents events ordered by time make: a gap of `EVOLVE.incidentGapMs` or more starts one. */
