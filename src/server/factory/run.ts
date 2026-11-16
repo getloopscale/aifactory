@@ -48,6 +48,7 @@ import {
   type CheckResult,
   type Verdict,
 } from './evidence'
+import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
 import { diffFacts } from './diff-facts'
 import {
   changePlanPrompt,
@@ -381,6 +382,13 @@ export class Run {
   private get title() {
     return squashTitle(this.c.issue.title, this.c.row.issueNumber)
   }
+  private get fixes(): string[] {
+    return this.c.repo.fixes ?? []
+  }
+  /** The fix commit pushed for an agent that changed nothing: the work is that commit. */
+  private pushedFix: string | undefined
+  /** The last commit the fixes ran on or made, so they never run twice on the same commit. */
+  private fixedHead: string | undefined
   private get checks() {
     return withChangesetCheck(
       this.c.repo.checks ?? this.c.deps.checks ?? DEFAULT_CHECKS,
@@ -1128,10 +1136,21 @@ export class Run {
     const { deps, taskId, row, api, continuation, state } = this.c
     if (continuation) return undefined
     if (!(await this.hasNothingToCommit())) return undefined
+    // Fixes that change the start commit make this a change after all: it goes on to be committed, checked
+    // and reviewed like any other, instead of a claim the checks backed only after the fix.
+    const fixed = await this.applyFixes(this.baseSha, {
+      costUsd: first.costUsd,
+      agentSummary: first.summary.slice(0, 4_000),
+      sessionId: this.sessionId,
+    })
+    if (fixed.fixedFrom) {
+      this.pushedFix = fixed.sha
+      return undefined
+    }
     await this.keepNoChange()
     const said = `The agent said: ${oneLine(first.summary).slice(0, 700)}`
     const at = this.baseSha.slice(0, 7)
-    const checked = await this.verify(this.baseSha, 1, { publish: false })
+    const checked = await this.verify(this.baseSha, 1, { publish: false, fixed })
     if (!checked.verdict.open) {
       throw new StageFailure(
         `the agent made no change to the repository, and the checks did not pass at ${at}: ${checked.verdict.reasons.join('; ')}. ${said}`,
@@ -1282,6 +1301,7 @@ export class Run {
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)
     if (resolved) return { result: resolved }
+    if (this.pushedFix) return { sha: this.pushedFix }
     // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed.
     if (this.c.continuation?.plain && (await this.hasNothingToCommit())) {
       return { sha: this.remoteHead }
@@ -1329,13 +1349,38 @@ export class Run {
   }
 
   /**
+   * Runs the repository's fix commands on the checkout, which is at `sha` and clean, and, when they changed
+   * files, commits and pushes that change as its own commit, with `detail` and their outcomes on the push.
+   * A fix that fails changes nothing; the checks that follow decide. A commit the fixes already ran on or
+   * made is not fixed again.
+   */
+  private async applyFixes(sha: string, detail: Record<string, unknown>): Promise<FixedRound> {
+    if (this.fixes.length === 0 || sha === this.fixedHead) return { sha, outcomes: [] }
+    const { outcomes, changed } = await runFixes(
+      this.backend,
+      this.repoDir,
+      this.fixes,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
+    const fixed: FixedRound = changed
+      ? {
+          sha: await this.commitAndPush(FIX_COMMIT_MESSAGE, { ...detail, fixes: outcomes }),
+          outcomes,
+          fixedFrom: sha,
+        }
+      : { sha, outcomes }
+    this.fixedHead = fixed.sha
+    return fixed
+  }
+
+  /**
    * Runs the checks on the pushed commit and nothing else, stores each result, and publishes what they
    * add up to as a check run on the commit.
    */
   private async verify(
     sha: string,
     attempt: number,
-    options: { publish: boolean } = { publish: true },
+    options: { publish: boolean; fixed?: FixedRound } = { publish: true },
   ): Promise<Checked> {
     const { deps, taskId, row, api, state } = this.c
     const { db } = deps
@@ -1344,7 +1389,12 @@ export class Run {
       db,
       taskId,
       'verify',
-      { sha, attempt, checks: this.checks.map((c) => c.name) },
+      {
+        sha,
+        attempt,
+        checks: this.checks.map((c) => c.name),
+        ...fixDetail(options.fixed),
+      },
       { headSha: sha },
     )
     const head = (await must(this.backend, `git -C ${this.repoDir} rev-parse HEAD`)).stdout.trim()
@@ -1793,7 +1843,9 @@ export class Run {
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
-      const checked = await this.verify(sha, attempt)
+      const fixed = await this.applyFixes(sha, { attempt })
+      sha = fixed.sha
+      const checked = await this.verify(sha, attempt, { publish: true, fixed })
 
       if (!checked.verdict.open) {
         if (!canRework) {

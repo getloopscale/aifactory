@@ -309,6 +309,16 @@ describe('the repositories page', () => {
     })
   })
 
+  it('saves the fixes trimmed, and refuses one that is empty, long or on several lines', async () => {
+    await enable()
+    await saveRepository(deps(), 'paulo/app', { fixes: ['  pnpm prettier --write .  '] })
+    const [row] = await getDb().select().from(repository)
+    expect(row.fixes).toEqual(['pnpm prettier --write .'])
+    for (const fixes of [[''], ['a\nb'], ['x'.repeat(501)], Array(9).fill('x')]) {
+      await expect(saveRepository(deps(), 'paulo/app', { fixes })).rejects.toThrow()
+    }
+  })
+
   describe('the run limit through the settings endpoints', () => {
     // The route as the server runs it: the body is parsed by the schema the route declares, and the handler
     // answers with a Response or the value it returns.
