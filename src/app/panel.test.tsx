@@ -269,7 +269,9 @@ describe('task actions', () => {
     const mark = screen.getByRole('button', { name: 'Mark as resolved' }) as HTMLButtonElement
     expect(mark.disabled).toBe(true)
 
-    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Fixed by hand in #1389.' } })
+    fireEvent.change(screen.getByLabelText(/Resolved another way/), {
+      target: { value: 'Fixed by hand in #1389.' },
+    })
     fireEvent.click(mark)
 
     await waitFor(() => expect(calls).toHaveLength(1))
