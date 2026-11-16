@@ -187,6 +187,41 @@ describe('listTasks', () => {
     expect(card.attempts).toBe(1)
   })
 
+  it('starts no retry of an exhausted task after a send-back was withdrawn', async () => {
+    const auto = { decision: 'retry', automatic: true }
+    const withdrawn = { decision: 'request_changes', withdrawn: true }
+    const conflictError =
+      'GitHub answered 405 merging paulo/app#95: {"message":"Pull Request has merge conflicts"}'
+    const conflicted = await seed('done', { issueNumber: 95 }, [
+      { stage: 'intake', detail: auto },
+      { stage: 'intake', detail: auto },
+      { stage: 'intake', detail: auto },
+      { stage: 'done', detail: { integrationError: conflictError } },
+      { stage: 'intake', detail: withdrawn },
+      { stage: 'done', detail: { integrationError: conflictError, withdrawnDecisionId: 1 } },
+    ])
+    const failed = { error: '403: team is blocked: spend_limit' }
+    const exhausted = await seed('failed', { issueNumber: 96 }, [
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: auto },
+      { stage: 'failed', detail: failed },
+      { stage: 'intake', detail: withdrawn },
+      { stage: 'failed', detail: { ...failed, withdrawnDecisionId: 1 } },
+    ])
+
+    const later = { limit: 5, now: new Date(Date.now() + 24 * 3600_000) }
+    expect(await runConflictRetries(deps(), { limit: 5 })).toEqual({ started: 0, skipped: 0 })
+    expect(await runDueRetries(deps(), later)).toEqual({ started: 0, skipped: 0 })
+
+    expect(queued).toEqual([])
+    const stages = new Map((await getDb().select().from(task)).map((t) => [t.id, t.stage] as const))
+    expect(stages.get(conflicted)).toBe('done')
+    expect(stages.get(exhausted)).toBe('failed')
+  })
+
   it('puts every stage in a column that exists on the board', async () => {
     for (const stage of [
       'intake',
