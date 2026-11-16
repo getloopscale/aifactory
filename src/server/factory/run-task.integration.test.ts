@@ -2520,9 +2520,22 @@ describe('runTask continuing from a branch a person sent back', () => {
       expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
     })
 
+    it('opens a new pull request when GitHub will not reopen the closed one', async () => {
+      githubApi.fail('reopenPullRequest', new Error('GitHub answered 422 reopening paulo/app#12'))
+      const { result } = await sentBackOnClosed(2)
+      expect(result.status).not.toBe('failed')
+    })
+
     it('reopens it when the branch is ahead of its base', async () => {
-      await sentBackOnClosed(2)
+      const { id, result } = await sentBackOnClosed(2)
       expect(githubApi.answered('reopenPullRequest').map(([number]) => number)).toEqual([12])
+      expect(result.status).not.toBe('failed')
+      const stages = await stagesOf(id)
+      expect(stages).toContain('verify')
+      expect(stages).toContain('review')
+      // The checks judged the branch's head, not the closed pull request's old one.
+      expect(seen.checkRuns.map((c) => c.headSha)).toContain('f'.repeat(40))
+      expect(seen.checkRuns.map((c) => c.headSha)).not.toContain('oldsha1')
     })
   })
 

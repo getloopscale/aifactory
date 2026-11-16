@@ -973,8 +973,12 @@ export class Run {
     const { row, api } = this.c
     const number = Number(/\/pull\/(\d+)$/.exec(row.pullRequestUrl ?? '')?.[1])
     if (!this.c.continuation || !number) return undefined
-    // A pull request that cannot be read leaves the run as it was: the old path, not a new failure.
-    return api.readPullRequest(row.repository, this.c.token, number).catch(() => undefined)
+    // A pull request that is gone is not one to reopen. One that could not be read is not judged as if its
+    // state were known: the error fails the run, which repeats when GitHub was only failing.
+    return api.readPullRequest(row.repository, this.c.token, number).catch((error: unknown) => {
+      if (/^GitHub answered 404\b/.test(error instanceof Error ? error.message : '')) return undefined
+      throw error
+    })
   }
 
   /**
@@ -1001,14 +1005,17 @@ export class Run {
   private async reopenedOrEmpty(sha: string): Promise<RunResult | undefined> {
     const { deps, taskId, row, api, branch } = this.c
     const pull = await this.recordedPullRequest()
-    if (!pull || pull.state !== 'closed' || pull.merged) return undefined
+    if (!pull || pull.state === 'open') return undefined
     const base = integrationBranch(this.c.repo)
     const ahead = await api.branchAhead(row.repository, this.c.token, base, branch)
     if (ahead && ahead.aheadBy > 0) {
-      await api.reopenPullRequest(row.repository, this.c.token, pull.number)
+      // A merged one stays merged; a closed one that GitHub will not reopen is replaced by a new one.
+      if (!pull.merged) {
+        await api.reopenPullRequest(row.repository, this.c.token, pull.number).catch(() => {})
+      }
       return undefined
     }
-    const reason = `the pull request ${pull.url} is closed and the branch has nothing ahead of ${base}, so there is nothing to open a pull request for`
+    const reason = `the pull request ${pull.url} is ${pull.merged ? 'merged' : 'closed'} and the branch has nothing ahead of ${base}, so there is nothing to open a pull request for`
     await enterStage(deps.db, taskId, 'handoff', {
       branch,
       sha,
