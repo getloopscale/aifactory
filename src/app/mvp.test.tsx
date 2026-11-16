@@ -52,7 +52,7 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       reachable: true,
       enabled: true,
       checks: [{ name: 'unit', command: 'pnpm test' }],
-      fixes: [],
+      fixes: ['pnpm eslint --fix .'],
       egress: ['pypi.org'],
       baseBranch: null,
       releaseBranch: null,
@@ -346,11 +346,17 @@ describe('repositories', () => {
     expect((screen.getByLabelText(/Checks, one per line/) as HTMLTextAreaElement).value).toBe(
       'unit: pnpm test',
     )
+    expect(
+      (screen.getByLabelText(/Fixes, one command per line/) as HTMLTextAreaElement).value,
+    ).toBe('pnpm eslint --fix .')
     expect((screen.getByLabelText(/Extra domains/) as HTMLTextAreaElement).value).toBe('pypi.org')
     expect((screen.getByLabelText('Builder') as HTMLSelectElement).value).toBe('codex')
 
     fireEvent.change(screen.getByLabelText(/Checks, one per line/), {
       target: { value: 'unit: pnpm test\ntypes: pnpm typecheck' },
+    })
+    fireEvent.change(screen.getByLabelText(/Fixes, one command per line/), {
+      target: { value: 'pnpm eslint --fix .\n  pnpm prettier --write .  ' },
     })
     fireEvent.change(screen.getByLabelText(/Extra domains/), {
       target: { value: 'pypi.org, crates.io' },
@@ -365,6 +371,7 @@ describe('repositories', () => {
         { name: 'unit', command: 'pnpm test' },
         { name: 'types', command: 'pnpm typecheck' },
       ],
+      fixes: ['pnpm eslint --fix .', 'pnpm prettier --write .'],
       egress: ['pypi.org', 'crates.io'],
       baseBranch: null,
       releaseBranch: null,

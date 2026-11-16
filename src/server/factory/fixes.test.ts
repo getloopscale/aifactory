@@ -117,6 +117,27 @@ describe('runFixes', () => {
       expect(await git('status', '--porcelain')).toBe(' M a.txt\n')
     })
 
+    it('puts back ignored files a failing fix changed, made or deleted, for the fix after it', async () => {
+      writeFileSync(join(dir, '.gitignore'), '*.cache\n')
+      await git('add', '.gitignore')
+      await git('commit', '-qm', 'ignore')
+      writeFileSync(join(dir, 'keep.cache'), 'k0\n')
+      writeFileSync(join(dir, 'gone.cache'), 'g0\n')
+      const out = await runFixes(
+        new LocalBackend(),
+        dir,
+        [
+          'echo k1 > keep.cache && echo n > made.cache && rm gone.cache && exit 2',
+          'cat keep.cache gone.cache > a.txt && ls *.cache >> a.txt',
+        ],
+        5000,
+      )
+      expect(out.map((o) => o.exitCode)).toEqual([2, 0])
+      expect(read('keep.cache')).toBe('k0\n')
+      expect(existsSync(join(dir, 'made.cache'))).toBe(false)
+      expect(read('a.txt')).toBe('k0\ng0\ngone.cache\nkeep.cache\n')
+    })
+
     it('restores a file a failing fix deleted', async () => {
       await runFixes(new LocalBackend(), dir, ['rm b.txt && exit 1'], 5000)
       expect(read('b.txt')).toBe('b0\n')

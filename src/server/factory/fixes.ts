@@ -16,6 +16,13 @@ export type FixOutcome = {
 }
 
 const SNAPSHOT_INDEX = '/tmp/factory-fix-index'
+const IGNORED_LIST = '/tmp/factory-fix-ignored.list'
+const IGNORED_NOW = '/tmp/factory-fix-ignored.now'
+const IGNORED_FILES = '/tmp/factory-fix-ignored.tar'
+
+/** Lists the ignored, untracked files (a cache, a build output), leaving the dependencies alone: too many to keep. */
+const listIgnored = (repoDir: string) =>
+  `git -C ${repoDir} ls-files -z -o -i --exclude-standard -- ':!node_modules' ':!**/node_modules'`
 
 /**
  * The working tree as it is now, tracked and untracked files, as a git tree built in a private index so the
@@ -26,7 +33,10 @@ async function snapshot(backend: SandboxBackend, repoDir: string, timeoutMs: num
   const run = await backend.execute(
     // Seeded from HEAD so a tracked file that matches an ignore rule stays in the tree: `add -A` alone would
     // leave it out, and a restore from that tree would delete it.
-    `rm -f ${SNAPSHOT_INDEX} && ${git} read-tree HEAD && ${git} add -A && ${git} write-tree`,
+    // The ignored files are kept apart, as the index never holds them.
+    `rm -f ${SNAPSHOT_INDEX} && ${listIgnored(repoDir)} | sort -z > ${IGNORED_LIST} && ` +
+      `(cd ${repoDir} && tar --null -T ${IGNORED_LIST} -cf ${IGNORED_FILES}) && ` +
+      `${git} read-tree HEAD && ${git} add -A && ${git} write-tree`,
     { timeoutMs },
   )
   return run.exitCode === 0 ? run.stdout.trim() : ''
@@ -44,7 +54,11 @@ async function restore(
     `git -C ${repoDir} reset -q --hard && git -C ${repoDir} clean -fdq && rm -f ${SNAPSHOT_INDEX} && ` +
       `${git} read-tree ${tree} && ${git} checkout-index -a -f && ` +
       // A tracked file the snapshot lacks (an earlier fix deleted it) comes back with the reset: remove it.
-      `cd ${repoDir} && git diff-tree -r -z --name-only --diff-filter=D HEAD ${tree} | xargs -0 rm -f --`,
+      `cd ${repoDir} && git diff-tree -r -z --name-only --diff-filter=D HEAD ${tree} | xargs -0 rm -f -- && ` +
+      // An ignored file the command made is removed, and one it changed or deleted comes back.
+      `${listIgnored(repoDir)} | sort -z > ${IGNORED_NOW} && ` +
+      `comm -z -13 ${IGNORED_LIST} ${IGNORED_NOW} | xargs -0 rm -f -- && ` +
+      `tar -xf ${IGNORED_FILES} -C ${repoDir}`,
     { timeoutMs },
   )
   return run.exitCode === 0 && !run.timedOut
