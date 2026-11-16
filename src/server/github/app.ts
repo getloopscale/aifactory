@@ -155,8 +155,9 @@ export function createGithubApp(
           },
         })
       } catch (error) {
-        // A network blip throws ("fetch failed"); only a read is asked again.
-        if (!isRead || attempt >= READ_ATTEMPTS) throw error
+        // A network blip throws ("fetch failed"), so nothing reached GitHub: a read is asked again, and so
+        // is the mint of an installation token, which only makes a token nobody saw.
+        if (!(isRead || path.endsWith('/access_tokens')) || attempt >= READ_ATTEMPTS) throw error
         await wait(READ_RETRY_MS * attempt)
         continue
       }
