@@ -350,6 +350,24 @@ describe('pollAwaitingIntegrations', () => {
     expect(updates()).toEqual([VERIFIED, NEW_HEAD])
   })
 
+  it('keeps the refresh marker when another check turns red on the base meanwhile', async () => {
+    repo().required.set('workspace', ['CI', 'Lint'])
+    reports(red('CI', 'https://ci/1'))
+    repo().report(BASE, red('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    repo().clearChecks(BASE)
+    repo().report(BASE, green('CI', 'https://ci/0'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id] })
+
+    // Lint fails on the pull request and on the base while CI's rerun is still pending.
+    repo().report(VERIFIED, red('Lint', 'https://ci/7'))
+    repo().report(BASE, red('Lint', 'https://ci/8'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [], rerun: [] })
+    expect(updates()).toEqual([VERIFIED])
+  })
+
   it('asks again for the update when GitHub refused it, without blaming the task', async () => {
     reports(red('CI', 'https://ci/1'))
     repo().report(BASE, red('CI', 'https://ci/0'))

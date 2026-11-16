@@ -279,7 +279,11 @@ function mergeBlame(
   refreshing?: string[],
 ): BaseBlame {
   const checks = [...new Set([...(before?.checks ?? []), ...baseRed])]
-  return refreshing ? { checks, refreshing } : { checks }
+  // A refresh in flight stays marked, except for a check that is red on the base again.
+  const inFlight = [...new Set([...(before?.refreshing ?? []), ...(refreshing ?? [])])].filter(
+    (name) => !baseRed.includes(name),
+  )
+  return inFlight.length > 0 ? { checks, refreshing: inFlight } : { checks }
 }
 
 /** What a send-back leaves for the next run: the checks the base failed, which that run must not be blamed for. */
@@ -310,12 +314,17 @@ async function adoptRefreshed(
   pull: Awaited<ReturnType<GithubApi['readPullRequest']>>,
   stored: BaseBlame | undefined,
   required: string[],
+  branch: string,
   result: AwaitCiResult,
 ): Promise<boolean> {
   const { row, verifiedSha, token } = w
   if (!stored?.refreshing?.length || pull.merged || pull.state !== 'open') return false
   if (pull.headSha === verifiedSha) return false
   if (!(await deps.api.contains(row.repository, token, pull.headSha, verifiedSha))) return false
+  // Exactly what was asked for: the verified commit with the integration branch merged in, nothing else.
+  const baseHead = await deps.api.branchHead(row.repository, token, branch)
+  if (!baseHead || !(await deps.api.contains(row.repository, token, pull.headSha, baseHead)))
+    return false
   const left = stored.checks.filter((name) => !stored.refreshing!.includes(name))
   await rememberBlame(deps, doneId, w.done, left.length > 0 ? { checks: left } : { checks: [] })
   await deps.db
@@ -378,6 +387,7 @@ async function look(
       pull,
       stored,
       required,
+      integrationBranch(repo),
       result,
     ))
   )
@@ -408,13 +418,18 @@ async function look(
       return
     case 'refresh':
       // The union is kept first, so a check red on the base now is still the base's if the next step fails.
-      await rememberBlame(deps, done!.id, done!.detail, mergeBlame(blame, step.baseRed))
-      await deps.api.updateBranch(row.repository, token, number, verifiedSha)
-      // Asked once: the task waits for the new head and its checks, and does not blame the old failure.
+      // The attempt is written before the call, so a pass that dies in between still knows it was made.
       await rememberBlame(deps, done!.id, done!.detail, {
         ...mergeBlame(blame, step.baseRed, step.checks),
         carry: true,
       })
+      try {
+        await deps.api.updateBranch(row.repository, token, number, verifiedSha)
+      } catch (error) {
+        // Not accepted: the blame goes back without the refresh, and the next pass asks again.
+        await rememberBlame(deps, done!.id, done!.detail, mergeBlame(blame, step.baseRed))
+        throw error
+      }
       result.rerun.push(row.id)
       return
     case 'finish':
