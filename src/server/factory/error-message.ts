@@ -1,4 +1,5 @@
 const MAX_DEPTH = 4
+const MAX_CAUSES = 8
 
 const NETWORK_CODE =
   /\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|EPIPE|UND_ERR_\w+)\b/
@@ -19,20 +20,20 @@ function describe(value: unknown): string {
 export function errorMessage(error: unknown): string {
   const causes: string[] = []
   const seen = new Set<unknown>([error])
-  let cause = error instanceof Error ? error.cause : undefined
-  while (cause !== undefined && cause !== null && !seen.has(cause) && causes.length < MAX_DEPTH) {
-    seen.add(cause)
-    const text = describe(cause)
-    if (text !== '') causes.push(text)
-    cause = cause instanceof Error ? cause.cause : undefined
-  }
-  if (error instanceof AggregateError) {
-    for (const inner of error.errors) {
-      if (causes.length >= MAX_DEPTH * 2) break
-      const text = describe(inner)
+  const visit = (value: unknown, depth: number): void => {
+    if (!(value instanceof Error) || depth >= MAX_DEPTH) return
+    const next: unknown[] = []
+    if (value instanceof AggregateError) next.push(...value.errors)
+    if (value.cause !== undefined && value.cause !== null) next.push(value.cause)
+    for (const item of next) {
+      if (seen.has(item) || causes.length >= MAX_CAUSES) continue
+      seen.add(item)
+      const text = describe(item)
       if (text !== '' && !causes.includes(text)) causes.push(text)
+      visit(item, depth + 1)
     }
   }
+  visit(error, 0)
   const own = describe(error)
   return causes.length === 0 ? own : `${own} (cause: ${causes.join(' <- ')})`
 }

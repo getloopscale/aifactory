@@ -70,3 +70,14 @@ describe('errorMessage with an AggregateError', () => {
     expect(text.startsWith('fetch failed')).toBe(true)
   })
 })
+
+describe('errorMessage with an AggregateError as the cause of a fetch failure', () => {
+  it('names the connection errors', () => {
+    const e = new TypeError('fetch failed', {
+      cause: new AggregateError([new Error('connect ECONNREFUSED ::1:443'), new Error('connect ETIMEDOUT 1.2.3.4:443')], ''),
+    })
+    const text = errorMessage(e)
+    expect(text).toContain('ECONNREFUSED ::1:443')
+    expect(text).toContain('ETIMEDOUT 1.2.3.4:443')
+  })
+})
