@@ -189,6 +189,12 @@ export type Continuation = {
   fromChecks?: boolean
   /** The run only continues a branch an earlier run pushed before it finished: nobody asked for anything. */
   plain?: boolean
+  /**
+   * The required checks failed only because the integration branch failed them too, and it passes them now
+   * (`merge_base` in ci-wait.ts): the run merges that branch into the work branch itself, with no agent, and
+   * checks and reviews the merge.
+   */
+  mergeBase?: boolean
 }
 
 /**
@@ -200,7 +206,9 @@ export function runContinuation(
   decided: { kind: string; note: string } | undefined,
   feedback: string | undefined,
   resume?: boolean,
+  mergeBase?: boolean,
 ): Continuation | undefined {
+  if (mergeBase) return { feedback: '', mergeBase: true }
   if (decided?.kind === 'request_changes') return { feedback: decided.note }
   if (feedback) return { feedback, fromChecks: true }
   return resume ? { feedback: '', plain: true } : undefined

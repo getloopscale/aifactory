@@ -24,6 +24,7 @@ import { KnowledgeFeed } from '../knowledge/feed'
 import { parseLearned, withoutLearned } from '../knowledge/format'
 
 import { cloneRepository } from './clone'
+import { mergeIntegration } from './merge-base'
 import { evidenceOfNote } from './ci-wait'
 import { ensureBranches, integrationBranch } from './branches'
 import { uploadChangesetCheck } from './changeset-check'
@@ -1282,6 +1283,7 @@ export class Run {
    * something (the run parks) or when a person's requested change needed no change.
    */
   async start(): Promise<{ result: RunResult } | { sha: string }> {
+    if (this.c.continuation?.mergeBase) return { sha: await this.mergeBase() }
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()
@@ -1312,6 +1314,31 @@ export class Run {
       sessionId: this.sessionId,
     })
     return { sha }
+  }
+
+  /**
+   * The run a fixed integration branch queued (`merge_base` in ci-wait.ts): the factory merges the head of
+   * that branch, as this run cloned it, into the work branch and pushes the merge. No agent runs, because a
+   * clean merge asks for no decision; the checks and the review then read the merge as any work. A conflict,
+   * or a branch that already holds that commit, fails the run with the reason, for a person.
+   */
+  private async mergeBase(): Promise<string> {
+    const { deps, branch, state } = this.c
+    state.current = 'push'
+    const base = `${integrationBranch(this.c.repo)} at ${this.baseSha.slice(0, 7)}`
+    await this.backend.uploadFile(GITCONFIG, gitConfig(deps.author))
+    const merged = await mergeIntegration(this.backend, this.git, this.baseSha)
+    if ('conflicts' in merged) {
+      throw new StageFailure(
+        `merging ${base} into ${branch} conflicts in ${merged.conflicts.join(', ')}, which a person resolves`,
+      )
+    }
+    if ('upToDate' in merged) {
+      throw new StageFailure(
+        `${branch} already holds ${base}, so merging it makes no commit for the required checks to run on again`,
+      )
+    }
+    return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
   }
 
   /** Sends the work back to the builder's own session with what was wrong, and pushes the fix. */

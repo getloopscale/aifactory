@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, asc, desc, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -33,6 +33,7 @@ import {
   type FindingAction,
   releaseTask,
   requestChanges,
+  withdrawSendBack,
   resolveElsewhere,
   retry,
   retryAutomatically,
@@ -41,6 +42,7 @@ import {
 } from './actions'
 import { coordinatorActions, health, inbox, listTasks, taskDetail } from './queries'
 import { runContinuation } from '../factory/run-support'
+import { sendBackWithdrawn } from '../factory/send-back'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
 import { stageStream } from './stream'
 import { eventsOf, pruneTranscripts } from '../factory/transcript-store'
@@ -306,6 +308,32 @@ describe('listTasks and the retries the factory makes on its own', () => {
   })
 })
 
+describe('the automatic retries after a send-back was withdrawn', () => {
+  it('does not count the withdrawn send-back as a person starting the task', async () => {
+    const automatic = { stage: 'intake', detail: { decision: 'retry', automatic: true } }
+    const failure = { stage: 'failed', detail: { error: 'git push: remote rejected' } }
+    await seed('failed', {}, [
+      failure,
+      automatic,
+      failure,
+      automatic,
+      failure,
+      automatic,
+      failure,
+      {
+        stage: 'intake',
+        detail: { decision: 'request_changes', note: 'x', decisionId: 1, withdrawn: true },
+      },
+      { stage: 'failed', detail: { ...failure.detail, withdrawnDecisionId: 1 } },
+    ])
+
+    const [card] = await listTasks(getDb())
+
+    // Three automatic retries are the limit, and withdrawing did not give them back.
+    expect(card.retryAt).toBeNull()
+  })
+})
+
 describe('taskDetail', () => {
   it('returns the timeline, the evidence, the reviews, the questions and the decisions', async () => {
     const id = await seed('done', { headSha: 'abc' }, [
@@ -520,7 +548,15 @@ describe('actions', () => {
     deleteSnapshot: async (id) => void snapshotsDeleted.push(id),
     inTransaction: (work) =>
       getDb().transaction((tx) =>
-        work(tx as never, async (input, key) => void queued.push({ input, key })),
+        work(
+          tx as never,
+          async (input, key) => void queued.push({ input, key }),
+          async (key) => {
+            const at = queued.findIndex((job) => job.key === key)
+            if (at >= 0) queued.splice(at, 1)
+            return at >= 0
+          },
+        ),
       ),
   })
   beforeEach(() => {
@@ -723,6 +759,224 @@ describe('actions', () => {
     ])
     await expect(requestChanges(deps(), id, 'again')).rejects.toThrow(ActionRefused)
     expect(queued).toHaveLength(1)
+  })
+
+  it('withdraws a send-back that has not started, and then accepts another note', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'failed', detail: {} })
+    await requestChanges(deps(), id, 'wrong note')
+    expect(queued).toHaveLength(1)
+
+    const withdrawn = await withdrawSendBack(deps(), id)
+
+    expect(withdrawn.stage).toBe('failed')
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('failed')
+    expect(queued).toEqual([])
+    const kinds = (await getDb().select().from(decision)).map((d) => d.kind)
+    expect(kinds).toEqual(['request_changes', 'withdrawn'])
+
+    await requestChanges(deps(), id, 'regenerate the docs')
+    expect(queued).toHaveLength(1)
+  })
+
+  it('tells a run taken before the withdrawal that its send-back was withdrawn', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'failed', detail: {} })
+    const wrong = await requestChanges(deps(), id, 'wrong note')
+    expect(await sendBackWithdrawn(getDb(), id, wrong.decisionId!)).toBe(false)
+
+    await withdrawSendBack(deps(), id)
+    const right = await requestChanges(deps(), id, 'regenerate the docs')
+
+    expect(await sendBackWithdrawn(getDb(), id, wrong.decisionId!)).toBe(true)
+    expect(await sendBackWithdrawn(getDb(), id, right.decisionId!)).toBe(false)
+  })
+
+  it('gives back what the send-back cleared, and finds the decision of an older intake', async () => {
+    const id = await seed('done', { headSha: 'abc', resolvedSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
+    await requestChanges(deps(), id, 'note')
+
+    await withdrawSendBack(deps(), id)
+
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'done', resolvedSha: 'abc', awaitingCiSha: 'abc' })
+
+    // An intake written before it kept what it cleared: what it gave up is read from the event it went back to.
+    const legacy = async (stageDetail: Record<string, unknown>, sha: string | null) => {
+      const old = await seed('done', { headSha: 'abc', resolvedSha: sha })
+      await getDb().insert(stageEvent).values({ taskId: old, stage: 'done', detail: stageDetail })
+      await requestChanges(deps(), old, 'note')
+      await getDb()
+        .update(stageEvent)
+        .set({ detail: { decision: 'request_changes', note: 'note' } })
+        .where(and(eq(stageEvent.taskId, old), eq(stageEvent.stage, 'intake')))
+      return old
+    }
+    const resolved = await legacy({ resolved: true, sha: 'r1' }, 'r1')
+    await withdrawSendBack(deps(), resolved)
+    const [back] = await getDb().select().from(task).where(eq(task.id, resolved))
+    expect(back).toMatchObject({ stage: 'done', resolvedSha: 'r1', awaitingCiSha: null })
+
+    const plain = await legacy({}, null)
+    await withdrawSendBack(deps(), plain)
+    const [plainRow] = await getDb().select().from(task).where(eq(task.id, plain))
+    expect(plainRow.stage).toBe('done')
+
+    // A task that waited for checks goes back to waiting on its head; the cron reconciles it.
+    const waiting = await legacy({ awaitingChecks: ['ci'] }, null)
+    await withdrawSendBack(deps(), waiting)
+    const [waited] = await getDb().select().from(task).where(eq(task.id, waiting))
+    expect(waited).toMatchObject({ stage: 'done', awaitingCiSha: 'abc' })
+
+    // One whose wait finished since (the merge is recorded) does not wait again: that would finish it twice.
+    const finished = await legacy({ awaitingChecks: ['ci'] }, null)
+    await getDb().update(task).set({ mergedSha: 'm1' }).where(eq(task.id, finished))
+    await withdrawSendBack(deps(), finished)
+    const [over] = await getDb().select().from(task).where(eq(task.id, finished))
+    expect(over).toMatchObject({ stage: 'done', awaitingCiSha: null, mergedSha: 'm1' })
+  })
+
+  it('refuses a send-back when the integration finished while it waited for the task lock', async () => {
+    const id = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
+    let sent: Promise<unknown> | undefined
+    await getDb().transaction(async (tx) => {
+      await tx.update(task).set({ awaitingCiSha: 'abc' }).where(eq(task.id, id))
+      sent = requestChanges(deps(), id, 'note')
+      await new Promise((r) => setTimeout(r, 200))
+      // The integrate-after-ci cron claims the merge as `finish` does, while the send-back waits at the lock.
+      await tx
+        .update(task)
+        .set({ mergedSha: 'm1', awaitingCiSha: null })
+        .where(and(eq(task.id, id), eq(task.awaitingCiSha, 'abc')))
+    })
+
+    await expect(sent).rejects.toThrow(ActionRefused)
+
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'done', mergedSha: 'm1', awaitingCiSha: null })
+    const intakes = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'intake')))
+    expect(intakes).toEqual([])
+    expect(queued).toEqual([])
+  })
+
+  it('keeps a change a cron made while the send-back waited for the task lock', async () => {
+    const id = await seed('done', { headSha: 'abc', resolvedSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'done', detail: {} })
+    let sent: Promise<unknown> | undefined
+    await getDb().transaction(async (tx) => {
+      await tx.update(task).set({ awaitingCiSha: 'abc' }).where(eq(task.id, id))
+      sent = requestChanges(deps(), id, 'note')
+      await new Promise((r) => setTimeout(r, 200))
+      // The integration finishes while the send-back is held at the lock.
+      await tx.update(task).set({ awaitingCiSha: null }).where(eq(task.id, id))
+    })
+    await sent
+    await withdrawSendBack(deps(), id)
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'done', awaitingCiSha: null })
+  })
+
+  it('keeps the failure a withdrawn send-back came from, and runs again from the right work', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    const at = new Date('2026-01-01T10:00:00Z')
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'failed', detail: { reason: 'quota' }, at })
+    await requestChanges(deps(), id, 'wrong note')
+    await withdrawSendBack(deps(), id)
+
+    const events = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(asc(stageEvent.id))
+    const last = events.at(-1)!
+    expect(last).toMatchObject({ stage: 'failed', detail: { reason: 'quota' } })
+    expect(last.at).toEqual(at)
+
+    // A retry on its own no longer finds the withdrawn note.
+    await retryAutomatically(deps(), id)
+    expect(queued.at(-1)?.input).not.toHaveProperty('decisionId')
+    expect(queued.at(-1)?.input).not.toHaveProperty('feedback')
+  })
+
+  it('keeps the integration error of a done task that was sent back and withdrawn', async () => {
+    const id = await seed('done', { headSha: 'abc' })
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'done', detail: { integrationError: 'conflict' } })
+    await requestChanges(deps(), id, 'note')
+    await withdrawSendBack(deps(), id)
+
+    // In the order they were written: the withdrawal updates the intake, which moves its row in the table.
+    const [last] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, id))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(last).toMatchObject({ stage: 'done', detail: { integrationError: 'conflict' } })
+  })
+
+  it('retries on its own with the older legacy send-back after a newer one was withdrawn', async () => {
+    const id = await seed('done', { headSha: 'abc' })
+    const [older] = await getDb()
+      .insert(decision)
+      .values({ taskId: id, kind: 'request_changes', sha: 'abc', note: 'older' })
+      .returning({ id: decision.id })
+    await getDb()
+      .insert(stageEvent)
+      .values([
+        { taskId: id, stage: 'intake', detail: { decision: 'request_changes', note: 'older' } },
+        { taskId: id, stage: 'failed', detail: { error: 'git push: remote rejected' } },
+      ])
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+    await requestChanges(deps(), id, 'newer')
+    await withdrawSendBack(deps(), id)
+
+    await retryAutomatically(deps(), id)
+
+    expect(queued.at(-1)?.input).toMatchObject({ taskId: id, decisionId: older.id })
+  })
+
+  it('keeps the attempts of the restored run after a withdrawal', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    await getDb()
+      .insert(stageEvent)
+      .values([
+        { taskId: id, stage: 'intake', detail: {} },
+        { taskId: id, stage: 'verify', detail: {} },
+        { taskId: id, stage: 'failed', detail: { error: 'x' } },
+      ])
+    await requestChanges(deps(), id, 'note')
+    await withdrawSendBack(deps(), id)
+
+    const [card] = await listTasks(getDb())
+    expect(card.attempts).toBe(1)
+  })
+
+  it('refuses to withdraw when nothing waits, when it was automatic, or when its run was taken', async () => {
+    const idle = await seed('done', { headSha: 'abc' })
+    await expect(withdrawSendBack(deps(), idle)).rejects.toThrow(ActionRefused)
+
+    const auto = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: auto, stage: 'done', detail: {} })
+    await sendBackAutomatically(deps(), auto, 'CI failed')
+    await expect(withdrawSendBack(deps(), auto)).rejects.toThrow(ActionRefused)
+
+    const taken = await seed('done', { headSha: 'abc' })
+    await getDb().insert(stageEvent).values({ taskId: taken, stage: 'done', detail: {} })
+    await requestChanges(deps(), taken, 'note')
+    queued.length = 0
+    await expect(withdrawSendBack(deps(), taken)).rejects.toThrow(/already started/)
+    const [row] = await getDb().select().from(task).where(eq(task.id, taken))
+    expect(row.stage).toBe('intake')
   })
 
   it('no longer counts a task as resolved once a person sends it back', async () => {

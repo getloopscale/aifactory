@@ -13,7 +13,7 @@ import type { CheckReport } from '../github/pulls'
 
 import { adoptMergedHandoffs, pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
 import type { EvidenceApi } from './check-evidence'
-import { CI_SILENCE_MS } from './ci-wait'
+import { CI_SILENCE_MS, fixedBaseNote } from './ci-wait'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -48,6 +48,7 @@ const gh = {
 }
 const sentBack: { taskId: number; note: string }[] = []
 const startedOver: number[] = []
+const mergedBase: { taskId: number; note: string }[] = []
 
 /** Sets how the task's pull request stands on GitHub. */
 const pull = (over: Partial<FakePullRequest> = {}) =>
@@ -82,6 +83,7 @@ beforeEach(async () => {
   Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
   sentBack.length = 0
   startedOver.length = 0
+  mergedBase.length = 0
 })
 
 const checks: EvidenceApi = {
@@ -119,6 +121,9 @@ const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
   },
   startOver: async (taskId) => {
     startedOver.push(taskId)
+  },
+  mergeBase: async (taskId, note) => {
+    mergedBase.push({ taskId, note })
   },
   ...over,
 })
@@ -260,6 +265,125 @@ describe('pollAwaitingIntegrations', () => {
 
     expect(branchMerges()).toHaveLength(1)
     expect((await events(id)).filter((e) => e.stage === 'done')).toHaveLength(2)
+  })
+
+  const BASE = 'b'.repeat(40)
+  const failure = (name: string, url = 'https://ci/1') =>
+    ({ name, state: 'failure', detail: 'red', url }) as const
+  const success = (name: string) => ({ name, state: 'success', detail: '', url: 'u' }) as const
+  /** Sets what the checks on the head of the integration branch report: these and nothing else. */
+  const baseIs = (...list: CheckReport[]) => {
+    repo().clearChecks(BASE)
+    for (const report of list) repo().report(BASE, report)
+  }
+  const blameOf = async (id: number) =>
+    ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseBlame?: unknown })
+      .baseBlame
+
+  it('waits, and sends nothing back, when the failed check also fails on the integration branch', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result).toMatchObject({ sentBack: [], waiting: 1, waitingOnBase: [id] })
+    expect(sentBack).toEqual([])
+    expect(autoMergeOff()).toEqual([])
+    expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
+  })
+
+  it('remembers on the done event which checks it blamed on the base, for the verified commit', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+
+    await pollAwaitingIntegrations(deps())
+
+    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
+  })
+
+  it('runs the task to merge the base, with no agent sent back, once the base passes the check', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    baseIs(success('CI'))
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result).toMatchObject({ baseFixed: [id], sentBack: [] })
+    expect(sentBack).toEqual([])
+    expect(mergedBase).toEqual([{ taskId: id, note: fixedBaseNote('workspace', ['CI']) }])
+    expect(autoMergeOff()).toEqual([12])
+  })
+
+  it('keeps every check blamed on the base while the task waits, and merges only once all pass', async () => {
+    repo().required.set('workspace', ['CI', 'Lint'])
+    reports(failure('CI'), { name: 'Lint', state: 'pending', detail: '', url: 'u' })
+    baseIs(failure('CI', 'https://ci/0'), success('Lint'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    reports(failure('CI'), failure('Lint'))
+    baseIs(failure('CI', 'https://ci/0'), failure('Lint', 'https://ci/0'))
+    await pollAwaitingIntegrations(deps())
+    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI', 'Lint'] })
+
+    baseIs(success('CI'), failure('Lint', 'https://ci/0'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })
+    expect(mergedBase).toEqual([])
+
+    baseIs(success('CI'), success('Lint'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ baseFixed: [id] })
+    expect(mergedBase).toEqual([{ taskId: id, note: fixedBaseNote('workspace', ['CI', 'Lint']) }])
+  })
+
+  it('does not take a blame stored for another commit as this one', async () => {
+    reports(failure('CI'))
+    baseIs(success('CI'))
+    const id = await waitingTask()
+    const [done] = (await events(id)).filter((e) => e.stage === 'done')
+    await getDb()
+      .update(stageEvent)
+      .set({ detail: { ...(done!.detail as object), baseBlame: { sha: 'old', checks: ['CI'] } } })
+      .where(eq(stageEvent.id, done!.id))
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id], baseFixed: [] })
+  })
+
+  it('records a failed read of the base and looks again, without blaming the task', async () => {
+    reports(failure('CI'))
+    const id = await waitingTask()
+    api.fail('branchHead', githubAnswered(502, 'reading the head of workspace'), {
+      when: (branch) => branch === 'workspace',
+    })
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result).toMatchObject({ sentBack: [], toPerson: [] })
+    expect(result.errors).toEqual([expect.stringContaining(`task ${id}:`)])
+    expect(sentBack).toEqual([])
+  })
+
+  it('finishes a merged integration though the base cannot be read', async () => {
+    reports(failure('CI'))
+    pull({ merged: true, state: 'closed', mergeCommitSha: 'merge0001' })
+    const id = await waitingTask()
+    api.fail('branchHead', githubAnswered(502, 'reading the head of workspace'), {
+      when: (branch) => branch === 'workspace',
+    })
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result).toMatchObject({ merged: [id], errors: [] })
+  })
+
+  it('sends the work back when the check passes on the integration branch', async () => {
+    reports(failure('CI'))
+    baseIs(success('CI'))
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [id] })
   })
 
   it('turns auto-merge off and sends the work back with each failed check', async () => {
@@ -475,6 +599,8 @@ describe('pollAwaitingIntegrations', () => {
       startedOver: [],
       toPerson: [],
       waiting: 0,
+      waitingOnBase: [],
+      baseFixed: [],
       errors: [],
       unreadEvidence: [],
     })

@@ -13,6 +13,8 @@ import {
   checksFeedback,
   decideWaitingIntegration,
   evidenceOfNote,
+  fixedBaseNote,
+  type WaitingIntegration,
   type WaitingStep,
 } from './ci-wait'
 import { createPreRelease, type ReleaseMode } from './deliver'
@@ -39,6 +41,11 @@ export type AwaitCiDeps = {
   now?: () => Date
   /** Runs the task again on its branch with the note as feedback (the panel's `sendBackAutomatically`). */
   sendBack: (taskId: number, note: string) => Promise<void>
+  /**
+   * Runs the task again to merge the integration branch, which passes again the checks it had failed, into
+   * its branch, with no agent; `note` is the record of why (the panel's `mergeFixedBase`).
+   */
+  mergeBase: (taskId: number, note: string) => Promise<void>
   /** Runs the task again: on its branch to merge the new base, or from it when the branch is gone (`retryAutomatically`). */
   startOver: (taskId: number) => Promise<void>
 }
@@ -52,6 +59,10 @@ export type AwaitCiResult = {
   startedOver: number[]
   toPerson: number[]
   waiting: number
+  /** Tasks that wait because the required checks they failed fail on the head of the integration branch too. */
+  waitingOnBase: number[]
+  /** Tasks run again to merge the integration branch, which passes now the checks it had failed, into their branch. */
+  baseFixed: number[]
   /** What stopped a task on this pass; it is looked at again on the next one. */
   errors: string[]
   /** Failed checks whose evidence GitHub would not give: the work went back with their links only. */
@@ -244,6 +255,54 @@ async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]):
   return finish(deps, w, merged.sha)
 }
 
+/**
+ * What the integration branch's head reports. A read that fails throws: the pass records it and looks at
+ * the task again, rather than blaming the task for a failure it cannot tell from the base's.
+ */
+async function readBase(
+  deps: AwaitCiDeps,
+  repository: string,
+  token: string,
+  branch: string,
+): Promise<CheckReport[]> {
+  const head = await deps.api.branchHead(repository, token, branch)
+  if (!head) {
+    throw new Error(`the integration branch ${branch} has no head to compare the checks with`)
+  }
+  return deps.api.checkReports(repository, token, head)
+}
+
+/**
+ * What a pass stores on the `done` event of the verified commit (`detail.baseBlame`): every required check
+ * found red on the base while it failed on that commit.
+ */
+type BaseBlame = { sha: string; checks: string[] }
+
+/** The checks blamed on the base for the verified commit; a blame stored for another commit counts for nothing. */
+function blamedOnBase(detail: unknown, verifiedSha: string): string[] {
+  const blame = (detail as { baseBlame?: Partial<BaseBlame> } | null | undefined)?.baseBlame
+  return blame?.sha === verifiedSha && Array.isArray(blame.checks) ? blame.checks : []
+}
+
+/**
+ * Adds the checks this pass found red on the base to the ones blamed before, so a later pass still knows
+ * whose their failure is once the base passes them. The list only grows while the commit waits.
+ */
+async function rememberBaseRed(
+  deps: AwaitCiDeps,
+  done: { id: number; detail: unknown },
+  verifiedSha: string,
+  before: string[],
+  red: string[],
+): Promise<void> {
+  if (red.every((name) => before.includes(name))) return
+  const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
+  await deps.db
+    .update(stageEvent)
+    .set({ detail: { ...(done.detail as Record<string, unknown>), baseBlame } })
+    .where(eq(stageEvent.id, done.id))
+}
+
 async function look(
   deps: AwaitCiDeps,
   row: typeof task.$inferSelect,
@@ -252,7 +311,7 @@ async function look(
 ) {
   const verifiedSha = row.awaitingCiSha!
   const [done] = await deps.db
-    .select({ detail: stageEvent.detail, at: stageEvent.at })
+    .select({ id: stageEvent.id, detail: stageEvent.detail, at: stageEvent.at })
     .from(stageEvent)
     .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'done')))
     .orderBy(desc(stageEvent.id))
@@ -264,21 +323,31 @@ async function look(
     .groupBy(stageEvent.taskId)
   const number = pullNumber(row.pullRequestUrl)
   const { token } = await deps.github.installationToken(row.repository)
-  const repo = await loadRepoConfig(deps.db, row.repository)
-  const pull = await deps.api.readPullRequest(row.repository, token, number)
-  const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
-  const step = decideWaitingIntegration({
+  const base = integrationBranch(await loadRepoConfig(deps.db, row.repository))
+  const required = await deps.api.requiredChecks(row.repository, token, base)
+  const blamed = blamedOnBase(done?.detail, verifiedSha)
+  const input: WaitingIntegration = {
     verifiedSha,
-    pull,
+    pull: await deps.api.readPullRequest(row.repository, token, number),
     required,
     reports: await deps.api.checkReports(row.repository, token, verifiedSha),
+    blamedOnBase: blamed,
     waitedMs:
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
       ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
       : {}),
-  })
+  }
+  let step = decideWaitingIntegration(input)
+  // The base is read only when a required check failed: whose failure it is is the question.
+  if (step.kind === 'needs_base') {
+    const baseReports = await readBase(deps, row.repository, token, base)
+    step = decideWaitingIntegration({ ...input, baseReports })
+  }
+  if (done && step.kind === 'wait' && step.baseRed) {
+    await rememberBaseRed(deps, done, verifiedSha, blamed, step.baseRed)
+  }
   const w: Waiting = {
     row,
     verifiedSha,
@@ -286,15 +355,28 @@ async function look(
     token,
     done: (done?.detail ?? {}) as Record<string, unknown>,
   }
+  await take(deps, w, step, { required, base, result })
+}
+
+/** Takes the step decided for a waiting integration. */
+async function take(
+  deps: AwaitCiDeps,
+  w: Waiting,
+  step: WaitingStep,
+  at: { required: string[]; base: string; result: AwaitCiResult },
+) {
+  const { row, token, number } = w
+  const { result } = at
   switch (step.kind) {
     case 'wait':
       result.waiting += 1
+      if (step.baseRed) result.waitingOnBase.push(row.id)
       return
     case 'finish':
       if (await finish(deps, w, step.mergedSha)) result.merged.push(row.id)
       return
     case 'integrate':
-      if (await integrateHeld(deps, w, required)) result.merged.push(row.id)
+      if (await integrateHeld(deps, w, at.required)) result.merged.push(row.id)
       else result.waiting += 1
       return
     case 'send_back': {
@@ -305,6 +387,14 @@ async function look(
       result.sentBack.push(row.id)
       return
     }
+    case 'merge_base':
+      // Off first: the merge the run pushes is a new commit, verified and reviewed before it lands.
+      await deps.api.disableAutoMerge(row.repository, token, number)
+      await deps.mergeBase(row.id, fixedBaseNote(at.base, step.checks))
+      result.baseFixed.push(row.id)
+      return
+    case 'needs_base':
+      throw new Error('the integration branch was read and the base is still asked for')
     case 'start_over':
       // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
@@ -335,6 +425,8 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     startedOver: [],
     toPerson: [],
     waiting: 0,
+    waitingOnBase: [],
+    baseFixed: [],
     errors: [],
     unreadEvidence: [],
   }
