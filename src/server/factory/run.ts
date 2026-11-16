@@ -969,7 +969,7 @@ export class Run {
   }
 
   /**
-   * Whether the pull request the task records is closed without a merge. GitHub does not move the head of a
+   * Whether the pull request the task records is closed, merged or not. GitHub does not move the head of a
    * closed pull request, so what it says of checks and conflicts is about a commit the branch left behind.
    * A pull request that cannot be read is not called closed.
    */
@@ -987,7 +987,7 @@ export class Run {
     if (!number) return false
     try {
       const pull = await this.c.api.readPullRequest(repository, this.c.token, number)
-      return pull.state === 'closed' && !pull.merged
+      return pull.state === 'closed'
     } catch {
       return false
     }

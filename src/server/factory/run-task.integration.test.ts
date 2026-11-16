@@ -2477,51 +2477,57 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
-  it('goes on from the branch when the pull request it was sent back on is closed', async () => {
-    const pushed = 'f'.repeat(40)
-    const id = await seedTask()
-    branchPushed()
-    repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed' })
-    await getDb()
-      .update(task)
-      .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
-      .where(eq(task.id, id))
-    const builder: CodingHarness = {
-      name: 'fake-agent',
-      egress: agentEgress,
-      run: async () => {
-        dirty = false
-        return { ok: true, summary: 'Nothing to merge.' }
-      },
-    }
+  it.each([
+    ['closed', false],
+    ['merged', true],
+  ])(
+    'goes on from the branch when the pull request it was sent back on is %s',
+    async (_, merged) => {
+      const pushed = 'f'.repeat(40)
+      const id = await seedTask()
+      branchPushed()
+      repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed', merged })
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async () => {
+          dirty = false
+          return { ok: true, summary: 'Nothing to merge.' }
+        },
+      }
 
-    const sandbox = new FakeSandbox(
-      changed((command) => {
-        if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
-        if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
-        return undefined
-      }),
-    )
+      const sandbox = new FakeSandbox(
+        changed((command) => {
+          if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+          if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
+          return undefined
+        }),
+      )
 
-    const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
-      feedback: 'CI failed:\n- CI: u',
-      fromChecks: true,
-    })
+      const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+        feedback: 'CI failed:\n- CI: u',
+        fromChecks: true,
+      })
 
-    expect(result).toMatchObject({ status: 'done', sha: pushed })
-    const opened = 'pullRequestUrl' in result ? result.pullRequestUrl : undefined
-    expect(opened).toBeTruthy()
-    expect(opened).not.toBe(PR_URL)
-    expect(seen.pulls).toEqual(['factory/7'])
-    const stages = await stagesOf(id)
-    expect(stages).toContain('verify')
-    expect(stages).toContain('review')
-    expect(stages).not.toContain('handoff')
-    const reviews = await getDb().select().from(review).where(eq(review.taskId, id))
-    expect(reviews.at(-1)).toMatchObject({ sha: pushed, verdict: 'approve' })
-    const [row] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(row.pullRequestUrl).toBe(opened)
-  })
+      expect(result).toMatchObject({ status: 'done', sha: pushed })
+      const opened = 'pullRequestUrl' in result ? result.pullRequestUrl : undefined
+      expect(opened).toBeTruthy()
+      expect(opened).not.toBe(PR_URL)
+      expect(seen.pulls).toEqual(['factory/7'])
+      const stages = await stagesOf(id)
+      expect(stages).toContain('verify')
+      expect(stages).toContain('review')
+      expect(stages).not.toContain('handoff')
+      const reviews = await getDb().select().from(review).where(eq(review.taskId, id))
+      expect(reviews.at(-1)).toMatchObject({ sha: pushed, verdict: 'approve' })
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.pullRequestUrl).toBe(opened)
+    },
+  )
 
   it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
     const id = await seedTask()
