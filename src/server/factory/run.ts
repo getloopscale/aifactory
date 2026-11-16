@@ -969,6 +969,54 @@ export class Run {
   }
 
   /**
+   * A task sent back on its branch whose recorded pull request is closed (not merged): GitHub keeps the old
+   * head of a closed pull request, so judging it would judge a stale commit. When the agent changed nothing,
+   * the pull request is reopened (GitHub moves its head to the branch) and the run goes on with the branch's
+   * head; when the branch has nothing ahead of its base, no pull request can be opened, so the task is
+   * handed over with that said instead of failing after the checks and the review.
+   */
+  private async closedPullRequestContinued(): Promise<
+    { sha: string } | { result: RunResult } | undefined
+  > {
+    const { deps, taskId, row, api, branch, continuation } = this.c
+    if (!continuation || continuation.plain || !row.pullRequestUrl || !this.remoteHead)
+      return undefined
+    const pull = await api.findPullRequest(row.repository, this.c.token, branch)
+    if (!pull || pull.state !== 'closed' || pull.merged) return undefined
+    if (!(await this.hasNothingToCommit())) return undefined
+    const ahead = await api.branchAhead(
+      row.repository,
+      this.c.token,
+      integrationBranch(this.c.repo),
+      branch,
+    )
+    if (ahead && ahead.aheadBy > 0) {
+      await api.reopenPullRequest(row.repository, this.c.token, pull.number)
+      return { sha: this.remoteHead }
+    }
+    const reason = `the pull request ${row.pullRequestUrl} is closed and the branch has nothing ahead of ${integrationBranch(this.c.repo)}, so there is nothing to open a pull request for`
+    await enterStage(deps.db, taskId, 'handoff', {
+      branch,
+      sha: this.remoteHead,
+      reason,
+      cause: 'checks_unchanged' satisfies HandoffCause,
+      pullRequestUrl: row.pullRequestUrl,
+      unchanged: true,
+      agentSummary: this.summary.slice(0, 4_000),
+      costUsd: this.cost,
+    })
+    return {
+      result: {
+        status: 'handoff',
+        branch,
+        sha: this.remoteHead,
+        pullRequestUrl: row.pullRequestUrl,
+        reason,
+      },
+    }
+  }
+
+  /**
    * A person asked for a change and the agent found nothing to change (the test was already there,
    * say). That is an answer, not a failure: the pull request stays as it was, and the person reads why.
    */
@@ -1196,6 +1244,8 @@ export class Run {
 
     // Work a review never approved is not left as it is: it goes on to the checks and the review.
     if (await this.unreviewedHeadLeftAsItIs()) return { sha: this.remoteHead }
+    const closed = await this.closedPullRequestContinued()
+    if (closed) return closed
     const unchanged = await this.answeredWithNoChange(first)
     if (unchanged) return { result: unchanged }
     const resolved = await this.resolvedAlready(first)

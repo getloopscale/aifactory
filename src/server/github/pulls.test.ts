@@ -279,6 +279,19 @@ describe('markReadyForReview', () => {
   })
 })
 
+describe('reopenPullRequest', () => {
+  it('sets the pull request open and throws when GitHub refuses', async () => {
+    const ok = fakeFetch({ 'PATCH /pulls/12': { status: 200 } })
+    await createGithubApi(ok.fetch).reopenPullRequest('o/r', 'tok', 12)
+    expect(ok.calls[0].body).toEqual({ state: 'open' })
+
+    const refused = fakeFetch({ 'PATCH /pulls/12': { status: 422 } })
+    await expect(
+      createGithubApi(refused.fetch).reopenPullRequest('o/r', 'tok', 12),
+    ).rejects.toThrow(/reopening o\/r#12/)
+  })
+})
+
 describe('commentOnIssue', () => {
   it('posts the comment on the issue and throws when GitHub refuses', async () => {
     const ok = fakeFetch({ 'POST /issues/7/comments': { status: 201 } })

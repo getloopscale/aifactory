@@ -2477,6 +2477,49 @@ describe('runTask continuing from a branch a person sent back', () => {
     })
   })
 
+  describe('when the recorded pull request is closed and the agent changes nothing', () => {
+    async function sentBackOnClosed(aheadBy: number) {
+      const id = await seedTask()
+      branchPushed()
+      repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed' })
+      repo().ahead('workspace', 'factory/7', aheadBy)
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async () => {
+          dirty = false
+          return { ok: true, summary: 'Nothing to merge.' }
+        },
+      }
+      const result = await runTask(
+        deps(new FakeSandbox(changed()), { harness: builder }),
+        id,
+        undefined,
+        { feedback: 'Merge workspace.', fromChecks: true },
+      )
+      return { id, result }
+    }
+
+    it('hands over without opening a pull request when the branch has nothing ahead of its base', async () => {
+      const { result } = await sentBackOnClosed(0)
+      expect(result).toMatchObject({
+        status: 'handoff',
+        reason: expect.stringContaining('nothing ahead of workspace'),
+      })
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
+      expect(githubApi.callsTo('reopenPullRequest')).toHaveLength(0)
+    })
+
+    it('reopens it when the branch is ahead of its base', async () => {
+      await sentBackOnClosed(2)
+      expect(githubApi.answered('reopenPullRequest').map(([number]) => number)).toEqual([12])
+    })
+  })
+
   it('hands over evidence that comes after the first 2,500 characters of the note', async () => {
     const id = await seedTask()
     branchPushed()
