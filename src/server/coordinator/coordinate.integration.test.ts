@@ -775,15 +775,14 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     const late = await seed('intake')
     await enqueue(late, 5)
 
-    await holdNewJob(getDb(), late, 'auto')
+    await holdNewJob(getDb(), late)
 
     expect(await dequeue()).toEqual([`job-${fix}`])
     expect(await dequeue()).toEqual([])
   })
 
-  it('changes no job in trial, whether a hold exists or a job was queued later', async () => {
-    const { fix } = await incident()
-    await coordinate(deps(), 'auto')
+  it('changes no job in trial when no hold exists, whether or not a job was queued later', async () => {
+    await incident()
     const late = await seed('intake')
     await enqueue(late, 5)
     const state = () =>
@@ -791,10 +790,42 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
 
     const before = await state()
     await coordinate(deps(), 'trial')
-    await holdNewJob(getDb(), late, 'trial')
+    await holdNewJob(getDb(), late)
 
     expect((await state()).rows).toEqual(before.rows)
-    expect(fix).toBeGreaterThan(0)
+  })
+
+  it('keeps a hold made in auto through trial and off, holds a new job, and ends it with the fix', async () => {
+    const { fix, other } = await incident()
+    await coordinate(deps(), 'auto')
+    const late = await seed('intake')
+    await enqueue(late, 5)
+
+    for (const mode of ['trial', 'off'] as const) {
+      await coordinate(deps(), mode)
+      await holdNewJob(getDb(), late)
+      expect(await dequeue()).toEqual([])
+    }
+
+    await getDb().insert(stageEvent).values({ taskId: fix, stage: 'failed' })
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'off')
+
+    const [job] = await dequeue()
+    expect(job).toBeDefined()
+    expect(other).toBeGreaterThan(0)
+  })
+
+  it('keeps the hold of a fix that is done without a merge, and ends it once merged', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    expect(await dequeue()).toEqual([])
+
+    await getDb().update(task).set({ mergedSha: 'abc' }).where(eq(task.id, fix))
+    await coordinate(deps(), 'auto')
+    expect((await dequeue())[0]).toBeDefined()
   })
 
   it('keeps the hold past an hour while the fix is still queued', async () => {

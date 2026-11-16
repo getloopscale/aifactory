@@ -3,7 +3,6 @@ import { eq } from 'drizzle-orm'
 import type { Database } from '../db'
 import { task } from '../db/schema'
 
-import type { CoordinatorMode } from './mode'
 import { HOLD_LOCK, holdOthers, releaseHolds } from './queue-apply'
 import { readHeldTests } from './queue-facts'
 import type { HeldTest } from './queue-order'
@@ -37,14 +36,12 @@ export async function maintainHolds(db: Database): Promise<HeldTest[]> {
 
 /**
  * Called in the transaction that queues a `run-task`: while a fix of the repository is on its way, the new job
- * is held with the others, so no worker takes it before the pass that would hold it.
+ * is held with the others, whatever the coordinator's mode (a hold made in `auto` ends only with its fix), so no worker takes it before the pass that would hold it.
  */
 export async function holdNewJob(
   db: Pick<Database, 'select' | 'execute'>,
   taskId: number,
-  mode: CoordinatorMode,
 ): Promise<void> {
-  if (mode !== 'auto') return
   await db.execute(HOLD_LOCK)
   const [row] = await db
     .select({ repository: task.repository })

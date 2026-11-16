@@ -1,6 +1,5 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 
-import { coordinatorModeFromEnv } from '../coordinator/mode'
 import { holdNewJob } from '../coordinator/queue-hold'
 import { getPool } from '../db'
 import * as schema from '../db/schema'
@@ -60,7 +59,7 @@ export const inTransactionForRun: ActionDeps['inTransaction'] = async (work) => 
         })
         const taskId = (input as { taskId?: number }).taskId
         if (taskId !== undefined) {
-          await holdNewJob(drizzle(client, { schema }), taskId, coordinatorModeFromEnv(process.env))
+          await holdNewJob(drizzle(client, { schema }), taskId)
         }
       }),
     )

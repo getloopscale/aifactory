@@ -7,7 +7,7 @@ import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions } from './exception-facts'
-import { readHeldTests, readLatestEvents, readQueueFacts } from './queue-facts'
+import { readLatestEvents, readQueueFacts } from './queue-facts'
 import { QUEUE, isHeld, recogniseQueue } from './queue-order'
 import { maintainHolds } from './queue-hold'
 import { readFailureEvents } from './evolve-facts'
@@ -58,10 +58,14 @@ export async function coordinate(
   mode: CoordinatorMode,
 ): Promise<PassResult> {
   const result: PassResult = { applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 }
-  if (mode === 'off') return result
+  // A hold made in `auto` lasts until its fix ends, whatever the mode is now.
+  if (mode === 'off') {
+    await maintainHolds(deps.db)
+    return result
+  }
   const exceptions = await exceptionsOf(deps)
   const repositories = await repositoriesOf(deps.db, exceptions)
-  const held = mode === 'auto' ? await maintainHolds(deps.db) : await readHeldTests(deps.db)
+  const held = await maintainHolds(deps.db)
   const now = new Date()
   // The reason of the failure the task is in now: its latest one, not every one of the window.
   const reasons = new Map<number, string[]>()
