@@ -1,0 +1,1 @@
+ALTER TABLE "repository" ADD COLUMN "fixes" jsonb DEFAULT '[]'::jsonb NOT NULL;

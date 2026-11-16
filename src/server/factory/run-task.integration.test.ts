@@ -466,6 +466,141 @@ describe('runTask', () => {
     expect(sandbox.stopped).toBe(1)
   })
 
+  it("passes format on the first round when the repository's fix commits what the builder left unformatted", async () => {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: [{ name: 'format', command: 'prettier --check .' }],
+        fixes: ['prettier --write .'],
+      })
+    const id = await seedTask()
+    let formatted = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+        if (c.endsWith('prettier --write .')) {
+          formatted = true
+          dirty = true
+          return { stdout: 'src/truncate.js' }
+        }
+        if (c.endsWith('prettier --check .')) return formatted ? {} : { exitCode: 1 }
+        return undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'push',
+      'verify',
+      'review',
+      'pr',
+      'done',
+    ])
+    const [row] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'push')))
+      .orderBy(desc(stageEvent.id))
+    expect(JSON.stringify(row.detail)).toContain('prettier --write .')
+    expect(sandbox.backend.files.get('/tmp/factory-commit-message.txt')).toBe(
+      "style: apply the repository's fixes\n",
+    )
+    const stored = await getDb().select().from(evidence).where(eq(evidence.taskId, id))
+    expect(stored.every((e) => e.passed)).toBe(true)
+  })
+
+  it('runs the fixes once, and checks their commit, when the builder changed nothing and the fixes did', async () => {
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, fixes: ['prettier --write .'] })
+    const id = await seedTask()
+    dirty = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+        if (c.endsWith('prettier --write .')) {
+          dirty = true
+          return { stdout: 'src/truncate.js' }
+        }
+        return undefined
+      }),
+    )
+    const unchanged: CodingHarness = {
+      name: 'unchanged',
+      egress: agentEgress,
+      run: async () => ({ ok: true, summary: 'Nothing to add.', sessionId: 'sess-1' }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: unchanged }), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    const fixRuns = sandbox.backend.commands.filter((c) => c.endsWith('prettier --write .'))
+    expect(fixRuns).toHaveLength(1)
+    expect(sandbox.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'pr',
+      'done',
+    ])
+  })
+
+  it('leaves the work as it was and still runs the checks when a fix fails', async () => {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: [{ name: 'format', command: 'prettier --check .' }],
+        fixes: ['prettier --write .'],
+      })
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+        if (c.endsWith('prettier --write .')) {
+          dirty = true
+          return { exitCode: 2, stderr: 'SyntaxError in src/truncate.js' }
+        }
+        if (c.includes('checkout-index')) dirty = false
+        return undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(sandbox.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'pr',
+      'done',
+    ])
+    const [verify] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'verify')))
+    expect(verify.detail).toMatchObject({
+      fixes: [{ command: 'prettier --write .', exitCode: 2 }],
+    })
+    const stored = await getDb().select().from(evidence).where(eq(evidence.taskId, id))
+    expect(stored.map((e) => e.name)).toEqual(['format'])
+  })
+
   it('records the whole cost and the branch on the done stage', async () => {
     const id = await seedTask()
     await runTask(deps(new FakeSandbox(changed())), id)
@@ -2474,6 +2609,87 @@ describe('runTask continuing from a branch a person sent back', () => {
       reason: expect.stringMatching(/required checks failed and the agent changed nothing/),
       cause: 'checks_unchanged',
       unchanged: true,
+    })
+  })
+
+  describe('when the recorded pull request is closed and the agent changes nothing', () => {
+    async function sentBackOnClosed(aheadBy: number, plain = false) {
+      const id = await seedTask()
+      branchPushed()
+      repo().pullRequest({ number: 12, headRef: 'factory/7', state: 'closed' })
+      repo().ahead('workspace', 'factory/7', aheadBy)
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async () => {
+          dirty = false
+          return { ok: true, summary: 'Nothing to merge.' }
+        },
+      }
+      // The branch moved on after its pull request was closed: its head is not the pull request's.
+      const head = 'f'.repeat(40)
+      const branchHead = (command: string) => {
+        if (command.includes('ls-remote')) return { stdout: `${head}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${head}\n` }
+        return undefined
+      }
+      const result = await runTask(
+        deps(new FakeSandbox(changed(branchHead)), { harness: builder }),
+        id,
+        undefined,
+        plain ? { feedback: '', plain: true } : { feedback: 'Merge workspace.', fromChecks: true },
+      )
+      return { id, result }
+    }
+
+    it('hands over without opening a pull request when the branch has nothing ahead of its base', async () => {
+      const { result } = await sentBackOnClosed(0)
+      expect(result).toMatchObject({
+        status: 'handoff',
+        reason: expect.stringContaining('nothing ahead of workspace'),
+      })
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
+      expect(githubApi.callsTo('reopenPullRequest')).toHaveLength(0)
+    })
+
+    it('hands over without opening a pull request on a plain continuation too', async () => {
+      const { result } = await sentBackOnClosed(0, true)
+      expect(result).toMatchObject({ status: 'handoff' })
+      expect(githubApi.callsTo('openPullRequest')).toHaveLength(0)
+    })
+
+    it('opens a new pull request when GitHub will not reopen the closed one', async () => {
+      githubApi.fail('reopenPullRequest', new Error('GitHub answered 422 reopening paulo/app#12'))
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+      const { id, result } = await sentBackOnClosed(2)
+      expect(result.status).not.toBe('failed')
+      const logged = warn.mock.calls
+        .map(([line]) => String(line))
+        .filter((line) => line.includes('pull_request_reopen_failed'))
+      warn.mockRestore()
+      expect(logged).toHaveLength(1)
+      expect(JSON.parse(logged[0])).toMatchObject({
+        taskId: id,
+        repository: 'paulo/app',
+        pullRequest: 12,
+        error: expect.stringContaining('GitHub answered 422'),
+      })
+    })
+
+    it('reopens it when the branch is ahead of its base', async () => {
+      const { id, result } = await sentBackOnClosed(2)
+      expect(githubApi.answered('reopenPullRequest').map(([number]) => number)).toEqual([12])
+      expect(result.status).not.toBe('failed')
+      const stages = await stagesOf(id)
+      expect(stages).toContain('verify')
+      expect(stages).toContain('review')
+      // The checks judged the branch's head, not the closed pull request's old one.
+      expect(seen.checkRuns.map((c) => c.headSha)).toContain('f'.repeat(40))
+      expect(seen.checkRuns.map((c) => c.headSha)).not.toContain('oldsha1')
     })
   })
 

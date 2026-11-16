@@ -108,6 +108,10 @@ async function pullRequestOf(
       .where(eq(repository.fullName, row.repository))
     const { token } = await deps.github.installationToken(row.repository)
     const pull = await deps.api.readPullRequest(row.repository, token, number)
+    // GitHub does not move the head of a closed pull request: its merge state is of a commit the branch left.
+    if (pull.state === 'closed' && !pull.merged) {
+      return unread(tried, 'the pull request is closed, so its merge state is stale')
+    }
     return readOf({
       conflicting: pull.mergeableState === 'dirty',
       base: integrationBranch(config ?? {}),

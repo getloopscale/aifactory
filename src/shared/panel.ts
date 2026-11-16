@@ -423,6 +423,8 @@ export type RepositoryView = {
   reachable: boolean
   enabled: boolean
   checks: { name: string; command: string }[] | null
+  /** Commands that rewrite files before each round of checks. */
+  fixes: string[]
   egress: string[]
   /** The branch work starts from and pull requests target; null means the default branch. */
   baseBranch: string | null
