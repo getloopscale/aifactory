@@ -100,6 +100,9 @@ const issues: IssuesApi = {
   async addLabels(_r, _t, issue, labels) {
     world.added.push({ issue, labels })
   },
+  async updateIssueBody() {
+    throw new Error('the panel does not rewrite an issue body')
+  },
 }
 
 let api = new FakeGithub()

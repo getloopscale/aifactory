@@ -5,11 +5,21 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { coordinatorAction, decision, finding, ingress, stageEvent, task } from '../db/schema'
-import type { ActionDeps } from '../panel/actions'
+import {
+  changePlan,
+  coordinatorAction,
+  decision,
+  finding,
+  ingress,
+  repository,
+  review,
+  stageEvent,
+  task,
+} from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
-import { coordinate } from './coordinate'
+import { coordinate, type CoordinatorDeps } from './coordinate'
+import type { ScopeDraft } from './scope'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -17,7 +27,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table coordinator_action, finding, decision, stage_event, task, ingress restart identity cascade',
+    'truncate table coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -71,10 +81,19 @@ const checksUnchanged = (detail: object = { reason: CHECKS_REASON, cause: 'check
 
 const queued: { input: Record<string, unknown>; key: string }[] = []
 let api = new FakeGithub()
-const deps = (): ActionDeps => ({
+/** What the fake model was asked, and what it answers next. */
+const model = { asked: [] as string[], answer: '', cost: 0.03, fails: '' }
+const deps = (): CoordinatorDeps => ({
   db: getDb(),
   github: { installationToken: async () => ({ token: 't', expiresAt: new Date() }) },
   api,
+  issues: api,
+  readIssue: (repo, number) => api.readIssue(repo, number),
+  drafter: async (message) => {
+    model.asked.push(message)
+    if (model.fails) throw new Error(model.fails)
+    return { response: model.answer, cost: model.cost }
+  },
   enqueueResume: async () => undefined,
   deleteSnapshot: async () => undefined,
   inTransaction: (work) =>
@@ -85,6 +104,7 @@ const deps = (): ActionDeps => ({
 beforeEach(() => {
   queued.length = 0
   api = new FakeGithub()
+  Object.assign(model, { asked: [], answer: '', cost: 0.03, fails: '' })
 })
 
 const stageOf = async (id: number) =>
@@ -356,5 +376,223 @@ describe('the other actions it applies', () => {
     expect(await actions()).toMatchObject([
       { taskId: id, exceptionKind: 'unknown', action: 'escalate', outcome: 'escalated' },
     ])
+  })
+})
+
+describe('scoping a review that does not converge', () => {
+  const ORIGINAL = 'Validate the name.\n\nDone when: an empty name is refused.'
+  const ROUNDS =
+    'the reviewer still asked for changes after 3 attempts (the review is not converging; blocking findings per round: 1, 1, 1)'
+  const LAST_FINDINGS = [{ severity: 'major', file: 'src/mod.ts', issue: 'rename the module' }]
+  const valid: ScopeDraft = {
+    inScope: ['Refuse an empty name'],
+    outOfScope: ['Rename the module'],
+    followUp: { title: 'Rename the module', body: 'The reviewer wants a clearer name.' },
+    note: 'Refuse an empty name and leave the module name as it is: the rename is a follow-up.',
+  }
+
+  async function plateau(over: { enabled?: boolean; mergedSha?: string } = {}) {
+    const { enabled = true, ...fields } = over
+    const id = await seed(
+      'handoff',
+      { headSha: 'abc', pullRequestUrl: 'https://github.com/paulo/app/pull/3', ...fields },
+      [
+        { stage: 'intake' },
+        {
+          stage: 'handoff',
+          detail: { reason: ROUNDS, cause: 'review_plateau', findings: LAST_FINDINGS, attempts: 3 },
+        },
+      ],
+    )
+    const db = getDb()
+    await db.insert(repository).values({ fullName: 'paulo/app', enabled })
+    await db.insert(changePlan).values({
+      taskId: id,
+      baseSha: 'base',
+      harness: 'claude',
+      plan: {
+        files: [{ path: 'src/mod.ts', why: 'the check' }],
+        order: [],
+        risks: [],
+        proof: [],
+        outOfScope: [],
+      },
+    })
+    for (const round of [1, 2, 3]) {
+      await db.insert(review).values({
+        taskId: id,
+        round,
+        sha: `sha${round}`,
+        reviewer: 'codex',
+        verdict: 'changes',
+        summary: `round ${round} summary`,
+        findings: [{ severity: 'major', issue: `finding of round ${round}` }],
+      })
+    }
+    const [row] = await db.select().from(task).where(eq(task.id, id))
+    api.repo('paulo/app').issue(row.issueNumber, { body: ORIGINAL })
+    return { id, issueNumber: row.issueNumber }
+  }
+
+  const bodyOf = (n: number) => api.repo('paulo/app').issue(n).body
+  const opened = (after: number) =>
+    [...api.repo('paulo/app').issues.values()].filter((i) => i.number > after)
+
+  it('in auto, writes the decision, files the follow-up, sends the task back with the note and records the draft', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify(valid)
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(bodyOf(issueNumber).startsWith(`${ORIGINAL}\n\n## Scope decision (`)).toBe(true)
+    expect(bodyOf(issueNumber)).toContain('- Refuse an empty name')
+    const followUps = opened(issueNumber)
+    expect(followUps).toHaveLength(1)
+    expect(followUps[0]).toMatchObject({ title: 'Rename the module', labels: ['factory'] })
+    expect(followUps[0].body.endsWith(`Follow-up of paulo/app#${issueNumber}.`)).toBe(true)
+    expect(bodyOf(issueNumber)).toContain(`filed as #${followUps[0].number}`)
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued).toHaveLength(1)
+    expect(queued[0].input).toMatchObject({ taskId: id, feedback: valid.note })
+    const rows = await actions()
+    expect(rows).toMatchObject([
+      { taskId: id, exceptionKind: 'review_plateau', action: 'scope', outcome: 'applied' },
+    ])
+    expect(rows[0].draft).toEqual({ ...valid, followUpIssue: followUps[0].number })
+    expect(rows[0].costUsd).toBeCloseTo(0.03)
+  })
+
+  it('gives the drafter the issue body, the plan, the findings of each round and the rounds note', async () => {
+    await plateau()
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'auto')
+
+    expect(model.asked).toHaveLength(1)
+    const [message] = model.asked
+    expect(message).toContain(ORIGINAL)
+    expect(message).toContain('src/mod.ts')
+    for (const round of [1, 2, 3]) expect(message).toContain(`finding of round ${round}`)
+    expect(message).toContain('rename the module')
+    expect(message).toContain('the review is not converging; blocking findings per round: 1, 1, 1')
+  })
+
+  it('files the follow-up without the factory label when the repository is not enabled', async () => {
+    const { issueNumber } = await plateau({ enabled: false })
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'auto')
+
+    expect(opened(issueNumber)).toMatchObject([{ title: 'Rename the module', labels: [] }])
+  })
+
+  it('files no follow-up when the draft has none, and still sends the task back', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify({ ...valid, outOfScope: [], followUp: null })
+
+    await coordinate(deps(), 'auto')
+
+    expect(opened(issueNumber)).toEqual([])
+    expect(await stageOf(id)).toBe('intake')
+    expect((await actions())[0].draft).toMatchObject({ followUpIssue: null })
+  })
+
+  it('records escalated with the parse error when the answer does not parse, and leaves the issue alone', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = 'I would rather not decide.'
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ escalated: 1 })
+    expect(bodyOf(issueNumber)).toBe(ORIGINAL)
+    expect(opened(issueNumber)).toEqual([])
+    expect(await stageOf(id)).toBe('handoff')
+    expect(queued).toEqual([])
+    const [row] = await actions()
+    expect(row).toMatchObject({ exceptionKind: 'review_plateau', outcome: 'escalated' })
+    expect(row.reason).toContain('the answer holds no JSON object')
+    expect(row.draft).toEqual({ answer: 'I would rather not decide.' })
+    expect(row.costUsd).toBeCloseTo(0.03)
+  })
+
+  it('records refused and sends nothing back when the note names quality configuration', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify({ ...valid, note: 'Lower the line in stryker.config.json.' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ refused: 1 })
+    expect(bodyOf(issueNumber)).toBe(ORIGINAL)
+    expect(opened(issueNumber)).toEqual([])
+    expect(await stageOf(id)).toBe('handoff')
+    expect(queued).toEqual([])
+    const [row] = await actions()
+    expect(row).toMatchObject({ action: 'scope', outcome: 'refused' })
+    expect(row.reason).toContain('stryker')
+    expect(row.draft).toMatchObject({ note: 'Lower the line in stryker.config.json.' })
+  })
+
+  it('records nothing new for a second review_plateau on the same head', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify(valid)
+    await coordinate(deps(), 'auto')
+    await getDb().update(task).set({ stage: 'handoff' }).where(eq(task.id, id))
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'handoff', detail: { reason: ROUNDS, cause: 'review_plateau' } })
+    queued.length = 0
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toEqual({ applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 })
+    expect(model.asked).toHaveLength(1)
+    expect(await actions()).toHaveLength(1)
+    expect(opened(issueNumber)).toHaveLength(1)
+    expect(queued).toEqual([])
+  })
+
+  it('in trial, records the draft and its cost as trial, and writes nothing to GitHub', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'trial')
+
+    expect(model.asked).toHaveLength(1)
+    expect(bodyOf(issueNumber)).toBe(ORIGINAL)
+    expect(opened(issueNumber)).toEqual([])
+    expect(await stageOf(id)).toBe('handoff')
+    expect(queued).toEqual([])
+    const [row] = await actions()
+    expect(row).toMatchObject({ action: 'scope', outcome: 'trial' })
+    expect(row.draft).toEqual(valid)
+    expect(row.costUsd).toBeCloseTo(0.03)
+  })
+
+  it('records failed when the model call throws, and writes nothing', async () => {
+    const { id, issueNumber } = await plateau()
+    model.fails = 'the provider answered 529'
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ failed: 1 })
+    expect(bodyOf(issueNumber)).toBe(ORIGINAL)
+    expect(await stageOf(id)).toBe('handoff')
+    const [row] = await actions()
+    expect(row).toMatchObject({ action: 'scope', outcome: 'failed' })
+    expect(row.reason).toContain('the provider answered 529')
+  })
+
+  it('writes nothing to GitHub when the transition table refuses the send-back', async () => {
+    const { issueNumber } = await plateau({ mergedSha: 'm' })
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'auto')
+
+    expect(bodyOf(issueNumber)).toBe(ORIGINAL)
+    expect(opened(issueNumber)).toEqual([])
+    const [row] = await actions()
+    expect(row).toMatchObject({ action: 'scope', outcome: 'refused' })
+    expect(row.reason).toContain('this work is already integrated')
   })
 })

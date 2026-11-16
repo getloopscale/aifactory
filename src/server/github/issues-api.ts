@@ -24,13 +24,15 @@ export type IssuesApi = {
     milestone: { title: string; description: string },
   ): Promise<number>
   addLabels(repo: string, token: string, issueNumber: number, labels: string[]): Promise<void>
+  /** Replaces the body of an issue with `body`. */
+  updateIssueBody(repo: string, token: string, issueNumber: number, body: string): Promise<void>
 }
 
 /** Runs on the factory host with an installation token for one repository. */
 export function createIssuesApi(fetchImpl: FetchLike = (url, init) => fetch(url, init)): IssuesApi {
-  const call = (repo: string, token: string, path: string, body: unknown) =>
+  const call = (repo: string, token: string, path: string, body: unknown, method = 'POST') =>
     fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
-      method: 'POST',
+      method,
       body: JSON.stringify(body),
       headers: {
         accept: 'application/vnd.github+json',
@@ -81,6 +83,14 @@ export function createIssuesApi(fetchImpl: FetchLike = (url, init) => fetch(url,
       await expect(
         await call(repo, token, `/issues/${issueNumber}/labels`, { labels }),
         `labelling ${repo}#${issueNumber}`,
+        [200],
+      )
+    },
+
+    async updateIssueBody(repo, token, issueNumber, body) {
+      await expect(
+        await call(repo, token, `/issues/${issueNumber}`, { body }, 'PATCH'),
+        `updating the body of ${repo}#${issueNumber}`,
         [200],
       )
     },

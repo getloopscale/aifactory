@@ -2,6 +2,7 @@ import type { COORDINATOR_ACTIONS, COORDINATOR_OUTCOMES } from '../db/schema'
 
 import type { ExceptionKind, TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
+import type { ScopeDraft } from './scope'
 
 /**
  * One action, from a closed set, for an exception of a task. A pure function of the exception and what the
@@ -28,6 +29,14 @@ export type Decision = {
   note?: string
   /** The finding a retry resolves. */
   findingId?: number
+  /** What the drafter wrote for a `scope`, filled by `draft.ts` after the decision. */
+  draft?: ScopeDraft
+  /** The drafter's answer when it did not parse, kept for a person to read. */
+  answer?: string
+  /** What drafting cost, in USD. */
+  costUsd?: number
+  /** Why drafting failed, when it threw: the action is then recorded as failed. */
+  failure?: string
 }
 
 /** A task gets at most this many applied actions; the next exception stays with a person. */
@@ -74,6 +83,10 @@ function retryFromFinding({ kind, evidence, findingId }: TaskException): Decisio
 
 const BY_KIND: Partial<Record<ExceptionKind, (exception: TaskException) => Decision>> = {
   checks_unchanged: sendBack,
+  review_plateau: ({ head, evidence }) => ({
+    action: 'scope',
+    reason: `the reviewer still asked for changes on ${short(head)} (${evidence}): the requests are scoped, the rest filed as a follow-up, and the task sent back on its branch`,
+  }),
   review_unusable: ({ head, evidence }) => ({
     action: 'review_again',
     reason: `the review gave no usable verdict on ${short(head)} (${evidence}): the same branch runs again to be reviewed`,

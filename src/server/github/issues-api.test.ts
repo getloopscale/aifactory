@@ -85,3 +85,25 @@ describe('labels and milestones', () => {
     )
   })
 })
+
+describe('rewriting the body of an issue', () => {
+  it('patches the issue with the new body, with the repository token', async () => {
+    const { api, calls } = serve(200, { number: 9 })
+
+    await api.updateIssueBody('o/r', 'tok', 9, 'Body\n\n## Scope decision')
+
+    expect(calls[0]).toEqual({
+      url: 'https://api.github.com/repos/o/r/issues/9',
+      method: 'PATCH',
+      auth: 'Bearer tok',
+      body: { body: 'Body\n\n## Scope decision' },
+    })
+  })
+
+  it('says what GitHub answered when it refuses', async () => {
+    const { api } = serve(410, { message: 'gone' })
+    await expect(api.updateIssueBody('o/r', 't', 9, 'b')).rejects.toThrow(
+      /GitHub answered 410 updating the body of o\/r#9: .*gone/,
+    )
+  })
+})

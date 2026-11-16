@@ -114,8 +114,20 @@ describe('deciding one action for an exception', () => {
     })
   })
 
+  it('scopes a review that did not converge, leaving the drafting to the next step', () => {
+    const plateau = exception({
+      kind: 'review_plateau',
+      evidence: 'the reviewer still asked for changes after 3 attempts',
+    })
+    expect(decide(plateau, [])).toEqual({
+      action: 'scope',
+      reason:
+        'the reviewer still asked for changes on abc1234 (the reviewer still asked for changes after 3 attempts): the requests are scoped, the rest filed as a follow-up, and the task sent back on its branch',
+    })
+  })
+
   it('escalates every other exception, saying it has no action for it', () => {
-    for (const kind of ['review_plateau', 'handoff', 'failure'] as const) {
+    for (const kind of ['handoff', 'failure'] as const) {
       expect(decide(exception({ kind, evidence: 'why' }), [])).toEqual({
         action: 'escalate',
         reason: `the coordinator has no action for ${kind} yet: why`,

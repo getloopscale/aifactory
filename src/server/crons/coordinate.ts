@@ -1,8 +1,11 @@
 import { defineCron } from 'theokit/server/cron'
 
 import { coordinate } from '../coordinator/coordinate'
+import { modelScopeDrafter } from '../coordinator/draft'
 import { coordinatorModeFromEnv } from '../coordinator/mode'
 import { mainProcessOnly } from '../factory/worker-only'
+import { fetchIssue } from '../github/issues'
+import { createIssuesApi } from '../github/issues-api'
 import { actionDeps } from '../panel/deps'
 
 /**
@@ -18,7 +21,12 @@ export default defineCron('coordinate', {
     if (mode === 'off') return
     let deps
     try {
-      deps = actionDeps()
+      deps = {
+        ...actionDeps(),
+        issues: createIssuesApi(),
+        readIssue: (repo: string, number: number, token: string) => fetchIssue(repo, number, token),
+        drafter: modelScopeDrafter(),
+      }
     } catch (error) {
       console.error(JSON.stringify({ event: 'coordinate_not_configured', error: String(error) }))
       return

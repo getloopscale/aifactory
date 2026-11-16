@@ -686,6 +686,7 @@ export const COORDINATOR_ACTIONS = [
   'send_back',
   'review_again',
   'retry_from_finding',
+  'scope',
   'escalate',
 ] as const
 
@@ -714,7 +715,7 @@ export const coordinatorAction = pgTable(
     action: text('action', { enum: COORDINATOR_ACTIONS }).notNull(),
     /** Why, as a person reads it. */
     reason: text('reason').notNull(),
-    /** What a model drafted for the action. Nothing drafts in this version. */
+    /** What a model drafted for the action (`scope`), or the answer it gave that did not parse. */
     draft: jsonb('draft'),
     outcome: text('outcome', { enum: COORDINATOR_OUTCOMES }).notNull(),
     costUsd: real('cost_usd').notNull().default(0),

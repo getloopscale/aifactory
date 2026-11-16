@@ -1,4 +1,5 @@
 import type { AppAccess, AppEvents, GithubApp } from '../server/github/app'
+import type { Issue } from '../server/github/issues'
 import type { IssuesApi } from '../server/github/issues-api'
 import {
   AutoMergeRefused,
@@ -62,6 +63,7 @@ export const AUTO_MERGE_REFUSALS = {
 export type FakeIssue = {
   number: number
   title: string
+  body: string
   state: 'open' | 'closed'
   /** Why it was closed: `completed` is what the factory asks for. */
   stateReason?: string
@@ -288,7 +290,14 @@ export class FakeRepository {
   issue(number: number, over: Partial<Omit<FakeIssue, 'number'>> = {}): FakeIssue {
     let issue = this.issues.get(number)
     if (!issue) {
-      issue = { number, title: `Issue ${number}`, state: 'open', labels: [], comments: [] }
+      issue = {
+        number,
+        title: `Issue ${number}`,
+        body: '',
+        state: 'open',
+        labels: [],
+        comments: [],
+      }
       this.issues.set(number, issue)
       this.nextNumber = Math.max(this.nextNumber, number + 1)
     }
@@ -542,6 +551,27 @@ export class FakeGithub implements GithubApi {
   /** Creates a label, as the panel's `IssuesApi` does. One that is already there stays as it is. */
   ensureLabel: IssuesApi['ensureLabel'] = async (repo, _token, label) => {
     this.repo(repo).labels.add(label.name)
+  }
+
+  /** Opens an issue, as the panel's `IssuesApi` does, with the next number of the repository. */
+  createIssue: IssuesApi['createIssue'] = async (repo, _token, issue) => {
+    const created = this.repo(repo).issue(this.repo(repo).nextNumber, {
+      title: issue.title,
+      body: issue.body,
+      labels: [...(issue.labels ?? [])],
+    })
+    return { number: created.number, url: `https://github.com/${repo}/issues/${created.number}` }
+  }
+
+  /** Replaces the body of an issue, as the panel's `IssuesApi` does. */
+  updateIssueBody: IssuesApi['updateIssueBody'] = async (repo, _token, number, body) => {
+    this.repo(repo).issue(number, { body })
+  }
+
+  /** Reads an issue as `fetchIssue` does. */
+  readIssue = async (repo: string, number: number): Promise<Issue> => {
+    const { title, body, labels, state } = this.repo(repo).issue(number)
+    return { number, title, body, labels: [...labels], state }
   }
 
   /** Every repository the fake holds, declared or reached by a call. */

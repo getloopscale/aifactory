@@ -172,9 +172,12 @@ reads that file, not a convention.
   reads and decides nothing; `exceptions.ts` recognises exceptions over those facts and reads nothing, and a
   fact that could not be read is an exception of kind `unknown`; `decide.ts` is a pure function from an
   exception and the decisions already recorded to one action (`send_back`, `review_again`,
-  `retry_from_finding` or `escalate`); `apply.ts` is the only module with side effects and goes through the
+  `retry_from_finding`, `scope` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
+  applying, where a drafter built by `buildAssistant` answers JSON that `scope.ts` parses (an answer that does not
+  parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION` is `refused`); `apply.ts` is the only module with side effects and goes through the
   panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`), so
-  `transitions.ts` is asked first. A handoff records its `cause`, and an older one is recognised by the start
+  `transitions.ts` is asked first, even before a scope's only writes of its own (the follow-up issue and
+  `updateIssueBody`). A handoff records its `cause`, and an older one is recognised by the start
   of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
   task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
