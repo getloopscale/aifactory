@@ -7,7 +7,7 @@ import type { Database } from '../db'
 import { changePlan, review, stageEvent, task } from '../db/schema'
 import { buildAssistant, type AssistantSpec } from '../factory/assistant'
 import { renderChangePlan, type ChangePlan } from '../factory/change-plan'
-import { assistModel } from '../factory/models'
+import { coordinatorModel } from '../factory/models'
 import { roundsNote, type Finding } from '../factory/review'
 import type { GithubApp } from '../github/app'
 import type { Issue } from '../github/issues'
@@ -47,9 +47,9 @@ const DRAFT_BUDGET_USD = 1
 
 /**
  * The drafter on a model, built by `buildAssistant` and run once per call. The key comes from the model's
- * provider, as TheoKit resolves it for the panel's assistants. `FACTORY_ASSIST_MODEL` changes the model.
+ * provider, as TheoKit resolves it for the panel's assistants. `FACTORY_COORDINATOR_MODEL` changes the model.
  */
-export function modelScopeDrafter(model: string = assistModel()): ScopeDrafter {
+export function modelScopeDrafter(model: string = coordinatorModel()): ScopeDrafter {
   const compiled = compileAgentDefinition(buildAssistant(model, SCOPE_DRAFTER_SPEC))
   const runner = AgentRunner.fromSpec({ name: 'scope-drafter', compiled, maxIterations: 1 }).build()
   return async (message) => {
