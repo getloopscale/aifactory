@@ -5,6 +5,7 @@ import { delivery, task } from '../db/schema'
 import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
+import { errorMessage } from './error-message'
 import { closeOpenIssue, releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
 
@@ -38,7 +39,7 @@ export type Shipped = {
 export const unclosedNote = (shipped: Shipped) =>
   shipped.issueErrors.length ? `; issues not closed: ${shipped.issueErrors.join('; ')}` : ''
 
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+const message = errorMessage
 
 /** What every released issue is told: where the fix is, and how it got there. */
 export const availableIn = (s: Shipment) =>
