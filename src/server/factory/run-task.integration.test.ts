@@ -3678,7 +3678,6 @@ describe('release', () => {
   it('releases a task resolved with no change once a release puts its resolving commit on the release branch', async () => {
     const asked = await delivered()
     const resolved = await resolvedAt(8, 'resolved01')
-    repo().issue(8, { state: 'closed' })
     repo().tags.add('v1.2.3')
 
     await release(dependencies(), asked, { bump: 'minor', actor: 'human' })

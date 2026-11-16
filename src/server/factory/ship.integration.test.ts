@@ -9,6 +9,12 @@ import { ingress, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { shipContained, type Shipment } from './ship'
+import { enterStage } from './stages'
+
+vi.mock('./stages', async (original) => {
+  const real = await original<typeof import('./stages')>()
+  return { ...real, enterStage: vi.fn(real.enterStage) }
+})
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -66,7 +72,14 @@ function setup(issues: Record<number, 'open' | 'closed'>) {
   const repo = api.repo(REPO)
   repo.holds('p1', ['aaa111'])
   for (const [n, state] of Object.entries(issues)) repo.issue(Number(n), { state })
-  return { api, repo, deps: { db: getDb(), api } }
+  const fetchIssue = async (_repo: string, n: number) => ({
+    number: n,
+    title: '',
+    body: '',
+    labels: [],
+    state: repo.issue(n).state,
+  })
+  return { api, repo, deps: { db: getDb(), api, fetchIssue } }
 }
 
 describe('shipContained with a resolved task', () => {
@@ -95,7 +108,7 @@ describe('shipContained with a resolved task', () => {
   it('does not take an unknown state as open', async () => {
     await resolved(REPO, 3, 'aaa111')
     const gh = setup({ 3: 'open' })
-    gh.api.issueState = async () => undefined
+    gh.deps.fetchIssue = async (_r: string, n: number) => ({ number: n, title: '', body: '', labels: [] })
 
     await shipContained(gh.deps, shipment())
 
@@ -123,5 +136,24 @@ describe('shipContained with a resolved task', () => {
     await shipContained(gh.deps, shipment())
 
     expect(gh.api.recorded('commentOnIssue')).toHaveLength(1)
+  })
+
+  it('leaves the issue alone when the transition fails, and announces it once on the retry', async () => {
+    const id = await resolved(REPO, 6, 'aaa111')
+    const gh = setup({ 6: 'open' })
+    vi.mocked(enterStage).mockRejectedValueOnce(new Error('db down'))
+
+    await shipContained(gh.deps, shipment())
+
+    expect(await stageOf(id)).toBe('done')
+    expect(gh.api.recorded('commentOnIssue')).toEqual([])
+    expect(gh.repo.issue(6).state).toBe('open')
+
+    const retried = await shipContained(gh.deps, shipment())
+
+    expect(retried.resolved).toEqual([id])
+    expect(await stageOf(id)).toBe('released')
+    expect(gh.api.recorded('commentOnIssue')).toHaveLength(1)
+    expect(gh.repo.issue(6).state).toBe('closed')
   })
 })

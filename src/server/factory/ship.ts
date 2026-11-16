@@ -2,6 +2,7 @@ import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, task } from '../db/schema'
+import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
 import { closeOpenIssue, releaseResolved } from './resolved-release'
@@ -89,7 +90,7 @@ async function belongs(
  * `released` stage and returned; the release is not undone.
  */
 export async function shipContained(
-  deps: { db: Database; api: GithubApi },
+  deps: { db: Database; api: GithubApi; fetchIssue?: typeof fetchIssue },
   s: Shipment,
 ): Promise<Shipped> {
   const candidates = await deps.db
@@ -138,10 +139,22 @@ export async function shipContained(
  * stage and returned. A task that could not be compared is
  * logged and left for the `catch-up` cron; the release stands.
  */
-async function shipResolved(deps: { db: Database; api: GithubApi }, s: Shipment, shipped: Shipped) {
+async function shipResolved(
+  deps: { db: Database; api: GithubApi; fetchIssue?: typeof fetchIssue },
+  s: Shipment,
+  shipped: Shipped,
+) {
+  const read = deps.fetchIssue ?? fetchIssue
   const resolved = await releaseResolved(deps, {
     afterRelease: (row) =>
-      closeOpenIssue(deps.api, s.repository, s.token, row.issueNumber, availableIn(s)),
+      closeOpenIssue(
+        deps.api,
+        (n) => read(s.repository, n, s.token),
+        s.repository,
+        s.token,
+        row.issueNumber,
+        availableIn(s),
+      ),
     repository: s.repository,
     token: s.token,
     releaseRef: s.promotedSha,

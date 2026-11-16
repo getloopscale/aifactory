@@ -3,6 +3,7 @@ import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import type { Issue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
 import { releaseBranchOf } from './branches'
@@ -96,14 +97,15 @@ async function releaseEach(
  * A failure is returned as `#<issue>: <why>`, not thrown: the release already happened.
  */
 export async function closeOpenIssue(
-  api: Pick<GithubApi, 'issueState' | 'commentOnIssue' | 'closeIssue'>,
+  api: Pick<GithubApi, 'commentOnIssue' | 'closeIssue'>,
+  readIssue: (issueNumber: number) => Promise<Pick<Issue, 'state'>>,
   repo: string,
   token: string,
   issueNumber: number,
   body: string,
 ): Promise<string | undefined> {
   try {
-    if ((await api.issueState(repo, token, issueNumber)) !== 'open') return undefined
+    if ((await readIssue(issueNumber)).state !== 'open') return undefined
     await api.commentOnIssue(repo, token, issueNumber, body)
     await api.closeIssue(repo, token, issueNumber)
     return undefined
