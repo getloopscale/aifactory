@@ -36,6 +36,7 @@ import {
   type Handed,
   type Integrated,
 } from './integration'
+import { heldForEvaluation } from '../evals/cases'
 import { integrationHeldUntil } from './promotion-merge'
 import {
   DEFAULT_CHECKS,
@@ -148,6 +149,16 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 /** GitHub failing: not a refusal of the work, so the run fails and repeats. */
 const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
 
+/** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
+type Held = { headline: string; reason: string; cause: HandoffCause }
+
+/** The hold of approved work that changes the agents' configuration (#139). */
+const heldFor = (paths: string[]): Held => ({
+  headline: 'The reviewer approved this, and it waits for a person',
+  reason: `it changes agent configuration (${paths.join(', ')}), which the factory never integrates on its own: run \`pnpm evals:check\` against the recorded baseline, then merge the pull request yourself`,
+  cause: 'agent_configuration',
+})
+
 /** The stages that end a run; a task goes through them again when a person sends it back. */
 const ENDING_STAGES = ['done', 'released', 'handoff', 'failed', 'cancelled'] as const
 
@@ -185,6 +196,8 @@ export class Run {
   plan: ChangePlan | undefined
   /** This run wrote the plan, so the first build pass continues the planning session. */
   private planned: { discarded: boolean } | undefined
+  /** Every path the change under review touches, as the last review read it. */
+  private touched: string[] = []
   /** What the agents of this task do, written while they work. Opened by the first agent run. */
   private transcript: Transcript | undefined
 
@@ -1288,7 +1301,7 @@ export class Run {
     const { deps, taskId, row, issue, branch, state } = this.c
     state.current = 'review'
     await enterStage(deps.db, taskId, 'review', { sha, attempt, reviewer: this.reviewer.name })
-    const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
+    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
       baseSha: this.baseSha,
       plan: this.plan,
       issue,
@@ -1314,6 +1327,7 @@ export class Run {
         }),
       }),
     )
+    this.touched = touched
     // The reviewer reads and does not write. If it wrote anyway, none of it counts.
     await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
     await must(this.backend, `git -C ${this.repoDir} clean -fd`)
@@ -1469,6 +1483,8 @@ export class Run {
     outcome: ReviewVerdict,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
+    const held = heldForEvaluation(row.repository, this.touched, deps.ownRepository)
+    if (held.length > 0) return this.handOver(sha, attempt, here, outcome, [], heldFor(held))
     state.current = 'pr'
     await enterStage(deps.db, taskId, 'pr', { branch, sha })
     const pull = await api.openPullRequest(row.repository, this.c.token, {
@@ -1562,12 +1578,14 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
     counts: number[] = [],
+    held?: Held,
   ): Promise<RunResult> {
     const { deps, taskId, row, api, branch, state } = this.c
     const reason =
-      outcome.verdict === 'invalid'
+      held?.reason ??
+      (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
     state.current = 'pr'
     const pull = await api.openPullRequest(row.repository, this.c.token, {
       head: branch,
@@ -1589,7 +1607,9 @@ export class Run {
       this.c.token,
       row.issueNumber,
       [
-        `The factory could not get this approved: ${reason}.`,
+        held
+          ? `${held.headline}: ${reason}.`
+          : `The factory could not get this approved: ${reason}.`,
         '',
         `Its work is in the draft pull request ${pull.url}, with the checks that passed and what the reviewer still found.`,
         '',
@@ -1605,9 +1625,11 @@ export class Run {
         branch,
         sha,
         reason,
-        cause: (outcome.verdict === 'invalid'
-          ? 'review_unusable'
-          : 'review_plateau') satisfies HandoffCause,
+        cause:
+          held?.cause ??
+          ((outcome.verdict === 'invalid'
+            ? 'review_unusable'
+            : 'review_plateau') satisfies HandoffCause),
         pullRequestUrl: pull.url,
         findings: outcome.findings,
         costUsd: this.cost,

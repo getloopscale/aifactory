@@ -16,7 +16,8 @@ import type { IsolatedSandboxProvider } from './sandbox'
  * did not converge in the attempts, the review gave no verdict, or the required checks failed and the agent
  * changed nothing. The coordinator reads it (`coordinator/exceptions.ts`).
  */
-export type HandoffCause = 'review_plateau' | 'review_unusable' | 'checks_unchanged'
+export type HandoffCause =
+  'review_plateau' | 'review_unusable' | 'checks_unchanged' | 'agent_configuration'
 
 export type HarnessChoice = CodingHarness | ((labels: string[]) => CodingHarness)
 
@@ -43,6 +44,11 @@ export type RunTaskDeps = {
   releaseMode?: ReleaseMode
   /** What must pass on the pushed commit before a pull request opens. */
   checks?: CheckSpec[]
+  /**
+   * The factory's own repository, whose agent configuration it never integrates on its own
+   * (`heldForEvaluation`). `FACTORY_REPOSITORY` unless a fork names its own.
+   */
+  ownRepository?: string
   /**
    * Whether the builder writes a plan before it changes anything (on unless false). A builder that cannot
    * resume a session never does, since the plan would not reach the turn that does the work.

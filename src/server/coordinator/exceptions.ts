@@ -58,10 +58,18 @@ export type TaskException = {
 /** An issue whose integrated work a release of its repository carries. */
 export type ReleasedIssue = { issue: number; labels: string[] }
 
-const CAUSES: readonly HandoffCause[] = ['review_plateau', 'review_unusable', 'checks_unchanged']
+/**
+ * The causes the coordinator has a playbook for. Any other, as `agent_configuration`, is a plain `handoff`:
+ * it is outside the coordinator's limits and goes to a person.
+ */
+const CAUSES = [
+  'review_plateau',
+  'review_unusable',
+  'checks_unchanged',
+] as const satisfies readonly HandoffCause[]
 
 /** How a handoff recorded before it carried a `cause` says why, at the start of its reason (`Run`). */
-const REASON_PREFIXES: [string, HandoffCause][] = [
+const REASON_PREFIXES: [string, (typeof CAUSES)[number]][] = [
   ["the repository's required checks failed and the agent changed nothing", 'checks_unchanged'],
   ['the review gave no usable verdict', 'review_unusable'],
   ['the reviewer still asked for changes after', 'review_plateau'],

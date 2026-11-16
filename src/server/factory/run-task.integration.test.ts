@@ -3069,6 +3069,47 @@ describe('the factory always makes a pre-release', () => {
     expect(done.detail).toMatchObject({ mergedSha: 'merge0001', developSha: 'develop0001' })
   })
 
+  it('hands approved work that changes agent configuration of the factory to a person, merging nothing (#139)', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.includes('diff --name-status')
+          ? { stdout: 'M\tsrc/server/factory/review.ts\nA\tsrc/truncate.js\n' }
+          : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { ownRepository: 'paulo/app' }), id)
+
+    expect(result).toMatchObject({ status: 'handoff' })
+    expect(seen.merges).toEqual([])
+    expect(seen.autoMerges).toEqual([])
+    expect(seen.drafts).toEqual([true])
+    expect(seen.comments.at(-1)).toContain('src/server/factory/review.ts')
+    expect(seen.comments.at(-1)).toContain('pnpm evals:check')
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'handoff', mergedSha: null })
+    const handoff = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'handoff'))
+    )[0]
+    expect(handoff.detail).toMatchObject({ cause: 'agent_configuration' })
+  })
+
+  it('integrates the same change in a repository that is not the factory', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.includes('diff --name-status')
+          ? { stdout: 'M\tsrc/server/factory/review.ts\n' }
+          : undefined,
+      ),
+    )
+
+    await runTask(deps(sandbox), id)
+
+    expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
+  })
+
   it('leaves the pull request open for a person when GitHub will not merge it, and still hands it over', async () => {
     repo().conflicting.add('factory/7')
     const id = await seedTask()

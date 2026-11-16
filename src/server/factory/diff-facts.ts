@@ -19,6 +19,8 @@ export type DiffFacts = {
   unplanned: string[]
   /** The factory checks that failed on an earlier commit of the change and pass on HEAD. */
   required: RequiredByCheck[]
+  /** Every path the change touches, the old path of a rename included. */
+  touched: string[]
 }
 
 /**
@@ -45,9 +47,8 @@ export async function diffFacts(
 ): Promise<DiffFacts> {
   const git = `git -C ${repoDir}`
   const base = (await must(backend, `${git} merge-base ${input.baseSha} HEAD`)).stdout.trim()
-  const changes = parseNameStatus(
-    (await must(backend, `${git} diff --name-status ${base} HEAD`)).stdout,
-  )
+  const nameStatus = (await must(backend, `${git} diff --name-status ${base} HEAD`)).stdout
+  const changes = parseNameStatus(nameStatus)
   const showScript = async (rev: string) => {
     const shown = await backend.execute(`${git} show ${rev}:package.json`)
     return shown.exitCode === 0 ? testScriptOf(shown.stdout) : undefined
@@ -66,7 +67,11 @@ export async function diffFacts(
   const paths = changes.map((change) => change.path)
   const required = await requiredByChecks(backend, git, base, input.checkRuns ?? [])
   const unplanned = input.plan ? unplannedFiles(paths, input.plan) : []
-  return { guards, unplanned: withoutRequired(unplanned, required), required }
+  const touched = nameStatus
+    .split('\n')
+    .flatMap((line) => line.split('\t').slice(1))
+    .filter((path) => path !== '')
+  return { guards, unplanned: withoutRequired(unplanned, required), required, touched }
 }
 
 /** The repaired checks of the change on HEAD, each with the files added while it was repaired. */
