@@ -123,22 +123,29 @@ const BY_KIND: Partial<Record<ExceptionKind, (exception: TaskException) => Decis
   unknown: ({ evidence }) => escalate(`the coordinator could not tell what is wrong: ${evidence}`),
   release_ready: releaseRepository,
   release_retry: releaseRepository,
+  queue_blocked: ({ evidence }) => ({
+    action: 'prioritise',
+    reason: `${evidence}: its job goes ahead of the repository's other queued tasks`,
+  }),
   release_blocked: ({ head, evidence }) =>
     escalate(
       `the release branch is red (${evidence}): the release train waits on ${short(head)} until it is green again, and a person looks at it`,
     ),
 }
 
-/** A release is the repository's, not a rework of the task it is recorded on, so the limit does not count it. */
+/** A release or a reordering is the repository's, not a rework of the task it is recorded on, so the limit does not count it. */
 const RELEASE_KINDS: readonly ExceptionKind[] = [
   'release_ready',
   'release_retry',
   'release_blocked',
+  'queue_blocked',
 ]
 
 /** The one action for this exception, given what was already recorded for its task. */
 export function decide(exception: TaskException, recorded: RecordedAction[]): Decision {
-  const applied = recorded.filter((r) => r.outcome === 'applied' && r.action !== 'release')
+  const applied = recorded.filter(
+    (r) => r.outcome === 'applied' && r.action !== 'release' && r.action !== 'prioritise',
+  )
   if (!RELEASE_KINDS.includes(exception.kind) && applied.length >= MAX_APPLIED) {
     const tried = applied.map((r) => `${r.action} for ${r.exceptionKind} on ${short(r.headSha)}`)
     return escalate(

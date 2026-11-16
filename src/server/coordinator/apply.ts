@@ -1,5 +1,6 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
+import type { Database } from '../db'
 import { coordinatorAction, repository, task } from '../db/schema'
 import { release, ReleaseRefused } from '../factory/deliver'
 import { outcome as transition } from '../factory/transitions'
@@ -15,6 +16,8 @@ import type { CoordinatorOutcome, Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
+import { HOLD_LOCK, moveAhead } from './queue-apply'
+import { readHeldTests } from './queue-facts'
 import { COORDINATOR_ACTOR } from './release-train'
 import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft } from './scope'
 
@@ -171,8 +174,62 @@ export async function applyDecision(
   decision: Decision,
   mode: CoordinatorMode,
 ): Promise<CoordinatorOutcome> {
+  if (decision.action === 'prioritise' && mode === 'auto' && decision.failure === undefined) {
+    return prioritiseAtomically(deps, exception, decision)
+  }
   const carried = await carryOut(deps, exception, decision, mode)
-  await deps.db
+  await record(deps.db, exception, decision, carried)
+  return carried.outcome
+}
+
+/**
+ * The hold and its record commit together, one pass at a time per repository: another pass never sees the
+ * delayed jobs without the applied action (and releases them), nor applies the same decision a second time.
+ */
+async function prioritiseAtomically(
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+): Promise<CoordinatorOutcome> {
+  return deps.db.transaction(async (tx) => {
+    await tx.execute(HOLD_LOCK)
+    const [done] = await tx
+      .select()
+      .from(coordinatorAction)
+      .where(
+        and(
+          eq(coordinatorAction.taskId, exception.taskId),
+          eq(coordinatorAction.exceptionKind, exception.kind),
+          eq(coordinatorAction.headSha, exception.head),
+          eq(coordinatorAction.outcome, 'applied'),
+        ),
+      )
+    if (done) return 'applied'
+    // One fix at a time per repository: a second one waits for its turn, and is decided again then.
+    const [own] = await tx
+      .select({ repository: task.repository })
+      .from(task)
+      .where(eq(task.id, exception.taskId))
+    const active = (await readHeldTests(tx)).find(
+      (h) => h.repository === own?.repository && h.taskId !== exception.taskId,
+    )
+    if (active) return 'refused'
+    const moved = await moveAhead(tx, exception.taskId)
+    const carried: Carried = moved
+      ? { outcome: 'applied', reason: decision.reason }
+      : notCarried(exception, decision, 'refused', 'its job is no longer waiting in the queue')
+    await record(tx, exception, decision, carried)
+    return carried.outcome
+  })
+}
+
+async function record(
+  db: Pick<Database, 'insert'>,
+  exception: TaskException,
+  decision: Decision,
+  carried: Carried,
+) {
+  await db
     .insert(coordinatorAction)
     .values({
       taskId: exception.taskId,
@@ -185,5 +242,4 @@ export async function applyDecision(
       costUsd: decision.costUsd ?? 0,
     })
     .onConflictDoNothing()
-  return carried.outcome
 }
