@@ -10,7 +10,14 @@ import { put } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
-import { formatChecks, formatDomains, parseChecks, parseDomains } from '../lib/repo-form'
+import {
+  formatChecks,
+  formatDomains,
+  formatFixes,
+  parseChecks,
+  parseDomains,
+  parseFixes,
+} from '../lib/repo-form'
 
 const selectClass =
   'h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground'
@@ -27,7 +34,7 @@ function Settings({
   const { t } = useCopy()
   const s = t.repositories.settings
   const [checks, setChecks] = useState(formatChecks(repo.checks))
-  const [fixes, setFixes] = useState((repo.fixes ?? []).join('\n'))
+  const [fixes, setFixes] = useState(formatFixes(repo.fixes))
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
@@ -54,10 +61,7 @@ function Settings({
       const parsed = parseChecks(checks)
       await put(`/api/panel/repositories/${repo.fullName}`, {
         checks: parsed.length > 0 ? parsed : null,
-        fixes: fixes
-          .split('\n')
-          .map((l) => l.trim())
-          .filter(Boolean),
+        fixes: parseFixes(fixes),
         egress: parseDomains(domains),
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,

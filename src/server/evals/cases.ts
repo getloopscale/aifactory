@@ -7,7 +7,10 @@ export type Candidate = {
   issueNumber: number
   /** The commit the first checks ran on: the builder's, or the fix commit on top of it. */
   firstSha: string
-  /** The builder's first commit, whose parent is the commit the run started from; absent means `firstSha`. */
+  /**
+   * The builder's first commit when the first checks ran on a fix commit on top of it: its parent is the
+   * commit the run started from. Absent when the first checks ran on the builder's commit (`firstSha`).
+   */
   startSha?: string
   mergedSha: string
   costUsd: number

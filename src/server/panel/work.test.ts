@@ -56,6 +56,19 @@ describe('patchProblem', () => {
     ).toBe('two checks are named "a"')
   })
 
+  it('takes fixes with the limits of checks: eight at most, each one line of at most 500 characters', () => {
+    const fixes = (n: number) => Array.from({ length: n }, () => 'pnpm prettier --write .')
+    expect(problem({ fixes: [] })).toBeUndefined()
+    expect(problem({ fixes: fixes(8) })).toBeUndefined()
+    expect(problem({ fixes: fixes(9) })).toBe('at most 8 fixes')
+    expect(problem({ fixes: [`  ${'x'.repeat(500)}  `] })).toBeUndefined()
+    for (const bad of ['x'.repeat(501), '   ', 'a\nb']) {
+      expect(problem({ fixes: ['ok', bad] }), bad).toBe(
+        'each fix must be one line of at most 500 characters',
+      )
+    }
+  })
+
   it('accepts a domain in any case, and refuses what is not a hostname', () => {
     expect(problem({ egress: ['PyPI.ORG'] })).toBeUndefined()
     expect(problem({ egress: ['pypi.org', 'localhost'] })).toBe('"localhost" is not a domain name')

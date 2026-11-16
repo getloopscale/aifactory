@@ -10,7 +10,7 @@ type Row = {
   repository: string
   issue_number: number
   first_sha: string
-  start_sha: string
+  start_sha: string | null
   merged_sha: string
   cost_usd: string
   duration_ms: string
@@ -34,7 +34,7 @@ export async function deliveredCandidates(db: Database): Promise<Candidate[]> {
         (select e.at from stage_event e where e.task_id = t.id and e.id > l.sandbox_id and e.stage = 'done' order by e.id limit 1) as finished,
         (select e.detail from stage_event e where e.task_id = t.id and e.id > l.sandbox_id and e.stage = 'done' order by e.id limit 1) as done,
         (select e.detail->>'sha' from stage_event e where e.task_id = t.id and e.id > l.sandbox_id and e.stage = 'verify' order by e.id limit 1) as first_sha,
-        (select coalesce(e.detail->>'fixedFrom', e.detail->>'sha') from stage_event e where e.task_id = t.id and e.id > l.sandbox_id and e.stage = 'verify' order by e.id limit 1) as start_sha,
+        (select e.detail->>'fixedFrom' from stage_event e where e.task_id = t.id and e.id > l.sandbox_id and e.stage = 'verify' order by e.id limit 1) as start_sha,
         exists (select 1 from stage_event e where e.task_id = t.id and e.id > l.sandbox_id and (e.detail->>'resumed')::boolean) as resumed
       from task t join last_run l on l.task_id = t.id
       where t.stage in ('done', 'released') and t.merged_sha is not null
@@ -57,7 +57,7 @@ export async function deliveredCandidates(db: Database): Promise<Candidate[]> {
     repository: r.repository,
     issueNumber: r.issue_number,
     firstSha: r.first_sha,
-    startSha: r.start_sha,
+    ...(r.start_sha ? { startSha: r.start_sha } : {}),
     mergedSha: r.merged_sha,
     costUsd: Number(r.cost_usd),
     durationMs: Number(r.duration_ms),

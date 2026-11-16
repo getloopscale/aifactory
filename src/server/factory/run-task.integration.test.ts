@@ -516,6 +516,91 @@ describe('runTask', () => {
     expect(stored.every((e) => e.passed)).toBe(true)
   })
 
+  it('runs the fixes once, and checks their commit, when the builder changed nothing and the fixes did', async () => {
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, fixes: ['prettier --write .'] })
+    const id = await seedTask()
+    dirty = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+        if (c.endsWith('prettier --write .')) {
+          dirty = true
+          return { stdout: 'src/truncate.js' }
+        }
+        return undefined
+      }),
+    )
+    const unchanged: CodingHarness = {
+      name: 'unchanged',
+      egress: agentEgress,
+      run: async () => ({ ok: true, summary: 'Nothing to add.', sessionId: 'sess-1' }),
+    }
+
+    const result = await runTask(deps(sandbox, { harness: unchanged }), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    const fixRuns = sandbox.backend.commands.filter((c) => c.endsWith('prettier --write .'))
+    expect(fixRuns).toHaveLength(1)
+    expect(sandbox.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'pr',
+      'done',
+    ])
+  })
+
+  it('leaves the work as it was and still runs the checks when a fix fails', async () => {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: [{ name: 'format', command: 'prettier --check .' }],
+        fixes: ['prettier --write .'],
+      })
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('write-tree')) return { stdout: 'tree0\n' }
+        if (c.endsWith('prettier --write .')) {
+          dirty = true
+          return { exitCode: 2, stderr: 'SyntaxError in src/truncate.js' }
+        }
+        if (c.includes('checkout-index')) dirty = false
+        return undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(sandbox.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'pr',
+      'done',
+    ])
+    const [verify] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'verify')))
+    expect(verify.detail).toMatchObject({
+      fixes: [{ command: 'prettier --write .', exitCode: 2 }],
+    })
+    const stored = await getDb().select().from(evidence).where(eq(evidence.taskId, id))
+    expect(stored.map((e) => e.name)).toEqual(['format'])
+  })
+
   it('records the whole cost and the branch on the done stage', async () => {
     const id = await seedTask()
     await runTask(deps(new FakeSandbox(changed())), id)

@@ -221,40 +221,31 @@ class CaseRun {
     if (!uncommitted && !(Number(ahead.stdout.trim()) > 0)) {
       throw new Stopped('the agent made no change')
     }
-    if (uncommitted) {
-      await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
-      await this.backend.uploadFile(
-        COMMIT_MESSAGE,
-        `evaluation of ${this.c.id}, attempt ${this.attempts}\n`,
-      )
-      await must(this.backend, `${this.git} add -A`)
-      await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
-    }
+    if (uncommitted) await this.commitAll(`evaluation of ${this.c.id}, attempt ${this.attempts}`)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
     return this.committed
+  }
+
+  /** Commits everything in the checkout, in the sandbox only. The message goes in by file. */
+  private async commitAll(message: string): Promise<void> {
+    await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
+    await this.backend.uploadFile(COMMIT_MESSAGE, `${message}\n`)
+    await must(this.backend, `${this.git} add -A`)
+    await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
   }
 
   /** The repository's fix commands, then their change as its own commit in the sandbox, as `Run.applyFixes`. */
   private async applyFixes(sha: string): Promise<string> {
     const fixes = this.c.fixes ?? []
     if (fixes.length === 0) return sha
-    const outcomes = await runFixes(
+    const { changed } = await runFixes(
       this.backend,
       this.repoDir,
       fixes,
       this.limits.checkMs ?? DEFAULT_CHECK_MS,
     )
-    if (outcomes.some((o) => o.restoreFailed)) {
-      await must(this.backend, `${this.git} reset -q --hard ${sha}`)
-      await must(this.backend, `${this.git} clean -fdq`)
-      return sha
-    }
-    const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    if (changes.stdout.trim() === '') return sha
-    await this.backend.uploadFile(GITCONFIG, gitConfig(this.deps.author))
-    await this.backend.uploadFile(COMMIT_MESSAGE, `${FIX_COMMIT_MESSAGE}\n`)
-    await must(this.backend, `${this.git} add -A`)
-    await must(this.backend, `${this.git} commit -F ${COMMIT_MESSAGE}`)
+    if (!changed) return sha
+    await this.commitAll(FIX_COMMIT_MESSAGE)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
     return this.committed
   }

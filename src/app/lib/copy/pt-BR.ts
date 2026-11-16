@@ -585,7 +585,7 @@ export const ptBR: Copy = {
       checksPlaceholder: 'Vazio roda npm test. Por exemplo: unit: pnpm test',
       fixes: 'Correções, um comando por linha, rodadas antes das verificações',
       fixesAssistContext:
-        'Only the fix commands: one shell command per line that rewrites files and decides nothing (a formatter, a lint autofix), with no name before it. Not checks.',
+        'Só os comandos de correção: um comando de shell por linha que reescreve arquivos e não decide nada (um formatador, um autofix de lint), sem nome na frente. Não são verificações.',
       fixesPlaceholder: 'Vazio não roda nenhuma. Por exemplo: pnpm prettier --write .',
       domains: 'Domínios extras que o sandbox pode acessar',
       domainsPlaceholder:
