@@ -54,6 +54,7 @@ describe('the transition table', () => {
       coordinator_send_back: true,
       hand_over: true,
       integrate: true,
+      merged_by_person: true,
       issue_labeled: true,
       issue_comment_created: true,
       pull_request_comment_created: true,
@@ -67,7 +68,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(22 * 14)
+    expect(pairs).toHaveLength(23 * 14)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -427,6 +428,13 @@ describe('what a delivery from GitHub is meant to do, once something acts on it'
     })
     expect(elsewhere('issue_labeled')).toEqual([
       ignored('the issue already has a task that is running or delivered'),
+    ])
+  })
+
+  it('takes as integrated only the pull request of a handoff that a person merged', () => {
+    expect(acting('merged_by_person')).toEqual({ handoff: 'adopt_merge' })
+    expect(elsewhere('merged_by_person')).toEqual([
+      ignored('only the pull request a handoff left waits for a person to merge it'),
     ])
   })
 

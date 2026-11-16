@@ -11,7 +11,7 @@ import type { FailedRun } from '../github/promotion-api'
 import { FakeGithub, githubAnswered, type FakePullRequest } from '../../test/fake-github'
 import type { CheckReport } from '../github/pulls'
 
-import { pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
+import { adoptMergedHandoffs, pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
 import type { EvidenceApi } from './check-evidence'
 import { CI_SILENCE_MS } from './ci-wait'
 
@@ -488,5 +488,90 @@ describe('pollAwaitingIntegrations', () => {
 
     expect(result.errors).toEqual([expect.stringMatching(new RegExp(`^task ${id}: .*502`))])
     expect(await row(id)).toMatchObject({ stage: 'done', awaitingCiSha: VERIFIED })
+  })
+})
+
+describe('adoptMergedHandoffs', () => {
+  /** A task the factory handed over with its draft pull request, as it holds work for the owner (#139). */
+  async function handedOver(issueNumber = 7) {
+    const id = await waitingTask({ stage: 'handoff', awaiting: null, issueNumber })
+    await getDb()
+      .insert(stageEvent)
+      .values({
+        taskId: id,
+        stage: 'handoff',
+        detail: {
+          sha: VERIFIED,
+          cause: 'agent_configuration',
+          attempts: 1,
+          agentSummary: 'held work',
+        },
+      })
+    return id
+  }
+
+  it("integrates the handoff whose pull request a person merged, as after the factory's own merge", async () => {
+    pull({ state: 'closed', merged: true, mergeCommitSha: 'merge0002', autoMerge: false })
+    const id = await handedOver()
+
+    expect(await adoptMergedHandoffs(deps({ releaseMode: 'trial' }))).toEqual({
+      adopted: [id],
+      errors: [],
+    })
+
+    expect(await row(id)).toMatchObject({ stage: 'done', mergedSha: 'merge0002' })
+    expect(branchMerges()).toEqual([{ base: 'develop', head: 'merge0002' }])
+    expect(releases()).toMatchObject([{ sha: 'develop0001', prerelease: true }])
+    expect((await events(id)).at(-1)!.detail).toMatchObject({
+      integratedBy: 'person',
+      mergedSha: 'merge0002',
+    })
+    // The release is the train's or a person's: nothing is released, or recorded as released, here.
+    expect(await getDb().select().from(decision)).toEqual([])
+  })
+
+  it('adopts a merge once, when a second pass sees it again', async () => {
+    pull({ state: 'closed', merged: true, mergeCommitSha: 'merge0002', autoMerge: false })
+    await handedOver()
+
+    await adoptMergedHandoffs(deps())
+
+    expect(await adoptMergedHandoffs(deps())).toEqual({ adopted: [], errors: [] })
+    expect(branchMerges()).toHaveLength(1)
+  })
+
+  it('leaves a handoff whose pull request is open, or closed without a merge', async () => {
+    pull({ draft: true, autoMerge: false })
+    const open = await handedOver()
+
+    expect(await adoptMergedHandoffs(deps())).toEqual({ adopted: [], errors: [] })
+    pull({ state: 'closed', merged: false, autoMerge: false })
+    expect(await adoptMergedHandoffs(deps())).toEqual({ adopted: [], errors: [] })
+
+    expect(await row(open)).toMatchObject({ stage: 'handoff', mergedSha: null })
+    expect(branchMerges()).toEqual([])
+  })
+
+  it('looks only at handed-over tasks', async () => {
+    pull({ state: 'closed', merged: true, mergeCommitSha: 'merge0002', autoMerge: false })
+    const failed = await waitingTask({ stage: 'failed', awaiting: null })
+
+    expect(await adoptMergedHandoffs(deps())).toEqual({ adopted: [], errors: [] })
+    expect(await row(failed)).toMatchObject({ stage: 'failed', mergedSha: null })
+  })
+
+  it('records what stopped one task and goes on with the others', async () => {
+    pull({ state: 'closed', merged: true, mergeCommitSha: 'merge0002', autoMerge: false })
+    const broken = await handedOver()
+    await getDb()
+      .update(task)
+      .set({ pullRequestUrl: 'not a pull request' })
+      .where(eq(task.id, broken))
+    const id = await handedOver(8)
+
+    const result = await adoptMergedHandoffs(deps())
+
+    expect(result.adopted).toEqual([id])
+    expect(result.errors).toEqual([expect.stringMatching(new RegExp(`^task ${broken}: `))])
   })
 })

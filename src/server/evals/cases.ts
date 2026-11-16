@@ -121,6 +121,22 @@ const AGENTS_FOLDER = 'src/server/agents/'
 
 const isTest = (path: string) => /\.test\.[cm]?[jt]sx?$/.test(path)
 
+/**
+ * The quality gates and the guard against weakened tests: what decides whether work is good enough. A change
+ * to one is never integrated by the factory on its own, since no evaluation measures it: the owner reads it.
+ * A path that ends in `/` names a folder.
+ */
+export const QUALITY_GATES = [
+  'quality/',
+  'scripts/crap.mjs',
+  'stryker.config.json',
+  'vitest.stryker.config.ts',
+  'vitest.config.ts',
+  '.jscpd.json',
+  '.github/workflows/',
+  'src/server/factory/test-weakening.ts',
+]
+
 /** The paths among `changed` that belong to the agents' configuration. */
 export function agentConfigurationChanged(changed: string[]): string[] {
   return changed.filter(
@@ -143,4 +159,21 @@ export function heldForEvaluation(
   own: string = FACTORY_REPOSITORY,
 ): string[] {
   return repository === own ? agentConfigurationChanged(changed) : []
+}
+
+/**
+ * The quality gates a change of `repository` touches. Like the agent configuration, the factory never
+ * integrates such a change on its own; unlike it, no evaluation measures it, so the owner reviews it.
+ */
+export function heldForReview(
+  repository: string,
+  changed: string[],
+  own: string = FACTORY_REPOSITORY,
+): string[] {
+  if (repository !== own) return []
+  return changed.filter(
+    (path) =>
+      !isTest(path) &&
+      QUALITY_GATES.some((gate) => (gate.endsWith('/') ? path.startsWith(gate) : path === gate)),
+  )
 }
