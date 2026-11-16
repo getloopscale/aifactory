@@ -192,6 +192,11 @@ describe('toFile', () => {
     expect(toFile(groups, new Set(), 0)).toEqual([])
   })
 
+  it('still files a repeated status code, since the signature cannot tell 402 from the rest', () => {
+    const groups = groupBySignature(threeTasks(() => 'Status code 402'))
+    expect(toFile(groups, new Set(), 0).map((g) => g.signature)).toEqual(['Status code <n>'])
+  })
+
   it('files one of five, the one on the most tasks', () => {
     const groups = groupBySignature([
       ...['a', 'b', 'c', 'd'].flatMap((s) => threeTasks(() => s)),

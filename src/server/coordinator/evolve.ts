@@ -34,8 +34,8 @@ export const EVOLVE = {
 /** The waits the factory was designed to have: a signature that starts with one, or that names a provider limit, is never filed. */
 export const DESIGNED_WAITS = ['blocked by', 'waiting for an answer'] as const
 
-/** The provider refusing to serve the account (spend or usage limit): a state of the account, not a defect to fix here. */
-const PROVIDER_LIMIT = /spend_limit|usage limit exceeded|Status code 402/i
+/** The provider refusing to serve the account (spend or usage limit, matched on the signature, where numbers are already `<n>`): a state of the account, not a defect to fix here. */
+const PROVIDER_LIMIT = /spend_limit|usage limit exceeded/i
 
 /** A `failed` or `handoff` event of a task, with the reason it recorded. */
 export type FailureEvent = {
