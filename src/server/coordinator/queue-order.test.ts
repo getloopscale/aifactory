@@ -13,7 +13,8 @@ import {
 } from './queue-order'
 
 const TEST = 'remPhase reports one fact left out of 501'
-const reason = (test = TEST) => `the checks failed:\n FAIL  sdk-memory > ${test}\n timed out in 5000ms`
+const reason = (test = TEST) =>
+  `the checks failed:\n FAIL  sdk-memory > ${test}\n timed out in 5000ms`
 
 const failure = (taskId: number, over: Partial<FailureEvent> = {}): FailureEvent => ({
   taskId,
@@ -48,9 +49,9 @@ describe('the failing test of a reason', () => {
   })
   it('is carried by an issue that holds its name, in any numbers', () => {
     const test = failingTestOf(reason())!
-    expect(issueNames(test, { title: 't', body: 'remPhase reports one fact left out of 502' })).toBe(
-      true,
-    )
+    expect(
+      issueNames(test, { title: 't', body: 'remPhase reports one fact left out of 502' }),
+    ).toBe(true)
     expect(issueNames(test, { title: 't', body: 'something else' })).toBe(false)
   })
 })
