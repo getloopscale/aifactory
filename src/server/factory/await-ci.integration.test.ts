@@ -301,23 +301,73 @@ describe('pollAwaitingIntegrations', () => {
     expect(autoMergeOff()).toHaveLength(1)
   })
 
-  it('keeps a check newly red on the base in the blame while another one is refreshed', async () => {
+  it('carries the base blame across the start-over, and clears it once the fix is held', async () => {
     const BASE = 'b'.repeat(40)
     repo().required.set('workspace', ['CI', 'Lint'])
+    const red = (name: string, url: string) =>
+      ({ name, state: 'failure', detail: 'red', url }) as const
+    reports(red('CI', 'https://ci/1'), red('Lint', 'https://ci/2'))
+    repo().report(BASE, red('CI', 'https://ci/3'))
+    repo().report(BASE, red('Lint', 'https://ci/4'))
+    const id = await waitingTask()
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })
+
+    // CI is fixed on the base, Lint is not: the task starts over for CI, and Lint stays the base's.
+    repo().clearChecks(BASE)
+    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/3' })
+    repo().report(BASE, red('Lint', 'https://ci/4'))
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+
+    // The new run left a new `done` event; Lint is fixed on the base before the next poll.
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'done', detail: { sha: VERIFIED, pullRequestUrl: PR_URL } })
     reports(
-      { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' },
-      { name: 'Lint', state: 'failure', detail: 'red', url: 'https://ci/2' },
+      { name: 'CI', state: 'success', detail: '', url: 'https://ci/5' },
+      red('Lint', 'https://ci/6'),
     )
+    pull({ autoMerge: true })
+    repo().clearChecks(BASE)
+    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/3' })
+    repo().report(BASE, { name: 'Lint', state: 'success', detail: '', url: 'https://ci/4' })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
+  })
+
+  it('retries a refresh whose start-over failed after auto-merge was turned off', async () => {
+    const BASE = 'b'.repeat(40)
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
     repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
     const id = await waitingTask()
     await pollAwaitingIntegrations(deps())
-
     repo().clearChecks(BASE)
-    repo().report(BASE, { name: 'CI', state: 'success', url: 'https://ci/0' })
-    repo().report(BASE, { name: 'Lint', state: 'failure', detail: 'red', url: 'https://ci/3' })
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [id], sentBack: [] })
-    const [event] = (await events(id)).filter((e) => e.stage === 'done')
-    expect(JSON.stringify(event)).toContain('Lint')
+    repo().report(BASE, { name: 'CI', state: 'success', detail: '', url: 'https://ci/0' })
+
+    const failing = deps({
+      startOver: async () => {
+        throw new Error('GitHub answered 502')
+      },
+    })
+    expect((await pollAwaitingIntegrations(failing)).errors).toHaveLength(1)
+
+    pull({ autoMerge: false })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({
+      rerun: [id],
+      toPerson: [],
+      sentBack: [],
+    })
+  })
+
+  it('waits while the base has not reported the check yet', async () => {
+    const BASE = 'b'.repeat(40)
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/1' })
+    repo().report(BASE, { name: 'CI', state: 'failure', detail: 'red', url: 'https://ci/0' })
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    repo().clearChecks(BASE)
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ rerun: [], sentBack: [] })
+    expect(startedOver).toEqual([])
+    expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
   })
 
   it('records a failed read of the base and looks again, without blaming the task', async () => {

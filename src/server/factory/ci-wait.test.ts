@@ -102,10 +102,21 @@ describe('decideWaitingIntegration after the base was blamed', () => {
     ).toEqual({ kind: 'refresh', checks: ['CI'], baseRed: ['Lint'] })
   })
 
-  it('waits while the base is still running the check', () => {
+  it.each([
+    ['running', [report('CI', 'pending')]],
+    ['not reported yet', []],
+  ])('waits while the base has the check %s', (_name, baseReports) => {
+    expect(decide({ reports: failing, baseReports, baseBlame: blame })).toEqual({ kind: 'wait' })
+  })
+
+  it('retries a refresh that began, whatever auto-merge shows now', () => {
     expect(
-      decide({ reports: failing, baseReports: [report('CI', 'pending')], baseBlame: blame }),
-    ).toEqual({ kind: 'wait' })
+      decide({
+        pull: { ...open, autoMerge: false },
+        reports: failing,
+        baseBlame: { checks: ['CI'], refreshing: ['CI'] },
+      }),
+    ).toEqual({ kind: 'refresh', checks: ['CI'], baseRed: [] })
   })
 
   it('tells a person when the automatic runs are spent', () => {

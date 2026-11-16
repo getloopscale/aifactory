@@ -273,8 +273,27 @@ async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown,
 }
 
 /** The earlier blame plus what this pass found: the union of the checks. */
-function mergeBlame(before: BaseBlame | undefined, baseRed: string[]): BaseBlame {
-  return { checks: [...new Set([...(before?.checks ?? []), ...baseRed])] }
+function mergeBlame(
+  before: BaseBlame | undefined,
+  baseRed: string[],
+  refreshing?: string[],
+): BaseBlame {
+  const checks = [...new Set([...(before?.checks ?? []), ...baseRed])]
+  return refreshing ? { checks, refreshing } : { checks }
+}
+
+/**
+ * The blame that applies to the verified commit: the one on its `done` event, or, when the task was just
+ * started over to take a base fix, what that start-over left unresolved. The checks it refreshed were
+ * evaluated on a commit holding their fix, so they are no longer the base's.
+ */
+function blameOf(dones: { detail: unknown }[]): BaseBlame | undefined {
+  const own = (dones[0]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
+  if (own) return own
+  const before = (dones[1]?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
+  if (!before?.refreshing?.length) return undefined
+  const checks = before.checks.filter((name) => !before.refreshing!.includes(name))
+  return checks.length > 0 ? { checks } : undefined
 }
 
 async function look(
@@ -284,12 +303,13 @@ async function look(
   holding: Set<string>,
 ) {
   const verifiedSha = row.awaitingCiSha!
-  const [done] = await deps.db
+  const dones = await deps.db
     .select({ id: stageEvent.id, detail: stageEvent.detail, at: stageEvent.at })
     .from(stageEvent)
     .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'done')))
     .orderBy(desc(stageEvent.id))
-    .limit(1)
+    .limit(2)
+  const done = dones[0]
   const [runs] = await deps.db
     .select({ automatic: automaticRunsSincePerson() })
     .from(stageEvent)
@@ -301,7 +321,8 @@ async function look(
   const pull = await deps.api.readPullRequest(row.repository, token, number)
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
-  const blame = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
+  const blame = blameOf(dones)
+  const stored = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
   const waitedMs =
     (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime()
   const input = {
@@ -335,14 +356,19 @@ async function look(
       if (step.baseRed) {
         result.waitingOnBase.push(row.id)
         const merged = mergeBlame(blame, step.baseRed)
-        if (done && merged.checks.length !== (blame?.checks.length ?? 0)) {
+        if (done && merged.checks.length !== (stored?.checks.length ?? 0)) {
           await rememberBlame(deps, done.id, done.detail, merged)
         }
       }
       return
     case 'refresh':
       // The union is kept first, so a check red on the base now is still the base's if the next step fails.
-      await rememberBlame(deps, done!.id, done!.detail, mergeBlame(blame, step.baseRed))
+      await rememberBlame(
+        deps,
+        done!.id,
+        done!.detail,
+        mergeBlame(blame, step.baseRed, step.checks),
+      )
       // Off first: the run merges the fixed base into this pull request, and that merge must be verified.
       await deps.api.disableAutoMerge(row.repository, token, number)
       await deps.startOver(row.id)

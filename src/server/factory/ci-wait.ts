@@ -64,8 +64,13 @@ export type WaitingStep =
    */
   | { kind: 'integrate' }
 
-/** Every check blamed on the base while the task waited (`done.detail.baseBlame`). */
-export type BaseBlame = { checks: string[] }
+/**
+ * Every check blamed on the base while the task waited (`done.detail.baseBlame`). `refreshing` names the
+ * ones whose fix the task is being started over to take: an intent kept until the start-over happens, so a
+ * failure between turning auto-merge off and starting over is retried, and the blame that is not
+ * `refreshing` goes on to the next verified commit.
+ */
+export type BaseBlame = { checks: string[]; refreshing?: string[] }
 
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
@@ -165,6 +170,17 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
           stopAutoMerge: true,
         }
   }
+  const refreshing = input.baseBlame?.refreshing ?? []
+  if (refreshing.length > 0 && !input.pull.autoMerge) {
+    // The refresh began (auto-merge is off) and did not finish: it is not somebody else turning it off.
+    return runsLeft
+      ? { kind: 'refresh', checks: refreshing, baseRed: [] }
+      : {
+          kind: 'person',
+          reason: `${refreshing.join(', ')} failed on the base, which is fixed now, but the work could not run again on it after ${runs}`,
+          stopAutoMerge: true,
+        }
+  }
   if (input.held && !input.pull.autoMerge) {
     return input.held === 'holding' ? { kind: 'wait' } : { kind: 'integrate' }
   }
@@ -186,8 +202,12 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   for (const name of allFailed) {
     if (baseRed.includes(name)) continue
     if (!blame?.checks.includes(name)) failed.push(name)
-    // Fixed on the base, and the base is not running it again: this commit lacks the fix.
-    else if (!base.some((r) => r.name === name && r.state === 'pending')) toRefresh.push(name)
+    // Fixed on the base: it reports, and every run of it passed. Absent or running, the base is not known fixed.
+    else if (
+      base.some((r) => r.name === name) &&
+      base.every((r) => r.name !== name || r.state === 'success')
+    )
+      toRefresh.push(name)
   }
   if (failed.length > 0) {
     if (!runsLeft) {
