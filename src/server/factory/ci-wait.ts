@@ -38,10 +38,16 @@ export type WaitingStep =
   /** `baseRed` names the required checks that fail on the base too: the task waits for the base, not for a fix. */
   | { kind: 'wait'; baseRed?: string[] }
   /**
-   * Checks blamed on the base before, which the base no longer fails, still show the old failure on the
-   * verified commit: their failed jobs run again, and the builder is not sent back for them.
+   * A required check failed and the head of the integration branch must be read to tell whose failure it
+   * is. Asked only then, so a base that cannot be read blocks no other step.
    */
-  | { kind: 'rerun'; checks: string[] }
+  | { kind: 'needs_base' }
+  /**
+   * Checks blamed on the base before, which the base no longer fails, still show the old failure on the
+   * verified commit: their failed jobs run again, and the builder is not sent back for them. `baseRed` are
+   * the checks that still fail on the base, kept in the blame.
+   */
+  | { kind: 'rerun'; checks: string[]; baseRed: string[] }
   /** GitHub merged the verified commit: what follows a direct merge runs now. */
   | { kind: 'finish'; mergedSha: string }
   /**
@@ -58,6 +64,18 @@ export type WaitingStep =
    */
   | { kind: 'integrate' }
 
+/** A rerun asked for a blamed check: when, and the links of the failures it was asked about. */
+export type RerunRecord = { at: string; urls: string[] }
+
+/**
+ * Every check ever blamed on the base while the task waited, and the reruns asked for after the base
+ * was fixed, per check: a rerun is over only when the check shows a failure the rerun did not start from.
+ */
+export type BaseBlame = { checks: string[]; reruns: Record<string, RerunRecord> }
+
+/** How long a rerun may leave the old failure showing before a person is told. */
+export const RERUN_WAIT_MS = 30 * 60_000
+
 export type WaitingIntegration = {
   /** The commit the factory verified and reviewed: the only one it lets merge. */
   verifiedSha: string
@@ -68,11 +86,10 @@ export type WaitingIntegration = {
   reports: CheckReport[]
   /** Every check reported on the head of the integration branch, when it could be read. */
   baseReports?: CheckReport[]
-  /**
-   * The checks an earlier pass blamed on the base for this verified commit (`done.detail.baseBlame`), and
-   * whether their jobs were already run again.
-   */
-  baseBlame?: { checks: string[]; rerun: boolean }
+  /** The checks an earlier pass blamed on the base for this verified commit (`done.detail.baseBlame`). */
+  baseBlame?: BaseBlame
+  /** The time of this look, in milliseconds. */
+  nowMs?: number
   /** How long the pull request has waited. */
   waitedMs: number
   /** Automatic runs since a person last started the task. */
@@ -171,15 +188,25 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   }
   const { failed: allFailed, silent } = readRequired(input)
   // A check that fails on the base too is not this change's failure: nothing the builder does fixes it.
+  if (allFailed.length > 0 && input.baseReports === undefined) return { kind: 'needs_base' }
   const base = input.baseReports ?? []
   const baseRed = allFailed.filter((name) => failedRuns(base, name).length > 0)
-  // Blamed on the base before, and the base no longer fails it: the failure on this commit is old news.
-  const blamed = input.baseBlame && !input.baseBlame.rerun ? input.baseBlame.checks : []
-  const healed = allFailed.filter((name) => blamed.includes(name) && !baseRed.includes(name))
-  const settling = healed.filter((name) =>
-    base.some((r) => r.name === name && r.state === 'pending'),
-  )
-  const failed = allFailed.filter((name) => !baseRed.includes(name) && !healed.includes(name))
+  const blame = input.baseBlame
+  const now = input.nowMs ?? Date.now()
+  const toRerun: string[] = []
+  const failed: string[] = []
+  const expired: string[] = []
+  for (const name of allFailed) {
+    if (baseRed.includes(name)) continue
+    const asked = blame?.reruns[name]
+    if (!blame?.checks.includes(name)) failed.push(name)
+    else if (asked) {
+      // The old failure may show while the rerun is queued: only a failure it did not start from is new.
+      const fresh = failedRuns(input.reports, name).some((r) => !asked.urls.includes(r.url))
+      if (fresh) failed.push(name)
+      else if (now - new Date(asked.at).getTime() > RERUN_WAIT_MS) expired.push(name)
+    } else if (!base.some((r) => r.name === name && r.state === 'pending')) toRerun.push(name)
+  }
   if (failed.length > 0) {
     if (!runsLeft) {
       return {
@@ -192,6 +219,13 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
     const reports = failed.flatMap((name) => failedRuns(input.reports, name))
     return { kind: 'send_back', failed, reports }
   }
+  if (expired.length > 0) {
+    return {
+      kind: 'person',
+      reason: `${expired.join(', ')} still shows the failure the base had, ${RERUN_WAIT_MS / 60_000} minutes after the factory ran it again: run it again`,
+      stopAutoMerge: false,
+    }
+  }
   if (silent.length > 0 && input.waitedMs > CI_SILENCE_MS) {
     return {
       kind: 'person',
@@ -199,8 +233,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
       stopAutoMerge: true,
     }
   }
-  const rerun = healed.filter((name) => !settling.includes(name))
-  if (rerun.length > 0) return { kind: 'rerun', checks: rerun }
+  if (toRerun.length > 0) return { kind: 'rerun', checks: toRerun, baseRed }
   return baseRed.length > 0 ? { kind: 'wait', baseRed } : { kind: 'wait' }
 }
 

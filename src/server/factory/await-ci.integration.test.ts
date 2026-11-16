@@ -311,7 +311,12 @@ describe('pollAwaitingIntegrations', () => {
     expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [], rerun: [id] })
     expect(reran).toEqual([431])
 
-    // Failing again after the rerun is the change's own failure.
+    // The old failure still shows while the rerun is queued: nothing goes back, nothing runs twice.
+    expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [], waiting: 1 })
+    expect(reran).toEqual([431])
+
+    // A failure the rerun did not start from is the change's own.
+    reports({ name: 'CI', state: 'failure', detail: 'red', url: `${link}0` })
     expect(await pollAwaitingIntegrations(withRerun())).toMatchObject({ sentBack: [id] })
     expect(reran).toEqual([431])
   })
@@ -578,6 +583,8 @@ describe('pollAwaitingIntegrations', () => {
       startedOver: [],
       toPerson: [],
       waiting: 0,
+      waitingOnBase: [],
+      rerun: [],
       errors: [],
       unreadEvidence: [],
     })

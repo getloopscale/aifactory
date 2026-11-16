@@ -30,6 +30,7 @@ const decide = (over: Partial<Parameters<typeof decideWaitingIntegration>[0]> = 
     reports: [report('CI', 'pending'), report('Lint', 'success')],
     waitedMs: 60_000,
     automaticRuns: 0,
+    baseReports: [],
     ...over,
   })
 
@@ -71,30 +72,76 @@ describe('decideWaitingIntegration with a red base', () => {
 
 describe('decideWaitingIntegration after the base was blamed', () => {
   const failing = [report('CI', 'failure', 'boom'), report('Lint', 'success')]
-  const blame = { checks: ['CI'], rerun: false }
+  const blame = { checks: ['CI'], reruns: {} }
+  const asked = (at: string) => ({
+    checks: ['CI'],
+    reruns: { CI: { at, urls: [report('CI', 'failure').url] } },
+  })
+  const NOW = Date.parse('2026-11-16T12:00:00Z')
+
+  it('asks for the base before it blames anyone', () => {
+    expect(decide({ reports: failing, baseReports: undefined })).toEqual({
+      kind: 'needs_base',
+    })
+  })
+
+  it('does not ask for the base when no required check failed', () => {
+    expect(decide({ reports: [report('CI', 'success'), report('Lint', 'success')] })).toEqual({
+      kind: 'wait',
+    })
+  })
 
   it('runs the check again once the base no longer fails it', () => {
     expect(
       decide({ reports: failing, baseReports: [report('CI', 'success')], baseBlame: blame }),
-    ).toEqual({
-      kind: 'rerun',
-      checks: ['CI'],
-    })
+    ).toEqual({ kind: 'rerun', checks: ['CI'], baseRed: [] })
+  })
+
+  it('keeps a check still red on the base in the blame while another one is run again', () => {
+    expect(
+      decide({
+        reports: [report('CI', 'failure'), report('Lint', 'failure')],
+        baseReports: [report('Lint', 'failure'), report('CI', 'success')],
+        baseBlame: blame,
+      }),
+    ).toEqual({ kind: 'rerun', checks: ['CI'], baseRed: ['Lint'] })
   })
 
   it('waits while the base is still running the check', () => {
     expect(
       decide({ reports: failing, baseReports: [report('CI', 'pending')], baseBlame: blame }),
-    ).toEqual({
-      kind: 'wait',
-    })
+    ).toEqual({ kind: 'wait' })
   })
 
-  it("takes a failure after the rerun as the change's own", () => {
+  it('waits while the old failure still shows after the rerun was asked for', () => {
+    expect(
+      decide({
+        reports: failing,
+        baseReports: [report('CI', 'success')],
+        baseBlame: asked('2026-11-16T11:55:00Z'),
+        nowMs: NOW,
+      }),
+    ).toEqual({ kind: 'wait' })
+  })
+
+  it('tells a person when the old failure still shows long after the rerun', () => {
+    expect(
+      decide({
+        reports: failing,
+        baseReports: [report('CI', 'success')],
+        baseBlame: asked('2026-11-16T10:00:00Z'),
+        nowMs: NOW,
+      }),
+    ).toMatchObject({ kind: 'person', stopAutoMerge: false })
+  })
+
+  it("takes a failure the rerun did not start from as the change's own", () => {
+    const fresh = [{ ...report('CI', 'failure'), url: 'https://github.com/o/r/runs/new' }]
     const step = decide({
-      reports: failing,
+      reports: fresh,
       baseReports: [report('CI', 'success')],
-      baseBlame: { checks: ['CI'], rerun: true },
+      baseBlame: asked('2026-11-16T11:55:00Z'),
+      nowMs: NOW,
     })
     expect(step).toMatchObject({ kind: 'send_back', failed: ['CI'] })
   })

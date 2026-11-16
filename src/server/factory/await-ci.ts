@@ -11,6 +11,8 @@ import { integrationBranch } from './branches'
 import { attachEvidence, runOf, type EvidenceApi } from './check-evidence'
 import {
   checksFeedback,
+  type BaseBlame,
+  type RerunRecord,
   decideWaitingIntegration,
   evidenceOfNote,
   type WaitingStep,
@@ -249,25 +251,20 @@ async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]):
 }
 
 /**
- * What the integration branch's head reports, read only when a check failed on the pull request. A read that
- * fails throws: the pass records it and looks at the task again, rather than blaming the task for a failure
- * it cannot tell from the base's.
+ * What the integration branch's head reports. A read that fails throws: the pass records it and looks at
+ * the task again, rather than blaming the task for a failure it cannot tell from the base's.
  */
 async function readBase(
   deps: AwaitCiDeps,
   repository: string,
   token: string,
   branch: string,
-  reports: CheckReport[],
-): Promise<CheckReport[] | undefined> {
-  if (!reports.some((r) => r.state === 'failure')) return undefined
+): Promise<CheckReport[]> {
   const head = await deps.api.branchHead(repository, token, branch)
   if (!head)
     throw new Error(`the integration branch ${branch} has no head to compare the checks with`)
   return deps.api.checkReports(repository, token, head)
 }
-
-type BaseBlame = { checks: string[]; rerun: boolean }
 
 /** Remembers on the `done` event which checks were blamed on the base, so a later pass still knows. */
 async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown, blame: BaseBlame) {
@@ -275,6 +272,18 @@ async function rememberBlame(deps: AwaitCiDeps, doneId: number, detail: unknown,
     .update(stageEvent)
     .set({ detail: { ...(detail as Record<string, unknown>), baseBlame: blame } })
     .where(eq(stageEvent.id, doneId))
+}
+
+/** The earlier blame plus what this pass found: the union of the checks, and the reruns already asked for. */
+function mergeBlame(
+  before: BaseBlame | undefined,
+  baseRed: string[],
+  reruns: Record<string, RerunRecord> = {},
+): BaseBlame {
+  return {
+    checks: [...new Set([...(before?.checks ?? []), ...baseRed])],
+    reruns: { ...before?.reruns, ...reruns },
+  }
 }
 
 /**
@@ -287,24 +296,30 @@ async function rerunBlamed(
   w: Waiting,
   reports: CheckReport[],
   names: string[],
-): Promise<string | undefined> {
+): Promise<{ asked: Record<string, RerunRecord> } | { refusal: string }> {
   const { row, token, verifiedSha } = w
   const { checks } = deps
-  if (!checks.rerunFailedJobs || !checks.jobAttempt) return 'it cannot run jobs again'
+  if (!checks.rerunFailedJobs || !checks.jobAttempt) return { refusal: 'it cannot run jobs again' }
   const runs = await checks.failedChecks(row.repository, token, verifiedSha)
   const ids = new Set<number>()
   for (const name of names) {
     for (const report of reports.filter((r) => r.name === name && r.state === 'failure')) {
       const run = runOf(runs, report)
-      if (!run) return `it could not find the run of ${name}`
+      if (!run) return { refusal: `it could not find the run of ${name}` }
       ids.add((await checks.jobAttempt(row.repository, token, run.id)).runId)
     }
   }
   for (const id of ids) {
     const answer = await checks.rerunFailedJobs(row.repository, token, id)
-    if (!answer.started) return answer.refusal
+    if (!answer.started) return { refusal: answer.refusal }
   }
-  return undefined
+  const at = (deps.now?.() ?? new Date()).toISOString()
+  const asked: Record<string, RerunRecord> = {}
+  for (const name of names) {
+    const urls = reports.filter((r) => r.name === name && r.state === 'failure').map((r) => r.url)
+    asked[name] = { at, urls }
+  }
+  return { asked }
 }
 
 async function look(
@@ -332,20 +347,27 @@ async function look(
   const required = await deps.api.requiredChecks(row.repository, token, integrationBranch(repo))
   const reports = await deps.api.checkReports(row.repository, token, verifiedSha)
   const blame = (done?.detail as { baseBlame?: BaseBlame } | undefined)?.baseBlame
-  const step = decideWaitingIntegration({
+  const nowMs = (deps.now?.() ?? new Date()).getTime()
+  const waitedMs = nowMs - new Date(done?.at ?? row.createdAt).getTime()
+  const input = {
     verifiedSha,
     pull,
     required,
     reports,
     ...(blame ? { baseBlame: blame } : {}),
-    baseReports: await readBase(deps, row.repository, token, integrationBranch(repo), reports),
-    waitedMs:
-      (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
+    nowMs,
+    waitedMs,
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
       ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
       : {}),
-  })
+  }
+  let step = decideWaitingIntegration(input)
+  // The base is read only when a required check failed and its blame is the question.
+  if (step.kind === 'needs_base') {
+    const baseReports = await readBase(deps, row.repository, token, integrationBranch(repo))
+    step = decideWaitingIntegration({ ...input, baseReports })
+  }
   const w: Waiting = {
     row,
     verifiedSha,
@@ -358,20 +380,26 @@ async function look(
       result.waiting += 1
       if (step.baseRed) {
         result.waitingOnBase.push(row.id)
-        if (done && (!blame || blame.rerun)) {
-          await rememberBlame(deps, done.id, done.detail, { checks: step.baseRed, rerun: false })
+        const merged = mergeBlame(blame, step.baseRed)
+        if (done && merged.checks.length !== (blame?.checks.length ?? 0)) {
+          await rememberBlame(deps, done.id, done.detail, merged)
         }
       }
       return
     case 'rerun': {
-      // Recorded first: a second pass must not run them again, whatever the rerun answers.
-      await rememberBlame(deps, done!.id, done!.detail, { checks: step.checks, rerun: true })
-      const refused = await rerunBlamed(deps, w, reports, step.checks)
-      if (refused === undefined) {
+      const answer = await rerunBlamed(deps, w, reports, step.checks)
+      if ('asked' in answer) {
+        // Recorded once GitHub accepted it, with the failures it started from: the old one may show a while.
+        await rememberBlame(
+          deps,
+          done!.id,
+          done!.detail,
+          mergeBlame(blame, step.baseRed, answer.asked),
+        )
         result.rerun.push(row.id)
         return
       }
-      const reason = `${step.checks.join(', ')} failed on the base, which is fixed now, but the check still shows that failure here and the factory could not run it again (${refused}): run it again`
+      const reason = `${step.checks.join(', ')} failed on the base, which is fixed now, but the check still shows that failure here and the factory could not run it again (${answer.refusal}): run it again`
       if (await toPerson(deps, w, { kind: 'person', reason, stopAutoMerge: false })) {
         result.toPerson.push(row.id)
       }
@@ -392,6 +420,8 @@ async function look(
       result.sentBack.push(row.id)
       return
     }
+    case 'needs_base':
+      throw new Error('the base was not read')
     case 'start_over':
       // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
