@@ -22,6 +22,7 @@ import { conflictNote } from '../panel/actions'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
 import { moveAhead } from './queue-apply'
+import { holdNewJob } from './queue-hold'
 import type { ScopeDraft } from './scope'
 
 beforeAll(async () => {
@@ -745,11 +746,73 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   })
 
   it('applies one decision once when two passes run at the same time', async () => {
-    await incident()
+    const { fix } = await incident()
 
     await Promise.all([coordinate(deps(), 'auto'), coordinate(deps(), 'auto')])
 
     expect(await prioritised()).toHaveLength(1)
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('keeps a hold made by one pass when another pass that began before it finishes', async () => {
+    const { fix } = await incident()
+
+    await Promise.all([
+      coordinate(deps(), 'auto'),
+      coordinate(deps(), 'auto'),
+      coordinate(deps(), 'auto'),
+    ])
+
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('holds a job queued after the decision as it is queued, with no pass in between', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    const late = await seed('intake')
+    await enqueue(late, 5)
+
+    await holdNewJob(getDb(), late, 'auto')
+
+    expect(await dequeue()).toEqual([`job-${fix}`])
+    expect(await dequeue()).toEqual([])
+  })
+
+  it('changes no job in trial, whether a hold exists or a job was queued later', async () => {
+    const { fix } = await incident()
+    await coordinate(deps(), 'auto')
+    const late = await seed('intake')
+    await enqueue(late, 5)
+    const state = () =>
+      getPool().query('select id, available_at, input from theokit_jobs order by id')
+
+    const before = await state()
+    await coordinate(deps(), 'trial')
+    await holdNewJob(getDb(), late, 'trial')
+
+    expect((await state()).rows).toEqual(before.rows)
+    expect(fix).toBeGreaterThan(0)
+  })
+
+  it('does not bring a fix scheduled for later ahead of its time', async () => {
+    const { fix } = await incident()
+    await getPool().query(
+      "update theokit_jobs set available_at = now() + interval '30 minutes' where id = $1",
+      [`job-${fix}`],
+    )
+    const before = await getPool().query('select available_at from theokit_jobs where id = $1', [
+      `job-${fix}`,
+    ])
+
+    await coordinate(deps(), 'auto')
+
+    const after = await getPool().query('select available_at from theokit_jobs where id = $1', [
+      `job-${fix}`,
+    ])
+    expect(after.rows[0].available_at).toEqual(before.rows[0].available_at)
+    expect(await dequeue()).toEqual([])
   })
 
   it('moves no job for a task that a run already took', async () => {

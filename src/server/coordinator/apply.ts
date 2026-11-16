@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, repository, task } from '../db/schema'
@@ -16,7 +16,7 @@ import type { CoordinatorOutcome, Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
-import { moveAhead } from './queue-apply'
+import { HOLD_LOCK, moveAhead } from './queue-apply'
 import { COORDINATOR_ACTOR } from './release-train'
 import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft } from './scope'
 
@@ -191,9 +191,7 @@ async function prioritiseAtomically(
   decision: Decision,
 ): Promise<CoordinatorOutcome> {
   return deps.db.transaction(async (tx) => {
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext('prioritise:' || (select repository from task where id = ${exception.taskId})))`,
-    )
+    await tx.execute(HOLD_LOCK)
     const [done] = await tx
       .select()
       .from(coordinatorAction)

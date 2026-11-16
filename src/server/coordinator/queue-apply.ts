@@ -13,6 +13,9 @@ import { QUEUE } from './queue-order'
  * statement itself. TheoKit's worker takes the job with the earliest `available_at` that is not in the future
  * (`dequeue`), and has no call for this (a gap to file on usetheokit/theokit).
  */
+/** Held while a hold is made, kept or released, and while a decision to hold is recorded: one at a time. */
+export const HOLD_LOCK = sql`select pg_advisory_xact_lock(hashtext('prioritise'))`
+
 export type QueueDb = Pick<Database, 'execute'>
 
 /** Pending `run-task` jobs of the repository of `taskId` that no worker holds, of tasks still in `intake`. */
@@ -50,9 +53,10 @@ export async function moveAhead(
           update theokit_jobs set available_at = least(available_at,
             coalesce((select min(available_at) from pending where task_id <> ${taskId}), available_at)
               - interval '1 second')
-          where id in (select id from pending where task_id = ${taskId}) returning id
+          where id in (select id from pending where task_id = ${taskId} and available_at <= now())
+          returning id
         )
-        select (select count(*) from fix)::int as moved`,
+        select (select count(*) from pending where task_id = ${taskId})::int as moved`,
   )
   if ((moved.rows[0]?.moved ?? 0) === 0) return false
   await holdOthers(db, taskId, new Date(now.getTime() + QUEUE.holdMs))

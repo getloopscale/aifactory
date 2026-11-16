@@ -76,7 +76,10 @@ export async function readQueueFacts(
  * The tests whose fix the coordinator moved ahead less than `QUEUE.holdMs` ago and that has not reached the
  * integration branch yet (queued, running, or waiting for its checks), and the repository of each.
  */
-export async function readHeldTests(db: Database, now: Date = new Date()): Promise<HeldTest[]> {
+export async function readHeldTests(
+  db: Pick<Database, 'select'>,
+  now: Date = new Date(),
+): Promise<HeldTest[]> {
   const rows = await db
     .select({
       repository: task.repository,
