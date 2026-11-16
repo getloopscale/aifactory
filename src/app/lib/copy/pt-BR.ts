@@ -286,6 +286,10 @@ export const ptBR: Copy = {
     changesPlaceholder: 'O que deve mudar? O agente continua a partir da branch que ele enviou.',
     sendBack: 'Devolver',
     sentBack: 'Devolvido ao agente.',
+    sendBackWaiting: 'Uma devolução espera a execução começar. Retire-a para corrigir a nota.',
+    withdraw: 'Retirar devolução',
+    confirmWithdraw: 'Retirar esta devolução? A execução não começa e a tarefa volta.',
+    withdrawn: 'Devolução retirada.',
     changesContext: (title: string, n: number, repository: string) =>
       `Pull request da issue "${title}" (#${n}) em ${repository}`,
     resolvedAnotherWay: 'Resolvida de outro jeito',

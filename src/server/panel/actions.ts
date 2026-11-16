@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
@@ -7,7 +7,8 @@ import { integrationBranch } from '../factory/branches'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
-import { outcome, stagesWhere, type TransitionEvent } from '../factory/transitions'
+import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
+import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
 export class ActionRefused extends Error {
@@ -39,6 +40,8 @@ export type ActionDeps = {
         },
         key: string,
       ) => Promise<void>,
+      /** Removes the run queued under `key` if no worker has taken it; answers whether it did. */
+      dequeueRun?: (key: string) => Promise<boolean>,
     ) => Promise<T>,
   ) => Promise<T>
 }
@@ -60,6 +63,18 @@ async function requeue(
   rework?: Rework,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
+    // What a person's send-back clears is kept on its intake, so withdrawing it can give it back. It is read
+    // under a lock held until the commit, so a cron that changes it meanwhile waits and is never overwritten.
+    const [locked] =
+      kind === 'request_changes'
+        ? await tx.select().from(task).where(eq(task.id, taskId)).for('update')
+        : []
+    // The integration may have finished between the panel's read and this lock: a merged task is not sent back,
+    // so no run starts on work already integrated and the cron's `done` never lands after the intake.
+    if (locked) mustAllow(locked, 'request_changes')
+    const before = locked
+      ? { resolvedSha: locked.resolvedSha, awaitingCiSha: locked.awaitingCiSha }
+      : undefined
     // A new run ends any wait for the repository's checks: its pull request is not the one that merges.
     const moved = await tx
       .update(task)
@@ -103,7 +118,7 @@ async function requeue(
       detail: {
         decision: kind,
         note,
-        ...(kind === 'request_changes' ? { decisionId: made.id } : {}),
+        ...(kind === 'request_changes' ? { decisionId: made.id, restore: before } : {}),
       },
     })
     await enqueueRun({ taskId, decisionId: made.id }, `task-${taskId}-d${made.id}`)
@@ -143,14 +158,27 @@ async function workToKeep(
   const [failed, before] = await deps.db
     .select({ stage: stageEvent.stage })
     .from(stageEvent)
-    .where(eq(stageEvent.taskId, row.id))
+    .where(
+      and(
+        eq(stageEvent.taskId, row.id),
+        // A withdrawn send-back, and the copy of the stage it went back to, are not part of the run's story.
+        sql`(${stageEvent.detail}->>'withdrawn') is distinct from 'true'`,
+        sql`(${stageEvent.detail}->>'withdrawnDecisionId') is null`,
+      ),
+    )
     .orderBy(desc(stageEvent.id))
     .limit(2)
   const preAgent = failed?.stage === 'failed' && before?.stage === 'sandbox'
   const events = await deps.db
     .select({ stage: stageEvent.stage, detail: stageEvent.detail })
     .from(stageEvent)
-    .where(and(eq(stageEvent.taskId, row.id), eq(stageEvent.stage, 'intake')))
+    .where(
+      and(
+        eq(stageEvent.taskId, row.id),
+        eq(stageEvent.stage, 'intake'),
+        sql`(${stageEvent.detail}->>'withdrawn') is distinct from 'true'`,
+      ),
+    )
     .orderBy(desc(stageEvent.id))
     .limit(1)
   const detail = (events[0]?.detail ?? {}) as Record<string, unknown>
@@ -158,13 +186,7 @@ async function workToKeep(
     let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
     if (decisionId === undefined && detail.automatic !== true) {
       // An intake written before it named its decision: the person's latest request is the one.
-      const [asked] = await deps.db
-        .select({ id: decision.id })
-        .from(decision)
-        .where(and(eq(decision.taskId, row.id), eq(decision.kind, 'request_changes')))
-        .orderBy(desc(decision.id))
-        .limit(1)
-      decisionId = asked?.id
+      decisionId = await latestSendBackDecision(deps.db, row.id)
     }
     return { note: detail.note, decisionId, preAgent }
   }
@@ -179,7 +201,7 @@ async function load(db: Database, taskId: number) {
 }
 
 /** Refuses, with the reason the transition table gives, an event the task's state does not allow. */
-function mustAllow(row: typeof task.$inferSelect, event: TransitionEvent) {
+function mustAllow(row: Facts, event: TransitionEvent) {
   const decided = outcome(row, event)
   if (decided.kind !== 'action') throw new ActionRefused(decided.reason)
 }
@@ -220,6 +242,58 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
     row.headSha,
   )
   return { decisionId }
+}
+
+/**
+ * Withdraws a send-back that has not started: the queued run goes, the task returns to the stage it was
+ * in before the person sent it back, and the decision is recorded as withdrawn. Only a person's own
+ * request for changes can be withdrawn, and only while its run waits in the queue.
+ */
+export async function withdrawSendBack(deps: ActionDeps, taskId: number) {
+  const row = await load(deps.db, taskId)
+  const pending = await pendingSendBack(deps.db, taskId)
+  const facts: Facts = { ...row, sendBackPending: pending !== undefined }
+  mustAllow(facts, 'withdraw_send_back')
+  const { decisionId, back, restore, previous } = pending!
+  return deps.inTransaction(async (tx, _enqueueRun, dequeueRun) => {
+    const moved = await tx
+      .update(task)
+      .set({ stage: back, ...restore })
+      .where(and(eq(task.id, taskId), eq(task.stage, 'intake')))
+      .returning({ id: task.id })
+    // The run goes only while no worker holds its job, and only the job of this very decision: a run
+    // already taken is not withdrawn, and the transaction ends here changing nothing.
+    if (moved.length === 0 || !dequeueRun || !(await dequeueRun(`task-${taskId}-d${decisionId}`))) {
+      throw new ActionRefused(
+        'the run of this send-back already started, so it cannot be withdrawn',
+      )
+    }
+    const [made] = await tx
+      .insert(decision)
+      .values({ taskId, kind: 'withdrawn', sha: row.headSha, note: '' })
+      .returning({ id: decision.id })
+    // The intake stays in the history, marked, so nothing rebuilds work from a note nobody wants.
+    await tx
+      .update(stageEvent)
+      .set({ detail: sql`${stageEvent.detail} || '{"withdrawn": true}'::jsonb` })
+      .where(
+        and(
+          eq(stageEvent.taskId, taskId),
+          eq(stageEvent.stage, 'intake'),
+          eq(stageEvent.id, sql`(select max(e.id) from stage_event e where e.task_id = ${taskId})`),
+        ),
+      )
+    // The stage's own event is written again as it was, with its time, because what reads the latest
+    // failed or done event (the reason, the retry schedule, the integration error) must still find it.
+    const kept = (previous.detail ?? {}) as Record<string, unknown>
+    await tx.insert(stageEvent).values({
+      taskId,
+      stage: back,
+      detail: { ...kept, withdrawnDecisionId: decisionId },
+      at: previous.at,
+    })
+    return { decisionId: made.id, stage: back }
+  })
 }
 
 /**

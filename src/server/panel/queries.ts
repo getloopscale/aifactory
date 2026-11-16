@@ -17,6 +17,7 @@ import {
   watch,
 } from '../db/schema'
 import { retryAt } from '../factory/auto-retry'
+import { pendingSendBack } from '../factory/send-back'
 import {
   columnOf,
   retryableFailure,
@@ -280,8 +281,10 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
         .where(eq(coordinatorAction.taskId, id))
         .orderBy(desc(coordinatorAction.id)),
     ])
+  const withdrawable = row.stage === 'intake' && (await pendingSendBack(db, id)) !== undefined
   return {
     task: card,
+    sendBackPending: withdrawable,
     timeline: events.map((e): TimelineEvent => ({
       id: e.id,
       stage: e.stage as Stage,
