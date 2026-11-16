@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
@@ -9,7 +11,7 @@ import { finding, ingress, question, sandboxLease, stageEvent, task, watch } fro
 
 import { FakeSandbox } from './fake-sandbox'
 import type { SandboxOwner } from './sandbox'
-import { LEASE_STALE_MS } from './sandbox-lease'
+import { LEASE_STALE_MS, withLease } from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
 import { detect, supervise } from './supervise'
 
@@ -384,5 +386,27 @@ describe('sandboxes nobody owns', () => {
     const later = new Date(NOW.getTime() + LEASE_STALE_MS + 1_000)
     expect((await run(later)).reaped?.map((k) => k.id)).toEqual(['sbx-1'])
     expect(provider.up.size).toBe(0)
+  })
+
+  it('stops the sandbox of a process killed a moment ago, on the very next pass, with its lease still fresh', async () => {
+    const inner = new FakeSandbox()
+    const provider = withLease(inner)
+    const owner: SandboxOwner = { owner: 'eval', caseId: 'a', runId: 'r' }
+    await provider.create({ egress: [{ domain: 'github.com' }], timeoutMs: 60_000, owner })
+    const sandbox = [...inner.up.values()][0]!
+    const alive = () =>
+      supervise({
+        db: getDb(),
+        listSandboxes: () => inner.listSandboxes(),
+        killSandbox: (id) => inner.killSandbox(id),
+      })
+    // The lease holds: this very process made it, and it beat when the sandbox was created.
+    sandbox.metadata = metadataFor(owner)
+    expect((await alive()).reaped).toBeUndefined()
+    // The process is killed: its lease is as fresh as it was, but its pid no longer exists.
+    const dead = spawnSync(process.execPath, ['-e', '']).pid!
+    sandbox.metadata = metadataFor(owner, { pid: dead })
+    expect((await alive()).reaped?.map((k) => k.id)).toEqual(['sbx-1'])
+    expect(inner.up.size).toBe(0)
   })
 })

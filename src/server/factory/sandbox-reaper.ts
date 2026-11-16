@@ -6,7 +6,7 @@ import type { Database } from '../db'
 import { sandboxLease, task } from '../db/schema'
 
 import type { ListedSandbox, SandboxOwner } from './sandbox'
-import { beat, LEASE_STALE_MS, leasesTrustworthy, PROCESS_LEASE } from './sandbox-lease'
+import { holdLease, LEASE_STALE_MS, leasesTrustworthy, PROCESS_LEASE } from './sandbox-lease'
 
 /** How long a sandbox with no owner recorded may live before it is taken for nobody's: it may be one still being made. */
 export const SANDBOX_GRACE_MS = 10 * 60_000
@@ -23,7 +23,20 @@ export const SANDBOX_STAGES = ['sandbox', 'plan', 'build', 'push', 'verify', 're
 /** The owners the factory writes; metadata of any other kind is somebody else's sandbox. */
 export const FACTORY_OWNERS = ['task', 'eval', 'prove-checks', 'plan']
 
-export type MetadataOptions = { host?: string; lease?: string }
+const IDS: Record<string, string[]> = {
+  task: ['taskId', 'run'],
+  eval: ['caseId', 'runId'],
+  'prove-checks': ['repository'],
+  plan: ['planId'],
+}
+
+/** Metadata the factory wrote: a known owner with all its identifiers, and the host and lease of its process. */
+export function isFactoryMetadata(m: Record<string, string>): boolean {
+  const ids = m.owner ? IDS[m.owner] : undefined
+  return !!ids && ids.every((k) => !!m[k]) && !!m.host && !!m.lease
+}
+
+export type MetadataOptions = { host?: string; lease?: string; pid?: number }
 
 /** What E2B stores: string values only, the owner's fields, the host and the process lease that created it. */
 export function metadataFor(
@@ -32,7 +45,10 @@ export function metadataFor(
 ): Record<string, string> {
   if (!owner) return {}
   const fields = Object.fromEntries(Object.entries(owner).map(([k, v]) => [k, String(v)]))
-  return { ...fields, host: opts.host ?? hostname(), lease: opts.lease ?? PROCESS_LEASE }
+  return { ...fields, host: opts.host ?? hostname(),
+    lease: opts.lease ?? PROCESS_LEASE,
+    pid: String(opts.pid ?? process.pid),
+  }
 }
 
 /** What the reaper knows of the tasks and the process leases the listing names. */
@@ -44,6 +60,9 @@ export type ReaperFacts = {
   leases: Map<string, Date>
   /** False when this process could not renew its own lease lately: a stale lease then proves nothing. */
   leasesTrusted?: boolean
+  /** This host's name and whether a process of it is gone, to tell a process killed a moment ago. */
+  localHost?: string
+  processGone?: (pid: number) => boolean
 }
 
 export type Verdict = { id: string; reason: string } | null
@@ -56,7 +75,11 @@ function judge(s: ListedSandbox, facts: ReaperFacts): Verdict {
   if (Object.keys(m).length === 0)
     return age > facts.graceMs ? kill(`no owner recorded and older than ${grace} minutes`) : null
   // Metadata the factory did not write: not ours to stop.
-  if (!m.owner || !FACTORY_OWNERS.includes(m.owner)) return null
+  if (!isFactoryMetadata(m)) return null
+  // A process on this very host that no longer exists: known at once, without waiting for its lease to age.
+  if (m.host === facts.localHost && m.pid && facts.processGone?.(Number(m.pid))) {
+    return kill(`${m.owner} process ${m.pid} on ${m.host} is gone`)
+  }
   // The process that made it, on whatever host: one that stopped saying it is alive has no one at work.
   if (m.lease) {
     const last = facts.leases.get(m.lease)
@@ -93,8 +116,18 @@ export function reapable(
 export function atWork(listing: ListedSandbox[], facts: ReaperFacts): number {
   return listing.filter(
     (s) =>
-      s.metadata.owner && FACTORY_OWNERS.includes(s.metadata.owner) && judge(s, facts) === null,
+      isFactoryMetadata(s.metadata) && judge(s, facts) === null,
   ).length
+}
+
+function processGone(pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH'
+  }
 }
 
 /** Reads the tasks and the leases the listing names, after the listing, so a task that began since is seen. */
@@ -125,6 +158,8 @@ export async function readReaperFacts(
     now,
     graceMs: SANDBOX_GRACE_MS,
     leasesTrusted: leasesTrustworthy(),
+    localHost: hostname(),
+    processGone,
     tasks: new Map(rows.map((r) => [r.id, { stage: r.stage, run: r.run }])),
     leases: new Map(leases.map((l) => [l.id, l.beatAt])),
   }
@@ -142,7 +177,8 @@ export type ReaperDeps = {
 /** Stops every sandbox whose owner is done and logs each with its id and why. */
 export async function reapSandboxes(deps: ReaperDeps): Promise<{ id: string; reason: string }[]> {
   // Proof the database answers now; when it does not, nothing is stopped.
-  if (!deps.skipBeat) await beat(deps.db)
+  // It also starts the beat every ten seconds, so an outage of the database is seen by this process too.
+  if (!deps.skipBeat) await holdLease(deps.db)
   const listing = await deps.listSandboxes()
   const facts = await readReaperFacts(deps.db, listing, deps.now?.())
   const killed: { id: string; reason: string }[] = []
