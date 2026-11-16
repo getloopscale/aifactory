@@ -17,6 +17,29 @@ export type PendingSendBack = {
 const text = (value: unknown) => (typeof value === 'string' ? value : null)
 
 /**
+ * The person's latest request for changes that was not withdrawn: what an intake written before it named
+ * its decision stands for.
+ */
+export async function latestSendBackDecision(
+  db: Database,
+  taskId: number,
+): Promise<number | undefined> {
+  const [asked] = await db
+    .select({ id: decision.id })
+    .from(decision)
+    .where(
+      and(
+        eq(decision.taskId, taskId),
+        eq(decision.kind, 'request_changes'),
+        sql`not exists (select 1 from stage_event e where e.task_id = ${decision.taskId} and e.detail->>'withdrawnDecisionId' = ${decision.id}::text)`,
+      ),
+    )
+    .orderBy(desc(decision.id))
+    .limit(1)
+  return asked?.id
+}
+
+/**
  * The send-back of a person that waits in `intake`: the latest event of the task is its intake, which
  * asks for changes and is not the factory's own. An intake written before it named its decision is
  * matched to the person's latest request, as `workToKeep` does.
@@ -35,15 +58,7 @@ export async function pendingSendBack(
   if (latest?.stage !== 'intake' || detail.decision !== 'request_changes') return undefined
   if (detail.automatic === true || detail.withdrawn === true || !before) return undefined
   let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
-  if (decisionId === undefined) {
-    const [asked] = await db
-      .select({ id: decision.id })
-      .from(decision)
-      .where(and(eq(decision.taskId, taskId), eq(decision.kind, 'request_changes')))
-      .orderBy(desc(decision.id))
-      .limit(1)
-    decisionId = asked?.id
-  }
+  if (decisionId === undefined) decisionId = await latestSendBackDecision(db, taskId)
   if (decisionId === undefined) return undefined
   const kept = detail.restore as Record<string, unknown> | undefined
   return {

@@ -98,7 +98,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
       // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
       // same run again, so the checks before it still count.
-      verifies: sql<number>`count(*) filter (where ${OUTER.stage} = 'verify' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true'), 0))`,
+      verifies: sql<number>`count(*) filter (where ${OUTER.stage} = 'verify' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'kept') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0))`,
       automatic: automaticRunsSincePerson(),
     })
     .from(stageEvent)

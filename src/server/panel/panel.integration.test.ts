@@ -736,6 +736,43 @@ describe('actions', () => {
     expect(last).toMatchObject({ stage: 'done', detail: { integrationError: 'conflict' } })
   })
 
+  it('retries on its own with the older legacy send-back after a newer one was withdrawn', async () => {
+    const id = await seed('done', { headSha: 'abc' })
+    const [older] = await getDb()
+      .insert(decision)
+      .values({ taskId: id, kind: 'request_changes', sha: 'abc', note: 'older' })
+      .returning({ id: decision.id })
+    await getDb()
+      .insert(stageEvent)
+      .values([
+        { taskId: id, stage: 'intake', detail: { decision: 'request_changes', note: 'older' } },
+        { taskId: id, stage: 'failed', detail: { error: 'git push: remote rejected' } },
+      ])
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+    await requestChanges(deps(), id, 'newer')
+    await withdrawSendBack(deps(), id)
+
+    await retryAutomatically(deps(), id)
+
+    expect(queued.at(-1)?.input).toMatchObject({ taskId: id, decisionId: older.id })
+  })
+
+  it('keeps the attempts of the restored run after a withdrawal', async () => {
+    const id = await seed('failed', { headSha: 'abc' })
+    await getDb()
+      .insert(stageEvent)
+      .values([
+        { taskId: id, stage: 'intake', detail: {} },
+        { taskId: id, stage: 'verify', detail: {} },
+        { taskId: id, stage: 'failed', detail: { error: 'x' } },
+      ])
+    await requestChanges(deps(), id, 'note')
+    await withdrawSendBack(deps(), id)
+
+    const [card] = await listTasks(getDb())
+    expect(card.attempts).toBe(1)
+  })
+
   it('refuses to withdraw when nothing waits, when it was automatic, or when its run was taken', async () => {
     const idle = await seed('done', { headSha: 'abc' })
     await expect(withdrawSendBack(deps(), idle)).rejects.toThrow(ActionRefused)

@@ -7,7 +7,7 @@ import { integrationBranch } from '../factory/branches'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
-import { pendingSendBack } from '../factory/send-back'
+import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
 import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
@@ -173,13 +173,7 @@ async function workToKeep(
     let decisionId = typeof detail.decisionId === 'number' ? detail.decisionId : undefined
     if (decisionId === undefined && detail.automatic !== true) {
       // An intake written before it named its decision: the person's latest request is the one.
-      const [asked] = await deps.db
-        .select({ id: decision.id })
-        .from(decision)
-        .where(and(eq(decision.taskId, row.id), eq(decision.kind, 'request_changes')))
-        .orderBy(desc(decision.id))
-        .limit(1)
-      decisionId = asked?.id
+      decisionId = await latestSendBackDecision(deps.db, row.id)
     }
     return { note: detail.note, decisionId, preAgent }
   }
