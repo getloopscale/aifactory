@@ -34,9 +34,18 @@ export type RepositoryQueueFacts = {
 const NAMED =
   /`([^`\n]+)`|"([^"\n]+)"|^\s*(?:FAIL|FAILED|✗|×|✕)\s+(.+?)\s*$|\btests?\s+([^\s"`][^\n]*?)(?=\s+(?:timed out|times out|failed|fails|failing|flaked|is flaky|was flaky|exceeded|threw)\b|[.,;:]|$)/gim
 
-/** What differs from one task to the next is taken out, as a signature does: case, numbers, spaces. */
-export const normal = (text: string) =>
-  text.replace(/\d+/g, '<n>').replace(/\s+/g, ' ').trim().toLowerCase()
+/** Case and spaces are taken out; numbers stay, since they tell one test from another ("out of 501"). */
+export const normal = (text: string) => text.replace(/\s+/g, ' ').trim().toLowerCase()
+
+/** The kinds of exception that come from a failure, whose recorded reason can say which test failed. */
+const FROM_FAILURE: ReadonlySet<string> = new Set([
+  'checks_unchanged',
+  'review_plateau',
+  'review_unusable',
+  'handoff',
+  'environment',
+  'failure',
+])
 
 /**
  * The tests an issue names, normalised: the end of a `file > name` path, with spaces (so a word or a check
@@ -79,7 +88,7 @@ export const isHeld = (
   held: HeldTest[],
   reasons: string[] = [],
 ) =>
-  exception.kind !== 'queue_blocked' &&
+  FROM_FAILURE.has(exception.kind) &&
   held.some(
     (h) =>
       h.repository === repository &&

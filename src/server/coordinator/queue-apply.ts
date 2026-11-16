@@ -26,6 +26,19 @@ const PENDING = (taskId: number) => sql`select j.id, j.available_at, t.id as tas
             and t.repository = (select repository from task where id = ${taskId})
           for update of j skip locked`
 
+/** The fix's own job is never held: a hold an earlier fix of the repository put on it ends first. */
+async function releaseOwn(db: QueueDb, fixTaskId: number): Promise<void> {
+  await db.execute(
+    sql`update theokit_jobs set available_at = (input->>'heldFrom')::timestamptz, input = input - 'heldFrom'
+        where id in (
+          select id from theokit_jobs
+          where name = 'run-task' and failed_at is null and input->>'taskId' = ${String(fixTaskId)}
+            and input->>'heldFrom' is not null and (locked_until is null or locked_until < now())
+          for update skip locked
+        )`,
+  )
+}
+
 /**
  * Holds the pending jobs of the repository's other tasks for `QUEUE.holdMs` past now, or past the moment the
  * fix's own job becomes available when that is later, keeping the `available_at` each had in its input as
@@ -33,6 +46,7 @@ const PENDING = (taskId: number) => sql`select j.id, j.available_at, t.id as tas
  * or fails (`releaseHolds` ends it) and covers a job queued after the decision.
  */
 export async function holdOthers(db: QueueDb, fixTaskId: number): Promise<void> {
+  await releaseOwn(db, fixTaskId)
   const hold = sql`make_interval(secs => ${QUEUE.holdMs / 1000})`
   await db.execute(
     sql`with pending as (${PENDING(fixTaskId)}),
@@ -49,6 +63,7 @@ export async function holdOthers(db: QueueDb, fixTaskId: number): Promise<void> 
 }
 
 export async function moveAhead(db: QueueDb, taskId: number): Promise<boolean> {
+  await releaseOwn(db, taskId)
   const moved = await db.execute<{ moved: number }>(
     sql`with pending as (${PENDING(taskId)}), fix as (
           update theokit_jobs set available_at = least(available_at,

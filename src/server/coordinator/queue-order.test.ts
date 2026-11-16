@@ -48,9 +48,9 @@ describe('the tests an issue names', () => {
   it('are its code spans, quoted texts and runner failure lines, with numbers replaced', () => {
     const body = `see \`${TEST}\`, "another long test name 7"\nFAIL  pkg > third test of many 9`
     expect(testsNamedBy({ title: 't', body })).toEqual([
-      'remphase reports one fact left out of <n>',
-      'another long test name <n>',
-      'third test of many <n>',
+      'remphase reports one fact left out of 501',
+      'another long test name 7',
+      'third test of many 9',
     ])
   })
   it('leave out what is not a test name: one word, or something short', () => {
@@ -63,7 +63,7 @@ describe('a test that failed on several tasks of a repository', () => {
     expect(recogniseQueue(facts())).toMatchObject({
       kind: 'queue_blocked',
       taskId: 7,
-      head: 'remphase reports one fact left out of <n>',
+      head: 'remphase reports one fact left out of 501',
     })
   })
   it('is nothing on one task, or on the same task twice', () => {
@@ -124,7 +124,7 @@ describe('a test that failed on several tasks of a repository', () => {
 })
 
 describe('work held behind a fix', () => {
-  const held = [{ repository: 'o/sdk', test: 'remphase reports one fact left out of <n>' }]
+  const held = [{ repository: 'o/sdk', test: 'remphase reports one fact left out of 501' }]
   const exception = (over: Partial<TaskException> = {}): TaskException => ({
     kind: 'checks_unchanged',
     taskId: 1,
@@ -134,6 +134,13 @@ describe('work held behind a fix', () => {
   })
   it('is a failure of the same test in the same repository', () => {
     expect(isHeld(exception(), 'o/sdk', held)).toBe(true)
+  })
+  it('keeps numbers apart: another test of the same words is not held', () => {
+    const other = [{ repository: 'o/sdk', test: 'remphase reports one fact left out of 500' }]
+    expect(isHeld(exception(), 'o/sdk', other)).toBe(false)
+  })
+  it('is not an exception that is no failure, whatever its task failed on before', () => {
+    expect(isHeld(exception({ kind: 'stalled' }), 'o/sdk', held, [said()])).toBe(false)
   })
   it('is also read from the recorded failure reason of the task', () => {
     expect(isHeld(exception({ evidence: 'no change' }), 'o/sdk', held, [said()])).toBe(true)

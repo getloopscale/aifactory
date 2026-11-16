@@ -9,6 +9,18 @@ import { readHeldTests } from './queue-facts'
 import type { HeldTest } from './queue-order'
 
 /**
+ * One fix at a time per repository, the one decided first: the others' jobs wait behind it, so two fixes
+ * never hold each other. A fix that has no task is left out.
+ */
+export function firstPerRepository(held: HeldTest[]): HeldTest[] {
+  const first = new Map<string, HeldTest>()
+  for (const h of [...held].sort((a, b) => (a.at?.getTime() ?? 0) - (b.at?.getTime() ?? 0))) {
+    if (h.taskId !== undefined && !first.has(h.repository)) first.set(h.repository, h)
+  }
+  return [...first.values()]
+}
+
+/**
  * Keeps the hold of a `prioritise` decision in step with the queue, always under `HOLD_LOCK`, the lock the
  * decision itself is recorded under: the held list is read inside the lock, so a decision committed by another
  * pass is never undone by a stale one. It does nothing outside `auto`.
@@ -17,11 +29,7 @@ export async function maintainHolds(db: Database): Promise<HeldTest[]> {
   return db.transaction(async (tx) => {
     await tx.execute(HOLD_LOCK)
     const held = await readHeldTests(tx)
-    for (const h of held) {
-      if (h.taskId !== undefined) {
-        await holdOthers(tx, h.taskId)
-      }
-    }
+    for (const h of firstPerRepository(held)) await holdOthers(tx, h.taskId!)
     await releaseHolds(tx, [...new Set(held.map((h) => h.repository))])
     return held
   })
@@ -43,10 +51,8 @@ export async function holdNewJob(
     .from(task)
     .where(eq(task.id, taskId))
   if (!row) return
-  for (const h of await readHeldTests(db)) {
-    if (h.repository !== row.repository || h.taskId === undefined || h.taskId === taskId) {
-      continue
-    }
-    await holdOthers(db, h.taskId)
-  }
+  const active = firstPerRepository(
+    (await readHeldTests(db)).filter((h) => h.repository === row.repository),
+  )[0]
+  if (active && active.taskId !== taskId) await holdOthers(db, active.taskId!)
 }
