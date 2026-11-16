@@ -73,7 +73,7 @@ describe('observe', () => {
         },
       ]),
     )
-    expect(observe(delivered)).toHaveLength(9)
+    expect(observe(delivered)).toHaveLength(13)
   })
 
   it('counts the first verification as red when any of its checks failed', () => {
@@ -159,6 +159,24 @@ describe('observe', () => {
     expect(value(h, 'minutes_to_first_review')).toEqual([21])
   })
 
+  it('does not start a run at a withdrawn send-back, nor count the stage it went back to twice', () => {
+    const h = history({
+      events: [
+        ev(0, 'intake'),
+        ev(5, 'verify', { sha: 'a1' }),
+        ev(10, 'failed', { error: 'checks' }),
+        ev(20, 'intake', { decision: 'request_changes', withdrawn: true }),
+        ev(10, 'failed', { error: 'checks', withdrawnDecisionId: 1 }),
+      ],
+      evidence: [{ sha: 'a1', passed: false, at: at(8) }],
+      reviews: [{ verdict: 'changes', at: at(9) }],
+    })
+    expect(observe(h).filter((o) => o.metric === 'first_pass_checks')).toEqual([
+      { metric: 'first_pass_checks', repository: 'o/r', at: at(10), value: 0 },
+    ])
+    expect(value(h, 'first_review_approval')).toEqual([0])
+  })
+
   it('splits a task into runs at each intake and measures each one alone', () => {
     const h = history({
       events: [
@@ -198,6 +216,54 @@ describe('observe', () => {
       ],
     })
     expect(value(h, 'change_failure')).toEqual([1, 0])
+  })
+
+  it('says why a delivery came back: a merge conflict, the required checks, a red release or else', () => {
+    const causes = (h: TaskHistory) => ({
+      total: value(h, 'change_failure'),
+      checks: value(h, 'change_failure_required_checks'),
+      conflict: value(h, 'change_failure_merge_conflict'),
+      red: value(h, 'change_failure_release_red'),
+      other: value(h, 'change_failure_other'),
+    })
+    const conflict = history({
+      events: [
+        ev(0, 'intake'),
+        ev(30, 'done', { integrationError: 'Pull Request has merge conflicts' }),
+        ev(60, 'intake', { note: 'start over' }),
+      ],
+    })
+    expect(causes(conflict)).toEqual({
+      total: [1],
+      checks: [0],
+      conflict: [1],
+      red: [0],
+      other: [0],
+    })
+    const checks = history({
+      events: [
+        ev(0, 'intake'),
+        ev(30, 'done', {}),
+        ev(60, 'intake', { note: "The repository's required checks failed on abc1234, so" }),
+      ],
+    })
+    expect(causes(checks)).toEqual({ total: [1], checks: [1], conflict: [0], red: [0], other: [0] })
+    const red = history({ releaseWentRed: true, events: [ev(0, 'intake'), ev(30, 'done', {})] })
+    expect(causes(red)).toEqual({ total: [1], checks: [0], conflict: [0], red: [1], other: [0] })
+    const other = history({ events: [ev(0, 'intake'), ev(30, 'done', {}), ev(60, 'handoff', {})] })
+    expect(causes(other)).toEqual({ total: [1], checks: [0], conflict: [0], red: [0], other: [1] })
+    const held = history({ events: [ev(0, 'intake'), ev(30, 'done', {})] })
+    expect(causes(held)).toEqual({ total: [0], checks: [0], conflict: [0], red: [0], other: [0] })
+  })
+
+  it('gives a red release only to the last delivery; an earlier return is another cause', () => {
+    const h = history({
+      releaseWentRed: true,
+      events: [ev(0, 'intake'), ev(30, 'done', {}), ev(60, 'intake'), ev(90, 'done', {})],
+    })
+    expect(value(h, 'change_failure')).toEqual([1, 1])
+    expect(value(h, 'change_failure_release_red')).toEqual([0, 1])
+    expect(value(h, 'change_failure_other')).toEqual([1, 0])
   })
 
   it('measures a cancelled run as a run that ended, and never as a delivery', () => {

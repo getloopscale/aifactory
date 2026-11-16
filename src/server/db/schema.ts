@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -99,15 +100,21 @@ export const task = pgTable(
 )
 
 /** Every stage a task entered, in order. `task.stage` is only the latest of these. */
-export const stageEvent = pgTable('stage_event', {
-  id: serial('id').primaryKey(),
-  taskId: integer('task_id')
-    .notNull()
-    .references(() => task.id),
-  stage: text('stage', { enum: TASK_STAGES }).notNull(),
-  detail: jsonb('detail'),
-  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
-})
+export const stageEvent = pgTable(
+  'stage_event',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    stage: text('stage', { enum: TASK_STAGES }).notNull(),
+    detail: jsonb('detail'),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // The board reads each task's history through subqueries keyed on the task, a stage and the order of its
+  // events; without this index each one scans the whole table, and the panel's poll took 20 seconds.
+  (table) => [index('stage_event_task_stage_id').on(table.taskId, table.stage, table.id)],
+)
 
 /**
  * What the factory itself observed about a commit: a check it ran, on that SHA, with its real exit

@@ -239,6 +239,13 @@
       "when": 1794794240870,
       "tag": "0036_promotion_wait",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1794851452514,
+      "tag": "0037_stage_event_task_index",
+      "breakpoints": true
     }
   ]
 }
