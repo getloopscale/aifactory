@@ -511,7 +511,10 @@ export class Run {
     if (!c.continuation || !feedback?.startsWith(CONFLICT_NOTE_OPENING)) return c
     try {
       const files = await conflictingFiles(backend, `git -C ${repoDir}`, baseSha)
-      return { ...c, continuation: { ...c.continuation, feedback: withConflictFiles(feedback, files) } }
+      return {
+        ...c,
+        continuation: { ...c.continuation, feedback: withConflictFiles(feedback, files) },
+      }
     } catch {
       return c
     }

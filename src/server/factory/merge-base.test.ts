@@ -90,7 +90,8 @@ describe('mergeIntegration', () => {
   })
 })
 
-const NOTE = 'The pull request conflicts with workspace. Merge it, then regenerate what a script writes.'
+const NOTE =
+  'The pull request conflicts with workspace. Merge it, then regenerate what a script writes.'
 
 describe('conflictingFiles', () => {
   it('names only the file that conflicts, not the other files both sides changed', async () => {
@@ -119,9 +120,9 @@ describe('conflictingFiles', () => {
     run('merge -q workspace')
     run('mv old.txt new.txt')
     run('commit -q -am "rename"')
-    commit('new.txt', 'one\ntwo\nthree\nfour\nfive\nsix\n', 'edit renamed')
+    commit('new.txt', 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n', 'edit renamed')
     run('switch -q workspace')
-    const base = commit('old.txt', 'one\ntwo\nthree\nfour\nFIVE\n', 'edit old')
+    const base = commit('old.txt', 'ONE\ntwo\nthree\nfour\nfive\n', 'edit old')
     run('switch -q factory/7')
 
     expect(await conflictingFiles(local, git(), base)).toEqual([])

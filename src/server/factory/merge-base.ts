@@ -53,7 +53,12 @@ export async function conflictingFiles(
     throw new Error(`git merge-tree exited ${tree.exitCode}: ${tree.stderr.trim().slice(-500)}`)
   }
   const [, ...names] = tree.stdout.split('\0')
-  return [...new Set(names.filter((name) => name !== ''))]
+  const files = [...new Set(names.filter((name) => name !== ''))]
+  // git exits 1 for a conflict and also for a commit it cannot merge; only a conflict names files.
+  if (files.length === 0) {
+    throw new Error(`git merge-tree found no conflict to name: ${tree.stderr.trim().slice(-500)}`)
+  }
+  return files
 }
 
 const PATH_MAX = 200
