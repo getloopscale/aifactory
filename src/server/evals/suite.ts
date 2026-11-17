@@ -43,13 +43,31 @@ export function suiteTimes(testStartedAt: number): { deadlineMs: number; abandon
  * `runSuite` with its deadline and abandon time taken from the moment the test started, so the setup before it
  * counts against the time the cases get.
  */
-export function runSuiteFromTestStart(
+export async function runSuiteFromTestStart(
   testStartedAt: number,
   ids: string[],
   runOne: (id: string, signal: AbortSignal) => Promise<CaseResult>,
-  options: Omit<Parameters<typeof runSuite>[2], 'deadlineMs' | 'abandonAtMs'>,
+  options: Omit<Parameters<typeof runSuite>[2], 'deadlineMs' | 'abandonAtMs' | 'startMarginMs'> & {
+    /** The margin, or what reads it (the repositories' limits): a read that outlasts the abandon time gives the default. */
+    startMarginMs: number | (() => Promise<number>)
+  },
 ) {
-  return runSuite(ids, runOne, { ...options, ...suiteTimes(testStartedAt) })
+  const times = suiteTimes(testStartedAt)
+  const { startMarginMs: margin, ...rest } = options
+  let startMarginMs = DEFAULT_START_MARGIN_MS
+  if (typeof margin === 'number') startMarginMs = margin
+  else {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const late = new Promise<number>((resolve) => {
+      timer = setTimeout(
+        () => resolve(DEFAULT_START_MARGIN_MS),
+        Math.max(0, times.abandonAtMs - (options.now ?? Date.now)()),
+      )
+    })
+    startMarginMs = await Promise.race([margin().catch(() => DEFAULT_START_MARGIN_MS), late])
+    clearTimeout(timer)
+  }
+  return runSuite(ids, runOne, { ...rest, ...times, startMarginMs })
 }
 
 /** Time kept after the longest case limit for the run to stop its sandbox and write its results. */

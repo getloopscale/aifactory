@@ -92,7 +92,6 @@ async function currentSetup(cases: EvalCase[]) {
 
 /** The time before the deadline when no case may start: the longest limit a case of these repositories has. */
 async function startMargin(cases: EvalCase[]): Promise<number> {
-  if (env.EVALS_START_MARGIN_MIN !== undefined) return parseMarginMinutes(env.EVALS_START_MARGIN_MIN)
   const limits: number[] = []
   for (const repository of new Set(cases.map((c) => c.repository)))
     limits.push((await evalDeps(repository, [])).timeouts.sandboxMs)
@@ -100,8 +99,12 @@ async function startMargin(cases: EvalCase[]): Promise<number> {
 }
 
 async function runCases(cases: EvalCase[], testStartedAt: number) {
+  // A bad value fails the run at once; only the read of the repositories' limits can be cut short.
+  const margin =
+    env.EVALS_START_MARGIN_MIN !== undefined
+      ? parseMarginMinutes(env.EVALS_START_MARGIN_MIN)
+      : () => startMargin(cases)
   const startedAt = Date.now()
-  const startMarginMs = await startMargin(cases)
   // Each finished case is written as it ends, so a run that is cut off (a sandbox that hangs past the margin, the
   // test's own timeout) still leaves what finished, though the final record below is never written.
   mkdirSync('.evals', { recursive: true })
@@ -133,7 +136,7 @@ async function runCases(cases: EvalCase[], testStartedAt: number) {
       sandboxUsdPerMs: E2B_USD_PER_MS,
       // Counted from the test's start, setup included, as vitest counts its timeout; a case that hangs is
       // abandoned a little before it.
-      startMarginMs,
+      startMarginMs: margin,
     },
   )
   // Before anything that can block: what finished, what was left, and the baseline's refusal.

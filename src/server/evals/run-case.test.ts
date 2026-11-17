@@ -203,6 +203,26 @@ describe('runCase', () => {
     expect(provider.stopped).toBe(1)
   })
 
+  it('stops a sandbox that comes up after the case was abandoned', async () => {
+    const provider = sandbox()
+    const create = provider.create.bind(provider)
+    const controller = new AbortController()
+    provider.create = async (spec) => {
+      controller.abort()
+      await new Promise((r) => setTimeout(r, 20))
+      return create(spec)
+    }
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [])
+
+    const pending = runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+    expect((await pending).reason).toContain('abandoned')
+    await new Promise((r) => setTimeout(r, 60))
+
+    expect(provider.stopped).toBe(1)
+    expect(builder.prompts).toHaveLength(0)
+  })
+
   it('does not stop a finished case again when a later case is abandoned', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built('done', 0.3)))

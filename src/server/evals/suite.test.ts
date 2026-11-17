@@ -221,6 +221,18 @@ describe('runSuite time limit', () => {
     expect(ran.skipped).toEqual(['a', 'b'])
   })
 
+  it('returns, naming every case, when the setup that reads the margin hangs past the abandon time', async () => {
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
+    const ran = await runSuiteFromTestStart(
+      testStartedAt,
+      ['a', 'b'],
+      async (id) => result(id, 0),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, startMarginMs: () => new Promise<never>(() => {}) },
+    )
+    expect(ran.results).toEqual([])
+    expect(ran.skipped).toEqual(['a', 'b'])
+  })
+
   it('abandons the cases in flight before the test time, counted from the test start', async () => {
     const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
     const ran = await runSuiteFromTestStart(

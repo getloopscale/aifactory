@@ -460,6 +460,8 @@ export async function runCase(
     live()
     let sandbox = await createIsolatedSandbox(deps.sandbox, spec)
     held.sandbox = sandbox
+    // Abandoned while it was being created: the abort handler and `finally` found nothing to stop.
+    if (signal?.aborted) await stopSandbox()
     live()
     const repoDir = await checkout(sandbox.backend, c)
     live()
