@@ -95,15 +95,21 @@ const NOTE =
 
 describe('conflictingFiles', () => {
   it('names only the file that conflicts, not the other files both sides changed', async () => {
-    commit('CHANGELOG.md', '# Changelog\n\nwork\n', 'work changelog')
+    commit('both.txt', 'top\n1\n2\n3\n4\n5\n6\n7\nbottom\n', 'both')
+    run('switch -q workspace')
+    run('merge -q factory/7')
+    run('switch -q factory/7')
+    commit('both.txt', 'top\n1\n2\n3\n4\n5\n6\n7\nwork bottom\n', 'work edits the end')
     commit('shared.txt', 'work\n', 'work shared')
     run('switch -q workspace')
+    commit('both.txt', 'base top\n1\n2\n3\n4\n5\n6\n7\nbottom\n', 'base edits the top')
     commit('shared.txt', 'base\n', 'base shared')
     commit('other.txt', 'base only\n', 'base other')
     const base = run('rev-parse HEAD')
     run('switch -q factory/7')
 
     expect(await conflictingFiles(local, git(), base)).toEqual(['shared.txt'])
+    expect(run('diff --name-only factory/7 workspace')).toContain('both.txt')
     expect(run('status --porcelain')).toBe('')
   })
 

@@ -2569,6 +2569,41 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(stages).not.toContain('failed')
   })
 
+  it('tells the agent which files git finds in conflict, and no other path', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const sandbox = new FakeSandbox(
+      changed((command) =>
+        command.includes('merge-tree')
+          ? { exitCode: 1, stdout: `${'a'.repeat(40)}\0docs/guide.md\0src/shared.ts\0` }
+          : undefined,
+      ),
+    )
+    const prompts: string[] = []
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        prompts.push(input.prompt)
+        dirty = false
+        return { ok: true, summary: 'Merged.' }
+      },
+    }
+
+    await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback:
+        'The pull request conflicts with workspace, which moved after this work was approved. Merge it.',
+    })
+
+    expect(sandbox.backend.commands.some((c) => c.includes('merge-tree'))).toBe(true)
+    expect(prompts[0]).toContain('Files in conflict: docs/guide.md, src/shared.ts')
+    expect(prompts[0]).not.toContain('src/truncate.js')
+  })
+
   it('hands to a person work whose required checks failed when the agent finds nothing to change', async () => {
     const id = await seedTask()
     branchPushed()
