@@ -55,16 +55,27 @@ const OUTER = {
   taskId: sql.raw('"stage_event"."task_id"'),
   stage: sql.raw('"stage_event"."stage"'),
   detail: sql.raw('"stage_event"."detail"'),
+  at: sql.raw('"stage_event"."at"'),
 }
+
+/** How long a run that failed on the network, before any agent ran, stays free. No outage lasts longer. */
+const NETWORK_FREE_SPAN = sql.raw("interval '1 hour'")
 
 /**
  * Per task, in a query grouped by `stage_event.task_id`: the automatic runs since a person last started it.
  * A person's retry starts the count over. A run that failed right after entering the sandbox stage, before
  * any agent ran, is not counted when it was a rework (nothing of the work was attempted) or when the network
- * dropped ("fetch failed": an outage is not the work failing, and waiting is what fixes it).
+ * dropped ("fetch failed": an outage is not the work failing, and waiting is what fixes it), but only within
+ * `NETWORK_FREE_SPAN` of the first run of that streak: a failure that outlasts any outage counts, so it ends
+ * in a person's hands.
  */
 export function automaticRunsSincePerson() {
-  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage = 'failed' and ((${OUTER.detail}->>'decision') is not distinct from 'request_changes' or f.detail->>'error' ilike '%fetch failed%') from stage_event f where f.id = (select min(x.id) from stage_event x where x.task_id = ${OUTER.taskId} and x.id > s.id))))`
+  const network = sql`coalesce(f.detail->>'error', '') ilike '%fetch failed%'`
+  // The first run of the network streak this run belongs to: the intakes since the last thing that was not a
+  // network failure (work that ran, another kind of failure) and since a person last started the task.
+  const streakStart = sql`(select min(q.at) from stage_event q where q.task_id = ${OUTER.taskId} and q.stage = 'intake' and q.id <= ${OUTER.id} and q.id > coalesce((select max(b.id) from stage_event b where b.task_id = ${OUTER.taskId} and b.id < ${OUTER.id} and (b.stage not in ('intake', 'sandbox', 'failed') or (b.stage = 'failed' and coalesce(b.detail->>'error', '') not ilike '%fetch failed%'))), 0) and q.id >= coalesce((select max(p.id) from stage_event p where p.task_id = ${OUTER.taskId} and p.id < ${OUTER.id} and p.stage = 'intake' and (p.detail->>'automatic') is distinct from 'true' and (p.detail->>'withdrawn') is distinct from 'true'), 0))`
+  const free = sql`(${network} and ${OUTER.at} - ${streakStart} < ${NETWORK_FREE_SPAN}) or (not ${network} and (${OUTER.detail}->>'decision') is not distinct from 'request_changes')`
+  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage = 'failed' and (${free}) from stage_event f where f.id = (select min(x.id) from stage_event x where x.task_id = ${OUTER.taskId} and x.id > s.id))))`
 }
 
 const iso = (date: Date) => date.toISOString()
