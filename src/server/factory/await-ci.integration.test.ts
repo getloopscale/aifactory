@@ -10,8 +10,15 @@ import type { GithubApp } from '../github/app'
 import type { FailedRun } from '../github/promotion-api'
 import { FakeGithub, githubAnswered, type FakePullRequest } from '../../test/fake-github'
 import type { CheckReport } from '../github/pulls'
+import { sendBackConflictAutomatically, type ActionDeps } from '../panel/actions'
 
-import { adoptMergedHandoffs, pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
+import {
+  adoptMergedHandoffs,
+  baseHoldOf,
+  nextBaseHold,
+  pollAwaitingIntegrations,
+  type AwaitCiDeps,
+} from './await-ci'
 import type { EvidenceApi } from './check-evidence'
 import { CI_SILENCE_MS, fixedBaseNote } from './ci-wait'
 
@@ -48,6 +55,21 @@ const gh = {
 }
 const sentBack: { taskId: number; note: string }[] = []
 const startedOver: number[] = []
+/** The runs the real panel action queued, as the integration pass asked for them. */
+const queuedRuns: { taskId: number; feedback?: string }[] = []
+const actionDeps = (): ActionDeps => ({
+  db: getDb(),
+  github: {
+    installationToken: async () => ({ token: 't', expiresAt: new Date() }),
+  } as unknown as GithubApp,
+  get api() {
+    return api
+  },
+  enqueueResume: async () => {},
+  deleteSnapshot: async () => {},
+  inTransaction: (work) =>
+    getDb().transaction((tx) => work(tx as never, async (input) => void queuedRuns.push(input))),
+})
 const mergedBase: { taskId: number; note: string }[] = []
 
 /** Sets how the task's pull request stands on GitHub. */
@@ -84,6 +106,7 @@ beforeEach(async () => {
   sentBack.length = 0
   startedOver.length = 0
   mergedBase.length = 0
+  queuedRuns.length = 0
 })
 
 const checks: EvidenceApi = {
@@ -119,7 +142,7 @@ const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
       .set({ stage: 'intake', awaitingCiSha: null })
       .where(eq(task.id, taskId))
   },
-  startOver: async (taskId) => {
+  sendBackConflict: async (taskId) => {
     startedOver.push(taskId)
   },
   mergeBase: async (taskId, note) => {
@@ -291,6 +314,28 @@ describe('pollAwaitingIntegrations', () => {
     expect(sentBack).toEqual([])
     expect(autoMergeOff()).toEqual([])
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
+  })
+
+  const holdOf = async (id: number) =>
+    ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseHold?: unknown })
+      .baseHold
+
+  it('keeps the hold of a red integration branch while it lasts, and clears it when no check is red', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    const hold = (await holdOf(id)) as { sha: string; checks: string[]; since: string }
+    expect(hold).toMatchObject({ sha: VERIFIED, checks: ['CI'] })
+
+    await pollAwaitingIntegrations(deps())
+    expect(await holdOf(id)).toEqual(hold)
+
+    baseIs(success('CI'))
+    await pollAwaitingIntegrations(deps())
+    expect(await holdOf(id)).toBeUndefined()
+    // The blame stays: it is what lets the task merge the base once it passes.
+    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
   })
 
   it('remembers on the done event which checks it blamed on the base, for the verified commit', async () => {
@@ -560,6 +605,7 @@ describe('pollAwaitingIntegrations', () => {
 
   it('leaves auto-merge alone on a pull request a person closed', async () => {
     pull({ state: 'closed' })
+    repo().heads.set('factory/7', VERIFIED)
     const id = await waitingTask()
 
     await pollAwaitingIntegrations(deps())
@@ -568,15 +614,82 @@ describe('pollAwaitingIntegrations', () => {
     expect(await row(id)).toMatchObject({ stage: 'handoff' })
   })
 
-  it('runs again a pull request that conflicts with its base, with its auto-merge off first', async () => {
+  it('starts over, plain, a task whose branch was deleted and whose pull request closed with it', async () => {
+    pull({ state: 'closed' })
+    const id = await waitingTask()
+
+    expect(
+      await pollAwaitingIntegrations(
+        deps({
+          sendBackConflict: (taskId, base) =>
+            sendBackConflictAutomatically(actionDeps(), taskId, base),
+        }),
+      ),
+    ).toMatchObject({ startedOver: [id], toPerson: [], errors: [] })
+
+    expect(autoMergeOff()).toEqual([])
+    expect(queuedRuns).toHaveLength(1)
+    expect(queuedRuns[0].feedback).toBeUndefined()
+    expect(await row(id)).toMatchObject({ stage: 'intake' })
+  })
+
+  it('hands to a person a closed pull request with its branch gone once the automatic runs are spent', async () => {
+    pull({ state: 'closed' })
+    const id = await waitingTask({ automaticRuns: 3 })
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ toPerson: [id] })
+    expect(queuedRuns).toEqual([])
+  })
+
+  it('sends back on its branch a pull request that conflicts with its base, with auto-merge off first', async () => {
+    pull({ mergeableState: 'dirty' })
+    repo().heads.set('factory/7', VERIFIED)
+    const id = await waitingTask()
+
+    expect(
+      await pollAwaitingIntegrations(
+        deps({
+          sendBackConflict: (taskId, base) =>
+            sendBackConflictAutomatically(actionDeps(), taskId, base),
+        }),
+      ),
+    ).toMatchObject({ conflictSentBack: [id], errors: [] })
+
+    // The run merges the base into the open pull request: the merge it pushes must not go through unverified.
+    expect(autoMergeOff()).toEqual([12])
+    expect(api.callsTo('deleteBranch')).toEqual([])
+    expect(await row(id)).toMatchObject({ stage: 'intake' })
+    expect(queuedRuns).toHaveLength(1)
+    expect(queuedRuns[0].taskId).toBe(id)
+    expect(queuedRuns[0].feedback).toContain('git merge origin/workspace')
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    expect(events.at(-1)?.detail).toMatchObject({ decision: 'request_changes', automatic: true })
+  })
+
+  it('starts over from the base, plain, when the branch of a conflicting pull request is gone', async () => {
     pull({ mergeableState: 'dirty' })
     const id = await waitingTask()
 
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ startedOver: [id] })
+    await pollAwaitingIntegrations(
+      deps({
+        sendBackConflict: (taskId, base) =>
+          sendBackConflictAutomatically(actionDeps(), taskId, base),
+      }),
+    )
 
-    expect(startedOver).toEqual([id])
-    // The run merges the base into the open pull request: the merge it pushes must not go through unverified.
-    expect(autoMergeOff()).toEqual([12])
+    expect(queuedRuns).toHaveLength(1)
+    expect(queuedRuns[0].feedback).toBeUndefined()
+    expect(await row(id)).toMatchObject({ stage: 'intake' })
+  })
+
+  it('hands to a person a conflict once the automatic runs are spent', async () => {
+    pull({ mergeableState: 'dirty' })
+    const id = await waitingTask({ automaticRuns: 3 })
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ toPerson: [id] })
+
+    expect(startedOver).toEqual([])
+    expect(await row(id)).toMatchObject({ stage: 'handoff' })
   })
 
   it('tells a person about a required check that never reports', async () => {
@@ -597,6 +710,7 @@ describe('pollAwaitingIntegrations', () => {
       merged: [],
       sentBack: [],
       startedOver: [],
+      conflictSentBack: [],
       toPerson: [],
       waiting: 0,
       waitingOnBase: [],
@@ -699,5 +813,37 @@ describe('adoptMergedHandoffs', () => {
 
     expect(result.adopted).toEqual([id])
     expect(result.errors).toEqual([expect.stringMatching(new RegExp(`^task ${broken}: `))])
+  })
+})
+
+describe('the hold of a red integration branch', () => {
+  const now = new Date('2026-11-17T12:00:00Z')
+
+  it('reads only the hold of the commit asked for', () => {
+    const detail = { baseHold: { sha: 'a', checks: ['lint'], since: '2026-11-17T10:00:00Z' } }
+    expect(baseHoldOf(detail, 'a')).toEqual(detail.baseHold)
+    expect(baseHoldOf(detail, 'b')).toBeNull()
+    expect(baseHoldOf(detail, null)).toBeNull()
+    expect(
+      baseHoldOf({ baseHold: { sha: 'a', checks: [], since: detail.baseHold.since } }, 'a'),
+    ).toBeNull()
+    expect(
+      baseHoldOf({ baseHold: { sha: 'a', checks: ['x'], since: 'not a date' } }, 'a'),
+    ).toBeNull()
+    expect(baseHoldOf(null, 'a')).toBeNull()
+  })
+
+  it('starts when a check is red, keeps its start while the same checks stay red and restarts for others', () => {
+    const first = nextBaseHold(null, 'a', ['test', 'lint'], now)
+    expect(first).toEqual({ sha: 'a', checks: ['lint', 'test'], since: now.toISOString() })
+    const later = new Date('2026-11-17T15:00:00Z')
+    expect(nextBaseHold(first, 'a', ['lint', 'test'], later)).toEqual(first)
+    expect(nextBaseHold(first, 'a', ['build'], later)?.since).toBe(later.toISOString())
+  })
+
+  it('ends when no check is red', () => {
+    const hold = nextBaseHold(null, 'a', ['lint'], now)
+    expect(nextBaseHold(hold, 'a', undefined, now)).toBeNull()
+    expect(nextBaseHold(hold, 'a', [], now)).toBeNull()
   })
 })

@@ -46,8 +46,11 @@ export type AwaitCiDeps = {
    * its branch, with no agent; `note` is the record of why (the panel's `mergeFixedBase`).
    */
   mergeBase: (taskId: number, note: string) => Promise<void>
-  /** Runs the task again: on its branch to merge the new base, or from it when the branch is gone (`retryAutomatically`). */
-  startOver: (taskId: number) => Promise<void>
+  /**
+   * Runs the task again on its branch to merge the integration branch `base`, or from the base when the
+   * branch is gone (`sendBackConflictAutomatically`).
+   */
+  sendBackConflict: (taskId: number, base: string) => Promise<void>
 }
 
 /** What an integration needs once the merge exists. */
@@ -56,7 +59,10 @@ type IntegrationDeps = Pick<AwaitCiDeps, 'db' | 'github' | 'api' | 'releaseMode'
 export type AwaitCiResult = {
   merged: number[]
   sentBack: number[]
+  /** Tasks whose branch was deleted and pull request closed, run again from the integration branch. */
   startedOver: number[]
+  /** Tasks whose pull request conflicts with its base, run again on their branch to merge it. */
+  conflictSentBack: number[]
   toPerson: number[]
   waiting: number
   /** Tasks that wait because the required checks they failed fail on the head of the integration branch too. */
@@ -273,6 +279,37 @@ async function readBase(
 }
 
 /**
+ * The hold a red integration branch puts on a task, stored on its `done` event (`detail.baseHold`): the required
+ * checks that fail on the head of the integration branch too, for the verified commit, and since when. Unlike
+ * `baseBlame`, which only grows, it is the hold now: it is cleared as soon as no check is red there.
+ */
+export type BaseHold = { sha: string; checks: string[]; since: string }
+
+/** The hold stored in the detail of a `done` event for this commit, or none; another commit's counts for nothing. */
+export function baseHoldOf(detail: unknown, sha: string | null): BaseHold | null {
+  const hold = (detail as { baseHold?: Partial<BaseHold> } | null | undefined)?.baseHold
+  if (!hold || hold.sha !== sha || !Array.isArray(hold.checks) || hold.checks.length === 0) {
+    return null
+  }
+  if (typeof hold.since !== 'string' || Number.isNaN(Date.parse(hold.since))) return null
+  return { sha: hold.sha, checks: hold.checks, since: hold.since }
+}
+
+/** The hold after a pass: the checks red now, keeping `since` while the same checks stay red; none when no check is. */
+export function nextBaseHold(
+  before: BaseHold | null,
+  sha: string,
+  red: string[] | undefined,
+  now: Date,
+): BaseHold | null {
+  if (!red || red.length === 0) return null
+  const checks = [...new Set(red)].sort()
+  const since =
+    before && before.checks.join('\n') === checks.join('\n') ? before.since : now.toISOString()
+  return { sha, checks, since }
+}
+
+/**
  * What a pass stores on the `done` event of the verified commit (`detail.baseBlame`): every required check
  * found red on the base while it failed on that commit.
  */
@@ -286,21 +323,34 @@ function blamedOnBase(detail: unknown, verifiedSha: string): string[] {
 
 /**
  * Adds the checks this pass found red on the base to the ones blamed before, so a later pass still knows
- * whose their failure is once the base passes them. The list only grows while the commit waits.
+ * whose their failure is once the base passes them (the list only grows while the commit waits), and keeps
+ * `baseHold` as what is red there now.
  */
-async function rememberBaseRed(
+async function settleBase(
   deps: AwaitCiDeps,
   done: { id: number; detail: unknown },
   verifiedSha: string,
   before: string[],
-  red: string[],
+  step: WaitingStep,
 ): Promise<void> {
-  if (red.every((name) => before.includes(name))) return
-  const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
-  await deps.db
-    .update(stageEvent)
-    .set({ detail: { ...(done.detail as Record<string, unknown>), baseBlame } })
-    .where(eq(stageEvent.id, done.id))
+  const detail = { ...((done.detail ?? {}) as Record<string, unknown>) }
+  const red = step.kind === 'wait' ? step.baseRed : undefined
+  let changed = false
+  if (red && !red.every((name) => before.includes(name))) {
+    const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
+    detail.baseBlame = baseBlame
+    changed = true
+  }
+  // The hold is the red there is now: cleared when no check is red on the base, so it never outlives the red.
+  const held = baseHoldOf(detail, verifiedSha)
+  const hold = nextBaseHold(held, verifiedSha, red, deps.now?.() ?? new Date())
+  if (JSON.stringify(hold) !== JSON.stringify(held) || (!hold && 'baseHold' in detail)) {
+    if (hold) detail.baseHold = hold
+    else delete detail.baseHold
+    changed = true
+  }
+  if (!changed) return
+  await deps.db.update(stageEvent).set({ detail }).where(eq(stageEvent.id, done.id))
 }
 
 async function look(
@@ -326,9 +376,17 @@ async function look(
   const base = integrationBranch(await loadRepoConfig(deps.db, row.repository))
   const required = await deps.api.requiredChecks(row.repository, token, base)
   const blamed = blamedOnBase(done?.detail, verifiedSha)
+  const pull = await deps.api.readPullRequest(row.repository, token, number)
+  // A deleted branch closes its pull request, so the branch is looked for only when it is closed unmerged.
+  const branchGone =
+    pull.state === 'closed' && !pull.merged
+      ? (await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)) ===
+        undefined
+      : undefined
   const input: WaitingIntegration = {
     verifiedSha,
-    pull: await deps.api.readPullRequest(row.repository, token, number),
+    pull,
+    ...(branchGone === undefined ? {} : { branchGone }),
     required,
     reports: await deps.api.checkReports(row.repository, token, verifiedSha),
     blamedOnBase: blamed,
@@ -345,9 +403,7 @@ async function look(
     const baseReports = await readBase(deps, row.repository, token, base)
     step = decideWaitingIntegration({ ...input, baseReports })
   }
-  if (done && step.kind === 'wait' && step.baseRed) {
-    await rememberBaseRed(deps, done, verifiedSha, blamed, step.baseRed)
-  }
+  if (done) await settleBase(deps, done, verifiedSha, blamed, step)
   const w: Waiting = {
     row,
     verifiedSha,
@@ -396,10 +452,15 @@ async function take(
     case 'needs_base':
       throw new Error('the integration branch was read and the base is still asked for')
     case 'start_over':
+      // The pull request is closed: no auto-merge to turn off, and no branch for the action to keep.
+      await deps.sendBackConflict(row.id, at.base)
+      result.startedOver.push(row.id)
+      return
+    case 'send_back_conflict':
       // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
-      await deps.startOver(row.id)
-      result.startedOver.push(row.id)
+      await deps.sendBackConflict(row.id, at.base)
+      result.conflictSentBack.push(row.id)
       return
     case 'person': {
       let said = step
@@ -423,6 +484,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
     merged: [],
     sentBack: [],
     startedOver: [],
+    conflictSentBack: [],
     toPerson: [],
     waiting: 0,
     waitingOnBase: [],

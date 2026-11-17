@@ -38,6 +38,7 @@ import {
   retry,
   retryAutomatically,
   sendBackAutomatically,
+  sendBackConflictAutomatically,
   type ActionDeps,
 } from './actions'
 import { coordinatorActions, health, inbox, listTasks, taskDetail } from './queries'
@@ -253,6 +254,29 @@ describe('listTasks and an integration that waits for the repository checks', ()
 
     expect(cards.get(waiting)).toMatchObject({ waitingForChecks: true, integrated: false })
     expect(cards.get(refused)).toMatchObject({ waitingForChecks: false })
+  })
+
+  it('shows the checks and the branch a red integration branch holds a task on, for its commit only', async () => {
+    const hold = { sha: 'abc', checks: ['lint'], since: '2026-11-17T09:00:00.000Z' }
+    const held = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' }, [
+      { stage: 'done', detail: { baseHold: hold } },
+    ])
+    const slow = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' }, [
+      { stage: 'done', detail: {} },
+    ])
+    const stale = await seed('done', { headSha: 'new', awaitingCiSha: 'new' }, [
+      { stage: 'done', detail: { baseHold: hold } },
+    ])
+
+    const cards = new Map((await listTasks(getDb())).map((c) => [c.id, c]))
+
+    expect(cards.get(held)?.waitingOnBase).toEqual({
+      branch: 'workspace',
+      checks: ['lint'],
+      since: hold.since,
+    })
+    expect(cards.get(slow)?.waitingOnBase).toBeNull()
+    expect(cards.get(stale)?.waitingOnBase).toBeNull()
   })
 })
 
@@ -1446,6 +1470,29 @@ describe('actions', () => {
     expect(input.taskId).toBe(id)
     expect(input.feedback).toContain('git merge origin/workspace')
     expect(input.feedback).toMatch(/generated file/)
+  })
+
+  it('sends back on its own branch a waiting integration that conflicts with its base, and starts over only without the branch', async () => {
+    const kept = await seed('done', {
+      issueNumber: 86,
+      headSha: 'approved1',
+      awaitingCiSha: 'approved1',
+    })
+    api.repo('paulo/app').heads.set('factory/86', 'approved1')
+    await sendBackConflictAutomatically(deps(), kept, 'workspace')
+    expect(deleted()).toEqual([])
+    const input = queued.at(-1)?.input as { taskId: number; feedback?: string }
+    expect(input.taskId).toBe(kept)
+    expect(input.feedback).toContain('git merge origin/workspace')
+
+    const gone = await seed('done', {
+      issueNumber: 87,
+      headSha: 'approved2',
+      awaitingCiSha: 'approved2',
+    })
+    await sendBackConflictAutomatically(deps(), gone, 'workspace')
+    expect((queued.at(-1)?.input as { feedback?: string }).feedback).toBeUndefined()
+    expect((await getDb().select().from(task).where(eq(task.id, gone)))[0].stage).toBe('intake')
   })
 
   it('starts no more conflicted tasks in one pass than the limit, the longest-waiting first', async () => {

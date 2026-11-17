@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { integrationBranch } from '../factory/branches'
+import { CONFLICT_NOTE_OPENING, withConflictFiles } from '../factory/merge-base'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
@@ -392,13 +393,14 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
  * work was approved (another task merged first). Tasks of one repository often regenerate the same files,
  * so most of these conflicts are in generated files, which only their generator writes right.
  */
-export function conflictNote(base: string): string {
-  return [
-    `The pull request conflicts with ${base}, which moved after this work was approved.`,
+export function conflictNote(base: string, files: string[] = []): string {
+  const note = [
+    `${CONFLICT_NOTE_OPENING}${base}, which moved after this work was approved.`,
     `Merge it into this branch: git fetch origin ${base} && git merge origin/${base}.`,
     'Resolve each conflict keeping what both sides changed. A generated file (a reference, a map or docs a script writes) is regenerated with the script that writes it, never edited by hand; a budget or a version takes the value the merged code needs.',
     'Commit the merge and change nothing else.',
   ].join(' ')
+  return withConflictFiles(note, files, NOTE_MAX)
 }
 
 /**
@@ -417,8 +419,8 @@ async function mergesTheBase(
     .select({ baseBranch: repository.baseBranch })
     .from(repository)
     .where(eq(repository.fullName, row.repository))
-  const note = conflictNote(integrationBranch(config ?? {}))
-  await requeue(deps, row.id, ['done'], 'automatic_changes', note, row.headSha)
+  const base = integrationBranch(config ?? {})
+  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
   return true
 }
 
@@ -432,6 +434,27 @@ export async function sendBackAutomatically(deps: ActionDeps, taskId: number, no
   const row = await load(deps.db, taskId)
   mustAllow(row, 'send_back_after_ci')
   await requeue(deps, taskId, ['done'], 'automatic_changes', note.slice(0, NOTE_MAX), row.headSha)
+}
+
+/**
+ * Sends a task whose pull request waits for checks, and conflicts with its base, back to its own branch to
+ * merge `base` (`send_back_conflict` in `factory/ci-wait.ts`). Without the branch there is nothing to keep,
+ * and the task starts over from the base.
+ */
+export async function sendBackConflictAutomatically(
+  deps: ActionDeps,
+  taskId: number,
+  base: string,
+) {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'send_back_after_ci')
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  if (!head) {
+    await requeue(deps, taskId, ['done'], 'automatic_retry', '', row.headSha)
+    return
+  }
+  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
 }
 
 /**
