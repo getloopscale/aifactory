@@ -51,8 +51,17 @@ export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[
 const ENVIRONMENT_PATTERN =
   /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
 
+/**
+ * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer
+ * either. The provider lost the sandbox; nothing the agent wrote caused it.
+ */
+const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe failed/i
+
 const ENVIRONMENT = {
-  test: (error: string) => ENVIRONMENT_PATTERN.test(error) || SANDBOX_TEMPLATE_MISSING.test(error),
+  test: (error: string) =>
+    ENVIRONMENT_PATTERN.test(error) ||
+    SANDBOX_TEMPLATE_MISSING.test(error) ||
+    SANDBOX_UNREACHABLE.test(error),
 }
 
 /**
@@ -250,6 +259,11 @@ export type TaskCard = {
    * and the factory finishes the integration then. It is not a merge GitHub refused.
    */
   waitingForChecks: boolean
+  /**
+   * The task waits because the required checks it failed fail on the head of the integration branch too:
+   * which checks, on which branch, and since when. Null when nothing holds it.
+   */
+  waitingOnBase: { branch: string; checks: string[]; since: string } | null
   /**
    * Delivered without a pull request: the agent changed nothing, the checks passed at the commit and the
    * reviewer confirmed the code already does what the issue asks. The factory closed the issue.

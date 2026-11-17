@@ -11,12 +11,15 @@ import {
   finding,
   question,
   releaseWait,
+  repository,
   review,
   stageEvent,
   task,
   watch,
 } from '../db/schema'
 import { retryAt } from '../factory/auto-retry'
+import { integrationBranch } from '../factory/branches'
+import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
 import {
   columnOf,
@@ -55,16 +58,28 @@ const OUTER = {
   taskId: sql.raw('"stage_event"."task_id"'),
   stage: sql.raw('"stage_event"."stage"'),
   detail: sql.raw('"stage_event"."detail"'),
+  at: sql.raw('"stage_event"."at"'),
 }
+
+/** How long a run that failed on the network, before any agent ran, stays free. No outage lasts longer. */
+const NETWORK_FREE_SPAN = sql.raw("interval '1 hour'")
 
 /**
  * Per task, in a query grouped by `stage_event.task_id`: the automatic runs since a person last started it.
  * A person's retry starts the count over. A run that failed right after entering the sandbox stage, before
  * any agent ran, is not counted when it was a rework (nothing of the work was attempted) or when the network
- * dropped ("fetch failed": an outage is not the work failing, and waiting is what fixes it).
+ * dropped ("fetch failed": an outage is not the work failing, and waiting is what fixes it), but only within
+ * `NETWORK_FREE_SPAN` of the first run of that streak: a failure that outlasts any outage counts, so it ends
+ * in a person's hands.
  */
 export function automaticRunsSincePerson() {
-  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage = 'failed' and ((${OUTER.detail}->>'decision') is not distinct from 'request_changes' or f.detail->>'error' ilike '%fetch failed%') from stage_event f where f.id = (select min(x.id) from stage_event x where x.task_id = ${OUTER.taskId} and x.id > s.id))))`
+  const network = sql`coalesce(f.detail->>'error', '') ilike '%fetch failed%'`
+  // When the network streak this run belongs to began: its first event (an intake, a sandbox or a failure) since
+  // the last thing that was not a network failure (work that ran, another kind of failure) and since a person
+  // last started the task. A failure counts too, so a streak with no intake of its own still has a start.
+  const streakStart = sql`(select min(q.at) from stage_event q where q.task_id = ${OUTER.taskId} and q.id <= ${OUTER.id} and q.id > coalesce((select max(b.id) from stage_event b where b.task_id = ${OUTER.taskId} and b.id < ${OUTER.id} and (b.stage not in ('intake', 'sandbox', 'failed') or (b.stage = 'failed' and coalesce(b.detail->>'error', '') not ilike '%fetch failed%'))), 0) and q.id >= coalesce((select max(p.id) from stage_event p where p.task_id = ${OUTER.taskId} and p.id < ${OUTER.id} and p.stage = 'intake' and (p.detail->>'automatic') is distinct from 'true' and (p.detail->>'withdrawn') is distinct from 'true'), 0))`
+  const free = sql`(${network} and ${OUTER.at} - ${streakStart} < ${NETWORK_FREE_SPAN}) or (not ${network} and (${OUTER.detail}->>'decision') is not distinct from 'request_changes')`
+  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage = 'failed' and (${free}) from stage_event f where f.id = (select min(x.id) from stage_event x where x.task_id = ${OUTER.taskId} and x.id > s.id))))`
 }
 
 const iso = (date: Date) => date.toISOString()
@@ -134,6 +149,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     .orderBy(stageEvent.taskId, desc(stageEvent.id))
   const lastFailure = new Map(failures.map((f) => [f.taskId, f]))
   const byTask = new Map(activity.map((a) => [a.taskId, a]))
+  const holds = await baseHolds(db, rows)
   return rows.map((r) => {
     const seen = byTask.get(r.id)
     const again =
@@ -158,6 +174,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       approved: r.headSha !== null && kinds.some((k) => k.sha === r.headSha),
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
+      waitingOnBase: holds.get(r.id) ?? null,
       resolved: r.resolvedSha !== null,
       retryable: again?.retryable ?? null,
       retryAt: again?.at.toISOString() ?? null,
@@ -167,6 +184,42 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       releaseWait: lastReleaseWait(releases, r),
     }
   })
+}
+
+/** The hold a red integration branch puts on each task that waits for its checks, on its latest `done` event. */
+async function baseHolds(db: Database, rows: TaskRow[]) {
+  const waiting = rows.filter((r) => r.stage === 'done' && r.awaitingCiSha !== null)
+  const holds = new Map<number, NonNullable<TaskCard['waitingOnBase']>>()
+  if (waiting.length === 0) return holds
+  const events = await db
+    .selectDistinctOn([stageEvent.taskId], { taskId: stageEvent.taskId, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(
+      and(
+        inArray(
+          stageEvent.taskId,
+          waiting.map((r) => r.id),
+        ),
+        eq(stageEvent.stage, 'done'),
+      ),
+    )
+    .orderBy(stageEvent.taskId, desc(stageEvent.id))
+  const configs = await db
+    .select({ fullName: repository.fullName, baseBranch: repository.baseBranch })
+    .from(repository)
+    .where(inArray(repository.fullName, [...new Set(waiting.map((r) => r.repository))]))
+  const detail = new Map(events.map((e) => [e.taskId, e.detail]))
+  for (const r of waiting) {
+    const hold = baseHoldOf(detail.get(r.id), r.awaitingCiSha)
+    if (!hold) continue
+    const config = configs.find((c) => c.fullName === r.repository)
+    holds.set(r.id, {
+      branch: integrationBranch(config ?? {}),
+      checks: hold.checks,
+      since: hold.since,
+    })
+  }
+  return holds
 }
 
 /** The latest release of a task that waits for checks or was refused, while the task is not released. */
