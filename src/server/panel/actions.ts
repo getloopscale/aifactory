@@ -387,14 +387,48 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   )
 }
 
+/** The most conflicting files a note names. */
+const CONFLICT_FILES_SHOWN = 20
+
+/**
+ * The files both the work and `base` changed since they diverged, where a conflict can be. GitHub has no
+ * call for the conflicts themselves, so this is the cause it lets us read. A comparison that fails leaves
+ * the list empty: the note then names none, and the send-back still goes.
+ */
+export async function conflictingFiles(
+  deps: Pick<ActionDeps, 'api'>,
+  repo: string,
+  token: string,
+  base: string,
+  head: string,
+): Promise<string[]> {
+  try {
+    const [work, moved] = await Promise.all([
+      deps.api.changedFiles(repo, token, base, head),
+      deps.api.changedFiles(repo, token, head, base),
+    ])
+    const changedOnBase = new Set(moved.map((f) => f.path))
+    return work.map((f) => f.path).filter((path) => changedOnBase.has(path))
+  } catch {
+    return []
+  }
+}
+
 /**
  * What a run is told when its finished work conflicts with the integration branch, which moved after the
  * work was approved (another task merged first). Tasks of one repository often regenerate the same files,
  * so most of these conflicts are in generated files, which only their generator writes right.
  */
-export function conflictNote(base: string): string {
+export function conflictNote(base: string, files: string[] = []): string {
+  const shown = files.slice(0, CONFLICT_FILES_SHOWN)
+  const named = shown.length
+    ? [
+        `Both sides changed ${shown.join(', ')}${files.length > shown.length ? ` and ${files.length - shown.length} more` : ''}: the conflict is in them.`,
+      ]
+    : []
   return [
     `The pull request conflicts with ${base}, which moved after this work was approved.`,
+    ...named,
     `Merge it into this branch: git fetch origin ${base} && git merge origin/${base}.`,
     'Resolve each conflict keeping what both sides changed. A generated file (a reference, a map or docs a script writes) is regenerated with the script that writes it, never edited by hand; a budget or a version takes the value the merged code needs.',
     'Commit the merge and change nothing else.',
@@ -417,8 +451,9 @@ async function mergesTheBase(
     .select({ baseBranch: repository.baseBranch })
     .from(repository)
     .where(eq(repository.fullName, row.repository))
-  const note = conflictNote(integrationBranch(config ?? {}))
-  await requeue(deps, row.id, ['done'], 'automatic_changes', note, row.headSha)
+  const base = integrationBranch(config ?? {})
+  const files = await conflictingFiles(deps, row.repository, token, base, row.headSha ?? head)
+  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base, files), row.headSha)
   return true
 }
 
@@ -452,7 +487,8 @@ export async function sendBackConflictAutomatically(
     await requeue(deps, taskId, ['done'], 'automatic_retry', '', row.headSha)
     return
   }
-  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
+  const files = await conflictingFiles(deps, row.repository, token, base, row.headSha ?? head)
+  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base, files), row.headSha)
 }
 
 /**

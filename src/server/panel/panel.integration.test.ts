@@ -1433,6 +1433,12 @@ describe('actions', () => {
       ],
     )
     api.repo('paulo/app').heads.set('factory/85', 'approved1')
+    api
+      .repo('paulo/app')
+      .compare('workspace', 'approved1', [{ path: 'docs/a.md', status: 'modified' }])
+    api
+      .repo('paulo/app')
+      .compare('approved1', 'workspace', [{ path: 'docs/a.md', status: 'modified' }])
 
     expect(await runConflictRetries(deps(), { limit: 5 })).toEqual({ started: 1, skipped: 0 })
 
@@ -1447,6 +1453,7 @@ describe('actions', () => {
     expect(input.taskId).toBe(id)
     expect(input.feedback).toContain('git merge origin/workspace')
     expect(input.feedback).toMatch(/generated file/)
+    expect(input.feedback).toContain('docs/a.md')
   })
 
   it('sends back on its own branch a waiting integration that conflicts with its base, and starts over only without the branch', async () => {
@@ -1456,11 +1463,18 @@ describe('actions', () => {
       awaitingCiSha: 'approved1',
     })
     api.repo('paulo/app').heads.set('factory/86', 'approved1')
+    api
+      .repo('paulo/app')
+      .compare('workspace', 'approved1', [{ path: 'docs/b.md', status: 'modified' }])
+    api
+      .repo('paulo/app')
+      .compare('approved1', 'workspace', [{ path: 'docs/b.md', status: 'modified' }])
     await sendBackConflictAutomatically(deps(), kept, 'workspace')
     expect(deleted()).toEqual([])
     const input = queued.at(-1)?.input as { taskId: number; feedback?: string }
     expect(input.taskId).toBe(kept)
     expect(input.feedback).toContain('git merge origin/workspace')
+    expect(input.feedback).toContain('docs/b.md')
 
     const gone = await seed('done', {
       issueNumber: 87,
