@@ -226,9 +226,18 @@ class CaseRun {
     return plan
   }
 
-  private async rework(findings: Finding[], failed: CheckResult[]): Promise<void> {
+  private async rework(
+    findings: Finding[],
+    failed: CheckResult[],
+    reviewedSha?: string,
+  ): Promise<void> {
     this.attempts++
-    const prompt = reworkPrompt({ findings, failedChecks: failed, checks: this.c.checks })
+    const prompt = reworkPrompt({
+      findings,
+      failedChecks: failed,
+      checks: this.c.checks,
+      ...(reviewedSha ? { reviewedSha } : {}),
+    })
     const result = await this.agentCall(() =>
       this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt)),
     )
@@ -390,7 +399,7 @@ class CaseRun {
       const findings = [...guards, ...outside, ...read.findings]
       // The next round starts from these findings, as `Run.review` keeps them.
       this.earlier = { sha, findings }
-      await this.rework(findings, [])
+      await this.rework(findings, [], sha)
     }
   }
 

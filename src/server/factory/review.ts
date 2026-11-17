@@ -306,11 +306,32 @@ export function notResolvedPrompt(input: {
   ].join('\n\n')
 }
 
+/**
+ * How the builder works through a reviewer's findings. A rework round that fixes one finding and adds the next
+ * never converges (#207): the later round reads only what changed since the reviewed commit, so the builder
+ * reads that same diff before it finishes, proves each fix with a test, and accounts for every finding and
+ * every file outside its plan in the summary the reviewer reads.
+ */
+function findingsMethod(reviewedSha: string | undefined): string {
+  const diff = reviewedSha
+    ? `The reviewer looks for new blockers only in what changed since ${reviewedSha.slice(0, 7)}, so before you finish read your own change with \`git diff ${reviewedSha} HEAD\``
+    : 'Before you finish, read your own change with `git diff HEAD`'
+  return [
+    'Work through the findings one by one:',
+    '- For a finding about behaviour (a bug, a missed case), first write a test that fails without the fix, then fix it at its cause with the smallest change that does it, and run that test.',
+    `- ${diff} the way the reviewer will: errors swallowed, races, input not checked, cases the new code misses. Fix what you find.`,
+    '- A finding you cannot fix inside this issue, because it needs a release, another package or a decision only the owner can make: change nothing for it and say what is missing. Do not half-fix it.',
+    '- In your summary, list each finding with what you changed and the test that shows it, and give the reason for every file you changed that your plan did not name.',
+  ].join('\n')
+}
+
 /** What the builder is told when it has to go back to its work. */
 export function reworkPrompt(input: {
   findings: Finding[]
   failedChecks: { command: string; output: string }[]
   checks?: CheckSpec[]
+  /** The commit the reviewer read, when the work comes back from a review. */
+  reviewedSha?: string
 }): string {
   const parts = [
     'Your change was not accepted. Fix what follows, then finish with a short summary.',
@@ -324,7 +345,11 @@ export function reworkPrompt(input: {
     )
   }
   if (input.findings.length > 0) {
-    parts.push('A reviewer found:', renderFindings(input.findings))
+    parts.push(
+      'A reviewer found:',
+      renderFindings(input.findings),
+      findingsMethod(input.reviewedSha),
+    )
   }
   if (input.checks?.length) parts.push(checksRule(input.checks).trimEnd())
   parts.push(
