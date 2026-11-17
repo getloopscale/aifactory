@@ -279,7 +279,7 @@ describe('a task held by a red integration branch', () => {
   it('is base_red past the limit, naming the checks and the commit they hold', () => {
     const [found, ...rest] = recognise(held('2026-11-17T09:00:00Z'))
     expect(rest).toEqual([])
-    expect(found).toMatchObject({ kind: 'base_red', taskId: 5, head: '1234567:lint,test' })
+    expect(found).toMatchObject({ kind: 'base_red', taskId: 5, head: '1234567:lint,test@2026-11-17T09:00:00Z' })
     expect(found.evidence).toContain('lint, test')
     expect(found.evidence).toContain('3 hours')
   })
@@ -288,7 +288,13 @@ describe('a task held by a red integration branch', () => {
     const other = held('2026-11-17T09:00:00Z', {
       baseHold: readOf({ sha: '1234567890', checks: ['build'], since: '2026-11-17T09:00:00Z' }),
     })
-    expect(recognise(other)[0].head).toBe('1234567:build')
+    expect(recognise(other)[0].head).toBe('1234567:build@2026-11-17T09:00:00Z')
+  })
+
+  it('has another identity for a hold that cleared and came back on the same check and commit', () => {
+    const first = recognise(held('2026-11-17T08:00:00Z'))[0]
+    const again = recognise(held('2026-11-17T09:00:00Z'))[0]
+    expect(first.head).not.toBe(again.head)
   })
 
   it('is nothing once the hold is cleared', () => {

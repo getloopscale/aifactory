@@ -351,34 +351,3 @@ export function checksFeedback(sha: string, failed: FailedReport[]): string {
   })
   return head + quotes.join('')
 }
-
-/**
- * The hold a red integration branch puts on a task, stored on its `done` event (`detail.baseHold`): the required
- * checks that fail on the head of the integration branch too, for the verified commit, and since when. Unlike
- * `baseBlame`, which only grows, it is the hold now: it is cleared as soon as no check is red there.
- */
-export type BaseHold = { sha: string; checks: string[]; since: string }
-
-/** The hold stored in the detail of a `done` event for this commit, or none; another commit's counts for nothing. */
-export function baseHoldOf(detail: unknown, sha: string | null): BaseHold | null {
-  const hold = (detail as { baseHold?: Partial<BaseHold> } | null | undefined)?.baseHold
-  if (!hold || hold.sha !== sha || !Array.isArray(hold.checks) || hold.checks.length === 0) {
-    return null
-  }
-  if (typeof hold.since !== 'string' || Number.isNaN(Date.parse(hold.since))) return null
-  return { sha: hold.sha, checks: hold.checks, since: hold.since }
-}
-
-/** The hold after a pass: the checks red now, keeping `since` while the same checks stay red; none when no check is. */
-export function nextBaseHold(
-  before: BaseHold | null,
-  sha: string,
-  red: string[] | undefined,
-  now: Date,
-): BaseHold | null {
-  if (!red || red.length === 0) return null
-  const checks = [...new Set(red)].sort()
-  const since =
-    before && before.checks.join('\n') === checks.join('\n') ? before.since : now.toISOString()
-  return { sha, checks, since }
-}

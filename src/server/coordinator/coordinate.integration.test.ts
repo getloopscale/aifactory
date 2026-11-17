@@ -1008,17 +1008,16 @@ describe('an integration branch that stays red under a task', () => {
     expect(await actions()).toEqual([])
   })
 
-  it('escalates again when another check holds the same commit', async () => {
+  it('escalates again when a hold clears and the same check holds the same commit later', async () => {
     const id = await heldTask(['lint'], 3)
     await coordinate(withClock(), 'auto')
     await getDb()
       .update(stageEvent)
-      .set({ detail: { baseHold: { sha: 'verified0001', checks: ['test'], since: at(3) } } })
+      .set({ detail: { baseHold: { sha: 'verified0001', checks: ['lint'], since: at(2.5) } } })
       .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'done')))
 
     await coordinate(withClock(), 'auto')
 
-    expect((await actions()).map((a) => a.reason).join('\n')).toContain('test')
     expect(await actions()).toHaveLength(2)
   })
 })

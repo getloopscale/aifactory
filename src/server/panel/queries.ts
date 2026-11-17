@@ -19,7 +19,7 @@ import {
 } from '../db/schema'
 import { retryAt } from '../factory/auto-retry'
 import { integrationBranch } from '../factory/branches'
-import { baseHoldOf } from '../factory/ci-wait'
+import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
 import {
   columnOf,

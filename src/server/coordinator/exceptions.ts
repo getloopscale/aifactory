@@ -1,7 +1,7 @@
 import type { EXCEPTION_KINDS, TaskStage } from '../db/schema'
 import type { Read } from '../factory/doctor'
 import type { HandoffCause } from '../factory/run-types'
-import type { BaseHold } from '../factory/ci-wait'
+import type { BaseHold } from '../factory/await-ci'
 import { automaticRunsLeft } from '../factory/transitions'
 import { retryableFailure } from '../../shared/panel'
 
@@ -178,7 +178,8 @@ function ofBase(facts: TaskFacts): Found | undefined {
   return {
     kind: 'base_red',
     evidence: `the integration branch has been red for ${hours} hours on ${hold.checks.join(', ')}, and the task waits for ${hold.checks.length === 1 ? 'it' : 'them'} to pass there`,
-    identity: `${short(hold.sha)}:${hold.checks.join(',')}`,
+    // The start is part of it: a hold that cleared and came back on the same commit is another hold.
+    identity: `${short(hold.sha)}:${hold.checks.join(',')}@${hold.since}`,
   }
 }
 
