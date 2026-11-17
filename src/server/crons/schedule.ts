@@ -2,8 +2,10 @@ import { defineCron } from 'theokit/server/cron'
 
 import { getPool } from '../db'
 import { mainProcessOnly } from '../factory/worker-only'
-import { fetchIssue } from '../github/issues'
+import { fetchIssue, listOpenIssues } from '../github/issues'
+import { FACTORY_LABEL } from '../ingest/decide'
 import { actionDeps } from '../panel/deps'
+import { listingReader } from '../scheduler/issue-reader'
 import { modelReadinessJudge } from '../scheduler/judge'
 import { schedulerModeFromEnv } from '../scheduler/mode'
 import { alone, schedule } from '../scheduler/schedule'
@@ -27,7 +29,11 @@ export default defineCron('schedule', {
         db,
         github,
         api,
-        readIssue: (repo: string, number: number, token: string) => fetchIssue(repo, number, token),
+        // One listing per repository each pass, not one read per queued task (GitHub's hourly limit).
+        readIssue: listingReader(
+          (repo, token) => listOpenIssues(repo, FACTORY_LABEL, token),
+          (repo, number, token) => fetchIssue(repo, number, token),
+        ),
         judge: modelReadinessJudge(),
       }
     } catch (error) {
