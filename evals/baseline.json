@@ -163,11 +163,11 @@
     {
       "id": "usetheokit/theokit-sdk#975",
       "passed": false,
-      "reason": "[unknown] terminated: The sandbox could not be reached and its health probe failed too (The operation was aborted due to timeout). It was not confirmed to be stopped \u2014 this is likely a network issue or envd inside the sandbox not being up yet; check the sandbox state with 'Sandbox.getInfo()'.",
-      "costUsd": 0,
-      "durationMs": 2355688,
-      "attempts": 0,
-      "reviewRounds": 0
+      "reason": "checks failed: tests",
+      "costUsd": 1.7132717999999998,
+      "durationMs": 2654795,
+      "attempts": 3,
+      "reviewRounds": 1
     },
     {
       "id": "usetheokit/theokit#1690",
@@ -215,6 +215,6 @@
       "reviewRounds": 1
     }
   ],
-  "spentUsd": 19.32,
-  "note": "Recorded from the eval_case lines of the 30-case run of 314dc06 on 2026-11-16, which reached the suite timeout after 20 cases (#180); the 10 cases it did not reach are absent."
+  "spentUsd": 21.0333,
+  "note": "Recorded from the eval_case lines of the 30-case run of 314dc06 on 2026-11-16, which reached the suite timeout after 20 cases (#180); the 10 cases it did not reach are absent. usetheokit/theokit-sdk#975, an environment failure in that run, was run again alone on 314dc06 on 2026-11-17 and its entry is that result. Its sandbox carried metadata so the live factory's reaper would leave it alone; 314dc06 creates sandboxes without any, and the reaper stops those after 10 minutes."
 }
