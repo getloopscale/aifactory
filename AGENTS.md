@@ -41,12 +41,13 @@ src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
-                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`, `coordinate`)
+                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`, `coordinate`, `schedule`)
   metrics/          the factory's own indicators, their daily points and control bands (`config.ts`)
   knowledge/        the owner's knowledge repository: mirror, sync, the slice each agent gets, notes
   db/               Postgres config, pool, Drizzle schema, health probe
   ingest/           GitHub delivery: decide, record (ingress + task), signed webhook handler
   coordinator/      the factory's exceptions: facts, recognition, one decision, applying it (ADR 0011)
+  scheduler/        the order of the queued runs and the readiness of newly queued issues
   factory/          one task end to end: sandbox, agent, push, stage history; the repository doctor
   github/           GitHub App auth (repository-scoped tokens) and issue reads
   jobs/             defineJob files; `run-task` runs a task, `prove-checks` proves proposed checks
@@ -231,6 +232,27 @@ reads that file, not a convention.
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
   however old) while it is on its way. The decision's head is the test and the fix's job (`headOf`), so a retried
   fix is decided again and an ended hold never comes back. It is not counted by `MAX_APPLIED`, and merges nothing.
+- **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
+  The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
+  `scheduler/facts.ts` reads the queued `run-task` jobs of tasks in `intake`, their issues and the decisions already
+  recorded, and decides nothing; `order.ts` and `readiness.ts` decide and read nothing; `apply.ts` is the only module
+  with side effects. First readiness: for each first run (no `decisionId`, `feedback`, `resume` or `mergeBase` in its
+  input) whose issue has no verdict for its current title and body (`bodyHash`), a judge built by `buildAssistant`
+  (`judge.ts`, the prompt in `agents/prompts/readiness.ts`) answers `ready` or `needs_refinement`, with what is missing
+  and one question. An answer that does not parse is `ready` with its error recorded, and a judge that throws records
+  nothing. In `auto` a `needs_refinement` task asks `transitions.ts` (`needs_refinement`, `ask_owner`), its queued run
+  is deleted, the question goes on the issue with `questionComment`, a `question` row with `origin` `readiness` and no
+  sandbox is stored and the task enters `waiting`, all in one transaction; `poll-answers` takes the answer, puts the
+  task back in `intake` and queues its first run, whose prompt carries the answers (`clarifications`). Then the order:
+  among the runs that are due and not held, lower `priority:N` first (no label sorts right after `priority:5`), then a
+  `bug`, then the issue more queued issues name in their `Blocked by` line, then the oldest job, then the task id. In
+  `auto` the sorted runs get the `available_at` times the queue already had, copied in one statement from the job
+  that had each, under `HOLD_LOCK`; only rows whose time changes are written. The scheduler never touches a job a
+  worker holds, that failed, that the coordinator holds (`heldFrom`, 'infinity'), that is not due, or of a task that
+  left `intake`. Every decision is a `scheduler_decision` row: a `readiness` row once per task and issue version, an
+  `order` row when a task's place or its reasons change. `FACTORY_SCHEDULER_MODE` is `off`, `trial` (the default:
+  decide and record, change no job, task or issue) or `auto`. The panel's queued card shows its place, why and the
+  verdict (`panel/queue-view.ts`).
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

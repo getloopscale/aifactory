@@ -65,6 +65,7 @@ import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
 import { pollAnswers } from './waiting'
+import { jobBackend } from './job-backend'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
 const ANTHROPIC = 'sk-ant-key-must-not-leak'
@@ -72,6 +73,8 @@ const ANTHROPIC = 'sk-ant-key-must-not-leak'
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  // The board reads each queued card's place from TheoKit's job table, which its own migration creates.
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
@@ -1979,6 +1982,40 @@ describe('runTask review loop', () => {
     expect(prompts[1]).not.toContain('QUESTION:')
   })
 
+  it('gives the builder the answers to the readiness questions of its task, and no unanswered one', async () => {
+    const prompts: string[] = []
+    const capture: CodingHarness = {
+      name: 'capture',
+      egress: agentEgress,
+      run: async (_backend, { prompt }) => {
+        prompts.push(prompt)
+        return { ok: true, summary: 'done' }
+      },
+    }
+    const id = await seedTask()
+    await getDb()
+      .insert(question)
+      .values([
+        {
+          taskId: id,
+          origin: 'readiness',
+          body: 'Which page shows the total?',
+          commentId: 'c1',
+          costUsd: 0,
+          answer: 'The invoice page.',
+          answeredBy: 'paulo',
+        },
+        { taskId: id, origin: 'readiness', body: 'Still open?', commentId: 'c2', costUsd: 0 },
+      ])
+
+    await runTask(deps(new FakeSandbox(changed()), { harness: capture }), id)
+
+    expect(prompts[0]).toContain(
+      'Question: Which page shows the total?\n\nAnswer, from paulo: The invoice page.',
+    )
+    expect(prompts[0]).not.toContain('Still open?')
+  })
+
   it('stops a rework that changes nothing instead of reviewing the same commit again', async () => {
     const id = await seedTask()
     const lazy: CodingHarness = {
@@ -3361,7 +3398,13 @@ const owner = (over: Partial<IssueComment> = {}): IssueComment => ({
 
 const inTx: Parameters<typeof pollAnswers>[0]['inTransaction'] = (work) =>
   getDb().transaction((tx) =>
-    work(tx as never, async (taskId, questionId) => void queued.push([taskId, questionId])),
+    work(
+      tx as never,
+      async (taskId, questionId) => void queued.push([taskId, questionId]),
+      async () => {
+        throw new Error('an agent question never queues a first run')
+      },
+    ),
   )
 const queued: [number, number][] = []
 

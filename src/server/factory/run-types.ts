@@ -92,5 +92,36 @@ export type RunResult =
   | { status: 'waiting'; question: string }
   | { status: 'failed'; stage: string; error: string }
 
-/** A question that parked a run, taken back to be resumed. */
-export type Parked = typeof questionTable.$inferSelect
+type QuestionRow = typeof questionTable.$inferSelect
+
+/** A question that parked a run, taken back to be resumed: an agent's, with the sandbox it left. */
+export type Parked = QuestionRow & {
+  snapshotId: string
+  sessionId: string
+  harness: string
+  repoDir: string
+  baseSha: string
+  attempt: number
+}
+
+/**
+ * The question as a parked run, or an error naming what is missing: only an agent's question left a sandbox
+ * to resume, and a readiness question (`scheduler/`) was asked before any run.
+ */
+export function parkedOf(row: QuestionRow): Parked {
+  const { snapshotId, sessionId, harness, repoDir, baseSha, attempt } = row
+  if (
+    row.origin !== 'agent' ||
+    snapshotId === null ||
+    sessionId === null ||
+    harness === null ||
+    repoDir === null ||
+    baseSha === null ||
+    attempt === null
+  ) {
+    throw new Error(
+      `question ${row.id} of task ${row.taskId} was asked by ${row.origin} and left no sandbox to resume`,
+    )
+  }
+  return { ...row, snapshotId, sessionId, harness, repoDir, baseSha, attempt }
+}

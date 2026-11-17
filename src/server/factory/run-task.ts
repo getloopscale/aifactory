@@ -1,9 +1,10 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { question as questionTable, task } from '../db/schema'
 import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
 import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
 import { errorMessage } from './error-message'
+import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
 import { createGithubApi } from '../github/pulls'
 
@@ -11,7 +12,7 @@ import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
-import type { Parked, RunResult, RunTaskDeps } from './run-types'
+import { parkedOf, type Parked, type RunResult, type RunTaskDeps } from './run-types'
 import { enterStage } from './stages'
 
 export type { RunResult, RunTaskDeps } from './run-types'
@@ -58,13 +59,14 @@ export async function resumeTask(
     .where(
       and(
         eq(questionTable.taskId, taskId),
+        eq(questionTable.origin, 'agent'),
         isNotNull(questionTable.answer),
         isNull(questionTable.resumedAt),
       ),
     )
     .returning()
   if (!claimed) throw new Error(`task ${taskId} has no answered question to resume`)
-  return execute(deps, taskId, signal, claimed)
+  return execute(deps, taskId, signal, parkedOf(claimed))
 }
 
 async function execute(
@@ -105,6 +107,7 @@ async function execute(
       signal,
       resuming,
       continuation,
+      clarifications: await clarificationsOf(deps, taskId),
     })
     const started = await run.start()
     return 'result' in started ? started.result : await run.loop(started.sha)
@@ -139,6 +142,26 @@ async function refuseWhileBlocked(
     return (await readIssue(ref.repository, ref.number, token)).state !== 'closed'
   })
   if (open.length > 0) throw new BlockedByOpenIssues(open)
+}
+
+/** The answers the owner gave to the scheduler's readiness questions on this task, oldest first. */
+async function clarificationsOf(deps: RunTaskDeps, taskId: number): Promise<Clarification[]> {
+  const rows = await deps.db
+    .select({
+      question: questionTable.body,
+      answer: questionTable.answer,
+      by: questionTable.answeredBy,
+    })
+    .from(questionTable)
+    .where(
+      and(
+        eq(questionTable.taskId, taskId),
+        eq(questionTable.origin, 'readiness'),
+        isNotNull(questionTable.answer),
+      ),
+    )
+    .orderBy(asc(questionTable.id))
+  return rows.map((r) => ({ question: r.question, answer: r.answer ?? '', by: r.by ?? 'a person' }))
 }
 
 /** Whether a task for this issue has been merged into the repository's integration branch. */

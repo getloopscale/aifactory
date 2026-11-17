@@ -25,6 +25,7 @@ const card = (id: number, over: Partial<TaskCard> = {}): TaskCard => ({
   integrated: false,
   waitingForChecks: false,
   waitingOnBase: null,
+  queue: null,
   resolved: false,
   retryable: null,
   retryAt: null,

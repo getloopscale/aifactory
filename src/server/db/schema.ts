@@ -174,26 +174,34 @@ export const changePlan = pgTable('change_plan', {
 })
 
 /**
- * A question an agent could not go on without. The sandbox was snapshotted when it was asked, so an
- * answer resumes the same session, with the same checkout, in a new sandbox. Everything needed to do
- * that lives here, because by then the process that asked may be gone.
+ * Who asked a question: an agent in a sandbox (`agent`), or the scheduler before any run started, because the
+ * issue was not ready to build (`readiness`, `scheduler/`).
+ */
+export const QUESTION_ORIGINS = ['agent', 'readiness'] as const
+
+/**
+ * A question the factory could not go on without. An agent's question snapshotted the sandbox when it was
+ * asked, so an answer resumes the same session, with the same checkout, in a new sandbox. Everything needed
+ * to do that lives here, because by then the process that asked may be gone. A readiness question has no
+ * sandbox: its sandbox columns are empty, and an answer queues the task's first run again.
  */
 export const question = pgTable('question', {
   id: serial('id').primaryKey(),
   taskId: integer('task_id')
     .notNull()
     .references(() => task.id),
+  origin: text('origin', { enum: QUESTION_ORIGINS }).notNull().default('agent'),
   body: text('body').notNull(),
   /** The comment the factory posted on the issue. */
   commentId: text('comment_id').notNull(),
   askedAt: timestamp('asked_at', { withTimezone: true }).notNull().defaultNow(),
-  snapshotId: text('snapshot_id').notNull(),
-  sessionId: text('session_id').notNull(),
-  harness: text('harness').notNull(),
-  repoDir: text('repo_dir').notNull(),
-  baseSha: text('base_sha').notNull(),
+  snapshotId: text('snapshot_id'),
+  sessionId: text('session_id'),
+  harness: text('harness'),
+  repoDir: text('repo_dir'),
+  baseSha: text('base_sha'),
   /** The attempt the question interrupted, so the budget of three carries over. */
-  attempt: integer('attempt').notNull(),
+  attempt: integer('attempt'),
   /** What the run had spent when it stopped. */
   costUsd: real('cost_usd').notNull(),
   answer: text('answer'),
@@ -838,3 +846,33 @@ export const failureSignature = pgTable('failure_signature', {
   countAfter: integer('count_after'),
   measuredAt: timestamp('measured_at', { withTimezone: true }),
 })
+
+/** What the scheduler decides: the order of the queued runs, and whether an issue is ready to build. */
+export const SCHEDULER_DECISION_KINDS = ['order', 'readiness'] as const
+
+/**
+ * One decision of the scheduler (`scheduler/`), applied or not. An `order` row is the place a queued run was
+ * given (its head is the `available_at` it gets) with the reasons; a `readiness` row is the verdict on an
+ * issue, its head a hash of the title and body it read, so the assistant judges each version of an issue once.
+ * `mode` is the scheduler's mode when it decided: in `trial` nothing was applied.
+ */
+export const schedulerDecision = pgTable(
+  'scheduler_decision',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    kind: text('kind', { enum: SCHEDULER_DECISION_KINDS }).notNull(),
+    mode: text('mode', { enum: ['trial', 'auto'] }).notNull(),
+    head: text('head').notNull(),
+    detail: jsonb('detail').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('scheduler_decision_readiness_once')
+      .on(t.taskId, t.kind, t.head)
+      .where(sql`${t.kind} = 'readiness'`),
+    index('scheduler_decision_task_kind').on(t.taskId, t.kind, t.id),
+  ],
+)

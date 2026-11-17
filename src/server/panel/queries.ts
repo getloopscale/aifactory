@@ -21,6 +21,7 @@ import { retryAt } from '../factory/auto-retry'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
+import { EMPTY_QUEUE, queueViews } from './queue-view'
 import {
   columnOf,
   retryableFailure,
@@ -150,6 +151,10 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   const lastFailure = new Map(failures.map((f) => [f.taskId, f]))
   const byTask = new Map(activity.map((a) => [a.taskId, a]))
   const holds = await baseHolds(db, rows)
+  const queues = await queueViews(
+    db,
+    rows.filter((r) => r.stage === 'intake').map((r) => r.id),
+  )
   return rows.map((r) => {
     const seen = byTask.get(r.id)
     const again =
@@ -175,6 +180,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
       waitingOnBase: holds.get(r.id) ?? null,
+      queue: r.stage === 'intake' ? (queues.get(r.id) ?? EMPTY_QUEUE) : null,
       resolved: r.resolvedSha !== null,
       retryable: again?.retryable ?? null,
       retryAt: again?.at.toISOString() ?? null,

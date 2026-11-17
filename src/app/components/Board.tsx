@@ -1,14 +1,53 @@
 import { Card as Surface, Table } from '@usetheo/ui'
 import { Link } from 'react-router'
 
-import { COLUMNS, type TaskCard } from '../../shared/panel'
+import { COLUMNS, type QueueView, type TaskCard } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
+import type { Copy } from '../lib/copy/en'
 import { ago, money, runsAgain } from '../lib/format'
 
 import { StageBadge } from './Badges'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
+
+/** Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. */
+export function queueWords(
+  queue: QueueView,
+  board: Copy['board'],
+): { place: string; verdict: string | null } {
+  const place = queue.position === null ? board.queueHeld : board.queuePlace(queue.position)
+  const why = queue.reasons
+    ? [
+        queue.reasons.priority === null ? null : board.priority(queue.reasons.priority),
+        queue.reasons.bug ? board.bug : null,
+        queue.reasons.unblocks > 0 ? board.unblocks(queue.reasons.unblocks) : null,
+      ].filter((w): w is string => w !== null)
+    : []
+  const verdict = queue.readiness
+    ? queue.readiness.verdict === 'ready'
+      ? board.ready
+      : board.needsRefinement(queue.readiness.missing)
+    : null
+  return { place: [place, ...why].join(' · '), verdict }
+}
+
+function QueueLines({ queue }: { queue: QueueView }) {
+  const { t } = useCopy()
+  const { place, verdict } = queueWords(queue, t.board)
+  return (
+    <>
+      <div className="mt-1 truncate text-xs text-muted-foreground" title={place}>
+        {place}
+      </div>
+      {verdict ? (
+        <div className="mt-1 truncate text-xs text-muted-foreground" title={verdict}>
+          {verdict}
+        </div>
+      ) : null}
+    </>
+  )
+}
 
 /** Every card on the board is this tall and as wide as its column, so the columns read as even stacks. */
 export function Card({ task }: { task: TaskCard }) {
@@ -41,6 +80,7 @@ export function Card({ task }: { task: TaskCard }) {
             {t.board.waitingOnBase(task.waitingOnBase.checks.join(', '), task.waitingOnBase.branch)}
           </div>
         ) : null}
+        {task.queue ? <QueueLines queue={task.queue} /> : null}
         {task.retryAt ? (
           <div className="mt-1 truncate text-xs text-muted-foreground">
             {runsAgain(task.retryAt, Date.now(), t.time)}
