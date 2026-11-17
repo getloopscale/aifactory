@@ -18,7 +18,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from '../factory/change-plan'
-import { failingOnBase } from '../factory/base-checks'
+import { BaseProbe, sameChecks } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
 import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
@@ -116,6 +116,8 @@ class CaseRun {
   private summary = ''
   /** Every result of the checks in this case, with the commit it ran on. */
   private readonly checkRuns: CheckRun[] = []
+  /** Whether the checks the case failed fail on its base too, as `Run` asks it. */
+  private readonly baseProbe = new BaseProbe()
   private readonly started = Date.now()
 
   constructor(
@@ -329,7 +331,7 @@ class CaseRun {
 
   /** The end of a case whose failing checks fail on its base too, or nothing when any passes there. */
   private async failingOnBase(failed: CheckResult[]): Promise<CaseEnd | undefined> {
-    const red = await failingOnBase(
+    const red = await this.baseProbe.red(
       this.backend,
       {
         repoDir: this.repoDir,
@@ -409,9 +411,15 @@ class CaseRun {
     let sha = await this.applyFixes(await this.commit())
     // The last reviewed commit whose checks passed, and how the case would end there, as `Run.loop` keeps it.
     let reviewed: { sha: string; end: CaseEnd } | undefined
+    // The checks that failed on the commit before, while they keep failing.
+    let failedBefore: CheckResult[] | undefined
     for (;;) {
       const failed = await this.check(sha)
       if (failed.length > 0) {
+        // The same checks failed on the commit before, as `Run.loop` asks (#219).
+        const red = sameChecks(failedBefore, failed) ? await this.failingOnBase(failed) : undefined
+        if (red) return red
+        failedBefore = failed
         if (!this.canRework()) {
           return reviewed ? this.restoreReviewed(reviewed, failed) : checksFailed(failed)
         }
@@ -424,6 +432,7 @@ class CaseRun {
         }
         continue
       }
+      failedBefore = undefined
       const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
         baseSha: this.c.baseSha,
         plan: this.plan,
