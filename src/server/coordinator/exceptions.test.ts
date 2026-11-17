@@ -298,7 +298,11 @@ describe('a task held by a red integration branch', () => {
   it('is unknown, never a throw, when the hold could not be read', () => {
     const facts = held('x', { baseHold: unread('the holds', 'connection lost') })
     expect(recognise(facts)).toEqual([
-      expect.objectContaining({ kind: 'unknown', taskId: 5, evidence: expect.stringContaining('connection lost') }),
+      expect.objectContaining({
+        kind: 'unknown',
+        taskId: 5,
+        evidence: expect.stringContaining('connection lost'),
+      }),
     ])
   })
 })

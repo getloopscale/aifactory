@@ -702,8 +702,12 @@ describe('the hold of a red integration branch', () => {
     expect(baseHoldOf(detail, 'a')).toEqual(detail.baseHold)
     expect(baseHoldOf(detail, 'b')).toBeNull()
     expect(baseHoldOf(detail, null)).toBeNull()
-    expect(baseHoldOf({ baseHold: { sha: 'a', checks: [], since: detail.baseHold.since } }, 'a')).toBeNull()
-    expect(baseHoldOf({ baseHold: { sha: 'a', checks: ['x'], since: 'not a date' } }, 'a')).toBeNull()
+    expect(
+      baseHoldOf({ baseHold: { sha: 'a', checks: [], since: detail.baseHold.since } }, 'a'),
+    ).toBeNull()
+    expect(
+      baseHoldOf({ baseHold: { sha: 'a', checks: ['x'], since: 'not a date' } }, 'a'),
+    ).toBeNull()
     expect(baseHoldOf(null, 'a')).toBeNull()
   })
 

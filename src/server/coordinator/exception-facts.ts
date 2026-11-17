@@ -169,7 +169,7 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
   const holds = await readEach('the holds of the integration branch on the tasks', () =>
     baseHolds(db, waiting),
   )
-  const at = (deps.now?.() ?? new Date())
+  const at = deps.now?.() ?? new Date()
   return Promise.all(
     rows.map(async (r): Promise<TaskFacts> => {
       const lastEvent = last(r.id, null)

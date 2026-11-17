@@ -975,17 +975,13 @@ describe('an integration branch that stays red under a task', () => {
   const NOW = new Date('2026-11-17T12:00:00Z')
   const at = (hours: number) => new Date(NOW.getTime() - hours * 3_600_000).toISOString()
   const heldTask = (checks: string[], hours: number) =>
-    seed(
-      'done',
-      { headSha: 'abc', awaitingCiSha: 'verified0001' },
-      [
-        { stage: 'intake' },
-        {
-          stage: 'done',
-          detail: { baseHold: { sha: 'verified0001', checks, since: at(hours) } },
-        },
-      ],
-    )
+    seed('done', { headSha: 'abc', awaitingCiSha: 'verified0001' }, [
+      { stage: 'intake' },
+      {
+        stage: 'done',
+        detail: { baseHold: { sha: 'verified0001', checks, since: at(hours) } },
+      },
+    ])
   const withClock = (): CoordinatorDeps => ({ ...deps(), now: () => NOW })
 
   it('escalates a hold past the limit, naming the check, once', async () => {

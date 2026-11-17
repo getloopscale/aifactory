@@ -263,11 +263,19 @@ describe('an integration branch red for too long', () => {
 
   it('is not stopped by the limit of applied actions', () => {
     const two = [recorded(), recorded({ headSha: 'o2' })]
-    expect(decide(red, two)).toMatchObject({ action: 'escalate', reason: expect.stringContaining('lint') })
+    expect(decide(red, two)).toMatchObject({
+      action: 'escalate',
+      reason: expect.stringContaining('lint'),
+    })
   })
 
   it('is decided again for another check on the same commit', () => {
-    const before = recorded({ exceptionKind: 'base_red', headSha: '1234567:lint', action: 'escalate', outcome: 'escalated' })
+    const before = recorded({
+      exceptionKind: 'base_red',
+      headSha: '1234567:lint',
+      action: 'escalate',
+      outcome: 'escalated',
+    })
     expect(seen(red, [before], 'auto')).toBe(true)
     expect(seen({ ...red, head: '1234567:test' }, [before], 'auto')).toBe(false)
   })
