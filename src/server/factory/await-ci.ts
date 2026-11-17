@@ -59,6 +59,8 @@ type IntegrationDeps = Pick<AwaitCiDeps, 'db' | 'github' | 'api' | 'releaseMode'
 export type AwaitCiResult = {
   merged: number[]
   sentBack: number[]
+  /** Tasks whose branch was deleted and pull request closed, run again from the integration branch. */
+  startedOver: number[]
   /** Tasks whose pull request conflicts with its base, run again on their branch to merge it. */
   conflictSentBack: number[]
   toPerson: number[]
@@ -330,9 +332,17 @@ async function look(
   const base = integrationBranch(await loadRepoConfig(deps.db, row.repository))
   const required = await deps.api.requiredChecks(row.repository, token, base)
   const blamed = blamedOnBase(done?.detail, verifiedSha)
+  const pull = await deps.api.readPullRequest(row.repository, token, number)
+  // A deleted branch closes its pull request, so the branch is looked for only when it is closed unmerged.
+  const branchGone =
+    pull.state === 'closed' && !pull.merged
+      ? (await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)) ===
+        undefined
+      : undefined
   const input: WaitingIntegration = {
     verifiedSha,
-    pull: await deps.api.readPullRequest(row.repository, token, number),
+    pull,
+    ...(branchGone === undefined ? {} : { branchGone }),
     required,
     reports: await deps.api.checkReports(row.repository, token, verifiedSha),
     blamedOnBase: blamed,
@@ -399,6 +409,11 @@ async function take(
       return
     case 'needs_base':
       throw new Error('the integration branch was read and the base is still asked for')
+    case 'start_over':
+      // The pull request is closed: no auto-merge to turn off, and no branch for the action to keep.
+      await deps.sendBackConflict(row.id, at.base)
+      result.startedOver.push(row.id)
+      return
     case 'send_back_conflict':
       // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
@@ -426,6 +441,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
   const result: AwaitCiResult = {
     merged: [],
     sentBack: [],
+    startedOver: [],
     conflictSentBack: [],
     toPerson: [],
     waiting: 0,

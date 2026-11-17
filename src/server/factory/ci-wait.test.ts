@@ -307,6 +307,18 @@ describe('decideWaitingIntegration', () => {
     })
   })
 
+  it('starts over a closed pull request whose branch is gone, while automatic runs are left', () => {
+    const closed = { ...open, state: 'closed' as const }
+    expect(decide({ pull: closed, branchGone: true })).toMatchObject({ kind: 'start_over' })
+    expect(decide({ pull: closed, branchGone: false })).toMatchObject({ kind: 'person' })
+    expect(decide({ pull: closed })).toMatchObject({ kind: 'person' })
+    expect(
+      decide({ pull: closed, branchGone: true, automaticRuns: AUTOMATIC_RETRIES }),
+    ).toMatchObject({
+      kind: 'person',
+    })
+  })
+
   it('hands to a person a pull request that keeps conflicting', () => {
     expect(
       decide({ pull: { ...open, mergeableState: 'dirty' }, automaticRuns: AUTOMATIC_RETRIES }),

@@ -577,12 +577,40 @@ describe('pollAwaitingIntegrations', () => {
 
   it('leaves auto-merge alone on a pull request a person closed', async () => {
     pull({ state: 'closed' })
+    repo().heads.set('factory/7', VERIFIED)
     const id = await waitingTask()
 
     await pollAwaitingIntegrations(deps())
 
     expect(autoMergeOff()).toEqual([])
     expect(await row(id)).toMatchObject({ stage: 'handoff' })
+  })
+
+  it('starts over, plain, a task whose branch was deleted and whose pull request closed with it', async () => {
+    pull({ state: 'closed' })
+    const id = await waitingTask()
+
+    expect(
+      await pollAwaitingIntegrations(
+        deps({
+          sendBackConflict: (taskId, base) =>
+            sendBackConflictAutomatically(actionDeps(), taskId, base),
+        }),
+      ),
+    ).toMatchObject({ startedOver: [id], toPerson: [], errors: [] })
+
+    expect(autoMergeOff()).toEqual([])
+    expect(queuedRuns).toHaveLength(1)
+    expect(queuedRuns[0].feedback).toBeUndefined()
+    expect(await row(id)).toMatchObject({ stage: 'intake' })
+  })
+
+  it('hands to a person a closed pull request with its branch gone once the automatic runs are spent', async () => {
+    pull({ state: 'closed' })
+    const id = await waitingTask({ automaticRuns: 3 })
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ toPerson: [id] })
+    expect(queuedRuns).toEqual([])
   })
 
   it('sends back on its branch a pull request that conflicts with its base, naming the files, with auto-merge off first', async () => {
@@ -663,6 +691,7 @@ describe('pollAwaitingIntegrations', () => {
     expect(await pollAwaitingIntegrations(deps())).toEqual({
       merged: [],
       sentBack: [],
+      startedOver: [],
       conflictSentBack: [],
       toPerson: [],
       waiting: 0,

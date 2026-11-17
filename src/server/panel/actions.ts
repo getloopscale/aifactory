@@ -387,13 +387,15 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   )
 }
 
-/** The most conflicting files a note names. */
+/** The most files a note names. */
 const CONFLICT_FILES_SHOWN = 20
 
 /**
- * The files both the work and `base` changed since they diverged, where a conflict can be. GitHub has no
- * call for the conflicts themselves, so this is the cause it lets us read. A comparison that fails leaves
- * the list empty: the note then names none, and the send-back still goes.
+ * The files both the work and `base` changed since they diverged: where a conflict can be, though two
+ * edits to different parts of one file merge cleanly. GitHub has no call that merges without writing, so
+ * the conflicts themselves cannot be read. A rename counts for both of its paths. Undefined when a
+ * comparison could not be read (GitHub failed, or it lists more files than it will show): the note then
+ * names nothing, and the send-back still goes.
  */
 export async function conflictingFiles(
   deps: Pick<ActionDeps, 'api'>,
@@ -401,16 +403,18 @@ export async function conflictingFiles(
   token: string,
   base: string,
   head: string,
-): Promise<string[]> {
+): Promise<string[] | undefined> {
   try {
     const [work, moved] = await Promise.all([
       deps.api.changedFiles(repo, token, base, head),
       deps.api.changedFiles(repo, token, head, base),
     ])
-    const changedOnBase = new Set(moved.map((f) => f.path))
-    return work.map((f) => f.path).filter((path) => changedOnBase.has(path))
+    const paths = (f: { path: string; previousPath?: string }) =>
+      f.previousPath ? [f.path, f.previousPath] : [f.path]
+    const movedPaths = new Set(moved.flatMap(paths))
+    return work.filter((f) => paths(f).some((p) => movedPaths.has(p))).map((f) => f.path)
   } catch {
-    return []
+    return undefined
   }
 }
 
@@ -419,12 +423,11 @@ export async function conflictingFiles(
  * work was approved (another task merged first). Tasks of one repository often regenerate the same files,
  * so most of these conflicts are in generated files, which only their generator writes right.
  */
-export function conflictNote(base: string, files: string[] = []): string {
+export function conflictNote(base: string, files: string[] | undefined = []): string {
   const shown = files.slice(0, CONFLICT_FILES_SHOWN)
+  const more = files.length > shown.length ? ` and ${files.length - shown.length} more` : ''
   const named = shown.length
-    ? [
-        `Both sides changed ${shown.join(', ')}${files.length > shown.length ? ` and ${files.length - shown.length} more` : ''}: the conflict is in them.`,
-      ]
+    ? [`Both sides changed ${shown.join(', ')}${more}: a conflict can only be in them.`]
     : []
   return [
     `The pull request conflicts with ${base}, which moved after this work was approved.`,
@@ -453,7 +456,14 @@ async function mergesTheBase(
     .where(eq(repository.fullName, row.repository))
   const base = integrationBranch(config ?? {})
   const files = await conflictingFiles(deps, row.repository, token, base, row.headSha ?? head)
-  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base, files), row.headSha)
+  await requeue(
+    deps,
+    row.id,
+    ['done'],
+    'automatic_changes',
+    conflictNote(base, files ?? []),
+    row.headSha,
+  )
   return true
 }
 
@@ -488,7 +498,14 @@ export async function sendBackConflictAutomatically(
     return
   }
   const files = await conflictingFiles(deps, row.repository, token, base, row.headSha ?? head)
-  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base, files), row.headSha)
+  await requeue(
+    deps,
+    taskId,
+    ['done'],
+    'automatic_changes',
+    conflictNote(base, files ?? []),
+    row.headSha,
+  )
 }
 
 /**
