@@ -253,6 +253,29 @@ describe('listTasks and an integration that waits for the repository checks', ()
 
     expect(cards.get(waiting)).toMatchObject({ waitingForChecks: true, integrated: false })
     expect(cards.get(refused)).toMatchObject({ waitingForChecks: false })
+    expect(cards.get(waiting)).toMatchObject({ waitingOnBase: null })
+  })
+
+  it('names the check and the branch a red integration branch holds a task on', async () => {
+    const since = '2026-11-16T00:00:00.000Z'
+    const blamed = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' }, [
+      {
+        stage: 'done',
+        detail: { baseBlame: { sha: 'abc', checks: ['CI'], base: 'workspace', since } },
+      },
+    ])
+    const stale = await seed('done', { headSha: 'def', awaitingCiSha: 'def' }, [
+      { stage: 'done', detail: { baseBlame: { sha: 'old', checks: ['CI'], base: 'workspace' } } },
+    ])
+
+    const cards = new Map((await listTasks(getDb())).map((c) => [c.id, c]))
+
+    expect(cards.get(blamed)?.waitingOnBase).toEqual({
+      checks: ['CI'],
+      branch: 'workspace',
+      since,
+    })
+    expect(cards.get(stale)?.waitingOnBase).toBeNull()
   })
 })
 

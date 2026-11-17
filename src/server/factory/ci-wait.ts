@@ -10,6 +10,27 @@ import { AUTOMATIC_RETRIES, automaticRunsLeft } from './transitions'
  */
 export const CI_SILENCE_MS = 6 * 60 * 60_000
 
+/**
+ * What a pass stores on the `done` event of the verified commit (`detail.baseBlame`): every required check
+ * found red on the base while it failed on that commit, the integration branch it was red on, and when it
+ * was first seen red.
+ */
+export type BaseBlame = { sha: string; checks: string[]; base?: string; since?: string }
+
+/** The blame stored for this commit, or none: one stored for another commit, or a malformed one, counts for nothing. */
+export function baseBlameOf(detail: unknown, verifiedSha: string): BaseBlame | undefined {
+  const blame = (detail as { baseBlame?: Partial<BaseBlame> } | null | undefined)?.baseBlame
+  if (blame?.sha !== verifiedSha || !Array.isArray(blame.checks)) return undefined
+  return {
+    sha: verifiedSha,
+    checks: blame.checks.filter((name): name is string => typeof name === 'string'),
+    ...(typeof blame.base === 'string' ? { base: blame.base } : {}),
+    ...(typeof blame.since === 'string' && !Number.isNaN(Date.parse(blame.since))
+      ? { since: blame.since }
+      : {}),
+  }
+}
+
 /** The longest note a run takes as feedback, the same as a person's request for changes. */
 const NOTE_MAX = 4_000
 /** Below this much room for each check's report, the note lists the checks and their links only. */

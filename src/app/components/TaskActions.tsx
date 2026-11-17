@@ -103,7 +103,14 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
       className="rounded-lg border border-border bg-card p-4"
     >
       <h2 className="mb-3 text-sm font-semibold">{t.taskActions.heading}</h2>
-      {task.waitingForChecks ? (
+      {task.waitingForChecks && task.waitingOnBase ? (
+        <p className="mb-3 text-sm text-muted-foreground">
+          {t.taskActions.waitingOnBase(
+            task.waitingOnBase.checks.join(', '),
+            task.waitingOnBase.branch,
+          )}
+        </p>
+      ) : task.waitingForChecks ? (
         <p className="mb-3 text-sm text-muted-foreground">{t.taskActions.waitingForChecks}</p>
       ) : null}
       {releaseWaiting && task.releaseWait ? (

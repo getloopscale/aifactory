@@ -220,6 +220,20 @@ describe('deciding a release of a repository', () => {
     })
   })
 
+  it('escalates an integration branch red for long, naming the check, past the limit of applied actions', () => {
+    const red = exception({
+      kind: 'base_red',
+      head: 'abc1234def',
+      evidence: 'CI fails on workspace as on abc1234, red for 3.0 hours',
+    })
+    const tried = [recorded(), recorded({ action: 'review_again' })]
+    expect(decide(red, tried)).toEqual({
+      action: 'escalate',
+      reason:
+        'the integration branch stays red (CI fails on workspace as on abc1234, red for 3.0 hours): the task waits on abc1234 until it passes, and a person looks at it',
+    })
+  })
+
   it('is not held by the limit of applied actions of the task it is recorded on', () => {
     const tried = [recorded(), recorded({ action: 'review_again' })]
     expect(decide(ready([['bug']]), tried).action).toBe('release')

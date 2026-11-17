@@ -4,6 +4,7 @@ import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import { AUTOMATIC_RETRIES } from './transitions'
 import {
+  baseBlameOf,
   CI_SILENCE_MS,
   checksFeedback,
   decideWaitingIntegration,
@@ -677,5 +678,36 @@ describe('checksFeedback with the step that exited', () => {
     expect(note).toContain(
       'CI:\nStep that exited: quality:loc (ran: pnpm quality)\n~~~~text\nERROR: "quality:loc" exited with 1.\n~~~~',
     )
+  })
+})
+
+describe('baseBlameOf', () => {
+  const detail = (baseBlame: unknown) => ({ baseBlame })
+
+  it('reads the blame stored for the commit', () => {
+    expect(
+      baseBlameOf(
+        detail({ sha: 'a', checks: ['CI'], base: 'workspace', since: '2026-11-16T00:00:00.000Z' }),
+        'a',
+      ),
+    ).toEqual({
+      sha: 'a',
+      checks: ['CI'],
+      base: 'workspace',
+      since: '2026-11-16T00:00:00.000Z',
+    })
+  })
+
+  it('leaves out a base or a time that is not a branch name or a date', () => {
+    expect(baseBlameOf(detail({ sha: 'a', checks: ['CI'], base: 3, since: 'soon' }), 'a')).toEqual({
+      sha: 'a',
+      checks: ['CI'],
+    })
+  })
+
+  it('counts a blame of another commit, or a malformed one, for nothing', () => {
+    expect(baseBlameOf(detail({ sha: 'b', checks: ['CI'] }), 'a')).toBeUndefined()
+    expect(baseBlameOf(detail({ sha: 'a', checks: 'CI' }), 'a')).toBeUndefined()
+    expect(baseBlameOf(null, 'a')).toBeUndefined()
   })
 })

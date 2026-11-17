@@ -43,6 +43,7 @@ const base: TaskCard = {
   approved: false,
   integrated: false,
   waitingForChecks: false,
+  waitingOnBase: null,
   resolved: false,
   retryable: null,
   retryAt: null,
@@ -364,6 +365,20 @@ describe('releasing from the panel', () => {
       render(<TaskActions detail={detail({ task })} onDone={noop} />)
       expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
     }
+  })
+
+  it('names the check and the branch of a task held by a red integration branch', () => {
+    const waitingOnBase = { checks: ['CI', 'Lint'], branch: 'workspace', since: null }
+    render(
+      <TaskActions
+        detail={detail({ task: { ...base, waitingForChecks: true, waitingOnBase } })}
+        onDone={noop}
+      />,
+    )
+    expect(
+      screen.getByText(/Waiting for CI, Lint to pass on the integration branch workspace/),
+    ).toBeDefined()
+    expect(screen.queryByText(/merges this pull request once/)).toBeNull()
   })
 
   it('says GitHub merges a pull request that waits for the repository checks', () => {

@@ -3,6 +3,8 @@ import { inArray } from 'drizzle-orm'
 import type { Database } from '../db'
 import { task } from '../db/schema'
 
+import { recogniseBaseRed } from './base-red'
+import { readBaseRedFacts } from './base-red-facts'
 import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
@@ -18,18 +20,23 @@ import { recogniseRelease } from './release-train'
 export type PassResult = Record<CoordinatorOutcome, number>
 
 /** What a pass needs: the panel's actions, the two GitHub writes of a scope, the drafter and the release mode. */
-export type CoordinatorDeps = ApplyDeps & DraftDeps & Pick<ReleaseFactsDeps, 'releaseMode'>
+export type CoordinatorDeps = ApplyDeps &
+  DraftDeps &
+  Pick<ReleaseFactsDeps, 'releaseMode'> & { now?: () => Date }
 
 /** The exceptions of the tasks, then the release of each repository the train does not hold. */
 async function exceptionsOf(deps: CoordinatorDeps): Promise<TaskException[]> {
   const ofTasks = (await readExceptionFacts(deps)).flatMap(recognise)
   const ofReleases = (await readReleaseFacts(deps)).map(recogniseRelease)
   const ofQueues = (await readQueueFacts(deps)).map(recogniseQueue)
+  const now = deps.now?.() ?? new Date()
+  const ofBase = (await readBaseRedFacts(deps.db)).map((f) => recogniseBaseRed(f, now))
   // The queue first: a task that failed on the test must find its fix already moved when its turn comes.
   return [
     ...ofQueues.filter((e): e is TaskException => e !== undefined),
     ...ofTasks,
     ...ofReleases.filter((e): e is TaskException => e !== undefined),
+    ...ofBase.filter((e): e is TaskException => e !== undefined),
   ]
 }
 

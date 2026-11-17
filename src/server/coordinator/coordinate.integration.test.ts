@@ -293,6 +293,38 @@ describe('the limit of applied actions on a task', () => {
   })
 })
 
+describe('an integration branch that stays red under a waiting task', () => {
+  const since = '2026-11-16T00:00:00.000Z'
+  const waiting = (sha: string, at: string) =>
+    seed('done', { headSha: sha, awaitingCiSha: sha }, [
+      {
+        stage: 'done',
+        detail: { baseBlame: { sha, checks: ['CI'], base: 'workspace', since: at } },
+      },
+    ])
+  const at = (hours: number) => () => new Date(Date.parse(since) + hours * 3_600_000)
+
+  it('records an escalation that names the check once it is red for longer than the limit', async () => {
+    const id = await waiting('abc1234def', since)
+
+    const result = await coordinate({ ...deps(), now: at(3) }, 'auto')
+
+    expect(result.escalated).toBe(1)
+    expect(await actions()).toMatchObject([
+      { taskId: id, exceptionKind: 'base_red', headSha: 'abc1234def', action: 'escalate' },
+    ])
+    expect((await actions())[0].reason).toContain('CI fails on workspace')
+  })
+
+  it('records nothing while the branch has been red for less than the limit', async () => {
+    await waiting('abc1234def', since)
+
+    await coordinate({ ...deps(), now: at(1) }, 'auto')
+
+    expect(await actions()).toEqual([])
+  })
+})
+
 describe('a failure of the environment', () => {
   const environment = (automaticIntakes: number) =>
     seed('failed', {}, [

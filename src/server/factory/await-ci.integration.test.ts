@@ -300,7 +300,23 @@ describe('pollAwaitingIntegrations', () => {
 
     await pollAwaitingIntegrations(deps())
 
-    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
+    expect(await blameOf(id)).toEqual({
+      sha: VERIFIED,
+      checks: ['CI'],
+      base: 'workspace',
+      since: expect.any(String),
+    })
+  })
+
+  it('keeps the time the base was first seen red across passes', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    const first = (await blameOf(id)) as { since: string }
+    await pollAwaitingIntegrations({ ...deps(), now: () => new Date(Date.now() + 3_600_000) })
+
+    expect(((await blameOf(id)) as { since: string }).since).toBe(first.since)
   })
 
   it('runs the task to merge the base, with no agent sent back, once the base passes the check', async () => {
@@ -327,7 +343,7 @@ describe('pollAwaitingIntegrations', () => {
     reports(failure('CI'), failure('Lint'))
     baseIs(failure('CI', 'https://ci/0'), failure('Lint', 'https://ci/0'))
     await pollAwaitingIntegrations(deps())
-    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI', 'Lint'] })
+    expect(await blameOf(id)).toMatchObject({ sha: VERIFIED, checks: ['CI', 'Lint'] })
 
     baseIs(success('CI'), failure('Lint', 'https://ci/0'))
     expect(await pollAwaitingIntegrations(deps())).toMatchObject({ waitingOnBase: [id] })

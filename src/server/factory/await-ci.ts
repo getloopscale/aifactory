@@ -10,6 +10,8 @@ import { errorMessage } from './error-message'
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
+  baseBlameOf,
+  type BaseBlame,
   checksFeedback,
   decideWaitingIntegration,
   evidenceOfNote,
@@ -272,31 +274,32 @@ async function readBase(
   return deps.api.checkReports(repository, token, head)
 }
 
-/**
- * What a pass stores on the `done` event of the verified commit (`detail.baseBlame`): every required check
- * found red on the base while it failed on that commit.
- */
-type BaseBlame = { sha: string; checks: string[] }
-
 /** The checks blamed on the base for the verified commit; a blame stored for another commit counts for nothing. */
 function blamedOnBase(detail: unknown, verifiedSha: string): string[] {
-  const blame = (detail as { baseBlame?: Partial<BaseBlame> } | null | undefined)?.baseBlame
-  return blame?.sha === verifiedSha && Array.isArray(blame.checks) ? blame.checks : []
+  return baseBlameOf(detail, verifiedSha)?.checks ?? []
 }
 
 /**
  * Adds the checks this pass found red on the base to the ones blamed before, so a later pass still knows
- * whose their failure is once the base passes them. The list only grows while the commit waits.
+ * whose their failure is once the base passes them. The list only grows while the commit waits; `since` is
+ * when the base was first seen red for this commit, and stays.
  */
 async function rememberBaseRed(
   deps: AwaitCiDeps,
   done: { id: number; detail: unknown },
   verifiedSha: string,
-  before: string[],
+  base: string,
   red: string[],
 ): Promise<void> {
-  if (red.every((name) => before.includes(name))) return
-  const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
+  const before = baseBlameOf(done.detail, verifiedSha)
+  const known = before?.checks ?? []
+  if (before?.since && before.base === base && red.every((name) => known.includes(name))) return
+  const baseBlame: BaseBlame = {
+    sha: verifiedSha,
+    checks: [...new Set([...known, ...red])],
+    base,
+    since: before?.since ?? (deps.now?.() ?? new Date()).toISOString(),
+  }
   await deps.db
     .update(stageEvent)
     .set({ detail: { ...(done.detail as Record<string, unknown>), baseBlame } })
@@ -346,7 +349,7 @@ async function look(
     step = decideWaitingIntegration({ ...input, baseReports })
   }
   if (done && step.kind === 'wait' && step.baseRed) {
-    await rememberBaseRed(deps, done, verifiedSha, blamed, step.baseRed)
+    await rememberBaseRed(deps, done, verifiedSha, base, step.baseRed)
   }
   const w: Waiting = {
     row,

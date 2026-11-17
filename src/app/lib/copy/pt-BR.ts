@@ -262,6 +262,8 @@ export const ptBR: Copy = {
     heading: 'O que você quer fazer?',
     waitingForChecks:
       'O GitHub une este pull request assim que as verificações exigidas do repositório passarem, e a fábrica termina a integração depois. Uma verificação que falhar devolve o trabalho ao agente.',
+    waitingOnBase: (checks: string, branch: string) =>
+      `Esperando ${checks} passar na branch de integração ${branch}: ela também falha lá, então não é desta tarefa. A fábrica une a branch a este pull request quando passar.`,
     releaseWaitBefore: 'O pull request do lançamento',
     releaseWaitAfter: (checks: string) =>
       `espera as verificações exigidas da branch de lançamento: ${checks}. O GitHub o une assim que passarem, e a fábrica termina o lançamento depois. Uma verificação que falhar interrompe o lançamento, e o motivo aparece aqui.`,
@@ -896,6 +898,7 @@ export const ptBR: Copy = {
       release_retry: 'Publicação a repetir',
       release_blocked: 'Publicação bloqueada',
       queue_blocked: 'Correção esperando na fila',
+      base_red: 'Branch de integração vermelha',
     } as Record<string, string>,
   },
   inbox: {

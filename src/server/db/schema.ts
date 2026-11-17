@@ -764,6 +764,7 @@ export const EXCEPTION_KINDS = [
   'release_retry',
   'release_blocked',
   'queue_blocked',
+  'base_red',
 ] as const
 
 /** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */

@@ -188,6 +188,8 @@ export const en = {
     heading: 'What do you want to do?',
     waitingForChecks:
       "GitHub merges this pull request once the repository's required checks pass, and the factory finishes the integration then. A check that fails sends the work back to the agent.",
+    waitingOnBase: (checks: string, branch: string) =>
+      `Waiting for ${checks} to pass on the integration branch ${branch}: it fails there too, so it is not this task's. The factory merges the branch into this pull request once it passes.`,
     releaseWaitBefore: 'The release pull request',
     releaseWaitAfter: (checks: string) =>
       `waits for the required checks of the release branch: ${checks}. GitHub merges it once they pass, and the factory finishes the release then. A check that fails stops the release, and the reason shows here.`,
@@ -657,6 +659,7 @@ export const en = {
       release_retry: 'Release to retry',
       release_blocked: 'Release blocked',
       queue_blocked: 'Fix waiting in the queue',
+      base_red: 'Integration branch red',
     } as Record<string, string>,
   },
   inbox: {

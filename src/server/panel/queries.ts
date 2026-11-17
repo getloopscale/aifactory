@@ -17,6 +17,7 @@ import {
   watch,
 } from '../db/schema'
 import { retryAt } from '../factory/auto-retry'
+import { baseBlameOf } from '../factory/ci-wait'
 import { pendingSendBack } from '../factory/send-back'
 import {
   columnOf,
@@ -132,6 +133,19 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     .from(stageEvent)
     .where(and(inArray(stageEvent.taskId, ids), eq(stageEvent.stage, 'failed')))
     .orderBy(stageEvent.taskId, desc(stageEvent.id))
+  const waitingIds = rows.filter((r) => r.awaitingCiSha !== null).map((r) => r.id)
+  const dones =
+    waitingIds.length === 0
+      ? []
+      : await db
+          .selectDistinctOn([stageEvent.taskId], {
+            taskId: stageEvent.taskId,
+            detail: stageEvent.detail,
+          })
+          .from(stageEvent)
+          .where(and(inArray(stageEvent.taskId, waitingIds), eq(stageEvent.stage, 'done')))
+          .orderBy(stageEvent.taskId, desc(stageEvent.id))
+  const lastDone = new Map(dones.map((d) => [d.taskId, d.detail]))
   const lastFailure = new Map(failures.map((f) => [f.taskId, f]))
   const byTask = new Map(activity.map((a) => [a.taskId, a]))
   return rows.map((r) => {
@@ -158,6 +172,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       approved: r.headSha !== null && kinds.some((k) => k.sha === r.headSha),
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
+      waitingOnBase: waitingOnBase(r, lastDone.get(r.id)),
       resolved: r.resolvedSha !== null,
       retryable: again?.retryable ?? null,
       retryAt: again?.at.toISOString() ?? null,
@@ -167,6 +182,13 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       releaseWait: lastReleaseWait(releases, r),
     }
   })
+}
+
+/** What holds a task that waits for CI on the integration branch, when its failed checks are blamed on it. */
+function waitingOnBase(t: TaskRow, done: unknown): TaskCard['waitingOnBase'] {
+  const blame = t.awaitingCiSha === null ? undefined : baseBlameOf(done, t.awaitingCiSha)
+  if (!blame || blame.checks.length === 0 || !blame.base) return null
+  return { checks: blame.checks, branch: blame.base, since: blame.since ?? null }
 }
 
 /** The latest release of a task that waits for checks or was refused, while the task is not released. */
