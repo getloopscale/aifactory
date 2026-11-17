@@ -600,4 +600,28 @@ describe('paths the builder may not touch', () => {
     expect(result.verdict).toBe('changes')
     expect(result.findings.map((f) => f.severity)).toEqual(['minor', 'major'])
   })
+
+  it('treats a finding already minor on .github as follow-up too', () => {
+    const result = parseVerdict(
+      answer({
+        verdict: 'changes',
+        summary: 's',
+        findings: [{ severity: 'minor', file: '.github/ci.yml', issue: 'wire the gate' }],
+      }),
+    )
+    expect(result.verdict).toBe('approve')
+  })
+
+  it('leaves the verdict alone when asked not to downgrade (a claim that the issue is resolved)', () => {
+    const result = parseVerdict(
+      answer({
+        verdict: 'changes',
+        summary: 's',
+        findings: [{ severity: 'major', file: '.github/ci.yml', issue: 'missing' }],
+      }),
+      { followUpPaths: false },
+    )
+    expect(result.verdict).toBe('changes')
+    expect(result.findings[0]?.severity).toBe('major')
+  })
 })

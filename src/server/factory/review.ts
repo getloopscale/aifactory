@@ -251,7 +251,11 @@ export function jsonObjects(text: string): string[] {
  * word that is not one of the two, is `invalid`, and so is an approval that lists a blocker or a
  * major finding: when the reviewer contradicts itself, the factory does not pick the kinder reading.
  */
-export function parseVerdict(text: string): ReviewVerdict {
+export function parseVerdict(
+  text: string,
+  options: { followUpPaths?: boolean } = {},
+): ReviewVerdict {
+  const followUpPaths = options.followUpPaths ?? true
   for (const candidate of jsonObjects(text).reverse()) {
     let parsed: { verdict?: unknown; summary?: unknown; findings?: unknown }
     try {
@@ -268,17 +272,19 @@ export function parseVerdict(text: string): ReviewVerdict {
         issue: String(f.issue ?? '').slice(0, 600),
       }))
       .filter((f) => f.issue !== '')
-    let downgraded = 0
-    for (const f of findings) {
-      if (f.file !== undefined && isForbiddenPath(f.file) && f.severity !== 'minor') {
+    let forbidden = 0
+    if (followUpPaths) {
+      for (const f of findings) {
+        if (f.file === undefined || !isForbiddenPath(f.file)) continue
+        forbidden++
+        if (f.severity === 'minor') continue
         f.severity = 'minor'
         f.issue = `follow-up for a person: ${f.issue}`
-        downgraded++
       }
     }
     const summary = String(parsed.summary ?? '').slice(0, 600)
     const verdict = parsed.verdict.toLowerCase()
-    if (verdict === 'changes' && downgraded > 0 && !findings.some((f) => f.severity !== 'minor')) {
+    if (verdict === 'changes' && forbidden > 0 && !findings.some((f) => f.severity !== 'minor')) {
       return { verdict: 'approve', summary, findings }
     }
     if (verdict === 'changes') return { verdict: 'changes', summary, findings }
