@@ -24,7 +24,6 @@ import {
 } from '../db/schema'
 import { COLUMNS } from '../../shared/panel'
 import { FakeGithub } from '../../test/fake-github'
-import type { ChangedFile, GithubApi } from '../github/pulls'
 
 import {
   ActionRefused,
@@ -39,8 +38,6 @@ import {
   retry,
   retryAutomatically,
   sendBackAutomatically,
-  conflictingFiles,
-  conflictNote,
   sendBackConflictAutomatically,
   type ActionDeps,
 } from './actions'
@@ -1436,12 +1433,6 @@ describe('actions', () => {
       ],
     )
     api.repo('paulo/app').heads.set('factory/85', 'approved1')
-    api
-      .repo('paulo/app')
-      .compare('workspace', 'approved1', [{ path: 'docs/a.md', status: 'modified' }])
-    api
-      .repo('paulo/app')
-      .compare('approved1', 'workspace', [{ path: 'docs/a.md', status: 'modified' }])
 
     expect(await runConflictRetries(deps(), { limit: 5 })).toEqual({ started: 1, skipped: 0 })
 
@@ -1456,7 +1447,6 @@ describe('actions', () => {
     expect(input.taskId).toBe(id)
     expect(input.feedback).toContain('git merge origin/workspace')
     expect(input.feedback).toMatch(/generated file/)
-    expect(input.feedback).toContain('docs/a.md')
   })
 
   it('sends back on its own branch a waiting integration that conflicts with its base, and starts over only without the branch', async () => {
@@ -1466,18 +1456,11 @@ describe('actions', () => {
       awaitingCiSha: 'approved1',
     })
     api.repo('paulo/app').heads.set('factory/86', 'approved1')
-    api
-      .repo('paulo/app')
-      .compare('workspace', 'approved1', [{ path: 'docs/b.md', status: 'modified' }])
-    api
-      .repo('paulo/app')
-      .compare('approved1', 'workspace', [{ path: 'docs/b.md', status: 'modified' }])
     await sendBackConflictAutomatically(deps(), kept, 'workspace')
     expect(deleted()).toEqual([])
     const input = queued.at(-1)?.input as { taskId: number; feedback?: string }
     expect(input.taskId).toBe(kept)
     expect(input.feedback).toContain('git merge origin/workspace')
-    expect(input.feedback).toContain('docs/b.md')
 
     const gone = await seed('done', {
       issueNumber: 87,
@@ -1704,69 +1687,6 @@ describe('deliveries on the panel', () => {
     await expect(releaseTask(deps, id, 'patch')).rejects.toThrow(ActionRefused)
     await expect(releaseTask(deps, id, 'patch')).rejects.toThrow(/only a finished task/)
     await expect(releaseTask(deps, 999, 'patch')).rejects.toThrow(/does not exist/)
-  })
-})
-
-describe('the files a conflict note names', () => {
-  const at = (work: ChangedFile[], moved: ChangedFile[]) => {
-    const api = new FakeGithub()
-    api.repo('paulo/app').compare('workspace', 'head1', work).compare('head1', 'workspace', moved)
-    return conflictingFiles({ api }, 'paulo/app', 't', 'workspace', 'head1')
-  }
-
-  it('names the files both sides changed, and none that only one side did', async () => {
-    expect(
-      await at(
-        [
-          { path: 'a.md', status: 'modified' },
-          { path: 'own.ts', status: 'added' },
-        ],
-        [
-          { path: 'a.md', status: 'modified' },
-          { path: 'other.ts', status: 'modified' },
-        ],
-      ),
-    ).toEqual(['a.md'])
-  })
-
-  it('names nothing when the two sides touched different files', async () => {
-    expect(
-      await at([{ path: 'own.ts', status: 'added' }], [{ path: 'o.ts', status: 'added' }]),
-    ).toEqual([])
-  })
-
-  it('counts a rename on either side for its old path too', async () => {
-    expect(
-      await at(
-        [{ path: 'new/a.md', previousPath: 'a.md', status: 'renamed' }],
-        [{ path: 'a.md', status: 'modified' }],
-      ),
-    ).toEqual(['new/a.md'])
-    expect(
-      await at(
-        [{ path: 'a.md', status: 'modified' }],
-        [{ path: 'new/a.md', previousPath: 'a.md', status: 'renamed' }],
-      ),
-    ).toEqual(['a.md'])
-  })
-
-  it('answers undefined when a comparison cannot be read, and the note names no file', async () => {
-    const api = {
-      changedFiles: async () => {
-        throw new Error('GitHub lists 3000 files or more')
-      },
-    } as unknown as GithubApi
-    const files = await conflictingFiles({ api }, 'paulo/app', 't', 'workspace', 'head1')
-    expect(files).toBeUndefined()
-    expect(conflictNote('workspace', files)).toBe(conflictNote('workspace'))
-  })
-
-  it('says a conflict can only be in the files it names, and caps the list', () => {
-    const many = Array.from({ length: 23 }, (_, i) => `f${i}.md`)
-    const note = conflictNote('workspace', many)
-    expect(note).toContain('a conflict can only be in them')
-    expect(note).toContain('f19.md and 3 more')
-    expect(note).not.toContain('f20.md')
   })
 })
 

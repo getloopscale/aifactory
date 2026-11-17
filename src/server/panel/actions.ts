@@ -387,51 +387,14 @@ export async function retryAutomatically(deps: ActionDeps, taskId: number) {
   )
 }
 
-/** The most files a note names. */
-const CONFLICT_FILES_SHOWN = 20
-
-/**
- * The files both the work and `base` changed since they diverged: where a conflict can be, though two
- * edits to different parts of one file merge cleanly. GitHub has no call that merges without writing, so
- * the conflicts themselves cannot be read. A rename counts for both of its paths. Undefined when a
- * comparison could not be read (GitHub failed, or it lists more files than it will show): the note then
- * names nothing, and the send-back still goes.
- */
-export async function conflictingFiles(
-  deps: Pick<ActionDeps, 'api'>,
-  repo: string,
-  token: string,
-  base: string,
-  head: string,
-): Promise<string[] | undefined> {
-  try {
-    const [work, moved] = await Promise.all([
-      deps.api.changedFiles(repo, token, base, head),
-      deps.api.changedFiles(repo, token, head, base),
-    ])
-    const paths = (f: { path: string; previousPath?: string }) =>
-      f.previousPath ? [f.path, f.previousPath] : [f.path]
-    const movedPaths = new Set(moved.flatMap(paths))
-    return work.filter((f) => paths(f).some((p) => movedPaths.has(p))).map((f) => f.path)
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * What a run is told when its finished work conflicts with the integration branch, which moved after the
  * work was approved (another task merged first). Tasks of one repository often regenerate the same files,
  * so most of these conflicts are in generated files, which only their generator writes right.
  */
-export function conflictNote(base: string, files: string[] | undefined = []): string {
-  const shown = files.slice(0, CONFLICT_FILES_SHOWN)
-  const more = files.length > shown.length ? ` and ${files.length - shown.length} more` : ''
-  const named = shown.length
-    ? [`Both sides changed ${shown.join(', ')}${more}: a conflict can only be in them.`]
-    : []
+export function conflictNote(base: string): string {
   return [
     `The pull request conflicts with ${base}, which moved after this work was approved.`,
-    ...named,
     `Merge it into this branch: git fetch origin ${base} && git merge origin/${base}.`,
     'Resolve each conflict keeping what both sides changed. A generated file (a reference, a map or docs a script writes) is regenerated with the script that writes it, never edited by hand; a budget or a version takes the value the merged code needs.',
     'Commit the merge and change nothing else.',
@@ -455,15 +418,7 @@ async function mergesTheBase(
     .from(repository)
     .where(eq(repository.fullName, row.repository))
   const base = integrationBranch(config ?? {})
-  const files = await conflictingFiles(deps, row.repository, token, base, row.headSha ?? head)
-  await requeue(
-    deps,
-    row.id,
-    ['done'],
-    'automatic_changes',
-    conflictNote(base, files ?? []),
-    row.headSha,
-  )
+  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
   return true
 }
 
@@ -497,15 +452,7 @@ export async function sendBackConflictAutomatically(
     await requeue(deps, taskId, ['done'], 'automatic_retry', '', row.headSha)
     return
   }
-  const files = await conflictingFiles(deps, row.repository, token, base, row.headSha ?? head)
-  await requeue(
-    deps,
-    taskId,
-    ['done'],
-    'automatic_changes',
-    conflictNote(base, files ?? []),
-    row.headSha,
-  )
+  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
 }
 
 /**
