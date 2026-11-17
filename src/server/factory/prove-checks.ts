@@ -5,6 +5,7 @@ import type { GithubApi } from '../github/pulls'
 import { DEFAULT_CHECK_MS, fitToSession } from './agent-time'
 import { ensureBranches, integrationBranch } from './branches'
 import { cloneRepository } from './clone'
+import { prepareDeclaredPackageManager } from './package-manager'
 import { githubEgress, renewGithubCredential } from './credential-renewal'
 import { runChecks, type CheckResult, type CheckSpec } from './evidence'
 import { withRecipe, type Recipe } from './recipe'
@@ -156,6 +157,7 @@ export async function proveChecks(
       ref: integration,
       instanceId: PROOF_INSTANCE,
     })
+    await prepareDeclaredPackageManager(sandbox.backend, repoDir)
     const sha = (await must(sandbox.backend, `git -C ${repoDir} rev-parse HEAD`)).stdout.trim()
     const results = await runChecks(sandbox.backend, repoDir, checks, limitMs)
     return { sha, limitMs, results: provenResults(checks, results) }

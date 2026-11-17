@@ -49,17 +49,21 @@ describe('an E2B sandbox', () => {
     )
     await prepareDeclaredPackageManager(sandbox.backend, '/tmp/pm-repo')
     await sandbox.updateEgress?.(NO_REGISTRY)
-    const refused = await sh('curl -sS -m 15 -o /dev/null https://registry.npmjs.org/pnpm')
-    expect(refused.exitCode).not.toBe(0)
-    const child = `const {execFileSync}=require('child_process');const env={PATH:process.env.PATH,HOME:process.env.HOME};console.log(execFileSync('pnpm',['--version'],{env,cwd:'/tmp/pm-repo'}).toString().trim())`
-    expect(await sh(`node -e "${child}"`)).toMatchObject({ stdout: `${version}\n`, exitCode: 0 })
-    // The image's own version needs no preparation at all.
-    await sandbox.backend.uploadFile(
-      '/tmp/pm-image/package.json',
-      JSON.stringify({ name: 'pm', packageManager: `pnpm@${SANDBOX_TOOLCHAIN.pnpm}` }),
-    )
-    const image = child.replace('/tmp/pm-repo', '/tmp/pm-image')
-    expect((await sh(`node -e "${image}"`)).stdout).toBe(`${SANDBOX_TOOLCHAIN.pnpm}\n`)
+    try {
+      const refused = await sh('curl -sS -m 15 -o /dev/null https://registry.npmjs.org/pnpm')
+      expect(refused.exitCode).not.toBe(0)
+      const child = `const {execFileSync}=require('child_process');const env={PATH:process.env.PATH,HOME:process.env.HOME};console.log(execFileSync('pnpm',['--version'],{env,cwd:'/tmp/pm-repo'}).toString().trim())`
+      expect(await sh(`node -e "${child}"`)).toMatchObject({ stdout: `${version}\n`, exitCode: 0 })
+      // The image's own version needs no preparation at all.
+      await sandbox.backend.uploadFile(
+        '/tmp/pm-image/package.json',
+        JSON.stringify({ name: 'pm', packageManager: `pnpm@${SANDBOX_TOOLCHAIN.pnpm}` }),
+      )
+      const image = child.replace('/tmp/pm-repo', '/tmp/pm-image')
+      expect((await sh(`node -e "${image}"`)).stdout).toBe(`${SANDBOX_TOOLCHAIN.pnpm}\n`)
+    } finally {
+      await sandbox.updateEgress?.(spec.egress)
+    }
   }, 300_000)
 
   it('cannot reach a domain that is not listed', async () => {
