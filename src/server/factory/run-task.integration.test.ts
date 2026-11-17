@@ -30,7 +30,7 @@ import {
 import type { GithubApp } from '../github/app'
 import type { ChangedFile, IssueComment } from '../github/pulls'
 
-import { retryableFailure } from '../../shared/panel'
+import { retryableFailure, type Stage } from '../../shared/panel'
 import { retryAt } from './auto-retry'
 import {
   divergedRepository,
@@ -3052,6 +3052,105 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
         expect(row.stage).toBe('done')
       },
     )
+
+    it('counts the runs again once the network has been down longer than any outage, and a person is called', async () => {
+      const id = await seedTask()
+      const queued: Queued[] = []
+      const action = actionDeps(queued, [])
+      const drops = { left: 1000 }
+      const failing = () => where['reading the issue'](drops)
+      expect(await runTask(failing(), id)).toMatchObject({ status: 'failed', stage: 'sandbox' })
+      // The failure is older than the span when the next runs begin.
+      await getDb()
+        .update(stageEvent)
+        .set({ at: new Date(Date.now() - 2 * 3600_000) })
+        .where(eq(stageEvent.taskId, id))
+      let runs = 0
+      for (; runs < 20; runs++) {
+        const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+        if (card.retryAt === null) break
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        const input = queued.at(-1)!
+        await runTask(
+          failing(),
+          id,
+          undefined,
+          runContinuation(undefined, input.feedback, input.resume),
+        )
+      }
+      expect(runs).toBe(3)
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.retryAt).toBeNull()
+      expect(card.column).toBe('attention')
+    })
+
+    /** A task that failed, with the events given: minutes ago, the stage and its detail. */
+    async function failedWith(issueNumber: number, events: [number, Stage, object?][]) {
+      const id = await seedTask(issueNumber)
+      await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+      for (const [ago, stage, detail] of events) {
+        await getDb()
+          .insert(stageEvent)
+          .values({ taskId: id, stage, detail, at: new Date(Date.now() - ago * 60_000) })
+      }
+      return (await listTasks(getDb())).find((c) => c.id === id)!
+    }
+    const dropAt = (error = 'fetch failed') => ({ error })
+    const person = { decision: 'retry', note: '' }
+    const auto = { decision: 'retry', automatic: true }
+    /** One run that failed creating its sandbox, `ago` minutes ago. */
+    const run = (ago: number, detail: object, error?: string): [number, Stage, object?][] => [
+      [ago, 'intake', detail],
+      [ago, 'sandbox'],
+      [ago, 'failed', dropAt(error)],
+    ]
+    const rework = { decision: 'request_changes', note: 'rename it' }
+
+    it('counts the network failures of a rework once they outlast the span, and calls a person', async () => {
+      const review: [number, Stage][] = [[400, 'review']]
+      const tooLong = await failedWith(11, [
+        ...review,
+        ...run(180, rework),
+        ...run(110, { ...rework, automatic: true }),
+        ...run(100, { ...rework, automatic: true }),
+        ...run(90, { ...rework, automatic: true }),
+      ])
+      expect(tooLong.retryAt).toBeNull()
+      expect(tooLong.column).toBe('attention')
+      const brief = await failedWith(12, [
+        ...review,
+        ...run(180, rework),
+        ...run(170, { ...rework, automatic: true }),
+        ...run(160, { ...rework, automatic: true }),
+        ...run(150, { ...rework, automatic: true }),
+      ])
+      expect(brief.retryAt).not.toBeNull()
+    })
+
+    it('starts the free span at the network streak, not at an older failure of another kind', async () => {
+      const card = await failedWith(13, [
+        ...run(600, person, '403: team is blocked: spend_limit'),
+        ...run(595, auto, '403: team is blocked: spend_limit'),
+        ...run(10, auto),
+        ...run(5, auto),
+        ...run(2, auto),
+      ])
+      // One counted run (the blocked one): the short outage after it is still free.
+      expect(card.retryAt).not.toBeNull()
+    })
+
+    it('starts the free span again when a person retries the task', async () => {
+      const card = await failedWith(14, [
+        ...run(300, person),
+        ...run(250, auto),
+        ...run(200, auto),
+        ...run(10, person),
+        ...run(5, auto),
+        ...run(3, auto),
+        ...run(1, auto),
+      ])
+      expect(card.retryAt).not.toBeNull()
+    })
 
     it('still limits the runs of an agent that fails with it, since that work was attempted', async () => {
       const id = await seedTask()
