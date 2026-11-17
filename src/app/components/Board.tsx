@@ -4,7 +4,7 @@ import { Link } from 'react-router'
 import { COLUMNS, type QueueView, type TaskCard } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
 import type { Copy } from '../lib/copy/en'
-import { ago, money, runsAgain } from '../lib/format'
+import { ago, lastAgentLine, money, runsAgain, workingLine } from '../lib/format'
 
 import { StageBadge } from './Badges'
 
@@ -46,6 +46,23 @@ function QueueLines({ queue }: { queue: QueueView }) {
         </div>
       ) : null}
     </>
+  )
+}
+
+/** What works on a running task now, or, more quietly, who worked on it last. */
+function AgentLine({ task }: { task: TaskCard }) {
+  const { t } = useCopy()
+  const line = task.working
+    ? workingLine(task.working, t.board)
+    : task.lastAgent
+      ? lastAgentLine(task.lastAgent, t.board)
+      : null
+  if (!line) return null
+  const tone = task.working ? 'font-medium text-foreground' : 'text-muted-foreground'
+  return (
+    <div className={`mt-1 truncate text-xs ${tone}`} title={line}>
+      {line}
+    </div>
   )
 }
 
@@ -91,6 +108,7 @@ export function Card({ task }: { task: TaskCard }) {
             {t.board.attempt(task.attempts)}
           </div>
         ) : null}
+        <AgentLine task={task} />
         <div className="mt-auto">
           <StageBadge
             stage={task.stage}

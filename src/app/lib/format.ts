@@ -1,4 +1,11 @@
-import type { MetricRow, Retryable, Stage, TimelineEvent } from '../../shared/panel'
+import type {
+  AgentSeen,
+  AgentStep,
+  MetricRow,
+  Retryable,
+  Stage,
+  TimelineEvent,
+} from '../../shared/panel'
 
 import { en, type Copy } from './copy/en'
 
@@ -11,6 +18,38 @@ export function metricValue(value: number, unit: MetricRow['unit']): string {
   if (unit === 'count') return value.toFixed(1)
   return `${value.toFixed(0)} ${unit === 'minutes' ? 'min' : 'h'}`
 }
+
+/** The product names of the agents the factory ships with; any other agent shows by the name it has. */
+const AGENT_NAMES: Record<string, string> = { 'claude-code': 'Claude Code', codex: 'Codex' }
+
+export const agentName = (agent: string) => AGENT_NAMES[agent] ?? agent
+
+const who = ({ agent, model }: AgentSeen) => [agentName(agent), model]
+
+/** The attempt of a build, or the round of a review, said only past the first. */
+function stepCount(step: Extract<AgentStep, { agent: string }>, board: Copy['board']) {
+  if (step.attempt <= 1) return null
+  return step.step === 'reviewing'
+    ? board.reviewRound(step.attempt)
+    : board.stepAttempt(step.attempt)
+}
+
+/** One line for what works on a running task: the agent, its model and its step, or the checks. */
+export function workingLine(step: AgentStep, board: Copy['board']): string {
+  const parts =
+    step.step === 'checks'
+      ? [board.steps.checks, step.checks.join(', ')]
+      : [...who(step), board.steps[step.step], stepCount(step, board)]
+  return parts.filter((part) => part).join(' · ')
+}
+
+/** Who worked on a task last, and with which model when it was recorded. */
+export const lastAgentLine = (seen: AgentSeen, board: Copy['board']) =>
+  board.lastAgent(
+    who(seen)
+      .filter((part) => part)
+      .join(' · '),
+  )
 
 export const shortSha = (sha: string | null | undefined) => (sha ? sha.slice(0, 7) : '')
 

@@ -86,6 +86,16 @@ export const en = {
     needsRefinement: (missing: string) =>
       missing ? `needs refinement: ${missing}` : 'needs refinement',
     attempt: (n: number) => `attempt ${n} of 3`,
+    steps: {
+      planning: 'planning',
+      building: 'building',
+      fixing: 'fixing findings',
+      reviewing: 'reviewing',
+      checks: 'checks',
+    },
+    stepAttempt: (n: number) => `attempt ${n}`,
+    reviewRound: (n: number) => `round ${n}`,
+    lastAgent: (who: string) => `last: ${who}`,
     tasks: 'Tasks',
     task: 'Task',
     repository: 'Repository',

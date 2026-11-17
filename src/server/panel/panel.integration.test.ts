@@ -126,6 +126,30 @@ describe('listTasks', () => {
     expect(new Set(cards.map((c) => c.column))).toEqual(new Set(['review', 'attention']))
   })
 
+  it('names the agent at work on a running card, and the last one on a card that stopped', async () => {
+    const reviewing = await seed('review', {}, [
+      { stage: 'plan', detail: { harness: 'claude-code' } },
+      { stage: 'build', detail: { harness: 'claude-code', model: 'opus', attempt: 1 } },
+      { stage: 'verify', detail: { checks: ['tests'], attempt: 1 } },
+      { stage: 'review', detail: { reviewer: 'codex', model: 'gpt-6.1-terra', attempt: 2 } },
+    ])
+    const stopped = await seed('failed', {}, [
+      { stage: 'build', detail: { harness: 'codex', attempt: 1 } },
+      { stage: 'failed', detail: { error: 'x' } },
+    ])
+
+    const cards = await listTasks(getDb())
+
+    expect(cards.find((c) => c.id === reviewing)).toMatchObject({
+      working: { step: 'reviewing', agent: 'codex', model: 'gpt-6.1-terra', attempt: 2 },
+      lastAgent: { agent: 'codex', model: 'gpt-6.1-terra' },
+    })
+    expect(cards.find((c) => c.id === stopped)).toMatchObject({
+      working: null,
+      lastAgent: { agent: 'codex', model: null },
+    })
+  })
+
   it('counts the attempts of the current run, not the ones a retry started over', async () => {
     const id = await seed('verify', {}, [
       { stage: 'intake' },

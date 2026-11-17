@@ -55,6 +55,8 @@ const base: TaskCard = {
   release: null,
   mainRed: false,
   releaseWait: null,
+  working: null,
+  lastAgent: null,
 }
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({

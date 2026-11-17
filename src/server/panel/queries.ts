@@ -21,6 +21,7 @@ import { retryAt } from '../factory/auto-retry'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
+import { cardAgent, STEP_STAGES, type StepEvent } from './card-agent'
 import { EMPTY_QUEUE, queueViews } from './queue-view'
 import {
   columnOf,
@@ -155,6 +156,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     db,
     rows.filter((r) => r.stage === 'intake').map((r) => r.id),
   )
+  const steps = await stepEvents(db, ids)
   return rows.map((r) => {
     const seen = byTask.get(r.id)
     const again =
@@ -188,8 +190,28 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       release: lastDelivery(delivered, r, 'release'),
       mainRed: watched.some((w) => w.taskId === r.id && w.status === 'red' && !w.acknowledgedAt),
       releaseWait: lastReleaseWait(releases, r),
+      ...cardAgent(r.stage as Stage, steps.get(r.id) ?? []),
     }
   })
+}
+
+/** The latest event of each step stage (plan, build, review, verify) of every task, by task. */
+async function stepEvents(db: Database, ids: number[]): Promise<Map<number, StepEvent[]>> {
+  const latest = await db
+    .selectDistinctOn([stageEvent.taskId, stageEvent.stage], {
+      taskId: stageEvent.taskId,
+      id: stageEvent.id,
+      stage: stageEvent.stage,
+      detail: stageEvent.detail,
+    })
+    .from(stageEvent)
+    .where(and(inArray(stageEvent.taskId, ids), inArray(stageEvent.stage, [...STEP_STAGES])))
+    .orderBy(stageEvent.taskId, stageEvent.stage, desc(stageEvent.id))
+  const byTask = new Map<number, StepEvent[]>()
+  for (const { taskId, ...event } of latest) {
+    byTask.set(taskId, [...(byTask.get(taskId) ?? []), event])
+  }
+  return byTask
 }
 
 /** The hold a red integration branch puts on each task that waits for its checks, on its latest `done` event. */
