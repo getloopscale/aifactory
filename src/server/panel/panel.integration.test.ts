@@ -47,10 +47,13 @@ import { sendBackWithdrawn } from '../factory/send-back'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
 import { stageStream } from './stream'
 import { eventsOf, pruneTranscripts } from '../factory/transcript-store'
+import { jobBackend } from '../factory/job-backend'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  // The board reads each queued card's place from TheoKit's job table, which its own migration creates.
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(

@@ -65,6 +65,7 @@ import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
 import { pollAnswers } from './waiting'
+import { jobBackend } from './job-backend'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
 const ANTHROPIC = 'sk-ant-key-must-not-leak'
@@ -72,6 +73,8 @@ const ANTHROPIC = 'sk-ant-key-must-not-leak'
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  // The board reads each queued card's place from TheoKit's job table, which its own migration creates.
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
