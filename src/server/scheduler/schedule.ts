@@ -13,7 +13,7 @@ import {
   type ReadinessRecord,
 } from './facts'
 import type { ReadinessJudge } from './judge'
-import type { SchedulerMode } from './mode'
+import type { SchedulerMode, SchedulerModes } from './mode'
 import {
   isBug,
   orderHead,
@@ -188,21 +188,31 @@ async function orderPass(
   }
 }
 
-/** One pass: readiness for the newly queued issues, then the order of what stays queued. */
-export async function schedule(deps: SchedulerDeps, mode: SchedulerMode): Promise<ScheduleResult> {
+/**
+ * One pass: readiness for the newly queued issues, then the order of what stays queued, each step in its own
+ * mode. A step that is `off` does nothing; both off read nothing.
+ */
+export async function schedule(
+  deps: SchedulerDeps,
+  modes: SchedulerModes,
+): Promise<ScheduleResult> {
   const result: ScheduleResult = { judged: 0, asked: 0, recorded: 0, moved: 0, failed: 0 }
-  if (mode === 'off') return result
+  if (modes.order === 'off' && modes.readiness === 'off') return result
   const queue = await readQueue(deps)
   for (const run of queue.filter((r) => !r.issue.read)) {
     log('schedule_issue_unread', { taskId: run.taskId, issue: run.issue })
     result.failed += 1
   }
   const runs = queue.filter(isRead)
-  const held = await readinessPass(deps, runs, mode, result)
+  const held =
+    modes.readiness === 'off'
+      ? new Set<number>()
+      : await readinessPass(deps, runs, modes.readiness, result)
+  if (modes.order === 'off') return result
   await orderPass(
     deps,
     runs.filter((r) => !held.has(r.taskId)),
-    mode,
+    modes.order,
     result,
   )
   return result

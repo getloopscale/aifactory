@@ -6,5 +6,17 @@ import { modeFromEnv, type CoordinatorMode } from '../coordinator/mode'
  */
 export type SchedulerMode = CoordinatorMode
 
+/** The mode of the order of the queue (`FACTORY_SCHEDULER_MODE`). */
 export const schedulerModeFromEnv = (env: NodeJS.ProcessEnv): SchedulerMode =>
   modeFromEnv(env, 'FACTORY_SCHEDULER_MODE')
+
+/**
+ * The mode of the readiness judge (`FACTORY_READINESS_MODE`), apart from the order's: the order is a sort the
+ * tests prove, while the judge is a model whose verdicts are compared with what became of the tasks before it
+ * may hold one back.
+ */
+export const readinessModeFromEnv = (env: NodeJS.ProcessEnv): SchedulerMode =>
+  modeFromEnv(env, 'FACTORY_READINESS_MODE')
+
+/** What each step of a pass may do. */
+export type SchedulerModes = { order: SchedulerMode; readiness: SchedulerMode }
