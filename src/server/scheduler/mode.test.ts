@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { schedulerModeFromEnv } from './mode'
+import {
+  passIsOff,
+  readinessModeFromEnv,
+  schedulerModeFromEnv,
+  schedulerModesFromEnv,
+} from './mode'
 
 describe('the scheduler mode', () => {
   it('is trial unless the environment says otherwise', () => {
@@ -19,5 +24,37 @@ describe('the scheduler mode', () => {
     expect(() => schedulerModeFromEnv({ FACTORY_SCHEDULER_MODE: 'on' })).toThrow(
       'FACTORY_SCHEDULER_MODE must be off, trial or auto, got on',
     )
+  })
+})
+
+describe('the readiness judge mode', () => {
+  it('is trial unless the environment says otherwise, whatever the order runs in', () => {
+    expect(readinessModeFromEnv({})).toBe('trial')
+    expect(readinessModeFromEnv({ FACTORY_SCHEDULER_MODE: 'auto' })).toBe('trial')
+  })
+
+  it('is what its own variable says', () => {
+    expect(readinessModeFromEnv({ FACTORY_READINESS_MODE: 'off' })).toBe('off')
+    expect(readinessModeFromEnv({ FACTORY_READINESS_MODE: 'auto' })).toBe('auto')
+  })
+
+  it('refuses a word it does not know, naming its own variable', () => {
+    expect(() => readinessModeFromEnv({ FACTORY_READINESS_MODE: 'on' })).toThrow(
+      'FACTORY_READINESS_MODE must be off, trial or auto, got on',
+    )
+  })
+})
+
+describe('the modes of a pass', () => {
+  it('reads each step from its own variable', () => {
+    expect(
+      schedulerModesFromEnv({ FACTORY_SCHEDULER_MODE: 'auto', FACTORY_READINESS_MODE: 'off' }),
+    ).toEqual({ order: 'auto', readiness: 'off' })
+  })
+
+  it('is off only when both steps are off', () => {
+    expect(passIsOff({ order: 'off', readiness: 'off' })).toBe(true)
+    expect(passIsOff({ order: 'off', readiness: 'trial' })).toBe(false)
+    expect(passIsOff({ order: 'auto', readiness: 'off' })).toBe(false)
   })
 })

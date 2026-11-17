@@ -30,6 +30,10 @@ const READY = '{"verdict":"ready","missing":"","question":""}'
 const NOT_READY =
   '{"verdict":"needs_refinement","missing":"no acceptance criterion","question":"Which page shows the total?"}'
 
+/** The order and the readiness judge in the same mode, as they were before each had its own. */
+const AUTO = { order: 'auto', readiness: 'auto' } as const
+const TRIAL = { order: 'trial', readiness: 'trial' } as const
+
 let api = new FakeGithub()
 /** What the fake judge was asked, and what it answers for an issue number (READY otherwise). */
 const judge = { asked: [] as string[], answers: new Map<number, string>(), fails: '' }
@@ -118,6 +122,55 @@ const decisions = () => getDb().select().from(schedulerDecision).orderBy(asc(sch
 const stageOf = async (id: number) =>
   (await getDb().select({ stage: task.stage }).from(task).where(eq(task.id, id)))[0].stage
 
+describe('the order and the readiness judge, each in its own mode', () => {
+  it('orders the queue in auto while the judge only records: an issue judged not ready runs in its place', async () => {
+    const vague = await seed({ body: 'Make it better.', labels: ['priority:1'] })
+    const other = await seed()
+    judge.answers.set(vague.issue, NOT_READY)
+    await enqueue(other.id, 30)
+    await enqueue(vague.id, 10)
+
+    const result = await schedule(deps(), { order: 'auto', readiness: 'trial' })
+
+    expect(result).toMatchObject({ judged: 2, asked: 0 })
+    expect(await stageOf(vague.id)).toBe('intake')
+    expect(api.callsTo('commentOnIssue')).toEqual([])
+    expect(await dequeue()).toEqual([`job-${vague.id}`])
+    const verdict = (await decisions()).find((d) => d.kind === 'readiness' && d.taskId === vague.id)
+    expect(verdict).toMatchObject({ mode: 'trial', detail: { verdict: 'needs_refinement' } })
+    expect((await decisions()).filter((d) => d.kind === 'order').map((d) => d.mode)).toEqual([
+      'auto',
+      'auto',
+    ])
+  })
+
+  it('asks the judge nothing when readiness is off, and still orders the queue', async () => {
+    const first = await seed({ labels: ['priority:1'] })
+    const second = await seed()
+    await enqueue(second.id, 30)
+    await enqueue(first.id, 10)
+
+    const result = await schedule(deps(), { order: 'auto', readiness: 'off' })
+
+    expect(judge.asked).toEqual([])
+    expect(result).toMatchObject({ judged: 0, asked: 0 })
+    expect((await decisions()).some((d) => d.kind === 'readiness')).toBe(false)
+    expect(await dequeue()).toEqual([`job-${first.id}`])
+  })
+
+  it('judges in auto while the order is off: the question goes out and the queue keeps its order', async () => {
+    const vague = await seed({ body: 'Make it better.' })
+    judge.answers.set(vague.issue, NOT_READY)
+    await enqueue(vague.id, 30)
+
+    const result = await schedule(deps(), { order: 'off', readiness: 'auto' })
+
+    expect(result).toMatchObject({ judged: 1, asked: 1, recorded: 0 })
+    expect(await stageOf(vague.id)).toBe('waiting')
+    expect((await decisions()).some((d) => d.kind === 'order')).toBe(false)
+  })
+})
+
 describe('the order of the queued runs in auto', () => {
   it('serves a priority:3 bug queued later before a priority:5 task queued first', async () => {
     const first = await seed({ labels: ['priority:5'] })
@@ -126,7 +179,7 @@ describe('the order of the queued runs in auto', () => {
     await enqueue(bug.id, 10)
     const before = (await jobs()).map((j) => j.available_at).sort()
 
-    const result = await schedule(deps(), 'auto')
+    const result = await schedule(deps(), AUTO)
 
     expect(result.moved).toBe(2)
     expect((await jobs()).map((j) => j.available_at).sort()).toEqual(before)
@@ -144,7 +197,7 @@ describe('the order of the queued runs in auto', () => {
       await enqueue(waiting.id, minutes)
     }
 
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
 
     expect(await dequeue()).toEqual([`job-${blocking.id}`])
     const [row] = (await decisions()).filter((d) => d.kind === 'order' && d.taskId === blocking.id)
@@ -176,7 +229,7 @@ describe('the order of the queued runs in auto', () => {
     }
     const before = new Map((await jobs()).map((j) => [j.id, j.available_at]))
 
-    const result = await schedule(reading, 'auto')
+    const result = await schedule(reading, AUTO)
 
     const after = new Map((await jobs()).map((j) => [j.id, j.available_at]))
     for (const kept of [held, locked, later, running, unread]) {
@@ -198,10 +251,10 @@ describe('the order of the queued runs in auto', () => {
     const bug = await seed({ labels: ['bug'] })
     await enqueue(first.id, 30)
     await enqueue(bug.id, 10)
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
     const recorded = (await decisions()).length
 
-    const again = await schedule(deps(), 'auto')
+    const again = await schedule(deps(), AUTO)
 
     expect(again).toMatchObject({ moved: 0, recorded: 0, judged: 0 })
     expect(await decisions()).toHaveLength(recorded)
@@ -219,7 +272,7 @@ describe('the scheduler in trial', () => {
     await enqueue(vague.id, 10)
     const before = await jobs()
 
-    await schedule(deps(), 'trial')
+    await schedule(deps(), TRIAL)
 
     expect(await jobs()).toEqual(before)
     for (const t of [first, bug, vague]) expect(await stageOf(t.id)).toBe('intake')
@@ -248,10 +301,10 @@ describe('the scheduler in trial', () => {
     const bug = await seed({ labels: ['bug'] })
     await enqueue(first.id, 30)
     await enqueue(bug.id, 10)
-    await schedule(deps(), 'trial')
+    await schedule(deps(), TRIAL)
     const recorded = (await decisions()).length
 
-    await schedule(deps(), 'trial')
+    await schedule(deps(), TRIAL)
 
     expect(await decisions()).toHaveLength(recorded)
     expect(judge.asked).toHaveLength(2)
@@ -266,7 +319,7 @@ describe('the readiness of a newly queued issue', () => {
     await enqueue(vague.id, 30)
     await enqueue(other.id, 10)
 
-    const result = await schedule(deps(), 'auto')
+    const result = await schedule(deps(), AUTO)
 
     expect(result).toMatchObject({ judged: 2, asked: 1 })
     expect(await stageOf(vague.id)).toBe('waiting')
@@ -292,9 +345,9 @@ describe('the readiness of a newly queued issue', () => {
     const vague = await seed({ body: 'Make it better.' })
     judge.answers.set(vague.issue, NOT_READY)
     await enqueue(vague.id, 30)
-    await schedule(deps(), 'trial')
+    await schedule(deps(), TRIAL)
 
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
 
     expect(judge.asked).toHaveLength(1)
     expect(await stageOf(vague.id)).toBe('waiting')
@@ -305,7 +358,7 @@ describe('the readiness of a newly queued issue', () => {
     judge.answers.set(t.issue, 'It looks fine to me.')
     await enqueue(t.id, 30)
 
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
 
     expect(await stageOf(t.id)).toBe('intake')
     expect(await dequeue()).toEqual([`job-${t.id}`])
@@ -322,7 +375,7 @@ describe('the readiness of a newly queued issue', () => {
     await enqueue(t.id, 30)
     judge.fails = 'the model is down'
 
-    const result = await schedule(deps(), 'auto')
+    const result = await schedule(deps(), AUTO)
 
     expect(result.failed).toBe(1)
     expect((await decisions()).filter((d) => d.kind === 'readiness')).toEqual([])
@@ -332,10 +385,10 @@ describe('the readiness of a newly queued issue', () => {
   it('judges an issue again once its body changed', async () => {
     const t = await seed()
     await enqueue(t.id, 30)
-    await schedule(deps(), 'trial')
+    await schedule(deps(), TRIAL)
 
     api.repo(REPO).issue(t.issue, { body: 'Done when: the total shows on the invoice page.' })
-    await schedule(deps(), 'trial')
+    await schedule(deps(), TRIAL)
 
     expect(judge.asked).toHaveLength(2)
     expect((await decisions()).filter((d) => d.kind === 'readiness')).toHaveLength(2)
@@ -346,7 +399,7 @@ describe('the readiness of a newly queued issue', () => {
     judge.answers.set(t.issue, NOT_READY)
     await enqueue(t.id, 30, { input: { feedback: 'the checks failed' } })
 
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
 
     expect(judge.asked).toEqual([])
     expect(await stageOf(t.id)).toBe('intake')
@@ -358,7 +411,7 @@ describe('the readiness of a newly queued issue', () => {
     await enqueue(t.id, 30)
     api.fail('commentOnIssue', new Error('GitHub answered 502'))
 
-    await expect(schedule(deps(), 'auto')).rejects.toThrow('GitHub answered 502')
+    await expect(schedule(deps(), AUTO)).rejects.toThrow('GitHub answered 502')
 
     expect(await stageOf(t.id)).toBe('intake')
     expect((await jobs()).map((j) => j.id)).toEqual([`job-${t.id}`])
@@ -369,7 +422,7 @@ describe('the readiness of a newly queued issue', () => {
     const vague = await seed({ body: 'Make it better.' })
     judge.answers.set(vague.issue, NOT_READY)
     await enqueue(vague.id, 30)
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
     api.repo(REPO).comment(vague.issue, {
       body: 'The invoice page.',
       createdAt: new Date(Date.now() + 60_000),
@@ -414,7 +467,7 @@ describe('what the panel shows of the queue', () => {
       input: { heldFrom: new Date().toISOString() },
       available: 'infinity',
     })
-    await schedule(deps(), 'auto')
+    await schedule(deps(), AUTO)
 
     const views = await queueViews(getDb(), [first.id, bug.id, held.id])
 

@@ -7,21 +7,22 @@ import { FACTORY_LABEL } from '../ingest/decide'
 import { actionDeps } from '../panel/deps'
 import { listingReader } from '../scheduler/issue-reader'
 import { modelReadinessJudge } from '../scheduler/judge'
-import { schedulerModeFromEnv } from '../scheduler/mode'
+import { passIsOff, schedulerModesFromEnv } from '../scheduler/mode'
 import { alone, schedule } from '../scheduler/schedule'
 
 /**
  * The scheduler's pass, every two minutes (`scheduler/`): an assistant judges whether each newly queued issue
- * is ready to build, and the queued runs are put in order of priority, bug, what waits for them and age. In
- * `trial`, the default, it records what it would do and changes nothing; `off` skips the pass. One pass runs
+ * is ready to build (`FACTORY_READINESS_MODE`), and the queued runs are put in order of priority, bug, what waits
+ * for them and age (`FACTORY_SCHEDULER_MODE`). In `trial`, the default of both, a step records what it would do
+ * and changes nothing; `off` skips it, and both off skip the pass. One pass runs
  * at a time, on any process.
  */
 export default defineCron('schedule', {
   schedule: '*/2 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
   handler: mainProcessOnly(async () => {
-    const mode = schedulerModeFromEnv(process.env)
-    if (mode === 'off') return
+    const modes = schedulerModesFromEnv(process.env)
+    if (passIsOff(modes)) return
     let deps
     try {
       const { db, github, api } = actionDeps()
@@ -40,9 +41,9 @@ export default defineCron('schedule', {
       console.error(JSON.stringify({ event: 'schedule_not_configured', error: String(error) }))
       return
     }
-    const result = await alone(getPool(), () => schedule(deps, mode))
+    const result = await alone(getPool(), () => schedule(deps, modes))
     if (result && Object.values(result).some((n) => n > 0)) {
-      console.log(JSON.stringify({ event: 'schedule', mode, ...result }))
+      console.log(JSON.stringify({ event: 'schedule', ...modes, ...result }))
     }
   }),
 })

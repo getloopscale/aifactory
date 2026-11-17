@@ -250,8 +250,10 @@ reads that file, not a convention.
   that had each, under `HOLD_LOCK`; only rows whose time changes are written. The scheduler never touches a job a
   worker holds, that failed, that the coordinator holds (`heldFrom`, 'infinity'), that is not due, or of a task that
   left `intake`. Every decision is a `scheduler_decision` row: a `readiness` row once per task and issue version, an
-  `order` row when a task's place or its reasons change. `FACTORY_SCHEDULER_MODE` is `off`, `trial` (the default:
-  decide and record, change no job, task or issue) or `auto`. The panel's queued card shows its place, why and the
+  `order` row when a task's place or its reasons change. Each step has its own mode, `off`, `trial` (the default:
+  decide and record, change no job, task or issue) or `auto`: `FACTORY_SCHEDULER_MODE` for the order and
+  `FACTORY_READINESS_MODE` for the judge, since the order is a sort the tests prove and the judge holds back work
+  only once its verdicts are compared with what became of the tasks. The panel's queued card shows its place, why and the
   verdict (`panel/queue-view.ts`).
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
