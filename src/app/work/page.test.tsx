@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { TaskCard } from '../../shared/panel'
+import type { StreamEvent, TaskCard } from '../../shared/panel'
 
 import { CopyProvider } from '../lib/copy'
 import { en } from '../lib/copy/en'
@@ -36,6 +36,8 @@ const card = (over: Partial<TaskCard>): TaskCard => ({
   release: null,
   mainRed: false,
   releaseWait: null,
+  working: null,
+  lastAgent: null,
   ...over,
 })
 
@@ -260,5 +262,135 @@ describe('board', () => {
       order.map((id) => ptBR.columns[id]),
     )
     expect(screen.getByText(ptBR.stages.build)).toBeDefined()
+  })
+})
+
+/** An `EventSource` the test speaks through, as the server's event stream would. */
+class FakeStream {
+  static last: FakeStream | undefined
+  onmessage: ((message: { data: string }) => void) | null = null
+  constructor() {
+    FakeStream.last = this
+  }
+  close() {}
+  send(event: StreamEvent) {
+    this.onmessage?.({ data: JSON.stringify(event) })
+  }
+}
+
+describe('the agent on a card', () => {
+  it('names the agent, its model and its step on a running card', async () => {
+    serve({
+      tasks: [
+        card({
+          id: 1,
+          stage: 'review',
+          working: { step: 'reviewing', agent: 'codex', model: 'gpt-6.1-terra', attempt: 2 },
+          lastAgent: { agent: 'codex', model: 'gpt-6.1-terra' },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('Codex · gpt-6.1-terra · reviewing · round 2')).toBeDefined(),
+    )
+    expect(screen.queryByText(/^last:/)).toBeNull()
+  })
+
+  it('names the checks, and no agent, while the factory verifies', async () => {
+    serve({
+      tasks: [
+        card({
+          stage: 'verify',
+          working: { step: 'checks', checks: ['tests'] },
+          lastAgent: { agent: 'claude-code', model: 'opus' },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('checks · tests')).toBeDefined())
+    expect(screen.queryByText(/Claude Code/)).toBeNull()
+  })
+
+  it('shows who worked last, more quietly, on a card that is not running', async () => {
+    serve({
+      tasks: [
+        card({
+          stage: 'done',
+          column: 'review',
+          lastAgent: { agent: 'claude-code', model: 'opus' },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    const last = await screen.findByText('last: Claude Code · opus')
+    expect(last.className).toContain('text-muted-foreground')
+    expect(last.className).not.toContain('font-medium')
+  })
+
+  it('moves to the next agent by itself when the stream says the task changed stage', async () => {
+    vi.stubGlobal('EventSource', FakeStream)
+    const planning = card({
+      stage: 'plan',
+      working: { step: 'planning', agent: 'codex', model: 'gpt-6.1-terra', attempt: 1 },
+    })
+    const building = card({
+      stage: 'build',
+      working: { step: 'building', agent: 'claude-code', model: 'opus', attempt: 2 },
+    })
+    let served = planning
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ tasks: [served] }), { status: 200 })),
+    )
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    await screen.findByText('Codex · gpt-6.1-terra · planning')
+
+    served = building
+    act(() =>
+      FakeStream.last!.send({
+        type: 'stage',
+        taskId: 1,
+        stage: 'build',
+        at: new Date().toISOString(),
+      }),
+    )
+
+    await screen.findByText('Claude Code · opus · building · attempt 2')
+  })
+
+  it('writes the step in Portuguese', async () => {
+    window.localStorage.setItem('aifactory.language', 'pt-BR')
+    serve({
+      tasks: [
+        card({
+          working: { step: 'fixing', agent: 'claude-code', model: 'opus', attempt: 2 },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <CopyProvider>
+          <Page />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    await screen.findByText('Claude Code · opus · corrigindo achados · tentativa 2')
   })
 })

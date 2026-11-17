@@ -3,7 +3,20 @@ import { describe, expect, it } from 'vitest'
 import type { Stage, TimelineEvent } from '../../shared/panel'
 
 import { DICTIONARIES } from './copy'
-import { ago, describeEvent, metricValue, money, runsAgain, shortSha, stageLabel } from './format'
+import { en } from './copy/en'
+import { ptBR } from './copy/pt-BR'
+import {
+  agentName,
+  ago,
+  describeEvent,
+  lastAgentLine,
+  metricValue,
+  money,
+  runsAgain,
+  shortSha,
+  stageLabel,
+  workingLine,
+} from './format'
 
 describe('money', () => {
   it('writes cents, and a sum too small to be one as zero', () => {
@@ -275,5 +288,63 @@ describe('in both languages', () => {
   it('says things differently in Portuguese', () => {
     expect(ago(before(120), now, DICTIONARIES['pt-BR'].time)).toBe('há 2min')
     expect(stageLabel('intake', {}, DICTIONARIES['pt-BR'].stages)).toBe('na fila')
+  })
+})
+
+describe('agentName', () => {
+  it('gives the two known agents their product names and keeps any other name as it is', () => {
+    expect(agentName('claude-code')).toBe('Claude Code')
+    expect(agentName('codex')).toBe('Codex')
+    expect(agentName('gemini-cli')).toBe('gemini-cli')
+  })
+})
+
+describe('workingLine', () => {
+  it('names the agent, its model and the step while it plans', () => {
+    const line = workingLine(
+      { step: 'planning', agent: 'codex', model: 'gpt-6.1-terra', attempt: 1 },
+      en.board,
+    )
+    expect(line).toBe('Codex · gpt-6.1-terra · planning')
+  })
+
+  it('says which attempt a build is past the first, and that a rework fixes findings', () => {
+    expect(
+      workingLine({ step: 'building', agent: 'claude-code', model: 'opus', attempt: 2 }, en.board),
+    ).toBe('Claude Code · opus · building · attempt 2')
+    expect(
+      workingLine({ step: 'fixing', agent: 'claude-code', model: null, attempt: 2 }, en.board),
+    ).toBe('Claude Code · fixing findings · attempt 2')
+  })
+
+  it('says which round a review is past the first', () => {
+    expect(
+      workingLine(
+        { step: 'reviewing', agent: 'codex', model: 'gpt-6.1-terra', attempt: 2 },
+        en.board,
+      ),
+    ).toBe('Codex · gpt-6.1-terra · reviewing · round 2')
+  })
+
+  it('names the checks while the factory verifies, with no agent', () => {
+    expect(workingLine({ step: 'checks', checks: ['tests', 'lint'] }, en.board)).toBe(
+      'checks · tests, lint',
+    )
+    expect(workingLine({ step: 'checks', checks: [] }, en.board)).toBe('checks')
+  })
+
+  it('speaks Portuguese with the Portuguese dictionary', () => {
+    expect(
+      workingLine({ step: 'reviewing', agent: 'codex', model: null, attempt: 3 }, ptBR.board),
+    ).toBe('Codex · revisando · rodada 3')
+  })
+})
+
+describe('lastAgentLine', () => {
+  it('names who worked last, with the model when there is one', () => {
+    expect(lastAgentLine({ agent: 'claude-code', model: 'opus' }, en.board)).toBe(
+      'last: Claude Code · opus',
+    )
+    expect(lastAgentLine({ agent: 'codex', model: null }, ptBR.board)).toBe('por último: Codex')
   })
 })

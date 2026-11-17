@@ -160,6 +160,16 @@ export const ptBR: Copy = {
     needsRefinement: (missing: string) =>
       missing ? `precisa de refinamento: ${missing}` : 'precisa de refinamento',
     attempt: (n: number) => `tentativa ${n} de 3`,
+    steps: {
+      planning: 'planejando',
+      building: 'construindo',
+      fixing: 'corrigindo achados',
+      reviewing: 'revisando',
+      checks: 'verificações',
+    },
+    stepAttempt: (n: number) => `tentativa ${n}`,
+    reviewRound: (n: number) => `rodada ${n}`,
+    lastAgent: (who: string) => `por último: ${who}`,
     tasks: 'Tarefas',
     task: 'Tarefa',
     repository: 'Repositório',

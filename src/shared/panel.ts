@@ -285,7 +285,26 @@ export type TaskCard = {
    * refused, while the task is not released. Null when none waited, or once one merged.
    */
   releaseWait: ReleaseWaitView | null
+  /** What works on the task right now, while it plans, builds, runs its checks or is reviewed; null otherwise. */
+  working: AgentStep | null
+  /** The agent that planned, built or reviewed the task last; null before any did. */
+  lastAgent: AgentSeen | null
 }
+
+/** An agent by the name the factory knows it by (`claude-code`, `codex`, ...), and the model it ran with. */
+export type AgentSeen = {
+  agent: string
+  /** Null when the stage did not record one. */
+  model: string | null
+}
+
+/**
+ * One step of a running task: an agent planning, building, fixing what a review or the checks found, or
+ * reviewing, with the attempt (the round, for a review); or the factory running the checks, with no agent.
+ */
+export type AgentStep =
+  | (AgentSeen & { step: 'planning' | 'building' | 'fixing' | 'reviewing'; attempt: number })
+  | { step: 'checks'; checks: string[] }
 
 /** A queued task's place in the line of runs, the reasons for it, and whether its issue is ready to build. */
 export type QueueView = {

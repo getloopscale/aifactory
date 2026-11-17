@@ -33,6 +33,8 @@ const card = (id: number, over: Partial<TaskCard> = {}): TaskCard => ({
   release: null,
   mainRed: false,
   releaseWait: null,
+  working: null,
+  lastAgent: null,
   ...over,
 })
 
