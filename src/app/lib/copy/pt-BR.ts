@@ -208,6 +208,7 @@ export const ptBR: Copy = {
     waitingForLimit: 'esperando o limite',
     willRetry: 'vai tentar de novo',
     waitingForIssue: 'esperando outra issue',
+    waitingForBase: 'esperando a base passar',
     passed: 'passou',
     checkFailed: 'falhou',
   },

@@ -106,6 +106,21 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure({ error: 'x', blockedBy: 'o/a#1' })).toBeNull()
   })
 
+  it('waits for the base, rather than going to a person, when the failing checks fail on the integration branch too', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'abc', checks: ['quality'] },
+    }
+
+    expect(retryableFailure(detail)).toBe('base')
+    expect(columnOf('failed', 'base')).toBe('retrying')
+    expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc', checks: [] } })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: 'quality' })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: null })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc', checks: 'quality' } })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc' } })).toBeNull()
+  })
+
   it('reads a sandbox provider that refuses for billing as the environment, not as the work', () => {
     expect(
       retryableFailure({ error: 'the sandbox did not start: 403: team is blocked: spend_limit' }),

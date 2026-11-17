@@ -35,11 +35,11 @@ export const COLUMNS: { id: Column; title: string }[] = [
 
 /**
  * Why a failed task is not waiting for a person: the agent's usage limit, the environment (GitHub, the
- * network, the sandbox, a restart), or an issue it is blocked by that is still open. Each passes, and the
- * factory runs the task again once it has. A failure of the work itself is none of them, and stays with a
- * person.
+ * network, the sandbox, a restart), an issue it is blocked by that is still open, or checks that fail on the
+ * integration branch too (`base`). Each passes, and the factory runs the task again once it has. A failure of
+ * the work itself is none of them, and stays with a person.
  */
-export type Retryable = 'quota' | 'environment' | 'blocked' | null
+export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
 
 /**
  * The sandbox provider has no template of the factory's (E2B answers `404: template 'aifactory-sandbox:4' not
@@ -72,11 +72,19 @@ const ENVIRONMENT = {
  */
 const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
 
+/** A run's record that the checks it failed on fail on the integration branch too (#219). */
+function failsOnBase(baseRed: unknown): boolean {
+  if (typeof baseRed !== 'object' || baseRed === null) return false
+  const checks = (baseRed as { checks?: unknown }).checks
+  return Array.isArray(checks) && checks.length > 0
+}
+
 /** From the detail the factory recorded when a task failed. */
 export function retryableFailure(detail: Record<string, unknown> | null | undefined): Retryable {
   if (!detail) return null
   if (detail.quota === true) return 'quota'
   if (Array.isArray(detail.blockedBy) && detail.blockedBy.length > 0) return 'blocked'
+  if (failsOnBase(detail.baseRed)) return 'base'
   if (typeof detail.error !== 'string' || AGENT_OUT_OF_TIME.test(detail.error)) return null
   return ENVIRONMENT.test(detail.error) ? 'environment' : null
 }

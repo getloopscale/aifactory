@@ -2131,6 +2131,63 @@ describe('runTask review loop', () => {
     ])
   })
 
+  it('stops reworking and waits for the base when the checks the builder left unchanged fail on the integration branch too', async () => {
+    const id = await seedTask()
+    let reworks = 0
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => {
+        reworks += 1
+        return { ok: true, summary: 'The audit failure is not my change.', sessionId: 'sess-1' }
+      },
+    }
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('npm test') ? { exitCode: 1, stdout: 'advisory found' } : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: lazy }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    expect(reworks).toBe(1)
+    expect(sandbox.backend.commands).toContain('cd /tmp/aifactory-base && npm test')
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).toMatchObject({
+      baseRed: { sha: 'abc123def', checks: ['test'] },
+      error:
+        '"test" fails on workspace at abc123d too, so the failure is the base\'s, not this work\'s; the task runs again on its own later',
+    })
+  })
+
+  it('goes on as before when the checks the builder left unchanged pass on the integration branch', async () => {
+    const id = await seedTask()
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => ({ ok: true, summary: 'Not my change.', sessionId: 'sess-1' }),
+    }
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('npm test') && !c.startsWith('cd /tmp/aifactory-base')
+          ? { exitCode: 1, stdout: 'expected 2, got 3' }
+          : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: lazy }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).not.toHaveProperty('baseRed')
+    expect(String((failed.detail as { error?: string }).error)).toMatch(
+      /^no pull request: "test" failed at abc123d/,
+    )
+  })
+
   it("gives the sandbox both agents' firewall rules, and the reviewer's quota stop is a wait", async () => {
     const id = await seedTask()
     const reviewer: CodingHarness = {

@@ -134,6 +134,7 @@ export const en = {
     waitingForLimit: 'waiting for the limit',
     willRetry: 'will retry',
     waitingForIssue: 'waiting for another issue',
+    waitingForBase: 'waiting for the base to pass',
     passed: 'passed',
     checkFailed: 'failed',
   },

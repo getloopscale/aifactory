@@ -8,7 +8,7 @@ import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
 import { createGithubApi } from '../github/pulls'
 
-import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
+import { Asked, BaseRed, QuotaStop, quotaDetail, type Continuation } from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
@@ -201,6 +201,7 @@ async function fail(
     error: message,
     ...(error instanceof QuotaStop ? quotaDetail(error, new Date()) : {}),
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
+    ...(error instanceof BaseRed ? { baseRed: { sha: error.baseSha, checks: error.checks } } : {}),
   })
   return { status: 'failed', stage: state.current, error: message }
 }

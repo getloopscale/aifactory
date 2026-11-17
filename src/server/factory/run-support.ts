@@ -20,6 +20,23 @@ export class Asked extends Error {
   }
 }
 
+/**
+ * The checks the work failed on fail on the head of the integration branch too: the failure is the base's, and
+ * no rework of this task fixes it. The task waits and runs again on its own (#219).
+ */
+export class BaseRed extends StageFailure {
+  constructor(
+    readonly checks: string[],
+    readonly baseSha: string,
+    integration: string,
+  ) {
+    const names = checks.map((name) => `"${name}"`).join(', ')
+    super(
+      `${names} ${checks.length === 1 ? 'fails' : 'fail'} on ${integration} at ${baseSha.slice(0, 7)} too, so the failure is the base's, not this work's; the task runs again on its own later`,
+    )
+  }
+}
+
 /** The agent's account is out of quota. It is recorded as such, because waiting fixes it. */
 export class QuotaStop extends StageFailure {
   constructor(

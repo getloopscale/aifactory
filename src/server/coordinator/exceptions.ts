@@ -136,18 +136,20 @@ function handedOver(last: LastEvent, pullRequest: TaskFacts['pullRequest']): Fou
   return { kind, evidence: reason || 'the handoff recorded no reason' }
 }
 
-/** A failure that passes by itself (a quota, a blocker, an environment with retries left) is none. */
+/**
+ * A failure that passes by itself (a quota, a blocker, an environment or a red base with retries left) is none.
+ * Checks that still fail on the integration branch once the retries are over are a `base_red`, for a person.
+ */
 function failed(last: LastEvent, automaticRuns: Read<number>): Found | undefined {
   const error = text(last.detail?.error) || 'the failure recorded no error'
   const retryable = retryableFailure(last.detail)
   if (retryable === null) return { kind: 'failure', evidence: error }
-  if (retryable !== 'environment') return undefined
+  if (retryable !== 'environment' && retryable !== 'base') return undefined
   if (!automaticRuns.read) {
     return unknown(`could not read ${automaticRuns.tried}: ${automaticRuns.error}`)
   }
-  return automaticRunsLeft(automaticRuns.value)
-    ? undefined
-    : { kind: 'environment', evidence: error }
+  if (automaticRunsLeft(automaticRuns.value)) return undefined
+  return { kind: retryable === 'base' ? 'base_red' : 'environment', evidence: error }
 }
 
 const isFound = (value: LastEvent | Found): value is Found => 'kind' in value
