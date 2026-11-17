@@ -1412,6 +1412,7 @@ export class Run {
     attempt: number,
     findings: Finding[],
     failed: CheckResult[],
+    reviewedSha?: string,
   ): Promise<string> {
     const { deps, taskId, state } = this.c
     const timeoutMs = await this.agentTimeout()
@@ -1426,7 +1427,12 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs,
-        prompt: reworkPrompt({ findings, failedChecks: failed, checks: this.checks }),
+        prompt: reworkPrompt({
+          findings,
+          failedChecks: failed,
+          checks: this.checks,
+          ...(reviewedSha ? { reviewedSha } : {}),
+        }),
       }),
     )
     if (!result.ok) await this.failUnfinished(result, 'the agent did not finish the rework')
@@ -1961,7 +1967,7 @@ export class Run {
       const mayRework =
         this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
       if (outcome.verdict === 'changes' && mayRework) {
-        sha = await this.rework(attempt + 1, outcome.findings, [])
+        sha = await this.rework(attempt + 1, outcome.findings, [], sha)
         continue
       }
       return this.handOver(sha, attempt, checked.here, outcome, counts)
