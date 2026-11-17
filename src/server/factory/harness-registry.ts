@@ -11,6 +11,31 @@ export type HarnessRegistry = Record<string, (options?: HarnessOptions) => Codin
 
 export const DEFAULT_HARNESS = 'claude-code'
 
+/**
+ * The agent that writes a task's change plan when the owner chose none. A plan written by another family of
+ * models than the builder's is a second reading of the issue before any code exists; the owner can choose any
+ * agent for the role, the builder's own included.
+ */
+export const DEFAULT_PLANNER = 'codex'
+
+/** Whether an agent of the registry could start now: its credential is there. */
+export function canStart(registry: HarnessRegistry, name: string): boolean {
+  const build = registry[name]
+  if (!build) return false
+  try {
+    build()
+    return true
+  } catch {
+    // A missing credential is the answer here, not a failure: the caller falls back and the panel says why.
+    return false
+  }
+}
+
+/** The agent that plans when nothing chose one: the default planner when it can start, else the builder. */
+export function defaultPlannerName(builder: string, ready: (name: string) => boolean): string {
+  return ready(DEFAULT_PLANNER) ? DEFAULT_PLANNER : builder
+}
+
 export function harnessRegistry(env: NodeJS.ProcessEnv = process.env): HarnessRegistry {
   return {
     'claude-code': (options) => claudeCodeHarness(claudeCredentialFromEnv(env), options),
@@ -27,7 +52,7 @@ export function pickHarness(
   registry: HarnessRegistry,
   fallback: string,
   labels: string[],
-  role: 'harness' | 'reviewer' = 'harness',
+  role: 'harness' | 'reviewer' | 'planner' = 'harness',
   /** What to tell the agent that ends up chosen, which depends on which one it is. */
   optionsFor: (engine: string) => HarnessOptions | undefined = () => undefined,
 ): CodingHarness {
@@ -42,4 +67,27 @@ export function pickHarness(
     throw new Error(`unknown agent "${name}" (known: ${Object.keys(registry).join(', ')})`)
   }
   return build(optionsFor(name))
+}
+
+/**
+ * The agent that writes a task's change plan, apart from the builder: a `planner:<name>` label, else the one
+ * the owner configured, else the default planner when it can start. Nothing when that agent is the builder,
+ * so planning and building stay in one session. A configured or labelled agent that is unknown is refused,
+ * as for the other roles; only the default falls back, because nobody asked for it.
+ */
+export function plannerFor(
+  registry: HarnessRegistry,
+  choice: {
+    configured?: string
+    builder: string
+    labels: string[]
+    ready: (name: string) => boolean
+    optionsFor?: (engine: string) => HarnessOptions | undefined
+  },
+): CodingHarness | undefined {
+  const labelled = choice.labels.some((l) => /^planner:/i.test(l))
+  const fallback = choice.configured || defaultPlannerName(choice.builder, choice.ready)
+  if (!labelled && fallback === choice.builder) return undefined
+  const planner = pickHarness(registry, fallback, choice.labels, 'planner', choice.optionsFor)
+  return planner.name === choice.builder ? undefined : planner
 }

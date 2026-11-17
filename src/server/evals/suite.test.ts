@@ -38,6 +38,24 @@ describe('agentSetup', () => {
   })
 })
 
+describe('agentSetup with a planner apart from the builder', () => {
+  it('names the planner with its own model and effort', () => {
+    const setup = agentSetup(
+      {},
+      'claude-code',
+      'codex',
+      (_env, role) => (role === 'planner' ? { model: 'gpt-6.1-terra', effort: 'high' } : {}),
+      'codex',
+    )
+
+    expect(setup).toMatchObject({
+      planner: 'codex',
+      plannerModel: 'gpt-6.1-terra',
+      plannerEffort: 'high',
+    })
+  })
+})
+
 const result = (id: string, costUsd: number, durationMs = 0, passed = true): CaseResult => ({
   id,
   passed,

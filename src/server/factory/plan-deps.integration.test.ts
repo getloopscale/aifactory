@@ -31,9 +31,13 @@ const plannerOf = (env: NodeJS.ProcessEnv, labels: string[] = []) =>
   planDeps({ ...base, ...env }).harness(labels).name
 
 describe('the agent that plans', () => {
-  it('is the builder agent when the planner was not given another', () => {
-    expect(plannerOf({})).toBe('claude-code')
+  it('is codex when the planner was not given another and codex can start', () => {
+    expect(plannerOf({})).toBe('codex')
     expect(plannerOf({ FACTORY_HARNESS: 'codex' })).toBe('codex')
+  })
+
+  it('is the builder agent when the planner was not given another and codex cannot start', () => {
+    expect(plannerOf({ OPENAI_API_KEY: '' })).toBe('claude-code')
   })
 
   it('is the one the owner gave it, whatever builds', () => {

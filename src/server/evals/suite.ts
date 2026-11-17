@@ -219,19 +219,24 @@ function setupChanges(before: AgentSetup, now: AgentSetup): string[] {
     .map((key) => `${key}: ${before[key] ?? '(none)'} -> ${now[key] ?? '(none)'}`)
 }
 
-/** Which agents a run gets and the model and effort each is told to use, `default` when nothing is set. */
+/**
+ * Which agents a run gets and the model and effort each is told to use, `default` when nothing is set. A
+ * planner apart from the builder is part of the setup; one that is the builder adds nothing.
+ */
 export function agentSetup(
   env: NodeJS.ProcessEnv,
   builder: string,
   reviewer: string,
   options: (
     env: NodeJS.ProcessEnv,
-    role: 'builder' | 'reviewer',
+    role: 'builder' | 'reviewer' | 'planner',
     engine: string,
   ) => { model?: string; effort?: string },
+  planner?: string,
 ): AgentSetup {
   const b = options(env, 'builder', builder)
   const r = options(env, 'reviewer', reviewer)
+  const p = planner ? options(env, 'planner', planner) : undefined
   return {
     builder,
     builderModel: b.model ?? 'default',
@@ -239,6 +244,9 @@ export function agentSetup(
     reviewer,
     reviewerModel: r.model ?? 'default',
     reviewerEffort: r.effort ?? 'default',
+    ...(planner && p
+      ? { planner, plannerModel: p.model ?? 'default', plannerEffort: p.effort ?? 'default' }
+      : {}),
   }
 }
 

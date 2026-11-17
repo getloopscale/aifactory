@@ -2143,6 +2143,62 @@ describe('runTask planning before it builds', () => {
     expect(builder.resumed[0]).not.toContain('discarded')
   })
 
+  it('lets a planner apart from the builder write the plan, and the builder builds it in its own session', async () => {
+    const id = await seedTask()
+    const planPrompts: string[] = []
+    const planner: CodingHarness = {
+      name: 'fake-planner',
+      model: 'plan-model',
+      effort: 'high',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        planPrompts.push(input.prompt)
+        return { ok: true, summary: JSON.stringify(plan), costUsd: 0.02, sessionId: 'plan-1' }
+      },
+      resume: async () => ({ ok: false, summary: 'not asked again' }),
+    }
+    const builder = planningBuilder([])
+    const builderRuns: string[] = []
+    const run = builder.run
+    builder.run = (backend, input) => {
+      builderRuns.push(input.prompt)
+      return run(backend, input)
+    }
+
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, planner: () => planner, planFirst: true }),
+      id,
+    )
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(planPrompts).toHaveLength(1)
+    expect(planPrompts[0]).toContain('# This turn: plan only')
+    expect(builderRuns).toHaveLength(1)
+    expect(builderRuns[0]).toContain('fake-planner read the code and wrote this plan')
+    expect(builder.resumed).toHaveLength(0)
+    const [stored] = await getDb().select().from(changePlan).where(eq(changePlan.taskId, id))
+    expect(stored).toMatchObject({ harness: 'fake-planner', plan })
+    const runs = await getDb()
+      .select()
+      .from(agentRun)
+      .where(eq(agentRun.taskId, id))
+      .orderBy(agentRun.id)
+    expect(runs.map((r) => [r.role, r.harness])).toEqual([
+      ['planner', 'fake-planner'],
+      ['builder', 'fake-agent'],
+      ['reviewer', 'fake-reviewer'],
+    ])
+    const [planStage] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'plan')))
+    expect(planStage?.detail).toMatchObject({
+      harness: 'fake-planner',
+      model: 'plan-model',
+      effort: 'high',
+    })
+  })
+
   it('gives the reviewer the plan and records a file changed outside it', async () => {
     const id = await seedTask()
     const reviewer = approving()

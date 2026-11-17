@@ -7,6 +7,9 @@ const nothingSaved = { FACTORY_CLAUDE_TOKEN_FILE: '/nonexistent/claude-oauth-tok
 const withClaude = { ...nothingSaved, CLAUDE_CODE_OAUTH_TOKEN: 'sk-ant-oat01-x' }
 const withBoth = { ...withClaude, CODEX_HOME: '/nowhere' }
 
+// The default planner depends on whether codex can start, which depends on the machine.
+const cannotStart = () => false
+
 describe('which agent a role uses', () => {
   it('reads each role from the variable it always came from', () => {
     expect(ROLE_ENV).toEqual({
@@ -16,8 +19,16 @@ describe('which agent a role uses', () => {
     })
   })
 
-  it('is claude-code for all three when nothing says otherwise', () => {
-    expect(effectiveOf({})).toEqual({
+  it('plans with codex by default when codex can start, and builds and reviews with claude-code', () => {
+    expect(effectiveOf({}, () => true)).toEqual({
+      builder: 'claude-code',
+      planner: 'codex',
+      reviewer: 'claude-code',
+    })
+  })
+
+  it('is claude-code for all three when nothing says otherwise and codex cannot start', () => {
+    expect(effectiveOf({}, cannotStart)).toEqual({
       builder: 'claude-code',
       planner: 'claude-code',
       reviewer: 'claude-code',
@@ -25,18 +36,20 @@ describe('which agent a role uses', () => {
   })
 
   it('makes the planner and the reviewer follow the builder, until each is given another', () => {
-    expect(effectiveOf({ FACTORY_HARNESS: 'codex' })).toEqual({
+    expect(effectiveOf({ FACTORY_HARNESS: 'codex' }, cannotStart)).toEqual({
       builder: 'codex',
       planner: 'codex',
       reviewer: 'codex',
     })
-    expect(effectiveOf({ FACTORY_HARNESS: 'codex', FACTORY_REVIEWER: 'claude-code' })).toEqual({
+    expect(
+      effectiveOf({ FACTORY_HARNESS: 'codex', FACTORY_REVIEWER: 'claude-code' }, cannotStart),
+    ).toEqual({
       builder: 'codex',
       planner: 'codex',
       reviewer: 'claude-code',
     })
-    expect(effectiveOf({ FACTORY_PLANNER: 'codex' }).planner).toBe('codex')
-    expect(effectiveOf({ FACTORY_PLANNER: '', FACTORY_HARNESS: '' })).toEqual({
+    expect(effectiveOf({ FACTORY_PLANNER: 'codex' }, cannotStart).planner).toBe('codex')
+    expect(effectiveOf({ FACTORY_PLANNER: '', FACTORY_HARNESS: '' }, cannotStart)).toEqual({
       builder: 'claude-code',
       planner: 'claude-code',
       reviewer: 'claude-code',

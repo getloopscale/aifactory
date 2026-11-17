@@ -39,6 +39,29 @@ export function planAgainPrompt(): string {
   return 'Your answer had no plan that could be read. Do not change any file. Answer with the plan only, as one JSON object with "files", "order", "risks", "proof" and "outOfScope", and nothing after it.'
 }
 
+/**
+ * The builder's first turn when another agent wrote the plan: the issue and the rules of a build, then the plan,
+ * named by who wrote it. The builder works in a session of its own, so the plan is all it knows of that reading.
+ */
+export function givenPlanPrompt(
+  input: Parameters<typeof buildPrompt>[0],
+  plan: ChangePlan,
+  planner: string,
+): string {
+  return `${buildPrompt(input)}
+# The plan
+
+Before you, ${planner} read the code and wrote this plan:
+
+${renderChangePlan(plan)}
+
+Implement it, following the rules above.
+- Hold to the files the plan names. If the work needs a file the plan does not name, change it and say why in your final summary: a reviewer compares the diff with the plan, and a file outside it with no reason is sent back.
+- When the code shows the plan is wrong about something (a file, a function or a behaviour that is not there), do what the issue needs and say in your final summary where you left the plan and why.
+- Finish with a short summary of what you changed.
+`
+}
+
 /** The turn that does the work, in the session that wrote the plan. */
 export function implementPlanPrompt(input: { discarded: boolean }): string {
   return [

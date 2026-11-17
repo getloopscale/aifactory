@@ -32,6 +32,11 @@ export type RunTaskDeps = {
    * work in a fresh session, which is weaker: set a different agent for a real second opinion.
    */
   reviewer?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
+  /**
+   * The agent that writes the change plan, apart from the builder, chosen from the issue's labels and the
+   * builder's name. Nothing (or no function) means the builder plans in the session it then builds in.
+   */
+  planner?: (labels: string[], builder: string) => CodingHarness | undefined
   /** The commit author, so the pull request shows who wrote it. */
   author: { name: string; email: string }
   fetchIssue?: (repo: string, number: number, token: string, fetch?: FetchLike) => Promise<Issue>
