@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { dockerSandboxProvider, removeStaleSandboxes } from './docker-sandbox'
+import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
 import { createIsolatedSandbox, type IsolatedSandbox } from './sandbox'
 
 // Runs real containers: Docker must be up. It needs the internet for the allowed domains it reaches.
@@ -55,6 +56,18 @@ describe('the docker sandbox', () => {
     )
     expect(result).toMatchObject({ stdout: 'ok\n', exitCode: 0 })
   })
+
+  it('runs the declared package manager in a child that has only PATH and HOME, with no network', async () => {
+    const version = SANDBOX_TOOLCHAIN.pnpm
+    await sandbox.backend.uploadFile(
+      '/tmp/pm-repo/package.json',
+      JSON.stringify({ name: 'pm', packageManager: `pnpm@${version}` }),
+    )
+    const result = await sh(
+      `cd /tmp/pm-repo && node -e "const {execFileSync}=require('child_process');console.log(execFileSync('pnpm',['--version'],{env:{PATH:process.env.PATH,HOME:process.env.HOME}}).toString().trim())"`,
+    )
+    expect(result).toMatchObject({ stdout: `${version}\n`, exitCode: 0 })
+  }, 60_000)
 
   it('stops a command that outlives its timeout, and says so', async () => {
     const result = await sh('sleep 30', 2_000)

@@ -2,6 +2,7 @@ import { Sandbox } from 'e2b'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { e2bSandboxProvider } from './e2b-sandbox'
+import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
 import { createIsolatedSandbox, restoreIsolatedSandbox, type IsolatedSandbox } from './sandbox'
 
 // Runs real E2B sandboxes: needs E2B_API_KEY and the template from scripts/build-e2b-template.mts. httpbin.org
@@ -36,6 +37,18 @@ describe('an E2B sandbox', () => {
     // bwrap runs here, so theokit-sdk's sandbox tests run too, and they trace a process with strace.
     expect((await sh('command -v bwrap strace')).stdout.trim().split('\n')).toHaveLength(2)
   })
+
+  it('runs the declared package manager in a child that has only PATH and HOME, with no network', async () => {
+    const version = SANDBOX_TOOLCHAIN.pnpm
+    await sandbox.backend.uploadFile(
+      '/tmp/pm-repo/package.json',
+      JSON.stringify({ name: 'pm', packageManager: `pnpm@${version}` }),
+    )
+    const result = await sh(
+      `cd /tmp/pm-repo && node -e "const {execFileSync}=require('child_process');console.log(execFileSync('pnpm',['--version'],{env:{PATH:process.env.PATH,HOME:process.env.HOME}}).toString().trim())"`,
+    )
+    expect(result).toMatchObject({ stdout: `${version}\n`, exitCode: 0 })
+  }, 60_000)
 
   it('cannot reach a domain that is not listed', async () => {
     const blocked = await sh('curl -sS -m 15 -o /dev/null https://example.com')
