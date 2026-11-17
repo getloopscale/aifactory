@@ -235,6 +235,23 @@ class CaseRun {
     return plan
   }
 
+  /**
+   * The last rework broke the checks and no attempt is left: the reviewed commit's tree comes back as a new
+   * commit and the checks run on it, as `Run.restoreReviewed` does (#216). The case ends as it would have there,
+   * or on the checks when they fail on it too.
+   */
+  private async restoreReviewed(
+    kept: { sha: string; end: CaseEnd },
+    failed: CheckResult[],
+  ): Promise<CaseEnd> {
+    await must(this.backend, `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`)
+    if (!(await this.hasChange())) return checksFailed(failed)
+    await this.commitAll(`evaluation of ${this.c.id}, ${kept.sha.slice(0, 7)} restored`)
+    this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
+    const again = await this.check(this.committed)
+    return again.length > 0 ? checksFailed(again) : kept.end
+  }
+
   /** Sends the work back to the builder, as `Run.rework`. Answers whether the builder changed anything. */
   private async rework(
     findings: Finding[],
@@ -370,16 +387,13 @@ class CaseRun {
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
   async loop(): Promise<CaseEnd> {
     let sha = await this.applyFixes(await this.commit())
+    // The last reviewed commit whose checks passed, and how the case would end there, as `Run.loop` keeps it.
+    let reviewed: { sha: string; end: CaseEnd } | undefined
     for (;;) {
       const failed = await this.check(sha)
       if (failed.length > 0) {
         if (!this.canRework()) {
-          return {
-            checksPassed: false,
-            verdict: 'invalid',
-            blockingGuards: [],
-            failedChecks: names(failed),
-          }
+          return reviewed ? this.restoreReviewed(reviewed, failed) : checksFailed(failed)
         }
         // A rework that changed nothing has the checks run again on the same commit (#214).
         if (await this.rework([], failed)) sha = await this.applyFixes(await this.commit())
@@ -410,6 +424,7 @@ class CaseRun {
         verdict: read.verdict,
         blockingGuards: blocking.map((g) => g.issue),
       }
+      reviewed = { sha, end: handedOver }
       if (
         read.verdict === 'invalid' ||
         !this.canResume() ||
@@ -439,6 +454,14 @@ class CaseRun {
 }
 
 const names = (checks: CheckResult[]) => [...new Set(checks.map((c) => c.name))]
+
+/** How a case ends when its checks failed on the last commit it had. */
+const checksFailed = (failed: CheckResult[]): CaseEnd => ({
+  checksPassed: false,
+  verdict: 'invalid',
+  blockingGuards: [],
+  failedChecks: names(failed),
+})
 
 /** Names this process's evaluation runs; the sandbox's metadata also carries the process, which says whether it lives. */
 const PROCESS_RUN = randomUUID()

@@ -165,6 +165,15 @@ const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
 /** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
 type Held = { headline: string; reason: string; cause: HandoffCause }
 
+/** A commit of the run that passed the checks and was reviewed without an approval, with that review. */
+type Reviewed = {
+  sha: string
+  attempt: number
+  here: StoredCheck[]
+  outcome: ReviewVerdict
+  counts: number[]
+}
+
 /**
  * The hold of approved work that changes the agents' configuration or the quality gates (#139), or nothing.
  * The first waits for an evaluation; the second for the owner's reading, since no evaluation measures a gate.
@@ -1827,6 +1836,41 @@ export class Run {
    * No approval and no attempts left (or no verdict to act on): a person takes it from here, with a
    * draft pull request, a comment on the issue and a pre-release of what the factory did get done.
    */
+  /**
+   * The last rework broke a check and no attempt is left, but an earlier commit of this run passed the checks and
+   * was reviewed. Its tree comes back as a new commit (history is never rewritten), the checks run on it, and the
+   * work goes to a person with that review, instead of failing with nothing to show. When the checks fail there
+   * too, the run fails as it did before.
+   */
+  private async restoreReviewed(
+    kept: Reviewed,
+    reasons: string[],
+    attempt: number,
+  ): Promise<RunResult> {
+    const short = kept.sha.slice(0, 7)
+    const broke = `no pull request: ${reasons.join('; ')} (after ${attempt} attempts)`
+    await must(
+      this.backend,
+      `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`,
+    )
+    if (await this.hasNothingToCommit()) throw new StageFailure(broke)
+    const sha = await this.commitAndPush(
+      `Restore ${short}, the last commit that passed the checks`,
+      { attempt: attempt + 1, restoredFrom: kept.sha },
+    )
+    const checked = await this.verify(sha, attempt + 1, { publish: true })
+    if (!checked.verdict.open) {
+      throw new StageFailure(
+        `no pull request: ${checked.verdict.reasons.join('; ')} (after ${attempt + 1} attempts, the last on ${short} restored)`,
+      )
+    }
+    return this.handOver(sha, kept.attempt, checked.here, kept.outcome, kept.counts, {
+      headline: 'The last rework broke the checks',
+      reason: `the last rework broke the checks (${reasons.join('; ')}), so the branch is back at ${short}, which passed them and was reviewed`,
+      cause: 'review_plateau',
+    })
+  }
+
   /** The builder changed nothing in answer to a review and said why: a person reads both sides. */
   private disputed(
     sha: string,
@@ -1966,6 +2010,8 @@ export class Run {
   async loop(pushed: string): Promise<RunResult> {
     let sha = pushed
     const counts = await this.priorCounts()
+    // The last commit of this run that passed the checks and was reviewed: a later rework may break it (#216).
+    let reviewed: Reviewed | undefined
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
@@ -1975,6 +2021,7 @@ export class Run {
 
       if (!checked.verdict.open) {
         if (!canRework) {
+          if (reviewed) return this.restoreReviewed(reviewed, checked.verdict.reasons, attempt)
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''
           throw new StageFailure(`no pull request: ${checked.verdict.reasons.join('; ')}${after}`)
         }
@@ -1987,6 +2034,7 @@ export class Run {
       const outcome = await this.review(sha, attempt)
       if (outcome.verdict === 'approve') return this.approved(sha, attempt, checked.here, outcome)
       counts.push(blockingCount(outcome.findings))
+      reviewed = { sha, attempt, here: checked.here, outcome, counts: [...counts] }
       const mayRework =
         this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
       if (outcome.verdict === 'changes' && mayRework) {

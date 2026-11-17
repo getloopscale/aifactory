@@ -733,6 +733,30 @@ describe('runCase', () => {
     expect(reviewer.prompts).toHaveLength(1)
   })
 
+  it('ends as the factory hands it over when the last rework breaks the checks of a reviewed commit, restored', async () => {
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 0] })
+    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: false, reason: 'the reviewer asked for changes' })
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(provider.backend.commands.some((c) => c.includes(`restore --source=${'b'.repeat(40)}`))).toBe(
+      true,
+    )
+  })
+
+  it('fails on the checks when they fail on the restored commit too', async () => {
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1] })
+    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: false, reason: 'checks failed: tests' })
+  })
+
   it('fails a case whose checks still fail after the last attempt', async () => {
     const builder = agent('builder', planned(built(), built('try 2'), built('try 3')))
 
