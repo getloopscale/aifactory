@@ -358,8 +358,10 @@ async function look(
     const baseReports = await readBase(deps, row.repository, token, base)
     step = decideWaitingIntegration({ ...input, baseReports })
   }
-  if (done && step.kind === 'wait' && step.baseRed) {
-    await rememberBaseRed(deps, done, verifiedSha, base, step.baseRed)
+  if (done) {
+    // A pass that finds no check red on the base ends the hold, whatever it decided.
+    const red = step.kind === 'wait' ? (step.baseRed ?? []) : []
+    await rememberBaseRed(deps, done, verifiedSha, base, red)
   }
   const w: Waiting = {
     row,
