@@ -170,6 +170,7 @@ export const ptBR: Copy = {
     stepAttempt: (n: number) => `tentativa ${n}`,
     reviewRound: (n: number) => `rodada ${n}`,
     lastAgent: (who: string) => `por último: ${who}`,
+    lastWorked: 'por último',
     tasks: 'Tarefas',
     task: 'Tarefa',
     repository: 'Repositório',

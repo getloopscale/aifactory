@@ -96,6 +96,7 @@ export const en = {
     stepAttempt: (n: number) => `attempt ${n}`,
     reviewRound: (n: number) => `round ${n}`,
     lastAgent: (who: string) => `last: ${who}`,
+    lastWorked: 'last on it',
     tasks: 'Tasks',
     task: 'Task',
     repository: 'Repository',
