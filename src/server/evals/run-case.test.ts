@@ -281,6 +281,21 @@ describe('runCase', () => {
     expect(provider.stopped).toBe(1)
   })
 
+  it('lets a planner apart from the builder write the plan, and gives the builder that plan in a session of its own', async () => {
+    const provider = sandbox()
+    const planner = agent('codex', [{ ok: true, summary: PLAN, sessionId: 'p1' }])
+    const builder = agent('builder', [built()])
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase({ ...deps(provider, builder, reviewer), planner }, evalCase)
+
+    expect(result.passed).toBe(true)
+    expect(planner.prompts[0]).toContain('# This turn: plan only')
+    expect(builder.prompts).toHaveLength(1)
+    expect(builder.prompts[0]).toContain('codex read the code and wrote this plan')
+    expect(builder.prompts[0]).toContain('`src/cli.ts`')
+  })
+
   it('passes a case whose checks pass and whose review approves, with its cost and rounds', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built('done', 0.3)))

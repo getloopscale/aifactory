@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  givenPlanPrompt,
   changePlanPrompt,
   implementPlanPrompt,
   parseChangePlan,
@@ -185,6 +186,37 @@ describe('the prompts', () => {
 
   it('says so when the edits made while planning were thrown away', () => {
     expect(implementPlanPrompt({ discarded: true })).toContain('discarded')
+  })
+})
+
+describe('the plan another agent wrote', () => {
+  const plan = {
+    files: [{ path: 'src/a.ts', why: 'the parser' }],
+    order: ['write the test'],
+    risks: ['the cache'],
+    proof: ['npm test'],
+    outOfScope: ['the CLI'],
+  }
+  const input = { repo: 'o/r', issueNumber: 7, title: 'Fix it', body: 'Body', branch: 'factory/7' }
+
+  it('gives the builder the issue, the rules and the plan, and names who wrote it', () => {
+    const prompt = givenPlanPrompt(input, plan, 'codex')
+    expect(prompt).toContain('Fix it')
+    expect(prompt).toContain('# The plan')
+    expect(prompt).toContain('codex read the code and wrote this plan')
+    expect(prompt).toContain('`src/a.ts`')
+  })
+
+  it('asks the builder to hold to the plan and to say why it leaves it', () => {
+    const prompt = givenPlanPrompt(input, plan, 'codex')
+    expect(prompt).toContain('Hold to the files the plan names')
+    expect(prompt).toContain('say why in your final summary')
+  })
+
+  it('lets the builder correct a plan that is wrong about the code, saying so', () => {
+    expect(givenPlanPrompt(input, plan, 'codex')).toContain(
+      'When the code shows the plan is wrong about something',
+    )
   })
 })
 

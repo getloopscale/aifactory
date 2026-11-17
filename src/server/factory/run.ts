@@ -58,6 +58,7 @@ import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixe
 import { diffFacts } from './diff-facts'
 import {
   changePlanPrompt,
+  givenPlanPrompt,
   implementPlanPrompt,
   parseChangePlan,
   planAgainPrompt,
@@ -229,6 +230,12 @@ export class Run {
 
   /** When the current sandbox started; a renewed session starts its provider's clock again. */
   private sessionStartedAt: number
+
+  /** The agent that writes the change plan: the builder, unless the owner chose another for the role. */
+  private planner: CodingHarness | undefined
+
+  /** The plan another agent wrote, which the builder's first pass is given as text. */
+  private plannedBy: string | undefined
 
   private constructor(
     private readonly c: RunContext,
@@ -427,7 +434,10 @@ export class Run {
     const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
     const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
     const reviewer = chosen ?? builder
-    const agents = reviewer.name === builder.name ? [builder] : [builder, reviewer]
+    const planner = deps.planner?.(labels, builder.name) ?? builder
+    const agents = [builder, reviewer, planner].filter(
+      (agent, at, all) => all.findIndex((other) => other.name === agent.name) === at,
+    )
     const agentEgress = mergeEgress(await Promise.all(agents.map((a) => a.egress())))
 
     const spec: SandboxSpec = {
@@ -469,6 +479,7 @@ export class Run {
     c.state.sandbox = feed.attachTo(sandbox)
     const told = await Run.withConflictFiles(c, sandbox.backend, repoDir, baseSha)
     const run = new Run(told, builder, reviewer, c.state.sandbox, spec, repoDir, baseSha, startedAt)
+    run.planner = planner
     run.feed = feed
     run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
     run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
@@ -852,7 +863,7 @@ export class Run {
     if (resuming) {
       if (!builder.resume) throw new StageFailure(`${builder.name} cannot resume a session`)
       await enterStage(deps.db, taskId, 'build', {
-        harness: builder.name,
+        ...agentFacts(builder),
         attempt: resuming.attempt,
         resumed: true,
       })
@@ -871,11 +882,17 @@ export class Run {
       )
     }
     await enterStage(deps.db, taskId, 'build', {
-      harness: builder.name,
+      ...agentFacts(builder),
       attempt: 1,
       ...(this.feed?.delivered ? { knowledge: this.feed.delivered } : {}),
       ...(this.planned ? { planned: true } : {}),
     })
+    if (this.plan && this.plannedBy) {
+      const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
+      return this.settle(builder, 'builder', 1, (onEvent) =>
+        builder.run(backend, { onEvent, cwd: repoDir, timeoutMs, prompt }),
+      )
+    }
     if (this.planned && this.sessionId) {
       const prompt = implementPlanPrompt(this.planned)
       const sessionId = this.sessionId
@@ -928,40 +945,54 @@ export class Run {
     if (!(deps.planFirst ?? true) || !this.builder.resume) return
     // Reading and planning is short; the rest of the pass is left to the work.
     const timeoutMs = Math.min(await this.agentTimeout(), PLAN_MS)
+    const planner = this.planner ?? this.builder
+    const apart = planner.name !== this.builder.name
+    if (apart && !planner.resume) {
+      throw new StageFailure(
+        `${planner.name} cannot plan: it cannot resume a session to be asked again`,
+      )
+    }
     state.current = 'plan'
-    await enterStage(deps.db, taskId, 'plan', { harness: this.builder.name })
+    await enterStage(deps.db, taskId, 'plan', agentFacts(planner))
     const prompt = changePlanPrompt(this.buildInput())
-    const first = await this.settle(this.builder, 'planner', 1, (onEvent) =>
-      this.builder.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
+    const first = await this.settle(planner, 'planner', 1, (onEvent) =>
+      planner.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
     )
     if (!first.ok) throw new StageFailure(`the agent did not finish the plan: ${first.summary}`)
-    this.sessionId = first.sessionId ?? this.sessionId
-    const plan = parseChangePlan(first.summary) ?? (await this.planAgain(timeoutMs))
+    // The planner's session is the builder's only when they are the same agent.
+    const session = first.sessionId ?? (apart ? undefined : this.sessionId)
+    if (!apart) this.sessionId = session
+    const plan =
+      parseChangePlan(first.summary) ?? (await this.planAgain(planner, session, timeoutMs))
     const discarded = await this.discardEdits()
     await deps.db.insert(changePlan).values({
       taskId,
       baseSha: this.baseSha,
-      harness: this.builder.name,
+      harness: planner.name,
       plan,
     })
     this.plan = plan
     this.planned = { discarded }
+    this.plannedBy = apart ? planner.name : undefined
   }
 
   /** The planning turn ended with no plan that could be read: one more turn, asking for the plan alone. */
-  private async planAgain(timeoutMs: number): Promise<ChangePlan> {
-    if (!this.sessionId)
+  private async planAgain(
+    planner: CodingHarness,
+    sessionId: string | undefined,
+    timeoutMs: number,
+  ): Promise<ChangePlan> {
+    if (!sessionId)
       throw new StageFailure('the agent wrote no plan and gave no session to ask again')
-    const sessionId = this.sessionId
-    const again = await this.settle(this.builder, 'planner', 1, (onEvent) =>
-      this.builder.resume!(this.backend, sessionId, {
+    const again = await this.settle(planner, 'planner', 1, (onEvent) =>
+      planner.resume!(this.backend, sessionId, {
         onEvent,
         cwd: this.repoDir,
         timeoutMs,
         prompt: planAgainPrompt(),
       }),
     )
-    this.sessionId = again.sessionId ?? this.sessionId
+    if (planner.name === this.builder.name) this.sessionId = again.sessionId ?? this.sessionId
     const plan = again.ok ? parseChangePlan(again.summary) : undefined
     if (!plan)
       throw new StageFailure(`the agent wrote no plan: ${oneLine(again.summary).slice(0, 700)}`)
@@ -1244,7 +1275,7 @@ export class Run {
     const timeoutMs = await this.agentTimeout()
     state.current = 'build'
     await enterStage(deps.db, taskId, 'build', {
-      harness: this.builder.name,
+      ...agentFacts(this.builder),
       attempt: 1,
       refuted: true,
     })
@@ -1386,7 +1417,7 @@ export class Run {
     const timeoutMs = await this.agentTimeout()
     state.current = 'build'
     await enterStage(deps.db, taskId, 'build', {
-      harness: this.builder.name,
+      ...agentFacts(this.builder),
       attempt,
       rework: true,
     })
@@ -1506,7 +1537,7 @@ export class Run {
   private async review(sha: string, attempt: number): Promise<ReviewVerdict> {
     const { deps, taskId, row, issue, branch, state } = this.c
     state.current = 'review'
-    await enterStage(deps.db, taskId, 'review', { sha, attempt, reviewer: this.reviewer.name })
+    await enterStage(deps.db, taskId, 'review', { sha, attempt, ...reviewerFacts(this.reviewer) })
     const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
       baseSha: this.baseSha,
       plan: this.plan,
@@ -1936,4 +1967,23 @@ export class Run {
       return this.handOver(sha, attempt, checked.here, outcome, counts)
     }
   }
+}
+
+/** What a stage records about the agent working in it, so the panel can say who it is and on which model. */
+function agentFacts(agent: CodingHarness): { harness: string; model?: string; effort?: string } {
+  return {
+    harness: agent.name,
+    ...(agent.model ? { model: agent.model } : {}),
+    ...(agent.effort ? { effort: agent.effort } : {}),
+  }
+}
+
+/** The reviewer as a review stage records it: the name under `reviewer`, as it always was, with model and effort. */
+function reviewerFacts(agent: CodingHarness): {
+  reviewer: string
+  model?: string
+  effort?: string
+} {
+  const { harness, ...rest } = agentFacts(agent)
+  return { reviewer: harness, ...rest }
 }

@@ -11,6 +11,7 @@ import {
 } from '../factory/agent-time'
 import {
   changePlanPrompt,
+  givenPlanPrompt,
   implementPlanPrompt,
   parseChangePlan,
   planAgainPrompt,
@@ -67,6 +68,8 @@ export type EvalDeps = {
   sandbox: IsolatedSandboxProvider
   builder: CodingHarness
   reviewer: CodingHarness
+  /** The agent that writes the plan when it is not the builder, as `Run.planChange` uses it. */
+  planner?: CodingHarness
   author: { name: string; email: string }
   /** The knowledge base every agent reads; left out, the agents work without one. */
   knowledge?: KnowledgeSource
@@ -179,30 +182,35 @@ class CaseRun {
    * (`Run.planChange`), what the planning turn changed is thrown away, and the work continues that session.
    */
   async build(): Promise<void> {
-    const { builder } = this.deps
-    const discarded = builder.resume ? await this.planChange() : undefined
-    const result = await this.agentCall(() =>
-      discarded === undefined
+    const { builder, planner } = this.deps
+    const apart = planner !== undefined && planner.name !== builder.name
+    const discarded = apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
+    const result = await this.agentCall(() => {
+      if (apart && this.plan) {
+        const prompt = givenPlanPrompt(this.buildInput(), this.plan, planner.name)
+        return builder.run(this.backend, this.agentInput(prompt))
+      }
+      return discarded === undefined
         ? builder.run(this.backend, this.agentInput(buildPrompt(this.buildInput())))
         : builder.resume!(
             this.backend,
             this.sessionId!,
             this.agentInput(implementPlanPrompt({ discarded })),
-          ),
-    )
+          )
+    })
     this.settle(result, 'the agent did not finish')
     this.summary = result.summary
     if (parseQuestion(result.summary)) throw new Stopped('the agent asked a question')
   }
 
   /** Writes the plan and answers whether the planning turn left edits, which are thrown away. */
-  private async planChange(): Promise<boolean> {
+  private async planChange(planner: CodingHarness): Promise<boolean> {
     const input = this.agentInput(changePlanPrompt(this.buildInput()), PLAN_MS)
     const first = this.settle(
-      await this.agentCall(() => this.deps.builder.run(this.backend, input)),
+      await this.agentCall(() => planner.run(this.backend, input)),
       'the agent did not finish the plan',
     )
-    this.plan = parseChangePlan(first.summary) ?? (await this.planAgain(input.timeoutMs))
+    this.plan = parseChangePlan(first.summary) ?? (await this.planAgain(planner, input.timeoutMs))
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     if (pending.stdout.trim() === '') return false
     await must(this.backend, `git -C ${this.repoDir} reset --hard ${this.c.baseSha}`)
@@ -211,9 +219,10 @@ class CaseRun {
   }
 
   /** The planning turn ended with no plan that could be read: one more turn, asking for the plan alone. */
-  private async planAgain(timeoutMs: number): Promise<ChangePlan> {
+  private async planAgain(planner: CodingHarness, timeoutMs: number): Promise<ChangePlan> {
+    if (!planner.resume || !this.sessionId) throw new Stopped('the agent wrote no plan')
     const again = await this.agentCall(() =>
-      this.deps.builder.resume!(this.backend, this.sessionId!, {
+      planner.resume!(this.backend, this.sessionId!, {
         cwd: this.repoDir,
         timeoutMs,
         prompt: planAgainPrompt(),
