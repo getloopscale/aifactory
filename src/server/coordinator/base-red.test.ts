@@ -49,7 +49,7 @@ describe('recogniseBaseRed', () => {
     ).toEqual({
       kind: 'unknown',
       taskId: 7,
-      head: 'abc1234def:CI,Lint',
+      head: 'abc1234def',
       evidence: 'could not read the done event of task 7: connection reset',
     })
   })
