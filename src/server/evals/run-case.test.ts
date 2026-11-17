@@ -71,6 +71,8 @@ type World = {
   dirty?: boolean
   /** Exit code of each run of the check command, in order. */
   checkExits?: number[]
+  /** Exit code of each run of the check command on the case's base, in order; it passes there when none is left. */
+  baseExits?: number[]
   /** `git diff --name-status` between the base and the commit. */
   nameStatus?: string
   /** `git diff --name-status` for each commit in turn, when it changes from round to round. */
@@ -89,6 +91,7 @@ type World = {
 
 function sandbox(world: World = {}) {
   const exits = [...(world.checkExits ?? [0])]
+  const baseExits = [...(world.baseExits ?? [])]
   let statuses = 0
   let commits = 0
   let fixed = false
@@ -108,6 +111,8 @@ function sandbox(world: World = {}) {
       return { stdout: changed ? ' M src/cli.ts\n' : '' }
     }
     if (command.endsWith('&& fix-it')) return { ...world.fix } as Reply
+    if (command.startsWith('cd /tmp/aifactory-base') && command.includes('pnpm test'))
+      return { exitCode: baseExits.shift() ?? 0, stdout: 'ran' }
     if (command.includes('pnpm test')) return { exitCode: exits.shift() ?? 0, stdout: 'ran' }
     if (command.includes('diff --name-status'))
       return {
@@ -722,7 +727,7 @@ describe('runCase', () => {
   })
 
   it('leaves unmeasured a case whose failing checks, left unchanged by the builder, fail on its base too', async () => {
-    const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1, 1, 1] })
+    const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1], baseExits: [1, 1] })
     const builder = agent('builder', planned(built(), built('the failure is not my change')))
 
     const result = await runCase(deps(provider, builder, agent('reviewer', [])), evalCase)
@@ -770,6 +775,16 @@ describe('runCase', () => {
     const result = await runCase(deps(provider, builder, reviewer), evalCase)
 
     expect(result).toMatchObject({ passed: false, reason: 'checks failed: tests' })
+  })
+
+  it('leaves unmeasured a case whose checks fail again after a rework that changed code, when they fail on its base too', async () => {
+    const builder = agent('builder', planned(built(), built('try 2'), built('try 3')))
+    const provider = sandbox({ checkExits: [1, 1, 1, 1], baseExits: [1, 1] })
+
+    const result = await runCase(deps(provider, builder, agent('reviewer', [])), evalCase)
+
+    expect(result).toMatchObject({ passed: false, attempts: 2 })
+    expect(failedForEnvironment(result)).toBe(true)
   })
 
   it('fails a case whose checks still fail after the last attempt', async () => {

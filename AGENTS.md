@@ -266,9 +266,10 @@ reads that file, not a convention.
   points. A new step is a new method, not a branch inside another. The same step goes into
   `src/server/evals/run-case.ts`, which runs evaluation cases along the factory's path without pushing:
   without it, the suite measures a factory that no longer exists.
-- **A check that fails on the base is not the task's.** When a rework after failing checks changes nothing,
-  `Run.refuseRedBase` runs those checks on the commit the work started from (`failingOnBase` in
-  `factory/base-checks.ts`, in a checkout of its own). If every one fails there too, the run throws `BaseRed`: the
+- **A check that fails on the base is not the task's.** When a rework after failing checks changes nothing, or
+  the same checks fail again on the next commit (`sameChecks`), `Run.refuseRedBase` runs those checks on the
+  commit the work started from (`BaseProbe` in `factory/base-checks.ts`, in a checkout of its own, each check at
+  most once per run). If every one fails there too, the run throws `BaseRed`: the
   failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
   environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
   `run-case.ts` takes the same step and leaves such a case unmeasured.

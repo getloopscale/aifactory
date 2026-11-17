@@ -340,6 +340,9 @@ const changed = (extra?: (command: string) => Reply | undefined) => {
   }
 }
 
+/** Whether a command runs on the checkout of the integration branch the run makes to blame a red base (#219). */
+const onBase = (command: string) => command.startsWith('cd /tmp/aifactory-base &&')
+
 /** The push commands a run sent, from `push` on. */
 const pushesOf = (sandbox: FakeSandbox) =>
   sandbox.backend.commands.flatMap((c) =>
@@ -1856,8 +1859,11 @@ describe('runTask review loop', () => {
   it('fails at verify, with the attempts it took, when the checks never pass', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
+    // The tests pass on the integration branch: the failure is the work's.
     const sandbox = new FakeSandbox(
-      changed((c) => (c.endsWith('npm test') ? { exitCode: 1, stdout: 'not ok' } : undefined)),
+      changed((c) =>
+        c.endsWith('npm test') && !onBase(c) ? { exitCode: 1, stdout: 'not ok' } : undefined,
+      ),
     )
 
     const result = await runTask(deps(sandbox, { harness: builder }), id)
@@ -2054,7 +2060,7 @@ describe('runTask review loop', () => {
           dirty = true
           return { stdout: '' }
         }
-        if (!c.endsWith('npm test')) return undefined
+        if (!c.endsWith('npm test') || onBase(c)) return undefined
         tests += 1
         // The first commit passes and is reviewed; every rework after it breaks the tests; the restored one passes.
         return tests === 1 || restored ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
@@ -2088,7 +2094,7 @@ describe('runTask review loop', () => {
           dirty = true
           return { stdout: '' }
         }
-        if (!c.endsWith('npm test')) return undefined
+        if (!c.endsWith('npm test') || onBase(c)) return undefined
         tests += 1
         return tests === 1 ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
       }),
@@ -2160,6 +2166,25 @@ describe('runTask review loop', () => {
       error:
         '"test" fails on workspace at abc123d too, so the failure is the base\'s, not this work\'s; the task runs again on its own later',
     })
+  })
+
+  it('stops at the second commit and waits for the base when a check that keeps failing after a rework fails on the integration branch too', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('npm test') ? { exitCode: 1, stdout: 'advisory found' } : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    expect(builder.resumed).toHaveLength(1)
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).toMatchObject({ baseRed: { checks: ['test'] } })
   })
 
   it('goes on as before when the checks the builder left unchanged pass on the integration branch', async () => {

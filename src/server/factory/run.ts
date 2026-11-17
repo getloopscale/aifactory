@@ -31,7 +31,7 @@ import {
   withConflictFiles,
 } from './merge-base'
 import { evidenceOfNote } from './ci-wait'
-import { failingOnBase } from './base-checks'
+import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
 import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
@@ -234,6 +234,8 @@ export class Run {
   private planned: { discarded: boolean } | undefined
   /** Every path the change under review touches, as the last review read it. */
   private touched: string[] = []
+  /** Whether the checks the run failed fail on the base too, asking each check at most once (#219). */
+  private readonly baseProbe = new BaseProbe()
   /** The last review of this run that asked for changes: the next round starts from its findings. */
   private earlier: EarlierReview | undefined
   /** What the agents of this task do, written while they work. Opened by the first agent run. */
@@ -1421,7 +1423,7 @@ export class Run {
   /** Throws `BaseRed` when the checks the work failed fail on the integration branch too (#219). */
   private async refuseRedBase(failed: CheckResult[]): Promise<void> {
     this.c.state.current = 'verify'
-    const red = await failingOnBase(
+    const red = await this.baseProbe.red(
       this.backend,
       {
         repoDir: this.repoDir,
@@ -2030,6 +2032,8 @@ export class Run {
     const counts = await this.priorCounts()
     // The last commit of this run that passed the checks and was reviewed: a later rework may break it (#216).
     let reviewed: Reviewed | undefined
+    // The checks that failed on the commit before, while they keep failing.
+    let failedBefore: CheckResult[] | undefined
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
         attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
@@ -2038,6 +2042,10 @@ export class Run {
       const checked = await this.verify(sha, attempt, { publish: true, fixed })
 
       if (!checked.verdict.open) {
+        const failed = failingChecks(checked.results)
+        // The same checks failed on the commit before, so the rework did not fix them: they may be the base's (#219).
+        if (sameChecks(failedBefore, failed)) await this.refuseRedBase(failed)
+        failedBefore = failed
         if (!canRework) {
           if (reviewed) return this.restoreReviewed(reviewed, checked.verdict.reasons, attempt)
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''
@@ -2046,13 +2054,13 @@ export class Run {
         // A builder that changed nothing said the failure is not its change's: a timeout, often, and then the
         // checks run again on the same commit, within the same attempts. When the failing checks fail on the
         // integration branch too, the failure is the base's, and no rework fixes it (#219).
-        const failed = failingChecks(checked.results)
         const reworked = await this.rework(attempt + 1, [], failed)
         if (reworked === undefined) await this.refuseRedBase(failed)
         sha = reworked ?? sha
         continue
       }
 
+      failedBefore = undefined
       const outcome = await this.review(sha, attempt)
       if (outcome.verdict === 'approve') return this.approved(sha, attempt, checked.here, outcome)
       counts.push(blockingCount(outcome.findings))
