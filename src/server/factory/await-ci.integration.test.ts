@@ -119,7 +119,7 @@ const deps = (over: Partial<AwaitCiDeps> = {}): AwaitCiDeps => ({
       .set({ stage: 'intake', awaitingCiSha: null })
       .where(eq(task.id, taskId))
   },
-  startOver: async (taskId) => {
+  sendBackConflict: async (taskId) => {
     startedOver.push(taskId)
   },
   mergeBase: async (taskId, note) => {
@@ -572,9 +572,10 @@ describe('pollAwaitingIntegrations', () => {
     pull({ mergeableState: 'dirty' })
     const id = await waitingTask()
 
-    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ startedOver: [id] })
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ conflictSentBack: [id] })
 
     expect(startedOver).toEqual([id])
+    expect(api.callsTo('deleteBranch')).toEqual([])
     // The run merges the base into the open pull request: the merge it pushes must not go through unverified.
     expect(autoMergeOff()).toEqual([12])
   })
@@ -596,7 +597,7 @@ describe('pollAwaitingIntegrations', () => {
     expect(await pollAwaitingIntegrations(deps())).toEqual({
       merged: [],
       sentBack: [],
-      startedOver: [],
+      conflictSentBack: [],
       toPerson: [],
       waiting: 0,
       waitingOnBase: [],

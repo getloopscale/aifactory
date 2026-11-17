@@ -59,8 +59,11 @@ export type WaitingStep =
    * check reported (`checksFeedback`) as feedback.
    */
   | { kind: 'send_back'; failed: string[]; reports: CheckReport[] }
-  /** The pull request conflicts with its base: the task runs again to merge the new base into its branch. */
-  | { kind: 'start_over'; reason: string }
+  /**
+   * The pull request conflicts with its base: the task runs again on its own branch, with a note, to merge
+   * the new base into it. The approved work stays; the branch is not deleted.
+   */
+  | { kind: 'send_back_conflict'; reason: string }
   | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
   /**
    * A promotion into the pre-release branch held the integration out and the hold expired: the verified
@@ -167,7 +170,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   const runs = `${AUTOMATIC_RETRIES} automatic runs`
   if (input.pull.mergeableState === 'dirty') {
     return runsLeft
-      ? { kind: 'start_over', reason: 'the pull request conflicts with its base' }
+      ? { kind: 'send_back_conflict', reason: 'the pull request conflicts with its base' }
       : {
           kind: 'person',
           reason: `the pull request conflicts with its base after ${runs}`,

@@ -46,8 +46,11 @@ export type AwaitCiDeps = {
    * its branch, with no agent; `note` is the record of why (the panel's `mergeFixedBase`).
    */
   mergeBase: (taskId: number, note: string) => Promise<void>
-  /** Runs the task again: on its branch to merge the new base, or from it when the branch is gone (`retryAutomatically`). */
-  startOver: (taskId: number) => Promise<void>
+  /**
+   * Runs the task again on its branch to merge the integration branch `base`, or from the base when the
+   * branch is gone (`sendBackConflictAutomatically`).
+   */
+  sendBackConflict: (taskId: number, base: string) => Promise<void>
 }
 
 /** What an integration needs once the merge exists. */
@@ -56,7 +59,8 @@ type IntegrationDeps = Pick<AwaitCiDeps, 'db' | 'github' | 'api' | 'releaseMode'
 export type AwaitCiResult = {
   merged: number[]
   sentBack: number[]
-  startedOver: number[]
+  /** Tasks whose pull request conflicts with its base, run again on their branch to merge it. */
+  conflictSentBack: number[]
   toPerson: number[]
   waiting: number
   /** Tasks that wait because the required checks they failed fail on the head of the integration branch too. */
@@ -395,11 +399,11 @@ async function take(
       return
     case 'needs_base':
       throw new Error('the integration branch was read and the base is still asked for')
-    case 'start_over':
+    case 'send_back_conflict':
       // Off first: the run merges the base into this pull request, and that merge must be verified before it lands.
       await deps.api.disableAutoMerge(row.repository, token, number)
-      await deps.startOver(row.id)
-      result.startedOver.push(row.id)
+      await deps.sendBackConflict(row.id, at.base)
+      result.conflictSentBack.push(row.id)
       return
     case 'person': {
       let said = step
@@ -422,7 +426,7 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
   const result: AwaitCiResult = {
     merged: [],
     sentBack: [],
-    startedOver: [],
+    conflictSentBack: [],
     toPerson: [],
     waiting: 0,
     waitingOnBase: [],

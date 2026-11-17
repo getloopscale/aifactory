@@ -435,6 +435,27 @@ export async function sendBackAutomatically(deps: ActionDeps, taskId: number, no
 }
 
 /**
+ * Sends a task whose pull request waits for checks, and conflicts with its base, back to its own branch to
+ * merge `base` (`send_back_conflict` in `factory/ci-wait.ts`). Without the branch there is nothing to keep,
+ * and the task starts over from the base.
+ */
+export async function sendBackConflictAutomatically(
+  deps: ActionDeps,
+  taskId: number,
+  base: string,
+) {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'send_back_after_ci')
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  if (!head) {
+    await requeue(deps, taskId, ['done'], 'automatic_retry', '', row.headSha)
+    return
+  }
+  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
+}
+
+/**
  * Runs a task again whose required checks failed only because the integration branch failed them too, now
  * that it passes them (`merge_base` in `factory/ci-wait.ts`), with no person asking. The run merges that
  * branch into the work branch itself, with no agent, and the merge goes through the checks and the review
