@@ -252,9 +252,9 @@ export type TaskCard = {
   waitingForChecks: boolean
   /**
    * The pull request waits because the required checks it failed fail on the integration branch too: the
-   * checks, the branch and when it was first seen red. Null when nothing is blamed on the branch.
+   * checks red there now, the branch and when it was first seen red. Null or absent when none is red now.
    */
-  waitingOnBase: { checks: string[]; branch: string; since: string | null } | null
+  waitingOnBase?: { checks: string[]; branch: string; since: string | null } | null
   /**
    * Delivered without a pull request: the agent changed nothing, the checks passed at the commit and the
    * reviewer confirmed the code already does what the issue asks. The factory closed the issue.

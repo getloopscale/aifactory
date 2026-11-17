@@ -280,6 +280,10 @@ describe('pollAwaitingIntegrations', () => {
     ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseBlame?: unknown })
       .baseBlame
 
+  const redOf = async (id: number) =>
+    ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseRed?: unknown })
+      .baseRed
+
   it('waits, and sends nothing back, when the failed check also fails on the integration branch', async () => {
     reports(failure('CI'))
     baseIs(failure('CI', 'https://ci/0'))
@@ -300,7 +304,8 @@ describe('pollAwaitingIntegrations', () => {
 
     await pollAwaitingIntegrations(deps())
 
-    expect(await blameOf(id)).toEqual({
+    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
+    expect(await redOf(id)).toEqual({
       sha: VERIFIED,
       checks: ['CI'],
       base: 'workspace',
@@ -313,10 +318,23 @@ describe('pollAwaitingIntegrations', () => {
     baseIs(failure('CI', 'https://ci/0'))
     const id = await waitingTask()
     await pollAwaitingIntegrations(deps())
-    const first = (await blameOf(id)) as { since: string }
+    const first = (await redOf(id)) as { since: string }
     await pollAwaitingIntegrations({ ...deps(), now: () => new Date(Date.now() + 3_600_000) })
 
-    expect(((await blameOf(id)) as { since: string }).since).toBe(first.since)
+    expect(((await redOf(id)) as { since: string }).since).toBe(first.since)
+  })
+
+  it('ends the hold, and keeps the blame, once the check is not known red any more', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    reports({ name: 'CI', state: 'pending', detail: '', url: 'u' })
+
+    await pollAwaitingIntegrations(deps())
+
+    expect(await redOf(id)).toBeUndefined()
+    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
   })
 
   it('runs the task to merge the base, with no agent sent back, once the base passes the check', async () => {

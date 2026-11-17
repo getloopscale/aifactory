@@ -261,11 +261,14 @@ describe('listTasks and an integration that waits for the repository checks', ()
     const blamed = await seed('done', { headSha: 'abc', awaitingCiSha: 'abc' }, [
       {
         stage: 'done',
-        detail: { baseBlame: { sha: 'abc', checks: ['CI'], base: 'workspace', since } },
+        detail: { baseRed: { sha: 'abc', checks: ['CI'], base: 'workspace', since } },
       },
     ])
     const stale = await seed('done', { headSha: 'def', awaitingCiSha: 'def' }, [
-      { stage: 'done', detail: { baseBlame: { sha: 'old', checks: ['CI'], base: 'workspace' } } },
+      {
+        stage: 'done',
+        detail: { baseRed: { sha: 'old', checks: ['CI'], base: 'workspace', since } },
+      },
     ])
 
     const cards = new Map((await listTasks(getDb())).map((c) => [c.id, c]))

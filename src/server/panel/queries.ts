@@ -17,7 +17,7 @@ import {
   watch,
 } from '../db/schema'
 import { retryAt } from '../factory/auto-retry'
-import { baseBlameOf } from '../factory/ci-wait'
+import { baseRedOf } from '../factory/ci-wait'
 import { pendingSendBack } from '../factory/send-back'
 import {
   columnOf,
@@ -184,11 +184,10 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   })
 }
 
-/** What holds a task that waits for CI on the integration branch, when its failed checks are blamed on it. */
+/** What holds a task that waits for CI on the integration branch: the checks red there now, while they are. */
 function waitingOnBase(t: TaskRow, done: unknown): TaskCard['waitingOnBase'] {
-  const blame = t.awaitingCiSha === null ? undefined : baseBlameOf(done, t.awaitingCiSha)
-  if (!blame || blame.checks.length === 0 || !blame.base) return null
-  return { checks: blame.checks, branch: blame.base, since: blame.since ?? null }
+  const red = t.awaitingCiSha === null ? undefined : baseRedOf(done, t.awaitingCiSha)
+  return red ? { checks: red.checks, branch: red.base, since: red.since } : null
 }
 
 /** The latest release of a task that waits for checks or was refused, while the task is not released. */

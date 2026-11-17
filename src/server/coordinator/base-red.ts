@@ -1,4 +1,5 @@
-import type { BaseBlame } from '../factory/ci-wait'
+import type { Read } from '../factory/doctor'
+import type { BaseRed } from '../factory/ci-wait'
 
 import type { TaskException } from './exceptions'
 
@@ -11,29 +12,34 @@ import type { TaskException } from './exceptions'
 /** How long the integration branch may stay red for a task before the coordinator escalates it. */
 export const BASE_RED_LIMIT_MS = 2 * 60 * 60_000
 
-/** A task that waits for CI, and what its `done` event blames on the integration branch. */
+/** A task that waits for CI, and the hold its `done` event records: the checks red on the branch now. */
 export type BaseRedFacts = {
   taskId: number
   /** The commit the task waits on. */
   head: string
-  blame: BaseBlame | undefined
+  /** The current hold, none when no check is red on the branch, or why the event could not be read. */
+  red: Read<BaseRed | undefined>
 }
 
 const short = (sha: string) => sha.slice(0, 7)
 
 const hours = (ms: number) => (ms / 3_600_000).toFixed(1)
 
-/** The `base_red` exception of a task held longer than the limit, or none. */
+/** The `base_red` exception of a task held longer than the limit, or none; an unread hold is `unknown`. */
 export function recogniseBaseRed(facts: BaseRedFacts, now: Date): TaskException | undefined {
-  const { blame } = facts
-  if (!blame || blame.checks.length === 0 || !blame.since) return undefined
-  const red = now.getTime() - Date.parse(blame.since)
-  if (red <= BASE_RED_LIMIT_MS) return undefined
-  const branch = blame.base ?? 'the integration branch'
+  const { taskId, head } = facts
+  if (!facts.red.read) {
+    const evidence = `could not read ${facts.red.tried}: ${facts.red.error}`
+    return { kind: 'unknown', taskId, head, evidence }
+  }
+  const red = facts.red.value
+  if (!red) return undefined
+  const for_ = now.getTime() - Date.parse(red.since)
+  if (for_ <= BASE_RED_LIMIT_MS) return undefined
   return {
     kind: 'base_red',
-    taskId: facts.taskId,
-    head: facts.head,
-    evidence: `${blame.checks.join(', ')} fails on ${branch} as on ${short(facts.head)}, red for ${hours(red)} hours`,
+    taskId,
+    head,
+    evidence: `${red.checks.join(', ')} fails on ${red.base} as on ${short(head)}, red for ${hours(for_)} hours`,
   }
 }

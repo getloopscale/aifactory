@@ -10,8 +10,9 @@ import { errorMessage } from './error-message'
 import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
-  baseBlameOf,
+  baseRedOf,
   type BaseBlame,
+  type BaseRed,
   checksFeedback,
   decideWaitingIntegration,
   evidenceOfNote,
@@ -276,13 +277,14 @@ async function readBase(
 
 /** The checks blamed on the base for the verified commit; a blame stored for another commit counts for nothing. */
 function blamedOnBase(detail: unknown, verifiedSha: string): string[] {
-  return baseBlameOf(detail, verifiedSha)?.checks ?? []
+  const blame = (detail as { baseBlame?: Partial<BaseBlame> } | null | undefined)?.baseBlame
+  return blame?.sha === verifiedSha && Array.isArray(blame.checks) ? blame.checks : []
 }
 
 /**
- * Adds the checks this pass found red on the base to the ones blamed before, so a later pass still knows
- * whose their failure is once the base passes them. The list only grows while the commit waits; `since` is
- * when the base was first seen red for this commit, and stays.
+ * Stores what this pass found of the integration branch on the `done` event: the checks blamed on the base
+ * so far (only growing, so a later pass still knows whose their failure is once the base passes them), and
+ * the hold, the checks red there now, which keeps its `since` while it lasts and is removed when none is.
  */
 async function rememberBaseRed(
   deps: AwaitCiDeps,
@@ -291,19 +293,27 @@ async function rememberBaseRed(
   base: string,
   red: string[],
 ): Promise<void> {
-  const before = baseBlameOf(done.detail, verifiedSha)
-  const known = before?.checks ?? []
-  if (before?.since && before.base === base && red.every((name) => known.includes(name))) return
-  const baseBlame: BaseBlame = {
-    sha: verifiedSha,
-    checks: [...new Set([...known, ...red])],
-    base,
-    since: before?.since ?? (deps.now?.() ?? new Date()).toISOString(),
+  const detail = { ...(done.detail as Record<string, unknown> | null) }
+  const before = blamedOnBase(done.detail, verifiedSha)
+  const hold = baseRedOf(done.detail, verifiedSha)
+  if (red.length === 0) {
+    if (!('baseRed' in detail)) return
+    delete detail.baseRed
+  } else {
+    const same =
+      hold?.base === base &&
+      hold.checks.length === red.length &&
+      red.every((name) => hold.checks.includes(name))
+    const grown = !red.every((name) => before.includes(name))
+    if (same && !grown) return
+    const since = hold?.since ?? (deps.now?.() ?? new Date()).toISOString()
+    detail.baseBlame = {
+      sha: verifiedSha,
+      checks: [...new Set([...before, ...red])],
+    } satisfies BaseBlame
+    detail.baseRed = { sha: verifiedSha, checks: red, base, since } satisfies BaseRed
   }
-  await deps.db
-    .update(stageEvent)
-    .set({ detail: { ...(done.detail as Record<string, unknown>), baseBlame } })
-    .where(eq(stageEvent.id, done.id))
+  await deps.db.update(stageEvent).set({ detail }).where(eq(stageEvent.id, done.id))
 }
 
 async function look(

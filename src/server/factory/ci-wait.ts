@@ -12,22 +12,28 @@ export const CI_SILENCE_MS = 6 * 60 * 60_000
 
 /**
  * What a pass stores on the `done` event of the verified commit (`detail.baseBlame`): every required check
- * found red on the base while it failed on that commit, the integration branch it was red on, and when it
- * was first seen red.
+ * found red on the base while it failed on that commit. It only grows while the commit waits.
  */
-export type BaseBlame = { sha: string; checks: string[]; base?: string; since?: string }
+export type BaseBlame = { sha: string; checks: string[] }
 
-/** The blame stored for this commit, or none: one stored for another commit, or a malformed one, counts for nothing. */
-export function baseBlameOf(detail: unknown, verifiedSha: string): BaseBlame | undefined {
-  const blame = (detail as { baseBlame?: Partial<BaseBlame> } | null | undefined)?.baseBlame
-  if (blame?.sha !== verifiedSha || !Array.isArray(blame.checks)) return undefined
+/**
+ * What a pass stores beside it (`detail.baseRed`): the checks red on the integration branch at the last pass,
+ * the branch, and when that hold began. It is removed as soon as a pass finds no check red there.
+ */
+export type BaseRed = { sha: string; checks: string[]; base: string; since: string }
+
+/** The hold stored for this commit, or none: one stored for another commit, or a malformed one, counts for nothing. */
+export function baseRedOf(detail: unknown, verifiedSha: string): BaseRed | undefined {
+  const red = (detail as { baseRed?: Partial<BaseRed> } | null | undefined)?.baseRed
+  if (red?.sha !== verifiedSha || !Array.isArray(red.checks) || red.checks.length === 0)
+    return undefined
+  if (typeof red.base !== 'string' || typeof red.since !== 'string') return undefined
+  if (Number.isNaN(Date.parse(red.since))) return undefined
   return {
     sha: verifiedSha,
-    checks: blame.checks.filter((name): name is string => typeof name === 'string'),
-    ...(typeof blame.base === 'string' ? { base: blame.base } : {}),
-    ...(typeof blame.since === 'string' && !Number.isNaN(Date.parse(blame.since))
-      ? { since: blame.since }
-      : {}),
+    checks: red.checks.filter((n): n is string => typeof n === 'string'),
+    base: red.base,
+    since: red.since,
   }
 }
 

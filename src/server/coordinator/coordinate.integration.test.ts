@@ -299,7 +299,7 @@ describe('an integration branch that stays red under a waiting task', () => {
     seed('done', { headSha: sha, awaitingCiSha: sha }, [
       {
         stage: 'done',
-        detail: { baseBlame: { sha, checks: ['CI'], base: 'workspace', since: at } },
+        detail: { baseRed: { sha, checks: ['CI'], base: 'workspace', since: at } },
       },
     ])
   const at = (hours: number) => () => new Date(Date.parse(since) + hours * 3_600_000)

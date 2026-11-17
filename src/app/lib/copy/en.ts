@@ -75,6 +75,7 @@ export const en = {
   board: {
     nothingHere: 'Nothing here.',
     mainRedAfterRelease: 'main is red after the release',
+    waitingOnBase: (checks: string, branch: string) => `waits for ${checks} to pass on ${branch}`,
     mainRed: 'main is red',
     attempt: (n: number) => `attempt ${n} of 3`,
     tasks: 'Tasks',
