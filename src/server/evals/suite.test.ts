@@ -15,6 +15,8 @@ import {
   spentOn,
   parseMarginMinutes,
   startMarginFor,
+  suiteTimes,
+  SUITE_TIMEOUT_MS,
 } from './suite'
 
 describe('agentSetup', () => {
@@ -185,6 +187,26 @@ describe('runSuite time limit', () => {
     )
     expect(ran.results.map((r) => r.id)).toEqual(['a'])
     expect(ran.skipped).toEqual(['b', 'c'])
+  })
+
+  it('aborts the signal of the cases in flight when it gives up on them', async () => {
+    let aborted = false
+    const ran = await runSuite(
+      ['a'],
+      (_id, signal) =>
+        new Promise<never>(() => {
+          signal.addEventListener('abort', () => (aborted = true))
+        }),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, abandonAtMs: Date.now() + 20 },
+    )
+    expect(aborted).toBe(true)
+    expect(ran.skipped).toEqual(['a'])
+  })
+
+  it('anchors the deadline and the abandon time to the start of the test, setup included', () => {
+    const { deadlineMs, abandonAtMs } = suiteTimes(1_000)
+    expect(deadlineMs).toBe(1_000 + SUITE_TIMEOUT_MS)
+    expect(abandonAtMs).toBe(deadlineMs - 5 * 60_000)
   })
 
   it('persists the cases left and the baseline refusal when a case hangs', async () => {

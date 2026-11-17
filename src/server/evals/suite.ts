@@ -29,6 +29,16 @@ export function parseMarginMinutes(value: string): number {
   return minutes * 60_000
 }
 
+/**
+ * When the suite's limits run out, anchored to the moment the test started (setup included), since that is when
+ * vitest starts counting its timeout: no case starts after `deadlineMs - margin`, and the cases in flight are
+ * abandoned five minutes before `deadlineMs`.
+ */
+export function suiteTimes(testStartedAt: number): { deadlineMs: number; abandonAtMs: number } {
+  const deadlineMs = testStartedAt + SUITE_TIMEOUT_MS
+  return { deadlineMs, abandonAtMs: deadlineMs - 5 * 60_000 }
+}
+
 /** Time kept after the longest case limit for the run to stop its sandbox and write its results. */
 const WRITE_SLACK_MS = 10 * 60_000
 
@@ -57,7 +67,7 @@ export function spentOn(results: CaseResult[], sandboxUsdPerMs: number): number 
  */
 export async function runSuite(
   ids: string[],
-  runOne: (id: string) => Promise<CaseResult>,
+  runOne: (id: string, signal: AbortSignal) => Promise<CaseResult>,
   options: {
     budgetUsd: number
     concurrency: number
@@ -81,6 +91,8 @@ export async function runSuite(
     now() >= options.deadlineMs - (options.startMarginMs ?? DEFAULT_START_MARGIN_MS)
   const inFlight = new Set<string>()
   let abandoned = false
+  // Aborted when the run gives up on the cases in flight, so each stops its sandbox and stops costing.
+  const controller = new AbortController()
   const worker = async () => {
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
       if (abandoned) break
@@ -89,10 +101,10 @@ export async function runSuite(
         continue
       }
       inFlight.add(id)
-      let result = await runOne(id)
+      let result = await runOne(id, controller.signal)
       if (failedForEnvironment(result) && !outOfTime() && !abandoned) {
         discarded.push(result)
-        result = await runOne(id)
+        result = await runOne(id, controller.signal)
       }
       inFlight.delete(id)
       if (!abandoned) done.set(id, result)
@@ -106,6 +118,7 @@ export async function runSuite(
       timer = setTimeout(
         () => {
           abandoned = true
+          controller.abort()
           resolve()
         },
         Math.max(0, options.abandonAtMs! - now()),

@@ -39,6 +39,7 @@ import {
   parseMarginMinutes,
   runSuite,
   spentOn,
+  suiteTimes,
   startMarginFor,
   writeRunOutcome,
 } from './suite'
@@ -99,7 +100,7 @@ async function startMargin(cases: EvalCase[]): Promise<number> {
   return startMarginFor(limits)
 }
 
-async function runCases(cases: EvalCase[]) {
+async function runCases(cases: EvalCase[], testStartedAt: number) {
   const startedAt = Date.now()
   const startMarginMs = await startMargin(cases)
   // Each finished case is written as it ends, so a run that is cut off (a sandbox that hangs past the margin, the
@@ -117,9 +118,9 @@ async function runCases(cases: EvalCase[]) {
   const byId = new Map(cases.map((c) => [c.id, c]))
   const ran = await runSuite(
     cases.map((c) => c.id),
-    async (id) => {
+    async (id, signal) => {
       const c = byId.get(id)!
-      const result = await runCase(await evalDeps(c.repository, c.labels), c)
+      const result = await runCase(await evalDeps(c.repository, c.labels), c, signal)
       appendFileSync(partial, `${JSON.stringify(result)}\n`)
       console.log(
         JSON.stringify({ event: 'eval_case', ...result, environment: failedForEnvironment(result) }),
@@ -130,10 +131,10 @@ async function runCases(cases: EvalCase[]) {
       budgetUsd: Number(env.EVALS_BUDGET_USD ?? 15),
       concurrency: Number(env.EVALS_CONCURRENCY ?? 2),
       sandboxUsdPerMs: E2B_USD_PER_MS,
-      deadlineMs: startedAt + SUITE_TIMEOUT_MS,
+      // Counted from the test's start, setup included, as vitest counts its timeout; a case that hangs is
+      // abandoned a little before it.
+      ...suiteTimes(testStartedAt),
       startMarginMs,
-      // A case that hangs must not keep the run from writing: give up on it a little before the test's own time.
-      abandonAtMs: startedAt + SUITE_TIMEOUT_MS - 5 * 60_000,
     },
   )
   // Before anything that can block: what finished, what was left, and the baseline's refusal.
@@ -199,7 +200,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
 
 describe.runIf(mode === 'run')('a run of the suite', () => {
   it('runs the chosen cases and writes what each came to', async () => {
-    const record = await runCases(chosenCases())
+    const record = await runCases(chosenCases(), Date.now())
     if (env.EVALS_BASELINE === '1' && record.skipped.length > 0) {
       // A baseline that lacks cases would let the deploy gate pass without them. The run is in .evals/.
       throw new Error(
@@ -224,6 +225,7 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
 
 describe.runIf(mode === 'check')('the agent configuration', () => {
   it('is no worse than the baseline when it changed since then', async () => {
+    const testStartedAt = Date.now()
     const baseline = readJson<Baseline>(BASELINE)
     const changedPaths = [
       ...git('diff', '--name-only', baseline.commit, 'HEAD').split('\n'),
@@ -235,7 +237,7 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
       changedPaths,
       setup: await currentSetup(quick),
       runQuick: async () => {
-        const { results, skipped } = await runCases(quick)
+        const { results, skipped } = await runCases(quick, testStartedAt)
         return { results, skipped }
       },
     })

@@ -157,6 +157,24 @@ describe('runCase', () => {
     expect(given[0]).toBeGreaterThan(124 * MIN)
   })
 
+  it('stops the sandbox of a case that hangs once it is abandoned', async () => {
+    const provider = sandbox()
+    const builder = agent('builder', [])
+    builder.run = () => new Promise<never>(() => {})
+    builder.resume = () => new Promise<never>(() => {})
+    const reviewer = agent('reviewer', [])
+    const controller = new AbortController()
+
+    const pending = runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+    await new Promise((r) => setTimeout(r, 50))
+    controller.abort()
+    const result = await pending
+
+    expect(result.passed).toBe(false)
+    expect(result.reason).toContain('abandoned')
+    expect(provider.stopped).toBe(1)
+  })
+
   it('passes a case whose checks pass and whose review approves, with its cost and rounds', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built('done', 0.3)))
