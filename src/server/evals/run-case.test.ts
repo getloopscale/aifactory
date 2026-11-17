@@ -223,6 +223,52 @@ describe('runCase', () => {
     expect(builder.prompts).toHaveLength(0)
   })
 
+  it('starts no further agent call when an agent answers after its case was abandoned', async () => {
+    const provider = sandbox()
+    const builder = agent('builder', [built()])
+    let answerPlan: (result: HarnessResult) => void = () => {}
+    const run = builder.run
+    builder.run = (backend, input) => {
+      builder.run = run
+      builder.prompts.push(input.prompt)
+      return new Promise((resolve) => (answerPlan = resolve))
+    }
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const controller = new AbortController()
+
+    const pending = runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+    await new Promise((r) => setTimeout(r, 50))
+    controller.abort()
+    expect((await pending).reason).toContain('abandoned')
+    answerPlan({ ok: true, summary: PLAN, sessionId: 's1' })
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(builder.prompts).toHaveLength(1)
+    expect(reviewer.prompts).toHaveLength(0)
+  })
+
+  it('sends no rework when the review answers after its case was abandoned', async () => {
+    const provider = sandbox()
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [])
+    let answerReview: (result: HarnessResult) => void = () => {}
+    reviewer.run = (_backend, input) => {
+      reviewer.prompts.push(input.prompt)
+      return new Promise((resolve) => (answerReview = resolve))
+    }
+    const controller = new AbortController()
+
+    const pending = runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+    await vi.waitFor(() => expect(reviewer.prompts).toHaveLength(1))
+    controller.abort()
+    expect((await pending).reason).toContain('abandoned')
+    answerReview({ ok: true, summary: CHANGES })
+    await new Promise((r) => setTimeout(r, 50))
+
+    expect(builder.prompts).toHaveLength(2)
+    expect(reviewer.prompts).toHaveLength(1)
+  })
+
   it('does not stop a finished case again when a later case is abandoned', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built('done', 0.3)))

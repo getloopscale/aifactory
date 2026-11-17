@@ -78,6 +78,13 @@ class Stopped extends Error {}
 
 const COMMIT = /^[0-9a-f]{40}$/
 
+const ABANDONED = 'abandoned: the suite ran out of time'
+
+/** Ends an abandoned case where it stands, so it starts nothing more. */
+function ensureLive(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Stopped(ABANDONED)
+}
+
 /**
  * One case run the way the factory runs a task (`factory/run.ts`): the same prompts, agents, plan, checks,
  * facts about the diff and review, and up to `MAX_ATTEMPTS` passes. A step added to `Run` is added here too,
@@ -110,7 +117,19 @@ class CaseRun {
     private readonly sandbox: IsolatedSandbox,
     private readonly repoDir: string,
     private readonly knowledgeDir: string | undefined,
+    private readonly signal?: AbortSignal,
   ) {}
+
+  /**
+   * Every agent call goes through here. An abandoned case starts none, and a call that answers after the case
+   * was abandoned ends it, so nothing after it runs against the stopped sandbox.
+   */
+  private async agentCall(start: () => Promise<HarnessResult>): Promise<HarnessResult> {
+    ensureLive(this.signal)
+    const result = await start()
+    ensureLive(this.signal)
+    return result
+  }
 
   private get backend(): SandboxBackend {
     return this.sandbox.backend
@@ -159,14 +178,15 @@ class CaseRun {
   async build(): Promise<void> {
     const { builder } = this.deps
     const discarded = builder.resume ? await this.planChange() : undefined
-    const result =
+    const result = await this.agentCall(() =>
       discarded === undefined
-        ? await builder.run(this.backend, this.agentInput(buildPrompt(this.buildInput())))
-        : await builder.resume!(
+        ? builder.run(this.backend, this.agentInput(buildPrompt(this.buildInput())))
+        : builder.resume!(
             this.backend,
             this.sessionId!,
             this.agentInput(implementPlanPrompt({ discarded })),
-          )
+          ),
+    )
     this.settle(result, 'the agent did not finish')
     this.summary = result.summary
     if (parseQuestion(result.summary)) throw new Stopped('the agent asked a question')
@@ -176,7 +196,7 @@ class CaseRun {
   private async planChange(): Promise<boolean> {
     const input = this.agentInput(changePlanPrompt(this.buildInput()), PLAN_MS)
     const first = this.settle(
-      await this.deps.builder.run(this.backend, input),
+      await this.agentCall(() => this.deps.builder.run(this.backend, input)),
       'the agent did not finish the plan',
     )
     this.plan = parseChangePlan(first.summary) ?? (await this.planAgain(input.timeoutMs))
@@ -189,11 +209,13 @@ class CaseRun {
 
   /** The planning turn ended with no plan that could be read: one more turn, asking for the plan alone. */
   private async planAgain(timeoutMs: number): Promise<ChangePlan> {
-    const again = await this.deps.builder.resume!(this.backend, this.sessionId!, {
-      cwd: this.repoDir,
-      timeoutMs,
-      prompt: planAgainPrompt(),
-    })
+    const again = await this.agentCall(() =>
+      this.deps.builder.resume!(this.backend, this.sessionId!, {
+        cwd: this.repoDir,
+        timeoutMs,
+        prompt: planAgainPrompt(),
+      }),
+    )
     this.cost += again.costUsd ?? 0
     this.sessionId = again.sessionId ?? this.sessionId
     const plan = again.ok ? parseChangePlan(again.summary) : undefined
@@ -204,10 +226,8 @@ class CaseRun {
   private async rework(findings: Finding[], failed: CheckResult[]): Promise<void> {
     this.attempts++
     const prompt = reworkPrompt({ findings, failedChecks: failed, checks: this.c.checks })
-    const result = await this.deps.builder.resume!(
-      this.backend,
-      this.sessionId!,
-      this.agentInput(prompt),
+    const result = await this.agentCall(() =>
+      this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt)),
     )
     this.settle(result, 'the agent did not finish the rework')
     this.summary = result.summary
@@ -280,7 +300,7 @@ class CaseRun {
   ): Promise<ReviewVerdict> {
     this.reviewRounds++
     const { c } = this
-    const result = await this.deps.reviewer.run(this.backend, {
+    const input: HarnessInput = {
       cwd: this.repoDir,
       timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
       prompt: reviewPrompt({
@@ -296,7 +316,8 @@ class CaseRun {
           ? { plan: renderChangePlan(this.plan), unplanned, builderSummary: this.summary }
           : {}),
       }),
-    })
+    }
+    const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
     this.cost += result.costUsd ?? 0
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
     await must(this.backend, `${this.git} reset --hard ${sha}`)
@@ -432,11 +453,8 @@ export async function runCase(
   if (!COMMIT.test(c.baseSha))
     return stoppedAs(`the base ${JSON.stringify(c.baseSha)} is not a commit hash`)
 
-  const ABANDONED = 'abandoned: the suite ran out of time'
-  // Checked before each step of the setup and before an agent starts, so abandoned work launches nothing more.
-  const live = () => {
-    if (signal?.aborted) throw new Stopped(ABANDONED)
-  }
+  // Checked before each step of the setup; inside the run, every agent call checks it too.
+  const live = () => ensureLive(signal)
   if (signal?.aborted) return stoppedAs(ABANDONED)
 
   const held: { sandbox?: IsolatedSandbox } = {}
@@ -473,7 +491,7 @@ export async function runCase(
     sandbox = feed.attachTo(sandbox)
     held.sandbox = sandbox
     live()
-    const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir)
+    const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir, signal)
     // Before the builder's first pass, so it can run the check it is told to run.
     await uploadChangesetCheck(sandbox.backend, c.checks)
     live()
