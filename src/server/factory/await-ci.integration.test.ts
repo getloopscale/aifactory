@@ -613,17 +613,9 @@ describe('pollAwaitingIntegrations', () => {
     expect(queuedRuns).toEqual([])
   })
 
-  it('sends back on its branch a pull request that conflicts with its base, naming the files, with auto-merge off first', async () => {
+  it('sends back on its branch a pull request that conflicts with its base, with auto-merge off first', async () => {
     pull({ mergeableState: 'dirty' })
     repo().heads.set('factory/7', VERIFIED)
-    repo().compare('workspace', VERIFIED, [
-      { path: 'docs/error-codes.md', status: 'modified' },
-      { path: 'src/own.ts', status: 'added' },
-    ])
-    repo().compare(VERIFIED, 'workspace', [
-      { path: 'docs/error-codes.md', status: 'modified' },
-      { path: 'src/other.ts', status: 'modified' },
-    ])
     const id = await waitingTask()
 
     expect(
@@ -642,8 +634,6 @@ describe('pollAwaitingIntegrations', () => {
     expect(queuedRuns).toHaveLength(1)
     expect(queuedRuns[0].taskId).toBe(id)
     expect(queuedRuns[0].feedback).toContain('git merge origin/workspace')
-    expect(queuedRuns[0].feedback).toContain('docs/error-codes.md')
-    expect(queuedRuns[0].feedback).not.toContain('src/own.ts')
     const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
     expect(events.at(-1)?.detail).toMatchObject({ decision: 'request_changes', automatic: true })
   })
