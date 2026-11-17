@@ -35,7 +35,8 @@ import {
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
-  checkBeforeDeploy,
+  checkFromTestStart,
+  fromTestStart,
   parseMarginMinutes,
   runSuiteFromTestStart,
   spentOn,
@@ -202,7 +203,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
 
 describe.runIf(mode === 'run')('a run of the suite', () => {
   it('runs the chosen cases and writes what each came to', async () => {
-    const record = await runCases(chosenCases(), Date.now())
+    const record = await fromTestStart((testStartedAt) => runCases(chosenCases(), testStartedAt))
     if (env.EVALS_BASELINE === '1' && record.skipped.length > 0) {
       // A baseline that lacks cases would let the deploy gate pass without them. The run is in .evals/.
       throw new Error(
@@ -227,21 +228,22 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
 
 describe.runIf(mode === 'check')('the agent configuration', () => {
   it('is no worse than the baseline when it changed since then', async () => {
-    const testStartedAt = Date.now()
-    const baseline = readJson<Baseline>(BASELINE)
-    const changedPaths = [
-      ...git('diff', '--name-only', baseline.commit, 'HEAD').split('\n'),
-      ...git('diff', '--name-only', 'HEAD').split('\n'),
-    ].filter(Boolean)
-    const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
-    const checked = await checkBeforeDeploy({
-      baseline,
-      changedPaths,
-      setup: await currentSetup(quick),
-      runQuick: async () => {
-        const { results, skipped } = await runCases(quick, testStartedAt)
-        return { results, skipped }
-      },
+    const checked = await fromTestStart((testStartedAt) => {
+      const baseline = readJson<Baseline>(BASELINE)
+      const changedPaths = [
+        ...git('diff', '--name-only', baseline.commit, 'HEAD').split('\n'),
+        ...git('diff', '--name-only', 'HEAD').split('\n'),
+      ].filter(Boolean)
+      const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
+      return checkFromTestStart(testStartedAt, {
+        baseline,
+        changedPaths,
+        readSetup: () => currentSetup(quick),
+        runQuick: async (startedAt) => {
+          const { results, skipped } = await runCases(quick, startedAt)
+          return { results, skipped }
+        },
+      })
     })
     console.log(JSON.stringify({ event: 'eval_check', ...checked }))
     expect(checked.reasons).toEqual([])

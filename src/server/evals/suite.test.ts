@@ -10,6 +10,8 @@ import {
   E2B_USD_PER_MS,
   agentSetup,
   checkBeforeDeploy,
+  checkFromTestStart,
+  fromTestStart,
   runSuite,
   writeRunOutcome,
   spentOn,
@@ -397,5 +399,60 @@ describe('checkBeforeDeploy', () => {
       ok: false,
       reasons: ['the pass rate fell from 100% to 0%'],
     })
+  })
+})
+
+describe('checkFromTestStart', () => {
+  it('fails, naming the read, before the test times out when reading the agent setup hangs', async () => {
+    // Abandon time is 30 ms away.
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
+    let ran = false
+
+    const checking = checkFromTestStart(testStartedAt, {
+      baseline,
+      changedPaths: ['src/server/factory/harness.ts'],
+      readSetup: () => new Promise<never>(() => {}),
+      runQuick: async () => {
+        ran = true
+        return { results: [], skipped: [] }
+      },
+    })
+
+    await expect(checking).rejects.toThrow(/agent setup/)
+    expect(ran).toBe(false)
+  })
+
+  it('runs the quick set against the time the test started, setup read included', async () => {
+    const testStartedAt = Date.now() - 60_000
+    const given: number[] = []
+
+    const checked = await checkFromTestStart(testStartedAt, {
+      baseline,
+      changedPaths: ['src/server/factory/harness.ts'],
+      readSetup: async () => baseline.setup,
+      runQuick: async (startedAt) => {
+        given.push(startedAt)
+        return { results: baseline.results, skipped: [] }
+      },
+    })
+
+    expect(given).toEqual([testStartedAt])
+    expect(checked).toMatchObject({ ran: true, ok: true })
+  })
+})
+
+describe('fromTestStart', () => {
+  it('takes the start before the steps run, so choosing the cases counts against the deadline', async () => {
+    let clock = 1_000
+
+    const startedAt = await fromTestStart(
+      async (testStartedAt) => {
+        clock = 9_000 // choosing the cases took 8 seconds
+        return testStartedAt
+      },
+      () => clock,
+    )
+
+    expect(startedAt).toBe(1_000)
   })
 })

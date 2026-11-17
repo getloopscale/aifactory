@@ -39,6 +39,56 @@ export function suiteTimes(testStartedAt: number): { deadlineMs: number; abandon
   return { deadlineMs, abandonAtMs: deadlineMs - 5 * 60_000 }
 }
 
+/** What `work` answers, or what `late` answers once `delayMs` passes first. */
+async function settleBy<T>(work: Promise<T>, delayMs: number, late: () => T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expired = new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => {
+      try {
+        resolve(late())
+      } catch (error) {
+        reject(error)
+      }
+    }, Math.max(0, delayMs))
+  })
+  try {
+    return await Promise.race([work, expired])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Takes the test's start before any step runs, so choosing and reading the cases counts against its time. */
+export function fromTestStart<T>(
+  steps: (testStartedAt: number) => Promise<T>,
+  now: () => number = Date.now,
+): Promise<T> {
+  return steps(now())
+}
+
+/**
+ * The check mode from the moment its test started: the agent setup is read under the same abandon time the cases
+ * get, so a read that hangs fails the test with its reason before vitest's timeout, and the quick set runs against
+ * that start.
+ */
+export async function checkFromTestStart(
+  testStartedAt: number,
+  input: Omit<Parameters<typeof checkBeforeDeploy>[0], 'setup' | 'runQuick'> & {
+    readSetup: () => Promise<AgentSetup>
+    runQuick: (testStartedAt: number) => Promise<{ results: CaseResult[]; skipped: string[] }>
+    now?: () => number
+  },
+): Promise<DeployCheck> {
+  const { readSetup, runQuick, now = Date.now, ...rest } = input
+  const { abandonAtMs } = suiteTimes(testStartedAt)
+  const setup = await settleBy(readSetup(), abandonAtMs - now(), () => {
+    throw new Error(
+      `the agent setup was not read before the suite's abandon time (${new Date(abandonAtMs).toISOString()}); no quick case ran`,
+    )
+  })
+  return checkBeforeDeploy({ ...rest, setup, runQuick: () => runQuick(testStartedAt) })
+}
+
 /**
  * `runSuite` with its deadline and abandon time taken from the moment the test started, so the setup before it
  * counts against the time the cases get.
@@ -56,17 +106,12 @@ export async function runSuiteFromTestStart(
   const { startMarginMs: margin, ...rest } = options
   let startMarginMs = DEFAULT_START_MARGIN_MS
   if (typeof margin === 'number') startMarginMs = margin
-  else {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const late = new Promise<number>((resolve) => {
-      timer = setTimeout(
-        () => resolve(DEFAULT_START_MARGIN_MS),
-        Math.max(0, times.abandonAtMs - (options.now ?? Date.now)()),
-      )
-    })
-    startMarginMs = await Promise.race([margin().catch(() => DEFAULT_START_MARGIN_MS), late])
-    clearTimeout(timer)
-  }
+  else
+    startMarginMs = await settleBy(
+      margin().catch(() => DEFAULT_START_MARGIN_MS),
+      times.abandonAtMs - (options.now ?? Date.now)(),
+      () => DEFAULT_START_MARGIN_MS,
+    )
   return runSuite(ids, runOne, { ...rest, ...times, startMarginMs })
 }
 
