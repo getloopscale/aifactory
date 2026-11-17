@@ -15,6 +15,7 @@ import {
   runsAgain,
   shortSha,
   stageLabel,
+  stepLine,
   workingLine,
 } from './format'
 
@@ -298,6 +299,17 @@ describe('agentName', () => {
     expect(agentName('claude-code')).toBe('Claude Code')
     expect(agentName('codex')).toBe('Codex')
     expect(agentName('gemini-cli')).toBe('gemini-cli')
+  })
+})
+
+describe('stepLine', () => {
+  it('says the step, and its attempt or round past the first, without the agent', () => {
+    const at = (step: 'building' | 'reviewing', attempt: number) =>
+      stepLine({ step, agent: 'codex', model: 'gpt-6.1-terra', attempt }, en.board)
+
+    expect(at('building', 1)).toBe('building')
+    expect(at('building', 2)).toBe('building · attempt 2')
+    expect(at('reviewing', 3)).toBe('reviewing · round 3')
   })
 })
 

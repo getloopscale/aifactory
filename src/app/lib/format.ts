@@ -34,12 +34,20 @@ function stepCount(step: Extract<AgentStep, { agent: string }>, board: Copy['boa
     : board.stepAttempt(step.attempt)
 }
 
+/** What an agent does on a running task, with its attempt or round past the first, without naming the agent. */
+export function stepLine(
+  step: Extract<AgentStep, { agent: string }>,
+  board: Copy['board'],
+): string {
+  return [board.steps[step.step], stepCount(step, board)].filter((part) => part).join(' · ')
+}
+
 /** One line for what works on a running task: the agent, its model and its step, or the checks. */
 export function workingLine(step: AgentStep, board: Copy['board']): string {
   const parts =
     step.step === 'checks'
       ? [board.steps.checks, step.checks.join(', ')]
-      : [...who(step), board.steps[step.step], stepCount(step, board)]
+      : [...who(step), stepLine(step, board)]
   return parts.filter((part) => part).join(' · ')
 }
 

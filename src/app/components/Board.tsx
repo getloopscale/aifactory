@@ -1,10 +1,19 @@
 import { Card as Surface, Table } from '@usetheo/ui'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 
-import { COLUMNS, type QueueView, type TaskCard } from '../../shared/panel'
+import { COLUMNS, type AgentSeen, type QueueView, type TaskCard } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
 import type { Copy } from '../lib/copy/en'
-import { ago, lastAgentLine, money, runsAgain, workingLine } from '../lib/format'
+import {
+  agentName,
+  ago,
+  lastAgentLine,
+  money,
+  runsAgain,
+  stepLine,
+  workingLine,
+} from '../lib/format'
 
 import { StageBadge } from './Badges'
 
@@ -37,11 +46,11 @@ function QueueLines({ queue }: { queue: QueueView }) {
   const { place, verdict } = queueWords(queue, t.board)
   return (
     <>
-      <div className="mt-1 truncate text-xs text-muted-foreground" title={place}>
+      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={place}>
         {place}
       </div>
       {verdict ? (
-        <div className="mt-1 truncate text-xs text-muted-foreground" title={verdict}>
+        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={verdict}>
           {verdict}
         </div>
       ) : null}
@@ -49,29 +58,113 @@ function QueueLines({ queue }: { queue: QueueView }) {
   )
 }
 
-/** What works on a running task now, or, more quietly, who worked on it last. */
-function AgentLine({ task }: { task: TaskCard }) {
-  const { t } = useCopy()
-  const line = task.working
-    ? workingLine(task.working, t.board)
-    : task.lastAgent
-      ? lastAgentLine(task.lastAgent, t.board)
-      : null
-  if (!line) return null
-  const tone = task.working ? 'font-medium text-foreground' : 'text-muted-foreground'
+/**
+ * The color of each agent the factory ships with, from the theme's tokens: the harness is the first thing an owner
+ * looks for on a card. It marks the panel (a stripe on its side, and its fill while the agent runs) and never the
+ * text, since no brand color reads at 4.5 in both modes (see palette.test.ts). Any other agent is neutral.
+ */
+const AGENT_TONE: Record<string, { stripe: string; lit: string }> = {
+  'claude-code': { stripe: 'bg-primary', lit: 'border-primary/40 bg-primary/10' },
+  codex: { stripe: 'bg-info', lit: 'border-info/40 bg-info/10' },
+}
+const NEUTRAL_TONE = { stripe: 'bg-muted-foreground', lit: 'border-border bg-muted/40' }
+
+/**
+ * A panel on the card with a stripe of color on its side, which pulses while what it shows is at work. `label` is the
+ * whole of it in one line, for a reader that does not see the layout.
+ */
+function Panel({
+  label,
+  stripe,
+  surface,
+  live,
+  children,
+}: {
+  label: string
+  stripe: string
+  surface: string
+  live: boolean
+  children: ReactNode
+}) {
   return (
-    <div className={`mt-1 truncate text-xs ${tone}`} title={line}>
-      {line}
+    <div
+      aria-label={label}
+      title={label}
+      className={`mt-2 flex gap-2 rounded-md border px-2 py-1.5 text-xs ${surface}`}
+    >
+      <span
+        aria-hidden
+        className={`w-1 shrink-0 self-stretch rounded-full ${stripe} ${live ? 'animate-pulse' : ''}`}
+      />
+      <div className="min-w-0 flex-1">{children}</div>
     </div>
   )
 }
 
-/** Every card on the board is this tall and as wide as its column, so the columns read as even stacks. */
+/** The agent's name, larger than the rest of the card, and its model. */
+function AgentName({ seen }: { seen: AgentSeen }) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-1.5">
+      <span className="shrink-0 text-[13px] font-semibold text-foreground">
+        {agentName(seen.agent)}
+      </span>
+      {seen.model ? (
+        <span className="min-w-0 truncate text-muted-foreground">{seen.model}</span>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Who works on the task: lit in the agent's color while it runs, with what it does; outlined, with its stripe still
+ * in color, once it is done, with who worked on it last. The checks have no agent, and a panel of their own.
+ */
+function AgentPanel({ task }: { task: TaskCard }) {
+  const { t } = useCopy()
+  const step = task.working
+  if (step?.step === 'checks') {
+    return (
+      <Panel
+        label={workingLine(step, t.board)}
+        stripe="bg-warning"
+        surface="border-warning/40 bg-warning/10"
+        live
+      >
+        <div className="text-[13px] font-semibold text-foreground">{t.board.steps.checks}</div>
+        <div className="mt-0.5 line-clamp-2 text-muted-foreground">{step.checks.join(', ')}</div>
+      </Panel>
+    )
+  }
+  const seen = step ?? task.lastAgent
+  if (!seen) return null
+  const tone = AGENT_TONE[seen.agent] ?? NEUTRAL_TONE
+  return (
+    <Panel
+      label={step ? workingLine(step, t.board) : lastAgentLine(seen, t.board)}
+      stripe={tone.stripe}
+      surface={step ? tone.lit : 'border-border'}
+      live={step !== null}
+    >
+      <AgentName seen={seen} />
+      <div className={`mt-0.5 ${step ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
+        {step ? stepLine(step, t.board) : t.board.lastWorked}
+      </div>
+    </Panel>
+  )
+}
+
+/**
+ * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
+ * takes up to three lines, the agent its own panel, and the stage closes the card.
+ */
 export function Card({ task }: { task: TaskCard }) {
   const { t } = useCopy()
   return (
-    <Link to={openTask(task.id)} className="block">
-      <Surface size="sm" className="flex h-[152px] flex-col p-3 hover:border-primary/60">
+    <Link to={openTask(task.id)} className="group block">
+      <Surface
+        size="sm"
+        className="flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20"
+      >
         <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
           <span
             className="min-w-0 flex-1 truncate"
@@ -79,16 +172,19 @@ export function Card({ task }: { task: TaskCard }) {
           >
             {task.repository.split('/').pop()} #{task.issueNumber}
           </span>
-          <span className="shrink-0">
+          <span className="shrink-0 tabular-nums">
             {task.costUsd >= 0.005 ? `${money(task.costUsd)} · ` : ''}
             {ago(task.updatedAt, Date.now(), t.time)}
           </span>
         </div>
-        <div title={task.title} className="mt-1 line-clamp-2 text-sm font-medium text-foreground">
+        <div
+          title={task.title}
+          className="mt-1.5 line-clamp-3 text-sm font-semibold leading-snug text-foreground"
+        >
           {task.title}
         </div>
         {task.mainRed ? (
-          <div className="mt-1 truncate text-xs font-medium text-destructive">
+          <div className="mt-1 text-xs font-medium text-destructive">
             {t.board.mainRedAfterRelease}
           </div>
         ) : null}
@@ -99,17 +195,15 @@ export function Card({ task }: { task: TaskCard }) {
         ) : null}
         {task.queue ? <QueueLines queue={task.queue} /> : null}
         {task.retryAt ? (
-          <div className="mt-1 truncate text-xs text-muted-foreground">
+          <div className="mt-1 text-xs text-muted-foreground">
             {runsAgain(task.retryAt, Date.now(), t.time)}
           </div>
         ) : null}
         {task.attempts > 1 ? (
-          <div className="mt-1 truncate text-xs text-muted-foreground">
-            {t.board.attempt(task.attempts)}
-          </div>
+          <div className="mt-1 text-xs text-muted-foreground">{t.board.attempt(task.attempts)}</div>
         ) : null}
-        <AgentLine task={task} />
-        <div className="mt-auto">
+        <AgentPanel task={task} />
+        <div className="mt-auto pt-2">
           <StageBadge
             stage={task.stage}
             integrated={task.integrated}
@@ -128,7 +222,7 @@ export function Card({ task }: { task: TaskCard }) {
  * Every column is the same width, full or empty, and they share the room equally, so the board looks the
  * same however many tasks there are. None goes below this: under it the board scrolls instead.
  */
-const COLUMN = 'minmax(150px, 1fr)'
+const COLUMN = 'minmax(176px, 1fr)'
 
 function Column({ title, tasks }: { title: string; tasks: TaskCard[] }) {
   const { t } = useCopy()

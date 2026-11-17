@@ -144,7 +144,7 @@ describe('board', () => {
       en.columns.attention,
     ])
     const grid = regions[0].parentElement as HTMLElement
-    expect(grid.style.gridTemplateColumns).toBe('repeat(8, minmax(150px, 1fr))')
+    expect(grid.style.gridTemplateColumns).toBe('repeat(8, minmax(176px, 1fr))')
     for (const name of [
       en.columns.queued,
       en.columns.waiting,
@@ -191,7 +191,7 @@ describe('board', () => {
     }
   })
 
-  it('draws every card the same size, whatever its title', async () => {
+  it('starts every card at the same height and lets a long one grow, whatever its title', async () => {
     serve({
       tasks: [
         card({ id: 1, title: 'Short' }),
@@ -208,8 +208,10 @@ describe('board', () => {
       .getAllByRole('link')
       .filter((l) => l.getAttribute('href')?.includes('?task='))
     expect(cards).toHaveLength(2)
-    for (const c of cards) expect(c.querySelector('[class*="h-[152px]"]')).not.toBeNull()
-    expect(screen.getByText(/A very long title/).className).toContain('line-clamp-2')
+    // Every card starts at the same height and grows with what it says, so nothing on it is cut.
+    for (const c of cards) expect(c.querySelector('[class*="min-h-[168px]"]')).not.toBeNull()
+    for (const c of cards) expect(c.querySelector('[class*=" h-["]')).toBeNull()
+    expect(screen.getByText(/A very long title/).className).toContain('line-clamp-3')
     expect(screen.queryAllByText('paulo/app #7').length).toBe(0)
     expect(screen.getAllByText('app #7').length).toBe(2)
     expect(screen.getByText(/A very long title/).getAttribute('title')).toContain(
@@ -295,10 +297,12 @@ describe('the agent on a card', () => {
         <Page />
       </MemoryRouter>,
     )
-    await waitFor(() =>
-      expect(screen.getByText('Codex · gpt-6.1-terra · reviewing · round 2')).toBeDefined(),
-    )
-    expect(screen.queryByText(/^last:/)).toBeNull()
+    const panel = await screen.findByLabelText('Codex · gpt-6.1-terra · reviewing · round 2')
+    expect(panel.className).toContain('bg-info/10')
+    expect(panel.querySelector('.bg-info.animate-pulse')).not.toBeNull()
+    expect(screen.getByText('gpt-6.1-terra')).toBeDefined()
+    expect(screen.getByText('reviewing · round 2')).toBeDefined()
+    expect(screen.queryByLabelText(/^last:/)).toBeNull()
   })
 
   it('names the checks, and no agent, while the factory verifies', async () => {
@@ -316,7 +320,7 @@ describe('the agent on a card', () => {
         <Page />
       </MemoryRouter>,
     )
-    await waitFor(() => expect(screen.getByText('checks · tests')).toBeDefined())
+    await screen.findByLabelText('checks · tests')
     expect(screen.queryByText(/Claude Code/)).toBeNull()
   })
 
@@ -335,9 +339,12 @@ describe('the agent on a card', () => {
         <Page />
       </MemoryRouter>,
     )
-    const last = await screen.findByText('last: Claude Code · opus')
-    expect(last.className).toContain('text-muted-foreground')
-    expect(last.className).not.toContain('font-medium')
+    const last = await screen.findByLabelText('last: Claude Code · opus')
+    // The agent keeps its color, so the harness reads at a glance, but the panel is not lit as a running one.
+    expect(last.querySelector('.bg-primary')).not.toBeNull()
+    expect(last.querySelector('.animate-pulse')).toBeNull()
+    expect(last.className).not.toContain('bg-primary/10')
+    expect(screen.getByText('last on it')).toBeDefined()
   })
 
   it('moves to the next agent by itself when the stream says the task changed stage', async () => {
@@ -360,7 +367,7 @@ describe('the agent on a card', () => {
         <Page />
       </MemoryRouter>,
     )
-    await screen.findByText('Codex · gpt-6.1-terra · planning')
+    await screen.findByLabelText('Codex · gpt-6.1-terra · planning')
 
     served = building
     act(() =>
@@ -372,7 +379,7 @@ describe('the agent on a card', () => {
       }),
     )
 
-    await screen.findByText('Claude Code · opus · building · attempt 2')
+    await screen.findByLabelText('Claude Code · opus · building · attempt 2')
   })
 
   it('writes the step in Portuguese', async () => {
@@ -391,6 +398,6 @@ describe('the agent on a card', () => {
         </CopyProvider>
       </MemoryRouter>,
     )
-    await screen.findByText('Claude Code · opus · corrigindo achados · tentativa 2')
+    await screen.findByLabelText('Claude Code · opus · corrigindo achados · tentativa 2')
   })
 })
