@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Baseline, CaseResult } from './compare'
-import { E2B_USD_PER_MS, agentSetup, checkBeforeDeploy, runSuite, spentOn } from './suite'
+import {
+  DEFAULT_START_MARGIN_MS,
+  E2B_USD_PER_MS,
+  agentSetup,
+  checkBeforeDeploy,
+  runSuite,
+  spentOn,
+  startMarginFor,
+} from './suite'
 
 describe('agentSetup', () => {
   it('names each agent with its model and effort, and default where nothing is set', () => {
@@ -114,6 +122,14 @@ describe('runSuite', () => {
     )
 
     expect(ran.skipped).toEqual(['b'])
+  })
+})
+
+describe('startMarginFor', () => {
+  it('keeps the longest case limit and time to write, so a case started at the cutoff ends in time', () => {
+    expect(startMarginFor([90 * 60_000, 150 * 60_000])).toBe(160 * 60_000)
+    expect(startMarginFor([])).toBe(DEFAULT_START_MARGIN_MS)
+    expect(DEFAULT_START_MARGIN_MS).toBeGreaterThan(90 * 60_000)
   })
 })
 

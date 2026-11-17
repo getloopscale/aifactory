@@ -7,7 +7,7 @@
 //   EVALS_CASES     comma-separated case ids, instead of a set
 //   EVALS_BUDGET_USD    no case starts once this is spent (default 15)
 //   EVALS_CONCURRENCY   cases at a time (default 2)
-//   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default 75)
+//   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -32,13 +32,13 @@ import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } f
 import { deliveredCandidates, toCase } from './extract'
 import { runCase } from './run-case'
 import {
-  DEFAULT_START_MARGIN_MS,
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
   checkBeforeDeploy,
   runSuite,
   spentOn,
+  startMarginFor,
 } from './suite'
 
 const CASES = 'evals/cases.json'
@@ -88,8 +88,18 @@ async function currentSetup(cases: EvalCase[]) {
   return setup
 }
 
+/** The time before the deadline when no case may start: the longest limit a case of these repositories has. */
+async function startMargin(cases: EvalCase[]): Promise<number> {
+  if (env.EVALS_START_MARGIN_MIN) return Number(env.EVALS_START_MARGIN_MIN) * 60_000
+  const limits: number[] = []
+  for (const repository of new Set(cases.map((c) => c.repository)))
+    limits.push((await evalDeps(repository, [])).timeouts.sandboxMs)
+  return startMarginFor(limits)
+}
+
 async function runCases(cases: EvalCase[]) {
   const startedAt = Date.now()
+  const startMarginMs = await startMargin(cases)
   const byId = new Map(cases.map((c) => [c.id, c]))
   const ran = await runSuite(
     cases.map((c) => c.id),
@@ -106,9 +116,7 @@ async function runCases(cases: EvalCase[]) {
       concurrency: Number(env.EVALS_CONCURRENCY ?? 2),
       sandboxUsdPerMs: E2B_USD_PER_MS,
       deadlineMs: startedAt + SUITE_TIMEOUT_MS,
-      startMarginMs: env.EVALS_START_MARGIN_MIN
-        ? Number(env.EVALS_START_MARGIN_MIN) * 60_000
-        : DEFAULT_START_MARGIN_MS,
+      startMarginMs,
     },
   )
   const record = {
@@ -171,21 +179,21 @@ describe.runIf(mode === 'cases')('the cases', () => {
 describe.runIf(mode === 'run')('a run of the suite', () => {
   it('runs the chosen cases and writes what each came to', async () => {
     const record = await runCases(chosenCases())
-    if (env.EVALS_BASELINE === '1') {
+    if (env.EVALS_BASELINE === '1' && record.skipped.length > 0) {
+      // A baseline that lacks cases would let the deploy gate pass without them. The run is in .evals/.
+      console.log(JSON.stringify({ event: 'eval_baseline_refused', skipped: record.skipped }))
+      throw new Error(
+        `baseline.json not written: the run left ${record.skipped.length} case(s) (${record.skipped.join(', ')}). ` +
+          'Its results are in .evals/; run again with more time or budget, or with EVALS_CASES for the rest.',
+      )
+    } else if (env.EVALS_BASELINE === '1') {
       const baseline: Baseline = {
         commit: record.commit,
         ranAt: record.ranAt,
         setup: record.setup,
         results: record.results,
       }
-      if (record.skipped.length > 0)
-        console.log(JSON.stringify({ event: 'eval_baseline_partial', skipped: record.skipped }))
-      writeJson(BASELINE, {
-        ...baseline,
-        spentUsd: record.spentUsd,
-        summary: record.summary,
-        skipped: record.skipped,
-      })
+      writeJson(BASELINE, { ...baseline, spentUsd: record.spentUsd, summary: record.summary })
     } else if (env.EVALS_COMPARE !== '0') {
       const compared = compareWithBaseline(record.results, readJson<Baseline>(BASELINE))
       console.log(JSON.stringify({ event: 'eval_compared', ...compared }))

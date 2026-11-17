@@ -16,7 +16,20 @@ export const E2B_USD_PER_MS = (4 * 0.000014 + 8 * 0.0000045) / 1000
 
 /** The time the suite's test gets (vitest fails it after this), and the default time before it ends when no case starts. */
 export const SUITE_TIMEOUT_MS = 4 * 60 * 60_000
-export const DEFAULT_START_MARGIN_MS = 75 * 60_000
+export const DEFAULT_START_MARGIN_MS = 100 * 60_000
+
+/** Time kept after the longest case limit for the run to stop its sandbox and write its results. */
+const WRITE_SLACK_MS = 10 * 60_000
+
+/**
+ * How long before the deadline no case may start: the longest sandbox limit of the repositories in the run (a case
+ * never runs longer) plus time to write the results. Without any limit, the default.
+ */
+export function startMarginFor(sandboxLimitsMs: number[]): number {
+  return sandboxLimitsMs.length === 0
+    ? DEFAULT_START_MARGIN_MS
+    : Math.max(...sandboxLimitsMs) + WRITE_SLACK_MS
+}
 
 /** What the cases cost: what the agents reported plus the time their sandboxes ran. */
 export function spentOn(results: CaseResult[], sandboxUsdPerMs: number): number {
