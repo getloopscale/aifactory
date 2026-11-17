@@ -40,6 +40,7 @@ import {
   runSuite,
   spentOn,
   startMarginFor,
+  writeRunOutcome,
 } from './suite'
 
 const CASES = 'evals/cases.json'
