@@ -106,11 +106,13 @@ async function runCases(cases: EvalCase[]) {
   mkdirSync('.evals', { recursive: true })
   const partial = `.evals/run-${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}.partial.jsonl`
   // What the run selected, so the cases left can be told even if the run is cut off.
-  writeJson(partial.replace('.partial.jsonl', '.selected.json'), {
+  const selectedPath = partial.replace('.partial.jsonl', '.selected.json')
+  const run = {
     startedAt: new Date(startedAt).toISOString(),
     baseline: env.EVALS_BASELINE === '1',
     selected: cases.map((c) => c.id),
-  })
+  }
+  writeRunOutcome(selectedPath, run, { results: [], skipped: [] })
   const byId = new Map(cases.map((c) => [c.id, c]))
   const ran = await runSuite(
     cases.map((c) => c.id),
@@ -133,6 +135,10 @@ async function runCases(cases: EvalCase[]) {
       abandonAtMs: startedAt + SUITE_TIMEOUT_MS - 5 * 60_000,
     },
   )
+  // Before anything that can block: what finished, what was left, and the baseline's refusal.
+  const outcome = writeRunOutcome(selectedPath, run, ran)
+  if (outcome.baselineRefused)
+    console.log(JSON.stringify({ event: 'eval_baseline_refused', skipped: ran.skipped }))
   const record = {
     commit: git('rev-parse', 'HEAD'),
     ranAt: new Date().toISOString(),
@@ -195,7 +201,6 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
     const record = await runCases(chosenCases())
     if (env.EVALS_BASELINE === '1' && record.skipped.length > 0) {
       // A baseline that lacks cases would let the deploy gate pass without them. The run is in .evals/.
-      console.log(JSON.stringify({ event: 'eval_baseline_refused', skipped: record.skipped }))
       throw new Error(
         `baseline.json not written: the run left ${record.skipped.length} case(s) (${record.skipped.join(', ')}). ` +
           'Its results are in .evals/; run the whole set again with more time or budget.',

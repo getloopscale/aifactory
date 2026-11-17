@@ -1,3 +1,6 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
+
 import { agentConfigurationChanged } from './cases'
 import {
   compareWithBaseline,
@@ -175,4 +178,35 @@ export async function checkBeforeDeploy(input: {
   const unmeasured = `the run left ${skipped.length} quick case(s) unmeasured: ${skipped.join(', ')}`
   const reasons = skipped.length > 0 ? [unmeasured, ...compared.reasons] : compared.reasons
   return { ran: true, ok: compared.ok && skipped.length === 0, reasons, changed }
+}
+
+export type RunOutcome = {
+  startedAt: string
+  baseline: boolean
+  selected: string[]
+  finished: string[]
+  skipped: string[]
+  /** Set when a baseline run left cases: no baseline.json is written for it. */
+  baselineRefused?: string
+}
+
+/**
+ * Writes what the run came to (the cases finished and the ones left, and the baseline's refusal when it left any)
+ * as soon as `runSuite` returns, before anything that can block, so a cut-off run still says what it lacked.
+ */
+export function writeRunOutcome(
+  path: string,
+  run: { startedAt: string; baseline: boolean; selected: string[] },
+  ran: { results: CaseResult[]; skipped: string[] },
+): RunOutcome {
+  const outcome: RunOutcome = {
+    ...run,
+    finished: ran.results.map((r) => r.id),
+    skipped: ran.skipped,
+  }
+  if (run.baseline && ran.skipped.length > 0)
+    outcome.baselineRefused = `baseline.json not written: the run left ${ran.skipped.length} case(s) (${ran.skipped.join(', ')})`
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, `${JSON.stringify(outcome, null, 2)}\n`)
+  return outcome
 }

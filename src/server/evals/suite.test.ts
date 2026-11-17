@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import type { Baseline, CaseResult } from './compare'
@@ -7,6 +11,7 @@ import {
   agentSetup,
   checkBeforeDeploy,
   runSuite,
+  writeRunOutcome,
   spentOn,
   parseMarginMinutes,
   startMarginFor,
@@ -180,6 +185,34 @@ describe('runSuite time limit', () => {
     )
     expect(ran.results.map((r) => r.id)).toEqual(['a'])
     expect(ran.skipped).toEqual(['b', 'c'])
+  })
+
+  it('persists the cases left and the baseline refusal when a case hangs', async () => {
+    const ids = ['a', 'b', 'c']
+    const ran = await runSuite(
+      ids,
+      async (id) => (id === 'b' ? new Promise<never>(() => {}) : result(id, 0)),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, abandonAtMs: Date.now() + 30 },
+    )
+    const path = join(mkdtempSync(join(tmpdir(), 'suite-')), 'run.selected.json')
+    writeRunOutcome(path, { startedAt: 't', baseline: true, selected: ids }, ran)
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    expect(saved.selected).toEqual(ids)
+    expect(saved.finished).toEqual(['a'])
+    expect(saved.skipped).toEqual(['b', 'c'])
+    expect(saved.baselineRefused).toContain('baseline.json not written')
+    expect(saved.baselineRefused).toContain('b, c')
+  })
+
+  it('records no baseline refusal for a run that is not a baseline or left nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'suite-'))
+    const full = { results: [result('a', 0)], skipped: [] }
+    const base = { startedAt: 't', selected: ['a'] }
+    expect(writeRunOutcome(join(dir, '1.json'), { ...base, baseline: true }, full).baselineRefused).toBeUndefined()
+    expect(
+      writeRunOutcome(join(dir, '2.json'), { ...base, baseline: false }, { results: [], skipped: ['a'] })
+        .baselineRefused,
+    ).toBeUndefined()
   })
 
   it('does not run again an environment failure inside the margin', async () => {
