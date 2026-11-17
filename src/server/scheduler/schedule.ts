@@ -13,7 +13,7 @@ import {
   type ReadinessRecord,
 } from './facts'
 import type { ReadinessJudge } from './judge'
-import type { SchedulerMode, SchedulerModes } from './mode'
+import { passIsOff, type SchedulerMode, type SchedulerModes } from './mode'
 import {
   isBug,
   orderHead,
@@ -197,7 +197,7 @@ export async function schedule(
   modes: SchedulerModes,
 ): Promise<ScheduleResult> {
   const result: ScheduleResult = { judged: 0, asked: 0, recorded: 0, moved: 0, failed: 0 }
-  if (modes.order === 'off' && modes.readiness === 'off') return result
+  if (passIsOff(modes)) return result
   const queue = await readQueue(deps)
   for (const run of queue.filter((r) => !r.issue.read)) {
     log('schedule_issue_unread', { taskId: run.taskId, issue: run.issue })

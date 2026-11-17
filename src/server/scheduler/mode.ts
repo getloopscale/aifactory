@@ -20,3 +20,13 @@ export const readinessModeFromEnv = (env: NodeJS.ProcessEnv): SchedulerMode =>
 
 /** What each step of a pass may do. */
 export type SchedulerModes = { order: SchedulerMode; readiness: SchedulerMode }
+
+/** Both modes, as the environment sets them. */
+export const schedulerModesFromEnv = (env: NodeJS.ProcessEnv): SchedulerModes => ({
+  order: schedulerModeFromEnv(env),
+  readiness: readinessModeFromEnv(env),
+})
+
+/** Whether a pass has nothing to do: both steps are off. */
+export const passIsOff = (modes: SchedulerModes): boolean =>
+  modes.order === 'off' && modes.readiness === 'off'

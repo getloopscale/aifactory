@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { readinessModeFromEnv, schedulerModeFromEnv } from './mode'
+import {
+  passIsOff,
+  readinessModeFromEnv,
+  schedulerModeFromEnv,
+  schedulerModesFromEnv,
+} from './mode'
 
 describe('the scheduler mode', () => {
   it('is trial unless the environment says otherwise', () => {
@@ -37,5 +42,19 @@ describe('the readiness judge mode', () => {
     expect(() => readinessModeFromEnv({ FACTORY_READINESS_MODE: 'on' })).toThrow(
       'FACTORY_READINESS_MODE must be off, trial or auto, got on',
     )
+  })
+})
+
+describe('the modes of a pass', () => {
+  it('reads each step from its own variable', () => {
+    expect(
+      schedulerModesFromEnv({ FACTORY_SCHEDULER_MODE: 'auto', FACTORY_READINESS_MODE: 'off' }),
+    ).toEqual({ order: 'auto', readiness: 'off' })
+  })
+
+  it('is off only when both steps are off', () => {
+    expect(passIsOff({ order: 'off', readiness: 'off' })).toBe(true)
+    expect(passIsOff({ order: 'off', readiness: 'trial' })).toBe(false)
+    expect(passIsOff({ order: 'auto', readiness: 'off' })).toBe(false)
   })
 })

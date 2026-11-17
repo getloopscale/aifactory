@@ -7,7 +7,7 @@ import { FACTORY_LABEL } from '../ingest/decide'
 import { actionDeps } from '../panel/deps'
 import { listingReader } from '../scheduler/issue-reader'
 import { modelReadinessJudge } from '../scheduler/judge'
-import { readinessModeFromEnv, schedulerModeFromEnv } from '../scheduler/mode'
+import { passIsOff, schedulerModesFromEnv } from '../scheduler/mode'
 import { alone, schedule } from '../scheduler/schedule'
 
 /**
@@ -21,11 +21,8 @@ export default defineCron('schedule', {
   schedule: '*/2 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
   handler: mainProcessOnly(async () => {
-    const modes = {
-      order: schedulerModeFromEnv(process.env),
-      readiness: readinessModeFromEnv(process.env),
-    }
-    if (modes.order === 'off' && modes.readiness === 'off') return
+    const modes = schedulerModesFromEnv(process.env)
+    if (passIsOff(modes)) return
     let deps
     try {
       const { db, github, api } = actionDeps()
