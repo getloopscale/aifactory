@@ -129,13 +129,18 @@ export async function checkBeforeDeploy(input: {
   baseline: Baseline
   changedPaths: string[]
   setup: AgentSetup
-  runQuick: () => Promise<CaseResult[]>
+  runQuick: () => Promise<CaseResult[] | { results: CaseResult[]; skipped: string[] }>
 }): Promise<DeployCheck> {
   const changed = [
     ...agentConfigurationChanged(input.changedPaths),
     ...setupChanges(input.baseline.setup, input.setup),
   ]
   if (changed.length === 0) return { ran: false, ok: true, reasons: [], changed }
-  const compared = compareWithBaseline(await input.runQuick(), input.baseline)
-  return { ran: true, ok: compared.ok, reasons: compared.reasons, changed }
+  const ran = await input.runQuick()
+  const { results, skipped } = Array.isArray(ran) ? { results: ran, skipped: [] } : ran
+  const compared = compareWithBaseline(results, input.baseline)
+  // A quick case the run left is not measured, so the gate cannot say it did not regress.
+  const unmeasured = `the run left ${skipped.length} quick case(s) unmeasured: ${skipped.join(', ')}`
+  const reasons = skipped.length > 0 ? [unmeasured, ...compared.reasons] : compared.reasons
+  return { ran: true, ok: compared.ok && skipped.length === 0, reasons, changed }
 }

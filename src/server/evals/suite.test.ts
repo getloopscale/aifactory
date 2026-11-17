@@ -258,6 +258,18 @@ describe('checkBeforeDeploy', () => {
     ])
   })
 
+  it('refuses a partial quick run, naming the cases left, though the ones that ran are as good', async () => {
+    const checked = await checkBeforeDeploy({
+      baseline,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      runQuick: async () => ({ results: [result('a', 0.5)], skipped: ['b'] }),
+    })
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons).toEqual(['the run left 1 quick case(s) unmeasured: b'])
+  })
+
   it('refuses a run worse than the baseline, with the reason', async () => {
     const checked = await checkBeforeDeploy({
       baseline,

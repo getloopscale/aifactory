@@ -184,7 +184,7 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
       console.log(JSON.stringify({ event: 'eval_baseline_refused', skipped: record.skipped }))
       throw new Error(
         `baseline.json not written: the run left ${record.skipped.length} case(s) (${record.skipped.join(', ')}). ` +
-          'Its results are in .evals/; run again with more time or budget, or with EVALS_CASES for the rest.',
+          'Its results are in .evals/; run the whole set again with more time or budget.',
       )
     } else if (env.EVALS_BASELINE === '1') {
       const baseline: Baseline = {
@@ -214,7 +214,10 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
       baseline,
       changedPaths,
       setup: await currentSetup(quick),
-      runQuick: async () => (await runCases(quick)).results,
+      runQuick: async () => {
+        const { results, skipped } = await runCases(quick)
+        return { results, skipped }
+      },
     })
     console.log(JSON.stringify({ event: 'eval_check', ...checked }))
     expect(checked.reasons).toEqual([])
