@@ -226,11 +226,12 @@ class CaseRun {
     return plan
   }
 
+  /** Sends the work back to the builder, as `Run.rework`. Answers whether the builder changed anything. */
   private async rework(
     findings: Finding[],
     failed: CheckResult[],
     reviewedSha?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.attempts++
     const prompt = reworkPrompt({
       findings,
@@ -243,6 +244,16 @@ class CaseRun {
     )
     this.settle(result, 'the agent did not finish the rework')
     this.summary = result.summary
+    return this.hasChange()
+  }
+
+  /** Whether the checkout holds something past the last commit of the case: a file left or a commit made. */
+  private async hasChange(): Promise<boolean> {
+    const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    if (changes.stdout.trim() !== '') return true
+    const since = this.committed ?? this.c.baseSha
+    const ahead = await must(this.backend, `git -C ${this.repoDir} rev-list --count ${since}..HEAD`)
+    return Number(ahead.stdout.trim()) > 0
   }
 
   /**
@@ -250,17 +261,15 @@ class CaseRun {
    * itself (a merge does) counts as its change and goes as it is, the same as `Run.commitAndPush`.
    */
   private async commit(): Promise<string> {
-    const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
-    const uncommitted = changes.stdout.trim() !== ''
-    const since = this.committed ?? this.c.baseSha
-    const ahead = await must(this.backend, `git -C ${this.repoDir} rev-list --count ${since}..HEAD`)
-    if (!uncommitted && !(Number(ahead.stdout.trim()) > 0)) {
+    if (!(await this.hasChange())) {
       // As `Run.resolvedAlready`: on the first pass, fixes that change the starting commit make the change.
       const fixed = this.committed === undefined ? await this.applyFixes(this.c.baseSha) : undefined
       if (fixed && fixed !== this.c.baseSha) return fixed
       throw new Stopped('the agent made no change')
     }
-    if (uncommitted) await this.commitAll(`evaluation of ${this.c.id}, attempt ${this.attempts}`)
+    const changes = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
+    if (changes.stdout.trim() !== '')
+      await this.commitAll(`evaluation of ${this.c.id}, attempt ${this.attempts}`)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
     return this.committed
   }
@@ -351,8 +360,8 @@ class CaseRun {
 
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
   async loop(): Promise<CaseEnd> {
+    let sha = await this.applyFixes(await this.commit())
     for (;;) {
-      const sha = await this.applyFixes(await this.commit())
       const failed = await this.check(sha)
       if (failed.length > 0) {
         if (!this.canRework()) {
@@ -363,7 +372,8 @@ class CaseRun {
             failedChecks: names(failed),
           }
         }
-        await this.rework([], failed)
+        // A rework that changed nothing has the checks run again on the same commit (#214).
+        if (await this.rework([], failed)) sha = await this.applyFixes(await this.commit())
         continue
       }
       const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
@@ -385,21 +395,25 @@ class CaseRun {
       if (read.verdict === 'approve' && blocking.length === 0) {
         return { checksPassed: true, verdict: 'approve', blockingGuards: [] }
       }
+      // What the factory hands over: green checks and a review that did not approve.
+      const handedOver: CaseEnd = {
+        checksPassed: true,
+        verdict: read.verdict,
+        blockingGuards: blocking.map((g) => g.issue),
+      }
       if (
         read.verdict === 'invalid' ||
         !this.canResume() ||
         !reviewAllowsRework(this.attempts, this.blockingCounts)
       ) {
-        return {
-          checksPassed: true,
-          verdict: read.verdict,
-          blockingGuards: blocking.map((g) => g.issue),
-        }
+        return handedOver
       }
       const findings = [...guards, ...outside, ...read.findings]
       // The next round starts from these findings, as `Run.review` keeps them.
       this.earlier = { sha, findings }
-      await this.rework(findings, [], sha)
+      // A rework that changed nothing ends the case as the factory hands it over: not reviewed again (#214).
+      if (!(await this.rework(findings, [], sha))) return handedOver
+      sha = await this.applyFixes(await this.commit())
     }
   }
 
