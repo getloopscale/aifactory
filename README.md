@@ -131,7 +131,7 @@ pnpm format:check
 pnpm test               # unidade
 pnpm test:integration   # exige Postgres e DATABASE_URL exportada
 pnpm test:e2e           # GitHub, Vercel Sandbox e Postgres reais; exige o .env.local
-pnpm quality            # cobertura, CRAP, duplicação e mutação (os gates do job `quality` do CI)
+pnpm quality            # cobertura, CRAP, duplicação e mutação (os gates dos jobs `quality` e `mutation` do CI)
 FACTORY_LIVE=1 pnpm test:e2e -t "real agent"   # com o Claude Code de verdade; custa centavos
 pnpm db:generate        # drizzle-kit: gera migrations a partir do schema
 pnpm db:migrate

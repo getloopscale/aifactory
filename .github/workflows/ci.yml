@@ -86,5 +86,22 @@ jobs:
       - run: pnpm crap
       # Copy and paste under 1% of the code.
       - run: pnpm dup
-      # The tests must catch changes to the logic: mutation score of the decision code at 90 or more.
+
+  # The tests must catch changes to the logic: mutation score of the decision code at 90 or more. Its own job,
+  # beside `quality`, because it is the slowest gate and grows with every module added to `stryker.config.json`:
+  # inside `quality` it ran after coverage and hit that job's limit on slower runners (#181). It runs only unit
+  # tests (`vitest.stryker.config.ts`), so it needs no database.
+  mutation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm mutation
