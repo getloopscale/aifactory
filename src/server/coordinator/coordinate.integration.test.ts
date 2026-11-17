@@ -311,7 +311,7 @@ describe('an integration branch that stays red under a waiting task', () => {
 
     expect(result.escalated).toBe(1)
     expect(await actions()).toMatchObject([
-      { taskId: id, exceptionKind: 'base_red', headSha: 'abc1234def', action: 'escalate' },
+      { taskId: id, exceptionKind: 'base_red', headSha: 'abc1234def:CI', action: 'escalate' },
     ])
     expect((await actions())[0].reason).toContain('CI fails on workspace')
   })

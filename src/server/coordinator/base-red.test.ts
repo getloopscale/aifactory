@@ -24,7 +24,7 @@ describe('recogniseBaseRed', () => {
     expect(recogniseBaseRed(facts(), after(BASE_RED_LIMIT_MS + 60_000))).toEqual({
       kind: 'base_red',
       taskId: 7,
-      head: 'abc1234def',
+      head: 'abc1234def:CI,Lint',
       evidence: 'CI, Lint fails on workspace as on abc1234, red for 2.0 hours',
     })
   })
@@ -49,7 +49,7 @@ describe('recogniseBaseRed', () => {
     ).toEqual({
       kind: 'unknown',
       taskId: 7,
-      head: 'abc1234def',
+      head: 'abc1234def:CI,Lint',
       evidence: 'could not read the done event of task 7: connection reset',
     })
   })
