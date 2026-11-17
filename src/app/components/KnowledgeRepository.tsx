@@ -4,9 +4,11 @@ import { useEffect, useState } from 'react'
 import type { KnowledgeChoice, KnowledgeStatus } from '../../shared/knowledge'
 import type { RepositoriesView } from '../../shared/panel'
 import { get, post, put } from '../lib/api'
+import { useCopy } from '../lib/copy'
 
 const short = (sha: string | null) => (sha ? sha.slice(0, 7) : '—')
-const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR') : 'ainda não')
+const when = (iso: string | null, language: string, never: string) =>
+  iso ? new Date(iso).toLocaleString(language) : never
 
 /**
  * Choosing the repository that is the knowledge base. The factory fetches it every minute and every agent
@@ -14,6 +16,8 @@ const when = (iso: string | null) => (iso ? new Date(iso).toLocaleString('pt-BR'
  * to the one chosen here.
  */
 export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
+  const { t, language } = useCopy()
+  const k = t.knowledge
   const [status, setStatus] = useState<KnowledgeStatus>()
   const [choices, setChoices] = useState<string[]>([])
   const [repository, setRepository] = useState('')
@@ -76,25 +80,20 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
 
   return (
     <section
-      aria-label="Base de conhecimento"
+      aria-label={k.label}
       className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm"
     >
-      <p className="text-muted-foreground">
-        Um repositório seu que todos os agentes consultam, no sandbox e no painel. As regras ficam
-        em <code>knowledge/</code> e só mudam por pull request seu. A fábrica busca o repositório a
-        cada minuto e grava as próprias notas na branch{' '}
-        <code>{status?.memoryBranch ?? 'factory-memory'}</code>, nunca na sua.
-      </p>
+      <p className="text-muted-foreground">{k.about(status?.memoryBranch ?? 'factory-memory')}</p>
       <div className="flex flex-wrap items-end gap-2">
         <label className="min-w-64 flex-1">
-          <span className="text-muted-foreground">Repositório</span>
+          <span className="text-muted-foreground">{k.repository}</span>
           <select
-            aria-label="Repositório da base de conhecimento"
+            aria-label={k.repositoryLabel}
             value={repository}
             onChange={(e) => setRepository(e.target.value)}
             className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground"
           >
-            <option value="">Nenhum</option>
+            <option value="">{k.none}</option>
             {options.map((name) => (
               <option key={name} value={name}>
                 {name}
@@ -103,11 +102,11 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
           </select>
         </label>
         <label className="w-48">
-          <span className="text-muted-foreground">Branch das regras</span>
+          <span className="text-muted-foreground">{k.rulesBranch}</span>
           <Input
-            aria-label="Branch das regras"
+            aria-label={k.rulesBranch}
             value={branch}
-            placeholder="a padrão"
+            placeholder={k.defaultBranch}
             autoComplete="off"
             spellCheck={false}
             onChange={(e) => setBranch(e.target.value)}
@@ -121,7 +120,7 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
             void save({ repository: repository || null, branch: branch.trim() || null })
           }
         >
-          {busy ? 'Conferindo…' : 'Salvar'}
+          {busy ? k.checking : k.save}
         </Button>
       </div>
 
@@ -133,23 +132,23 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
 
       {status?.repository ? (
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
-          <dt>Regras</dt>
+          <dt>{k.rules}</dt>
           <dd className="font-mono">
-            {status.readBranch ?? status.branch ?? 'branch padrão'} @ {short(status.knowledgeSha)}
+            {status.readBranch ?? status.branch ?? k.defaultBranchName} @{' '}
+            {short(status.knowledgeSha)}
           </dd>
-          <dt>Notas</dt>
+          <dt>{k.notes}</dt>
           <dd className="font-mono">
-            {status.memoryBranch} @ {short(status.memorySha)} · {status.writtenNotes} gravadas,{' '}
-            {status.pendingNotes} esperando
+            {status.memoryBranch} @ {short(status.memorySha)} ·{' '}
+            {k.notesCount(status.writtenNotes, status.pendingNotes)}
           </dd>
-          <dt>Última busca</dt>
-          <dd>{when(status.syncedAt)}</dd>
+          <dt>{k.lastFetch}</dt>
+          <dd>{when(status.syncedAt, language, k.never)}</dd>
           {status.error ? (
             <>
-              <dt>Falhou</dt>
+              <dt>{k.failed}</dt>
               <dd className="text-destructive">
-                {status.error} ({when(status.errorAt)}). Os agentes seguem lendo o último commit
-                bom.
+                {k.failure(status.error, when(status.errorAt, language, k.never))}
               </dd>
             </>
           ) : null}
@@ -159,11 +158,7 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
       {status && status.okfProblems.length > 0 ? (
         <div className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
-            <p>
-              Os agentes já leem este repositório, mas ele não segue o Open Knowledge Format em
-              tudo. A fábrica pode abrir um pull request que acrescenta o que falta, sem mudar
-              nenhum texto que já existe.
-            </p>
+            <p>{k.notOkf}</p>
             <ul className="mt-1 list-disc pl-5 text-muted-foreground">
               {status.okfProblems.slice(0, 5).map((problem) => (
                 <li key={problem}>{problem}</li>
@@ -171,13 +166,13 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
             </ul>
           </div>
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => void propose()}>
-            Propor a estrutura
+            {k.propose}
           </Button>
         </div>
       ) : null}
       {proposed ? (
         <p role="status">
-          Pull request aberto:{' '}
+          {k.opened}{' '}
           <a
             href={proposed}
             target="_blank"
@@ -186,7 +181,7 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
           >
             {proposed}
           </a>
-          . Depois do merge, a fábrica lê a estrutura nova em até um minuto.
+          . {k.afterMerge}
         </p>
       ) : null}
     </section>

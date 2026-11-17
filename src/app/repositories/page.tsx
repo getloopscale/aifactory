@@ -10,7 +10,14 @@ import { put } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
-import { formatChecks, formatDomains, parseChecks, parseDomains } from '../lib/repo-form'
+import {
+  formatChecks,
+  formatDomains,
+  formatFixes,
+  parseChecks,
+  parseDomains,
+  parseFixes,
+} from '../lib/repo-form'
 
 const selectClass =
   'h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground'
@@ -25,7 +32,9 @@ function Settings({
   onSaved: () => void
 }) {
   const { t } = useCopy()
+  const s = t.repositories.settings
   const [checks, setChecks] = useState(formatChecks(repo.checks))
+  const [fixes, setFixes] = useState(formatFixes(repo.fixes))
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
@@ -52,6 +61,7 @@ function Settings({
       const parsed = parseChecks(checks)
       await put(`/api/panel/repositories/${repo.fullName}`, {
         checks: parsed.length > 0 ? parsed : null,
+        fixes: parseFixes(fixes),
         egress: parseDomains(domains),
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,
@@ -61,7 +71,7 @@ function Settings({
         releaseMode: release || null,
         runLimitMinutes: minutes,
       })
-      setMessage('Saved.')
+      setMessage(t.repositories.settings.saved)
       onSaved()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
@@ -82,53 +92,65 @@ function Settings({
         }}
       />
       <label className="block">
-        <span className="text-foreground">Checks, one per line as name: command</span>
+        <span className="text-foreground">{s.checks}</span>
         <Textarea
           value={checks}
           onChange={(e) => setChecks(e.target.value)}
           rows={3}
-          placeholder="Empty runs npm test. For example: unit: pnpm test"
+          placeholder={s.checksPlaceholder}
+          className="mt-1 w-full font-mono"
+        />
+      </label>
+      <Assist
+        kind="setup"
+        text={fixes}
+        repository={repo.fullName}
+        context={s.fixesAssistContext}
+        onUse={(p) => setFixes(p.text)}
+      />
+      <label className="block">
+        <span className="text-foreground">{s.fixes}</span>
+        <Textarea
+          value={fixes}
+          onChange={(e) => setFixes(e.target.value)}
+          rows={2}
+          placeholder={s.fixesPlaceholder}
           className="mt-1 w-full font-mono"
         />
       </label>
       <label className="block">
-        <span className="text-foreground">Extra domains the sandbox may reach</span>
+        <span className="text-foreground">{s.domains}</span>
         <Textarea
           value={domains}
           onChange={(e) => setDomains(e.target.value)}
           rows={2}
-          placeholder="GitHub, the agent and the npm registry are always open. For Python: pypi.org, files.pythonhosted.org"
+          placeholder={s.domainsPlaceholder}
           className="mt-1 w-full font-mono"
         />
       </label>
       <label className="block">
-        <span className="text-foreground">Branch the work starts from</span>
+        <span className="text-foreground">{s.baseBranch}</span>
         <Input
-          aria-label="Branch the work starts from"
+          aria-label={s.baseBranch}
           value={baseBranch}
-          placeholder="workspace (the default)"
+          placeholder={s.defaultPlaceholder}
           onChange={(e) => setBaseBranch(e.target.value)}
           className="mt-1 w-full"
         />
         <span className="text-muted-foreground">
-          Finished work is merged here by the factory. Leave it empty to use workspace. The branch
-          develop then carries the pre-release, and {repo.defaultBranch || 'the default branch'} the
-          release. Missing branches are created for you.
+          {s.baseBranchHelp(repo.defaultBranch || s.theDefaultBranch)}
         </span>
       </label>
       <label className="block">
-        <span className="text-foreground">Branch a release lands on</span>
+        <span className="text-foreground">{s.releaseBranch}</span>
         <Input
-          aria-label="Branch a release lands on"
+          aria-label={s.releaseBranch}
           value={releaseBranch}
-          placeholder={`${repo.defaultBranch || 'the default branch'} (the default)`}
+          placeholder={s.releaseBranchDefault(repo.defaultBranch || s.theDefaultBranch)}
           onChange={(e) => setReleaseBranch(e.target.value)}
           className="mt-1 w-full"
         />
-        <span className="text-muted-foreground">
-          Only needed when the default branch is develop, which is where the pre-release goes: name
-          main, or the branch your releases use.
-        </span>
+        <span className="text-muted-foreground">{s.releaseBranchHelp}</span>
       </label>
       <label className="block">
         <span className="text-foreground">{t.runLimit.label}</span>
@@ -144,57 +166,55 @@ function Settings({
       </label>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />
-        <span className="text-foreground">
-          Let the agent ask me questions on the issue when something is unclear
-        </span>
+        <span className="text-foreground">{s.ask}</span>
       </label>
       <div className="grid grid-cols-3 gap-3">
         <label className="block">
-          <span className="text-foreground">Builder</span>
+          <span className="text-foreground">{s.builder}</span>
           <select
-            aria-label="Builder"
+            aria-label={s.builder}
             value={harness}
             onChange={(e) => setHarness(e.target.value)}
             className={selectClass}
           >
-            <option value="">Factory default</option>
+            <option value="">{s.factoryDefault}</option>
             {agents.map((a) => (
               <option key={a}>{a}</option>
             ))}
           </select>
         </label>
         <label className="block">
-          <span className="text-foreground">Reviewer</span>
+          <span className="text-foreground">{s.reviewer}</span>
           <select
-            aria-label="Reviewer"
+            aria-label={s.reviewer}
             value={reviewer}
             onChange={(e) => setReviewer(e.target.value)}
             className={selectClass}
           >
-            <option value="">Same as the builder</option>
+            <option value="">{s.sameAsBuilder}</option>
             {agents.map((a) => (
               <option key={a}>{a}</option>
             ))}
           </select>
         </label>
         <label className="block">
-          <span className="text-foreground">Release</span>
+          <span className="text-foreground">{s.release}</span>
           <select
-            aria-label="Release"
+            aria-label={s.release}
             value={release}
             onChange={(e) => setRelease(e.target.value)}
             className={selectClass}
           >
-            <option value="">Factory default</option>
-            <option value="manual">Only me, from the panel</option>
-            <option value="trial">Record what an agent would do</option>
-            <option value="auto">An agent may release</option>
+            <option value="">{s.factoryDefault}</option>
+            <option value="manual">{s.manual}</option>
+            <option value="trial">{s.trial}</option>
+            <option value="auto">{s.auto}</option>
           </select>
         </label>
       </div>
       <div className="flex items-center gap-3">
         <Button size="sm" disabled={busy} onClick={() => void save()}>
-          Save settings
+          {s.save}
         </Button>
         {message ? (
           <span role="status" className="text-foreground">
@@ -215,6 +235,7 @@ function Repo({
   agents: string[]
   onChanged: () => void
 }) {
+  const { t } = useCopy()
   const [message, setMessage] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -236,9 +257,11 @@ function Repo({
       <Card size="sm" className="p-4">
         <div className="flex flex-wrap items-center gap-3">
           <span className="font-medium">{repo.fullName}</span>
-          <Badge variant="default">{repo.private ? 'private' : 'public'}</Badge>
-          {!repo.reachable ? <Badge variant="warning">App has no access</Badge> : null}
-          {repo.enabled ? <Badge variant="success">enabled</Badge> : null}
+          <Badge variant="default">
+            {repo.private ? t.repositories.private : t.repositories.public}
+          </Badge>
+          {!repo.reachable ? <Badge variant="warning">{t.repositories.noAccess}</Badge> : null}
+          {repo.enabled ? <Badge variant="success">{t.repositories.enabled}</Badge> : null}
           <Button
             size="sm"
             variant={repo.enabled ? 'secondary' : 'primary'}
@@ -246,7 +269,7 @@ function Repo({
             disabled={busy}
             onClick={() => void toggle()}
           >
-            {repo.enabled ? 'Disable' : 'Enable'}
+            {repo.enabled ? t.repositories.disable : t.repositories.enable}
           </Button>
         </div>
         {message ? (
@@ -277,16 +300,19 @@ const WATCH_MS = 5 * 60_000
 
 /** The button that sends the owner to GitHub to install the App, and the page notices when they are back. */
 function InstallButton({ url, onClick }: { url: string; onClick: () => void }) {
+  const { t } = useCopy()
   return (
     <Button asChild size="sm" onClick={onClick}>
       <a href={url} target="_blank" rel="noreferrer">
-        Install on GitHub
+        {t.repositories.installOnGitHub}
       </a>
     </Button>
   )
 }
 
 export default function RepositoriesPage() {
+  const { t } = useCopy()
+  const r = t.repositories
   const [watch, setWatch] = useState<Watch>()
   const [installed, setInstalled] = useState<string>()
   const [params, setParams] = useSearchParams()
@@ -300,11 +326,11 @@ export default function RepositoriesPage() {
   // GitHub can send the owner back here with the installation in the address.
   useEffect(() => {
     if (params.get('installation_id')) {
-      setInstalled('GitHub confirmed the installation.')
+      setInstalled(r.confirmed)
       setParams({}, { replace: true })
       resource.reload()
     }
-  }, [params, setParams, resource])
+  }, [params, setParams, resource, r])
 
   // Once an account or a repository shows up that was not there when the owner left, say so and stop asking.
   useEffect(() => {
@@ -315,14 +341,14 @@ export default function RepositoriesPage() {
     if (added.length > 0 || data.repositories.length > watch.repositories) {
       setInstalled(
         added.length > 0
-          ? `Installed on ${added.join(', ')}. ${data.repositories.length} repositories are in reach.`
-          : `${data.repositories.length} repositories are in reach.`,
+          ? r.installedOn(added.join(', '), data.repositories.length)
+          : r.inReach(data.repositories.length),
       )
       setWatch(undefined)
     } else if (Date.now() - watch.since > WATCH_MS) {
       setWatch(undefined)
     }
-  }, [data, watch])
+  }, [data, watch, r])
 
   const startWatching = () => {
     setInstalled(undefined)
@@ -336,48 +362,41 @@ export default function RepositoriesPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">Repositories</h1>
+        <h1 className="text-xl font-semibold">{r.title}</h1>
         <div className="flex items-center gap-2">
           {data?.installUrl ? (
             <InstallButton url={data.installUrl} onClick={startWatching} />
           ) : null}
           <Button size="sm" variant="secondary" onClick={resource.reload}>
-            Refresh
+            {r.refresh}
           </Button>
         </div>
       </div>
       {watch ? (
         <p role="status" className="text-sm text-muted-foreground">
-          Waiting for GitHub. Pick the account and the repositories there, then come back: this page
-          notices on its own.
+          {r.waiting}
         </p>
       ) : null}
-      {installed ? (
-        <Alert
-          intent="success"
-          title={installed}
-          description="Enable the repositories you want below."
-        />
-      ) : null}
+      {installed ? <Alert intent="success" title={installed} description={r.enableBelow} /> : null}
       {resource.error ? <p className="text-sm text-destructive">{resource.error}</p> : null}
       {data?.error ? (
-        <Alert intent="warning" title="GitHub could not be asked" description={data.error} />
+        <Alert intent="warning" title={r.githubFailed} description={data.error} />
       ) : null}
       {data && data.installations.length > 0 ? (
-        <ul aria-label="Installations" className="space-y-1 text-sm text-muted-foreground">
+        <ul aria-label={r.installationsLabel} className="space-y-1 text-sm text-muted-foreground">
           {data.installations.map((i) => (
             <li key={i.account}>
-              Installed on {i.account},{' '}
-              {i.selection === 'all' ? 'every repository' : 'the repositories chosen there'}.{' '}
+              {r.installation.installedOn} {i.account},{' '}
+              {i.selection === 'all' ? r.installation.every : r.installation.chosen}.{' '}
               <a
                 href={i.url}
                 target="_blank"
                 rel="noreferrer"
                 className="text-foreground underline underline-offset-2"
               >
-                Manage on GitHub
+                {r.installation.manage}
               </a>{' '}
-              (GitHub shows that page only when you are signed in as {i.account}.)
+              {r.installation.signedInAs(i.account)}
             </li>
           ))}
         </ul>
@@ -386,8 +405,8 @@ export default function RepositoriesPage() {
         data.repositories.length === 0 ? (
           <Alert
             intent="info"
-            title="The App reaches no repository yet"
-            description="Install it on GitHub and choose the repositories it may work in, then refresh."
+            title={r.noneTitle}
+            description={r.noneDescription}
             action={
               data.installUrl ? (
                 <InstallButton url={data.installUrl} onClick={startWatching} />
@@ -407,7 +426,7 @@ export default function RepositoriesPage() {
           </ul>
         )
       ) : (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <p className="text-sm text-muted-foreground">{r.loading}</p>
       )}
     </div>
   )

@@ -1,3 +1,5 @@
+import { retryableFailure } from '../../shared/panel'
+
 /** What one case of the suite came to. */
 export type CaseResult = {
   id: string
@@ -35,8 +37,14 @@ export type Summary = {
  * How much worse a run may be than the baseline before it is refused (ADR 0008). A pass rate may fall by
  * one case in five, since a model answers differently from one run to the next; two cases in five is a
  * change. The mean cost may rise by a quarter.
+ *
+ * Two more rules, for a suite large enough to tell a change from chance. Cases that got worse are weighed
+ * against cases that got better, and a run is refused when that many regressions would come by chance less
+ * than once in twenty (`regressionPValue`), even under the pass-rate drop. A case the environment failed
+ * (a sandbox, the network, a provider's limit) says nothing about the agents and is left out of both, but a
+ * run where that happened to more than one case in five measured too little and is refused.
  */
-export const THRESHOLDS = { passRateDrop: 0.2, costRise: 0.25 }
+export const THRESHOLDS = { passRateDrop: 0.2, costRise: 0.25, unmeasured: 0.2, pValue: 0.05 }
 
 const mean = (values: number[]) =>
   values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length
@@ -57,6 +65,12 @@ export type Comparison = {
   reasons: string[]
   /** Cases that passed in the baseline and failed now. */
   regressions: string[]
+  /** Cases that failed in the baseline and pass now. */
+  improvements: string[]
+  /** Cases left out because the environment failed them, in the run or in the baseline. */
+  unmeasured: string[]
+  /** How likely that many regressions are by chance, against the improvements (`regressionPValue`). */
+  pValue: number
   now: Summary
   before: Summary
 }
@@ -66,6 +80,27 @@ const usd = (value: number) => `US$ ${value.toFixed(2)}`
 // Rates and costs are sums of floating point numbers; a run exactly at a threshold must not fail on rounding.
 const EPSILON = 1e-9
 
+/** A case that failed for its environment (`retryableFailure` says `environment`), not for what the agents did. */
+export function failedForEnvironment(result: CaseResult): boolean {
+  return !result.passed && retryableFailure({ error: result.reason }) === 'environment'
+}
+
+/**
+ * The exact one-sided sign test over the cases whose outcome changed (McNemar's test for paired cases): the
+ * chance of `regressions` or more of them going worse if each change were a fair coin.
+ */
+export function regressionPValue(regressions: number, improvements: number): number {
+  const n = regressions + improvements
+  if (regressions === 0) return 1
+  let choose = 1
+  let tail = 0
+  for (let k = 0; k <= n; k++) {
+    if (k >= regressions) tail += choose
+    choose = (choose * (n - k)) / (k + 1)
+  }
+  return tail / 2 ** n
+}
+
 /** Compares the cases a run shares with the baseline; cases only one of them has are left out. */
 export function compareWithBaseline(
   run: CaseResult[],
@@ -74,19 +109,30 @@ export function compareWithBaseline(
 ): Comparison {
   const earlier = new Map(baseline.results.map((r) => [r.id, r]))
   const shared = run.filter((r) => earlier.has(r.id))
-  const now = summarize(shared)
-  const before = summarize(shared.map((r) => earlier.get(r.id)!))
-  const regressions = shared.filter((r) => !r.passed && earlier.get(r.id)!.passed).map((r) => r.id)
+  const unmeasured = shared
+    .filter((r) => failedForEnvironment(r) || failedForEnvironment(earlier.get(r.id)!))
+    .map((r) => r.id)
+  const measured = shared.filter((r) => !unmeasured.includes(r.id))
+  const now = summarize(measured)
+  const before = summarize(measured.map((r) => earlier.get(r.id)!))
+  const regressions = measured.filter((r) => !r.passed && earlier.get(r.id)!.passed).map((r) => r.id)
+  const improvements = measured.filter((r) => r.passed && !earlier.get(r.id)!.passed).map((r) => r.id)
+  const pValue = regressionPValue(regressions.length, improvements.length)
+  const counts = { regressions, improvements, unmeasured, pValue, now, before }
   if (shared.length === 0) {
-    return {
-      ok: false,
-      reasons: ['no case of this run is in the baseline'],
-      regressions,
-      now,
-      before,
-    }
+    return { ok: false, reasons: ['no case of this run is in the baseline'], ...counts }
   }
   const reasons: string[] = []
+  if (unmeasured.length / shared.length > thresholds.unmeasured + EPSILON) {
+    reasons.push(
+      `the environment failed ${unmeasured.length} of ${shared.length} cases (${unmeasured.join(', ')}), so the run measured too little`,
+    )
+  }
+  if (pValue < thresholds.pValue) {
+    reasons.push(
+      `${regressions.length} cases got worse and ${improvements.length} got better, more than chance explains (p = ${pValue.toFixed(3)})`,
+    )
+  }
   if (before.passRate - now.passRate > thresholds.passRateDrop + EPSILON) {
     reasons.push(`the pass rate fell from ${percent(before.passRate)} to ${percent(now.passRate)}`)
   }
@@ -98,7 +144,7 @@ export function compareWithBaseline(
       `the mean cost per case rose from ${usd(before.meanCostUsd)} to ${usd(now.meanCostUsd)}`,
     )
   }
-  return { ok: reasons.length === 0, reasons, regressions, now, before }
+  return { ok: reasons.length === 0, reasons, ...counts }
 }
 
 /** What a case's last attempt came to, or what stopped it before there was one. */

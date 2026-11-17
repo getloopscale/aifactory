@@ -9,7 +9,8 @@ export type Series = { metric: MetricName; repository: string; points: Point[] }
 
 /**
  * Turns observations into one daily series per metric and repository, plus one per metric for the whole
- * factory. A day becomes a point only with enough observations for its metric. Series without a point are
+ * factory. A day becomes a point only with enough observations for its metric; one that is no sample adds to
+ * the day's sum and not to its count. Series without a point are
  * left out; series come ordered by metric then repository, points by day.
  */
 export function dailySeries(
@@ -23,7 +24,7 @@ export function dailySeries(
       const key = JSON.stringify([o.metric, repository, day])
       const acc = sums.get(key) ?? { sum: 0, samples: 0 }
       acc.sum += o.value
-      acc.samples += 1
+      if (o.sample !== false) acc.samples += 1
       sums.set(key, acc)
     }
   }

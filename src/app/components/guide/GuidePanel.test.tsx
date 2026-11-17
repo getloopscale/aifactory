@@ -1,5 +1,13 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render as rtlRender,
+  screen,
+  waitFor,
+} from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -30,6 +38,11 @@ vi.mock('../../lib/live', async (original) => ({
 import { GuideProvider, useGuideState } from '../../lib/guide-state'
 
 import { GuidePanel } from './GuidePanel'
+import { CopyProvider, LANGUAGE_KEY } from '../../lib/copy'
+import { ptBR } from '../../lib/copy/pt-BR'
+// The owner's language is Portuguese here; the dictionary keys say what is on the screen.
+window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: CopyProvider })
 
 const fresh = (): Agent => ({
   thread: [],
@@ -45,6 +58,7 @@ beforeEach(() => {
   agents.clear()
   changed.mockClear()
   window.localStorage.clear()
+  window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
   vi.stubGlobal(
     'fetch',
     vi.fn(async () => new Response('{}', { status: 404 })),
@@ -162,7 +176,7 @@ describe('the guide beside the page', () => {
     render(tree())
     openIt()
     fireEvent.click(screen.getByText('Quero abrir um job para'))
-    expect((screen.getByLabelText('Mensagem') as HTMLTextAreaElement).value).toBe(
+    expect((screen.getByLabelText(ptBR.composer.message) as HTMLTextAreaElement).value).toBe(
       'Quero abrir um job para ',
     )
     expect(agents.get('/api/agents/guide-board')!.send).not.toHaveBeenCalled()
@@ -224,7 +238,7 @@ describe('the guide beside the page', () => {
 
     await waitFor(() => expect(agents.has('/api/agents/guide-board-codex')).toBe(true))
     expect(screen.getByText(/Antes/)).toBeDefined()
-    expect(await screen.findByLabelText('Conectar o ChatGPT')).toBeDefined()
+    expect(await screen.findByLabelText(ptBR.chatgpt.label)).toBeDefined()
     expect(window.localStorage.getItem('aifactory.guide.model')).toBe('codex')
   })
 })

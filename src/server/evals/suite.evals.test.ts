@@ -27,7 +27,7 @@ import { fetchIssue } from '../github/issues'
 import type { KnowledgeSource } from '../knowledge/source'
 
 import { markQuick, selectCandidates, type EvalCase } from './cases'
-import { compareWithBaseline, summarize, type Baseline } from './compare'
+import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } from './compare'
 import { deliveredCandidates, toCase } from './extract'
 import { runCase } from './run-case'
 import { E2B_USD_PER_MS, agentSetup, checkBeforeDeploy, runSuite, spentOn } from './suite'
@@ -86,7 +86,9 @@ async function runCases(cases: EvalCase[]) {
     async (id) => {
       const c = byId.get(id)!
       const result = await runCase(await evalDeps(c.repository, c.labels), c)
-      console.log(JSON.stringify({ event: 'eval_case', ...result }))
+      console.log(
+        JSON.stringify({ event: 'eval_case', ...result, environment: failedForEnvironment(result) }),
+      )
       return result
     },
     {
@@ -142,7 +144,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
           },
           config: async (repo) => {
             const config = await loadRepoConfig(getDb(), repo)
-            return { integrationBranch: integrationBranch(config), egress: config.egress }
+            return { integrationBranch: integrationBranch(config), egress: config.egress, fixes: config.fixes }
           },
         }),
       )

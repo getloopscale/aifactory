@@ -2,6 +2,7 @@ import { parseDocument } from 'yaml'
 
 import {
   retryableFailure,
+  SANDBOX_TEMPLATE_MISSING,
   type DoctorItem,
   type DoctorItemId,
   type PublishMode,
@@ -127,6 +128,8 @@ export type SandboxFacts = {
   refusal?: { taskId: number; at: string; error: string }
   /** When a sandbox last started for the repository. */
   lastStartedAt?: string
+  /** Sandboxes up on the account against its limit, and how many have an owner at work. Unset when it cannot be listed. */
+  slots?: Read<{ up: number; limit: number; atWork: number }>
 }
 
 export type DoctorFacts = {
@@ -512,21 +515,42 @@ const BAD_KEY = /Status code 401|invalid api key/i
 export function providerRefusal(detail: Record<string, unknown> | null | undefined): boolean {
   const error = String(detail?.error ?? '')
   if (BAD_KEY.test(error)) return true
-  return retryableFailure(detail) === 'environment' && NO_CREDIT.test(error)
+  if (retryableFailure(detail) !== 'environment') return false
+  return NO_CREDIT.test(error) || SANDBOX_TEMPLATE_MISSING.test(error)
 }
 
 export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
   if (!sandbox.read) return unknownItem('sandbox', sandbox)
   const { refusal, lastStartedAt } = sandbox.value
+  // A listing that failed is not a count: it is said not to be known, with what was tried.
+  const slots = sandbox.value.slots?.read ? sandbox.value.slots.value : undefined
   // With no start to compare, the date is not a number and nothing is at or after the refusal.
   if (!refusal || Date.parse(lastStartedAt ?? '') >= Date.parse(refusal.at)) {
-    return fine('sandbox', 'ok_sandbox')
+    if (sandbox.value.slots && !sandbox.value.slots.read) {
+      return unknownItem('sandbox', sandbox.value.slots)
+    }
+    return slots
+      ? fine('sandbox', 'ok_sandbox_slots', {
+          up: String(slots.up),
+          limit: String(slots.limit),
+          atWork: String(slots.atWork),
+        })
+      : fine('sandbox', 'ok_sandbox')
   }
   return problem(
     'sandbox',
     'blocked',
     'sandbox_refused',
-    { taskId: String(refusal.taskId), at: refusal.at, error: refusal.error },
+    {
+      taskId: String(refusal.taskId),
+      at: refusal.at,
+      error: refusal.error,
+      ...(slots && {
+        up: String(slots.up),
+        limit: String(slots.limit),
+        atWork: String(slots.atWork),
+      }),
+    },
     { link: `/tasks/${refusal.taskId}` },
   )
 }
