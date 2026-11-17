@@ -11,7 +11,9 @@ import { integrationBranch } from './branches'
 import { attachEvidence, type EvidenceApi } from './check-evidence'
 import {
   checksFeedback,
+  baseHoldOf,
   decideWaitingIntegration,
+  nextBaseHold,
   evidenceOfNote,
   fixedBaseNote,
   type WaitingIntegration,
@@ -292,21 +294,34 @@ function blamedOnBase(detail: unknown, verifiedSha: string): string[] {
 
 /**
  * Adds the checks this pass found red on the base to the ones blamed before, so a later pass still knows
- * whose their failure is once the base passes them. The list only grows while the commit waits.
+ * whose their failure is once the base passes them (the list only grows while the commit waits), and keeps
+ * `baseHold` as what is red there now.
  */
-async function rememberBaseRed(
+async function settleBase(
   deps: AwaitCiDeps,
   done: { id: number; detail: unknown },
   verifiedSha: string,
   before: string[],
-  red: string[],
+  step: WaitingStep,
 ): Promise<void> {
-  if (red.every((name) => before.includes(name))) return
-  const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
-  await deps.db
-    .update(stageEvent)
-    .set({ detail: { ...(done.detail as Record<string, unknown>), baseBlame } })
-    .where(eq(stageEvent.id, done.id))
+  const detail = { ...((done.detail ?? {}) as Record<string, unknown>) }
+  const red = step.kind === 'wait' ? step.baseRed : undefined
+  let changed = false
+  if (red && !red.every((name) => before.includes(name))) {
+    const baseBlame: BaseBlame = { sha: verifiedSha, checks: [...new Set([...before, ...red])] }
+    detail.baseBlame = baseBlame
+    changed = true
+  }
+  // The hold is the red there is now: cleared when no check is red on the base, so it never outlives the red.
+  const held = baseHoldOf(detail, verifiedSha)
+  const hold = nextBaseHold(held, verifiedSha, red, deps.now?.() ?? new Date())
+  if (JSON.stringify(hold) !== JSON.stringify(held) || (!hold && 'baseHold' in detail)) {
+    if (hold) detail.baseHold = hold
+    else delete detail.baseHold
+    changed = true
+  }
+  if (!changed) return
+  await deps.db.update(stageEvent).set({ detail }).where(eq(stageEvent.id, done.id))
 }
 
 async function look(
@@ -359,9 +374,7 @@ async function look(
     const baseReports = await readBase(deps, row.repository, token, base)
     step = decideWaitingIntegration({ ...input, baseReports })
   }
-  if (done && step.kind === 'wait' && step.baseRed) {
-    await rememberBaseRed(deps, done, verifiedSha, blamed, step.baseRed)
-  }
+  if (done) await settleBase(deps, done, verifiedSha, blamed, step)
   const w: Waiting = {
     row,
     verifiedSha,

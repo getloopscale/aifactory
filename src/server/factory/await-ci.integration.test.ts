@@ -310,6 +310,28 @@ describe('pollAwaitingIntegrations', () => {
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
   })
 
+  const holdOf = async (id: number) =>
+    ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseHold?: unknown })
+      .baseHold
+
+  it('keeps the hold of a red integration branch while it lasts, and clears it when no check is red', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    const hold = (await holdOf(id)) as { sha: string; checks: string[]; since: string }
+    expect(hold).toMatchObject({ sha: VERIFIED, checks: ['CI'] })
+
+    await pollAwaitingIntegrations(deps())
+    expect(await holdOf(id)).toEqual(hold)
+
+    baseIs(success('CI'))
+    await pollAwaitingIntegrations(deps())
+    expect(await holdOf(id)).toBeUndefined()
+    // The blame stays: it is what lets the task merge the base once it passes.
+    expect(await blameOf(id)).toEqual({ sha: VERIFIED, checks: ['CI'] })
+  })
+
   it('remembers on the done event which checks it blamed on the base, for the verified commit', async () => {
     reports(failure('CI'))
     baseIs(failure('CI', 'https://ci/0'))

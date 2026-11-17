@@ -5,6 +5,8 @@ import type { CheckReport, PullRequestDetail } from '../github/pulls'
 import { AUTOMATIC_RETRIES } from './transitions'
 import {
   CI_SILENCE_MS,
+  baseHoldOf,
+  nextBaseHold,
   checksFeedback,
   decideWaitingIntegration,
   fixedBaseNote,
@@ -689,5 +691,33 @@ describe('checksFeedback with the step that exited', () => {
     expect(note).toContain(
       'CI:\nStep that exited: quality:loc (ran: pnpm quality)\n~~~~text\nERROR: "quality:loc" exited with 1.\n~~~~',
     )
+  })
+})
+
+describe('the hold of a red integration branch', () => {
+  const now = new Date('2026-11-17T12:00:00Z')
+
+  it('reads only the hold of the commit asked for', () => {
+    const detail = { baseHold: { sha: 'a', checks: ['lint'], since: '2026-11-17T10:00:00Z' } }
+    expect(baseHoldOf(detail, 'a')).toEqual(detail.baseHold)
+    expect(baseHoldOf(detail, 'b')).toBeNull()
+    expect(baseHoldOf(detail, null)).toBeNull()
+    expect(baseHoldOf({ baseHold: { sha: 'a', checks: [], since: detail.baseHold.since } }, 'a')).toBeNull()
+    expect(baseHoldOf({ baseHold: { sha: 'a', checks: ['x'], since: 'not a date' } }, 'a')).toBeNull()
+    expect(baseHoldOf(null, 'a')).toBeNull()
+  })
+
+  it('starts when a check is red, keeps its start while the same checks stay red and restarts for others', () => {
+    const first = nextBaseHold(null, 'a', ['test', 'lint'], now)
+    expect(first).toEqual({ sha: 'a', checks: ['lint', 'test'], since: now.toISOString() })
+    const later = new Date('2026-11-17T15:00:00Z')
+    expect(nextBaseHold(first, 'a', ['lint', 'test'], later)).toEqual(first)
+    expect(nextBaseHold(first, 'a', ['build'], later)?.since).toBe(later.toISOString())
+  })
+
+  it('ends when no check is red', () => {
+    const hold = nextBaseHold(null, 'a', ['lint'], now)
+    expect(nextBaseHold(hold, 'a', undefined, now)).toBeNull()
+    expect(nextBaseHold(hold, 'a', [], now)).toBeNull()
   })
 })
