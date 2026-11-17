@@ -707,6 +707,32 @@ describe('runCase', () => {
     expect(reviewer.prompts[1]).toContain('add a test')
   })
 
+  it('runs the checks again on the same commit when the rework after them changes nothing, as the factory does', async () => {
+    const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1, 0] })
+    const builder = agent('builder', planned(built(), built('the failure was a timeout')))
+
+    const result = await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: true, attempts: 2, reviewRounds: 1 })
+    expect(provider.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+  })
+
+  it('ends a case whose review rework changes nothing without reviewing the same commit again', async () => {
+    const builder = agent('builder', planned(built(), built('the finding is outside the issue')))
+    const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
+
+    const result = await runCase(
+      deps(sandbox({ cleanAfterCommit: true }), builder, reviewer),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: false, attempts: 2, reviewRounds: 1 })
+    expect(reviewer.prompts).toHaveLength(1)
+  })
+
   it('fails a case whose checks still fail after the last attempt', async () => {
     const builder = agent('builder', planned(built(), built('try 2'), built('try 3')))
 

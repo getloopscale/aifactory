@@ -2016,18 +2016,59 @@ describe('runTask review loop', () => {
     expect(prompts[0]).not.toContain('Still open?')
   })
 
-  it('stops a rework that changes nothing instead of reviewing the same commit again', async () => {
+  it('hands a review rework that changes nothing to a person, with what the builder said, without reviewing the same commit again', async () => {
     const id = await seedTask()
     const lazy: CodingHarness = {
       ...resumableBuilder(),
-      resume: async () => ({ ok: true, summary: 'nothing to do', sessionId: 'sess-1' }),
+      resume: async () => ({
+        ok: true,
+        summary: 'The finding asks me to undo what the scope decision keeps.',
+        sessionId: 'sess-1',
+      }),
     }
     const reviewer = reviewerSaying(verdictJson('changes', [finding]))
 
     const result = await runTask(deps(new FakeSandbox(changed()), { harness: lazy, reviewer }), id)
 
-    expect(result).toMatchObject({ status: 'failed', stage: 'push' })
-    expect(result.status === 'failed' && result.error).toContain('no change')
+    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def' })
+    expect(await reviewsOf(id)).toHaveLength(1)
+    expect(seen.drafts).toEqual([true])
+    expect(await handoffDetail(id)).toMatchObject({
+      cause: 'review_plateau',
+      reason: expect.stringMatching(
+        /^the builder changed nothing in answer to the review, and said: The finding asks me to undo what the scope decision keeps\.$/,
+      ),
+    })
+  })
+
+  it('runs the checks again on the same commit when a rework after failing checks changes nothing', async () => {
+    const id = await seedTask()
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => ({
+        ok: true,
+        summary: 'The failure was a timeout.',
+        sessionId: 'sess-1',
+      }),
+    }
+    let runs = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (!c.endsWith('npm test')) return undefined
+        runs += 1
+        // It fails on the commit and when run again there, then passes on the third run.
+        return runs <= 2 ? { exitCode: 1, stdout: 'timed out in 5000ms' } : undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: lazy }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def' })
+    expect((await getDb().select().from(evidence)).map((e) => [e.sha, e.passed])).toEqual([
+      ['abc123def', false],
+      ['abc123def', false],
+      ['abc123def', true],
+    ])
   })
 
   it("gives the sandbox both agents' firewall rules, and the reviewer's quota stop is a wait", async () => {

@@ -1407,13 +1407,17 @@ export class Run {
     return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
   }
 
-  /** Sends the work back to the builder's own session with what was wrong, and pushes the fix. */
+  /**
+   * Sends the work back to the builder's own session with what was wrong, and pushes the fix. Answers the new
+   * head, or nothing when the builder changed nothing: that is its answer, with the reason in its summary, and
+   * the loop decides what follows (#214).
+   */
   private async rework(
     attempt: number,
     findings: Finding[],
     failed: CheckResult[],
     reviewedSha?: string,
-  ): Promise<string> {
+  ): Promise<string | undefined> {
     const { deps, taskId, state } = this.c
     const timeoutMs = await this.agentTimeout()
     state.current = 'build'
@@ -1440,6 +1444,7 @@ export class Run {
     const asked = parseQuestion(result.summary)
     if (asked) await this.ask(asked, attempt)
     this.summary = result.summary
+    if (await this.hasNothingToCommit()) return undefined
     return this.commitAndPush(`${this.title}: address feedback (attempt ${attempt})`, {
       attempt,
       rework: true,
@@ -1822,6 +1827,22 @@ export class Run {
    * No approval and no attempts left (or no verdict to act on): a person takes it from here, with a
    * draft pull request, a comment on the issue and a pre-release of what the factory did get done.
    */
+  /** The builder changed nothing in answer to a review and said why: a person reads both sides. */
+  private disputed(
+    sha: string,
+    attempt: number,
+    here: StoredCheck[],
+    outcome: ReviewVerdict,
+    counts: number[],
+  ): Promise<RunResult> {
+    const said = oneLine(withoutLearned(this.summary)).slice(0, 700)
+    return this.handOver(sha, attempt, here, outcome, counts, {
+      headline: 'The builder and the reviewer disagree',
+      reason: `the builder changed nothing in answer to the review, and said: ${said}`,
+      cause: 'review_plateau',
+    })
+  }
+
   private async handOver(
     sha: string,
     attempt: number,
@@ -1957,7 +1978,9 @@ export class Run {
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''
           throw new StageFailure(`no pull request: ${checked.verdict.reasons.join('; ')}${after}`)
         }
-        sha = await this.rework(attempt + 1, [], failingChecks(checked.results))
+        // A builder that changed nothing said the failure is not its change's (a timeout, often): the checks run
+        // again on the same commit, within the same attempts.
+        sha = (await this.rework(attempt + 1, [], failingChecks(checked.results))) ?? sha
         continue
       }
 
@@ -1967,7 +1990,11 @@ export class Run {
       const mayRework =
         this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
       if (outcome.verdict === 'changes' && mayRework) {
-        sha = await this.rework(attempt + 1, outcome.findings, [], sha)
+        const reworked = await this.rework(attempt + 1, outcome.findings, [], sha)
+        // Reviewing the same commit again would get the same verdict: the disagreement goes to a person.
+        if (reworked === undefined)
+          return this.disputed(sha, attempt, checked.here, outcome, counts)
+        sha = reworked
         continue
       }
       return this.handOver(sha, attempt, checked.here, outcome, counts)
