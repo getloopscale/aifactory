@@ -61,6 +61,8 @@ export async function runSuite(
     sandboxUsdPerMs: number
     deadlineMs?: number
     startMarginMs?: number
+    /** When this time comes, stop waiting for the cases in flight: they are named in `skipped` and the run returns. */
+    abandonAtMs?: number
     now?: () => number
   },
 ): Promise<{ results: CaseResult[]; skipped: string[] }> {
@@ -74,24 +76,46 @@ export async function runSuite(
   const outOfTime = () =>
     options.deadlineMs !== undefined &&
     now() >= options.deadlineMs - (options.startMarginMs ?? DEFAULT_START_MARGIN_MS)
+  const inFlight = new Set<string>()
+  let abandoned = false
   const worker = async () => {
     for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+      if (abandoned) break
       if (spent() >= options.budgetUsd || outOfTime()) {
         skipped.push(id)
         continue
       }
+      inFlight.add(id)
       let result = await runOne(id)
-      if (failedForEnvironment(result) && !outOfTime()) {
+      if (failedForEnvironment(result) && !outOfTime() && !abandoned) {
         discarded.push(result)
         result = await runOne(id)
       }
-      done.set(id, result)
+      inFlight.delete(id)
+      if (!abandoned) done.set(id, result)
     }
   }
-  await Promise.all(Array.from({ length: Math.max(1, options.concurrency) }, worker))
+  const workers = Promise.all(Array.from({ length: Math.max(1, options.concurrency) }, worker))
+  let timer: ReturnType<typeof setTimeout> | undefined
+  if (options.abandonAtMs === undefined) await workers
+  else {
+    const giveUp = new Promise<void>((resolve) => {
+      timer = setTimeout(
+        () => {
+          abandoned = true
+          resolve()
+        },
+        Math.max(0, options.abandonAtMs! - now()),
+      )
+    })
+    await Promise.race([workers, giveUp])
+    clearTimeout(timer)
+  }
+  // What was not started, and what was abandoned in flight, is left.
+  const left = new Set([...skipped, ...queue, ...(abandoned ? inFlight : [])])
   return {
     results: ids.filter((id) => done.has(id)).map((id) => done.get(id)!),
-    skipped: ids.filter((id) => skipped.includes(id)),
+    skipped: ids.filter((id) => left.has(id) && !done.has(id)),
   }
 }
 

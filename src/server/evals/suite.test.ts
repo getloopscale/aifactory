@@ -167,6 +167,21 @@ describe('runSuite time limit', () => {
     expect(ran.skipped).toEqual(['c'])
   })
 
+  it('returns when an in-flight case hangs past the abandon time, naming it and the ones never started', async () => {
+    const ran = await runSuite(
+      ['a', 'b', 'c'],
+      async (id) => (id === 'b' ? new Promise<never>(() => {}) : result(id, 0)),
+      {
+        budgetUsd: 10,
+        concurrency: 1,
+        sandboxUsdPerMs: 0,
+        abandonAtMs: Date.now() + 30,
+      },
+    )
+    expect(ran.results.map((r) => r.id)).toEqual(['a'])
+    expect(ran.skipped).toEqual(['b', 'c'])
+  })
+
   it('does not run again an environment failure inside the margin', async () => {
     let clock = 0
     const calls: string[] = []

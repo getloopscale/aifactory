@@ -91,7 +91,7 @@ async function currentSetup(cases: EvalCase[]) {
 
 /** The time before the deadline when no case may start: the longest limit a case of these repositories has. */
 async function startMargin(cases: EvalCase[]): Promise<number> {
-  if (env.EVALS_START_MARGIN_MIN) return parseMarginMinutes(env.EVALS_START_MARGIN_MIN)
+  if (env.EVALS_START_MARGIN_MIN !== undefined) return parseMarginMinutes(env.EVALS_START_MARGIN_MIN)
   const limits: number[] = []
   for (const repository of new Set(cases.map((c) => c.repository)))
     limits.push((await evalDeps(repository, [])).timeouts.sandboxMs)
@@ -105,6 +105,12 @@ async function runCases(cases: EvalCase[]) {
   // test's own timeout) still leaves what finished, though the final record below is never written.
   mkdirSync('.evals', { recursive: true })
   const partial = `.evals/run-${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}.partial.jsonl`
+  // What the run selected, so the cases left can be told even if the run is cut off.
+  writeJson(partial.replace('.partial.jsonl', '.selected.json'), {
+    startedAt: new Date(startedAt).toISOString(),
+    baseline: env.EVALS_BASELINE === '1',
+    selected: cases.map((c) => c.id),
+  })
   const byId = new Map(cases.map((c) => [c.id, c]))
   const ran = await runSuite(
     cases.map((c) => c.id),
@@ -123,6 +129,8 @@ async function runCases(cases: EvalCase[]) {
       sandboxUsdPerMs: E2B_USD_PER_MS,
       deadlineMs: startedAt + SUITE_TIMEOUT_MS,
       startMarginMs,
+      // A case that hangs must not keep the run from writing: give up on it a little before the test's own time.
+      abandonAtMs: startedAt + SUITE_TIMEOUT_MS - 5 * 60_000,
     },
   )
   const record = {
