@@ -306,7 +306,7 @@ async function rememberBaseRed(
       red.every((name) => hold.checks.includes(name))
     const grown = !red.every((name) => before.includes(name))
     if (same && !grown) return
-    const since = hold?.since ?? (deps.now?.() ?? new Date()).toISOString()
+    const since = same && hold ? hold.since : (deps.now?.() ?? new Date()).toISOString()
     detail.baseBlame = {
       sha: verifiedSha,
       checks: [...new Set([...before, ...red])],

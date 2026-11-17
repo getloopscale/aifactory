@@ -149,7 +149,6 @@ export const ptBR: Copy = {
   board: {
     nothingHere: 'Nada aqui.',
     mainRedAfterRelease: 'a main quebrou depois da versão',
-    waitingOnBase: (checks: string, branch: string) => `espera ${checks} passar em ${branch}`,
     mainRed: 'main quebrada',
     attempt: (n: number) => `tentativa ${n} de 3`,
     tasks: 'Tarefas',

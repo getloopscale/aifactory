@@ -24,9 +24,22 @@ describe('recogniseBaseRed', () => {
     expect(recogniseBaseRed(facts(), after(BASE_RED_LIMIT_MS + 60_000))).toEqual({
       kind: 'base_red',
       taskId: 7,
-      head: 'abc1234def:CI,Lint',
+      head: 'abc1234def:CI,Lint@2026-11-16T00:00:00.000Z',
       evidence: 'CI, Lint fails on workspace as on abc1234, red for 2.0 hours',
     })
+  })
+
+  it('is a different hold, with its own identity, for another check or a later start', () => {
+    const at = (checks: string[], start: Date) =>
+      recogniseBaseRed(
+        facts({
+          red: readOf({ sha: 'abc1234def', checks, base: 'workspace', since: start.toISOString() }),
+        }),
+        after(10 * BASE_RED_LIMIT_MS),
+      )?.head
+    const later = after(60_000)
+    expect(at(['CI'], since)).not.toEqual(at(['Lint'], since))
+    expect(at(['CI'], since)).not.toEqual(at(['CI'], later))
   })
 
   it('is none at the limit and before it', () => {

@@ -25,9 +25,9 @@ const short = (sha: string) => sha.slice(0, 7)
 
 const hours = (ms: number) => (ms / 3_600_000).toFixed(1)
 
-/** A hold is the commit and the checks red on the branch, so a different check red on the same commit is a new hold. */
-export const holdIdentity = (head: string, checks: string[]) =>
-  `${head}:${[...checks].sort().join(',')}`
+/** A hold is the commit, the checks red on the branch and when it began, so a different check, or the same one red again after a pass cleared it, is a new hold. */
+export const holdIdentity = (head: string, checks: string[], since: string) =>
+  `${head}:${[...checks].sort().join(',')}@${since}`
 
 /** The `base_red` exception of a task held longer than the limit, or none; an unread hold is `unknown`. */
 export function recogniseBaseRed(facts: BaseRedFacts, now: Date): TaskException | undefined {
@@ -43,7 +43,7 @@ export function recogniseBaseRed(facts: BaseRedFacts, now: Date): TaskException 
   return {
     kind: 'base_red',
     taskId,
-    head: holdIdentity(head, red.checks),
+    head: holdIdentity(head, red.checks, red.since),
     evidence: `${red.checks.join(', ')} fails on ${red.base} as on ${short(head)}, red for ${hours(for_)} hours`,
   }
 }

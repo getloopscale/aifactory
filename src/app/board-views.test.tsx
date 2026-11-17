@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { TaskCard, TaskDetail } from '../shared/panel'
 
 import { en } from './lib/copy/en'
-import { Card } from './components/Board'
 import Page from './work/page'
 
 const card = (id: number, over: Partial<TaskCard> = {}): TaskCard => ({
@@ -142,31 +141,6 @@ describe('board and list', () => {
     fireEvent.click(screen.getByRole('button', { name: en.work.list }))
     expect(screen.getByRole('table', { name: en.board.tasks })).toBeDefined()
     vi.restoreAllMocks()
-  })
-})
-
-describe('a card of a task held by a red integration branch', () => {
-  it('names the check and the branch on the card itself', () => {
-    const held = card(3, {
-      stage: 'done',
-      waitingForChecks: true,
-      waitingOnBase: { checks: ['CI'], branch: 'workspace', since: null },
-    })
-    render(
-      <MemoryRouter>
-        <Card task={held} />
-      </MemoryRouter>,
-    )
-    expect(screen.getByText(en.board.waitingOnBase('CI', 'workspace'))).toBeDefined()
-  })
-
-  it('shows only the stage when no check is red on the branch', () => {
-    render(
-      <MemoryRouter>
-        <Card task={card(4, { stage: 'done', waitingForChecks: true })} />
-      </MemoryRouter>,
-    )
-    expect(screen.queryByText(/to pass on/)).toBeNull()
   })
 })
 

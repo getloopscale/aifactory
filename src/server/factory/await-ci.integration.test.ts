@@ -324,6 +324,41 @@ describe('pollAwaitingIntegrations', () => {
     expect(((await redOf(id)) as { since: string }).since).toBe(first.since)
   })
 
+  it('starts a new timer when the checks red on the base change', async () => {
+    repo().required.set('workspace', ['CI', 'Lint'])
+    reports(failure('CI'), failure('Lint'))
+    baseIs(failure('CI', 'https://ci/0'), failure('Lint', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    const first = (await redOf(id)) as { since: string }
+    baseIs(success('CI'), failure('Lint', 'https://ci/0'))
+    const later = new Date(Date.now() + 3_600_000)
+
+    await pollAwaitingIntegrations({ ...deps(), now: () => later })
+
+    const hold = (await redOf(id)) as { since: string; checks: string[] }
+    expect(hold.checks).toEqual(['Lint'])
+    expect(hold.since).toBe(later.toISOString())
+    expect(hold.since).not.toBe(first.since)
+  })
+
+  it('starts a new hold when the base is red again after a pass ended the first', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI', 'https://ci/0'))
+    const id = await waitingTask()
+    await pollAwaitingIntegrations(deps())
+    const first = (await redOf(id)) as { since: string }
+    reports({ name: 'CI', state: 'pending', detail: '', url: 'u' })
+    await pollAwaitingIntegrations(deps())
+    reports(failure('CI'))
+    const later = new Date(Date.now() + 3_600_000)
+
+    await pollAwaitingIntegrations({ ...deps(), now: () => later })
+
+    expect(((await redOf(id)) as { since: string }).since).toBe(later.toISOString())
+    expect(((await redOf(id)) as { since: string }).since).not.toBe(first.since)
+  })
+
   it('ends the hold, and keeps the blame, once the check is not known red any more', async () => {
     reports(failure('CI'))
     baseIs(failure('CI', 'https://ci/0'))
