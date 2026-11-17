@@ -2041,6 +2041,66 @@ describe('runTask review loop', () => {
     })
   })
 
+  it('hands over the last commit that passed the checks and was reviewed when the last rework breaks a check', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+    let tests = 0
+    let restored = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('restore --source=abc123def ')) {
+          restored = true
+          dirty = true
+          return { stdout: '' }
+        }
+        if (!c.endsWith('npm test')) return undefined
+        tests += 1
+        // The first commit passes and is reviewed; every rework after it breaks the tests; the restored one passes.
+        return tests === 1 || restored ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def4' })
+    expect(await reviewsOf(id)).toHaveLength(1)
+    expect(seen.drafts).toEqual([true])
+    expect(await handoffDetail(id)).toMatchObject({
+      cause: 'review_plateau',
+      sha: 'abc123def4',
+      reason:
+        'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d, which passed them and was reviewed',
+    })
+    const evidenceOfRestored = (await getDb().select().from(evidence)).filter(
+      (e) => e.sha === 'abc123def4',
+    )
+    expect(evidenceOfRestored.map((e) => e.passed)).toEqual([true])
+  })
+
+  it('fails as before when the checks still fail on the restored commit', async () => {
+    const id = await seedTask()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+    let tests = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('restore --source=')) {
+          dirty = true
+          return { stdout: '' }
+        }
+        if (!c.endsWith('npm test')) return undefined
+        tests += 1
+        return tests === 1 ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: resumableBuilder(), reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    expect(result.status === 'failed' && result.error).toContain('abc123d restored')
+    expect(seen.pulls).toEqual([])
+  })
+
   it('runs the checks again on the same commit when a rework after failing checks changes nothing', async () => {
     const id = await seedTask()
     const lazy: CodingHarness = {
