@@ -1710,6 +1710,19 @@ describe('runTask review loop', () => {
     expect(builder.resumed).toHaveLength(3)
   })
 
+  it('gives the second review round the findings of the first, and the first round none', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(...roundsOf(1), verdictJson('approve'))
+
+    await runTask(deps(new FakeSandbox(changed()), { harness: builder, reviewer }), id)
+
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[0]).not.toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('problem 0')
+  })
+
   it('hands over a review that is not converging: 5, 6, 7', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
@@ -3545,6 +3558,49 @@ describe('runTask waiting for an answer', () => {
 
     expect(result).toMatchObject({ status: 'done' })
     expect(reviewer.prompts).toHaveLength(4)
+  })
+
+  it('gives the first review after a question the findings of the round before it', async () => {
+    const id = await seedTask()
+    let commits = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        // The first commit gets a hash of its own: a review of the base commit is not a round.
+        if (c.includes('commit -F')) commits += 1
+        if (c.endsWith('rev-parse HEAD') && commits === 1) return { stdout: 'first111\n' }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness & { n: number } = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      n: 0,
+      run: async () => {
+        dirty = true
+        return { ok: true, summary: 'first pass', sessionId: 'sess-q' }
+      },
+      resume: async () => {
+        dirty = true
+        builder.n += 1
+        return builder.n === 1
+          ? { ok: true, summary: 'hmm\nQUESTION: Keep the old export too?', sessionId: 'sess-q' }
+          : { ok: true, summary: 'reworked', sessionId: 'sess-q' }
+      },
+    }
+    const reviewer = reviewerSaying(
+      verdictJson('changes', [{ ...finding, issue: 'the export is gone' }]),
+      verdictJson('approve'),
+    )
+
+    const parked = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+    expect(parked.status).toBe('waiting')
+    replies(owner({ body: 'No, drop it.' }))
+    await poll(sandbox)
+    await resumeTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[1]).toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('the export is gone')
   })
 
   it('does not fill a round that had no review with one from a run before the task was sent back', async () => {

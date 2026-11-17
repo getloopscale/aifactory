@@ -77,6 +77,7 @@ import {
   reviewPrompt,
   reworkPrompt,
   roundsNote,
+  type EarlierReview,
   type Finding,
   type ReviewVerdict,
 } from './review'
@@ -219,6 +220,8 @@ export class Run {
   private planned: { discarded: boolean } | undefined
   /** Every path the change under review touches, as the last review read it. */
   private touched: string[] = []
+  /** The last review of this run that asked for changes: the next round starts from its findings. */
+  private earlier: EarlierReview | undefined
   /** What the agents of this task do, written while they work. Opened by the first agent run. */
   private transcript: Transcript | undefined
 
@@ -1521,6 +1524,7 @@ export class Run {
           baseSha: this.baseSha,
           knowledgeDir: this.feed?.dir,
           required,
+          ...(this.earlier ? { earlier: this.earlier } : {}),
           ...(this.plan
             ? { plan: this.renderedPlan, unplanned, builderSummary: this.summary }
             : {}),
@@ -1557,6 +1561,7 @@ export class Run {
       summary: merged.summary,
       findings: merged.findings,
     })
+    this.earlier = merged.verdict === 'changes' ? { sha, findings: merged.findings } : undefined
     return merged
   }
 
@@ -1878,7 +1883,11 @@ export class Run {
     const byRound = new Map<number, number>()
     for (const r of rows) {
       if (ended && r.at <= ended.at) continue
-      if (r.sha !== this.baseSha) byRound.set(r.round, blockingCount(r.findings as Finding[]))
+      if (r.sha === this.baseSha) continue
+      byRound.set(r.round, blockingCount(r.findings as Finding[]))
+      // The run that parked asked for changes last: its continuation reviews against those findings.
+      this.earlier =
+        r.verdict === 'changes' ? { sha: r.sha, findings: r.findings as Finding[] } : undefined
     }
     const counts: number[] = []
     for (let round = 1; round < resuming.attempt; round++) {

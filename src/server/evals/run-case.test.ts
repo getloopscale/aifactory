@@ -678,6 +678,20 @@ describe('runCase', () => {
     expect(builder.prompts[2]).toContain('add a test')
   })
 
+  it('gives the second review round the findings of the first, as the factory does', async () => {
+    const builder = agent('builder', planned(built(), built('added the test')))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(sandbox(), builder, reviewer), evalCase)
+
+    expect(reviewer.prompts[0]).not.toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('add a test')
+  })
+
   it('fails a case whose checks still fail after the last attempt', async () => {
     const builder = agent('builder', planned(built(), built('try 2'), built('try 3')))
 

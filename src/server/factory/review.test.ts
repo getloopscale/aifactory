@@ -98,6 +98,43 @@ describe('prompts', () => {
     expect(prompt).not.toContain("# The builder's plan")
   })
 
+  it('in a later round, gives the reviewer its earlier findings and limits new blockers to what changed', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      earlier: {
+        sha: '1234567890abcdef',
+        findings: [
+          { severity: 'blocker', file: 'src/a.ts', issue: 'drops the error' },
+          { severity: 'minor', file: 'src/b.ts', issue: 'a nicer name' },
+        ],
+      },
+    })
+    expect(prompt).toContain('# Your earlier review of 1234567')
+    expect(prompt).toContain('- **blocker** `src/a.ts`: drops the error')
+    // A minor finding never blocked, so it is not carried into the next round.
+    expect(prompt).not.toContain('a nicer name')
+    expect(prompt).toContain('git diff 1234567890abcdef HEAD')
+    expect(prompt).toContain('A new blocker or major finding')
+    expect(prompt).toContain('would break code that is already in use')
+  })
+
+  it('says nothing about an earlier review in the first round', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+    })
+    expect(prompt).not.toContain('# Your earlier review')
+  })
+
   it('gives the reviewer the plan, the files changed outside it, and what the builder said', () => {
     const prompt = reviewPrompt({
       repo: 'o/r',

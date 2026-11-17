@@ -37,6 +37,7 @@ import {
   reviewAllowsRework,
   reviewPrompt,
   reworkPrompt,
+  type EarlierReview,
   type Finding,
   type ReviewVerdict,
 } from '../factory/review'
@@ -93,6 +94,8 @@ function ensureLive(signal: AbortSignal | undefined): void {
  * pull request or records a stage.
  */
 class CaseRun {
+  /** The last review that asked for changes: the next round starts from its findings. */
+  private earlier: EarlierReview | undefined
   cost = 0
   attempts = 1
   reviewRounds = 0
@@ -312,6 +315,7 @@ class CaseRun {
         baseSha: c.baseSha,
         knowledgeDir: this.knowledgeDir,
         required,
+        ...(this.earlier ? { earlier: this.earlier } : {}),
         ...(this.plan
           ? { plan: renderChangePlan(this.plan), unplanned, builderSummary: this.summary }
           : {}),
@@ -383,7 +387,10 @@ class CaseRun {
           blockingGuards: blocking.map((g) => g.issue),
         }
       }
-      await this.rework([...guards, ...outside, ...read.findings], [])
+      const findings = [...guards, ...outside, ...read.findings]
+      // The next round starts from these findings, as `Run.review` keeps them.
+      this.earlier = { sha, findings }
+      await this.rework(findings, [])
     }
   }
 
