@@ -246,6 +246,8 @@ describe('stageLabel with what is known of the task', () => {
     expect(stageLabel('failed', { retryable: 'quota' })).toBe('waiting for the limit')
     expect(stageLabel('failed', { retryable: 'environment' })).toBe('will retry')
     expect(stageLabel('failed', { retryable: 'blocked' })).toBe('waiting for another issue')
+    expect(stageLabel('failed', { retryable: 'base' })).toBe('waiting for the base to pass')
+    expect(stageLabel('build', { retryable: 'base' })).toBe('building')
     expect(stageLabel('failed', { retryable: null })).toBe('failed')
     expect(stageLabel('build', { integrated: true, retryable: 'quota' })).toBe('building')
   })

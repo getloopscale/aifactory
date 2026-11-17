@@ -18,6 +18,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from '../factory/change-plan'
+import { failingOnBase } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
 import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
@@ -62,7 +63,7 @@ import { KnowledgeFeed } from '../knowledge/feed'
 import type { KnowledgeSource } from '../knowledge/source'
 
 import type { EvalCase } from './cases'
-import { caseOutcome, type CaseEnd, type CaseResult } from './compare'
+import { caseOutcome, MEASURED_ITS_BASE, type CaseEnd, type CaseResult } from './compare'
 
 export type EvalDeps = {
   sandbox: IsolatedSandboxProvider
@@ -326,6 +327,25 @@ class CaseRun {
     return this.committed
   }
 
+  /** The end of a case whose failing checks fail on its base too, or nothing when any passes there. */
+  private async failingOnBase(failed: CheckResult[]): Promise<CaseEnd | undefined> {
+    const red = await failingOnBase(
+      this.backend,
+      {
+        repoDir: this.repoDir,
+        baseSha: this.c.baseSha,
+        checks: this.c.checks,
+        timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
+      },
+      failed,
+    )
+    if (!red) return undefined
+    const names = red.map((name) => `"${name}"`).join(', ')
+    return {
+      stopped: `${names} failed on the case's base ${this.c.baseSha.slice(0, 7)} too, ${MEASURED_ITS_BASE}`,
+    }
+  }
+
   /** Runs the checks on the commit and keeps every result, as the factory keeps its evidence. */
   private async check(sha: string): Promise<CheckResult[]> {
     await must(this.backend, `git -C ${this.repoDir} clean -fdxq`)
@@ -395,8 +415,13 @@ class CaseRun {
         if (!this.canRework()) {
           return reviewed ? this.restoreReviewed(reviewed, failed) : checksFailed(failed)
         }
-        // A rework that changed nothing has the checks run again on the same commit (#214).
+        // A rework that changed nothing has the checks run again on the same commit (#214), unless they fail on
+        // the case's base too, as `Run.refuseRedBase` asks (#219).
         if (await this.rework([], failed)) sha = await this.applyFixes(await this.commit())
+        else {
+          const red = await this.failingOnBase(failed)
+          if (red) return red
+        }
         continue
       }
       const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {

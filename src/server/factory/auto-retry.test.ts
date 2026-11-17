@@ -92,3 +92,15 @@ describe('when a task blocked by an open issue runs again', () => {
     }
   })
 })
+
+describe('when a task whose checks fail on the integration branch too runs again', () => {
+  it('waits half an hour, doubling each time, a limited number of times', () => {
+    const at = (automaticRetries: number) =>
+      iso(retryAt({ retryable: 'base', failedAt, automaticRetries }))
+
+    expect(at(0)).toBe('2026-11-06T00:43:00.000Z')
+    expect(at(1)).toBe('2026-11-06T01:13:00.000Z')
+    expect(at(2)).toBe('2026-11-06T02:13:00.000Z')
+    expect(at(AUTOMATIC_RETRIES)).toBeNull()
+  })
+})

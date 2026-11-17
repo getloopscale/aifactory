@@ -6,6 +6,7 @@ import { FakeSandbox, type Reply } from '../factory/fake-sandbox'
 import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harness'
 
 import type { EvalCase } from './cases'
+import { failedForEnvironment } from './compare'
 import { runCase } from './run-case'
 
 const BASE = 'a'.repeat(40)
@@ -718,6 +719,20 @@ describe('runCase', () => {
 
     expect(result).toMatchObject({ passed: true, attempts: 2, reviewRounds: 1 })
     expect(provider.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+  })
+
+  it('leaves unmeasured a case whose failing checks, left unchanged by the builder, fail on its base too', async () => {
+    const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1, 1, 1] })
+    const builder = agent('builder', planned(built(), built('the failure is not my change')))
+
+    const result = await runCase(deps(provider, builder, agent('reviewer', [])), evalCase)
+
+    expect(result).toMatchObject({ passed: false, attempts: 2 })
+    expect(result.reason).toContain('so the case measures its base, not the agents')
+    expect(failedForEnvironment(result)).toBe(true)
+    expect(provider.backend.commands.some((c) => c.startsWith('cd /tmp/aifactory-base &&'))).toBe(
+      true,
+    )
   })
 
   it('ends a case whose review rework changes nothing without reviewing the same commit again', async () => {

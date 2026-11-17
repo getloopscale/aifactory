@@ -93,6 +93,7 @@ export function stageLabel(
   if (stage === 'failed' && extra.retryable === 'quota') return t.waitingForLimit
   if (stage === 'failed' && extra.retryable === 'environment') return t.willRetry
   if (stage === 'failed' && extra.retryable === 'blocked') return t.waitingForIssue
+  if (stage === 'failed' && extra.retryable === 'base') return t.waitingForBase
   return t[stage]
 }
 

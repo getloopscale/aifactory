@@ -196,6 +196,24 @@ describe('recognising the exceptions of a task', () => {
     ])
   })
 
+  it('leaves alone a task waiting for a red integration branch while it has automatic retries', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'abc', checks: ['quality'] },
+    }
+    expect(recognise(failedWith(detail, 2))).toEqual([])
+  })
+
+  it('recognises a task still blocked by a red integration branch past its automatic retries', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'abc', checks: ['quality'] },
+    }
+    expect(recognise(failedWith(detail, 3))).toEqual([
+      { kind: 'base_red', taskId: 9, head: 'none', evidence: '"quality" fails on workspace too' },
+    ])
+  })
+
   it('leaves alone the failures that pass by themselves', () => {
     expect(recognise(failedWith({ quota: true, error: 'usage limit' }, 9))).toEqual([])
     expect(recognise(failedWith({ blockedBy: [12], error: 'blocked' }, 9))).toEqual([])

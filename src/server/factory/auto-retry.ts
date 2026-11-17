@@ -8,6 +8,8 @@ const QUOTA_UNKNOWN_WAIT_MS = 60 * 60_000
 /** How often a task blocked by an open issue checks again. The check reads issues, before any sandbox. */
 const BLOCKED_WAIT_MS = 30 * 60_000
 const AFTER_RESET_MS = 60_000
+/** A red integration branch is fixed by a person or by an upstream release, which takes longer than an outage. */
+const BASE_WAIT_MS = 30 * 60_000
 
 export type FailureToRetry = {
   retryable: Retryable
@@ -24,7 +26,8 @@ export type FailureToRetry = {
  * When a failed task runs again on its own, or nothing when it does not. A quota stop runs again once the
  * quota is back, and a task blocked by an open issue every half hour, however often that takes, because
  * waiting is what fixes them. An environment failure runs
- * again with a doubling wait, a limited number of times. A failure of the work itself never does.
+ * again with a doubling wait, a limited number of times, and so do checks that fail on the integration branch
+ * too, from half an hour. A failure of the work itself never does.
  */
 export function retryAt(failure: FailureToRetry): Date | null {
   const failed = failure.failedAt.getTime()
@@ -38,6 +41,9 @@ export function retryAt(failure: FailureToRetry): Date | null {
   }
   // Waiting is what unblocks it, so it is not limited like an environment failure.
   if (failure.retryable === 'blocked') return new Date(failed + BLOCKED_WAIT_MS)
+  if (failure.retryable === 'base' && automaticRunsLeft(failure.automaticRetries)) {
+    return new Date(failed + BASE_WAIT_MS * 2 ** failure.automaticRetries)
+  }
   if (failure.retryable === 'environment' && automaticRunsLeft(failure.automaticRetries)) {
     return new Date(failed + ENVIRONMENT_WAIT_MS * 2 ** failure.automaticRetries)
   }

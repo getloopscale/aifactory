@@ -31,6 +31,7 @@ import {
   withConflictFiles,
 } from './merge-base'
 import { evidenceOfNote } from './ci-wait'
+import { failingOnBase } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
 import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
@@ -96,6 +97,7 @@ import {
   pushWithRetry,
   resolvedComment,
   Asked,
+  BaseRed,
   QuotaStop,
   StageFailure,
   type Continuation,
@@ -1416,6 +1418,22 @@ export class Run {
     return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
   }
 
+  /** Throws `BaseRed` when the checks the work failed fail on the integration branch too (#219). */
+  private async refuseRedBase(failed: CheckResult[]): Promise<void> {
+    this.c.state.current = 'verify'
+    const red = await failingOnBase(
+      this.backend,
+      {
+        repoDir: this.repoDir,
+        baseSha: this.baseSha,
+        checks: this.checks,
+        timeoutMs: this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+      },
+      failed,
+    )
+    if (red) throw new BaseRed(red, this.baseSha, integrationBranch(this.c.repo))
+  }
+
   /**
    * Sends the work back to the builder's own session with what was wrong, and pushes the fix. Answers the new
    * head, or nothing when the builder changed nothing: that is its answer, with the reason in its summary, and
@@ -2025,9 +2043,13 @@ export class Run {
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''
           throw new StageFailure(`no pull request: ${checked.verdict.reasons.join('; ')}${after}`)
         }
-        // A builder that changed nothing said the failure is not its change's (a timeout, often): the checks run
-        // again on the same commit, within the same attempts.
-        sha = (await this.rework(attempt + 1, [], failingChecks(checked.results))) ?? sha
+        // A builder that changed nothing said the failure is not its change's: a timeout, often, and then the
+        // checks run again on the same commit, within the same attempts. When the failing checks fail on the
+        // integration branch too, the failure is the base's, and no rework fixes it (#219).
+        const failed = failingChecks(checked.results)
+        const reworked = await this.rework(attempt + 1, [], failed)
+        if (reworked === undefined) await this.refuseRedBase(failed)
+        sha = reworked ?? sha
         continue
       }
 
