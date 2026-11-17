@@ -18,6 +18,14 @@ export const E2B_USD_PER_MS = (4 * 0.000014 + 8 * 0.0000045) / 1000
 export const SUITE_TIMEOUT_MS = 4 * 60 * 60_000
 export const DEFAULT_START_MARGIN_MS = 100 * 60_000
 
+/** `EVALS_START_MARGIN_MIN` in milliseconds; a value that is not a number of minutes, or is negative, is an error. */
+export function parseMarginMinutes(value: string): number {
+  const minutes = Number(value)
+  if (value.trim() === '' || !Number.isFinite(minutes) || minutes < 0)
+    throw new Error(`EVALS_START_MARGIN_MIN must be a number of minutes, 0 or more; got "${value}"`)
+  return minutes * 60_000
+}
+
 /** Time kept after the longest case limit for the run to stop its sandbox and write its results. */
 const WRITE_SLACK_MS = 10 * 60_000
 

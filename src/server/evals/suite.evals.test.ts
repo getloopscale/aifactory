@@ -10,7 +10,7 @@
 //   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -36,6 +36,7 @@ import {
   SUITE_TIMEOUT_MS,
   agentSetup,
   checkBeforeDeploy,
+  parseMarginMinutes,
   runSuite,
   spentOn,
   startMarginFor,
@@ -90,7 +91,7 @@ async function currentSetup(cases: EvalCase[]) {
 
 /** The time before the deadline when no case may start: the longest limit a case of these repositories has. */
 async function startMargin(cases: EvalCase[]): Promise<number> {
-  if (env.EVALS_START_MARGIN_MIN) return Number(env.EVALS_START_MARGIN_MIN) * 60_000
+  if (env.EVALS_START_MARGIN_MIN) return parseMarginMinutes(env.EVALS_START_MARGIN_MIN)
   const limits: number[] = []
   for (const repository of new Set(cases.map((c) => c.repository)))
     limits.push((await evalDeps(repository, [])).timeouts.sandboxMs)
@@ -100,12 +101,17 @@ async function startMargin(cases: EvalCase[]): Promise<number> {
 async function runCases(cases: EvalCase[]) {
   const startedAt = Date.now()
   const startMarginMs = await startMargin(cases)
+  // Each finished case is written as it ends, so a run that is cut off (a sandbox that hangs past the margin, the
+  // test's own timeout) still leaves what finished, though the final record below is never written.
+  mkdirSync('.evals', { recursive: true })
+  const partial = `.evals/run-${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}.partial.jsonl`
   const byId = new Map(cases.map((c) => [c.id, c]))
   const ran = await runSuite(
     cases.map((c) => c.id),
     async (id) => {
       const c = byId.get(id)!
       const result = await runCase(await evalDeps(c.repository, c.labels), c)
+      appendFileSync(partial, `${JSON.stringify(result)}\n`)
       console.log(
         JSON.stringify({ event: 'eval_case', ...result, environment: failedForEnvironment(result) }),
       )

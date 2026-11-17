@@ -8,6 +8,7 @@ import {
   checkBeforeDeploy,
   runSuite,
   spentOn,
+  parseMarginMinutes,
   startMarginFor,
 } from './suite'
 
@@ -130,6 +131,14 @@ describe('startMarginFor', () => {
     expect(startMarginFor([90 * 60_000, 150 * 60_000])).toBe(160 * 60_000)
     expect(startMarginFor([])).toBe(DEFAULT_START_MARGIN_MS)
     expect(DEFAULT_START_MARGIN_MS).toBeGreaterThan(90 * 60_000)
+  })
+})
+
+describe('parseMarginMinutes', () => {
+  it('reads minutes and refuses what would switch the time limit off', () => {
+    expect(parseMarginMinutes('90')).toBe(90 * 60_000)
+    expect(parseMarginMinutes('0')).toBe(0)
+    for (const bad of ['abc', '', '-5', 'Infinity']) expect(() => parseMarginMinutes(bad)).toThrow()
   })
 })
 
