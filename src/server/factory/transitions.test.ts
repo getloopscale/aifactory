@@ -56,6 +56,7 @@ describe('the transition table', () => {
       hand_over: true,
       integrate: true,
       merged_by_person: true,
+      needs_refinement: true,
       issue_labeled: true,
       issue_comment_created: true,
       pull_request_comment_created: true,
@@ -69,7 +70,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(24 * 14)
+    expect(pairs).toHaveLength(25 * 14)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -448,6 +449,15 @@ describe('what a delivery from GitHub is meant to do, once something acts on it'
     expect(acting('merged_by_person')).toEqual({ handoff: 'adopt_merge' })
     expect(elsewhere('merged_by_person')).toEqual([
       ignored('only the pull request a handoff left waits for a person to merge it'),
+    ])
+  })
+
+  it('holds back for refinement only a queued task that no run has taken', () => {
+    expect(acting('needs_refinement')).toEqual({ intake: 'ask_owner' })
+    expect(elsewhere('needs_refinement')).toEqual([
+      ignored(
+        'only a queued task that no run has taken yet is held back for its issue to be refined',
+      ),
     ])
   })
 

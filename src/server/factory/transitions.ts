@@ -21,7 +21,8 @@ type PanelEvent =
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
  * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over task back to its
- * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left.
+ * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left,
+ * `needs_refinement` the scheduler finding a queued issue not ready to build (`scheduler/apply.ts`).
  */
 type AutomaticEvent =
   | 'retry_due'
@@ -31,6 +32,7 @@ type AutomaticEvent =
   | 'hand_over'
   | 'integrate'
   | 'merged_by_person'
+  | 'needs_refinement'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
 type WebhookEvent = 'issue_labeled' | RoutedCode
@@ -60,6 +62,8 @@ export type Action =
   | 'withdraw_send_back'
   /** A person merged the work a handoff left: it is integrated, and goes on to the release like any other. */
   | 'adopt_merge'
+  /** The queued run is withdrawn and the task waits for the owner's answer to a question on its issue. */
+  | 'ask_owner'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -308,6 +312,15 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
       ignore('only the pull request a handoff left waits for a person to merge it'),
     ),
     handoff: act('adopt_merge'),
+  },
+  needs_refinement: {
+    intake: act('ask_owner'),
+    ...each(
+      [...WORKING, 'waiting', 'done', 'released', 'handoff', 'failed', 'cancelled'],
+      ignore(
+        'only a queued task that no run has taken yet is held back for its issue to be refined',
+      ),
+    ),
   },
 
   issue_labeled: {

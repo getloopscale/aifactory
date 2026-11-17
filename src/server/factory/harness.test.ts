@@ -293,6 +293,34 @@ describe('buildPrompt', () => {
     expect(prompt).not.toContain('The factory runs these checks')
   })
 
+  it('gives the owner answers to the readiness questions right after the issue', () => {
+    const prompt = buildPrompt({
+      repo: 'o/r',
+      issueNumber: 1,
+      title: 't',
+      body: 'the body',
+      branch: 'x',
+      clarifications: [{ question: 'Which page?', answer: 'The invoice page.', by: 'paulo' }],
+    })
+    expect(prompt).toContain(
+      'the body\n\nBefore any work started, the factory asked about this issue, and the answers are part of it:\n\nQuestion: Which page?\n\nAnswer, from paulo: The invoice page.\n',
+    )
+  })
+
+  it('says nothing of readiness questions when none was answered', () => {
+    for (const clarifications of [undefined, []]) {
+      const prompt = buildPrompt({
+        repo: 'o/r',
+        issueNumber: 1,
+        title: 't',
+        body: 'b',
+        branch: 'x',
+        clarifications,
+      })
+      expect(prompt).not.toContain('Before any work started')
+    }
+  })
+
   it('lets the agent ask by default, with a QUESTION: line', () => {
     const prompt = buildPrompt({ repo: 'o/r', issueNumber: 1, title: 't', body: 'b', branch: 'x' })
     expect(prompt).toContain('QUESTION:')

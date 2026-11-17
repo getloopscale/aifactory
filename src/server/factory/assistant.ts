@@ -1,4 +1,11 @@
-import { AgentBuilder, Provider, type ContextualTool } from '@theokit/agents'
+import {
+  AgentBuilder,
+  AgentRunner,
+  compileAgentDefinition,
+  Provider,
+  type ContextualTool,
+} from '@theokit/agents'
+import { resolveProvider } from 'theokit/server/agent'
 import { z } from 'zod'
 
 import { onlyTools } from '../agents/hooks/only-tools'
@@ -50,4 +57,27 @@ export function buildAssistant(model: string, spec: AssistantSpec) {
     )
     .hooks(onlyTools(names))
     .build()
+}
+
+/** A model that answers one message, with what the answer cost. */
+export type OneShot = (message: string) => Promise<{ response: string; cost: number }>
+
+/**
+ * An assistant that answers one message with nobody watching, as the coordinator's drafter and the
+ * scheduler's readiness judge do: built by `buildAssistant` and run once per call, within `budgetUsd`. The key
+ * comes from the model's provider, as TheoKit resolves it for the panel's assistants.
+ */
+export function oneShotAssistant(
+  name: string,
+  model: string,
+  spec: AssistantSpec,
+  budgetUsd: number,
+): OneShot {
+  const compiled = compileAgentDefinition(buildAssistant(model, spec))
+  const runner = AgentRunner.fromSpec({ name, compiled, maxIterations: 1 }).build()
+  return async (message) => {
+    const { apiKey } = resolveProvider(compiled.model, { plugins: compiled.plugins })
+    const result = await runner.run(message, { apiKey, budget: budgetUsd })
+    return { response: result.response, cost: result.cost }
+  }
 }

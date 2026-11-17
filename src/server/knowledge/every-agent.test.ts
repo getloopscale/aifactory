@@ -11,6 +11,7 @@ import { guideSpec } from '../factory/guides'
 import { buildPrompt } from '../factory/harness'
 import { planPrompt } from '../factory/plan'
 import { reviewPrompt } from '../factory/review'
+import { READINESS_JUDGE_SPEC } from '../scheduler/judge'
 
 import { SANDBOX_KNOWLEDGE_DIR } from './format'
 import { knowledgeRules } from './prompt'
@@ -44,8 +45,13 @@ describe('every agent of the factory reads the knowledge base', () => {
     expect(direct).toEqual(['src/server/factory/assistant.ts'])
   })
 
-  it('in the panel: the chat, every guide and the scope drafter have the two tools of the base', () => {
-    for (const spec of [CHAT_SPEC, SCOPE_DRAFTER_SPEC, ...GUIDE_IDS.map((id) => guideSpec(id))]) {
+  it('in the panel: the chat, every guide, the scope drafter and the readiness judge have the two tools of the base', () => {
+    for (const spec of [
+      CHAT_SPEC,
+      SCOPE_DRAFTER_SPEC,
+      READINESS_JUDGE_SPEC,
+      ...GUIDE_IDS.map((id) => guideSpec(id)),
+    ]) {
       expect(Object.keys(assistantTools(spec))).toEqual(
         expect.arrayContaining(['knowledge_search', 'knowledge_read']),
       )

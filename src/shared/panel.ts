@@ -264,6 +264,8 @@ export type TaskCard = {
    * which checks, on which branch, and since when. Null when nothing holds it.
    */
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
+  /** Where a queued task stands in the line of runs and why the scheduler put it there; null once it left `intake`. */
+  queue: QueueView | null
   /**
    * Delivered without a pull request: the agent changed nothing, the checks passed at the commit and the
    * reviewer confirmed the code already does what the issue asks. The factory closed the issue.
@@ -283,6 +285,16 @@ export type TaskCard = {
    * refused, while the task is not released. Null when none waited, or once one merged.
    */
   releaseWait: ReleaseWaitView | null
+}
+
+/** A queued task's place in the line of runs, the reasons for it, and whether its issue is ready to build. */
+export type QueueView = {
+  /** Its place among the queued runs the worker serves, from 1; null while its run is held, not due or gone. */
+  position: number | null
+  /** What the scheduler last read of its issue to place it; null before it placed the task. */
+  reasons: { priority: number | null; bug: boolean; unblocks: number } | null
+  /** The scheduler's verdict on the issue, when it judged it. */
+  readiness: { verdict: 'ready' | 'needs_refinement'; missing: string } | null
 }
 
 /** A release that waits for the release branch's required checks, or why it did not happen. */

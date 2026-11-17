@@ -157,6 +157,8 @@ export function buildPrompt(input: {
   askQuestions?: boolean
   /** Where the knowledge base is in the sandbox, when the factory delivered one. */
   knowledgeDir?: string
+  /** What the owner answered before any run started, when the scheduler found the issue not ready. */
+  clarifications?: Clarification[]
   /** What the factory runs on the commit. */
   checks?: CheckSpec[]
 }): string {
@@ -167,7 +169,7 @@ Implement this issue.
 # ${input.title} (#${input.issueNumber})
 
 ${input.body || '(the issue has no description)'}
-
+${clarificationsOf(input.clarifications)}
 Rules:
 - Read AGENTS.md first and follow it.
 - Add or update tests for the behavior you change, and run the project's tests until they pass.
@@ -185,6 +187,18 @@ ${input.knowledgeDir ? `\n${knowledgeRules(input.knowledgeDir)}\n` : ''}${
       ? `\n${sentBackBy(input)}\n\n${input.feedback}\n\n${input.startsOver ? 'The branch of that run no longer exists, so none of its work is here. Start from what the repository holds now.' : 'The branch already holds your earlier work. Build on it.'}\n`
       : ''
   }`
+}
+
+/** A question the scheduler asked on the issue before any run, and what the owner answered. */
+export type Clarification = { question: string; answer: string; by: string }
+
+/** The owner's answers to the readiness questions, as part of the issue: they settle what it left open. */
+function clarificationsOf(clarifications: Clarification[] | undefined): string {
+  if (!clarifications?.length) return ''
+  const each = clarifications.map(
+    (c) => `Question: ${c.question}\n\nAnswer, from ${c.by}: ${c.answer}`,
+  )
+  return `\nBefore any work started, the factory asked about this issue, and the answers are part of it:\n\n${each.join('\n\n')}\n`
 }
 
 /** The line that says who sent the work back, above what they said. */

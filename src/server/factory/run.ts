@@ -64,7 +64,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from './change-plan'
-import { buildPrompt, type CodingHarness, type HarnessResult } from './harness'
+import { buildPrompt, type Clarification, type CodingHarness, type HarnessResult } from './harness'
 import {
   blockingCount,
   MAX_ATTEMPTS,
@@ -144,6 +144,8 @@ export type RunContext = {
    * from the integration branch as a first run does, and only the builder's prompt knows it was sent back.
    */
   startingOver?: Continuation
+  /** The owner's answers to the questions the scheduler asked on the issue before any run. */
+  clarifications?: Clarification[]
 }
 
 type Timeouts = NonNullable<RunTaskDeps['timeouts']>
@@ -907,6 +909,7 @@ export class Run {
       askQuestions: this.c.repo.askQuestions,
       knowledgeDir: this.feed?.dir,
       checks: this.checks,
+      clarifications: this.c.clarifications,
     }
   }
 

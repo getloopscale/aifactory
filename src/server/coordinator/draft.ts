@@ -1,11 +1,9 @@
-import { AgentRunner, compileAgentDefinition } from '@theokit/agents'
 import { and, asc, desc, eq } from 'drizzle-orm'
-import { resolveProvider } from 'theokit/server/agent'
 
 import { SCOPE_INSTRUCTIONS } from '../agents/prompts/scope'
 import type { Database } from '../db'
 import { changePlan, review, stageEvent, task } from '../db/schema'
-import { buildAssistant, type AssistantSpec } from '../factory/assistant'
+import { oneShotAssistant, type AssistantSpec } from '../factory/assistant'
 import { renderChangePlan, type ChangePlan } from '../factory/change-plan'
 import { coordinatorModel } from '../factory/models'
 import { roundsNote, type Finding } from '../factory/review'
@@ -50,13 +48,7 @@ const DRAFT_BUDGET_USD = 1
  * provider, as TheoKit resolves it for the panel's assistants. `FACTORY_COORDINATOR_MODEL` changes the model.
  */
 export function modelScopeDrafter(model: string = coordinatorModel()): ScopeDrafter {
-  const compiled = compileAgentDefinition(buildAssistant(model, SCOPE_DRAFTER_SPEC))
-  const runner = AgentRunner.fromSpec({ name: 'scope-drafter', compiled, maxIterations: 1 }).build()
-  return async (message) => {
-    const { apiKey } = resolveProvider(compiled.model, { plugins: compiled.plugins })
-    const result = await runner.run(message, { apiKey, budget: DRAFT_BUDGET_USD })
-    return { response: result.response, cost: result.cost }
-  }
+  return oneShotAssistant('scope-drafter', model, SCOPE_DRAFTER_SPEC, DRAFT_BUDGET_USD)
 }
 
 async function lastHandoff(db: Database, taskId: number) {

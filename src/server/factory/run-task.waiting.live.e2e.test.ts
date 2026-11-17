@@ -158,7 +158,13 @@ describe.skipIf(!live)('a task that waits for an answer, with the real agent', (
       api: createGithubApi(),
       inTransaction: (work) =>
         db.transaction((tx) =>
-          work(tx as never, async (_t, questionId) => void queued.push(questionId)),
+          work(
+            tx as never,
+            async (_t, questionId) => void queued.push(questionId),
+            async () => {
+              throw new Error('an agent question never queues a first run')
+            },
+          ),
         ),
       deleteSnapshot: (id) => sandbox.deleteSnapshot!(id),
       ttlMs: 7 * 86_400_000,

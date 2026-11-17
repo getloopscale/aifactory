@@ -82,12 +82,14 @@ export type PollDeps = {
   api: GithubApi
   /**
    * Runs `work` in one transaction and hands it the way to queue the resume inside it, so an answer
-   * is never stored without its job or queued without being stored.
+   * is never stored without its job or queued without being stored. A readiness question had no run to
+   * resume: its answer queues the task's first run (`enqueueRun`).
    */
   inTransaction: <T>(
     work: (
       tx: Database,
       enqueueResume: (taskId: number, questionId: number) => Promise<void>,
+      enqueueRun: (taskId: number, questionId: number) => Promise<void>,
     ) => Promise<T>,
   ) => Promise<T>
   /** Frees the snapshot of a question nobody answered. */
@@ -121,7 +123,7 @@ export async function pollAnswers(deps: PollDeps): Promise<PollResult> {
         error: `nobody answered in ${Math.round(deps.ttlMs / 86_400_000)} days`,
         questionId: q.id,
       })
-      await deps.deleteSnapshot?.(q.snapshotId).catch(() => {})
+      if (q.snapshotId) await deps.deleteSnapshot?.(q.snapshotId).catch(() => {})
       result.expired.push(q.id)
       continue
     }
@@ -132,17 +134,39 @@ export async function pollAnswers(deps: PollDeps): Promise<PollResult> {
       result.waiting += 1
       continue
     }
-    const stored = await deps.inTransaction(async (tx, enqueueResume) => {
-      const claimed = await tx
-        .update(question)
-        .set({ answer: answer.text, answeredBy: answer.by, answeredAt: now })
-        .where(and(eq(question.id, q.id), isNull(question.answer)))
-        .returning({ id: question.id })
-      if (claimed.length === 0) return false
-      await enqueueResume(q.taskId, q.id)
-      return true
-    })
+    const stored = await deps.inTransaction((tx, enqueueResume, enqueueRun) =>
+      takeAnswer(tx, q, answer, now, q.origin === 'readiness' ? enqueueRun : enqueueResume),
+    )
     if (stored) result.answered.push(q.id)
   }
   return result
+}
+
+/**
+ * Stores the answer once and queues what goes on from it: the resume of the agent's run, or, for a readiness
+ * question, the task's first run, with the task back in `intake`. Nothing is resumed for a readiness question,
+ * so it is marked taken at once.
+ */
+async function takeAnswer(
+  tx: Database,
+  q: typeof question.$inferSelect,
+  answer: { text: string; by: string },
+  now: Date,
+  enqueue: (taskId: number, questionId: number) => Promise<void>,
+): Promise<boolean> {
+  const readiness = q.origin === 'readiness'
+  const claimed = await tx
+    .update(question)
+    .set({
+      answer: answer.text,
+      answeredBy: answer.by,
+      answeredAt: now,
+      ...(readiness ? { resumedAt: now } : {}),
+    })
+    .where(and(eq(question.id, q.id), isNull(question.answer)))
+    .returning({ id: question.id })
+  if (claimed.length === 0) return false
+  if (readiness) await enterStage(tx, q.taskId, 'intake', { answered: q.id, readiness: true })
+  await enqueue(q.taskId, q.id)
+  return true
 }
