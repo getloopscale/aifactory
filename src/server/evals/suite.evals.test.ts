@@ -7,9 +7,10 @@
 //   EVALS_CASES     comma-separated case ids, instead of a set
 //   EVALS_BUDGET_USD    no case starts once this is spent (default 15)
 //   EVALS_CONCURRENCY   cases at a time (default 2)
+//   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -30,7 +31,18 @@ import { markQuick, selectCandidates, type EvalCase } from './cases'
 import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } from './compare'
 import { deliveredCandidates, toCase } from './extract'
 import { runCase } from './run-case'
-import { E2B_USD_PER_MS, agentSetup, checkBeforeDeploy, runSuite, spentOn } from './suite'
+import {
+  E2B_USD_PER_MS,
+  SUITE_TIMEOUT_MS,
+  agentSetup,
+  checkFromTestStart,
+  fromTestStart,
+  parseMarginMinutes,
+  runSuiteFromTestStart,
+  spentOn,
+  startMarginFor,
+  writeRunOutcome,
+} from './suite'
 
 const CASES = 'evals/cases.json'
 const BASELINE = 'evals/baseline.json'
@@ -79,13 +91,41 @@ async function currentSetup(cases: EvalCase[]) {
   return setup
 }
 
-async function runCases(cases: EvalCase[]) {
+/** The time before the deadline when no case may start: the longest limit a case of these repositories has. */
+async function startMargin(cases: EvalCase[]): Promise<number> {
+  const limits: number[] = []
+  for (const repository of new Set(cases.map((c) => c.repository)))
+    limits.push((await evalDeps(repository, [])).timeouts.sandboxMs)
+  return startMarginFor(limits)
+}
+
+async function runCases(cases: EvalCase[], testStartedAt: number) {
+  // A bad value fails the run at once; only the read of the repositories' limits can be cut short.
+  const margin =
+    env.EVALS_START_MARGIN_MIN !== undefined
+      ? parseMarginMinutes(env.EVALS_START_MARGIN_MIN)
+      : () => startMargin(cases)
+  const startedAt = Date.now()
+  // Each finished case is written as it ends, so a run that is cut off (a sandbox that hangs past the margin, the
+  // test's own timeout) still leaves what finished, though the final record below is never written.
+  mkdirSync('.evals', { recursive: true })
+  const partial = `.evals/run-${new Date(startedAt).toISOString().replace(/[:.]/g, '-')}.partial.jsonl`
+  // What the run selected, so the cases left can be told even if the run is cut off.
+  const selectedPath = partial.replace('.partial.jsonl', '.selected.json')
+  const run = {
+    startedAt: new Date(startedAt).toISOString(),
+    baseline: env.EVALS_BASELINE === '1',
+    selected: cases.map((c) => c.id),
+  }
+  writeRunOutcome(selectedPath, run, { results: [], skipped: [] })
   const byId = new Map(cases.map((c) => [c.id, c]))
-  const ran = await runSuite(
+  const ran = await runSuiteFromTestStart(
+    testStartedAt,
     cases.map((c) => c.id),
-    async (id) => {
+    async (id, signal) => {
       const c = byId.get(id)!
-      const result = await runCase(await evalDeps(c.repository, c.labels), c)
+      const result = await runCase(await evalDeps(c.repository, c.labels), c, signal)
+      appendFileSync(partial, `${JSON.stringify(result)}\n`)
       console.log(
         JSON.stringify({ event: 'eval_case', ...result, environment: failedForEnvironment(result) }),
       )
@@ -95,8 +135,15 @@ async function runCases(cases: EvalCase[]) {
       budgetUsd: Number(env.EVALS_BUDGET_USD ?? 15),
       concurrency: Number(env.EVALS_CONCURRENCY ?? 2),
       sandboxUsdPerMs: E2B_USD_PER_MS,
+      // Counted from the test's start, setup included, as vitest counts its timeout; a case that hangs is
+      // abandoned a little before it.
+      startMarginMs: margin,
     },
   )
+  // Before anything that can block: what finished, what was left, and the baseline's refusal.
+  const outcome = writeRunOutcome(selectedPath, run, ran)
+  if (outcome.baselineRefused)
+    console.log(JSON.stringify({ event: 'eval_baseline_refused', skipped: ran.skipped }))
   const record = {
     commit: git('rev-parse', 'HEAD'),
     ranAt: new Date().toISOString(),
@@ -156,8 +203,14 @@ describe.runIf(mode === 'cases')('the cases', () => {
 
 describe.runIf(mode === 'run')('a run of the suite', () => {
   it('runs the chosen cases and writes what each came to', async () => {
-    const record = await runCases(chosenCases())
-    if (env.EVALS_BASELINE === '1') {
+    const record = await fromTestStart((testStartedAt) => runCases(chosenCases(), testStartedAt))
+    if (env.EVALS_BASELINE === '1' && record.skipped.length > 0) {
+      // A baseline that lacks cases would let the deploy gate pass without them. The run is in .evals/.
+      throw new Error(
+        `baseline.json not written: the run left ${record.skipped.length} case(s) (${record.skipped.join(', ')}). ` +
+          'Its results are in .evals/; run the whole set again with more time or budget.',
+      )
+    } else if (env.EVALS_BASELINE === '1') {
       const baseline: Baseline = {
         commit: record.commit,
         ranAt: record.ranAt,
@@ -170,22 +223,27 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
       console.log(JSON.stringify({ event: 'eval_compared', ...compared }))
     }
     expect(record.results.length).toBeGreaterThan(0)
-  })
+  }, SUITE_TIMEOUT_MS)
 })
 
 describe.runIf(mode === 'check')('the agent configuration', () => {
   it('is no worse than the baseline when it changed since then', async () => {
-    const baseline = readJson<Baseline>(BASELINE)
-    const changedPaths = [
-      ...git('diff', '--name-only', baseline.commit, 'HEAD').split('\n'),
-      ...git('diff', '--name-only', 'HEAD').split('\n'),
-    ].filter(Boolean)
-    const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
-    const checked = await checkBeforeDeploy({
-      baseline,
-      changedPaths,
-      setup: await currentSetup(quick),
-      runQuick: async () => (await runCases(quick)).results,
+    const checked = await fromTestStart((testStartedAt) => {
+      const baseline = readJson<Baseline>(BASELINE)
+      const changedPaths = [
+        ...git('diff', '--name-only', baseline.commit, 'HEAD').split('\n'),
+        ...git('diff', '--name-only', 'HEAD').split('\n'),
+      ].filter(Boolean)
+      const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
+      return checkFromTestStart(testStartedAt, {
+        baseline,
+        changedPaths,
+        readSetup: () => currentSetup(quick),
+        runQuick: async (startedAt) => {
+          const { results, skipped } = await runCases(quick, startedAt)
+          return { results, skipped }
+        },
+      })
     })
     console.log(JSON.stringify({ event: 'eval_check', ...checked }))
     expect(checked.reasons).toEqual([])
