@@ -175,6 +175,46 @@ describe('runCase', () => {
     expect(provider.stopped).toBe(1)
   })
 
+  it('starts nothing for a case abandoned before it begins', async () => {
+    const provider = sandbox()
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [])
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+
+    expect(result.reason).toContain('abandoned')
+    expect(provider.specs).toHaveLength(0)
+    expect(builder.prompts).toHaveLength(0)
+  })
+
+  it('starts no agent for a case abandoned during its setup', async () => {
+    const provider = sandbox()
+    const builder = agent('builder', planned(built()))
+    const controller = new AbortController()
+    builder.prepare = async () => controller.abort()
+    const reviewer = agent('reviewer', [])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+
+    expect(result.reason).toContain('abandoned')
+    expect(builder.prompts).toHaveLength(0)
+    expect(provider.stopped).toBe(1)
+  })
+
+  it('does not stop a finished case again when a later case is abandoned', async () => {
+    const provider = sandbox()
+    const builder = agent('builder', planned(built('done', 0.3)))
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const controller = new AbortController()
+
+    await runCase(deps(provider, builder, reviewer), evalCase, controller.signal)
+    controller.abort()
+
+    expect(provider.stopped).toBe(1)
+  })
+
   it('passes a case whose checks pass and whose review approves, with its cost and rounds', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built('done', 0.3)))

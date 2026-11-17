@@ -37,9 +37,8 @@ import {
   agentSetup,
   checkBeforeDeploy,
   parseMarginMinutes,
-  runSuite,
+  runSuiteFromTestStart,
   spentOn,
-  suiteTimes,
   startMarginFor,
   writeRunOutcome,
 } from './suite'
@@ -116,7 +115,8 @@ async function runCases(cases: EvalCase[], testStartedAt: number) {
   }
   writeRunOutcome(selectedPath, run, { results: [], skipped: [] })
   const byId = new Map(cases.map((c) => [c.id, c]))
-  const ran = await runSuite(
+  const ran = await runSuiteFromTestStart(
+    testStartedAt,
     cases.map((c) => c.id),
     async (id, signal) => {
       const c = byId.get(id)!
@@ -133,7 +133,6 @@ async function runCases(cases: EvalCase[], testStartedAt: number) {
       sandboxUsdPerMs: E2B_USD_PER_MS,
       // Counted from the test's start, setup included, as vitest counts its timeout; a case that hangs is
       // abandoned a little before it.
-      ...suiteTimes(testStartedAt),
       startMarginMs,
     },
   )

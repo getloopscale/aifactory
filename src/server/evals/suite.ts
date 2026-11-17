@@ -39,6 +39,19 @@ export function suiteTimes(testStartedAt: number): { deadlineMs: number; abandon
   return { deadlineMs, abandonAtMs: deadlineMs - 5 * 60_000 }
 }
 
+/**
+ * `runSuite` with its deadline and abandon time taken from the moment the test started, so the setup before it
+ * counts against the time the cases get.
+ */
+export function runSuiteFromTestStart(
+  testStartedAt: number,
+  ids: string[],
+  runOne: (id: string, signal: AbortSignal) => Promise<CaseResult>,
+  options: Omit<Parameters<typeof runSuite>[2], 'deadlineMs' | 'abandonAtMs'>,
+) {
+  return runSuite(ids, runOne, { ...options, ...suiteTimes(testStartedAt) })
+}
+
 /** Time kept after the longest case limit for the run to stop its sandbox and write its results. */
 const WRITE_SLACK_MS = 10 * 60_000
 

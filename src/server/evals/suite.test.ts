@@ -15,7 +15,7 @@ import {
   spentOn,
   parseMarginMinutes,
   startMarginFor,
-  suiteTimes,
+  runSuiteFromTestStart,
   SUITE_TIMEOUT_MS,
 } from './suite'
 
@@ -203,10 +203,33 @@ describe('runSuite time limit', () => {
     expect(ran.skipped).toEqual(['a'])
   })
 
-  it('anchors the deadline and the abandon time to the start of the test, setup included', () => {
-    const { deadlineMs, abandonAtMs } = suiteTimes(1_000)
-    expect(deadlineMs).toBe(1_000 + SUITE_TIMEOUT_MS)
-    expect(abandonAtMs).toBe(deadlineMs - 5 * 60_000)
+  it('counts the time the setup took before the first case: a late-starting run starts no case', async () => {
+    const MIN = 60_000
+    // The test started 4 hours less 20 minutes ago (setup took that long); the margin is 30 minutes.
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 20 * MIN)
+    const started: string[] = []
+    const ran = await runSuiteFromTestStart(
+      testStartedAt,
+      ['a', 'b'],
+      async (id) => {
+        started.push(id)
+        return result(id, 0)
+      },
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, startMarginMs: 30 * MIN },
+    )
+    expect(started).toEqual([])
+    expect(ran.skipped).toEqual(['a', 'b'])
+  })
+
+  it('abandons the cases in flight before the test time, counted from the test start', async () => {
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
+    const ran = await runSuiteFromTestStart(
+      testStartedAt,
+      ['a'],
+      () => new Promise<never>(() => {}),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, startMarginMs: 0 },
+    )
+    expect(ran.skipped).toEqual(['a'])
   })
 
   it('persists the cases left and the baseline refusal when a case hangs', async () => {

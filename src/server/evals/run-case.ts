@@ -432,33 +432,49 @@ export async function runCase(
   if (!COMMIT.test(c.baseSha))
     return stoppedAs(`the base ${JSON.stringify(c.baseSha)} is not a commit hash`)
 
+  const ABANDONED = 'abandoned: the suite ran out of time'
+  // Checked before each step of the setup and before an agent starts, so abandoned work launches nothing more.
+  const live = () => {
+    if (signal?.aborted) throw new Stopped(ABANDONED)
+  }
+  if (signal?.aborted) return stoppedAs(ABANDONED)
+
   const held: { sandbox?: IsolatedSandbox } = {}
+  let stopped = false
+  const stopSandbox = async () => {
+    if (stopped || !held.sandbox) return
+    stopped = true
+    await held.sandbox.stop().catch(() => {})
+  }
   // An abandoned case stops its sandbox at once, so work that hangs cannot go on costing, and ends as stopped.
+  let onAbort = () => {}
   const abandoned = new Promise<CaseResult>((resolve) => {
-    const abandon = () => {
-      void held.sandbox?.stop().catch(() => {})
-      resolve(stoppedAs('abandoned: the suite ran out of time'))
+    onAbort = () => {
+      void stopSandbox()
+      resolve(stoppedAs(ABANDONED))
     }
-    if (signal?.aborted) abandon()
-    else signal?.addEventListener('abort', abandon, { once: true })
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
   const work = async (): Promise<CaseResult> => {
-    let sandbox = await createIsolatedSandbox(deps.sandbox, await specFor(deps, c))
+    const spec = await specFor(deps, c)
+    live()
+    let sandbox = await createIsolatedSandbox(deps.sandbox, spec)
     held.sandbox = sandbox
-    // A sandbox that came up after the case was abandoned is stopped, not used.
-    if (signal?.aborted) {
-      await sandbox.stop().catch(() => {})
-      return stoppedAs('abandoned: the suite ran out of time')
-    }
+    live()
     const repoDir = await checkout(sandbox.backend, c)
-    for (const agent of new Set([deps.builder, deps.reviewer]))
+    live()
+    for (const agent of new Set([deps.builder, deps.reviewer])) {
       await agent.prepare?.(sandbox.backend)
+      live()
+    }
     const feed = await KnowledgeFeed.open(deps.knowledge, sandbox.backend, c.repository, {})
     sandbox = feed.attachTo(sandbox)
     held.sandbox = sandbox
+    live()
     const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir)
     // Before the builder's first pass, so it can run the check it is told to run.
     await uploadChangesetCheck(sandbox.backend, c.checks)
+    live()
     try {
       await run.build()
       return run.result(await run.loop())
@@ -472,7 +488,7 @@ export async function runCase(
   } catch (error) {
     return stoppedAs(error instanceof Error ? error.message : String(error))
   } finally {
-    // An abandoned case stopped its sandbox when it was abandoned.
-    if (!signal?.aborted) await held.sandbox?.stop().catch(() => {})
+    signal?.removeEventListener('abort', onAbort)
+    await stopSandbox()
   }
 }
