@@ -286,7 +286,7 @@ async function readBase(
 export type BaseHold = { sha: string; checks: string[]; since: string }
 
 /** The hold stored in the detail of a `done` event for this commit, or none; another commit's counts for nothing. */
-export export function baseHoldOf(detail: unknown, sha: string | null): BaseHold | null {
+export function baseHoldOf(detail: unknown, sha: string | null): BaseHold | null {
   const hold = (detail as { baseHold?: Partial<BaseHold> } | null | undefined)?.baseHold
   if (!hold || hold.sha !== sha || !Array.isArray(hold.checks) || hold.checks.length === 0) {
     return null

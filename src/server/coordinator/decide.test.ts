@@ -277,6 +277,8 @@ describe('an integration branch red for too long', () => {
       outcome: 'escalated',
     })
     expect(seen(red, [before], 'auto')).toBe(true)
-    expect(seen({ ...red, head: '1234567:lint@2026-11-17T11:00:00Z' }, [before], 'auto')).toBe(false)
+    expect(seen({ ...red, head: '1234567:lint@2026-11-17T11:00:00Z' }, [before], 'auto')).toBe(
+      false,
+    )
   })
 })

@@ -279,7 +279,11 @@ describe('a task held by a red integration branch', () => {
   it('is base_red past the limit, naming the checks and the commit they hold', () => {
     const [found, ...rest] = recognise(held('2026-11-17T09:00:00Z'))
     expect(rest).toEqual([])
-    expect(found).toMatchObject({ kind: 'base_red', taskId: 5, head: '1234567:lint,test@2026-11-17T09:00:00Z' })
+    expect(found).toMatchObject({
+      kind: 'base_red',
+      taskId: 5,
+      head: '1234567:lint,test@2026-11-17T09:00:00Z',
+    })
     expect(found.evidence).toContain('lint, test')
     expect(found.evidence).toContain('3 hours')
   })

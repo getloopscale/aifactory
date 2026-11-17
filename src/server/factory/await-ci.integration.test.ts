@@ -816,7 +816,6 @@ describe('adoptMergedHandoffs', () => {
   })
 })
 
-
 describe('the hold of a red integration branch', () => {
   const now = new Date('2026-11-17T12:00:00Z')
 
