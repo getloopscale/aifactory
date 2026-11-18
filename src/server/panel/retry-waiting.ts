@@ -2,6 +2,10 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import { stageEvent, task } from '../db/schema'
 import { rerunsAfterConflict } from '../factory/auto-retry'
+import { openBlockersOf, type BlockerReads } from '../factory/blocker-check'
+import { nameOf, type IssueRef } from '../factory/blockers'
+import { errorMessage } from '../factory/error-message'
+import { fetchIssue } from '../github/issues'
 import { ActionRefused, retry, retryAutomatically, type ActionDeps } from './actions'
 import { automaticRunsSincePerson, listTasks } from './queries'
 
@@ -33,20 +37,30 @@ export async function retryWaiting(
  * Runs again, on its own, each failed task whose time came (see `retryAt`), the longest-waiting first and
  * no more than `limit` in one pass, so a quota coming back for a hundred tasks does not start a hundred
  * sandboxes in the same minute. A task that moved on since the board was read is counted and left.
+ *
+ * A task blocked by an open issue has its blockers read here first, and runs again only once none is open:
+ * while one is, the check is recorded on its failure (`blockedCheckedAt`), which sets its next one half an
+ * hour later, and the task stays failed. So a blocked task neither joins the queue nor takes a start of the
+ * pass from a task that can run. A blocker that cannot be read is logged and checked on the next pass.
  */
 export async function runDueRetries(
-  deps: ActionDeps,
+  deps: ActionDeps & Pick<BlockerReads, 'fetchIssue'>,
   { limit, now = new Date() }: { limit: number; now?: Date },
-): Promise<{ started: number; skipped: number }> {
+): Promise<{ started: number; skipped: number; waiting: number }> {
   const due = (await listTasks(deps.db))
     .filter(
       (c) => c.stage === 'failed' && c.retryAt !== null && Date.parse(c.retryAt) <= now.getTime(),
     )
     .sort((a, b) => Date.parse(a.retryAt!) - Date.parse(b.retryAt!))
-    .slice(0, limit)
   let started = 0
   let skipped = 0
+  let waiting = 0
   for (const card of due) {
+    if (started + skipped >= limit) break
+    if (card.retryable === 'blocked' && (await stillBlocked(deps, card.id, now))) {
+      waiting += 1
+      continue
+    }
     try {
       await retryAutomatically(deps, card.id)
       started += 1
@@ -55,7 +69,53 @@ export async function runDueRetries(
       skipped += 1
     }
   }
-  return { started, skipped }
+  return { started, skipped, waiting }
+}
+
+/**
+ * Whether a blocked task's issue still declares an open blocker, read from GitHub now. When it does, the
+ * check and the blockers found open are written on the task's last failure. A read that fails is logged and
+ * counts as still blocked, with nothing written, so the next pass reads again.
+ */
+async function stillBlocked(
+  deps: ActionDeps & Pick<BlockerReads, 'fetchIssue'>,
+  taskId: number,
+  now: Date,
+): Promise<boolean> {
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) return false
+  let open: IssueRef[]
+  try {
+    const readIssue = deps.fetchIssue ?? fetchIssue
+    const { token } = await deps.github.installationToken(row.repository)
+    const issue = await readIssue(row.repository, row.issueNumber, token)
+    open = await openBlockersOf(deps, row.repository, issue.body)
+  } catch (error) {
+    console.error(
+      JSON.stringify({ event: 'blocked_check_failed', taskId, error: errorMessage(error) }),
+    )
+    return true
+  }
+  if (open.length === 0) return false
+  const [failure] = await deps.db
+    .select({ id: stageEvent.id, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, taskId), eq(stageEvent.stage, 'failed')))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  if (failure) {
+    await deps.db
+      .update(stageEvent)
+      .set({
+        detail: {
+          ...((failure.detail ?? {}) as object),
+          blockedBy: open.map(nameOf),
+          blockedCheckedAt: now.toISOString(),
+        },
+      })
+      .where(eq(stageEvent.id, failure.id))
+  }
+  return true
 }
 
 /**

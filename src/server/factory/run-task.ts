@@ -2,7 +2,8 @@ import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { question as questionTable, task } from '../db/schema'
 import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
-import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
+import { openBlockersOf } from './blocker-check'
+import { BlockedByOpenIssues } from './blockers'
 import { errorMessage } from './error-message'
 import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
@@ -119,13 +120,9 @@ async function execute(
 }
 
 /**
- * Throws `BlockedByOpenIssues` when the issue declares a blocker that is still open, before any sandbox
- * exists: the work it waits for has not shipped, and an agent started now finds nothing to build on. Each
- * blocker is read with a token for its own repository. One whose state is unknown counts as open.
- *
- * A blocker in the task's own repository stops blocking once the factory has integrated its fix: the run
- * starts from the integration branch, where that code already is. Its issue stays open until the release,
- * which can take hours, and a chain of dependent issues would otherwise wait a release per link.
+ * Throws `BlockedByOpenIssues` when the issue declares a blocker that is still open (`openBlockersOf`),
+ * before any sandbox exists: the work it waits for has not shipped, and an agent started now finds nothing
+ * to build on.
  */
 async function refuseWhileBlocked(
   deps: RunTaskDeps,
@@ -133,14 +130,7 @@ async function refuseWhileBlocked(
   issue: Issue,
   readIssue: NonNullable<RunTaskDeps['fetchIssue']>,
 ): Promise<void> {
-  const blockers = declaredBlockers(issue.body, repository)
-  if (blockers.length === 0) return
-  const open = await openBlockers(blockers, async (ref) => {
-    if (ref.repository === repository && (await integrated(deps, ref.repository, ref.number)))
-      return false
-    const { token } = await deps.github.installationToken(ref.repository)
-    return (await readIssue(ref.repository, ref.number, token)).state !== 'closed'
-  })
+  const open = await openBlockersOf({ ...deps, fetchIssue: readIssue }, repository, issue.body)
   if (open.length > 0) throw new BlockedByOpenIssues(open)
 }
 
@@ -162,26 +152,6 @@ async function clarificationsOf(deps: RunTaskDeps, taskId: number): Promise<Clar
     )
     .orderBy(asc(questionTable.id))
   return rows.map((r) => ({ question: r.question, answer: r.answer ?? '', by: r.by ?? 'a person' }))
-}
-
-/** Whether a task for this issue has been merged into the repository's integration branch. */
-async function integrated(
-  deps: RunTaskDeps,
-  repository: string,
-  issueNumber: number,
-): Promise<boolean> {
-  const [merged] = await deps.db
-    .select({ id: task.id })
-    .from(task)
-    .where(
-      and(
-        eq(task.repository, repository),
-        eq(task.issueNumber, issueNumber),
-        isNotNull(task.mergedSha),
-      ),
-    )
-    .limit(1)
-  return merged !== undefined
 }
 
 /** Records how a run ended when it did not finish: parked on a question, or failed at a stage. */

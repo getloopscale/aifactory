@@ -4,7 +4,8 @@ export type IssueRef = { repository: string; number: number }
 const DECLARATION = /^[\s*_>-]*blocked by\b(.*)$/gim
 const REFERENCE = /(?:\b([\w.-]+\/[\w.-]+))?#(\d+)\b/g
 
-const name = (ref: IssueRef) => `${ref.repository}#${ref.number}`
+/** How a blocker is written on a failure: `owner/repo#number`. */
+export const nameOf = (ref: IssueRef) => `${ref.repository}#${ref.number}`
 
 /**
  * The issues an issue says it waits for, from each line that starts with "Blocked by". A reference without a
@@ -15,7 +16,7 @@ export function declaredBlockers(body: string, repository: string): IssueRef[] {
   for (const [, rest] of body.matchAll(DECLARATION)) {
     for (const [, repo, number] of (rest ?? '').matchAll(REFERENCE)) {
       const ref = { repository: repo ?? repository, number: Number(number) }
-      found.set(name(ref), ref)
+      found.set(nameOf(ref), ref)
     }
   }
   return [...found.values()]
@@ -38,7 +39,7 @@ export class BlockedByOpenIssues extends Error {
   readonly blockedBy: string[]
 
   constructor(open: IssueRef[]) {
-    const names = open.map(name)
+    const names = open.map(nameOf)
     super(
       `blocked by ${names.join(', ')}, still open; the task runs again on its own once they are closed`,
     )
