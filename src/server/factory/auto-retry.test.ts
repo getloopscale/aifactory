@@ -91,6 +91,21 @@ describe('when a task blocked by an open issue runs again', () => {
       )
     }
   })
+
+  it('counts the half hour from the last time its blockers were read, not from when it failed', () => {
+    const blockedCheckedAt = '2026-11-06T05:00:00.000Z'
+    expect(
+      iso(retryAt({ retryable: 'blocked', failedAt, automaticRetries: 0, blockedCheckedAt })),
+    ).toBe('2026-11-06T05:30:00.000Z')
+  })
+
+  it('ignores a check recorded before the failure, or one that is not a date', () => {
+    for (const blockedCheckedAt of ['2026-11-05T00:00:00.000Z', 'soon']) {
+      expect(
+        iso(retryAt({ retryable: 'blocked', failedAt, automaticRetries: 0, blockedCheckedAt })),
+      ).toBe('2026-11-06T00:43:00.000Z')
+    }
+  })
 })
 
 describe('when a task whose checks fail on the integration branch too runs again', () => {

@@ -3366,7 +3366,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
     await runQueued(id, queued)
 
     for (let i = 0; i < 3; i++) {
-      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
       expect(await runQueued(id, queued)).toMatchObject({ feedback: 'Rename the helper to cut.' })
     }
 
@@ -3430,11 +3430,15 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
           stage: 'sandbox',
         })
         for (let i = 0; i < 4; i++) {
-          expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+          expect(await runDueRetries(action, later())).toEqual({
+            started: 1,
+            skipped: 0,
+            waiting: 0,
+          })
           expect(await runAgain()).toMatchObject({ status: 'failed', stage: 'sandbox' })
         }
         // The network is back: the fifth automatic run reaches the agent and completes.
-        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         expect(await runAgain()).toMatchObject({ status: 'done' })
         const [row] = await getDb().select().from(task).where(eq(task.id, id))
         expect(row.stage).toBe('done')
@@ -3457,7 +3461,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
       for (; runs < 20; runs++) {
         const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
         if (card.retryAt === null) break
-        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         const input = queued.at(-1)!
         await runTask(
           failing(),
@@ -3559,7 +3563,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
       for (; runs < 10; runs++) {
         const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
         if (card.retryAt === null) break
-        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         const input = queued.at(-1)!
         await runTask(
           failing(),

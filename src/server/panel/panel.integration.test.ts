@@ -1182,7 +1182,11 @@ describe('actions', () => {
       { stage: 'failed', detail: { error: 'the tests failed' } },
     ])
 
-    expect(await runDueRetries(deps(), { limit: 2 })).toEqual({ started: 2, skipped: 0 })
+    expect(await runDueRetries(deps(), { limit: 2 })).toEqual({
+      started: 2,
+      skipped: 0,
+      waiting: 0,
+    })
 
     const stages = new Map((await getDb().select().from(task)).map((t) => [t.id, t.stage] as const))
     expect([oldest, middle, newest, notYet, work].map((id) => stages.get(id))).toEqual([
@@ -1198,6 +1202,94 @@ describe('actions', () => {
     const intake = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, oldest))
     expect(intake.at(-1)?.detail).toMatchObject({ decision: 'retry', automatic: true })
     expect(queued.map((q) => q.input)).toEqual([{ taskId: oldest }, { taskId: middle }])
+  })
+
+  describe('a task blocked by an open issue', () => {
+    const later = (minutes = 31) => new Date(Date.now() + minutes * 60_000)
+    const blocked = (issueNumber: number) =>
+      seed('failed', { issueNumber }, [
+        {
+          stage: 'failed',
+          detail: { error: 'blocked by paulo/app#5', blockedBy: ['paulo/app#5'] },
+        },
+      ])
+    /** Issues as GitHub has them: the task's own, which declares #5, and #5 itself. */
+    const issues = (blocker: 'open' | 'closed' | 'unreadable') => ({
+      ...deps(),
+      fetchIssue: async (_repo: string, number: number) => {
+        if (number === 5) {
+          if (blocker === 'unreadable') throw new Error('GitHub answered 502 reading paulo/app#5')
+          return { number, title: 'b', body: '', labels: [], state: blocker as 'open' | 'closed' }
+        }
+        return { number, title: 't', body: 'Blocked by #5', labels: [], state: 'open' as const }
+      },
+    })
+    const failureOf = async (id: number) =>
+      (await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))).at(-1)
+
+    it('stays failed while its blocker is open, and its next check is half an hour after this one', async () => {
+      const id = await blocked(81)
+      const now = later()
+
+      expect(await runDueRetries(issues('open'), { limit: 3, now })).toEqual({
+        started: 0,
+        skipped: 0,
+        waiting: 1,
+      })
+
+      expect(queued).toEqual([])
+      expect((await failureOf(id))?.detail).toMatchObject({
+        blockedBy: ['paulo/app#5'],
+        blockedCheckedAt: now.toISOString(),
+      })
+      const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
+      expect(card.stage).toBe('failed')
+      expect(card.retryAt).toBe(new Date(now.getTime() + 30 * 60_000).toISOString())
+    })
+
+    it('runs again once its blocker is closed', async () => {
+      const id = await blocked(82)
+      expect(await runDueRetries(issues('closed'), { limit: 3, now: later() })).toEqual({
+        started: 1,
+        skipped: 0,
+        waiting: 0,
+      })
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
+    })
+
+    it('leaves the starts of a pass to the tasks that can run', async () => {
+      // Both have waited longer than the outage, so they come first in the pass.
+      for (const id of [await blocked(83), await blocked(84)]) {
+        await getDb()
+          .update(stageEvent)
+          .set({ at: new Date(Date.now() - 2 * 3600_000) })
+          .where(eq(stageEvent.taskId, id))
+      }
+      const outage = await seed('failed', { issueNumber: 85 }, [
+        { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      ])
+      expect(await runDueRetries(issues('open'), { limit: 1, now: later(24 * 60) })).toEqual({
+        started: 1,
+        skipped: 0,
+        waiting: 2,
+      })
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: outage }])
+    })
+
+    it('records nothing for a blocker it could not read, and goes on with the others', async () => {
+      const id = await blocked(86)
+      const outage = await seed('failed', { issueNumber: 87 }, [
+        { stage: 'failed', detail: { error: '403: team is blocked: spend_limit' } },
+      ])
+      const before = (await failureOf(id))?.detail
+      expect(await runDueRetries(issues('unreadable'), { limit: 3, now: later() })).toEqual({
+        started: 1,
+        skipped: 0,
+        waiting: 1,
+      })
+      expect((await failureOf(id))?.detail).toEqual(before)
+      expect(queued.map((q) => q.input)).toEqual([{ taskId: outage }])
+    })
   })
 
   describe('an automatic retry after a sandbox outage', () => {
@@ -1247,7 +1339,7 @@ describe('actions', () => {
 
     it('keeps the branch, the note and the head of a rework, even when its intake did not name the decision', async () => {
       const { id } = await reworkAtSandbox(91)
-      expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+      expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
       expect(deleted()).toEqual([])
       // The branch the new run fetches is still at the commit the failed run started from.
       expect(api.repo('paulo/app').heads.get('factory/91')).toBe('abc')
@@ -1293,7 +1385,7 @@ describe('actions', () => {
       for (; runs < 10; runs++) {
         const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
         if (card.retryAt === null) break
-        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         await failAgain(id)
       }
       expect(runs).toBeGreaterThan(0)
@@ -1331,7 +1423,7 @@ describe('actions', () => {
       const attemptsBefore = (await before()).attempts
       expect(attemptsBefore).toBe(2)
       for (let i = 0; i < 4; i++) {
-        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(deps(), later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         await failAgain(id)
       }
       expect(deleted()).toEqual([])
@@ -1456,7 +1548,7 @@ describe('actions', () => {
 
     const later = { limit: 5, now: new Date(Date.now() + 24 * 3600_000) }
     expect(await runConflictRetries(deps(), { limit: 5 })).toEqual({ started: 0, skipped: 0 })
-    expect(await runDueRetries(deps(), later)).toEqual({ started: 0, skipped: 0 })
+    expect(await runDueRetries(deps(), later)).toEqual({ started: 0, skipped: 0, waiting: 0 })
 
     expect(queued).toEqual([])
     const stages = new Map((await getDb().select().from(task)).map((t) => [t.id, t.stage] as const))
