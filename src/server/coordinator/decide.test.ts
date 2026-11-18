@@ -258,8 +258,7 @@ describe('deciding a release of a repository', () => {
     expect(decide(ready([['bug'], []]), [])).toEqual({
       action: 'release',
       bump: 'patch',
-      reason:
-        '2 issues wait for a release of paulo/app at dev1234: #40, #60: released as a patch',
+      reason: '2 issues wait for a release of paulo/app at dev1234: #40, #60: released as a patch',
     })
   })
 
