@@ -214,6 +214,18 @@ describe('an issue that no longer asks for the work', () => {
     expect(await jobs()).toEqual([{ name: 'run-task', input: { taskId: id } }])
   })
 
+  it('leaves alone a job whose lease ran out, since its run may still be going on', async () => {
+    const id = await taskIn('build')
+    await getPool().query(
+      `update theokit_jobs set locked_until = now() - interval '1 minute', attempts = 1`,
+    )
+
+    await recordAndQueue(delivery('close', closed()), queue)
+
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await jobs()).toEqual([{ name: 'run-task', input: { taskId: id } }])
+  })
+
   it.each(['done', 'handoff'])('leaves a task in %s and its jobs untouched', async (stage) => {
     const id = await taskIn(stage)
     const before = await lastEvent(id)

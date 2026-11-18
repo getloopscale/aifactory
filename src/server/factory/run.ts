@@ -107,7 +107,7 @@ import {
   type EgressRule,
   type SandboxSpec,
 } from './sandbox'
-import { enterStage } from './stages'
+import { enterRunStage } from './stages'
 import type { AgentEvent } from './transcript'
 import { Transcript } from './transcript-store'
 import { answerPrompt, parseQuestion, questionComment } from './waiting'
@@ -332,7 +332,7 @@ export class Run {
     })
     this.sandbox = this.feed.attachTo(sandbox)
     state.sandbox = this.sandbox
-    await enterStage(deps.db, taskId, 'sandbox', {
+    await enterRunStage(deps.db, taskId, 'sandbox', {
       provider: deps.sandbox.name,
       renewed: true,
       sessionMinutes: minutes,
@@ -712,7 +712,7 @@ export class Run {
       attempt,
       costUsd: this.cost,
     })
-    await enterStage(deps.db, taskId, 'waiting', {
+    await enterRunStage(deps.db, taskId, 'waiting', {
       question: text,
       commentId,
       attempt,
@@ -781,7 +781,7 @@ export class Run {
     const { deps, taskId, branch, state } = this.c
     const { backend, git } = this
     state.current = 'push'
-    await enterStage(deps.db, taskId, 'push', { branch, ...detail })
+    await enterRunStage(deps.db, taskId, 'push', { branch, ...detail })
     const changes = await must(backend, `git -C ${this.repoDir} status --porcelain`)
     const uncommitted = changes.stdout.trim() !== ''
     if (!uncommitted && !(await this.hasUnpushedCommits())) {
@@ -860,7 +860,7 @@ export class Run {
     const { builder, backend, repoDir } = this
     if (resuming) {
       if (!builder.resume) throw new StageFailure(`${builder.name} cannot resume a session`)
-      await enterStage(deps.db, taskId, 'build', {
+      await enterRunStage(deps.db, taskId, 'build', {
         ...agentFacts(builder),
         attempt: resuming.attempt,
         resumed: true,
@@ -879,7 +879,7 @@ export class Run {
         }),
       )
     }
-    await enterStage(deps.db, taskId, 'build', {
+    await enterRunStage(deps.db, taskId, 'build', {
       ...agentFacts(builder),
       attempt: 1,
       ...(this.feed?.delivered ? { knowledge: this.feed.delivered } : {}),
@@ -951,7 +951,7 @@ export class Run {
       )
     }
     state.current = 'plan'
-    await enterStage(deps.db, taskId, 'plan', agentFacts(planner))
+    await enterRunStage(deps.db, taskId, 'plan', agentFacts(planner))
     const prompt = changePlanPrompt(this.buildInput())
     const first = await this.settle(planner, 'planner', 1, (onEvent) =>
       planner.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
@@ -1108,7 +1108,7 @@ export class Run {
       return undefined
     }
     const reason = `the pull request ${pull.url} is ${pull.merged ? 'merged' : 'closed'} and the branch has nothing ahead of ${base}, so there is nothing to open a pull request for`
-    await enterStage(deps.db, taskId, 'handoff', {
+    await enterRunStage(deps.db, taskId, 'handoff', {
       branch,
       sha,
       reason,
@@ -1137,7 +1137,7 @@ export class Run {
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
-    await enterStage(deps.db, taskId, 'done', {
+    await enterRunStage(deps.db, taskId, 'done', {
       branch,
       sha: row.headSha,
       pullRequestUrl: row.pullRequestUrl,
@@ -1172,7 +1172,7 @@ export class Run {
       row.issueNumber,
       `The repository's required checks failed on ${row.pullRequestUrl}, and the agent left it as it is:\n\n${said}${evidence ? `\n\nWhat the failed checks reported:\n\n${evidence}` : ''}`,
     )
-    await enterStage(deps.db, taskId, 'handoff', {
+    await enterRunStage(deps.db, taskId, 'handoff', {
       branch,
       sha: row.headSha,
       reason,
@@ -1245,7 +1245,7 @@ export class Run {
       }),
     )
     await api.closeIssue(row.repository, this.c.token, row.issueNumber)
-    await enterStage(
+    await enterRunStage(
       deps.db,
       taskId,
       'done',
@@ -1272,7 +1272,7 @@ export class Run {
     const { deps, taskId, state } = this.c
     const timeoutMs = await this.agentTimeout()
     state.current = 'build'
-    await enterStage(deps.db, taskId, 'build', {
+    await enterRunStage(deps.db, taskId, 'build', {
       ...agentFacts(this.builder),
       attempt: 1,
       refuted: true,
@@ -1302,7 +1302,7 @@ export class Run {
   private async reviewClaim(claim: string): Promise<ReviewVerdict> {
     const { deps, taskId, row, issue, state } = this.c
     state.current = 'review'
-    await enterStage(deps.db, taskId, 'review', {
+    await enterRunStage(deps.db, taskId, 'review', {
       sha: this.baseSha,
       attempt: 1,
       reviewer: this.reviewer.name,
@@ -1435,7 +1435,7 @@ export class Run {
     const { deps, taskId, state } = this.c
     const timeoutMs = await this.agentTimeout()
     state.current = 'build'
-    await enterStage(deps.db, taskId, 'build', {
+    await enterRunStage(deps.db, taskId, 'build', {
       ...agentFacts(this.builder),
       attempt,
       rework: true,
@@ -1503,7 +1503,7 @@ export class Run {
     const { deps, taskId, row, api, state } = this.c
     const { db } = deps
     state.current = 'verify'
-    await enterStage(
+    await enterRunStage(
       db,
       taskId,
       'verify',
@@ -1562,7 +1562,11 @@ export class Run {
   private async review(sha: string, attempt: number): Promise<ReviewVerdict> {
     const { deps, taskId, row, issue, branch, state } = this.c
     state.current = 'review'
-    await enterStage(deps.db, taskId, 'review', { sha, attempt, ...reviewerFacts(this.reviewer) })
+    await enterRunStage(deps.db, taskId, 'review', {
+      sha,
+      attempt,
+      ...reviewerFacts(this.reviewer),
+    })
     const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
       baseSha: this.baseSha,
       plan: this.plan,
@@ -1787,7 +1791,7 @@ export class Run {
       ].join('\n'),
     )
     const handed = await this.deliver(sha, pull.url, attempt)
-    await enterStage(
+    await enterRunStage(
       deps.db,
       taskId,
       'handoff',

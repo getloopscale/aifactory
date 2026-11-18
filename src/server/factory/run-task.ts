@@ -14,7 +14,7 @@ import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
 import { parkedOf, type Parked, type RunResult, type RunTaskDeps } from './run-types'
-import { enterStage } from './stages'
+import { enterRunStage, TaskCancelled } from './stages'
 
 export type { RunResult, RunTaskDeps } from './run-types'
 export { mergeEgress } from './run-support'
@@ -83,7 +83,8 @@ async function execute(
 
   const state: RunState = { current: 'sandbox', sandbox: undefined }
   try {
-    await enterStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
+    // A job a worker took just before its task was cancelled ends here, before any sandbox exists.
+    await enterRunStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
 
     // One token, limited to this task's repository. It is used here and in the firewall rule,
     // and nothing below hands it to the sandbox.
@@ -154,7 +155,10 @@ async function clarificationsOf(deps: RunTaskDeps, taskId: number): Promise<Clar
   return rows.map((r) => ({ question: r.question, answer: r.answer ?? '', by: r.by ?? 'a person' }))
 }
 
-/** Records how a run ended when it did not finish: parked on a question, or failed at a stage. */
+/**
+ * Records how a run ended when it did not finish: parked on a question, or failed at a stage. A run whose task
+ * was cancelled records nothing: the task stays cancelled and the job ends without a retry.
+ */
 async function fail(
   deps: RunTaskDeps,
   taskId: number,
@@ -163,15 +167,40 @@ async function fail(
   signal: AbortSignal | undefined,
 ): Promise<RunResult> {
   if (error instanceof Asked) return error.result
+  if (error instanceof TaskCancelled) return cancelled(taskId, state, error)
   const message = signal?.aborted
     ? 'the job lease expired before the run finished'
     : errorMessage(error)
-  await enterStage(deps.db, taskId, 'failed', {
+  try {
+    await recordFailure(deps, taskId, state, error, message)
+  } catch (refused) {
+    if (refused instanceof TaskCancelled) return cancelled(taskId, state, refused)
+    throw refused
+  }
+  return { status: 'failed', stage: state.current, error: message }
+}
+
+/** The end of a run whose task was cancelled, said in the log since nothing more is recorded. */
+function cancelled(taskId: number, state: RunState, error: TaskCancelled): RunResult {
+  console.log(
+    JSON.stringify({ event: 'run_cancelled', taskId, stage: state.current, why: error.reason }),
+  )
+  return { status: 'cancelled', stage: state.current, reason: error.reason }
+}
+
+/** The `failed` stage with the reason and what the error carries, unless the task was cancelled first. */
+async function recordFailure(
+  deps: RunTaskDeps,
+  taskId: number,
+  state: RunState,
+  error: unknown,
+  message: string,
+): Promise<void> {
+  await enterRunStage(deps.db, taskId, 'failed', {
     failedAt: state.current,
     error: message,
     ...(error instanceof QuotaStop ? quotaDetail(error, new Date()) : {}),
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
     ...(error instanceof BaseRed ? { baseRed: { sha: error.baseSha, checks: error.checks } } : {}),
   })
-  return { status: 'failed', stage: state.current, error: message }
 }

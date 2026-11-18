@@ -20,8 +20,9 @@ type Withdrawal = Extract<RoutedIntent, { actorLogin: string; issueNumber: numbe
 const isWithdrawal = (intent: RoutedIntent): intent is Withdrawal => intent.kind in WITHDRAWN
 
 /**
- * The jobs that would start work for a task, as long as no worker holds them: a lease in the future may be a
- * run going on, which is left alone. A failed job is already over. A `merge-task` job finds its task no longer
+ * The jobs that would start work for a task, as long as no worker ever took them: a lease, even an expired one,
+ * may belong to a run going on, which is left alone and stops at its next stage (`enterRunStage`), as `resume-queue.ts`
+ * leaves it. A failed job is already over. A `merge-task` job finds its task no longer
  * in `merge` and does nothing, and a `resume-task` would take a waiting task back into a run, so both go too.
  * SQL on the backend's table because `JobBackend` cannot cancel a job yet (usetheokit/theokit#2118).
  */
@@ -29,14 +30,14 @@ const deleteQueuedJobs = (tx: Database, taskId: number) =>
   tx.execute(
     sql`delete from theokit_jobs
         where name in ('run-task', 'merge-task', 'resume-task') and input->>'taskId' = ${String(taskId)}
-          and failed_at is null and (locked_until is null or locked_until < now())`,
+          and failed_at is null and locked_until is null and attempts = 0`,
   )
 
 /**
  * Cancels the task of an issue that was closed or lost the factory label, when `transitions.ts` says so: the
  * `cancelled` stage event with why, the stage, and the task's queued jobs, all in the caller's transaction.
- * Any other outcome changes nothing and is only logged. A run that is going on is not stopped here: it
- * records its next stage over this one (paulohenriquevn/aifactory#237).
+ * Any other outcome changes nothing and is only logged. A run that is going on is not stopped here: it stops
+ * at its next stage, which it may no longer record (`enterRunStage`, paulohenriquevn/aifactory#237).
  */
 export async function withdrawTask(tx: Database, intent: RoutedIntent): Promise<void> {
   if (!isWithdrawal(intent)) return
