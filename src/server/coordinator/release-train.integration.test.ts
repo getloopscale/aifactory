@@ -18,7 +18,7 @@ import {
 } from '../db/schema'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { CI_SILENCE_MS } from '../factory/ci-wait'
-import type { ReleaseMode } from '../factory/deliver'
+import { release, ReleaseRefused, type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
@@ -347,6 +347,27 @@ describe('a red release branch that develop already fixed', () => {
 
     expect(result).toMatchObject({ escalated: 1, applied: 0 })
     expect(promotions()).toEqual([])
+  })
+})
+
+describe('a release asked for at a develop head that has since moved', () => {
+  it('is refused without merging or turning on auto-merge', async () => {
+    await enable('auto')
+    const id = await integrated()
+    const readAt = 'e'.repeat(40)
+
+    const asked = release(deps(), id, {
+      bump: 'patch',
+      actor: 'agent:coordinator',
+      expectedHead: readAt,
+    })
+
+    await expect(asked).rejects.toBeInstanceOf(ReleaseRefused)
+    await expect(asked).rejects.toThrow(
+      /moved to ccccccc after the release was asked for at eeeeeee/,
+    )
+    expect(merges()).toEqual([])
+    expect(api.callsTo('enableAutoMerge')).toEqual([])
   })
 })
 
