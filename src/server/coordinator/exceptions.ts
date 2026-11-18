@@ -91,6 +91,8 @@ export type TaskException = {
   conflictsWith?: string
   /** For a release of the repository: every issue it would release, with its labels, which set the bump. */
   released?: ReleasedIssue[]
+  /** A release of a red release branch is allowed by the checks of this `develop` head: `release()` refuses another. */
+  verifiedHead?: string
   /** The repository's release mode is `trial`: the decision is recorded and nothing is applied. */
   trialOnly?: true
   /** What the checks that fail on the task's head printed, for a send-back (`failingOutput`). */

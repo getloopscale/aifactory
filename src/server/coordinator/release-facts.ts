@@ -13,7 +13,10 @@ import type { ReadIssue } from './draft'
 import type { ReleasedIssue } from './exceptions'
 import {
   attemptDue,
+  failingNames,
+  needsRecovery,
   trainHolds,
+  type RedRecovery,
   type ReleaseBranchState,
   type RepositoryReleaseFacts,
 } from './release-train'
@@ -30,7 +33,7 @@ import {
 export type ReleaseFactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
-  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch'>
+  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks'>
   readIssue: ReadIssue
   /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
   releaseMode: ReleaseMode
@@ -81,14 +84,23 @@ async function inFlight(db: Database, repo: string): Promise<string | undefined>
  */
 async function branchState(db: Database, repo: string) {
   const [last] = await db
-    .select({ status: watch.status, detail: watch.detail, acknowledgedAt: watch.acknowledgedAt })
+    .select({
+      sha: watch.sha,
+      status: watch.status,
+      detail: watch.detail,
+      acknowledgedAt: watch.acknowledgedAt,
+    })
     .from(watch)
     .where(eq(watch.repository, repo))
     .orderBy(desc(watch.id))
     .limit(1)
   const red = (last?.status === 'red' || last?.status === 'reverting') && !last.acknowledgedAt
   const state: ReleaseBranchState = last?.status === 'watching' ? 'watching' : red ? 'red' : 'green'
-  return { state, detail: last?.detail ?? `the last release of ${repo} is ${last?.status}` }
+  return {
+    state,
+    detail: last?.detail ?? `the last release of ${repo} is ${last?.status}`,
+    sha: last?.sha,
+  }
 }
 
 const RELEASE_ATTEMPTS = ['release_ready', 'release_retry'] as const
@@ -164,6 +176,35 @@ async function readLabels(
   }
 }
 
+/** The checks that failed on the red release commit and what `develop` reports at its head. */
+async function readRecovery(
+  deps: ReleaseFactsDeps,
+  f: RepositoryReleaseFacts,
+  head: string,
+  token: string,
+): Promise<Read<RedRecovery>> {
+  const sha = f.branch.sha ?? ''
+  try {
+    const red = await deps.api.commitChecks(f.repository, token, sha)
+    const develop = await deps.api.commitChecks(f.repository, token, head)
+    return readOf({
+      failing: failingNames(red.checkRuns),
+      failingStatuses: red.statuses,
+      developRuns: develop.checkRuns,
+      developStatuses: develop.statuses,
+      failingContexts: (red.statusContexts ?? [])
+        .filter((s) => s.state === 'failure' || s.state === 'error')
+        .map((s) => s.context),
+      developContexts: develop.statusContexts ?? [],
+    })
+  } catch (error) {
+    return unread(
+      `the checks of ${sha.slice(0, 7)} and ${head.slice(0, 7)} of ${f.repository}`,
+      message(error),
+    )
+  }
+}
+
 /** What GitHub and the record say of a repository the train does not hold. */
 async function lookFurther(
   deps: ReleaseFactsDeps,
@@ -185,7 +226,12 @@ async function lookFurther(
     attempts: await attempts(deps.db, f.repository, head.value),
     waitRefusal: await waitRefusal(deps.db, f.repository, head.value),
   }
-  return attemptDue(seen) ? { ...seen, labels: await readLabels(deps, seen, token) } : seen
+  const checked = needsRecovery(seen)
+    ? { ...seen, recovery: await readRecovery(deps, seen, head.value, token) }
+    : seen
+  return attemptDue(checked)
+    ? { ...checked, labels: await readLabels(deps, checked, token) }
+    : checked
 }
 
 /** The release facts of every enabled repository whose release mode is not `manual`. */

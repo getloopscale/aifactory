@@ -178,10 +178,10 @@ describe('the promotion watch', () => {
     expect(reruns).toEqual([9])
   })
 
-  it('files an issue for the factory when the job failed again after the rerun', async () => {
+  it('files an issue the factory takes first when the job failed again after the rerun: a red promotion holds every release', async () => {
     const result = await pollPromotions(deps())
     expect(created).toHaveLength(1)
-    expect(created[0]).toMatchObject({ repo: 'paulo/app', labels: ['factory'] })
+    expect(created[0]).toMatchObject({ repo: 'paulo/app', labels: ['factory', 'priority:1'] })
     expect(created[0].title).toBe('promotion: `validate` fails on workspace -> develop')
     expect(created[0].body).toContain('https://github.com/paulo/app/actions/runs/9/job/1')
     expect(created[0].body).toContain('onnxruntime-node  packages/sdk/package.json:455:6')
@@ -239,7 +239,7 @@ describe('the promotion watch', () => {
       const result = await pollPromotions(deps())
       expect(comments()).toEqual([])
       expect(created).toHaveLength(2)
-      expect(created[1].labels).toEqual(['factory'])
+      expect(created[1].labels).toEqual(['factory', 'priority:1'])
       expect(created[1].body).toContain('#51 (https://github.com/paulo/app/issues/51)')
       expect(result.opened).toEqual(['https://github.com/paulo/app/issues/52'])
       const [row] = await getDb().select().from(promotionFinding)

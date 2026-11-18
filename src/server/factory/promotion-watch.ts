@@ -24,6 +24,13 @@ import {
   type Rerun,
 } from './promotion'
 
+/** The label the scheduler sorts first. */
+const FIRST = {
+  name: 'priority:1',
+  color: 'b60205',
+  description: 'The factory takes this issue first',
+}
+
 export type PromotionWatchDeps = {
   db: Database
   app: GithubApp
@@ -331,11 +338,13 @@ async function openIssue(
       color: '5319e7',
       description: 'The factory builds this issue',
     })
+    await deps.issues.ensureLabel(repo, token, FIRST)
   }
   const issue = await deps.issues.createIssue(repo, token, {
     title: issueTitle(check, where),
     body: issueBody(check, where, previous),
-    labels: forFactory ? [FACTORY_LABEL] : [],
+    // A red promotion holds every release of the repository, so its fix goes ahead of the queue.
+    labels: forFactory ? [FACTORY_LABEL, FIRST.name] : [],
   })
   await deps.db
     .update(promotionFinding)

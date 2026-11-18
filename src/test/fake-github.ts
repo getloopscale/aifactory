@@ -926,6 +926,7 @@ export class FakeGithub implements GithubApi {
           .checkRuns(sha)
           .map(({ name, status, conclusion }) => ({ name, status, conclusion })),
         statuses: combined(),
+        statusContexts: r.commitStatuses(sha).map((s) => ({ context: s.context, state: s.state })),
       }
     })
   }

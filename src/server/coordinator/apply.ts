@@ -131,7 +131,11 @@ async function perform(
   } else if (decision.action === 'scope' && decision.draft) {
     return { followUpIssue: await scope(deps, exception.taskId, decision.draft) }
   } else if (decision.action === 'release' && decision.bump) {
-    await release(deps, exception.taskId, { bump: decision.bump, actor: COORDINATOR_ACTOR })
+    await release(deps, exception.taskId, {
+      bump: decision.bump,
+      actor: COORDINATOR_ACTOR,
+      expectedHead: exception.verifiedHead,
+    })
   } else if (decision.action === 'fix_base' && decision.base) {
     return { done: await fixBase(deps, decision.base) }
   } else {
