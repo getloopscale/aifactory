@@ -142,6 +142,14 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc' } })).toBeNull()
   })
 
+  it('reads the sandbox provider refusing past its concurrent sandbox limit as the environment', () => {
+    const refused =
+      'Rate limit exceeded, please try again later - you have reached the maximum number of concurrent E2B sandboxes (10).'
+
+    expect(retryableFailure({ error: refused })).toBe('environment')
+    expect(retryableFailure({ error: `the sandbox did not start: ${refused}` })).toBe('environment')
+  })
+
   it('reads a sandbox provider that refuses for billing as the environment, not as the work', () => {
     expect(
       retryableFailure({ error: 'the sandbox did not start: 403: team is blocked: spend_limit' }),
