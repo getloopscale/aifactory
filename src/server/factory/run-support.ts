@@ -125,10 +125,32 @@ export async function must(backend: SandboxBackend, command: string) {
 
 export type StoredCheck = Pick<CheckResult, 'name' | 'command' | 'passed' | 'durationMs' | 'output'>
 
-export function checkSummary(rows: StoredCheck[]): string {
-  return rows
+export function checkSummary(rows: StoredCheck[], repository?: string): string {
+  const list = rows
     .map((r) => `- ${r.passed ? 'passed' : 'failed'}: \`${r.command}\` (${seconds(r.durationMs)})`)
     .join('\n')
+  const missing = repository ? unestablishedGates(repository, rows) : []
+  if (missing.length === 0) return list
+  return `${list}\n\nNot run by the factory: ${missing.map((g) => `\`pnpm ${g}\``).join(', ')}. The CI quality job enforces them, so it can still fail on this change.`
+}
+
+/** The quality gates the CI of the factory's own repository runs and the factory's checks may leave out. */
+const CI_QUALITY_GATES = ['coverage', 'crap', 'dup', 'mutation']
+const OWN_REPOSITORY = 'paulohenriquevn/aifactory'
+
+/**
+ * The CI quality gates of `repository` that no passing recorded check established. Only commands whose
+ * meaning is known count (`pnpm <gate>` or `pnpm quality`); any other command establishes nothing.
+ */
+export function unestablishedGates(repository: string, rows: StoredCheck[]): string[] {
+  if (repository.toLowerCase() !== OWN_REPOSITORY) return []
+  const passed = new Set(rows.filter((r) => r.passed).map((r) => r.command.trim()))
+  // Only the whole command counts: a wrapper, an argument or a masked exit status proves nothing.
+  const ran = (gate: string) =>
+    [`pnpm ${gate}`, `pnpm run ${gate}`, 'pnpm quality', 'pnpm run quality'].some((c) =>
+      passed.has(c),
+    )
+  return CI_QUALITY_GATES.filter((g) => !ran(g))
 }
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
@@ -142,6 +164,7 @@ export function pullRequestBody(input: {
   handoff?: string
   /** The plan the builder wrote before it changed anything, as markdown. */
   plan?: string
+  repository?: string
 }): string {
   const { review } = input
   const remaining = review.outcome.findings
@@ -156,7 +179,7 @@ export function pullRequestBody(input: {
     ...(input.handoff ? [`**This needs a person:** ${input.handoff}.`, ''] : []),
     `Checks the factory ran on \`${input.sha.slice(0, 7)}\`:`,
     '',
-    checkSummary(input.rows),
+    checkSummary(input.rows, input.repository),
     '',
     `Independent review by ${review.reviewer}, attempt ${review.attempt}: ${review.outcome.verdict}. ${review.outcome.summary}`,
     ...(remaining.length > 0 ? ['', renderFindings(remaining)] : []),
@@ -181,13 +204,14 @@ export function resolvedComment(input: {
   reviewer: string
   review: string
   rows: StoredCheck[]
+  repository?: string
 }): string {
   return [
     `The factory found this already resolved at ${input.sha}, so it changed nothing and is closing the issue.`,
     '',
     `Checks the factory ran on \`${input.sha.slice(0, 7)}\`:`,
     '',
-    checkSummary(input.rows),
+    checkSummary(input.rows, input.repository),
     '',
     `Independent review by ${input.reviewer}: ${input.review}`,
     '',
