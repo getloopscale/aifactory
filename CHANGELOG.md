@@ -40,6 +40,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A task that failed because its harness would not install in the sandbox (`claude did not install`, `codex did not install`) or because the provider ended the sandbox in the middle of a command (`The sandbox was killed or reached its end of life`) now runs again on its own like any other failure of the environment, instead of waiting in Failed for a person (#266)
+
 - Approved work merges within minutes instead of waiting for a worker to finish a run. The `merge-task` and `resume-task` jobs, which take seconds, are queued ahead of every queued run, which can take an hour each (#259)
 - A task sent back on its pushed branch that asked a question, got an answer and then changed nothing no longer fails with `the checkout is not the pushed commit`. The resumed run used to take it as a new issue the agent found already done and checked the base commit; it now checks and reviews the head of its branch (#255)
 - The board leaves cancelled tasks out. Their issue was closed or lost the `factory` label, so they no longer count in Needs a person (#253)
