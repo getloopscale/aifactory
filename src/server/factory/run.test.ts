@@ -8,8 +8,9 @@ import { retryableFailure } from '../../shared/panel'
 import { GET } from '../routes/panel/codex/login'
 
 import { CREDENTIAL_RENEWAL_MS, githubEgress } from './credential-renewal'
-import { FakeSandbox } from './fake-sandbox'
+import { FakeBackend, FakeSandbox } from './fake-sandbox'
 import { codexHarness } from './harness-codex'
+import { buildPrompt } from './harness'
 import { heldFor, Run } from './run'
 import { StageFailure } from './run-support'
 import type { EgressRule } from './sandbox'
@@ -221,5 +222,71 @@ describe('approved work the factory holds for its owner', () => {
 
   it('holds nothing when neither changed', () => {
     expect(heldFor([], [])).toBeUndefined()
+  })
+})
+
+describe('the install before the builder', () => {
+  class Stop extends Error {}
+
+  /** A Run that has only what `start` touches up to the builder's first pass, which records what it saw. */
+  function starting(checks: { name: string; command: string }[], install: { exitCode?: number }) {
+    const backend = new FakeBackend((command) =>
+      command.endsWith('&& pnpm install') ? { ...install, stderr: 'tarball missing' } : undefined,
+    )
+    const seen: { installs: number; prompt: string }[] = []
+    const run = Object.create(Run.prototype) as Record<string, unknown>
+    run.c = {
+      deps: { checks, sandbox: {} },
+      repo: {},
+      row: { repository: 'o/r', issueNumber: 7 },
+      issue: { title: 'T', body: 'B' },
+      branch: 'factory/7',
+      state: { current: 'start' },
+    }
+    run.sandbox = { backend }
+    run.repoDir = '/work/repo'
+    run.baseSha = 'a'.repeat(40)
+    run.planChange = async () => {}
+    run.failUnfinished = async () => {
+      throw new Stop()
+    }
+    run.firstPass = async function (this: { buildInput: () => Parameters<typeof buildPrompt>[0] }) {
+      seen.push({
+        installs: backend.commands.filter((c) => c.endsWith('&& pnpm install')).length,
+        prompt: buildPrompt(this.buildInput()),
+      })
+      return { ok: false, summary: 'stop here' }
+    }
+    const start = () => (run as unknown as { start: () => Promise<unknown> }).start()
+    return { start, backend, seen }
+  }
+
+  const checks = [
+    { name: 'install', command: 'pnpm install' },
+    { name: 'test', command: 'pnpm test' },
+  ]
+
+  it('runs the install in the checkout once, before the builder is called', async () => {
+    const { start, backend, seen } = starting(checks, {})
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    expect(backend.commands).toEqual(['cd /work/repo && pnpm install'])
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.installs).toBe(1)
+    expect(seen[0]!.prompt).not.toContain('before your pass to install')
+  })
+
+  it('records a failed install in the prompt and goes on to the builder', async () => {
+    const { start, seen } = starting(checks, { exitCode: 1 })
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.prompt).toContain('before your pass to install')
+    expect(seen[0]!.prompt).toContain('tarball missing')
+  })
+
+  it('runs nothing extra for a repository with no install check', async () => {
+    const { start, backend, seen } = starting([{ name: 'test', command: 'pnpm test' }], {})
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    expect(backend.commands).toEqual([])
+    expect(seen).toHaveLength(1)
   })
 })

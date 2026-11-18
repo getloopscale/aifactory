@@ -87,6 +87,8 @@ type World = {
   fix?: { exitCode?: number; timedOut?: boolean }
   /** Whether a fix command leaves a change in the checkout. */
   fixChanges?: boolean
+  /** What the install check answers (the command ends with `&& pnpm install`). */
+  install?: Reply
 }
 
 function sandbox(world: World = {}) {
@@ -98,6 +100,7 @@ function sandbox(world: World = {}) {
   return new FakeSandbox((command): Reply | undefined => {
     if (command.includes('commit -F')) commits += 1
     if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
+    if (command.endsWith('&& pnpm install') && world.install) return world.install
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
@@ -953,5 +956,57 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false })
     expect(result.reason).toContain('is not a commit hash')
     expect(provider.specs).toEqual([])
+  })
+})
+
+describe('runCase install', () => {
+  const withInstall = {
+    ...evalCase,
+    checks: [{ name: 'install', command: 'pnpm install' }, ...evalCase.checks],
+  }
+  const installs = (provider: FakeSandbox) =>
+    provider.backend.commands.filter((c) => c.endsWith('&& pnpm install'))
+
+  it('installs the project before the builder runs, and again for the checks', async () => {
+    const provider = sandbox()
+    const inner = agent('builder', planned(built()))
+    const seen: number[] = []
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        seen.push(installs(provider).length)
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])), withInstall)
+
+    expect(seen[0]).toBe(1)
+    // The checks clean and install on their own: one for the builder, one for the commit.
+    expect(installs(provider)).toHaveLength(2)
+    expect(builder.prompts[0]).not.toContain('before your pass to install')
+  })
+
+  it('tells the builder a failed install and goes on', async () => {
+    const provider = sandbox({ install: { exitCode: 1, stderr: 'tarball missing' } })
+    const builder = agent('builder', planned(built()))
+
+    const result = await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      withInstall,
+    )
+
+    expect(builder.prompts[0]).toContain('before your pass to install')
+    expect(builder.prompts[0]).toContain('tarball missing')
+    expect(result).toBeDefined()
+  })
+
+  it('runs no install for a case with no install check', async () => {
+    const provider = sandbox()
+    await runCase(
+      deps(provider, agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    expect(installs(provider)).toEqual([])
   })
 })
