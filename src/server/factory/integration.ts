@@ -19,6 +19,7 @@ import {
   type Pinned,
   type PromotionDeps,
 } from './promotion-merge'
+import { selfCiRefusal } from './self-ci'
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
@@ -208,6 +209,8 @@ export async function integrate(
   const heldUntil = await integrationHeldUntil(db, repository, new Date())
   if (heldUntil) return { heldUntil }
   const required = await api.requiredChecks(repository, token, work.integration)
+  const refusal = selfCiRefusal(repository, required)
+  if (refusal) return { error: refusal }
   const pull = { repo: repository, token, number: opened.number, sha }
   if (
     required.length > 0 &&
