@@ -311,6 +311,7 @@ describe('the state the fake GitHub holds', () => {
         { name: 'factory', status: 'completed', conclusion: 'success' },
       ],
       statuses: 'pending',
+      statusContexts: [{ context: 'deploy', state: 'pending' }],
     })
     expect(
       (await github.checkReports(REPO, 't', 'abc')).map((r) => [r.name, r.state, r.detail]),

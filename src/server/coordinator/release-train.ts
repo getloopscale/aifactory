@@ -39,7 +39,8 @@ export type RepositoryReleaseFacts = {
   working: number
   /** A release or a publication of the repository that has not finished, said as a person reads it. */
   inFlight: string | undefined
-  branch: { state: ReleaseBranchState; detail: string }
+  /** `sha` is the commit `watch-main` last watched on the release branch. */
+  branch: { state: ReleaseBranchState; detail: string; sha?: string }
   /** The facts below are read only when the train does not hold the repository (`trainHolds`). */
   head?: Read<string>
   /**
@@ -51,7 +52,70 @@ export type RepositoryReleaseFacts = {
   /** Why the release that waited for the release branch's checks on this head was refused, if it was. */
   waitRefusal?: string
   labels?: Read<ReleasedIssue[]>
+  /** Read only for a red release branch with commits to release: the checks of the red commit and of `head`. */
+  recovery?: Read<RedRecovery>
 }
+
+type CheckReport = { name: string; status: string; conclusion: string | null }
+
+/** The checks that failed on the watched commit of the release branch, and what `develop` reports at its head. */
+export type RedRecovery = {
+  failing: string[]
+  /** The combined commit status of the watched commit. */
+  failingStatuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
+  developRuns: CheckReport[]
+  developStatuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
+  /** The contexts of the commit statuses that failed on the watched commit, and each status of `develop`. */
+  failingContexts?: string[]
+  developContexts?: { context: string; state: string }[]
+}
+
+const FAILED = ['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']
+
+/** The names of the check runs that finished red. */
+export const failingNames = (runs: CheckReport[]): string[] => [
+  ...new Set(
+    runs
+      .filter((r) => r.status === 'completed' && FAILED.includes(r.conclusion ?? ''))
+      .map((r) => r.name),
+  ),
+]
+
+/**
+ * Whether the release is the fix of a red release branch: every check that failed there reports on the head
+ * of `develop`, every report of it passed, and no commit status is red or pending. With no failing check
+ * known, nothing says the branch is fixed.
+ */
+export function releaseFixesRed(r: RedRecovery): boolean {
+  // A commit status that failed on the red commit must be named, and matched by context to a green one on
+  // develop; one that cannot be named cannot be shown fixed.
+  const failedContexts = r.failingContexts ?? []
+  if (['failure', 'error'].includes(r.failingStatuses) && failedContexts.length === 0) return false
+  if (r.failing.length === 0 && failedContexts.length === 0) return false
+  if (['failure', 'error', 'pending'].includes(r.developStatuses)) return false
+  const contextsFixed = failedContexts.every((context) => {
+    const reports = (r.developContexts ?? []).filter((s) => s.context === context)
+    return reports.length > 0 && reports.every((s) => s.state === 'success')
+  })
+  return (
+    contextsFixed &&
+    r.failing.every((name) => {
+      const reports = r.developRuns.filter((run) => run.name === name)
+      return (
+        reports.length > 0 &&
+        reports.every((run) => run.status === 'completed' && run.conclusion === 'success')
+      )
+    })
+  )
+}
+
+/** A red release branch that the release itself fixes, so it does not hold the train. */
+const redIsFixed = (f: RepositoryReleaseFacts) =>
+  f.branch.state === 'red' && f.recovery?.read === true && releaseFixesRed(f.recovery.value)
+
+/** Whether the train must read the checks of the red commit and of `develop` before it decides. */
+export const needsRecovery = (f: RepositoryReleaseFacts) =>
+  f.branch.state === 'red' && !!f.branch.sha && (f.ahead ?? 0) > 0
 
 /** Labels that make an issue a feature, which bumps the minor version. */
 const FEATURE_LABELS = ['enhancement', 'feature']
@@ -131,7 +195,8 @@ const unknown = (taskId: number, head: string, evidence: string) => ({
  * the issues are worth reading at all.
  */
 export function attemptDue(f: RepositoryReleaseFacts) {
-  if (trainHolds(f) || !f.head?.read || f.ahead === 0 || f.branch.state === 'red') return undefined
+  if (trainHolds(f) || !f.head?.read || f.ahead === 0) return undefined
+  if (f.branch.state === 'red' && !redIsFixed(f)) return undefined
   return nextAttempt(f.attempts ?? [], f.waitRefusal)
 }
 
@@ -144,7 +209,11 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   if (f.ahead === 0) return undefined
   const head = f.head.value
   const at = { taskId, head, ...(f.mode === 'trial' ? { trialOnly: true as const } : {}) }
-  if (f.branch.state === 'red') return { kind: 'release_blocked', ...at, evidence: f.branch.detail }
+  if (f.branch.state === 'red' && !redIsFixed(f)) {
+    if (f.recovery?.read === false)
+      return unknown(taskId, head, notRead(f.recovery, 'the checks of the red release branch'))
+    return { kind: 'release_blocked', ...at, evidence: f.branch.detail }
+  }
   const kind = attemptDue(f)
   if (!kind) return undefined
   if (!f.labels?.read) return unknown(taskId, head, notRead(f.labels, 'the labels of the issues'))
@@ -152,6 +221,7 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   return {
     kind,
     ...at,
+    ...(f.branch.state === 'red' ? { verifiedHead: head } : {}),
     evidence: `${f.releasable.length} integrated issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
     released: f.labels.value,
   }
