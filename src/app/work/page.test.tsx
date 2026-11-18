@@ -138,17 +138,19 @@ describe('board', () => {
       en.columns.working,
       en.columns.waiting,
       en.columns.retrying,
+      en.columns.merge,
       en.columns.review,
       en.columns.released,
       en.columns.resolved,
       en.columns.attention,
     ])
     const grid = regions[0].parentElement as HTMLElement
-    expect(grid.style.gridTemplateColumns).toBe('repeat(8, minmax(176px, 1fr))')
+    expect(grid.style.gridTemplateColumns).toBe('repeat(9, minmax(176px, 1fr))')
     for (const name of [
       en.columns.queued,
       en.columns.waiting,
       en.columns.retrying,
+      en.columns.merge,
       en.columns.review,
       en.columns.released,
     ]) {
@@ -330,7 +332,7 @@ describe('board', () => {
     expect(screen.queryByText(en.board.restOfQueue)).toBeNull()
   })
 
-  it('writes the eight column titles in Portuguese, in the same order', async () => {
+  it('writes the nine column titles in Portuguese, in the same order', async () => {
     window.localStorage.setItem('aifactory.language', 'pt-BR')
     serve({ tasks: [card({ id: 1, title: 'Building one' })] })
     render(
@@ -346,6 +348,7 @@ describe('board', () => {
       'working',
       'waiting',
       'retrying',
+      'merge',
       'review',
       'released',
       'resolved',
@@ -354,7 +357,21 @@ describe('board', () => {
     expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(
       order.map((id) => ptBR.columns[id]),
     )
+    expect(ptBR.columns.merge).toBe('Merge')
     expect(screen.getByText(ptBR.stages.build)).toBeDefined()
+  })
+
+  it('shows approved work that is being merged in the Merge column, as merging', async () => {
+    serve({ tasks: [card({ id: 1, title: 'Merging one', stage: 'merge', column: 'merge' })] })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Merging one')).toBeDefined())
+    const column = within(screen.getByRole('region', { name: en.columns.merge }))
+    expect(column.getByText('Merging one')).toBeDefined()
+    expect(column.getByText(en.stages.merge)).toBeDefined()
   })
 })
 

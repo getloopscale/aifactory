@@ -52,7 +52,14 @@ import { eventsOf } from './transcript-store'
 import { parseRecipe } from './recipe'
 import type { CodingHarness } from './harness'
 import type { Finding } from './review'
-import { mergeEgress, resumeTask, runTask, type RunTaskDeps } from './run-task'
+import {
+  mergeEgress,
+  resumeTask as resumeOnly,
+  runTask as runOnly,
+  type RunTaskDeps,
+} from './run-task'
+import { mergeTask } from './merge-task'
+import { queuedMerges, thenMerge } from '../../test/merge-job'
 import { runContinuation } from './run-support'
 import { fixedBaseNote } from './ci-wait'
 import {
@@ -77,11 +84,23 @@ beforeAll(async () => {
   await jobBackend().migrate()
 })
 beforeEach(async () => {
+  // No worker runs here: a test takes the merge-task job its run queued, and none is left for the next.
+  await getPool().query(`delete from theokit_jobs where name = 'merge-task'`)
   await getPool().query(
     'truncate table promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
+
+/** A run, and the merge-task job it queued when the review approved its work. */
+async function runTask(...args: Parameters<typeof runOnly>) {
+  return thenMerge(args[0], args[1], await runOnly(...args))
+}
+
+/** A resumed run, and the merge-task job it queued when the review approved its work. */
+async function resumeTask(...args: Parameters<typeof resumeOnly>) {
+  return thenMerge(args[0], args[1], await resumeOnly(...args))
+}
 
 async function seedTask(issueNumber = 7): Promise<number> {
   const db = getDb()
@@ -500,6 +519,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -508,6 +528,89 @@ describe('runTask', () => {
     expect(sandbox.backend.commands.some((c) => c.includes('push origin factory/7 '))).toBe(true)
     expect(github.asked).toContain('paulo/app')
     expect(sandbox.stopped).toBe(1)
+  })
+
+  it('ends an approved run in merge, with a merge-task job for the approved commit and no pull request yet', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+
+    const result = await runOnly(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'merging', branch: 'factory/7', sha: 'abc123def' })
+    expect(await stagesOf(id)).toEqual(['sandbox', 'build', 'push', 'verify', 'review', 'merge'])
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('merge')
+    expect(row.pullRequestUrl).toBeNull()
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    expect(seen.pulls).toEqual([])
+    expect(seen.merges).toEqual([])
+    const [merge] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'merge')))
+    expect(merge.detail).toMatchObject({
+      branch: 'factory/7',
+      sha: 'abc123def',
+      attempts: 1,
+      reviewer: 'fake-reviewer',
+      title: 'Add truncate (#7)',
+      issueTitle: 'Add truncate',
+    })
+    expect((merge.detail as { pullRequestBody: string }).pullRequestBody).toContain(
+      'Independent review by fake-reviewer, attempt 1: approve.',
+    )
+    expect(sandbox.stopped).toBe(1)
+  })
+
+  it('opens the pull request and integrates it at the approved commit when the merge-task job runs', async () => {
+    const id = await seedTask()
+    const given = deps(new FakeSandbox(changed()))
+    await runOnly(given, id)
+
+    const result = await mergeTask(given, id, 'abc123def')
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def', pullRequestUrl: PR_URL })
+    expect(seen.pulls).toEqual(['factory/7'])
+    expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'merge',
+      'pr',
+      'done',
+    ])
+  })
+
+  it('does nothing when the merge-task job finds its task no longer in merge', async () => {
+    const id = await seedTask()
+    const given = deps(new FakeSandbox(changed()))
+    await runOnly(given, id)
+    await getDb().update(task).set({ stage: 'cancelled' }).where(eq(task.id, id))
+
+    const result = await mergeTask(given, id, 'abc123def')
+
+    expect(result).toEqual({
+      status: 'skipped',
+      reason: 'only approved work that waits in merge is taken to its pull request',
+    })
+    expect(seen.pulls).toEqual([])
+    expect(await stagesOf(id)).toEqual(['sandbox', 'build', 'push', 'verify', 'review', 'merge'])
+  })
+
+  it('does nothing when the merge-task job is for another commit than the one waiting in merge', async () => {
+    const id = await seedTask()
+    const given = deps(new FakeSandbox(changed()))
+    await runOnly(given, id)
+
+    const result = await mergeTask(given, id, 'other999')
+
+    expect(result).toMatchObject({ status: 'skipped' })
+    expect(seen.pulls).toEqual([])
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('merge')
   })
 
   it("passes format on the first round when the repository's fix commits what the builder left unformatted", async () => {
@@ -544,6 +647,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -594,6 +698,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -631,6 +736,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -1653,6 +1759,7 @@ describe('runTask review loop', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -3742,6 +3849,7 @@ describe('runTask waiting for an answer', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -5620,6 +5728,7 @@ describe('runTask with a knowledge base', () => {
         'push',
         'verify',
         'review',
+        'merge',
         'pr',
         'done',
       ])

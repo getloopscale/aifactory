@@ -92,6 +92,11 @@ export type RunResult =
       reason: string
       preRelease?: string
     }
+  /**
+   * The review approved the work and the task waits in `merge` for its `merge-task` job, which opens the pull
+   * request and integrates it (`factory/merge-task.ts`). The run's part succeeded.
+   */
+  | { status: 'merging'; branch: string; sha: string; summary: string }
   /** The code already did what the issue asks: the checks passed there, the reviewer agreed, the issue is closed. */
   | { status: 'resolved'; sha: string; summary: string }
   | { status: 'waiting'; question: string }

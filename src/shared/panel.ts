@@ -11,6 +11,7 @@ export type Stage =
   | 'verify'
   | 'review'
   | 'waiting'
+  | 'merge'
   | 'pr'
   | 'done'
   | 'released'
@@ -20,13 +21,22 @@ export type Stage =
 
 /** Where a stage sits on the board. */
 export type Column =
-  'queued' | 'working' | 'waiting' | 'retrying' | 'review' | 'released' | 'resolved' | 'attention'
+  | 'queued'
+  | 'working'
+  | 'waiting'
+  | 'retrying'
+  | 'merge'
+  | 'review'
+  | 'released'
+  | 'resolved'
+  | 'attention'
 
 export const COLUMNS: { id: Column; title: string }[] = [
   { id: 'queued', title: 'Queued' },
   { id: 'working', title: 'Working' },
   { id: 'waiting', title: 'Waiting for you' },
   { id: 'retrying', title: 'Will retry itself' },
+  { id: 'merge', title: 'Merge' },
   { id: 'review', title: 'Delivered' },
   { id: 'released', title: 'Released' },
   { id: 'resolved', title: 'Already resolved' },
@@ -110,6 +120,10 @@ export function columnOf(
       return 'queued'
     case 'waiting':
       return 'waiting'
+    // Approved work on its way to the integration branch: waiting for the merge, then at its pull request.
+    case 'merge':
+    case 'pr':
+      return 'merge'
     case 'done':
       return 'review'
     case 'released':

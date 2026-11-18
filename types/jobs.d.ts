@@ -15,6 +15,11 @@ declare module 'theokit/server/jobs' {
       resume?: boolean
       mergeBase?: boolean
     }
+    /**
+     * Takes work the review approved, waiting in `merge`, to its pull request and the integration branch, at
+     * the approved commit.
+     */
+    'merge-task': { taskId: number; sha: string }
     /** Continues a task whose question was answered, from the snapshot taken when it was asked. */
     'resume-task': { taskId: number; questionId: number }
     /** Has an agent read a repository and split a goal into issues. */

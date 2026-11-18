@@ -27,15 +27,18 @@ const acting = (event: TransitionEvent, facts: Omit<Facts, 'stage'> = {}) =>
       .map(([stage, o]) => [stage, (o as Extract<Outcome, { kind: 'action' }>).action]),
   )
 
-/** What every stage outside `acting` answers, which must be one outcome. */
+/**
+ * What every stage outside `acting` answers, which must be one outcome. Approved work being merged refuses
+ * what a person asks with a reason of its own, which its own tests read, so it is left out here.
+ */
 const elsewhere = (event: TransitionEvent, facts: Omit<Facts, 'stage'> = {}) => {
-  const others = TASK_STAGES.map((stage) => outcome({ ...facts, stage }, event)).filter(
-    (o) => o.kind !== 'action',
-  )
+  const others = TASK_STAGES.filter((stage) => stage !== 'merge')
+    .map((stage) => outcome({ ...facts, stage }, event))
+    .filter((o) => o.kind !== 'action')
   return [...new Map(others.map((o) => [JSON.stringify(o), o])).values()]
 }
 
-const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
+const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'merge', 'pr'] as const
 const each = <T>(stages: readonly TaskStage[], value: T) =>
   Object.fromEntries(stages.map((stage) => [stage, value]))
 
@@ -57,6 +60,7 @@ describe('the transition table', () => {
       integrate: true,
       merged_by_person: true,
       needs_refinement: true,
+      merge_due: true,
       issue_labeled: true,
       issue_comment_created: true,
       pull_request_comment_created: true,
@@ -70,7 +74,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(25 * 14)
+    expect(pairs).toHaveLength(26 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -225,6 +229,7 @@ describe('what a person asks for in the panel', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
     ] as const
     expect(acting('retry_from_finding', { mergedSha: 'm' })).toEqual({
@@ -264,6 +269,48 @@ describe('what a person asks for in the panel', () => {
       refused(
         'this work was not integrated: its pull request is still waiting to be merged into the integration branch, so it is not on the pre-release branch',
       ),
+    )
+  })
+})
+
+describe('approved work while the factory merges it', () => {
+  const merging = refused(
+    'the reviewer approved this work and the factory is merging it now: wait until it is delivered',
+  )
+  const facts = { headSha: 'abc' }
+
+  it.each(['approve', 'request_changes', 'retry', 'resolve', 'release'] as const)(
+    'refuses %s from a person, saying the work is being merged',
+    (event) => {
+      expect(outcome({ ...facts, stage: 'merge' }, event)).toEqual(merging)
+    },
+  )
+
+  it('lets the merge-task job take it to its pull request only while it is in merge', () => {
+    expect(acting('merge_due', facts)).toEqual({ merge: 'integrate_approved' })
+    expect(elsewhere('merge_due', facts)).toEqual([
+      ignored('only approved work that waits in merge is taken to its pull request'),
+    ])
+  })
+
+  it('is started over from a supervisor finding, as a stalled run is', () => {
+    expect(outcome({ ...facts, stage: 'merge' }, 'retry_from_finding')).toEqual(act('start_over'))
+  })
+
+  it('is not run again on its own, sent back by the coordinator or integrated as a pull request', () => {
+    expect(outcome({ stage: 'merge' }, 'retry_due').kind).toBe('refused')
+    expect(outcome({ stage: 'merge' }, 'conflict_rerun').kind).toBe('refused')
+    expect(outcome({ stage: 'merge' }, 'coordinator_send_back').kind).toBe('refused')
+    expect(outcome({ stage: 'merge' }, 'integrate').kind).toBe('ignored')
+  })
+
+  it('is cancelled when its issue is closed, and ignores what is written on a pull request it has not opened', () => {
+    expect(outcome({ stage: 'merge' }, 'issue_closed')).toEqual(act('cancel'))
+    expect(outcome({ stage: 'merge', trusted: true }, 'pull_request_comment_created')).toEqual(
+      ignored('the task has no pull request waiting for a person'),
+    )
+    expect(outcome({ stage: 'merge', awaitingCiSha: 'abc' }, 'check_suite_completed').kind).toBe(
+      'ignored',
     )
   })
 })

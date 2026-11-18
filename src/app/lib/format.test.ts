@@ -141,6 +141,13 @@ describe('describeEvent', () => {
   const line = (stage: Stage, detail: Record<string, unknown> | null) =>
     describeEvent({ id: 1, stage, at: '2026-11-04T10:00:00Z', detail } as TimelineEvent)
 
+  it('says which approved commit waits for its merge, and by whose review', () => {
+    expect(line('merge', { sha: 'abc1234def', reviewer: 'codex' })).toBe(
+      'abc1234, approved by codex',
+    )
+    expect(line('merge', { sha: 'abc1234def' })).toBe('abc1234')
+  })
+
   it('says what a person asked for, with the note when there is one', () => {
     expect(line('intake', { decision: 'retry' })).toBe('a person retry')
     expect(line('intake', { decision: 'request_changes', note: 'rename it' })).toBe(
