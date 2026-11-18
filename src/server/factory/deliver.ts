@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, notExists, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -9,6 +9,7 @@ import {
   releaseWait,
   repository,
   review,
+  stageEvent,
   task,
   watch,
 } from '../db/schema'
@@ -398,12 +399,27 @@ async function waitForChecks(
   }
 }
 
-/** Gives back the claim a release took on a resolved task: only a task still claimed (`released`) moves. */
+/**
+ * Gives back the claim a release took on a resolved task: only a task still claimed moves, never one a
+ * release already shipped (it has a `released` event).
+ */
 async function unclaimResolved(db: Database, taskId: number) {
   await db
     .update(task)
     .set({ stage: 'done' })
-    .where(and(eq(task.id, taskId), eq(task.stage, 'released'), isNull(task.mergedSha)))
+    .where(
+      and(
+        eq(task.id, taskId),
+        eq(task.stage, 'released'),
+        isNull(task.mergedSha),
+        notExists(
+          db
+            .select({ id: stageEvent.id })
+            .from(stageEvent)
+            .where(and(eq(stageEvent.taskId, taskId), eq(stageEvent.stage, 'released'))),
+        ),
+      ),
+    )
 }
 
 /**
