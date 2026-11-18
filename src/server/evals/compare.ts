@@ -20,8 +20,11 @@ export type CaseResult = {
   reachedVerdict?: boolean
 }
 
-/** A result recorded without the field counts as a verdict when it passed or a review round ran. */
-export const reachedVerdict = (r: CaseResult): boolean => r.reachedVerdict ?? (r.passed || r.reviewRounds > 0)
+/**
+ * A result recorded without the field counts as a verdict only when it passed (an approval): `reviewRounds` also
+ * counts a review that gave no valid verdict, so a failed legacy result is ambiguous and left out.
+ */
+export const reachedVerdict = (r: CaseResult): boolean => r.reachedVerdict ?? r.passed
 
 /** Which agents ran, and with what model, so a change made outside the code still counts as a change. */
 export type AgentSetup = Record<string, string>

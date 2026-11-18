@@ -112,7 +112,7 @@ describe('compareWithBaseline', () => {
     expect(compareWithBaseline(at, before).ok).toBe(true)
     const refused = compareWithBaseline(above, before)
     expect(refused.ok).toBe(false)
-    expect(refused.reasons).toEqual(['the mean cost per case rose from US$ 0.50 to US$ 0.64 (5 cases that ran to a verdict in both runs)'])
+    expect(refused.reasons).toEqual(['the mean cost per case rose from US$ 0.50 to US$ 0.64 (4 cases that ran to a verdict in both runs)'])
   })
 
   it('refuses a cost rise that one early failure at zero cost would hide', () => {
@@ -128,10 +128,10 @@ describe('compareWithBaseline', () => {
     ])
   })
 
-  it('leaves out a case that reached no verdict in the baseline, and a legacy result by its review rounds', () => {
+  it('leaves out a case that reached no verdict in the baseline, and a legacy failure, since its review rounds may hold an invalid review', () => {
     const base = baseline([
       result('a', true),
-      { ...result('b', false, 0), reviewRounds: 0 },
+      { ...result('b', false, 0), reviewRounds: 1 },
     ])
     const run = [result('a', true, 0.5), result('b', true, 9)]
 
