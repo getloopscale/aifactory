@@ -2950,6 +2950,44 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(done?.detail).not.toMatchObject({ unchanged: true })
   })
 
+  it('checks and reviews an unreviewed head when the factory sent the work back with its own note and the agent changes nothing', async () => {
+    // The coordinator sends a run that ran out of time back with a note, which reaches the run as feedback
+    // from the factory (`fromChecks`), on a branch no review ever read and with no pull request yet.
+    const pushed = 'e'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb().update(task).set({ stage: 'intake', headSha: pushed }).where(eq(task.id, id))
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return {
+          ok: true,
+          summary: 'The earlier work is in place; I made no new change this pass.',
+        }
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'The last run ran out of time before it finished. Continue from the branch.',
+      fromChecks: true,
+    })
+
+    expect(result).toMatchObject({ sha: pushed })
+    const stages = await stagesOf(id)
+    expect(stages).toContain('verify')
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('failed')
+  })
+
   it('pushes the merge the agent committed itself, with nothing left uncommitted, and checks and reviews it', async () => {
     const approved = 'a'.repeat(40)
     const merge = 'b'.repeat(40)
