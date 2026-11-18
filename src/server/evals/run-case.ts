@@ -484,6 +484,7 @@ class CaseRun {
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
+      reachedVerdict: !('stopped' in end) && end.verdict !== 'invalid',
     }
   }
 }
@@ -545,6 +546,7 @@ export async function runCase(
     durationMs: Date.now() - started,
     attempts: 0,
     reviewRounds: 0,
+    reachedVerdict: false,
   })
   // The hash reaches a shell, so only a full commit hash gets that far.
   if (!COMMIT.test(c.baseSha))
