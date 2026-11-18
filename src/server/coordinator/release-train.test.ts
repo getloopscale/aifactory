@@ -8,6 +8,10 @@ import {
   COORDINATOR_ACTOR,
   passingRefusal,
   recogniseRelease,
+  releaseFixesRed,
+  failingNames,
+  needsRecovery,
+  type RedRecovery,
   trainHolds,
   type RepositoryReleaseFacts,
 } from './release-train'
@@ -287,5 +291,93 @@ describe('a fact the train never read', () => {
 describe('the actor of a release the train starts', () => {
   it('is an agent, so it never counts as a decision of a person', () => {
     expect(COORDINATOR_ACTOR).toBe('agent:coordinator')
+  })
+})
+
+describe('a red release branch that the release itself fixes', () => {
+  const ok = { status: 'completed', conclusion: 'success' }
+  const recovery = (over: Partial<RedRecovery> = {}): RedRecovery => ({
+    failing: ['check', 'quality'],
+    developRuns: [
+      { name: 'check', ...ok },
+      { name: 'quality', ...ok },
+    ],
+    developStatuses: 'none',
+    ...over,
+  })
+  const red = (r?: ReturnType<typeof readOf<RedRecovery>> | ReturnType<typeof unread>) =>
+    facts({
+      branch: { state: 'red', detail: 'failing: check, quality', sha: 'main123' },
+      ...(r ? { recovery: r as RepositoryReleaseFacts['recovery'] } : {}),
+    })
+
+  it('releases when every failing check passes on develop', () => {
+    const f = red(readOf(recovery()))
+    expect(attemptDue(f)).toBe('release_ready')
+    expect(recogniseRelease(f)?.kind).toBe('release_ready')
+  })
+
+  it('stays blocked when a check still fails, is pending, missing or reported twice with a failure', () => {
+    const bad = [
+      recovery({
+        developRuns: [
+          { name: 'check', ...ok },
+          { name: 'quality', status: 'completed', conclusion: 'failure' },
+        ],
+      }),
+      recovery({
+        developRuns: [
+          { name: 'check', ...ok },
+          { name: 'quality', status: 'in_progress', conclusion: null },
+        ],
+      }),
+      recovery({ developRuns: [{ name: 'check', ...ok }] }),
+      recovery({
+        developRuns: [
+          { name: 'check', ...ok },
+          { name: 'quality', ...ok },
+          { name: 'quality', status: 'completed', conclusion: 'failure' },
+        ],
+      }),
+      recovery({ developStatuses: 'failure' }),
+      recovery({ developStatuses: 'pending' }),
+      recovery({ failing: [] }),
+    ]
+    for (const r of bad) {
+      expect(releaseFixesRed(r)).toBe(false)
+      expect(recogniseRelease(red(readOf(r)))?.kind).toBe('release_blocked')
+      expect(attemptDue(red(readOf(r)))).toBeUndefined()
+    }
+  })
+
+  it('is unknown when the checks could not be read', () => {
+    const f = red(unread('the checks', 'GitHub answered 502'))
+    expect(recogniseRelease(f)?.kind).toBe('unknown')
+  })
+
+  it('keeps the once-per-head rule after a fixed red branch', () => {
+    const f = {
+      ...red(readOf(recovery())),
+      attempts: [{ kind: 'release_ready' as const, outcome: 'applied' as const, reason: 'x' }],
+    }
+    expect(attemptDue(f)).toBeUndefined()
+  })
+
+  it('reads the checks only for a red branch with a watched commit and commits to release', () => {
+    expect(needsRecovery(red())).toBe(true)
+    expect(needsRecovery(facts({ branch: { state: 'red', detail: '' } }))).toBe(false)
+    expect(needsRecovery({ ...red(), ahead: 0 })).toBe(false)
+    expect(needsRecovery(facts())).toBe(false)
+  })
+
+  it('names the checks that finished red, once each', () => {
+    expect(
+      failingNames([
+        { name: 'a', status: 'completed', conclusion: 'failure' },
+        { name: 'a', status: 'completed', conclusion: 'timed_out' },
+        { name: 'b', status: 'completed', conclusion: 'success' },
+        { name: 'c', status: 'in_progress', conclusion: null },
+      ]),
+    ).toEqual(['a'])
   })
 })
