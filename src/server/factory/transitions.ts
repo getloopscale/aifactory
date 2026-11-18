@@ -20,7 +20,7 @@ type PanelEvent =
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
- * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over task back to its
+ * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over or failed task back to its
  * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left,
  * `needs_refinement` the scheduler finding a queued issue not ready to build (`scheduler/apply.ts`).
  */
@@ -161,7 +161,7 @@ const NOT_AWAITING_CHECKS = refuse(
 )
 
 const NOT_HANDED_OVER = refuse(
-  'the coordinator sends back only a task that was handed over to a person',
+  'the coordinator sends back only a task that was handed over to a person or failed',
 )
 
 const NOBODY_WORKING = ignore(
@@ -284,11 +284,10 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     done: (task) => (task.awaitingCiSha ? act('continue_on_branch') : NOT_AWAITING_CHECKS),
   },
   coordinator_send_back: {
-    ...each(
-      ['intake', ...WORKING, 'waiting', 'done', 'released', 'failed', 'cancelled'],
-      NOT_HANDED_OVER,
-    ),
+    ...each(['intake', ...WORKING, 'waiting', 'done', 'released', 'cancelled'], NOT_HANDED_OVER),
     handoff: sendBack,
+    // A failure of the work itself (checks still red, out of time, no change) continues on its branch.
+    failed: sendBack,
   },
   hand_over: {
     ...each(WORKING, act('hand_over')),

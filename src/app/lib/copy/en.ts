@@ -671,6 +671,7 @@ export const en = {
       refused: 'Refused',
       failed: 'Failed',
       escalated: 'Escalated',
+      deferred: 'Read again later',
     } as Record<string, string>,
     actions: {
       send_back: 'Send back',
@@ -679,6 +680,8 @@ export const en = {
       scope: 'Scope a follow-up',
       release: 'Release',
       prioritise: 'Move ahead in the queue',
+      fix_base: 'File the fix of the integration branch',
+      wait: 'Read again on the next passes',
       escalate: 'Escalate',
     } as Record<string, string>,
     exceptions: {
@@ -690,6 +693,9 @@ export const en = {
       orphaned: 'Orphaned',
       environment: 'Environment problem',
       failure: 'Failure',
+      checks_red: 'Checks still failing',
+      out_of_time: 'Out of time',
+      no_change: 'No change made',
       unknown: 'Unknown',
       release_ready: 'Ready to release',
       release_retry: 'Release to retry',

@@ -774,7 +774,9 @@ export const metricSignal = pgTable(
  * What the coordinator recognises as an exception of a task (`coordinator/exceptions.ts`), and the three of
  * a repository's release train (`coordinator/release-train.ts`): work ready for a release, the one retry of a
  * refused release on the same head, a red release branch that holds the train, and an integration branch
- * red for too long while it holds tasks (`base_red`).
+ * red for too long while it holds tasks (`base_red`). A failure whose reason the coordinator acts on is its own
+ * kind: checks still red after the attempts (`checks_red`), a run out of time (`out_of_time`) and an agent that
+ * changed nothing (`no_change`); any other is a `failure`.
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -785,6 +787,9 @@ export const EXCEPTION_KINDS = [
   'orphaned',
   'environment',
   'failure',
+  'checks_red',
+  'out_of_time',
+  'no_change',
   'unknown',
   'release_ready',
   'release_retry',
@@ -793,7 +798,10 @@ export const EXCEPTION_KINDS = [
   'base_red',
 ] as const
 
-/** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */
+/**
+ * The closed set of actions the coordinator decides between (`coordinator/decide.ts`). `fix_base` files the
+ * fix of a red integration branch as an issue of its repository; `wait` reads a fact again on the next passes.
+ */
 export const COORDINATOR_ACTIONS = [
   'send_back',
   'review_again',
@@ -801,15 +809,25 @@ export const COORDINATOR_ACTIONS = [
   'scope',
   'release',
   'prioritise',
+  'fix_base',
+  'wait',
   'escalate',
 ] as const
 
 /**
  * What became of a decision: `applied` went through the panel's own action, `trial` was only recorded
  * because the coordinator runs in trial mode, `refused` was refused by the transition table, `failed` threw,
- * and `escalated` left the task with a person.
+ * `escalated` left the task with a person, and `deferred` is a `wait`: the first pass that could not read a fact,
+ * kept so a later pass knows how long it has been unreadable.
  */
-export const COORDINATOR_OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated'] as const
+export const COORDINATOR_OUTCOMES = [
+  'applied',
+  'trial',
+  'refused',
+  'failed',
+  'escalated',
+  'deferred',
+] as const
 
 /**
  * One decision of the coordinator, applied or not, so every action taken with nobody watching can be read
@@ -836,17 +854,19 @@ export const coordinatorAction = pgTable(
     costUsd: real('cost_usd').notNull().default(0),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies.
+  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies, and a deferred one
+  // leaves it free for the escalation that follows it.
   (t) => [
     uniqueIndex('coordinator_action_once_per_head')
       .on(t.taskId, t.exceptionKind, t.headSha)
-      .where(sql`${t.outcome} <> 'trial'`),
+      .where(sql`${t.outcome} not in ('trial', 'deferred')`),
   ],
 )
 
 /**
  * A failure that repeated across tasks and the issue the coordinator filed for it on the factory's own
- * repository (`coordinator/evolve.ts`): one row per signature, so it is filed once. The row is written
+ * repository (`coordinator/evolve.ts`), or a red integration branch and the issue that fixes it on its repository
+ * (`coordinator/base-fix.ts`, a signature that starts with `base_red:`): one row per signature, so it is filed once. The row is written
  * before the issue is opened and removed when opening fails, so two passes never file the same signature.
  * When the issue has been closed for a week, both counts and `measured_at` are recorded.
  */

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { conflictNote } from '../panel/actions'
 
-import { decide, MAX_APPLIED, seen, type RecordedAction } from './decide'
+import { decide, MAX_APPLIED, seen, UNKNOWN_LIMIT_MS, type RecordedAction } from './decide'
 import type { TaskException } from './exceptions'
 
 const exception = (over: Partial<TaskException> = {}): TaskException => ({
@@ -117,13 +117,6 @@ describe('deciding one action for an exception', () => {
       action: 'escalate',
       reason:
         'the environment failed past its automatic retries (Status code 402): credentials, spend limits and the GitHub App are for a person',
-    })
-  })
-
-  it('escalates a fact it could not read', () => {
-    expect(decide(exception({ kind: 'unknown', evidence: 'could not read x: y' }), [])).toEqual({
-      action: 'escalate',
-      reason: 'the coordinator could not tell what is wrong: could not read x: y',
     })
   })
 
@@ -249,36 +242,242 @@ describe('prioritising a task in the queue', () => {
 })
 
 describe('an integration branch red for too long', () => {
+  const BASE = {
+    repository: 'usetheokit/theokit',
+    branch: 'workspace',
+    sha: '1234567890',
+    checks: ['lint'],
+    commands: [],
+  }
   const red = exception({
     kind: 'base_red',
     head: '1234567:lint@2026-11-17T09:00:00Z',
     evidence: 'the integration branch has been red for 3 hours on lint',
+    base: BASE,
   })
 
-  it('is escalated with the check named', () => {
-    const decision = decide(red, [])
-    expect(decision.action).toBe('escalate')
-    expect(decision.reason).toContain('lint')
+  it('files the fix of the base, and the task keeps waiting', () => {
+    expect(decide(red, [])).toEqual({
+      action: 'fix_base',
+      base: BASE,
+      reason:
+        'the integration branch has been red for 3 hours on lint: its fix is filed on usetheokit/theokit as an issue for the factory, and the task keeps waiting for workspace to pass',
+    })
+  })
+
+  it('escalates a red base whose repository is not known', () => {
+    expect(decide({ ...red, base: undefined }, [])).toEqual({
+      action: 'escalate',
+      reason:
+        'the integration branch has been red for 3 hours on lint, but the repository it fails on is not known: a person looks at why the integration branch fails',
+    })
   })
 
   it('is not stopped by the limit of applied actions', () => {
     const two = [recorded(), recorded({ headSha: 'o2' })]
-    expect(decide(red, two)).toMatchObject({
-      action: 'escalate',
-      reason: expect.stringContaining('lint'),
-    })
+    expect(decide(red, two)).toMatchObject({ action: 'fix_base' })
+  })
+
+  it('does not count a filed fix toward the limit of the task', () => {
+    const filed = recorded({ action: 'fix_base', exceptionKind: 'base_red' })
+    expect(decide(exception(), [filed, recorded()]).action).toBe('send_back')
   })
 
   it('is decided again for the same check back on the same commit', () => {
     const before = recorded({
       exceptionKind: 'base_red',
       headSha: '1234567:lint@2026-11-17T09:00:00Z',
-      action: 'escalate',
-      outcome: 'escalated',
+      action: 'fix_base',
+      outcome: 'applied',
     })
     expect(seen(red, [before], 'auto')).toBe(true)
     expect(seen({ ...red, head: '1234567:lint@2026-11-17T11:00:00Z' }, [before], 'auto')).toBe(
       false,
     )
+  })
+})
+
+describe('a failure the coordinator acts on', () => {
+  const OUTPUT = 'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~'
+
+  it('sends checks still red back on their branch with what they printed on the head', () => {
+    const red = exception({
+      kind: 'checks_red',
+      head: 'abc1234def@40',
+      evidence: 'no pull request: "quality" failed at abc1234 (after 3 attempts)',
+      checkOutput: OUTPUT,
+    })
+    expect(decide(red, [])).toEqual({
+      action: 'send_back',
+      reason:
+        'the required checks still failed on abc1234 after the run\'s attempts (no pull request: "quality" failed at abc1234 (after 3 attempts)): sent back on its branch with what they printed',
+      note: `The coordinator sent this back: the repository's required checks still failed on abc1234 after the run's attempts (no pull request: "quality" failed at abc1234 (after 3 attempts)). Start from the branch as it is and fix what they report.\n\n${OUTPUT}`,
+    })
+  })
+
+  it('escalates checks still red whose output it could not find', () => {
+    const red = exception({
+      kind: 'checks_red',
+      head: 'abc1234def@40',
+      evidence: 'why',
+      checkOutput: '',
+    })
+    expect(decide(red, [])).toEqual({
+      action: 'escalate',
+      reason:
+        "the required checks still failed on abc1234 after the run's attempts (why), but no output of a failing check on that commit was found to send back",
+    })
+    expect(decide({ ...red, checkOutput: undefined }, []).action).toBe('escalate')
+  })
+
+  it('sends a run out of time back to continue from its branch with the smallest change', () => {
+    const late = exception({ kind: 'out_of_time', head: 'abc1234def@41', evidence: 'no time left' })
+    expect(decide(late, [])).toEqual({
+      action: 'send_back',
+      reason:
+        'the run ran out of time on abc1234 (no time left): sent back on its branch to continue from where it stopped',
+      note: "The coordinator sent this back: the last run ran out of time before it finished (no time left). Continue from the branch as it is now, without starting over. Finish the smallest change that satisfies the issue, and before you stop run only the tests of the files you touched: the factory runs the repository's checks after you.",
+    })
+  })
+
+  it('sends an agent that changed nothing back once, with what was said, asking for the change or the proof', () => {
+    const same = exception({
+      kind: 'no_change',
+      head: 'abc1234def@42',
+      evidence: 'the agent made no change to the repository. The agent said: it is done',
+    })
+    expect(decide(same, [])).toEqual({
+      action: 'send_back',
+      reason:
+        'the agent made no change on abc1234 (the agent made no change to the repository. The agent said: it is done): sent back once to make the change or show where the code already does it',
+      note: 'The coordinator sent this back: the last run made no change to the repository, so nothing shows the issue is resolved. What the run recorded:\n\nthe agent made no change to the repository. The agent said: it is done\n\nMake the change the issue asks for. If the code already does what it asks, say so with the evidence: the file and the line that do it, and the test that proves it.',
+    })
+  })
+
+  it('escalates an agent that changed nothing a second time', () => {
+    const same = exception({ kind: 'no_change', head: 'abc1234def@50', evidence: 'nothing again' })
+    const before = recorded({
+      exceptionKind: 'no_change',
+      action: 'send_back',
+      headSha: 'abc1234def@42',
+    })
+    expect(decide(same, [before])).toEqual({
+      action: 'escalate',
+      reason:
+        'the agent made no change on abc1234 again (nothing again), after it was already sent back once for that: a person decides what comes next',
+    })
+  })
+
+  it('sends an agent that changed nothing back when the earlier one was not applied', () => {
+    const same = exception({ kind: 'no_change', head: 'abc1234def@50', evidence: 'x' })
+    for (const outcome of ['trial', 'refused', 'failed', 'escalated'] as const) {
+      const before = recorded({ exceptionKind: 'no_change', action: 'send_back', outcome })
+      expect(decide(same, [before]).action).toBe('send_back')
+    }
+    const other = recorded({ exceptionKind: 'out_of_time', action: 'send_back' })
+    expect(decide(same, [other]).action).toBe('send_back')
+    const retried = recorded({ exceptionKind: 'no_change', action: 'retry_from_finding' })
+    expect(decide(same, [retried]).action).toBe('send_back')
+  })
+
+  it('escalates any of them on a task that never pushed, since there is no branch to continue', () => {
+    for (const kind of ['checks_red', 'out_of_time', 'no_change'] as const) {
+      expect(
+        decide(exception({ kind, head: 'none', evidence: 'why', checkOutput: 'x' }), []),
+      ).toEqual({
+        action: 'escalate',
+        reason: `the run failed (why), but it pushed no branch to send the work back on`,
+      })
+    }
+  })
+
+  it('escalates any of them once two actions were applied on the task', () => {
+    const two = [recorded(), recorded({ headSha: 'o2' })]
+    for (const kind of ['checks_red', 'out_of_time', 'no_change'] as const) {
+      expect(decide(exception({ kind, head: 'abc1234def@40', checkOutput: 'x' }), two).action).toBe(
+        'escalate',
+      )
+    }
+  })
+})
+
+describe('failed checks that the handoff did not quote', () => {
+  it("are sent back with what the factory's own checks printed on the head", () => {
+    const decided = decide(exception({ evidence: '', checkOutput: 'lint (`x`):\nboom' }), [])
+    expect(decided).toEqual({
+      action: 'send_back',
+      reason:
+        'the required checks failed on abc1234 and the last run changed nothing: sent back on its branch with what the checks reported',
+      note: "The coordinator sent this back: the repository's required checks failed on abc1234 and the last run changed nothing. Fix what they report.\n\nlint (`x`):\nboom",
+    })
+  })
+
+  it("are escalated when the factory's checks printed nothing failing either", () => {
+    expect(decide(exception({ evidence: '', checkOutput: '' }), []).action).toBe('escalate')
+  })
+})
+
+describe('a fact the coordinator could not read', () => {
+  const NOW = new Date('2026-11-18T12:00:00Z')
+  const unreadable = exception({
+    kind: 'unknown',
+    head: 'abc1234def',
+    evidence: 'could not read x: fetch failed',
+  })
+  const waited = (minutesAgo: number, over: Partial<RecordedAction> = {}) =>
+    recorded({
+      exceptionKind: 'unknown',
+      headSha: 'abc1234def',
+      action: 'wait',
+      outcome: 'deferred',
+      at: new Date(NOW.getTime() - minutesAgo * 60_000),
+      ...over,
+    })
+
+  it('is read again on the next passes the first time, recording when', () => {
+    expect(UNKNOWN_LIMIT_MS).toBe(60 * 60_000)
+    expect(decide(unreadable, [], NOW)).toEqual({
+      action: 'wait',
+      reason:
+        'the coordinator could not tell what is wrong (could not read x: fetch failed): it reads it again on the next passes, and escalates it if it still cannot within an hour',
+    })
+  })
+
+  it('waits quietly while it has been unreadable for less than an hour', () => {
+    expect(decide(unreadable, [waited(10)], NOW)).toEqual({
+      action: 'wait',
+      quiet: true,
+      reason:
+        'the coordinator still could not tell what is wrong after 10 minutes (could not read x: fetch failed)',
+    })
+    expect(decide(unreadable, [waited(59)], NOW)).toMatchObject({ action: 'wait', quiet: true })
+  })
+
+  it('escalates once it has been unreadable for an hour', () => {
+    expect(decide(unreadable, [waited(60)], NOW)).toEqual({
+      action: 'escalate',
+      reason:
+        'the coordinator could not tell what is wrong for 60 minutes: could not read x: fetch failed',
+    })
+    expect(decide(unreadable, [waited(90), waited(5)], NOW)).toMatchObject({ action: 'escalate' })
+  })
+
+  it('starts again for a wait that is too old to be the same episode, or of another head or kind', () => {
+    for (const old of [
+      waited(2 * 60),
+      waited(70, { headSha: 'other' }),
+      waited(70, { exceptionKind: 'stalled' }),
+      waited(70, { action: 'escalate' }),
+      waited(70, { at: undefined }),
+    ]) {
+      expect(decide(unreadable, [old], NOW)).toMatchObject({ action: 'wait' })
+      expect(decide(unreadable, [old], NOW).quiet).toBeUndefined()
+    }
+  })
+
+  it('never counts a deferred row as a decision on its head', () => {
+    for (const mode of ['trial', 'auto'] as const) {
+      expect(seen(unreadable, [waited(10)], mode)).toBe(false)
+    }
   })
 })

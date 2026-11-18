@@ -1,0 +1,2 @@
+DROP INDEX "coordinator_action_once_per_head";--> statement-breakpoint
+CREATE UNIQUE INDEX "coordinator_action_once_per_head" ON "coordinator_action" USING btree ("task_id","exception_kind","head_sha") WHERE "coordinator_action"."outcome" not in ('trial', 'deferred');

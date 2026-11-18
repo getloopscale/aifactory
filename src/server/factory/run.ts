@@ -56,6 +56,7 @@ import {
   type Verdict,
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
+import { NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
 import { diffFacts } from './diff-facts'
 import {
   changePlanPrompt,
@@ -803,7 +804,7 @@ export class Run {
       // A rework that changed nothing is the reviewer's business, not a fact about the issue.
       if (!detail.rework) await this.keepNoChange()
       throw new StageFailure(
-        `the agent made no change to the repository${
+        `${NO_CHANGE}${
           this.summary ? `. The agent said: ${oneLine(this.summary).slice(0, 700)}` : ''
         }`,
       )
@@ -1233,11 +1234,11 @@ export class Run {
     const checked = await this.verify(this.baseSha, 1, { publish: false, fixed })
     if (!checked.verdict.open) {
       throw new StageFailure(
-        `the agent made no change to the repository, and the checks did not pass at ${at}: ${checked.verdict.reasons.join('; ')}. ${said}`,
+        `${NO_CHANGE}, and the checks did not pass at ${at}: ${checked.verdict.reasons.join('; ')}. ${said}`,
       )
     }
     const outcome = await this.reviewClaim(first.summary)
-    const refuted = `the agent made no change to the repository, and the reviewer did not confirm the issue is resolved: ${outcome.summary}.`
+    const refuted = `${NO_CHANGE}, and the reviewer did not confirm the issue is resolved: ${outcome.summary}.`
     if (outcome.verdict === 'changes' && this.builder.resume && this.sessionId) {
       const after = await this.buildAfterRefutedClaim(outcome)
       if (after.changed) return undefined
@@ -1868,7 +1869,7 @@ export class Run {
     attempt: number,
   ): Promise<RunResult> {
     const short = kept.sha.slice(0, 7)
-    const broke = `no pull request: ${reasons.join('; ')} (after ${attempt} attempts)`
+    const broke = `${NO_PULL_REQUEST}${reasons.join('; ')} (after ${attempt} attempts)`
     await must(
       this.backend,
       `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`,
@@ -1881,7 +1882,7 @@ export class Run {
     const checked = await this.verify(sha, attempt + 1, { publish: true })
     if (!checked.verdict.open) {
       throw new StageFailure(
-        `no pull request: ${checked.verdict.reasons.join('; ')} (after ${attempt + 1} attempts, the last on ${short} restored)`,
+        `${NO_PULL_REQUEST}${checked.verdict.reasons.join('; ')} (after ${attempt + 1} attempts, the last on ${short} restored)`,
       )
     }
     return this.handOver(sha, kept.attempt, checked.here, kept.outcome, kept.counts, {
@@ -2049,7 +2050,7 @@ export class Run {
         if (!canRework) {
           if (reviewed) return this.restoreReviewed(reviewed, checked.verdict.reasons, attempt)
           const after = attempt > 1 ? ` (after ${attempt} attempts)` : ''
-          throw new StageFailure(`no pull request: ${checked.verdict.reasons.join('; ')}${after}`)
+          throw new StageFailure(`${NO_PULL_REQUEST}${checked.verdict.reasons.join('; ')}${after}`)
         }
         // A builder that changed nothing said the failure is not its change's: a timeout, often, and then the
         // checks run again on the same commit, within the same attempts. When the failing checks fail on the

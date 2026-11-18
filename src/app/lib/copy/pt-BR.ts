@@ -910,6 +910,7 @@ export const ptBR: Copy = {
       refused: 'Recusada',
       failed: 'Falhou',
       escalated: 'Encaminhada',
+      deferred: 'Ler de novo depois',
     } as Record<string, string>,
     actions: {
       send_back: 'Devolver',
@@ -918,6 +919,8 @@ export const ptBR: Copy = {
       scope: 'Delimitar uma continuação',
       release: 'Publicar',
       prioritise: 'Passar à frente na fila',
+      fix_base: 'Abrir a correção da branch de integração',
+      wait: 'Ler de novo nas próximas passadas',
       escalate: 'Encaminhar',
     } as Record<string, string>,
     exceptions: {
@@ -929,6 +932,9 @@ export const ptBR: Copy = {
       orphaned: 'Órfã',
       environment: 'Problema de ambiente',
       failure: 'Falha',
+      checks_red: 'Checks ainda falhando',
+      out_of_time: 'Sem tempo',
+      no_change: 'Nenhuma mudança feita',
       unknown: 'Desconhecida',
       release_ready: 'Pronta para publicar',
       release_retry: 'Publicação a repetir',

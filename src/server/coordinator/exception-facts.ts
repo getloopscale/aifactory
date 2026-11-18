@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { coordinatorAction, finding, repository, stageEvent, task } from '../db/schema'
+import { coordinatorAction, evidence, finding, repository, stageEvent, task } from '../db/schema'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf, type BaseHold } from '../factory/await-ci'
 import { readOf, unread, type Read } from '../factory/doctor'
@@ -12,6 +12,8 @@ import { automaticRunsSincePerson } from '../panel/queries'
 import type { RecordedAction } from './decide'
 import {
   causeOf,
+  readsChecks,
+  type CheckRun,
   type LastEvent,
   type OpenFinding,
   type PullRequestFacts,
@@ -67,6 +69,7 @@ async function readEach<T>(tried: string, read: () => Promise<Map<number, T>>) {
 async function lastEvents(db: Database, ids: number[]) {
   const rows = await db
     .selectDistinctOn([stageEvent.taskId], {
+      id: stageEvent.id,
       taskId: stageEvent.taskId,
       stage: stageEvent.stage,
       detail: stageEvent.detail,
@@ -77,9 +80,29 @@ async function lastEvents(db: Database, ids: number[]) {
   return new Map<number, LastEvent | null>(
     rows.map((r) => [
       r.taskId,
-      { stage: r.stage, detail: (r.detail ?? null) as Record<string, unknown> | null },
+      { id: r.id, stage: r.stage, detail: (r.detail ?? null) as Record<string, unknown> | null },
     ]),
   )
+}
+
+/** The checks the factory ran on each of these tasks, oldest first. */
+async function checkRuns(db: Database, ids: number[]) {
+  const byTask = new Map<number, CheckRun[]>(ids.map((id) => [id, []]))
+  if (ids.length === 0) return byTask
+  const rows = await db
+    .select({
+      taskId: evidence.taskId,
+      name: evidence.name,
+      command: evidence.command,
+      sha: evidence.sha,
+      passed: evidence.passed,
+      output: evidence.output,
+    })
+    .from(evidence)
+    .where(inArray(evidence.taskId, ids))
+    .orderBy(evidence.id)
+  for (const { taskId, ...run } of rows) byTask.get(taskId)?.push(run)
+  return byTask
 }
 
 async function automaticRuns(db: Database, ids: number[]) {
@@ -151,8 +174,10 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
       repository: task.repository,
       pullRequestUrl: task.pullRequestUrl,
       awaitingCiSha: task.awaitingCiSha,
+      baseBranch: repository.baseBranch,
     })
     .from(task)
+    .leftJoin(repository, eq(repository.fullName, task.repository))
     .where(
       or(
         inArray(task.stage, ['handoff', 'failed']),
@@ -169,6 +194,14 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
   const holds = await readEach('the holds of the integration branch on the tasks', () =>
     baseHolds(db, waiting),
   )
+  // Only the tasks whose exception quotes or names their checks: a failure on them, or a red base.
+  const checked = rows
+    .filter((r) => {
+      const event = last(r.id, null)
+      return event.read && readsChecks(r.stage, event.value?.detail ?? null)
+    })
+    .map((r) => r.id)
+  const checks = await readEach('the checks of the tasks', () => checkRuns(db, checked))
   const at = deps.now?.() ?? new Date()
   return Promise.all(
     rows.map(async (r): Promise<TaskFacts> => {
@@ -182,6 +215,8 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
         findings: found
           .filter((f) => f.taskId === r.id)
           .map((f): OpenFinding => ({ id: f.id, kind: f.kind, detail: f.detail })),
+        repository: { fullName: r.repository, integrationBranch: integrationBranch(r) },
+        ...(checked.includes(r.id) ? { checks: checks(r.id, []) } : {}),
       }
       if (r.stage === 'done' && r.awaitingCiSha !== null) {
         return { ...facts, baseHold: holds(r.id, null), at }
@@ -209,6 +244,7 @@ export async function readRecordedActions(
       headSha: coordinatorAction.headSha,
       action: coordinatorAction.action,
       outcome: coordinatorAction.outcome,
+      at: coordinatorAction.at,
     })
     .from(coordinatorAction)
     .where(inArray(coordinatorAction.taskId, taskIds))

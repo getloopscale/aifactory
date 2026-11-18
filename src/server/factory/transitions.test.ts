@@ -295,18 +295,23 @@ describe('what the factory does on its own', () => {
     )
   })
 
-  it('lets the coordinator send back only a handed-over task that is not integrated', () => {
-    expect(acting('coordinator_send_back')).toEqual({ handoff: 'continue_on_branch' })
-    expect(outcome({ stage: 'handoff', branchGone: true }, 'coordinator_send_back')).toEqual(
-      act('start_from_integration_branch'),
-    )
-    expect(outcome({ stage: 'handoff', mergedSha: 'm' }, 'coordinator_send_back')).toEqual(
-      refused(
-        'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
-      ),
-    )
+  it('lets the coordinator send back only a handed-over or failed task that is not integrated', () => {
+    expect(acting('coordinator_send_back')).toEqual({
+      handoff: 'continue_on_branch',
+      failed: 'continue_on_branch',
+    })
+    for (const stage of ['handoff', 'failed'] as const) {
+      expect(outcome({ stage, branchGone: true }, 'coordinator_send_back')).toEqual(
+        act('start_from_integration_branch'),
+      )
+      expect(outcome({ stage, mergedSha: 'm' }, 'coordinator_send_back')).toEqual(
+        refused(
+          'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
+        ),
+      )
+    }
     expect(elsewhere('coordinator_send_back')).toEqual([
-      refused('the coordinator sends back only a task that was handed over to a person'),
+      refused('the coordinator sends back only a task that was handed over to a person or failed'),
     ])
   })
 

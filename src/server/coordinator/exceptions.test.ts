@@ -2,7 +2,17 @@ import { describe, expect, it } from 'vitest'
 
 import { readOf, unread } from '../factory/doctor'
 
-import { causeOf, failedChecksOutput, recognise, type TaskFacts } from './exceptions'
+import {
+  CHECK_OUTPUT_MAX,
+  causeOf,
+  failedChecksOutput,
+  failingOutput,
+  failureCause,
+  readsChecks,
+  recognise,
+  type CheckRun,
+  type TaskFacts,
+} from './exceptions'
 
 const CHECKS_REASON =
   "the repository's required checks failed and the agent changed nothing, saying why below. What the failed checks reported:\n\nCI:\n~~~~text\nERROR: lint exited with 1\n~~~~"
@@ -332,5 +342,289 @@ describe('a task held by a red integration branch', () => {
         evidence: expect.stringContaining('connection lost'),
       }),
     ])
+  })
+})
+
+const run = (over: Partial<CheckRun> = {}): CheckRun => ({
+  name: 'quality',
+  command: 'pnpm quality',
+  sha: 'abc1234def',
+  passed: false,
+  output: 'ERROR: too long',
+  ...over,
+})
+
+describe('the cause of a failure', () => {
+  it('is checks_red for checks still red after the attempts', () => {
+    for (const error of [
+      'no pull request: "quality" failed at edea7b1 (after 3 attempts)',
+      'no pull request: "types" failed at 9a4e8c5',
+      'no pull request: "tests" failed at 55f31b9; "quality" failed at 55f31b9 (after 3 attempts)',
+      'no pull request: no evidence for "lint" at abc1234; "tests" failed at abc1234 (after 2 attempts)',
+      'no pull request: "format" failed at 1234567 (after 4 attempts, the last on 7654321 restored)',
+    ]) {
+      expect(failureCause(error)).toBe('checks_red')
+    }
+  })
+
+  it('is out_of_time for a run with no time left or an agent cut at its limit', () => {
+    for (const error of [
+      "no time left for another agent pass: 36 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
+      'the agent did not finish the rework: claude exited 1 without a JSON result: timed out after 3600000 ms',
+      'the agent did not finish: claude exited 124 without a JSON result: timed out after 10 ms\nthe work was kept in commit abc on factory/3; send the task back to continue from it',
+    ]) {
+      expect(failureCause(error)).toBe('out_of_time')
+    }
+  })
+
+  it('is no_change for an agent that left the repository as it was', () => {
+    for (const error of [
+      'the agent made no change to the repository, and the reviewer did not confirm the issue is resolved: it is not. The agent said: done',
+      'the agent made no change to the repository. The agent said: the code already does it',
+      'the agent made no change to the repository',
+    ]) {
+      expect(failureCause(error)).toBe('no_change')
+    }
+  })
+
+  it('stays a failure for any other reason, or one that only quotes those words', () => {
+    for (const error of [
+      'the tests failed',
+      'no pull request: no evidence for "lint" at abc1234',
+      'no pull request: no checks are required, so nothing was verified',
+      'push refused: no pull request: "lint" failed at abc1234',
+      'clone failed: the agent made no change to the repository',
+      'the agent did not finish: claude exited 1 without a JSON result: boom',
+      '',
+    ]) {
+      expect(failureCause(error)).toBe('failure')
+    }
+  })
+})
+
+describe('the output of the checks that fail on a head', () => {
+  it('quotes each check whose last run on the head failed, with its command', () => {
+    expect(
+      failingOutput(
+        [run(), run({ name: 'lint', command: 'pnpm lint', output: 'x' })],
+        'abc1234def',
+      ),
+    ).toBe(
+      'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~\n\nlint (`pnpm lint`):\n~~~~text\nx\n~~~~',
+    )
+  })
+
+  it('leaves out a check that passed when it ran again, and runs on other commits', () => {
+    const runs = [
+      run(),
+      run({ passed: true, output: 'ok' }),
+      run({ name: 'lint', sha: 'other', output: 'old' }),
+    ]
+    expect(failingOutput(runs, 'abc1234def')).toBe('')
+  })
+
+  it('takes the last failed run of a check on the head', () => {
+    const runs = [run({ passed: true }), run({ output: 'second' })]
+    expect(failingOutput(runs, 'abc1234def')).toContain('second')
+  })
+
+  it('keeps the end of a long output, each check within its share of the limit', () => {
+    const long = `${'a'.repeat(CHECK_OUTPUT_MAX)}END`
+    const one = failingOutput([run({ output: long })], 'abc1234def')
+    expect(one).toContain(`${'a'.repeat(CHECK_OUTPUT_MAX - 3)}END`)
+    expect(one).not.toContain('a'.repeat(CHECK_OUTPUT_MAX - 2))
+    const two = failingOutput(
+      [run({ output: long }), run({ name: 'lint', output: long })],
+      'abc1234def',
+    )
+    expect(two).toContain(`${'a'.repeat(CHECK_OUTPUT_MAX / 2 - 3)}END`)
+    expect(two).not.toContain('a'.repeat(CHECK_OUTPUT_MAX / 2 - 2))
+  })
+
+  it('keeps a fence in the output from closing the quote, and says when a check printed nothing', () => {
+    expect(failingOutput([run({ output: 'a\n~~~~\nb' })], 'abc1234def')).toContain('a\n~~\nb')
+    expect(failingOutput([run({ output: '  \n' })], 'abc1234def')).toContain('(no output)')
+  })
+})
+
+describe('whether the checks of a task are read', () => {
+  it('reads them for failed checks, checks still red and a red base', () => {
+    expect(readsChecks('handoff', { cause: 'checks_unchanged' })).toBe(true)
+    expect(readsChecks('failed', { error: 'no pull request: "lint" failed at abc1234' })).toBe(true)
+    expect(readsChecks('failed', { error: 'x', baseRed: { sha: 'b', checks: ['lint'] } })).toBe(
+      true,
+    )
+  })
+
+  it('does not read them for anything else', () => {
+    expect(readsChecks('handoff', { cause: 'review_plateau' })).toBe(false)
+    expect(readsChecks('failed', { error: 'the agent made no change to the repository' })).toBe(
+      false,
+    )
+    expect(readsChecks('failed', null)).toBe(false)
+    expect(readsChecks('done', { error: 'no pull request: "lint" failed at abc1234' })).toBe(false)
+  })
+})
+
+describe('recognising a failure the coordinator acts on', () => {
+  const failing = (error: string, over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...failedWith({ error }),
+    headSha: 'abc1234def',
+    last: readOf({ stage: 'failed', detail: { error }, id: 40 }),
+    checks: readOf([run()]),
+    ...over,
+  })
+  const RED = 'no pull request: "quality" failed at abc1234 (after 3 attempts)'
+
+  it('recognises checks still red with the output of the failing checks, once per failure event', () => {
+    expect(recognise(failing(RED))).toEqual([
+      {
+        kind: 'checks_red',
+        taskId: 9,
+        head: 'abc1234def@40',
+        evidence: RED,
+        checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~',
+      },
+    ])
+  })
+
+  it('recognises checks still red with no output when no failing run is kept', () => {
+    expect(recognise(failing(RED, { checks: readOf([]) }))[0]).toMatchObject({
+      kind: 'checks_red',
+      checkOutput: '',
+    })
+    expect(recognise(failing(RED, { checks: undefined }))[0]).toMatchObject({
+      kind: 'checks_red',
+      checkOutput: '',
+    })
+  })
+
+  it('gives an unknown exception when the checks of the failure could not be read', () => {
+    const facts = failing(RED, { checks: unread('the checks of the tasks', 'timeout') })
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'unknown',
+        taskId: 9,
+        head: 'abc1234def',
+        evidence: 'could not read the checks of the tasks: timeout',
+      },
+    ])
+  })
+
+  it('recognises a run out of time and an agent that changed nothing, on the failure event', () => {
+    const late = "no time left for another agent pass: 36 of the sandbox's 60 minutes are gone"
+    expect(recognise(failing(late))).toEqual([
+      { kind: 'out_of_time', taskId: 9, head: 'abc1234def@40', evidence: late },
+    ])
+    const same = 'the agent made no change to the repository. The agent said: it is done'
+    expect(recognise(failing(same))).toEqual([
+      { kind: 'no_change', taskId: 9, head: 'abc1234def@40', evidence: same },
+    ])
+  })
+
+  it('stays on the head alone for a task that never pushed, or an event with no id', () => {
+    const late = 'no time left for another agent pass: 50 of 60'
+    expect(recognise(failing(late, { headSha: null }))[0].head).toBe('none')
+    const noId = failing(late, { last: readOf({ stage: 'failed', detail: { error: late } }) })
+    expect(recognise(noId)[0].head).toBe('abc1234def')
+  })
+
+  it('keeps any other failure a failure on its head', () => {
+    expect(recognise(failing('the tests failed'))).toEqual([
+      { kind: 'failure', taskId: 9, head: 'abc1234def', evidence: 'the tests failed' },
+    ])
+  })
+})
+
+describe('the checks of failed checks that the handoff did not quote', () => {
+  it('are the output of the checks that fail on the head', () => {
+    const facts: TaskFacts = {
+      ...handedOver({ reason: 'the required checks failed', cause: 'checks_unchanged' }),
+      headSha: 'abc1234def',
+      checks: readOf([run()]),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc1234def',
+        evidence: '',
+        checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~',
+      },
+    ])
+  })
+
+  it('are none when they could not be read or were not', () => {
+    const base = handedOver({ reason: 'the required checks failed', cause: 'checks_unchanged' })
+    for (const checks of [undefined, unread('the checks', 'x')]) {
+      expect(recognise({ ...base, checks })[0]).toEqual({
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc',
+        evidence: '',
+      })
+    }
+  })
+})
+
+describe('the red base a fix is filed for', () => {
+  const REPO = { fullName: 'usetheokit/theokit', integrationBranch: 'workspace' }
+
+  it('names the repository, the branch, the commit and the checks of a hold', () => {
+    const facts: TaskFacts = {
+      taskId: 5,
+      stage: 'done',
+      headSha: 'abc',
+      last: readOf({ stage: 'done', detail: {} }),
+      automaticRuns: readOf(0),
+      findings: [],
+      baseHold: readOf({ sha: '1234567890', checks: ['CI'], since: '2026-11-17T09:00:00Z' }),
+      at: new Date('2026-11-17T12:00:00Z'),
+      repository: REPO,
+    }
+    expect(recognise(facts)[0].base).toEqual({
+      repository: 'usetheokit/theokit',
+      branch: 'workspace',
+      sha: '1234567890',
+      checks: ['CI'],
+      commands: [],
+    })
+  })
+
+  it('names the commands of the checks a failed run found red on the base', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'base999', checks: ['quality'] },
+    }
+    const facts: TaskFacts = {
+      ...failedWith(detail, 3),
+      repository: REPO,
+      checks: readOf([
+        run({ command: 'old' }),
+        run({ name: 'lint', command: 'pnpm lint' }),
+        run({ command: 'pnpm quality --ci', sha: 'other' }),
+      ]),
+    }
+    expect(recognise(facts)[0]).toMatchObject({
+      kind: 'base_red',
+      base: {
+        repository: 'usetheokit/theokit',
+        branch: 'workspace',
+        sha: 'base999',
+        checks: ['quality'],
+        commands: [{ name: 'quality', command: 'pnpm quality --ci' }],
+      },
+    })
+  })
+
+  it('names no command when the checks were not read, and no base when the repository is not known', () => {
+    const detail = { error: 'red', baseRed: { sha: 'base999', checks: ['quality'] } }
+    const unreadChecks = {
+      ...failedWith(detail, 3),
+      repository: REPO,
+      checks: unread('the checks', 'x'),
+    }
+    expect(recognise(unreadChecks)[0].base?.commands).toEqual([])
+    expect(recognise(failedWith(detail, 3))[0].base).toBeUndefined()
   })
 })
