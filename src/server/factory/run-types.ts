@@ -101,6 +101,8 @@ export type RunResult =
   | { status: 'resolved'; sha: string; summary: string }
   | { status: 'waiting'; question: string }
   | { status: 'failed'; stage: string; error: string }
+  /** The task was cancelled while the run went on: it stopped at `stage` and recorded nothing more. */
+  | { status: 'cancelled'; stage: string; reason: string }
 
 type QuestionRow = typeof questionTable.$inferSelect
 

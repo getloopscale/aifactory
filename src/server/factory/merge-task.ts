@@ -20,7 +20,7 @@ import {
 import { jobBackend } from './job-backend'
 import { loadRepoConfig } from './repo-config'
 import type { RunResult, RunTaskDeps } from './run-types'
-import { enterStage } from './stages'
+import { enterStage, refuseUnlessRunMayRecord } from './stages'
 import { outcome } from './transitions'
 
 /**
@@ -55,6 +55,8 @@ export async function enterMerge(taskId: number, detail: MergeDetail): Promise<v
   const client = await getPool().connect()
   try {
     await drizzle(client, { schema }).transaction(async (tx) => {
+      // Approved work of a task cancelled during its review neither waits in merge nor gets a job.
+      await refuseUnlessRunMayRecord(tx as never, taskId)
       const [event] = await tx
         .insert(stageEvent)
         .values({ taskId, stage: 'merge', detail })

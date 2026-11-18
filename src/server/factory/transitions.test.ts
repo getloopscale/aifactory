@@ -61,6 +61,7 @@ describe('the transition table', () => {
       merged_by_person: true,
       needs_refinement: true,
       merge_due: true,
+      run_step: true,
       issue_labeled: true,
       issue_comment_created: true,
       pull_request_comment_created: true,
@@ -74,7 +75,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(26 * 15)
+    expect(pairs).toHaveLength(27 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -116,8 +117,6 @@ describe('the transition table', () => {
         'pull_request_review_comment_created',
         'check_suite_completed',
         'check_run_completed',
-        'issue_unlabeled',
-        'issue_closed',
         'issue_reopened',
       ].sort(),
     )
@@ -407,6 +406,22 @@ describe('integrating approved work', () => {
       act('mark_ready_for_review'),
     )
     expect(outcome({ stage: 'done', draft: true }, 'integrate')).toEqual(ignored(none))
+  })
+})
+
+describe('what a run records as it goes', () => {
+  it('records every stage of a run but over a cancelled task', () => {
+    expect(acting('run_step')).toEqual(
+      Object.fromEntries(
+        TASK_STAGES.filter((stage) => stage !== 'cancelled').map((stage) => [
+          stage,
+          'record_stage',
+        ]),
+      ),
+    )
+    expect(outcome({ stage: 'cancelled' }, 'run_step')).toEqual(
+      refused('the task was cancelled: its issue was closed or lost the factory label'),
+    )
   })
 })
 

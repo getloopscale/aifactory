@@ -6136,3 +6136,75 @@ describe('runTask agent time', () => {
     expect(renewed).toMatchObject({ stage: 'sandbox', detail: { provider: 'fake', renewed: true } })
   })
 })
+
+describe('a run whose issue no longer asks for the work', () => {
+  /** What the webhook does when the issue is closed: the task enters `cancelled`. */
+  const cancel = (taskId: number) =>
+    getDb().transaction(async (tx) => {
+      await tx
+        .insert(stageEvent)
+        .values({ taskId, stage: 'cancelled', detail: { reason: 'the issue was closed' } })
+      await tx.update(task).set({ stage: 'cancelled' }).where(eq(task.id, taskId))
+    })
+  const stageNow = async (taskId: number) =>
+    (await getDb().select().from(task).where(eq(task.id, taskId)))[0].stage
+
+  it('does nothing for a task cancelled before its job was taken, not even start a sandbox', async () => {
+    const id = await seedTask()
+    await cancel(id)
+    const sandbox = new FakeSandbox(changed())
+
+    const result = await runOnly(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'cancelled' })
+    expect(await stagesOf(id)).toEqual(['cancelled'])
+    expect(sandbox.specs).toEqual([])
+  })
+
+  it('stops at its next stage when the task is cancelled while the agent works, and does not fail it', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const cancelling: CodingHarness = {
+      ...okHarness,
+      run: async (...args) => {
+        await cancel(id)
+        return okHarness.run(...args)
+      },
+    }
+
+    const result = await runOnly(deps(sandbox, { harness: cancelling }), id)
+
+    expect(result).toMatchObject({ status: 'cancelled' })
+    expect(await stagesOf(id)).toEqual(['sandbox', 'build', 'cancelled'])
+    expect(await stageNow(id)).toBe('cancelled')
+    expect(pushesOf(sandbox)).toEqual([])
+    expect(sandbox.stopped).toBe(1)
+  })
+
+  it('queues no merge-task when the task is cancelled while the review approves it', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const reviewer = approving()
+    const cancelling: CodingHarness = {
+      ...reviewer,
+      run: async (...args) => {
+        await cancel(id)
+        return reviewer.run(...args)
+      },
+    }
+
+    const result = await runOnly(deps(sandbox, { reviewer: cancelling }), id)
+
+    expect(result).toMatchObject({ status: 'cancelled' })
+    expect(await queuedMerges(id)).toEqual([])
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'cancelled',
+    ])
+    expect(await stageNow(id)).toBe('cancelled')
+  })
+})

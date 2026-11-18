@@ -23,7 +23,8 @@ type PanelEvent =
  * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over or failed task back to its
  * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left,
  * `needs_refinement` the scheduler finding a queued issue not ready to build (`scheduler/apply.ts`),
- * `merge_due` the `merge-task` job taking approved work to its pull request and the integration branch.
+ * `merge_due` the `merge-task` job taking approved work to its pull request and the integration branch,
+ * `run_step` a run recording the stage it reached (`enterRunStage` in `stages.ts`).
  */
 type AutomaticEvent =
   | 'retry_due'
@@ -35,6 +36,7 @@ type AutomaticEvent =
   | 'merged_by_person'
   | 'needs_refinement'
   | 'merge_due'
+  | 'run_step'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
 type WebhookEvent = 'issue_labeled' | RoutedCode
@@ -68,6 +70,8 @@ export type Action =
   | 'ask_owner'
   /** Approved work gets its pull request and is integrated, as the run did once the review approved it. */
   | 'integrate_approved'
+  /** The run records the stage it reached and goes on. */
+  | 'record_stage'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -354,6 +358,14 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     ),
     merge: act('integrate_approved'),
   },
+  // Nothing brings a cancelled task back while its run goes on, so the run stops instead of writing over it.
+  run_step: {
+    ...each(
+      TASK_STAGES.filter((stage) => stage !== 'cancelled'),
+      act('record_stage'),
+    ),
+    cancelled: refuse('the task was cancelled: its issue was closed or lost the factory label'),
+  },
 
   issue_labeled: {
     ...each(
@@ -388,8 +400,9 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
 export const EVENTS = Object.keys(TRANSITIONS) as TransitionEvent[]
 
 /**
- * The events whose outcome is declared here and read by nothing yet. The webhook intents are only recorded
- * (`ingest/decide.ts`), and a later step will act on them as this says. A run hands its own work over, and the
+ * The events whose outcome is declared here and read by nothing yet. These webhook intents are only recorded
+ * (`ingest/decide.ts`), and a later step will act on them as this says; an issue that was closed or lost the
+ * label already cancels its task (`ingest/withdraw.ts`). A run hands its own work over, and the
  * `merge-task` job integrates it where it is (`integrate`, `autoMergeOrMergeable`, `integrate-after-ci`); the table states what
  * those do, and they do not ask it.
  */
@@ -403,8 +416,6 @@ export const NOT_WIRED: readonly TransitionEvent[] = [
   'pull_request_review_comment_created',
   'check_suite_completed',
   'check_run_completed',
-  'issue_unlabeled',
-  'issue_closed',
   'issue_reopened',
 ]
 
