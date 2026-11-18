@@ -42,6 +42,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `change_failure` no longer counts a delivery whose next run only merged the integration branch after a required check failed there too; that failure was the base's, not the work's (#274)
 - A task that failed because its harness would not install in the sandbox (`claude did not install`, `codex did not install`) or because the provider ended the sandbox in the middle of a command (`The sandbox was killed or reached its end of life`) now runs again on its own like any other failure of the environment, instead of waiting in Failed for a person (#266)
 
 - Approved work merges within minutes instead of waiting for a worker to finish a run. The `merge-task` and `resume-task` jobs, which take seconds, are queued ahead of every queued run, which can take an hour each (#259)
