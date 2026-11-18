@@ -23,12 +23,15 @@ import {
   workingLine,
 } from '../lib/format'
 
-import { StageBadge } from './Badges'
+import { PriorityBadge, StageBadge } from './Badges'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
 
-/** Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. */
+/**
+ * Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. The
+ * priority is not in the words: the card shows it as a badge (`PriorityBadge`).
+ */
 export function queueWords(
   queue: QueueView,
   board: Copy['board'],
@@ -36,7 +39,6 @@ export function queueWords(
   const place = queue.position === null ? board.queueHeld : board.queuePlace(queue.position)
   const why = queue.reasons
     ? [
-        queue.reasons.priority === null ? null : board.priority(queue.reasons.priority),
         queue.reasons.bug ? board.bug : null,
         queue.reasons.unblocks > 0 ? board.unblocks(queue.reasons.unblocks) : null,
       ].filter((w): w is string => w !== null)
@@ -54,8 +56,13 @@ function QueueLines({ queue }: { queue: QueueView }) {
   const { place, verdict } = queueWords(queue, t.board)
   return (
     <>
-      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={place}>
-        {place}
+      <div className="mt-1 flex items-start gap-1.5">
+        {queue.reasons?.priority != null ? (
+          <PriorityBadge priority={queue.reasons.priority} />
+        ) : null}
+        <span className="line-clamp-2 text-xs text-muted-foreground" title={place}>
+          {place}
+        </span>
       </div>
       {verdict ? (
         <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={verdict}>

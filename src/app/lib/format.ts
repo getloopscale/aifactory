@@ -35,6 +35,20 @@ function stepCount(step: Extract<AgentStep, { agent: string }>, board: Copy['boa
     : board.stepAttempt(step.attempt)
 }
 
+/** The badge tones a priority can take, from the theme's badge variants. */
+export type PriorityTone = 'destructive' | 'warning' | 'primary' | 'default'
+
+/**
+ * The tone of a `priority:N` badge: 1 is the most urgent and red, 2 amber, 3 violet, and from 4 on it is
+ * plain, so only what the owner marked urgent stands out. A number under 1 counts as the most urgent.
+ */
+export function priorityTone(priority: number): PriorityTone {
+  if (priority <= 1) return 'destructive'
+  if (priority === 2) return 'warning'
+  if (priority === 3) return 'primary'
+  return 'default'
+}
+
 /** How many places at the head of the queue the board ranks. */
 export const TOP_OF_QUEUE = 10
 

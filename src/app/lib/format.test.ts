@@ -13,6 +13,7 @@ import {
   lastAgentLine,
   metricValue,
   money,
+  priorityTone,
   runsAgain,
   shortSha,
   stageLabel,
@@ -394,5 +395,22 @@ describe('the queued column', () => {
       null,
     ])
     expect(topRank(null)).toBeNull()
+  })
+})
+
+describe('the badge of a priority', () => {
+  it('is red for priority 1, amber for 2, violet for 3 and plain from 4 down', () => {
+    expect([1, 2, 3, 4, 5, 9].map(priorityTone)).toEqual([
+      'destructive',
+      'warning',
+      'primary',
+      'default',
+      'default',
+      'default',
+    ])
+  })
+
+  it('treats a priority under 1 as the most urgent', () => {
+    expect(priorityTone(0)).toBe('destructive')
   })
 })

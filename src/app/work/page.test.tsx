@@ -271,6 +271,42 @@ describe('board', () => {
     expect(column.getByText(en.board.restOfQueue)).toBeDefined()
   })
 
+  it('marks the priority of a queued task with a badge of its own', async () => {
+    serve({
+      tasks: [
+        card({
+          id: 1,
+          title: 'Urgent one',
+          stage: 'intake',
+          column: 'queued',
+          queue: { position: 1, reasons: { priority: 1, bug: true, unblocks: 0 }, readiness: null },
+        }),
+        card({
+          id: 2,
+          title: 'Unlabelled one',
+          stage: 'intake',
+          column: 'queued',
+          queue: {
+            position: 2,
+            reasons: { priority: null, bug: false, unblocks: 0 },
+            readiness: null,
+          },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <CopyProvider>
+          <Page />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Urgent one')).toBeDefined())
+    const badge = screen.getByLabelText(en.board.priority(1))
+    expect(badge.textContent).toBe(en.board.priorityBadge(1))
+    expect(screen.getAllByText(/^P\d$/)).toHaveLength(1)
+  })
+
   it('draws no line under the first ten when the queue is no longer than that', async () => {
     serve({
       tasks: [
