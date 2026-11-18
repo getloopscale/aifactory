@@ -293,4 +293,56 @@ describe('catchUpResolved', () => {
 
     expect(gh.api.repo('paulo/app').issue(1).state).toBe('open')
   })
+
+  it('leaves a task to the release that begins after the first look at the repository, issue open', async () => {
+    const t = await resolved('paulo/app', 1, 'aaa111')
+    const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
+    gh.api.repo('paulo/app').issue(1, { state: 'open' })
+    // The release lands while the pass compares the commit: its wait is recorded after the pass's first check.
+    const contains = gh.api.contains.bind(gh.api)
+    gh.api.contains = async (...args: Parameters<typeof contains>) => {
+      await getDb().insert(releaseWait).values({
+        taskId: t,
+        repository: 'paulo/app',
+        pullRequestNumber: 1,
+        pullRequestUrl: 'u',
+        releaseBranch: 'main',
+        sha: 's',
+        actor: 'human',
+        bump: 'patch',
+        changesets: false,
+        checks: [],
+      })
+      return contains(...args)
+    }
+
+    const result = await catchUpResolved(
+      { db: getDb(), ...gh, fetchIssue: (r, n) => gh.api.readIssue(r, n) },
+      { after: 0, limit: 10 },
+    )
+
+    expect(result.released).toEqual([])
+    expect(await stageOf(t)).toBe('done')
+    expect(gh.api.repo('paulo/app').issue(1).state).toBe('open')
+  })
+
+  it('leaves tasks alone while a release holds its resolved anchor, before any wait or publication is recorded', async () => {
+    const anchor = await seed('paulo/app', 1, { stage: 'released', resolvedSha: 'aaa111' })
+    const other = await resolved('paulo/app', 2, 'aaa111')
+    const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
+    gh.api.repo('paulo/app').issue(2, { state: 'open' })
+
+    const held = await catchUpResolved(
+      { db: getDb(), ...gh, fetchIssue: (r, n) => gh.api.readIssue(r, n) },
+      { after: 0, limit: 10 },
+    )
+    expect(held.released).toEqual([])
+    expect(await stageOf(other)).toBe('done')
+    expect(gh.api.repo('paulo/app').issue(2).state).toBe('open')
+
+    // Once the anchor is given back, the pass ships the other task.
+    await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, anchor))
+    const after = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+    expect(after.released).toContain(other)
+  })
 })

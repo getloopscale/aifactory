@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -284,20 +284,25 @@ export async function release(
     await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
     throw new ReleaseRefused(`GitHub did not merge it: ${errorMessage(error)}`)
   }
-  // A resolved anchor is shipped like the other resolved tasks, by the containment of its commit once the
-  // release (or its publication) completes, so it goes back to `done` for that: the claim only guarded the merge.
-  if (resolvedOnly) await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
-  return completeRelease(deps, {
-    row,
-    pre,
-    pull,
-    token,
-    target,
-    sha,
-    mergeSha: merged.sha,
-    changesets: usesChangesets,
-    ...options,
-  })
+  // A resolved anchor keeps its claim until the release records what ships its tasks (the publication, or the
+  // tag), so the catch-up cannot release the others in between (`shipping` reads the claim).
+  try {
+    return await completeRelease(deps, {
+      row,
+      pre,
+      pull,
+      token,
+      target,
+      sha,
+      mergeSha: merged.sha,
+      changesets: usesChangesets,
+      ...options,
+    })
+  } catch (error) {
+    // A failure before the release unclaimed the anchor must not leave it held for good.
+    if (resolvedOnly) await unclaimResolved(deps.db, taskId)
+    throw error
+  }
 }
 
 /** The latest pre-release of a task: what a release promotes. */
@@ -393,6 +398,14 @@ async function waitForChecks(
   }
 }
 
+/** Gives back the claim a release took on a resolved task: only a task still claimed (`released`) moves. */
+async function unclaimResolved(db: Database, taskId: number) {
+  await db
+    .update(task)
+    .set({ stage: 'done' })
+    .where(and(eq(task.id, taskId), eq(task.stage, 'released'), isNull(task.mergedSha)))
+}
+
 /**
  * What follows the promotion's merge, however it was made: the factory's own release or the publication a
  * changesets repository makes, the watch on the merge commit, and the task's move to `released`. With its own
@@ -409,6 +422,9 @@ export async function completeRelease(
     ? await handToChangesets(deps, { row, target, mergeSha, actor })
     : await createOwnRelease(deps, { row, pre, pr: pull, token, mergeSha, bump: input.bump, actor })
   const { created, releaseError, publishing } = published
+  // The publication (or the tag) now says what ships the resolved tasks: the anchor is shipped like them, by
+  // the containment of its commit, so it is `done` again before `shipContained` looks for it.
+  if (!row.mergedSha && row.resolvedSha) await unclaimResolved(deps.db, taskId)
 
   // The merge is on the default branch now, so its checks are watched from here on.
   await deps.db.insert(watch).values({

@@ -1,7 +1,7 @@
-import { and, asc, eq, gt, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, asc, eq, gt, isNotNull, isNull, notExists, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { publication, releaseWait, repository, task } from '../db/schema'
+import { publication, releaseWait, repository, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { Issue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
@@ -168,6 +168,27 @@ async function shipping(db: Database, repo: string, now: Date): Promise<boolean>
     )
     .limit(1)
   if (wait) return true
+  // A release that merged its promotion holds its resolved anchor (`released`, with no `released` event
+  // yet) until the publication or the tag is recorded, which an immediate release does not wait for.
+  const [claimed] = await db
+    .select({ id: task.id })
+    .from(task)
+    .where(
+      and(
+        eq(task.repository, repo),
+        eq(task.stage, 'released'),
+        isNotNull(task.resolvedSha),
+        isNull(task.mergedSha),
+        notExists(
+          db
+            .select({ id: stageEvent.id })
+            .from(stageEvent)
+            .where(and(eq(stageEvent.taskId, task.id), eq(stageEvent.stage, 'released'))),
+        ),
+      ),
+    )
+    .limit(1)
+  if (claimed) return true
   const [publishing] = await db
     .select({ id: publication.id })
     .from(publication)
