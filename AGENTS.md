@@ -78,6 +78,11 @@ reads that file, not a convention.
   reaches git by file, never through a shell.
 - **GitHub tokens are repository-scoped.** The App is installed on every repository of the account,
   so `installationToken(repo)` is the only way to get one, and it always names the repository.
+- **Every call to the GitHub API goes through `gated` (`github/rate-limit.ts`).** It counts the call for the
+  cron pass it is made in, records the `x-ratelimit-*` budget GitHub reports, and throws `RateLimited` with the
+  reset time for a refusal for the limit. A cron that calls GitHub wraps its handler in `githubPass`, which logs
+  `github_requests` per pass; one that only polls passes `waitsForLimit` and skips its passes while the
+  installation's budget is under its reserve. A read that many tasks of one pass share goes through `passReads`.
 - **`src/server/jobs/` holds only jobs.** `theokit build` treats every file there as one and fails the
   build on a helper; a test guards it. Shared helpers live in `factory/`.
 - **A delivery is taken, routed or ignored, and `decideIngress` is the only place that says which.** An

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { FetchLike } from './app'
 import { createIssuesApi, issueOpener } from './issues-api'
+import { RateLimited } from './rate-limit'
 
 type Call = { url: string; method: string; auth: string; body: unknown }
 
@@ -128,5 +129,18 @@ describe('opening an issue as the App', () => {
     expect(created).toEqual({ number: 9, url: 'https://github.com/o/r/issues/9' })
     expect(asked).toEqual(['o/r'])
     expect(calls[0]).toMatchObject({ auth: 'Bearer tok-o/r', body: { labels: ['factory'] } })
+  })
+})
+
+describe('a write refused for the rate limit', () => {
+  it('is thrown as RateLimited', async () => {
+    const spent: FetchLike = async () =>
+      new Response('{"message":"API rate limit exceeded for installation ID 1."}', {
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' },
+      })
+    await expect(
+      createIssuesApi(spent).createIssue('o/r', 't', { title: 'x', body: '' }),
+    ).rejects.toBeInstanceOf(RateLimited)
   })
 })

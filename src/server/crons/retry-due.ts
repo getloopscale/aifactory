@@ -3,6 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { mainProcessOnly } from '../factory/worker-only'
 import { actionDeps } from '../panel/deps'
 import { runConflictRetries, runDueRetries } from '../panel/retry-waiting'
+import { githubPass } from '../github/budget-pass'
 
 /**
  * Keeps the promise of the "Will retry itself" column: every five minutes it runs again the failed tasks
@@ -21,15 +22,17 @@ function report(event: string, result: { started: number; skipped: number }): vo
 export default defineCron('retry-due', {
   schedule: '*/5 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    let deps
-    try {
-      deps = actionDeps()
-    } catch (error) {
-      console.error(JSON.stringify({ event: 'retry_due_not_configured', error: String(error) }))
-      return
-    }
-    report('retry_due', await runDueRetries(deps, { limit: PER_PASS }))
-    report('retry_conflict', await runConflictRetries(deps, { limit: PER_PASS }))
-  }),
+  handler: mainProcessOnly(
+    githubPass('retry-due', async () => {
+      let deps
+      try {
+        deps = actionDeps()
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'retry_due_not_configured', error: String(error) }))
+        return
+      }
+      report('retry_due', await runDueRetries(deps, { limit: PER_PASS }))
+      report('retry_conflict', await runConflictRetries(deps, { limit: PER_PASS }))
+    }),
+  ),
 })

@@ -1,4 +1,5 @@
 import type { FetchLike } from './app'
+import { gated } from './rate-limit'
 import { retryRead } from './retry-read'
 
 export type CheckRun = {
@@ -368,9 +369,11 @@ type GraphqlAnswer<T> = { data?: T; errors?: { message: string }[] }
 const MAX_COMPARE_FILES = 3000
 
 export function createGithubApi(
-  fetchImpl: FetchLike = (url, init) => fetch(url, init),
+  plainFetch: FetchLike = (url, init) => fetch(url, init),
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): GithubApi {
+  // Every call goes through the rate gate: counted, its budget recorded, a refusal for the limit typed.
+  const fetchImpl = gated(plainFetch)
   const call = async (repo: string, token: string, path: string, init: RequestInit = {}) => {
     const isRead = (init.method ?? 'GET') === 'GET'
     return retryRead(

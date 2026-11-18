@@ -6,6 +6,7 @@ import { passLog, pollPromotions } from '../factory/promotion-watch'
 import { createIssuesApi } from '../github/issues-api'
 import { createPromotionApi } from '../github/promotion-api'
 import { actionDeps } from '../panel/deps'
+import { githubPass } from '../github/budget-pass'
 
 /**
  * Watches the promotion pull requests of every enabled repository, every five minutes. A check that failed
@@ -15,26 +16,32 @@ import { actionDeps } from '../panel/deps'
 export default defineCron('watch-promotions', {
   schedule: '*/5 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    let deps
-    let cap
-    try {
-      deps = actionDeps()
-      cap = newIssuesCapFromEnv(process.env)
-    } catch (error) {
-      console.error(
-        JSON.stringify({ event: 'watch_promotions_not_configured', error: String(error) }),
-      )
-      return
-    }
-    const result = await pollPromotions({
-      db: deps.db,
-      app: deps.github,
-      api: createPromotionApi(),
-      github: deps.api,
-      issues: createIssuesApi(),
-      maxNewIssuesPerRepository: cap,
-    })
-    for (const { level, line } of passLog(result)) console[level](line)
-  }),
+  handler: mainProcessOnly(
+    githubPass(
+      'watch-promotions',
+      async () => {
+        let deps
+        let cap
+        try {
+          deps = actionDeps()
+          cap = newIssuesCapFromEnv(process.env)
+        } catch (error) {
+          console.error(
+            JSON.stringify({ event: 'watch_promotions_not_configured', error: String(error) }),
+          )
+          return
+        }
+        const result = await pollPromotions({
+          db: deps.db,
+          app: deps.github,
+          api: createPromotionApi(),
+          github: deps.api,
+          issues: createIssuesApi(),
+          maxNewIssuesPerRepository: cap,
+        })
+        for (const { level, line } of passLog(result)) console[level](line)
+      },
+      { waitsForLimit: true },
+    ),
+  ),
 })

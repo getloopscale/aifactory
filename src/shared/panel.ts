@@ -49,7 +49,7 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
 export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
 
 const ENVIRONMENT_PATTERN =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|Codex login[^:]*(was refused|could not be renewed)/i
 
 /**
  * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer

@@ -1,4 +1,5 @@
 import type { FetchLike } from './app'
+import { gated } from './rate-limit'
 import { retryRead } from './retry-read'
 
 export type Issue = {
@@ -23,7 +24,7 @@ export async function fetchIssue(
   // A read GitHub answers with a 5xx, or the network drops, is asked again with a pause.
   const response = await retryRead(
     () =>
-      fetchImpl(`https://api.github.com/repos/${repo}/issues/${number}`, {
+      gated(fetchImpl)(`https://api.github.com/repos/${repo}/issues/${number}`, {
         headers: {
           accept: 'application/vnd.github+json',
           'x-github-api-version': '2022-11-28',
@@ -83,7 +84,7 @@ export async function listOpenIssues(
     const page = url
     const response = await retryRead(
       () =>
-        fetchImpl(page, {
+        gated(fetchImpl)(page, {
           headers: {
             accept: 'application/vnd.github+json',
             'x-github-api-version': '2022-11-28',

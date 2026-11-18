@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { fetchIssue, listOpenIssues } from './issues'
+import { RateLimited } from './rate-limit'
 
 const answering = (body: unknown) => async () =>
   new Response(JSON.stringify(body), {
@@ -133,5 +134,23 @@ describe('listing the open issues that carry a label', () => {
     await expect(listOpenIssues('o/r', 'factory', 't', fetch, noWait)).rejects.toThrow(
       'GitHub answered 404 listing the open issues of o/r labelled factory',
     )
+  })
+})
+
+describe('reading an issue once the rate limit is spent', () => {
+  const spent = async () =>
+    new Response('{"message":"API rate limit exceeded for installation ID 1."}', {
+      status: 403,
+      headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' },
+    })
+
+  it('throws RateLimited, which a blocker check logs as the limit', async () => {
+    await expect(fetchIssue('o/r', 3, 't', spent, async () => {})).rejects.toBeInstanceOf(
+      RateLimited,
+    )
+  })
+
+  it('throws RateLimited from a listing too', async () => {
+    await expect(listOpenIssues('o/r', 'factory', 't', spent)).rejects.toBeInstanceOf(RateLimited)
   })
 })
