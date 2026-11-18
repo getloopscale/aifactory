@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { repository, task } from '../db/schema'
+import { publication, releaseWait, repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { Issue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
@@ -144,6 +144,19 @@ export type CatchUpPage = {
   limit: number
 }
 
+/** The repositories with a release waiting for checks or a publication that has not finished. */
+async function inFlight(db: Database): Promise<Set<string>> {
+  const waits = await db
+    .select({ repository: releaseWait.repository })
+    .from(releaseWait)
+    .where(eq(releaseWait.status, 'waiting'))
+  const publishing = await db
+    .select({ repository: publication.repository })
+    .from(publication)
+    .where(eq(publication.status, 'waiting'))
+  return new Set([...waits, ...publishing].map((r) => r.repository))
+}
+
 /**
  * Catches up the tasks that finished with no change before a release could move them, `limit` at a time:
  * each is compared with the head of its repository's release branch (the owner's choice, or the default
@@ -167,7 +180,11 @@ export async function catchUpResolved(
     .orderBy(asc(task.id))
     .limit(page.limit)
   const result: ResolvedReleased = { released: [], errors: [] }
+  const releasing = await inFlight(deps.db)
   for (const repo of new Set(rows.map((r) => r.repository))) {
+    // A release or publication that waits ships these tasks itself, with their issues closed: moving them
+    // to `released` here would leave it nothing to select.
+    if (releasing.has(repo)) continue
     const mine = rows.filter((r) => r.repository === repo)
     try {
       const { token } = await deps.app.installationToken(repo)

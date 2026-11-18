@@ -78,6 +78,7 @@ const deps = (over: Partial<AwaitReleaseDeps> = {}): AwaitReleaseDeps => ({
     return api
   },
   now: () => NOW,
+  fetchIssue: (repoName, number) => api.readIssue(repoName, number),
   ...over,
 })
 

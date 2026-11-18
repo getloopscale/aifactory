@@ -13,14 +13,19 @@ import {
   versionBranchWaits,
   versionPullRequestFrom,
 } from './changesets'
-import { createOwnTag, latestPreRelease, nextOwnTag } from './deliver'
+import { createOwnTag, latestPreRelease, nextOwnTag, type DeliverDeps } from './deliver'
 import { shipContained, unclosedNote } from './ship'
 import { enterStage } from './stages'
 import { classify } from './watch'
 
 type Publication = typeof publication.$inferSelect
 
-export type EndDeps = { db: Database; api: GithubApi; now?: () => Date }
+export type EndDeps = {
+  db: Database
+  api: GithubApi
+  now?: () => Date
+  fetchIssue?: DeliverDeps['fetchIssue']
+}
 
 /** What came of a publication the release workflow opened no Version Packages pull request for. */
 export type Ending = { wait: string } | { failed: string } | { released: string }

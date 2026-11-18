@@ -5,7 +5,7 @@ import { decision, releaseWait, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
 
-import { completeRelease, latestPreRelease } from './deliver'
+import { completeRelease, latestPreRelease, type DeliverDeps } from './deliver'
 import { decideWaitingRelease, type ReleaseStep } from './release-wait'
 
 export type AwaitReleaseDeps = {
@@ -13,6 +13,7 @@ export type AwaitReleaseDeps = {
   github: GithubApp
   api: GithubApi
   now?: () => Date
+  fetchIssue?: DeliverDeps['fetchIssue']
 }
 
 export type AwaitReleaseResult = {

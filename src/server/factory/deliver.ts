@@ -13,6 +13,7 @@ import {
   watch,
 } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import { fetchIssue } from '../github/issues'
 import { autoMergeOrMergeable, type GithubApi } from '../github/pulls'
 
 import { errorMessage } from './error-message'
@@ -33,7 +34,13 @@ export type ReleaseMode =
   /** The factory releases a commit that has green checks and an approving review. */
   | 'auto'
 
-export type DeliverDeps = { db: Database; github: GithubApp; api: GithubApi }
+export type DeliverDeps = {
+  db: Database
+  github: GithubApp
+  api: GithubApi
+  /** How an issue is read before a resolved task's issue is closed; the real one unless a test gives its own. */
+  fetchIssue?: typeof fetchIssue
+}
 
 /** The latest result of each check on a commit. Empty means nothing was verified. */
 async function latestChecks(db: Database, taskId: number, sha: string) {
