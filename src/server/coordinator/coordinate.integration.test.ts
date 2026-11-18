@@ -1151,7 +1151,7 @@ describe('an integration branch that stays red under a task', () => {
   })
 
   it('records nothing for a hold under the limit, or one that cleared', async () => {
-    await heldTask(['lint'], 1)
+    await heldTask(['lint'], 1 / 3)
     const cleared = await heldTask(['lint'], 5)
     await getDb()
       .update(stageEvent)

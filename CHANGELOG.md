@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The board shows, above the metrics, each red integration branch that holds delivered work, how long it has been red and how many tasks it holds (#282)
 - The top of the board shows the factory's speed, efficiency and quality. Closed it is one line; open it lists the tasks delivered in the last hour and in 24 hours, the hourly mean, the median lead time of the last day, the tasks queued and working, and the latest day of the first-try checks, cost per delivery, rework rounds, first-review approval, deliveries that came back and handoffs, each marked when it left its band. `GET /api/panel/pulse` serves the live numbers (#272)
 
 - Each card on the board shows the task's lead time, from entering the factory to its delivery, with its status: on track, at risk or overdue. While the clock runs, an at-risk card gets an amber border and an overdue one a red border; a delivered card keeps the time it was delivered in. Each repository sets both limits in minutes on its settings form, 120 and 480 by default (#269)
@@ -46,6 +47,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - The release train releases a repository that keeps working: a queued task no longer holds it, and a running one holds it only until the oldest integrated work has waited an hour (#303)
+- A red integration branch starts its fix after 30 minutes instead of 2 hours, and its clock no longer restarts when another of its checks goes red or its checks run again (#282)
 - The issue the factory files for a check that fails on a promotion is labelled `priority:1`, so its fix runs ahead of the queue instead of after every other task while the red base holds the repository's deliveries (#300)
 - `pnpm evals:check` no longer fails every case as an environment failure while the factory's runs hold every E2B sandbox: a case waits for a slot, asking again every 30 seconds for up to 20 minutes (#261)
 - `change_failure` no longer counts a delivery whose next run only merged the integration branch after a required check failed there too; that failure was the base's, not the work's (#274)
