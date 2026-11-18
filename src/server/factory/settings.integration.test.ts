@@ -118,7 +118,7 @@ describe('the choice of agent, kept in the panel', () => {
     expect(settings.chosen).toEqual({ builder: null, planner: null, reviewer: 'codex' })
     expect(settings.effective).toEqual({
       builder: 'claude-code',
-      planner: 'claude-code',
+      planner: 'codex',
       reviewer: 'codex',
     })
     expect(settings.repositoriesWithOwn).toEqual([

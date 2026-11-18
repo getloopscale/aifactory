@@ -1,17 +1,23 @@
 import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { coordinatorAction, finding, repository, stageEvent, task } from '../db/schema'
+import { coordinatorAction, evidence, finding, repository, stageEvent, task } from '../db/schema'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf, type BaseHold } from '../factory/await-ci'
+import { readEvidence } from '../factory/check-evidence'
 import { readOf, unread, type Read } from '../factory/doctor'
 import type { GithubApp } from '../github/app'
+import type { PromotionApi } from '../github/promotion-api'
 import type { GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
 import type { RecordedAction } from './decide'
 import {
   causeOf,
+  readsChecks,
+  readsCiOutput,
+  type CheckRun,
+  type CiFailure,
   type LastEvent,
   type OpenFinding,
   type PullRequestFacts,
@@ -23,6 +29,11 @@ export type FactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
   api: Pick<GithubApi, 'readPullRequest'>
+  /**
+   * The failed checks of a pull request's head and their logs, read for failed checks nothing else quoted.
+   * Without it they are not read, and such a handoff is escalated as before.
+   */
+  ciChecks?: Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'>
   /** The clock the age of a hold is measured against. */
   now?: () => Date
 }
@@ -31,7 +42,8 @@ export type FactsDeps = {
  * What the coordinator reads before it decides anything, and nothing else: the tasks with an exception to
  * look at, their last events, their automatic runs, the supervisor's open findings about their runs and the
  * decisions already recorded for them, and, for a handoff on failed checks, whether its pull request conflicts
- * with its base. It decides nothing (`exceptions.ts` does). A read of the tasks, the
+ * with its base and, when nothing else quoted the checks, what the failed GitHub Actions jobs of its head logged.
+ * It decides nothing (`exceptions.ts` does). A read of the tasks, the
  * findings or the record that fails is thrown, because without them there is nothing to decide over; a read
  * of what each task says that fails is handed over as not read, and becomes an `unknown` exception.
  */
@@ -67,6 +79,7 @@ async function readEach<T>(tried: string, read: () => Promise<Map<number, T>>) {
 async function lastEvents(db: Database, ids: number[]) {
   const rows = await db
     .selectDistinctOn([stageEvent.taskId], {
+      id: stageEvent.id,
       taskId: stageEvent.taskId,
       stage: stageEvent.stage,
       detail: stageEvent.detail,
@@ -77,9 +90,29 @@ async function lastEvents(db: Database, ids: number[]) {
   return new Map<number, LastEvent | null>(
     rows.map((r) => [
       r.taskId,
-      { stage: r.stage, detail: (r.detail ?? null) as Record<string, unknown> | null },
+      { id: r.id, stage: r.stage, detail: (r.detail ?? null) as Record<string, unknown> | null },
     ]),
   )
+}
+
+/** The checks the factory ran on each of these tasks, oldest first. */
+async function checkRuns(db: Database, ids: number[]) {
+  const byTask = new Map<number, CheckRun[]>(ids.map((id) => [id, []]))
+  if (ids.length === 0) return byTask
+  const rows = await db
+    .select({
+      taskId: evidence.taskId,
+      name: evidence.name,
+      command: evidence.command,
+      sha: evidence.sha,
+      passed: evidence.passed,
+      output: evidence.output,
+    })
+    .from(evidence)
+    .where(inArray(evidence.taskId, ids))
+    .orderBy(evidence.id)
+  for (const { taskId, ...run } of rows) byTask.get(taskId)?.push(run)
+  return byTask
 }
 
 async function automaticRuns(db: Database, ids: number[]) {
@@ -132,10 +165,55 @@ async function pullRequestOf(
     return readOf({
       conflicting: pull.mergeableState === 'dirty',
       base: integrationBranch(config ?? {}),
+      head: pull.headSha,
     })
   } catch (error) {
     return unread(tried, message(error))
   }
+}
+
+/** The most failed checks of one commit whose logs are read: each log is a download. */
+const CI_LOGS_MAX = 5
+
+/**
+ * The checks that failed on GitHub for `sha`, each with the lines its log (or its annotations) gives, or why
+ * they could not be read. The text is CI output: data for an agent to read, never a command to run.
+ */
+async function ciFailuresOf(
+  deps: FactsDeps,
+  ci: NonNullable<FactsDeps['ciChecks']>,
+  repo: string,
+  sha: string,
+): Promise<Read<CiFailure[]>> {
+  try {
+    const { token } = await deps.github.installationToken(repo)
+    const runs = (await ci.failedChecks(repo, token, sha)).slice(0, CI_LOGS_MAX)
+    const failures: CiFailure[] = []
+    for (const run of runs) {
+      const lines = await readEvidence(ci, repo, token, run)
+      failures.push({ name: run.name, url: run.url, lines })
+    }
+    return readOf(failures)
+  } catch (error) {
+    return unread(`the failed checks of ${sha.slice(0, 7)} on GitHub in ${repo}`, message(error))
+  }
+}
+
+const reasonOf = (event: Read<LastEvent | null>) =>
+  event.read && typeof event.value?.detail?.reason === 'string' ? event.value.detail.reason : ''
+
+/** The pull request of a handoff on failed checks and, when nothing else quoted them, their GitHub logs. */
+async function withPullRequest(
+  deps: FactsDeps,
+  row: PulledTask,
+  facts: TaskFacts,
+): Promise<TaskFacts> {
+  const pullRequest = await pullRequestOf(deps, row)
+  const pull = pullRequest.read ? pullRequest.value : null
+  const read = { ...facts, pullRequest }
+  const quiet = readsCiOutput(reasonOf(facts.last), facts)
+  if (!deps.ciChecks || !pull?.head || pull.conflicting || !quiet) return read
+  return { ...read, ciFailures: await ciFailuresOf(deps, deps.ciChecks, row.repository, pull.head) }
 }
 
 /** The facts of every task in `handoff` or `failed`, and of every task with an open finding about its run. */
@@ -151,8 +229,10 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
       repository: task.repository,
       pullRequestUrl: task.pullRequestUrl,
       awaitingCiSha: task.awaitingCiSha,
+      baseBranch: repository.baseBranch,
     })
     .from(task)
+    .leftJoin(repository, eq(repository.fullName, task.repository))
     .where(
       or(
         inArray(task.stage, ['handoff', 'failed']),
@@ -169,6 +249,14 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
   const holds = await readEach('the holds of the integration branch on the tasks', () =>
     baseHolds(db, waiting),
   )
+  // Only the tasks whose exception quotes or names their checks: a failure on them, or a red base.
+  const checked = rows
+    .filter((r) => {
+      const event = last(r.id, null)
+      return event.read && readsChecks(r.stage, event.value?.detail ?? null)
+    })
+    .map((r) => r.id)
+  const checks = await readEach('the checks of the tasks', () => checkRuns(db, checked))
   const at = deps.now?.() ?? new Date()
   return Promise.all(
     rows.map(async (r): Promise<TaskFacts> => {
@@ -182,6 +270,8 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
         findings: found
           .filter((f) => f.taskId === r.id)
           .map((f): OpenFinding => ({ id: f.id, kind: f.kind, detail: f.detail })),
+        repository: { fullName: r.repository, integrationBranch: integrationBranch(r) },
+        ...(checked.includes(r.id) ? { checks: checks(r.id, []) } : {}),
       }
       if (r.stage === 'done' && r.awaitingCiSha !== null) {
         return { ...facts, baseHold: holds(r.id, null), at }
@@ -190,7 +280,7 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
         r.stage === 'handoff' &&
         lastEvent.read &&
         causeOf(lastEvent.value?.detail ?? null) === 'checks_unchanged'
-      return onFailedChecks ? { ...facts, pullRequest: await pullRequestOf(deps, r) } : facts
+      return onFailedChecks ? withPullRequest(deps, r, facts) : facts
     }),
   )
 }
@@ -209,6 +299,7 @@ export async function readRecordedActions(
       headSha: coordinatorAction.headSha,
       action: coordinatorAction.action,
       outcome: coordinatorAction.outcome,
+      at: coordinatorAction.at,
     })
     .from(coordinatorAction)
     .where(inArray(coordinatorAction.taskId, taskIds))

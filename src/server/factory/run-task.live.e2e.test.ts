@@ -16,8 +16,14 @@ import { createGithubApp } from '../github/app'
 import { deletePreReleases, resetIntegrationBranches } from '../../test/playground'
 
 import { DEFAULT_HARNESS, harnessRegistry, pickHarness } from './harness-registry'
-import { runTask } from './run-task'
+import { runTask as runOnly } from './run-task'
+import { jobBackend } from './job-backend'
+import { thenMerge } from '../../test/merge-job'
 import { vercelSandboxProvider } from './vercel-sandbox'
+
+/** A run, and the merge-task job it queued when the review approved its work, as a worker runs it. */
+const runTask = async (...args: Parameters<typeof runOnly>) =>
+  thenMerge(args[0], args[1], await runOnly(...args))
 
 // The real thing: Claude Code inside a Vercel Sandbox, with the Anthropic key and the GitHub token
 // attached by the firewall, implementing issue #1 of the playground. It costs money (the agent bills
@@ -57,6 +63,8 @@ describe.skipIf(!live)('the factory with the real agent', () => {
   beforeAll(async () => {
     getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
     await migrate(getDb(), { migrationsFolder: 'drizzle' })
+    // The run queues its merge-task job in TheoKit's table, which its own migration creates.
+    await jobBackend().migrate()
     await getPool().query('truncate table stage_event, task, ingress restart identity cascade')
     await deleteBranch()
   })
@@ -132,6 +140,7 @@ describe.skipIf(!live)('the factory with the real agent', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -252,6 +261,7 @@ describe.skipIf(!live)('the factory with the real agent', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])

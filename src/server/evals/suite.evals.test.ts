@@ -65,6 +65,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
   const labels = labelsWithRepoChoice(issueLabels, config)
   const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
   const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
+  const planner = deps.planner?.(labels, builder.name)
   const knowledge: KnowledgeSource | undefined = deps.knowledge && {
     ...deps.knowledge,
     delivered: async () => {},
@@ -73,6 +74,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
     sandbox: deps.sandbox,
     builder,
     reviewer: chosen ?? builder,
+    ...(planner ? { planner } : {}),
     author: deps.author,
     knowledge,
     // The time a task of this repository gets: the owner's limit, else the default.
@@ -84,8 +86,14 @@ async function evalDeps(repository: string, issueLabels: string[]) {
 async function currentSetup(cases: EvalCase[]) {
   const setup: Record<string, string> = {}
   for (const repository of [...new Set(cases.map((c) => c.repository))].sort()) {
-    const { builder, reviewer } = await evalDeps(repository, [])
-    const one = agentSetup(await effectiveEnv(getDb(), env), builder.name, reviewer.name, optionsFor)
+    const { builder, reviewer, planner } = await evalDeps(repository, [])
+    const one = agentSetup(
+      await effectiveEnv(getDb(), env),
+      builder.name,
+      reviewer.name,
+      optionsFor,
+      planner?.name,
+    )
     for (const [key, value] of Object.entries(one)) setup[`${repository} ${key}`] = value
   }
   return setup

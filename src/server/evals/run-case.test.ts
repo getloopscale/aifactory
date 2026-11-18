@@ -6,6 +6,7 @@ import { FakeSandbox, type Reply } from '../factory/fake-sandbox'
 import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harness'
 
 import type { EvalCase } from './cases'
+import { failedForEnvironment } from './compare'
 import { runCase } from './run-case'
 
 const BASE = 'a'.repeat(40)
@@ -70,6 +71,8 @@ type World = {
   dirty?: boolean
   /** Exit code of each run of the check command, in order. */
   checkExits?: number[]
+  /** Exit code of each run of the check command on the case's base, in order; it passes there when none is left. */
+  baseExits?: number[]
   /** `git diff --name-status` between the base and the commit. */
   nameStatus?: string
   /** `git diff --name-status` for each commit in turn, when it changes from round to round. */
@@ -88,6 +91,7 @@ type World = {
 
 function sandbox(world: World = {}) {
   const exits = [...(world.checkExits ?? [0])]
+  const baseExits = [...(world.baseExits ?? [])]
   let statuses = 0
   let commits = 0
   let fixed = false
@@ -107,6 +111,8 @@ function sandbox(world: World = {}) {
       return { stdout: changed ? ' M src/cli.ts\n' : '' }
     }
     if (command.endsWith('&& fix-it')) return { ...world.fix } as Reply
+    if (command.startsWith('cd /tmp/aifactory-base') && command.includes('pnpm test'))
+      return { exitCode: baseExits.shift() ?? 0, stdout: 'ran' }
     if (command.includes('pnpm test')) return { exitCode: exits.shift() ?? 0, stdout: 'ran' }
     if (command.includes('diff --name-status'))
       return {
@@ -279,6 +285,21 @@ describe('runCase', () => {
     controller.abort()
 
     expect(provider.stopped).toBe(1)
+  })
+
+  it('lets a planner apart from the builder write the plan, and gives the builder that plan in a session of its own', async () => {
+    const provider = sandbox()
+    const planner = agent('codex', [{ ok: true, summary: PLAN, sessionId: 'p1' }])
+    const builder = agent('builder', [built()])
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase({ ...deps(provider, builder, reviewer), planner }, evalCase)
+
+    expect(result.passed).toBe(true)
+    expect(planner.prompts[0]).toContain('# This turn: plan only')
+    expect(builder.prompts).toHaveLength(1)
+    expect(builder.prompts[0]).toContain('codex read the code and wrote this plan')
+    expect(builder.prompts[0]).toContain('`src/cli.ts`')
   })
 
   it('passes a case whose checks pass and whose review approves, with its cost and rounds', async () => {
@@ -676,6 +697,94 @@ describe('runCase', () => {
 
     expect(result).toMatchObject({ passed: true, attempts: 2, reviewRounds: 2 })
     expect(builder.prompts[2]).toContain('add a test')
+  })
+
+  it('gives the second review round the findings of the first, as the factory does', async () => {
+    const builder = agent('builder', planned(built(), built('added the test')))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(sandbox(), builder, reviewer), evalCase)
+
+    expect(reviewer.prompts[0]).not.toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('add a test')
+  })
+
+  it('runs the checks again on the same commit when the rework after them changes nothing, as the factory does', async () => {
+    const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1, 0] })
+    const builder = agent('builder', planned(built(), built('the failure was a timeout')))
+
+    const result = await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: true, attempts: 2, reviewRounds: 1 })
+    expect(provider.backend.commands.filter((c) => c.includes('commit -F'))).toHaveLength(1)
+  })
+
+  it('leaves unmeasured a case whose failing checks, left unchanged by the builder, fail on its base too', async () => {
+    const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1], baseExits: [1, 1] })
+    const builder = agent('builder', planned(built(), built('the failure is not my change')))
+
+    const result = await runCase(deps(provider, builder, agent('reviewer', [])), evalCase)
+
+    expect(result).toMatchObject({ passed: false, attempts: 2 })
+    expect(result.reason).toContain('so the case measures its base, not the agents')
+    expect(failedForEnvironment(result)).toBe(true)
+    expect(provider.backend.commands.some((c) => c.startsWith('cd /tmp/aifactory-base &&'))).toBe(
+      true,
+    )
+  })
+
+  it('ends a case whose review rework changes nothing without reviewing the same commit again', async () => {
+    const builder = agent('builder', planned(built(), built('the finding is outside the issue')))
+    const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
+
+    const result = await runCase(
+      deps(sandbox({ cleanAfterCommit: true }), builder, reviewer),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: false, attempts: 2, reviewRounds: 1 })
+    expect(reviewer.prompts).toHaveLength(1)
+  })
+
+  it('ends as the factory hands it over when the last rework breaks the checks of a reviewed commit, restored', async () => {
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 0] })
+    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: false, reason: 'the reviewer asked for changes' })
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(provider.backend.commands.some((c) => c.includes(`restore --source=${'b'.repeat(40)}`))).toBe(
+      true,
+    )
+  })
+
+  it('fails on the checks when they fail on the restored commit too', async () => {
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1] })
+    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: false, reason: 'checks failed: tests' })
+  })
+
+  it('leaves unmeasured a case whose checks fail again after a rework that changed code, when they fail on its base too', async () => {
+    const builder = agent('builder', planned(built(), built('try 2'), built('try 3')))
+    const provider = sandbox({ checkExits: [1, 1, 1, 1], baseExits: [1, 1] })
+
+    const result = await runCase(deps(provider, builder, agent('reviewer', [])), evalCase)
+
+    expect(result).toMatchObject({ passed: false, attempts: 2 })
+    expect(failedForEnvironment(result)).toBe(true)
   })
 
   it('fails a case whose checks still fail after the last attempt', async () => {

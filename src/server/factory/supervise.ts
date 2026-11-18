@@ -62,6 +62,66 @@ async function queuedJobs(db: Database, name: string, field: string) {
   }
 }
 
+/** When each task last entered a stage, as a subquery to join. */
+const lastEventOf = (db: Database) =>
+  db
+    .select({ taskId: stageEvent.taskId, last: sql<Date>`max(${stageEvent.at})`.as('last') })
+    .from(stageEvent)
+    .groupBy(stageEvent.taskId)
+    .as('last_event')
+type LastEvent = ReturnType<typeof lastEventOf>
+
+/** The stages a task waits in for a job to take it, with the job and what a finding says when it is lost. */
+const PICKUPS = [
+  {
+    stage: 'intake',
+    job: 'run-task',
+    lost: 'it is queued, and no job is left to run it',
+    failed: 'the job that should run it failed',
+  },
+  {
+    stage: 'merge',
+    job: 'merge-task',
+    lost: 'the review approved it and it waits in merge, and no job is left to merge it',
+    failed: 'the job that should merge it failed',
+  },
+] as const
+
+/**
+ * The tasks that waited past `before` for a job that is gone or failed, or nothing when there is no queue
+ * table to read: without it, nothing can be said to be missing from the queue.
+ */
+async function joblessTasks(
+  db: Database,
+  lastEvent: LastEvent,
+  before: number,
+): Promise<Found[] | null> {
+  const found: Found[] = []
+  for (const pickup of PICKUPS) {
+    const jobs = await queuedJobs(db, pickup.job, 'taskId')
+    if (!jobs) return null
+    const waiting = await db
+      .select({ id: task.id, last: lastEvent.last })
+      .from(task)
+      .innerJoin(lastEvent, eq(lastEvent.taskId, task.id))
+      .where(eq(task.stage, pickup.stage))
+    for (const t of waiting) {
+      if (new Date(t.last).getTime() >= before) continue
+      const job = jobs.find((j) => Number(j.id) === t.id)
+      if (job && !job.failed) continue
+      found.push({
+        key: `orphaned:queued_run:${t.id}`,
+        kind: 'orphaned',
+        subject: 'queued_run',
+        taskId: t.id,
+        ref: null,
+        detail: job ? `${pickup.failed}: ${job.error ?? 'no reason given'}` : pickup.lost,
+      })
+    }
+  }
+  return found
+}
+
 export type Detected = {
   found: Found[]
   /** The checks that actually ran. A check that could not run says nothing about its findings. */
@@ -78,11 +138,7 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
   const ago = (ms: number) => new Date(now.getTime() - ms)
 
   // Work that stopped moving.
-  const lastEvent = db
-    .select({ taskId: stageEvent.taskId, last: sql<Date>`max(${stageEvent.at})`.as('last') })
-    .from(stageEvent)
-    .groupBy(stageEvent.taskId)
-    .as('last_event')
+  const lastEvent = lastEventOf(db)
   const quiet = await db
     .select({ id: task.id, stage: task.stage, last: lastEvent.last })
     .from(task)
@@ -102,31 +158,11 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
     }
   }
 
-  // A task queued with no job to run it.
-  const waiting = await db
-    .select({ id: task.id, last: lastEvent.last })
-    .from(task)
-    .innerJoin(lastEvent, eq(lastEvent.taskId, task.id))
-    .where(eq(task.stage, 'intake'))
-  const runJobs = await queuedJobs(db, 'run-task', 'taskId')
-  if (runJobs) {
+  // A task queued with no job to run it, or approved work in merge with no job to merge it.
+  const jobless = await joblessTasks(db, lastEvent, now.getTime() - limits.pickupMs)
+  if (jobless) {
     checked.add('queued_run')
-    for (const t of waiting) {
-      if (now.getTime() - new Date(t.last).getTime() <= limits.pickupMs) continue
-      const job = runJobs.find((j) => Number(j.id) === t.id)
-      if (!job || job.failed) {
-        found.push({
-          key: `orphaned:queued_run:${t.id}`,
-          kind: 'orphaned',
-          subject: 'queued_run',
-          taskId: t.id,
-          ref: null,
-          detail: job
-            ? `the job that should run it failed: ${job.error ?? 'no reason given'}`
-            : 'it is queued, and no job is left to run it',
-        })
-      }
-    }
+    found.push(...jobless)
   }
 
   // An answer nobody resumed.

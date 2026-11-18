@@ -11,7 +11,8 @@ describe('columnOf', () => {
     push: 'working',
     verify: 'working',
     review: 'working',
-    pr: 'working',
+    merge: 'merge',
+    pr: 'merge',
     waiting: 'waiting',
     done: 'review',
     released: 'released',
@@ -32,6 +33,7 @@ describe('columnOf', () => {
       'working',
       'waiting',
       'retrying',
+      'merge',
       'review',
       'released',
       'resolved',
@@ -47,6 +49,7 @@ describe('columnOf', () => {
       'Working',
       'Waiting for you',
       'Will retry itself',
+      'Merge',
       'Delivered',
       'Released',
       'Already resolved',
@@ -97,6 +100,24 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure(undefined)).toBeNull()
   })
 
+  it('reads a run GitHub refused for the spent rate limit as the environment, which passes at the reset', () => {
+    expect(
+      retryableFailure({
+        error:
+          'GitHub rate limit spent: GET /repos/o/r/issues/3 was refused with 403 for the core limit, until 2026-11-18T01:22:00.000Z',
+      }),
+    ).toBe('environment')
+  })
+
+  it('reads a run that failed on the rate limit before the factory named it as the environment', () => {
+    expect(
+      retryableFailure({
+        error:
+          'GitHub answered 403 creating the check run on o/r: {"message": "API rate limit exceeded for installation ID 178693604."}',
+      }),
+    ).toBe('environment')
+  })
+
   it('waits, rather than going to a person, while an issue the task is blocked by is open', () => {
     const detail = { error: 'blocked by o/a#1, still open; …', blockedBy: ['o/a#1'] }
 
@@ -104,6 +125,29 @@ describe('a failure that passes by itself', () => {
     expect(columnOf('failed', 'blocked')).toBe('retrying')
     expect(retryableFailure({ error: 'x', blockedBy: [] })).toBeNull()
     expect(retryableFailure({ error: 'x', blockedBy: 'o/a#1' })).toBeNull()
+  })
+
+  it('waits for the base, rather than going to a person, when the failing checks fail on the integration branch too', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'abc', checks: ['quality'] },
+    }
+
+    expect(retryableFailure(detail)).toBe('base')
+    expect(columnOf('failed', 'base')).toBe('retrying')
+    expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc', checks: [] } })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: 'quality' })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: null })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc', checks: 'quality' } })).toBeNull()
+    expect(retryableFailure({ error: 'x', baseRed: { sha: 'abc' } })).toBeNull()
+  })
+
+  it('reads the sandbox provider refusing past its concurrent sandbox limit as the environment', () => {
+    const refused =
+      'Rate limit exceeded, please try again later - you have reached the maximum number of concurrent E2B sandboxes (10).'
+
+    expect(retryableFailure({ error: refused })).toBe('environment')
+    expect(retryableFailure({ error: `the sandbox did not start: ${refused}` })).toBe('environment')
   })
 
   it('reads a sandbox provider that refuses for billing as the environment, not as the work', () => {

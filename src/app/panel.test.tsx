@@ -44,6 +44,7 @@ const base: TaskCard = {
   integrated: false,
   waitingForChecks: false,
   waitingOnBase: null,
+  queue: null,
   resolved: false,
   retryable: null,
   retryAt: null,
@@ -54,6 +55,8 @@ const base: TaskCard = {
   release: null,
   mainRed: false,
   releaseWait: null,
+  working: null,
+  lastAgent: null,
 }
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({

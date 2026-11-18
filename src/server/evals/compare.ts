@@ -80,9 +80,19 @@ const usd = (value: number) => `US$ ${value.toFixed(2)}`
 // Rates and costs are sums of floating point numbers; a run exactly at a threshold must not fail on rounding.
 const EPSILON = 1e-9
 
-/** A case that failed for its environment (`retryableFailure` says `environment`), not for what the agents did. */
+/** How a case ends whose failing checks fail on its base too: it measured the base, not the agents (#219). */
+export const MEASURED_ITS_BASE = 'so the case measures its base, not the agents'
+
+/**
+ * A case that failed for its environment (`retryableFailure` says `environment`), or whose checks fail on its base
+ * too, not for what the agents did.
+ */
 export function failedForEnvironment(result: CaseResult): boolean {
-  return !result.passed && retryableFailure({ error: result.reason }) === 'environment'
+  if (result.passed) return false
+  return (
+    result.reason.includes(MEASURED_ITS_BASE) ||
+    retryableFailure({ error: result.reason }) === 'environment'
+  )
 }
 
 /**

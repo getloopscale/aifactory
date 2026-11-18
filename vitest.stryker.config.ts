@@ -16,6 +16,7 @@ export default defineConfig({
       'src/server/factory/transitions.test.ts',
       'src/server/coordinator/exceptions.test.ts',
       'src/server/coordinator/decide.test.ts',
+      'src/server/coordinator/base-fix.test.ts',
       'src/server/coordinator/scope.test.ts',
       'src/server/coordinator/evolve.test.ts',
       'src/server/coordinator/release-train.test.ts',

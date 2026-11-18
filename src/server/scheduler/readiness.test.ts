@@ -1,0 +1,105 @@
+import { describe, expect, it } from 'vitest'
+
+import { bodyHash, parseReadiness, readinessMessage, readinessStep } from './readiness'
+
+describe('reading the readiness answer', () => {
+  it('reads a ready verdict', () => {
+    expect(parseReadiness('{"verdict":"ready","missing":"","question":""}')).toEqual({
+      verdict: 'ready',
+      missing: '',
+      question: '',
+    })
+  })
+
+  it('reads a needs_refinement verdict with what is missing and the question, after any text', () => {
+    const answer =
+      'Thinking. {"verdict":"needs_refinement","missing":"no acceptance criterion","question":"Which page?"}'
+    expect(parseReadiness(answer)).toEqual({
+      verdict: 'needs_refinement',
+      missing: 'no acceptance criterion',
+      question: 'Which page?',
+    })
+  })
+
+  it('takes an answer with no JSON as ready, with the error recorded', () => {
+    expect(parseReadiness('I think it is fine.')).toEqual({
+      verdict: 'ready',
+      missing: '',
+      question: '',
+      error: 'the answer holds no JSON object',
+    })
+  })
+
+  it('takes JSON that is not a verdict as ready, with the error recorded', () => {
+    const read = parseReadiness('{"verdict":"maybe","missing":"","question":""}')
+    expect(read.verdict).toBe('ready')
+    expect(read.error).toContain('verdict')
+  })
+
+  it('takes a needs_refinement verdict with no question as ready, since nothing could be asked', () => {
+    const read = parseReadiness('{"verdict":"needs_refinement","missing":"scope","question":"  "}')
+    expect(read).toMatchObject({ verdict: 'ready', missing: '', question: '' })
+    expect(read.error).toBe('a needs_refinement answer must carry a question for the owner')
+  })
+
+  it('takes a broken object as ready, with the parse error recorded', () => {
+    const read = parseReadiness('{"verdict": ready}')
+    expect(read.verdict).toBe('ready')
+    expect(read.error).toMatch(/^the answer is not JSON: /)
+  })
+})
+
+describe('the version of an issue a verdict is for', () => {
+  it('is the same for the same title and body', () => {
+    expect(bodyHash('T', 'B')).toBe(bodyHash('T', 'B'))
+    expect(bodyHash('T', 'B')).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('changes when the title or the body changes', () => {
+    expect(bodyHash('T', 'B')).not.toBe(bodyHash('T', 'B2'))
+    expect(bodyHash('T', 'B')).not.toBe(bodyHash('T2', 'B'))
+    expect(bodyHash('a\nb', '')).not.toBe(bodyHash('a', 'b'))
+  })
+})
+
+describe('the message the assistant reads', () => {
+  it('holds the issue with its body inside markers, as data', () => {
+    const message = readinessMessage({ repository: 'o/app', issueNumber: 7, title: 'T', body: 'B' })
+    expect(message).toBe('Issue o/app#7: T\n\n<issue-body>\nB\n</issue-body>')
+  })
+
+  it('says when the issue has no body', () => {
+    expect(
+      readinessMessage({ repository: 'o/app', issueNumber: 7, title: 'T', body: '' }),
+    ).toContain('(the issue has no description)')
+  })
+})
+
+describe('what a pass does with a queued issue', () => {
+  const verdict = (over: object = {}) => ({
+    verdict: 'needs_refinement' as const,
+    questionId: undefined as number | undefined,
+    ...over,
+  })
+
+  it('judges an issue not judged for its current body', () => {
+    expect(readinessStep(undefined, 'trial')).toBe('judge')
+    expect(readinessStep(undefined, 'auto')).toBe('judge')
+  })
+
+  it('asks the owner in auto when the verdict needs refinement and nothing was asked', () => {
+    expect(readinessStep(verdict(), 'auto')).toBe('ask')
+  })
+
+  it('asks nothing in trial', () => {
+    expect(readinessStep(verdict(), 'trial')).toBe('none')
+  })
+
+  it('asks nothing again once a question was asked for that body', () => {
+    expect(readinessStep(verdict({ questionId: 4 }), 'auto')).toBe('none')
+  })
+
+  it('leaves a ready issue alone', () => {
+    expect(readinessStep(verdict({ verdict: 'ready' }), 'auto')).toBe('none')
+  })
+})

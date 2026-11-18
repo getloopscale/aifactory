@@ -1,9 +1,17 @@
 import { Badge, Button } from '@usetheo/ui'
 import { useCallback, useEffect, useState } from 'react'
 
-import type { ChecksProof, DoctorItem, DoctorReport, RepositoryView } from '../../shared/panel'
+import type {
+  ChecksProof,
+  DoctorItem,
+  DoctorReport,
+  ProofKind,
+  ProvenCheck,
+  RepositoryView,
+} from '../../shared/panel'
 import { get, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
+import type { Copy } from '../lib/copy/en'
 import { ago } from '../lib/format'
 import { useResource } from '../lib/live'
 
@@ -125,9 +133,63 @@ export function RepositoryDoctor({
   )
 }
 
-/** Which saved checks no proof ran, and the button that proves them in a sandbox. */
-export function ProveChecks({ repo }: { repo: RepositoryView }) {
+/** What a list of a repository a proof is for: where it is, and how the panel speaks of it. */
+function proofSide(repo: RepositoryView, kind: ProofKind, t: Copy) {
+  if (kind === 'integration') {
+    return {
+      checks: repo.integrationChecks,
+      unproven: repo.unprovenIntegrationChecks,
+      query: '?kind=integration',
+      body: { kind },
+      unprovenLine: t.doctor.integrationUnprovenLine,
+      allProven: t.doctor.integrationAllProven,
+      prove: t.doctor.proveIntegration,
+    }
+  }
+  return {
+    checks: repo.checks ?? [],
+    unproven: repo.unprovenChecks,
+    query: '',
+    body: {},
+    unprovenLine: t.doctor.unprovenLine,
+    allProven: t.doctor.allProven,
+    prove: t.doctor.prove,
+  }
+}
+
+/** How each check of a proof did, with the tail of what it printed. */
+function ProofResults({ results }: { results: ProvenCheck[] }) {
   const { t } = useCopy()
+  const label = { passed: t.doctor.passed, failed: t.doctor.failed, too_slow: t.doctor.tooSlow }
+  return (
+    <ul className="space-y-2">
+      {results.map((r) => (
+        <li key={r.name} className="rounded-lg border border-border p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={r.status === 'passed' ? 'success' : 'destructive'}>
+              {label[r.status]}
+            </Badge>
+            <span className="text-foreground">{r.name}</span>
+            <span className="text-muted-foreground">
+              {t.doctor.seconds((r.durationMs / 1000).toFixed(1))}
+            </span>
+          </div>
+          {r.output ? (
+            <pre className="mt-1 overflow-x-auto font-mono text-muted-foreground">{r.output}</pre>
+          ) : null}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Which saved checks of one kind no proof ran, and the button that proves them in a sandbox. A repository
+ * with no integration checks shows nothing for them until a proof of them is asked for.
+ */
+export function ProveChecks({ repo, kind = 'checks' }: { repo: RepositoryView; kind?: ProofKind }) {
+  const { t } = useCopy()
+  const side = proofSide(repo, kind, t)
   const base = `/api/panel/repositories/${repo.fullName}/checks/prove`
   const [proof, setProof] = useState<ChecksProof | null>()
   const [message, setMessage] = useState<string>()
@@ -135,14 +197,14 @@ export function ProveChecks({ repo }: { repo: RepositoryView }) {
 
   const read = useCallback(async () => {
     try {
-      const answer = await get<{ proof: ChecksProof | null }>(base)
+      const answer = await get<{ proof: ChecksProof | null }>(`${base}${side.query}`)
       setProof(answer.proof)
       return answer.proof
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
       return null
     }
-  }, [base])
+  }, [base, side.query])
 
   useEffect(() => {
     if (!asked) return
@@ -161,28 +223,26 @@ export function ProveChecks({ repo }: { repo: RepositoryView }) {
 
   async function prove() {
     setMessage(undefined)
-    const wanted = (repo.checks ?? []).filter((c) => repo.unprovenChecks.includes(c.name))
+    const wanted = side.checks.filter((c) => side.unproven.includes(c.name))
     try {
-      await post(base, { checks: wanted })
+      await post(base, { checks: wanted, ...side.body })
       setAsked(true)
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
     }
   }
 
+  if (kind === 'integration' && side.checks.length === 0 && !asked) return null
   const proving = asked && (!proof || proof.status === 'proving')
-  const label = { passed: t.doctor.passed, failed: t.doctor.failed, too_slow: t.doctor.tooSlow }
   return (
     <div className="mt-3 space-y-2 text-sm">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-foreground">
-          {repo.unprovenChecks.length > 0
-            ? t.doctor.unprovenLine(repo.unprovenChecks.join(', '))
-            : t.doctor.allProven}
+          {side.unproven.length > 0 ? side.unprovenLine(side.unproven.join(', ')) : side.allProven}
         </span>
-        {repo.unprovenChecks.length > 0 ? (
+        {side.unproven.length > 0 ? (
           <Button size="sm" variant="secondary" disabled={proving} onClick={() => void prove()}>
-            {proving ? t.doctor.proving : t.doctor.prove}
+            {proving ? t.doctor.proving : side.prove}
           </Button>
         ) : null}
       </div>
@@ -190,28 +250,13 @@ export function ProveChecks({ repo }: { repo: RepositoryView }) {
       {proof?.status === 'failed' ? (
         <p className="text-destructive">{t.doctor.proofFailed(proof.error ?? '')}</p>
       ) : null}
-      {proof && proof.results.length > 0 ? (
-        <ul className="space-y-2">
-          {proof.results.map((r) => (
-            <li key={r.name} className="rounded-lg border border-border p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={r.status === 'passed' ? 'success' : 'destructive'}>
-                  {label[r.status]}
-                </Badge>
-                <span className="text-foreground">{r.name}</span>
-                <span className="text-muted-foreground">
-                  {t.doctor.seconds((r.durationMs / 1000).toFixed(1))}
-                </span>
-              </div>
-              {r.output ? (
-                <pre className="mt-1 overflow-x-auto font-mono text-muted-foreground">
-                  {r.output}
-                </pre>
-              ) : null}
-            </li>
-          ))}
-        </ul>
+      {proof?.setup && proof.setup.length > 0 ? (
+        <>
+          <p className="text-muted-foreground">{t.doctor.setupLine}</p>
+          <ProofResults results={proof.setup} />
+        </>
       ) : null}
+      {proof && proof.results.length > 0 ? <ProofResults results={proof.results} /> : null}
     </div>
   )
 }

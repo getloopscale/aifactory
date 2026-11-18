@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-import type { ChecksProof, DoctorReport, ProvenCheck } from '../../shared/panel'
+import type { DoctorReport, ProvenCheck, StoredProof } from '../../shared/panel'
 
 /**
  * The stages of a task, in the order a successful run passes through them, then the ways a run ends
@@ -29,6 +29,7 @@ export const TASK_STAGES = [
   'verify',
   'review',
   'waiting',
+  'merge',
   'pr',
   'done',
   'released',
@@ -174,26 +175,34 @@ export const changePlan = pgTable('change_plan', {
 })
 
 /**
- * A question an agent could not go on without. The sandbox was snapshotted when it was asked, so an
- * answer resumes the same session, with the same checkout, in a new sandbox. Everything needed to do
- * that lives here, because by then the process that asked may be gone.
+ * Who asked a question: an agent in a sandbox (`agent`), or the scheduler before any run started, because the
+ * issue was not ready to build (`readiness`, `scheduler/`).
+ */
+export const QUESTION_ORIGINS = ['agent', 'readiness'] as const
+
+/**
+ * A question the factory could not go on without. An agent's question snapshotted the sandbox when it was
+ * asked, so an answer resumes the same session, with the same checkout, in a new sandbox. Everything needed
+ * to do that lives here, because by then the process that asked may be gone. A readiness question has no
+ * sandbox: its sandbox columns are empty, and an answer queues the task's first run again.
  */
 export const question = pgTable('question', {
   id: serial('id').primaryKey(),
   taskId: integer('task_id')
     .notNull()
     .references(() => task.id),
+  origin: text('origin', { enum: QUESTION_ORIGINS }).notNull().default('agent'),
   body: text('body').notNull(),
   /** The comment the factory posted on the issue. */
   commentId: text('comment_id').notNull(),
   askedAt: timestamp('asked_at', { withTimezone: true }).notNull().defaultNow(),
-  snapshotId: text('snapshot_id').notNull(),
-  sessionId: text('session_id').notNull(),
-  harness: text('harness').notNull(),
-  repoDir: text('repo_dir').notNull(),
-  baseSha: text('base_sha').notNull(),
+  snapshotId: text('snapshot_id'),
+  sessionId: text('session_id'),
+  harness: text('harness'),
+  repoDir: text('repo_dir'),
+  baseSha: text('base_sha'),
   /** The attempt the question interrupted, so the budget of three carries over. */
-  attempt: integer('attempt').notNull(),
+  attempt: integer('attempt'),
   /** What the run had spent when it stopped. */
   costUsd: real('cost_usd').notNull(),
   answer: text('answer'),
@@ -536,7 +545,24 @@ export const repository = pgTable('repository', {
   /** The saved checks a proof ran and saw pass, each with its result; one the owner typed is not here. */
   checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
   /** The last proof of proposed checks, running or finished. */
-  checksProof: jsonb('checks_proof').$type<ChecksProof>(),
+  checksProof: jsonb('checks_proof').$type<StoredProof>(),
+  /**
+   * The checks run on the merge of the work with the integration branch, after the checks above:
+   * `[{ name, command }]`. Empty means none.
+   */
+  integrationChecks: jsonb('integration_checks')
+    .$type<{ name: string; command: string }[]>()
+    .notNull()
+    .default([]),
+  /** The commit of the integration branch the checks in `integrationChecksProven` passed on. */
+  integrationChecksProvenSha: text('integration_checks_proven_sha'),
+  /** The saved integration checks a proof ran and saw pass, each with its result. */
+  integrationChecksProven: jsonb('integration_checks_proven')
+    .$type<ProvenCheck[]>()
+    .notNull()
+    .default([]),
+  /** The last proof of proposed integration checks, running or finished. */
+  integrationChecksProof: jsonb('integration_checks_proof').$type<StoredProof>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -749,7 +775,10 @@ export const metricSignal = pgTable(
  * What the coordinator recognises as an exception of a task (`coordinator/exceptions.ts`), and the three of
  * a repository's release train (`coordinator/release-train.ts`): work ready for a release, the one retry of a
  * refused release on the same head, a red release branch that holds the train, and an integration branch
- * red for too long while it holds tasks (`base_red`).
+ * red for too long while it holds tasks (`base_red`). A failure whose reason the coordinator acts on is its own
+ * kind: checks still red after the attempts (`checks_red`), a run out of time (`out_of_time`) and an agent that
+ * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
+ * (`base_conflict`); any other is a `failure`.
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -760,15 +789,23 @@ export const EXCEPTION_KINDS = [
   'orphaned',
   'environment',
   'failure',
+  'checks_red',
+  'out_of_time',
+  'no_change',
   'unknown',
   'release_ready',
   'release_retry',
   'release_blocked',
   'queue_blocked',
   'base_red',
+  'base_conflict',
 ] as const
 
-/** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */
+/**
+ * The closed set of actions the coordinator decides between (`coordinator/decide.ts`). `fix_base` files the
+ * fix of a red integration branch as an issue of its repository; `merge_base` queues the run that merges the
+ * integration branch into the task's branch with no agent; `wait` reads a fact again on the next passes.
+ */
 export const COORDINATOR_ACTIONS = [
   'send_back',
   'review_again',
@@ -776,15 +813,26 @@ export const COORDINATOR_ACTIONS = [
   'scope',
   'release',
   'prioritise',
+  'fix_base',
+  'merge_base',
+  'wait',
   'escalate',
 ] as const
 
 /**
  * What became of a decision: `applied` went through the panel's own action, `trial` was only recorded
  * because the coordinator runs in trial mode, `refused` was refused by the transition table, `failed` threw,
- * and `escalated` left the task with a person.
+ * `escalated` left the task with a person, and `deferred` is a `wait`: the first pass that could not read a fact,
+ * kept so a later pass knows how long it has been unreadable.
  */
-export const COORDINATOR_OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated'] as const
+export const COORDINATOR_OUTCOMES = [
+  'applied',
+  'trial',
+  'refused',
+  'failed',
+  'escalated',
+  'deferred',
+] as const
 
 /**
  * One decision of the coordinator, applied or not, so every action taken with nobody watching can be read
@@ -811,17 +859,19 @@ export const coordinatorAction = pgTable(
     costUsd: real('cost_usd').notNull().default(0),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies.
+  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies, and a deferred one
+  // leaves it free for the escalation that follows it.
   (t) => [
     uniqueIndex('coordinator_action_once_per_head')
       .on(t.taskId, t.exceptionKind, t.headSha)
-      .where(sql`${t.outcome} <> 'trial'`),
+      .where(sql`${t.outcome} not in ('trial', 'deferred')`),
   ],
 )
 
 /**
  * A failure that repeated across tasks and the issue the coordinator filed for it on the factory's own
- * repository (`coordinator/evolve.ts`): one row per signature, so it is filed once. The row is written
+ * repository (`coordinator/evolve.ts`), or a red integration branch and the issue that fixes it on its repository
+ * (`coordinator/base-fix.ts`, a signature that starts with `base_red:`): one row per signature, so it is filed once. The row is written
  * before the issue is opened and removed when opening fails, so two passes never file the same signature.
  * When the issue has been closed for a week, both counts and `measured_at` are recorded.
  */
@@ -838,3 +888,33 @@ export const failureSignature = pgTable('failure_signature', {
   countAfter: integer('count_after'),
   measuredAt: timestamp('measured_at', { withTimezone: true }),
 })
+
+/** What the scheduler decides: the order of the queued runs, and whether an issue is ready to build. */
+export const SCHEDULER_DECISION_KINDS = ['order', 'readiness'] as const
+
+/**
+ * One decision of the scheduler (`scheduler/`), applied or not. An `order` row is the place a queued run was
+ * given (its head is the `available_at` it gets) with the reasons; a `readiness` row is the verdict on an
+ * issue, its head a hash of the title and body it read, so the assistant judges each version of an issue once.
+ * `mode` is the scheduler's mode when it decided: in `trial` nothing was applied.
+ */
+export const schedulerDecision = pgTable(
+  'scheduler_decision',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    kind: text('kind', { enum: SCHEDULER_DECISION_KINDS }).notNull(),
+    mode: text('mode', { enum: ['trial', 'auto'] }).notNull(),
+    head: text('head').notNull(),
+    detail: jsonb('detail').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('scheduler_decision_readiness_once')
+      .on(t.taskId, t.kind, t.head)
+      .where(sql`${t.kind} = 'readiness'`),
+    index('scheduler_decision_task_kind').on(t.taskId, t.kind, t.id),
+  ],
+)

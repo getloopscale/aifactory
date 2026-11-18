@@ -11,11 +11,14 @@ export const DEFAULT_REVIEW_MS = 10 * 60_000
 
 type Limits = { sandboxMs: number; agentMs: number; checkMs?: number; reviewMs?: number }
 
+/** How the reason of a run stopped by `NoTimeForAgent` starts. */
+export const NO_TIME_FOR_AGENT = 'no time left for another agent pass: '
+
 /** A run whose sandbox has too little time left for another agent pass and the checks and review after it. */
 export class NoTimeForAgent extends Error {
   constructor(elapsedMs: number, sandboxMs: number) {
     super(
-      `no time left for another agent pass: ${Math.floor(elapsedMs / 60_000)} of the sandbox's ` +
+      `${NO_TIME_FOR_AGENT}${Math.floor(elapsedMs / 60_000)} of the sandbox's ` +
         `${Math.floor(sandboxMs / 60_000)} minutes are gone, and the checks and the review need the rest`,
     )
     this.name = 'NoTimeForAgent'

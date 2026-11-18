@@ -10,6 +10,8 @@ import { mainProcessOnly } from '../factory/worker-only'
 import { fetchIssue } from '../github/issues'
 import { createIssuesApi } from '../github/issues-api'
 import { actionDeps } from '../panel/deps'
+import { githubPass } from '../github/budget-pass'
+import { createPromotionApi } from '../github/promotion-api'
 
 /**
  * The coordinator's pass, every ten minutes: the exceptions of the factory's tasks, one action from a
@@ -21,27 +23,31 @@ import { actionDeps } from '../panel/deps'
 export default defineCron('coordinate', {
   schedule: '*/10 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    const mode = coordinatorModeFromEnv(process.env)
-    if (mode === 'off') return
-    let deps
-    try {
-      deps = {
-        ...actionDeps(),
-        issues: createIssuesApi(),
-        readIssue: (repo: string, number: number, token: string) => fetchIssue(repo, number, token),
-        drafter: modelScopeDrafter(),
-        releaseMode: releaseModeFromEnv(process.env),
+  handler: mainProcessOnly(
+    githubPass('coordinate', async () => {
+      const mode = coordinatorModeFromEnv(process.env)
+      if (mode === 'off') return
+      let deps
+      try {
+        deps = {
+          ...actionDeps(),
+          issues: createIssuesApi(),
+          readIssue: (repo: string, number: number, token: string) =>
+            fetchIssue(repo, number, token),
+          drafter: modelScopeDrafter(),
+          releaseMode: releaseModeFromEnv(process.env),
+          ciChecks: createPromotionApi(),
+        }
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'coordinate_not_configured', error: String(error) }))
+        return
       }
-    } catch (error) {
-      console.error(JSON.stringify({ event: 'coordinate_not_configured', error: String(error) }))
-      return
-    }
-    const result = await coordinate(deps, mode)
-    if (Object.values(result).some((n) => n > 0)) {
-      console.log(JSON.stringify({ event: 'coordinate', mode, ...result }))
-    }
-    const evolution = evolveDeps({ db: deps.db, github: deps.github, api: deps.api }, deps.issues)
-    for (const line of evolveLog(await evolve(evolution, mode), mode)) console.log(line)
-  }),
+      const result = await coordinate(deps, mode)
+      if (Object.values(result).some((n) => n > 0)) {
+        console.log(JSON.stringify({ event: 'coordinate', mode, ...result }))
+      }
+      const evolution = evolveDeps({ db: deps.db, github: deps.github, api: deps.api }, deps.issues)
+      for (const line of evolveLog(await evolve(evolution, mode), mode)) console.log(line)
+    }),
+  ),
 })

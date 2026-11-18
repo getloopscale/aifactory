@@ -52,10 +52,18 @@ import { eventsOf } from './transcript-store'
 import { parseRecipe } from './recipe'
 import type { CodingHarness } from './harness'
 import type { Finding } from './review'
-import { mergeEgress, resumeTask, runTask, type RunTaskDeps } from './run-task'
+import {
+  mergeEgress,
+  resumeTask as resumeOnly,
+  runTask as runOnly,
+  type RunTaskDeps,
+} from './run-task'
+import { mergeTask } from './merge-task'
+import { queuedMerges, thenMerge } from '../../test/merge-job'
 import { runContinuation } from './run-support'
 import { fixedBaseNote } from './ci-wait'
 import {
+  mergeBaseByCoordinator,
   mergeFixedBase,
   requestChanges,
   retryAutomatically,
@@ -65,6 +73,7 @@ import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
 import { pollAnswers } from './waiting'
+import { jobBackend } from './job-backend'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
 const ANTHROPIC = 'sk-ant-key-must-not-leak'
@@ -72,13 +81,27 @@ const ANTHROPIC = 'sk-ant-key-must-not-leak'
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  // The board reads each queued card's place from TheoKit's job table, which its own migration creates.
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
+  // No worker runs here: a test takes the merge-task job its run queued, and none is left for the next.
+  await getPool().query(`delete from theokit_jobs where name = 'merge-task'`)
   await getPool().query(
     'truncate table promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
+
+/** A run, and the merge-task job it queued when the review approved its work. */
+async function runTask(...args: Parameters<typeof runOnly>) {
+  return thenMerge(args[0], args[1], await runOnly(...args))
+}
+
+/** A resumed run, and the merge-task job it queued when the review approved its work. */
+async function resumeTask(...args: Parameters<typeof resumeOnly>) {
+  return thenMerge(args[0], args[1], await resumeOnly(...args))
+}
 
 async function seedTask(issueNumber = 7): Promise<number> {
   const db = getDb()
@@ -337,6 +360,9 @@ const changed = (extra?: (command: string) => Reply | undefined) => {
   }
 }
 
+/** Whether a command runs on the checkout of the integration branch the run makes to blame a red base (#219). */
+const onBase = (command: string) => command.startsWith('cd /tmp/aifactory-base &&')
+
 /** The push commands a run sent, from `push` on. */
 const pushesOf = (sandbox: FakeSandbox) =>
   sandbox.backend.commands.flatMap((c) =>
@@ -494,6 +520,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -502,6 +529,109 @@ describe('runTask', () => {
     expect(sandbox.backend.commands.some((c) => c.includes('push origin factory/7 '))).toBe(true)
     expect(github.asked).toContain('paulo/app')
     expect(sandbox.stopped).toBe(1)
+  })
+
+  it('ends an approved run in merge, with a merge-task job for the approved commit and no pull request yet', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+
+    const result = await runOnly(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'merging', branch: 'factory/7', sha: 'abc123def' })
+    expect(await stagesOf(id)).toEqual(['sandbox', 'build', 'push', 'verify', 'review', 'merge'])
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('merge')
+    expect(row.pullRequestUrl).toBeNull()
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    expect(seen.pulls).toEqual([])
+    expect(seen.merges).toEqual([])
+    const [merge] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'merge')))
+    expect(merge.detail).toMatchObject({
+      branch: 'factory/7',
+      sha: 'abc123def',
+      attempts: 1,
+      reviewer: 'fake-reviewer',
+      title: 'Add truncate (#7)',
+      issueTitle: 'Add truncate',
+    })
+    expect((merge.detail as { pullRequestBody: string }).pullRequestBody).toContain(
+      'Independent review by fake-reviewer, attempt 1: approve.',
+    )
+    expect(sandbox.stopped).toBe(1)
+  })
+
+  it('queues the merge of approved work ahead of every queued run, however old', async () => {
+    // A merge takes seconds and delivers the work; a run takes up to an hour. Workers take the job whose
+    // available_at is earliest, so a merge queued behind older runs waited for one of them to end.
+    await getPool().query(`delete from theokit_jobs where id = 'old-run'`)
+    await getPool().query(
+      `insert into theokit_jobs (id, name, input, max_attempts, available_at)
+       values ('old-run', 'run-task', '{"taskId": 999}', 1, now() - interval '400 days')`,
+    )
+    const id = await seedTask()
+
+    await runOnly(deps(new FakeSandbox(changed())), id)
+
+    const { rows } = await getPool().query<{ name: string }>(
+      `select name from theokit_jobs where name in ('merge-task', 'run-task')
+        and available_at <> 'infinity' order by available_at limit 1`,
+    )
+    await getPool().query(`delete from theokit_jobs where id = 'old-run'`)
+    expect(rows[0]?.name).toBe('merge-task')
+  })
+
+  it('opens the pull request and integrates it at the approved commit when the merge-task job runs', async () => {
+    const id = await seedTask()
+    const given = deps(new FakeSandbox(changed()))
+    await runOnly(given, id)
+
+    const result = await mergeTask(given, id, 'abc123def')
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def', pullRequestUrl: PR_URL })
+    expect(seen.pulls).toEqual(['factory/7'])
+    expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'merge',
+      'pr',
+      'done',
+    ])
+  })
+
+  it('does nothing when the merge-task job finds its task no longer in merge', async () => {
+    const id = await seedTask()
+    const given = deps(new FakeSandbox(changed()))
+    await runOnly(given, id)
+    await getDb().update(task).set({ stage: 'cancelled' }).where(eq(task.id, id))
+
+    const result = await mergeTask(given, id, 'abc123def')
+
+    expect(result).toEqual({
+      status: 'skipped',
+      reason: 'only approved work that waits in merge is taken to its pull request',
+    })
+    expect(seen.pulls).toEqual([])
+    expect(await stagesOf(id)).toEqual(['sandbox', 'build', 'push', 'verify', 'review', 'merge'])
+  })
+
+  it('does nothing when the merge-task job is for another commit than the one waiting in merge', async () => {
+    const id = await seedTask()
+    const given = deps(new FakeSandbox(changed()))
+    await runOnly(given, id)
+
+    const result = await mergeTask(given, id, 'other999')
+
+    expect(result).toMatchObject({ status: 'skipped' })
+    expect(seen.pulls).toEqual([])
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('merge')
   })
 
   it("passes format on the first round when the repository's fix commits what the builder left unformatted", async () => {
@@ -538,6 +668,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -588,6 +719,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -625,6 +757,7 @@ describe('runTask', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -1647,6 +1780,7 @@ describe('runTask review loop', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -1708,6 +1842,19 @@ describe('runTask review loop', () => {
     expect(result).toMatchObject({ status: 'done' })
     expect(reviewer.prompts).toHaveLength(4)
     expect(builder.resumed).toHaveLength(3)
+  })
+
+  it('gives the second review round the findings of the first, and the first round none', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(...roundsOf(1), verdictJson('approve'))
+
+    await runTask(deps(new FakeSandbox(changed()), { harness: builder, reviewer }), id)
+
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[0]).not.toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('problem 0')
   })
 
   it('hands over a review that is not converging: 5, 6, 7', async () => {
@@ -1840,8 +1987,11 @@ describe('runTask review loop', () => {
   it('fails at verify, with the attempts it took, when the checks never pass', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
+    // The tests pass on the integration branch: the failure is the work's.
     const sandbox = new FakeSandbox(
-      changed((c) => (c.endsWith('npm test') ? { exitCode: 1, stdout: 'not ok' } : undefined)),
+      changed((c) =>
+        c.endsWith('npm test') && !onBase(c) ? { exitCode: 1, stdout: 'not ok' } : undefined,
+      ),
     )
 
     const result = await runTask(deps(sandbox, { harness: builder }), id)
@@ -1966,18 +2116,229 @@ describe('runTask review loop', () => {
     expect(prompts[1]).not.toContain('QUESTION:')
   })
 
-  it('stops a rework that changes nothing instead of reviewing the same commit again', async () => {
+  it('gives the builder the answers to the readiness questions of its task, and no unanswered one', async () => {
+    const prompts: string[] = []
+    const capture: CodingHarness = {
+      name: 'capture',
+      egress: agentEgress,
+      run: async (_backend, { prompt }) => {
+        prompts.push(prompt)
+        return { ok: true, summary: 'done' }
+      },
+    }
+    const id = await seedTask()
+    await getDb()
+      .insert(question)
+      .values([
+        {
+          taskId: id,
+          origin: 'readiness',
+          body: 'Which page shows the total?',
+          commentId: 'c1',
+          costUsd: 0,
+          answer: 'The invoice page.',
+          answeredBy: 'paulo',
+        },
+        { taskId: id, origin: 'readiness', body: 'Still open?', commentId: 'c2', costUsd: 0 },
+      ])
+
+    await runTask(deps(new FakeSandbox(changed()), { harness: capture }), id)
+
+    expect(prompts[0]).toContain(
+      'Question: Which page shows the total?\n\nAnswer, from paulo: The invoice page.',
+    )
+    expect(prompts[0]).not.toContain('Still open?')
+  })
+
+  it('hands a review rework that changes nothing to a person, with what the builder said, without reviewing the same commit again', async () => {
     const id = await seedTask()
     const lazy: CodingHarness = {
       ...resumableBuilder(),
-      resume: async () => ({ ok: true, summary: 'nothing to do', sessionId: 'sess-1' }),
+      resume: async () => ({
+        ok: true,
+        summary: 'The finding asks me to undo what the scope decision keeps.',
+        sessionId: 'sess-1',
+      }),
     }
     const reviewer = reviewerSaying(verdictJson('changes', [finding]))
 
     const result = await runTask(deps(new FakeSandbox(changed()), { harness: lazy, reviewer }), id)
 
-    expect(result).toMatchObject({ status: 'failed', stage: 'push' })
-    expect(result.status === 'failed' && result.error).toContain('no change')
+    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def' })
+    expect(await reviewsOf(id)).toHaveLength(1)
+    expect(seen.drafts).toEqual([true])
+    expect(await handoffDetail(id)).toMatchObject({
+      cause: 'review_plateau',
+      reason: expect.stringMatching(
+        /^the builder changed nothing in answer to the review, and said: The finding asks me to undo what the scope decision keeps\.$/,
+      ),
+    })
+  })
+
+  it('hands over the last commit that passed the checks and was reviewed when the last rework breaks a check', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+    let tests = 0
+    let restored = false
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('restore --source=abc123def ')) {
+          restored = true
+          dirty = true
+          return { stdout: '' }
+        }
+        if (!c.endsWith('npm test') || onBase(c)) return undefined
+        tests += 1
+        // The first commit passes and is reviewed; every rework after it breaks the tests; the restored one passes.
+        return tests === 1 || restored ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def4' })
+    expect(await reviewsOf(id)).toHaveLength(1)
+    expect(seen.drafts).toEqual([true])
+    expect(await handoffDetail(id)).toMatchObject({
+      cause: 'review_plateau',
+      sha: 'abc123def4',
+      reason:
+        'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d, which passed them and was reviewed',
+    })
+    const evidenceOfRestored = (await getDb().select().from(evidence)).filter(
+      (e) => e.sha === 'abc123def4',
+    )
+    expect(evidenceOfRestored.map((e) => e.passed)).toEqual([true])
+  })
+
+  it('fails as before when the checks still fail on the restored commit', async () => {
+    const id = await seedTask()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+    let tests = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('restore --source=')) {
+          dirty = true
+          return { stdout: '' }
+        }
+        if (!c.endsWith('npm test') || onBase(c)) return undefined
+        tests += 1
+        return tests === 1 ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: resumableBuilder(), reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    expect(result.status === 'failed' && result.error).toContain('abc123d restored')
+    expect(seen.pulls).toEqual([])
+  })
+
+  it('runs the checks again on the same commit when a rework after failing checks changes nothing', async () => {
+    const id = await seedTask()
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => ({
+        ok: true,
+        summary: 'The failure was a timeout.',
+        sessionId: 'sess-1',
+      }),
+    }
+    let runs = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (!c.endsWith('npm test')) return undefined
+        runs += 1
+        // It fails on the commit and when run again there, then passes on the third run.
+        return runs <= 2 ? { exitCode: 1, stdout: 'timed out in 5000ms' } : undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: lazy }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def' })
+    expect((await getDb().select().from(evidence)).map((e) => [e.sha, e.passed])).toEqual([
+      ['abc123def', false],
+      ['abc123def', false],
+      ['abc123def', true],
+    ])
+  })
+
+  it('stops reworking and waits for the base when the checks the builder left unchanged fail on the integration branch too', async () => {
+    const id = await seedTask()
+    let reworks = 0
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => {
+        reworks += 1
+        return { ok: true, summary: 'The audit failure is not my change.', sessionId: 'sess-1' }
+      },
+    }
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('npm test') ? { exitCode: 1, stdout: 'advisory found' } : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: lazy }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    expect(reworks).toBe(1)
+    expect(sandbox.backend.commands).toContain('cd /tmp/aifactory-base && npm test')
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).toMatchObject({
+      baseRed: { sha: 'abc123def', checks: ['test'] },
+      error:
+        '"test" fails on workspace at abc123d too, so the failure is the base\'s, not this work\'s; the task runs again on its own later',
+    })
+  })
+
+  it('stops at the second commit and waits for the base when a check that keeps failing after a rework fails on the integration branch too', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('npm test') ? { exitCode: 1, stdout: 'advisory found' } : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    expect(builder.resumed).toHaveLength(1)
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).toMatchObject({ baseRed: { checks: ['test'] } })
+  })
+
+  it('goes on as before when the checks the builder left unchanged pass on the integration branch', async () => {
+    const id = await seedTask()
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => ({ ok: true, summary: 'Not my change.', sessionId: 'sess-1' }),
+    }
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('npm test') && !c.startsWith('cd /tmp/aifactory-base')
+          ? { exitCode: 1, stdout: 'expected 2, got 3' }
+          : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: lazy }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'verify' })
+    const failed = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    )[0]
+    expect(failed.detail).not.toHaveProperty('baseRed')
+    expect(String((failed.detail as { error?: string }).error)).toMatch(
+      /^no pull request: "test" failed at abc123d/,
+    )
   })
 
   it("gives the sandbox both agents' firewall rules, and the reviewer's quota stop is a wait", async () => {
@@ -2091,6 +2452,62 @@ describe('runTask planning before it builds', () => {
     expect(builder.resumed).toHaveLength(1)
     expect(builder.resumed[0]).toContain('Implement the plan')
     expect(builder.resumed[0]).not.toContain('discarded')
+  })
+
+  it('lets a planner apart from the builder write the plan, and the builder builds it in its own session', async () => {
+    const id = await seedTask()
+    const planPrompts: string[] = []
+    const planner: CodingHarness = {
+      name: 'fake-planner',
+      model: 'plan-model',
+      effort: 'high',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        planPrompts.push(input.prompt)
+        return { ok: true, summary: JSON.stringify(plan), costUsd: 0.02, sessionId: 'plan-1' }
+      },
+      resume: async () => ({ ok: false, summary: 'not asked again' }),
+    }
+    const builder = planningBuilder([])
+    const builderRuns: string[] = []
+    const run = builder.run
+    builder.run = (backend, input) => {
+      builderRuns.push(input.prompt)
+      return run(backend, input)
+    }
+
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, planner: () => planner, planFirst: true }),
+      id,
+    )
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(planPrompts).toHaveLength(1)
+    expect(planPrompts[0]).toContain('# This turn: plan only')
+    expect(builderRuns).toHaveLength(1)
+    expect(builderRuns[0]).toContain('fake-planner read the code and wrote this plan')
+    expect(builder.resumed).toHaveLength(0)
+    const [stored] = await getDb().select().from(changePlan).where(eq(changePlan.taskId, id))
+    expect(stored).toMatchObject({ harness: 'fake-planner', plan })
+    const runs = await getDb()
+      .select()
+      .from(agentRun)
+      .where(eq(agentRun.taskId, id))
+      .orderBy(agentRun.id)
+    expect(runs.map((r) => [r.role, r.harness])).toEqual([
+      ['planner', 'fake-planner'],
+      ['builder', 'fake-agent'],
+      ['reviewer', 'fake-reviewer'],
+    ])
+    const [planStage] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'plan')))
+    expect(planStage?.detail).toMatchObject({
+      harness: 'fake-planner',
+      model: 'plan-model',
+      effort: 'high',
+    })
   })
 
   it('gives the reviewer the plan and records a file changed outside it', async () => {
@@ -2552,6 +2969,44 @@ describe('runTask continuing from a branch a person sent back', () => {
       -1,
     )
     expect(done?.detail).not.toMatchObject({ unchanged: true })
+  })
+
+  it('checks and reviews an unreviewed head when the factory sent the work back with its own note and the agent changes nothing', async () => {
+    // The coordinator sends a run that ran out of time back with a note, which reaches the run as feedback
+    // from the factory (`fromChecks`), on a branch no review ever read and with no pull request yet.
+    const pushed = 'e'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb().update(task).set({ stage: 'intake', headSha: pushed }).where(eq(task.id, id))
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${pushed}\n` }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return {
+          ok: true,
+          summary: 'The earlier work is in place; I made no new change this pass.',
+        }
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'The last run ran out of time before it finished. Continue from the branch.',
+      fromChecks: true,
+    })
+
+    expect(result).toMatchObject({ sha: pushed })
+    const stages = await stagesOf(id)
+    expect(stages).toContain('verify')
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('failed')
   })
 
   it('pushes the merge the agent committed itself, with nothing left uncommitted, and checks and reviews it', async () => {
@@ -3025,6 +3480,90 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(pushesOf(sandbox)).toEqual([])
     expect(retryableFailure({ error: (result as { error: string }).error })).toBeNull()
   })
+
+  it('records the branch and the files of a conflict, for the coordinator to send the merge to the agent', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
+        if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
+        if (command.includes('--diff-filter=U')) return { stdout: 'CHANGELOG.md\nsrc/a.ts\n' }
+        return undefined
+      }),
+    )
+    const input = queued[0]!
+
+    await runTask(
+      deps(sandbox),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    const [failed] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'failed')))
+    expect(failed!.detail).toMatchObject({
+      baseConflict: { branch: 'workspace', files: ['CHANGELOG.md', 'src/a.ts'] },
+    })
+  })
+
+  it('queues the same run for a handed-over task the coordinator merges the base of', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+
+    await mergeBaseByCoordinator(
+      {
+        db: getDb(),
+        github,
+        api: githubApi,
+        enqueueResume: async () => {},
+        deleteSnapshot: async () => {},
+        inTransaction: (work) =>
+          getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+      },
+      id,
+      'merges workspace',
+    )
+
+    expect(queued).toEqual([{ taskId: id, mergeBase: true }])
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row!.stage).toBe('intake')
+  })
+
+  it('refuses to merge the base for a handed-over task whose branch is gone', async () => {
+    const id = await seedTask()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+
+    const merging = mergeBaseByCoordinator(
+      {
+        db: getDb(),
+        github,
+        api: githubApi,
+        enqueueResume: async () => {},
+        deleteSnapshot: async () => {},
+        inTransaction: (work) =>
+          getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+      },
+      id,
+      'merges workspace',
+    )
+
+    await expect(merging).rejects.toThrow(
+      'the task has no branch on GitHub to merge the integration branch into',
+    )
+    expect(queued).toEqual([])
+  })
 })
 
 describe('an automatic retry of a run that failed creating its sandbox', () => {
@@ -3077,7 +3616,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
     await runQueued(id, queued)
 
     for (let i = 0; i < 3; i++) {
-      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+      expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
       expect(await runQueued(id, queued)).toMatchObject({ feedback: 'Rename the helper to cut.' })
     }
 
@@ -3141,11 +3680,15 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
           stage: 'sandbox',
         })
         for (let i = 0; i < 4; i++) {
-          expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+          expect(await runDueRetries(action, later())).toEqual({
+            started: 1,
+            skipped: 0,
+            waiting: 0,
+          })
           expect(await runAgain()).toMatchObject({ status: 'failed', stage: 'sandbox' })
         }
         // The network is back: the fifth automatic run reaches the agent and completes.
-        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         expect(await runAgain()).toMatchObject({ status: 'done' })
         const [row] = await getDb().select().from(task).where(eq(task.id, id))
         expect(row.stage).toBe('done')
@@ -3168,7 +3711,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
       for (; runs < 20; runs++) {
         const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
         if (card.retryAt === null) break
-        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         const input = queued.at(-1)!
         await runTask(
           failing(),
@@ -3270,7 +3813,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
       for (; runs < 10; runs++) {
         const [card] = (await listTasks(getDb())).filter((c) => c.id === id)
         if (card.retryAt === null) break
-        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0 })
+        expect(await runDueRetries(action, later())).toEqual({ started: 1, skipped: 0, waiting: 0 })
         const input = queued.at(-1)!
         await runTask(
           failing(),
@@ -3348,7 +3891,13 @@ const owner = (over: Partial<IssueComment> = {}): IssueComment => ({
 
 const inTx: Parameters<typeof pollAnswers>[0]['inTransaction'] = (work) =>
   getDb().transaction((tx) =>
-    work(tx as never, async (taskId, questionId) => void queued.push([taskId, questionId])),
+    work(
+      tx as never,
+      async (taskId, questionId) => void queued.push([taskId, questionId]),
+      async () => {
+        throw new Error('an agent question never queues a first run')
+      },
+    ),
   )
 const queued: [number, number][] = []
 
@@ -3443,6 +3992,7 @@ describe('runTask waiting for an answer', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])
@@ -3452,6 +4002,56 @@ describe('runTask waiting for an answer', () => {
     expect(stored.resumedAt).not.toBeNull()
     const done = (await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'done')))[0]
     expect((done.detail as { costUsd: number }).costUsd).toBeGreaterThan(0.1)
+  })
+
+  it('checks and reviews the pushed branch when a continuation resumed after an answer changes nothing', async () => {
+    // The work was sent back on a branch it had already pushed; the agent asked instead of changing it,
+    // and after the answer it still changed nothing. The checkout is at the pushed head, not at the base.
+    const pushed = 'e'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb().update(task).set({ stage: 'intake', headSha: pushed }).where(eq(task.id, id))
+    // The clone is at the base until the run checks out the pushed branch.
+    let onBranch = false
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('checkout -B')) onBranch = true
+        if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) {
+          return { stdout: `${onBranch ? pushed : 'b'.repeat(40)}\n` }
+        }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'QUESTION: Can it stay async?', sessionId: 'sess-c' }
+      },
+      resume: async (_backend, sessionId) => {
+        dirty = false
+        return { ok: true, summary: 'It stays async, which the branch already does.', sessionId }
+      },
+    }
+    const parked = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'Two findings of the last review are open; fix only these.',
+      fromChecks: true,
+    })
+    expect(parked.status).toBe('waiting')
+    replies(owner())
+    await poll(sandbox)
+
+    await resumeTask(deps(sandbox, { harness: builder }), id)
+
+    const verified = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'verify'))
+    ).map((e) => (e.detail as { sha: string }).sha)
+    expect(verified).toEqual([pushed])
+    const stages = await stagesOf(id)
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('failed')
   })
 
   it('does not let a question be resumed twice, or before it has an answer', async () => {
@@ -3545,6 +4145,49 @@ describe('runTask waiting for an answer', () => {
 
     expect(result).toMatchObject({ status: 'done' })
     expect(reviewer.prompts).toHaveLength(4)
+  })
+
+  it('gives the first review after a question the findings of the round before it', async () => {
+    const id = await seedTask()
+    let commits = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        // The first commit gets a hash of its own: a review of the base commit is not a round.
+        if (c.includes('commit -F')) commits += 1
+        if (c.endsWith('rev-parse HEAD') && commits === 1) return { stdout: 'first111\n' }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness & { n: number } = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      n: 0,
+      run: async () => {
+        dirty = true
+        return { ok: true, summary: 'first pass', sessionId: 'sess-q' }
+      },
+      resume: async () => {
+        dirty = true
+        builder.n += 1
+        return builder.n === 1
+          ? { ok: true, summary: 'hmm\nQUESTION: Keep the old export too?', sessionId: 'sess-q' }
+          : { ok: true, summary: 'reworked', sessionId: 'sess-q' }
+      },
+    }
+    const reviewer = reviewerSaying(
+      verdictJson('changes', [{ ...finding, issue: 'the export is gone' }]),
+      verdictJson('approve'),
+    )
+
+    const parked = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+    expect(parked.status).toBe('waiting')
+    replies(owner({ body: 'No, drop it.' }))
+    await poll(sandbox)
+    await resumeTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[1]).toContain('# Your earlier review')
+    expect(reviewer.prompts[1]).toContain('the export is gone')
   })
 
   it('does not fill a round that had no review with one from a run before the task was sent back', async () => {
@@ -5278,6 +5921,7 @@ describe('runTask with a knowledge base', () => {
         'push',
         'verify',
         'review',
+        'merge',
         'pr',
         'done',
       ])
@@ -5683,5 +6327,77 @@ describe('runTask agent time', () => {
       .orderBy(stageEvent.id)
     const renewed = events.find((e) => (e.detail as { renewed?: boolean } | null)?.renewed)
     expect(renewed).toMatchObject({ stage: 'sandbox', detail: { provider: 'fake', renewed: true } })
+  })
+})
+
+describe('a run whose issue no longer asks for the work', () => {
+  /** What the webhook does when the issue is closed: the task enters `cancelled`. */
+  const cancel = (taskId: number) =>
+    getDb().transaction(async (tx) => {
+      await tx
+        .insert(stageEvent)
+        .values({ taskId, stage: 'cancelled', detail: { reason: 'the issue was closed' } })
+      await tx.update(task).set({ stage: 'cancelled' }).where(eq(task.id, taskId))
+    })
+  const stageNow = async (taskId: number) =>
+    (await getDb().select().from(task).where(eq(task.id, taskId)))[0].stage
+
+  it('does nothing for a task cancelled before its job was taken, not even start a sandbox', async () => {
+    const id = await seedTask()
+    await cancel(id)
+    const sandbox = new FakeSandbox(changed())
+
+    const result = await runOnly(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'cancelled' })
+    expect(await stagesOf(id)).toEqual(['cancelled'])
+    expect(sandbox.specs).toEqual([])
+  })
+
+  it('stops at its next stage when the task is cancelled while the agent works, and does not fail it', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const cancelling: CodingHarness = {
+      ...okHarness,
+      run: async (...args) => {
+        await cancel(id)
+        return okHarness.run(...args)
+      },
+    }
+
+    const result = await runOnly(deps(sandbox, { harness: cancelling }), id)
+
+    expect(result).toMatchObject({ status: 'cancelled' })
+    expect(await stagesOf(id)).toEqual(['sandbox', 'build', 'cancelled'])
+    expect(await stageNow(id)).toBe('cancelled')
+    expect(pushesOf(sandbox)).toEqual([])
+    expect(sandbox.stopped).toBe(1)
+  })
+
+  it('queues no merge-task when the task is cancelled while the review approves it', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const reviewer = approving()
+    const cancelling: CodingHarness = {
+      ...reviewer,
+      run: async (...args) => {
+        await cancel(id)
+        return reviewer.run(...args)
+      },
+    }
+
+    const result = await runOnly(deps(sandbox, { reviewer: cancelling }), id)
+
+    expect(result).toMatchObject({ status: 'cancelled' })
+    expect(await queuedMerges(id)).toEqual([])
+    expect(await stagesOf(id)).toEqual([
+      'sandbox',
+      'build',
+      'push',
+      'verify',
+      'review',
+      'cancelled',
+    ])
+    expect(await stageNow(id)).toBe('cancelled')
   })
 })

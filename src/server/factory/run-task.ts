@@ -1,18 +1,27 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { question as questionTable, task } from '../db/schema'
 import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
-import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
+import { openBlockersOf } from './blocker-check'
+import { BlockedByOpenIssues } from './blockers'
 import { errorMessage } from './error-message'
+import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
 import { createGithubApi } from '../github/pulls'
 
-import { Asked, QuotaStop, quotaDetail, type Continuation } from './run-support'
+import {
+  Asked,
+  BaseConflict,
+  BaseRed,
+  QuotaStop,
+  quotaDetail,
+  type Continuation,
+} from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
-import type { Parked, RunResult, RunTaskDeps } from './run-types'
-import { enterStage } from './stages'
+import { parkedOf, type Parked, type RunResult, type RunTaskDeps } from './run-types'
+import { enterRunStage, TaskCancelled } from './stages'
 
 export type { RunResult, RunTaskDeps } from './run-types'
 export { mergeEgress } from './run-support'
@@ -21,8 +30,8 @@ export { mergeEgress } from './run-support'
  * Runs one task: reads the issue, starts an isolated sandbox, has the agent implement it, pushes
  * the result to `factory/<issue>`, runs the checks on the pushed commit and has an independent
  * reviewer read it. Checks that fail or a review that asks for changes send the work back to the
- * same agent session, up to three attempts. A pull request opens only on green evidence for the
- * pushed commit plus an approval; when attempts run out after green checks, a draft pull request
+ * same agent session, up to three attempts. Green evidence for the pushed commit plus an approval
+ * moves the task to `merge`, where the `merge-task` job opens the pull request; when attempts run out after green checks, a draft pull request
  * and a comment on the issue hand the work to a person. Each stage is recorded as the run enters
  * it, the sandbox is always stopped, and a failure is recorded as `failed` with its reason.
  */
@@ -58,13 +67,14 @@ export async function resumeTask(
     .where(
       and(
         eq(questionTable.taskId, taskId),
+        eq(questionTable.origin, 'agent'),
         isNotNull(questionTable.answer),
         isNull(questionTable.resumedAt),
       ),
     )
     .returning()
   if (!claimed) throw new Error(`task ${taskId} has no answered question to resume`)
-  return execute(deps, taskId, signal, claimed)
+  return execute(deps, taskId, signal, parkedOf(claimed))
 }
 
 async function execute(
@@ -80,7 +90,8 @@ async function execute(
 
   const state: RunState = { current: 'sandbox', sandbox: undefined }
   try {
-    await enterStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
+    // A job a worker took just before its task was cancelled ends here, before any sandbox exists.
+    await enterRunStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
 
     // One token, limited to this task's repository. It is used here and in the firewall rule,
     // and nothing below hands it to the sandbox.
@@ -105,6 +116,7 @@ async function execute(
       signal,
       resuming,
       continuation,
+      clarifications: await clarificationsOf(deps, taskId),
     })
     const started = await run.start()
     return 'result' in started ? started.result : await run.loop(started.sha)
@@ -116,13 +128,9 @@ async function execute(
 }
 
 /**
- * Throws `BlockedByOpenIssues` when the issue declares a blocker that is still open, before any sandbox
- * exists: the work it waits for has not shipped, and an agent started now finds nothing to build on. Each
- * blocker is read with a token for its own repository. One whose state is unknown counts as open.
- *
- * A blocker in the task's own repository stops blocking once the factory has integrated its fix: the run
- * starts from the integration branch, where that code already is. Its issue stays open until the release,
- * which can take hours, and a chain of dependent issues would otherwise wait a release per link.
+ * Throws `BlockedByOpenIssues` when the issue declares a blocker that is still open (`openBlockersOf`),
+ * before any sandbox exists: the work it waits for has not shipped, and an agent started now finds nothing
+ * to build on.
  */
 async function refuseWhileBlocked(
   deps: RunTaskDeps,
@@ -130,38 +138,34 @@ async function refuseWhileBlocked(
   issue: Issue,
   readIssue: NonNullable<RunTaskDeps['fetchIssue']>,
 ): Promise<void> {
-  const blockers = declaredBlockers(issue.body, repository)
-  if (blockers.length === 0) return
-  const open = await openBlockers(blockers, async (ref) => {
-    if (ref.repository === repository && (await integrated(deps, ref.repository, ref.number)))
-      return false
-    const { token } = await deps.github.installationToken(ref.repository)
-    return (await readIssue(ref.repository, ref.number, token)).state !== 'closed'
-  })
+  const open = await openBlockersOf({ ...deps, fetchIssue: readIssue }, repository, issue.body)
   if (open.length > 0) throw new BlockedByOpenIssues(open)
 }
 
-/** Whether a task for this issue has been merged into the repository's integration branch. */
-async function integrated(
-  deps: RunTaskDeps,
-  repository: string,
-  issueNumber: number,
-): Promise<boolean> {
-  const [merged] = await deps.db
-    .select({ id: task.id })
-    .from(task)
+/** The answers the owner gave to the scheduler's readiness questions on this task, oldest first. */
+async function clarificationsOf(deps: RunTaskDeps, taskId: number): Promise<Clarification[]> {
+  const rows = await deps.db
+    .select({
+      question: questionTable.body,
+      answer: questionTable.answer,
+      by: questionTable.answeredBy,
+    })
+    .from(questionTable)
     .where(
       and(
-        eq(task.repository, repository),
-        eq(task.issueNumber, issueNumber),
-        isNotNull(task.mergedSha),
+        eq(questionTable.taskId, taskId),
+        eq(questionTable.origin, 'readiness'),
+        isNotNull(questionTable.answer),
       ),
     )
-    .limit(1)
-  return merged !== undefined
+    .orderBy(asc(questionTable.id))
+  return rows.map((r) => ({ question: r.question, answer: r.answer ?? '', by: r.by ?? 'a person' }))
 }
 
-/** Records how a run ended when it did not finish: parked on a question, or failed at a stage. */
+/**
+ * Records how a run ended when it did not finish: parked on a question, or failed at a stage. A run whose task
+ * was cancelled records nothing: the task stays cancelled and the job ends without a retry.
+ */
 async function fail(
   deps: RunTaskDeps,
   taskId: number,
@@ -170,14 +174,43 @@ async function fail(
   signal: AbortSignal | undefined,
 ): Promise<RunResult> {
   if (error instanceof Asked) return error.result
+  if (error instanceof TaskCancelled) return cancelled(taskId, state, error)
   const message = signal?.aborted
     ? 'the job lease expired before the run finished'
     : errorMessage(error)
-  await enterStage(deps.db, taskId, 'failed', {
+  try {
+    await recordFailure(deps, taskId, state, error, message)
+  } catch (refused) {
+    if (refused instanceof TaskCancelled) return cancelled(taskId, state, refused)
+    throw refused
+  }
+  return { status: 'failed', stage: state.current, error: message }
+}
+
+/** The end of a run whose task was cancelled, said in the log since nothing more is recorded. */
+function cancelled(taskId: number, state: RunState, error: TaskCancelled): RunResult {
+  console.log(
+    JSON.stringify({ event: 'run_cancelled', taskId, stage: state.current, why: error.reason }),
+  )
+  return { status: 'cancelled', stage: state.current, reason: error.reason }
+}
+
+/** The `failed` stage with the reason and what the error carries, unless the task was cancelled first. */
+async function recordFailure(
+  deps: RunTaskDeps,
+  taskId: number,
+  state: RunState,
+  error: unknown,
+  message: string,
+): Promise<void> {
+  await enterRunStage(deps.db, taskId, 'failed', {
     failedAt: state.current,
     error: message,
     ...(error instanceof QuotaStop ? quotaDetail(error, new Date()) : {}),
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
+    ...(error instanceof BaseRed ? { baseRed: { sha: error.baseSha, checks: error.checks } } : {}),
+    ...(error instanceof BaseConflict
+      ? { baseConflict: { branch: error.branch, files: error.files } }
+      : {}),
   })
-  return { status: 'failed', stage: state.current, error: message }
 }

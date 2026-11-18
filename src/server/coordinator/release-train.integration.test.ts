@@ -175,7 +175,14 @@ describe('the release train in a repository in auto', () => {
 
     const result = await coordinate(deps(), 'auto')
 
-    expect(result).toEqual({ applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 })
+    expect(result).toEqual({
+      applied: 0,
+      trial: 0,
+      refused: 0,
+      failed: 0,
+      escalated: 0,
+      deferred: 0,
+    })
     expect(promotions()).toHaveLength(1)
     expect(await actions()).toHaveLength(1)
   })
@@ -239,7 +246,14 @@ describe('the release train outside auto', () => {
 
     const result = await coordinate(deps('auto'), 'auto')
 
-    expect(result).toEqual({ applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 })
+    expect(result).toEqual({
+      applied: 0,
+      trial: 0,
+      refused: 0,
+      failed: 0,
+      escalated: 0,
+      deferred: 0,
+    })
     expect(api.calls).toEqual([])
     expect(await actions()).toEqual([])
   })
