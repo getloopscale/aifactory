@@ -536,6 +536,10 @@ export const repository = pgTable('repository', {
   releaseMode: text('release_mode', { enum: ['manual', 'trial', 'auto'] }),
   /** How long a run may last in this repository, in minutes; absent means the factory's default. */
   runLimitMinutes: integer('run_limit_minutes'),
+  /** From this many minutes of lead time a task is at risk; absent means the factory's default. */
+  leadTimeAtRiskMinutes: integer('lead_time_at_risk_minutes'),
+  /** From this many minutes of lead time a task is overdue; absent means the factory's default. */
+  leadTimeOverdueMinutes: integer('lead_time_overdue_minutes'),
   /** The doctor's last report on the repository, with its time. */
   doctor: jsonb('doctor').$type<DoctorReport>(),
   /** How the repository publishes a release, as the doctor last read it. */

@@ -17,6 +17,13 @@ import {
   task,
   watch,
 } from '../db/schema'
+import {
+  DEFAULT_LEAD_TIME,
+  leadTimeOf,
+  limitsFor,
+  type LeadTime,
+  type LeadTimeLimits,
+} from '../../shared/lead-time'
 import { retryAt } from '../factory/auto-retry'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
@@ -117,6 +124,8 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     .select({
       taskId: stageEvent.taskId,
       last: sql<Date>`max(${stageEvent.at})`,
+      // The last delivery: a task sent back after one is delivered again when it is done again.
+      delivered: sql<Date | null>`max(${stageEvent.at}) filter (where ${stageEvent.stage} = 'done')`,
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
       // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
       // same run again, so the checks before it still count.
@@ -159,6 +168,8 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     rows.filter((r) => r.stage === 'intake').map((r) => r.id),
   )
   const steps = await stepEvents(db, ids)
+  const limits = await leadTimeLimits(db, rows)
+  const now = new Date()
   return rows.map((r) => {
     const seen = byTask.get(r.id)
     const again =
@@ -180,6 +191,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       attempts: Number(seen?.verifies ?? 0),
       createdAt: iso(r.createdAt),
       updatedAt: iso(new Date(seen?.last ?? r.createdAt)),
+      leadTime: leadTimeOfCard(r, seen?.delivered ?? null, now, limits),
       approved: r.headSha !== null && kinds.some((k) => k.sha === r.headSha),
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
@@ -195,6 +207,50 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       ...cardAgent(r.stage as Stage, steps.get(r.id) ?? []),
     }
   })
+}
+
+/** The stages in which a task is delivered, so its lead time stopped at its last `done`. */
+const DELIVERED: readonly string[] = ['done', 'released']
+
+/** Each repository's lead time limits, the factory's default where it set none. */
+async function leadTimeLimits(db: Database, rows: TaskRow[]): Promise<Map<string, LeadTimeLimits>> {
+  const names = [...new Set(rows.map((r) => r.repository))]
+  const set = await db
+    .select({
+      fullName: repository.fullName,
+      atRiskMinutes: repository.leadTimeAtRiskMinutes,
+      overdueMinutes: repository.leadTimeOverdueMinutes,
+    })
+    .from(repository)
+    .where(inArray(repository.fullName, names))
+  const byName = new Map(set.map((r) => [r.fullName, r]))
+  return new Map(
+    names.map((name) => {
+      const own = byName.get(name)
+      return [
+        name,
+        limitsFor({
+          atRiskMinutes: own?.atRiskMinutes ?? null,
+          overdueMinutes: own?.overdueMinutes ?? null,
+        }),
+      ]
+    }),
+  )
+}
+
+/** A card's lead time: none for a cancelled task, stopped at the last delivery for a delivered one. */
+function leadTimeOfCard(
+  r: TaskRow,
+  delivered: Date | string | null,
+  now: Date,
+  limits: Map<string, LeadTimeLimits>,
+): LeadTime | null {
+  if (r.stage === 'cancelled') return null
+  const deliveredAt = DELIVERED.includes(r.stage) && delivered ? new Date(delivered) : null
+  return leadTimeOf(
+    { startedAt: r.createdAt, deliveredAt, now },
+    limits.get(r.repository) ?? DEFAULT_LEAD_TIME,
+  )
 }
 
 /** The latest event of each step stage (plan, build, review, verify) of every task, by task. */

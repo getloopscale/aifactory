@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+import { MAX_LEAD_TIME_MINUTES, MIN_LEAD_TIME_MINUTES } from '../../shared/lead-time'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 
 const check = z.object({ name: z.string().max(40), command: z.string().max(600) })
@@ -24,4 +25,18 @@ export const repositoryPatchSchema = z.object({
   reviewer: z.string().max(40).nullable().optional(),
   releaseMode: z.enum(['manual', 'trial', 'auto']).nullable().optional(),
   runLimitMinutes: z.number().int().min(MIN_RUN_MINUTES).max(MAX_RUN_MINUTES).nullable().optional(),
+  leadTimeAtRiskMinutes: z
+    .number()
+    .int()
+    .min(MIN_LEAD_TIME_MINUTES)
+    .max(MAX_LEAD_TIME_MINUTES)
+    .nullable()
+    .optional(),
+  leadTimeOverdueMinutes: z
+    .number()
+    .int()
+    .min(MIN_LEAD_TIME_MINUTES)
+    .max(MAX_LEAD_TIME_MINUTES)
+    .nullable()
+    .optional(),
 })
