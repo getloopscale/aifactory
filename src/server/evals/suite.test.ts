@@ -1,7 +1,25 @@
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import type { Baseline, CaseResult } from './compare'
-import { E2B_USD_PER_MS, agentSetup, checkBeforeDeploy, runSuite, spentOn } from './suite'
+import {
+  DEFAULT_START_MARGIN_MS,
+  E2B_USD_PER_MS,
+  agentSetup,
+  checkBeforeDeploy,
+  checkFromTestStart,
+  fromTestStart,
+  runSuite,
+  writeRunOutcome,
+  spentOn,
+  parseMarginMinutes,
+  startMarginFor,
+  runSuiteFromTestStart,
+  SUITE_TIMEOUT_MS,
+} from './suite'
 
 describe('agentSetup', () => {
   it('names each agent with its model and effort, and default where nothing is set', () => {
@@ -117,6 +135,181 @@ describe('runSuite', () => {
   })
 })
 
+describe('startMarginFor', () => {
+  it('keeps the longest case limit and time to write, so a case started at the cutoff ends in time', () => {
+    expect(startMarginFor([90 * 60_000, 150 * 60_000])).toBe(160 * 60_000)
+    expect(startMarginFor([])).toBe(DEFAULT_START_MARGIN_MS)
+    expect(DEFAULT_START_MARGIN_MS).toBeGreaterThan(90 * 60_000)
+  })
+})
+
+describe('parseMarginMinutes', () => {
+  it('reads minutes and refuses what would switch the time limit off', () => {
+    expect(parseMarginMinutes('90')).toBe(90 * 60_000)
+    expect(parseMarginMinutes('0')).toBe(0)
+    for (const bad of ['abc', '', '-5', 'Infinity']) expect(() => parseMarginMinutes(bad)).toThrow()
+  })
+})
+
+describe('runSuite time limit', () => {
+  const MIN = 60_000
+  it('starts no case once the time left is below the margin, and names the ones it left', async () => {
+    let clock = 0
+    const ran = await runSuite(
+      ['a', 'b', 'c'],
+      async (id) => {
+        clock += 50 * MIN
+        return result(id, 0)
+      },
+      {
+        budgetUsd: 10,
+        concurrency: 1,
+        sandboxUsdPerMs: 0,
+        deadlineMs: 120 * MIN,
+        startMarginMs: 30 * MIN,
+        now: () => clock,
+      },
+    )
+
+    // a starts at 0, b at 50 (70 left), c at 100 (20 left, below 30)
+    expect(ran.results.map((r) => r.id)).toEqual(['a', 'b'])
+    expect(ran.skipped).toEqual(['c'])
+  })
+
+  it('returns when an in-flight case hangs past the abandon time, naming it and the ones never started', async () => {
+    const ran = await runSuite(
+      ['a', 'b', 'c'],
+      async (id) => (id === 'b' ? new Promise<never>(() => {}) : result(id, 0)),
+      {
+        budgetUsd: 10,
+        concurrency: 1,
+        sandboxUsdPerMs: 0,
+        abandonAtMs: Date.now() + 30,
+      },
+    )
+    expect(ran.results.map((r) => r.id)).toEqual(['a'])
+    expect(ran.skipped).toEqual(['b', 'c'])
+  })
+
+  it('aborts the signal of the cases in flight when it gives up on them', async () => {
+    let aborted = false
+    const ran = await runSuite(
+      ['a'],
+      (_id, signal) =>
+        new Promise<never>(() => {
+          signal.addEventListener('abort', () => (aborted = true))
+        }),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, abandonAtMs: Date.now() + 20 },
+    )
+    expect(aborted).toBe(true)
+    expect(ran.skipped).toEqual(['a'])
+  })
+
+  it('counts the time the setup took before the first case: a late-starting run starts no case', async () => {
+    const MIN = 60_000
+    // The test started 4 hours less 20 minutes ago (setup took that long); the margin is 30 minutes.
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 20 * MIN)
+    const started: string[] = []
+    const ran = await runSuiteFromTestStart(
+      testStartedAt,
+      ['a', 'b'],
+      async (id) => {
+        started.push(id)
+        return result(id, 0)
+      },
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, startMarginMs: 30 * MIN },
+    )
+    expect(started).toEqual([])
+    expect(ran.skipped).toEqual(['a', 'b'])
+  })
+
+  it('returns, naming every case, when the setup that reads the margin hangs past the abandon time', async () => {
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
+    const ran = await runSuiteFromTestStart(
+      testStartedAt,
+      ['a', 'b'],
+      async (id) => result(id, 0),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, startMarginMs: () => new Promise<never>(() => {}) },
+    )
+    expect(ran.results).toEqual([])
+    expect(ran.skipped).toEqual(['a', 'b'])
+  })
+
+  it('abandons the cases in flight before the test time, counted from the test start', async () => {
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
+    const ran = await runSuiteFromTestStart(
+      testStartedAt,
+      ['a'],
+      () => new Promise<never>(() => {}),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, startMarginMs: 0 },
+    )
+    expect(ran.skipped).toEqual(['a'])
+  })
+
+  it('persists the cases left and the baseline refusal when a case hangs', async () => {
+    const ids = ['a', 'b', 'c']
+    const ran = await runSuite(
+      ids,
+      async (id) => (id === 'b' ? new Promise<never>(() => {}) : result(id, 0)),
+      { budgetUsd: 10, concurrency: 1, sandboxUsdPerMs: 0, abandonAtMs: Date.now() + 30 },
+    )
+    const path = join(mkdtempSync(join(tmpdir(), 'suite-')), 'run.selected.json')
+    writeRunOutcome(path, { startedAt: 't', baseline: true, selected: ids }, ran)
+    const saved = JSON.parse(readFileSync(path, 'utf8'))
+    expect(saved.selected).toEqual(ids)
+    expect(saved.finished).toEqual(['a'])
+    expect(saved.skipped).toEqual(['b', 'c'])
+    expect(saved.baselineRefused).toContain('baseline.json not written')
+    expect(saved.baselineRefused).toContain('b, c')
+  })
+
+  it('records no baseline refusal for a run that is not a baseline or left nothing', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'suite-'))
+    const full = { results: [result('a', 0)], skipped: [] }
+    const base = { startedAt: 't', selected: ['a'] }
+    expect(writeRunOutcome(join(dir, '1.json'), { ...base, baseline: true }, full).baselineRefused).toBeUndefined()
+    expect(
+      writeRunOutcome(join(dir, '2.json'), { ...base, baseline: false }, { results: [], skipped: ['a'] })
+        .baselineRefused,
+    ).toBeUndefined()
+  })
+
+  it('does not run again an environment failure inside the margin', async () => {
+    let clock = 0
+    const calls: string[] = []
+    const ran = await runSuite(
+      ['a'],
+      async (id) => {
+        calls.push(id)
+        clock += 100 * MIN
+        return { ...result(id, 0), passed: false, reason: 'fetch failed' }
+      },
+      {
+        budgetUsd: 10,
+        concurrency: 1,
+        sandboxUsdPerMs: 0,
+        deadlineMs: 120 * MIN,
+        startMarginMs: 30 * MIN,
+        now: () => clock,
+      },
+    )
+
+    expect(calls).toEqual(['a'])
+    expect(ran.results.map((r) => r.id)).toEqual(['a'])
+  })
+
+  it('has no time limit without a deadline', async () => {
+    const ran = await runSuite(['a', 'b'], async (id) => result(id, 0), {
+      budgetUsd: 10,
+      concurrency: 1,
+      sandboxUsdPerMs: 0,
+      now: () => Number.MAX_SAFE_INTEGER,
+    })
+
+    expect(ran.skipped).toEqual([])
+  })
+})
+
 const baseline: Baseline = {
   commit: 'abc1234',
   ranAt: '2026-11-11T20:00:00.000Z',
@@ -181,6 +374,18 @@ describe('checkBeforeDeploy', () => {
     ])
   })
 
+  it('refuses a partial quick run, naming the cases left, though the ones that ran are as good', async () => {
+    const checked = await checkBeforeDeploy({
+      baseline,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      runQuick: async () => ({ results: [result('a', 0.5)], skipped: ['b'] }),
+    })
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons).toEqual(['the run left 1 quick case(s) unmeasured: b'])
+  })
+
   it('refuses a run worse than the baseline, with the reason', async () => {
     const checked = await checkBeforeDeploy({
       baseline,
@@ -194,5 +399,60 @@ describe('checkBeforeDeploy', () => {
       ok: false,
       reasons: ['the pass rate fell from 100% to 0%'],
     })
+  })
+})
+
+describe('checkFromTestStart', () => {
+  it('fails, naming the read, before the test times out when reading the agent setup hangs', async () => {
+    // Abandon time is 30 ms away.
+    const testStartedAt = Date.now() - (SUITE_TIMEOUT_MS - 5 * 60_000 - 30)
+    let ran = false
+
+    const checking = checkFromTestStart(testStartedAt, {
+      baseline,
+      changedPaths: ['src/server/factory/harness.ts'],
+      readSetup: () => new Promise<never>(() => {}),
+      runQuick: async () => {
+        ran = true
+        return { results: [], skipped: [] }
+      },
+    })
+
+    await expect(checking).rejects.toThrow(/agent setup/)
+    expect(ran).toBe(false)
+  })
+
+  it('runs the quick set against the time the test started, setup read included', async () => {
+    const testStartedAt = Date.now() - 60_000
+    const given: number[] = []
+
+    const checked = await checkFromTestStart(testStartedAt, {
+      baseline,
+      changedPaths: ['src/server/factory/harness.ts'],
+      readSetup: async () => baseline.setup,
+      runQuick: async (startedAt) => {
+        given.push(startedAt)
+        return { results: baseline.results, skipped: [] }
+      },
+    })
+
+    expect(given).toEqual([testStartedAt])
+    expect(checked).toMatchObject({ ran: true, ok: true })
+  })
+})
+
+describe('fromTestStart', () => {
+  it('takes the start before the steps run, so choosing the cases counts against the deadline', async () => {
+    let clock = 1_000
+
+    const startedAt = await fromTestStart(
+      async (testStartedAt) => {
+        clock = 9_000 // choosing the cases took 8 seconds
+        return testStartedAt
+      },
+      () => clock,
+    )
+
+    expect(startedAt).toBe(1_000)
   })
 })

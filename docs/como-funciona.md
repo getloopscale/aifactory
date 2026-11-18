@@ -756,7 +756,8 @@ os sinais dos últimos 14 dias que mostram ou abrem issue.
 
 ## Qualidade do código
 
-Três gates rodam no job `quality` do CI, ao lado do `check`. Localmente: `pnpm quality`, ou cada um
+Os gates rodam ao lado do `check`: CRAP e duplicação no job `quality` do CI, mutação no job `mutation`, que é o
+mais lento e tem um limite de tempo próprio. Localmente: `pnpm quality`, ou cada um
 (`pnpm coverage`, `pnpm crap`, `pnpm dup`, `pnpm mutation`).
 
 - **CRAP.** Para cada função, `complexidade² × (1 − cobertura)³ + complexidade`: uma função complicada que
