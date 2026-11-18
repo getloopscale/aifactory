@@ -269,6 +269,18 @@ export type MetricSignalView = {
 
 export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
 
+/** How fast the factory delivers right now, measured live rather than by the daily indicators. */
+export type PulseReport = {
+  /** Tasks delivered (their last `done`) in the last hour, and in the last 24 hours. */
+  deliveredLastHour: number
+  deliveredLast24Hours: number
+  /** The median lead time, entering to delivery, of the tasks delivered in the last 24 hours; null with none. */
+  leadTimeP50Minutes: number | null
+  /** Tasks waiting in the queue, and tasks a run is working on. */
+  queued: number
+  working: number
+}
+
 export type HealthReport = {
   cost: {
     last24HoursUsd: number

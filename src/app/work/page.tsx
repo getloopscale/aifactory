@@ -6,6 +6,7 @@ import type { TaskCard } from '../../shared/panel'
 
 import { Board, TaskList } from '../components/Board'
 import { NewJob, type CreatedJob } from '../components/NewJob'
+import { Pulse } from '../components/Pulse'
 import { TaskDetailView } from '../components/TaskDetail'
 import { useCopy } from '../lib/copy'
 import { useEscape } from '../lib/keys'
@@ -63,6 +64,7 @@ export default function Page() {
           </div>
         </div>
       </div>
+      <Pulse />
       {opened ? (
         <p role="status" className="mb-3 text-sm text-foreground">
           {t.work.opened}{' '}
