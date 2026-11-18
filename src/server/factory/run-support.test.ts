@@ -1,7 +1,14 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { pullRequestBody, pushWithRetry, resolvedComment, runContinuation } from './run-support'
+import {
+  checkSummary,
+  unestablishedGates,
+  pullRequestBody,
+  pushWithRetry,
+  resolvedComment,
+  runContinuation,
+} from './run-support'
 
 const failing = (times: number) => {
   let calls = 0
@@ -134,5 +141,65 @@ describe('pullRequestBody', () => {
     // before any release has shipped it; the factory closes it on release, naming the version.
     expect(body().startsWith('For #114.')).toBe(true)
     expect(body()).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:?\s+#114\b/i)
+  })
+})
+
+describe('unestablishedGates', () => {
+  const row = (command: string, passed = true) => ({
+    name: command,
+    command,
+    passed,
+    durationMs: 1000,
+    output: '',
+  })
+  const own = 'paulohenriquevn/aifactory'
+
+  it('names every CI quality gate when the checks run none of them', () => {
+    expect(unestablishedGates(own, [row('pnpm test')])).toEqual([
+      'coverage',
+      'crap',
+      'dup',
+      'mutation',
+    ])
+  })
+
+  it('counts a gate only when its check passed', () => {
+    expect(unestablishedGates(own, [row('pnpm dup'), row('pnpm crap', false)])).toEqual([
+      'coverage',
+      'crap',
+      'mutation',
+    ])
+  })
+
+  it('takes pnpm quality as all of them', () => {
+    expect(unestablishedGates(own, [row('pnpm quality')])).toEqual([])
+  })
+
+  it.each([
+    'echo pnpm quality',
+    'pnpm crap || true',
+    'pnpm coverage --help',
+    'pnpm crap; pnpm test',
+    'pnpm dup | cat',
+    'pnpm quality --help',
+  ])('does not take `%s` as a gate that passed', (command) => {
+    expect(unestablishedGates(own, [row(command)]).length).toBeGreaterThan(0)
+    expect(unestablishedGates(own, [row(command)])).toContain('mutation')
+  })
+
+  it('takes the whole command, spaces around it aside', () => {
+    expect(unestablishedGates(own, [row(' pnpm run crap ')])).not.toContain('crap')
+  })
+
+  it('says nothing for another repository', () => {
+    expect(unestablishedGates('someone/else', [row('npm test')])).toEqual([])
+  })
+
+  it('puts the disclosure in the summary and the delivery text', () => {
+    const rows = [row('pnpm test')]
+    expect(checkSummary(rows, own)).toContain('Not run by the factory: `pnpm coverage`')
+    expect(checkSummary(rows)).not.toContain('Not run')
+    const input = { sha: 'abc1234def', claim: 'x', reviewer: 'r', review: 'ok', rows }
+    expect(resolvedComment({ ...input, repository: own })).toContain('Not run by the factory')
   })
 })
