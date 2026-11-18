@@ -382,9 +382,8 @@ class CaseRun {
         knowledgeDir: this.knowledgeDir,
         required,
         ...(this.earlier ? { earlier: this.earlier } : {}),
-        ...(this.plan
-          ? { plan: renderChangePlan(this.plan), unplanned, builderSummary: this.summary }
-          : {}),
+        builderSummary: this.summary,
+        ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
       }),
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))

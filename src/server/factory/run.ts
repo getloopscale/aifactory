@@ -1601,9 +1601,8 @@ export class Run {
           knowledgeDir: this.feed?.dir,
           required,
           ...(this.earlier ? { earlier: this.earlier } : {}),
-          ...(this.plan
-            ? { plan: this.renderedPlan, unplanned, builderSummary: this.summary }
-            : {}),
+          builderSummary: this.summary,
+          ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
         }),
       }),
     )

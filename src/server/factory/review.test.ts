@@ -124,6 +124,27 @@ describe('prompts', () => {
     expect(prompt).toContain('would break code that is already in use')
   })
 
+  it('tells a later round to judge the reason the builder gave for a finding it did not fix', () => {
+    const base = {
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      earlier: { sha: '1234567890abcdef', findings: [{ severity: 'major' as const, issue: 'x' }] },
+    }
+    const prompt = reviewPrompt({ ...base, builderSummary: 'declined x: out of scope' })
+    expect(prompt).toContain('judge the reason')
+    expect(prompt).toContain('lower it to minor with a note for the owner')
+    expect(prompt).toContain('stays, in the same words')
+    // The builder's answer reaches the reviewer with or without a plan.
+    expect(prompt).toContain('declined x: out of scope')
+    expect(prompt).not.toContain("# The builder's plan")
+    expect(reviewPrompt({ ...base, plan: 'p', builderSummary: 'declined x' })).toContain('declined x')
+    expect(reviewPrompt(base)).not.toContain('What the builder said')
+  })
+
   it('says nothing about an earlier review in the first round', () => {
     const prompt = reviewPrompt({
       repo: 'o/r',
