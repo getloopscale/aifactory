@@ -47,6 +47,33 @@ export async function runChecks(
   return results
 }
 
+/**
+ * The preparatory install a builder gets before its first pass: the check named `install`, run once and never
+ * again, with nothing stored. A repository with no such check runs nothing. Answers the failed result, or
+ * nothing when it passed or there was none; an install that cannot run is a failure, never a thrown error.
+ */
+export async function prepareInstall(
+  backend: SandboxBackend,
+  repoDir: string,
+  checks: CheckSpec[],
+  timeoutMs: number,
+): Promise<CheckResult | undefined> {
+  const install = checks.find((c) => c.name === 'install')
+  if (!install) return undefined
+  const result = await runCheck(backend, repoDir, install, timeoutMs).catch(
+    (error): CheckResult => ({
+      name: install.name,
+      command: install.command,
+      exitCode: -1,
+      timedOut: false,
+      passed: false,
+      output: String(error instanceof Error ? error.message : error).slice(-OUTPUT_TAIL),
+      durationMs: 0,
+    }),
+  )
+  return result.passed ? undefined : result
+}
+
 async function runCheck(
   backend: SandboxBackend,
   repoDir: string,

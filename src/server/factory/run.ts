@@ -38,6 +38,7 @@ import {
   failingChecks,
   gate,
   runChecks,
+  prepareInstall,
   type CheckResult,
   type Verdict,
 } from './evidence'
@@ -53,7 +54,13 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from './change-plan'
-import { buildPrompt, type Clarification, type CodingHarness, type HarnessResult } from './harness'
+import {
+  buildPrompt,
+  installFailureRule,
+  type Clarification,
+  type CodingHarness,
+  type HarnessResult,
+} from './harness'
 import {
   blockingCount,
   MAX_ATTEMPTS,
@@ -876,11 +883,11 @@ export class Run {
         attempt: resuming.attempt,
         resumed: true,
       })
-      const prompt = answerPrompt(
+      const prompt = `${installFailureRule(this.installFailed)}${answerPrompt(
         resuming.body,
         resuming.answer ?? '',
         resuming.answeredBy ?? 'a person',
-      )
+      )}`
       return this.settle(builder, 'builder', resuming.attempt, (onEvent) =>
         builder.resume!(backend, resuming.sessionId, {
           onEvent,
@@ -919,6 +926,22 @@ export class Run {
     )
   }
 
+  /** The install the factory ran before the builder's first pass, when it failed. */
+  private installFailed: CheckResult | undefined
+
+  /**
+   * Installs the project before the builder's first pass, once per sandbox, so it can run the tests it is told
+   * to run. A failure does not fail the run: the builder is told, and `verify` cleans and installs on its own.
+   */
+  private async installProject(): Promise<void> {
+    this.installFailed = await prepareInstall(
+      this.backend,
+      this.repoDir,
+      this.checks,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
+  }
+
   /** What the builder is told about the issue and its rules, the same for the plan and the work. */
   private buildInput(): Parameters<typeof buildPrompt>[0] {
     const { row, issue, branch, startingOver } = this.c
@@ -936,6 +959,7 @@ export class Run {
       knowledgeDir: this.feed?.dir,
       checks: this.checks,
       clarifications: this.c.clarifications,
+      ...(this.installFailed ? { installFailed: this.installFailed } : {}),
     }
   }
 
@@ -1361,6 +1385,7 @@ export class Run {
    */
   async start(): Promise<{ result: RunResult } | { sha: string }> {
     if (this.c.continuation?.mergeBase) return { sha: await this.mergeBase() }
+    await this.installProject()
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()

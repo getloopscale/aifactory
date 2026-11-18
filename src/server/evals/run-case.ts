@@ -21,7 +21,7 @@ import {
 import { BaseProbe, sameChecks } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
-import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
+import { failingChecks, prepareInstall, runChecks, type CheckResult } from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
 import { diffFacts } from '../factory/diff-facts'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
@@ -177,8 +177,12 @@ class CaseRun {
       askQuestions: false,
       knowledgeDir: this.knowledgeDir,
       checks: c.checks,
+      ...(this.installFailed ? { installFailed: this.installFailed } : {}),
     }
   }
+
+  /** The install that failed before the builder's first pass, as `Run.installProject` keeps it. */
+  private installFailed: CheckResult | undefined
 
   /**
    * The builder's work, as `Run.build` does it: a builder that can continue a session first writes a plan
@@ -186,8 +190,15 @@ class CaseRun {
    */
   async build(): Promise<void> {
     const { builder, planner } = this.deps
+    this.installFailed = await prepareInstall(
+      this.backend,
+      this.repoDir,
+      this.c.checks,
+      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    )
     const apart = planner !== undefined && planner.name !== builder.name
-    const discarded = apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
+    const discarded =
+      apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
     const result = await this.agentCall(() => {
       if (apart && this.plan) {
         const prompt = givenPlanPrompt(this.buildInput(), this.plan, planner.name)
@@ -247,7 +258,10 @@ class CaseRun {
     kept: { sha: string; end: CaseEnd },
     failed: CheckResult[],
   ): Promise<CaseEnd> {
-    await must(this.backend, `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`)
+    await must(
+      this.backend,
+      `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`,
+    )
     if (!(await this.hasChange())) return checksFailed(failed)
     await this.commitAll(`evaluation of ${this.c.id}, ${kept.sha.slice(0, 7)} restored`)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
