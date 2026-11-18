@@ -879,12 +879,17 @@ describe('the hold of a red integration branch', () => {
     expect(baseHoldOf(null, 'a')).toBeNull()
   })
 
-  it('starts when a check is red, keeps its start while the same checks stay red and restarts for others', () => {
+  it('starts when a check is red and keeps its start while the base stays red, whichever checks are', () => {
     const first = nextBaseHold(null, 'a', ['test', 'lint'], now)
     expect(first).toEqual({ sha: 'a', checks: ['lint', 'test'], since: now.toISOString() })
     const later = new Date('2026-11-17T15:00:00Z')
     expect(nextBaseHold(first, 'a', ['lint', 'test'], later)).toEqual(first)
-    expect(nextBaseHold(first, 'a', ['build'], later)?.since).toBe(later.toISOString())
+    // Another check going red on a base that never went green is the same red: the clock goes on (#282).
+    expect(nextBaseHold(first, 'a', ['build'], later)).toEqual({
+      sha: 'a',
+      checks: ['build'],
+      since: now.toISOString(),
+    })
   })
 
   it('ends when no check is red', () => {

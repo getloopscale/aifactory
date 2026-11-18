@@ -322,6 +322,11 @@ export const en = {
     changePlaceholder: 'Something different? Say what, in your words',
     change: 'Change it',
   },
+  baseAlert: {
+    region: 'Red integration branches',
+    line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>
+      `${repository}: ${branch} has been red for ${forHow} on ${checks}, holding ${held} delivered ${held === 1 ? 'task' : 'tasks'}.`,
+  },
   pulse: {
     region: 'Factory metrics',
     show: 'Show metrics',
