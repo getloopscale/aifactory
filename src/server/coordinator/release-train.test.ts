@@ -365,15 +365,10 @@ describe('a red release branch that the release itself fixes', () => {
     }
   })
 
-  it('is fixed by a green status on develop when a status failed on the red commit too', () => {
-    expect(
-      releaseFixesRed(recovery({ failingStatuses: 'failure', developStatuses: 'success' })),
-    ).toBe(true)
-    expect(
-      releaseFixesRed(
-        recovery({ failing: [], failingStatuses: 'error', developStatuses: 'success' }),
-      ),
-    ).toBe(true)
+  it('stays blocked when a status failed on the red commit, even if develop is green', () => {
+    for (const failingStatuses of ['failure', 'error'] as const) {
+      expect(releaseFixesRed(recovery({ failingStatuses, developStatuses: 'success' }))).toBe(false)
+    }
   })
 
   it('carries the develop head its checks were read at into the release exception', () => {

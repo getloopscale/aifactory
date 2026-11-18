@@ -84,15 +84,11 @@ export const failingNames = (runs: CheckReport[]): string[] => [
  * known, nothing says the branch is fixed.
  */
 export function releaseFixesRed(r: RedRecovery): boolean {
-  const statusFailed = ['failure', 'error'].includes(r.failingStatuses)
-  if (r.failing.length === 0 && !statusFailed) return false
-  // A status that failed on the red commit is fixed only by a green status on develop.
-  if (
-    statusFailed
-      ? r.developStatuses !== 'success'
-      : ['failure', 'error', 'pending'].includes(r.developStatuses)
-  )
-    return false
+  // A commit status that failed on the red commit is not named in what is read, so a green one on develop
+  // cannot be matched to it: the release cannot be shown to fix it.
+  if (['failure', 'error'].includes(r.failingStatuses)) return false
+  if (r.failing.length === 0) return false
+  if (['failure', 'error', 'pending'].includes(r.developStatuses)) return false
   return r.failing.every((name) => {
     const reports = r.developRuns.filter((run) => run.name === name)
     return (
