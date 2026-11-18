@@ -1,4 +1,7 @@
 import type { DoctorSay } from './doctor-say'
+import type { LeadTime } from './lead-time'
+
+export type { LeadTime, LeadTimeStatus } from './lead-time'
 
 /** What the panel's API returns. The server builds these, the interface reads them. */
 
@@ -294,6 +297,11 @@ export type TaskCard = {
   createdAt: string
   /** The last time anything happened to the task. */
   updatedAt: string
+  /**
+   * From entering the factory to the delivery, or to now while it is not delivered, against the repository's
+   * limits. Null for a cancelled task, which has no delivery to count to.
+   */
+  leadTime: LeadTime | null
   /** Whether a person approved the commit the pull request is at. */
   approved: boolean
   /** The pull request was merged into the integration branch, so it is on the pre-release branch too. */
@@ -520,6 +528,10 @@ export type RepositoryView = {
   releaseMode: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; null means the factory's default. */
   runLimitMinutes: number | null
+  /** From this many minutes of lead time a task is at risk; null means the factory's default. */
+  leadTimeAtRiskMinutes: number | null
+  /** From this many minutes of lead time a task is overdue; null means the factory's default. */
+  leadTimeOverdueMinutes: number | null
   /** The commit of the integration branch the proven checks passed on; null when none was proven. */
   checksProvenSha: string | null
   /** The names of the saved checks that no proof ran: the owner typed them, and the first task tries them. */

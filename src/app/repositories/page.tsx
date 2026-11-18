@@ -10,6 +10,11 @@ import { put } from '../lib/api'
 import type { Proposal } from '../lib/assist'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
+import {
+  leadTimeLimitsProblem,
+  MAX_LEAD_TIME_MINUTES,
+  MIN_LEAD_TIME_MINUTES,
+} from '../../shared/lead-time'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 import {
   formatChecks,
@@ -97,6 +102,8 @@ function Settings({
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
   const [runLimit, setRunLimit] = useState(repo.runLimitMinutes?.toString() ?? '')
+  const [atRisk, setAtRisk] = useState(repo.leadTimeAtRiskMinutes?.toString() ?? '')
+  const [overdue, setOverdue] = useState(repo.leadTimeOverdueMinutes?.toString() ?? '')
   const [message, setMessage] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -112,6 +119,14 @@ function Settings({
         setMessage(t.runLimit.invalid(MIN_RUN_MINUTES, MAX_RUN_MINUTES))
         return
       }
+      const limits = {
+        atRiskMinutes: atRisk.trim() ? Number(atRisk) : null,
+        overdueMinutes: overdue.trim() ? Number(overdue) : null,
+      }
+      if (leadTimeLimitsProblem(limits)) {
+        setMessage(t.leadTimeLimits.invalid(MIN_LEAD_TIME_MINUTES, MAX_LEAD_TIME_MINUTES))
+        return
+      }
       const parsed = parseChecks(checks)
       await put(`/api/panel/repositories/${repo.fullName}`, {
         checks: parsed.length > 0 ? parsed : null,
@@ -125,6 +140,8 @@ function Settings({
         reviewer: reviewer || null,
         releaseMode: release || null,
         runLimitMinutes: minutes,
+        leadTimeAtRiskMinutes: limits.atRiskMinutes,
+        leadTimeOverdueMinutes: limits.overdueMinutes,
       })
       setMessage(t.repositories.settings.saved)
       onSaved()
@@ -214,6 +231,31 @@ function Settings({
         />
         <span className="text-muted-foreground">{t.runLimit.help}</span>
       </label>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <label className="block">
+          <span className="text-foreground">{t.leadTimeLimits.atRisk}</span>
+          <Input
+            aria-label={t.leadTimeLimits.atRisk}
+            type="number"
+            value={atRisk}
+            placeholder={t.leadTimeLimits.atRiskPlaceholder}
+            onChange={(e) => setAtRisk(e.target.value)}
+            className="mt-1 w-full"
+          />
+        </label>
+        <label className="block">
+          <span className="text-foreground">{t.leadTimeLimits.overdue}</span>
+          <Input
+            aria-label={t.leadTimeLimits.overdue}
+            type="number"
+            value={overdue}
+            placeholder={t.leadTimeLimits.overduePlaceholder}
+            onChange={(e) => setOverdue(e.target.value)}
+            className="mt-1 w-full"
+          />
+        </label>
+        <span className="text-muted-foreground sm:col-span-2">{t.leadTimeLimits.help}</span>
+      </div>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />
         <span className="text-foreground">{s.ask}</span>

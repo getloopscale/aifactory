@@ -76,6 +76,15 @@ describe('patchProblem', () => {
     for (const bad of [49, 241]) expect(problem({ runLimitMinutes: bad }), `${bad}`).toBe(refused)
   })
 
+  it('takes lead time limits with the at-risk one under the overdue one, and null for the defaults', () => {
+    expect(problem({ leadTimeAtRiskMinutes: 120, leadTimeOverdueMinutes: 480 })).toBeUndefined()
+    expect(problem({ leadTimeAtRiskMinutes: null, leadTimeOverdueMinutes: null })).toBeUndefined()
+    expect(problem({ leadTimeAtRiskMinutes: 480, leadTimeOverdueMinutes: 120 })).toMatch(
+      /must be under the overdue limit/,
+    )
+    expect(problem({ leadTimeAtRiskMinutes: 2 })).toMatch(/from 5 to 10080 minutes/)
+  })
+
   it('accepts a domain in any case, and refuses what is not a hostname', () => {
     expect(problem({ egress: ['PyPI.ORG'] })).toBeUndefined()
     expect(problem({ egress: ['pypi.org', 'localhost'] })).toBe('"localhost" is not a domain name')

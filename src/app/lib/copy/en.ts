@@ -89,6 +89,13 @@ export const en = {
     needsRefinement: (missing: string) =>
       missing ? `needs refinement: ${missing}` : 'needs refinement',
     attempt: (n: number) => `attempt ${n} of 3`,
+    leadTime: {
+      on_track: 'On track',
+      at_risk: 'At risk',
+      overdue: 'Overdue',
+      running: (time: string, status: string) => `Lead time ${time} · ${status}`,
+      delivered: (time: string, status: string) => `Delivered in ${time} · ${status}`,
+    },
     steps: {
       planning: 'planning',
       building: 'building',
@@ -314,6 +321,15 @@ export const en = {
     askChange: 'Ask for a change',
     changePlaceholder: 'Something different? Say what, in your words',
     change: 'Change it',
+  },
+  leadTimeLimits: {
+    atRisk: 'Minutes until a task is at risk',
+    overdue: 'Minutes until a task is overdue',
+    atRiskPlaceholder: "Empty: the factory's default (120 minutes, 2 hours)",
+    overduePlaceholder: "Empty: the factory's default (480 minutes, 8 hours)",
+    help: 'The lead time runs from the moment an issue enters the factory until its work is delivered. Past the first limit the card gets an amber border, past the second a red one.',
+    invalid: (min: number, max: number) =>
+      `Each limit is a whole number of minutes from ${min} to ${max}, and the first is under the second.`,
   },
   runLimit: {
     label: 'Minutes a run may last',
