@@ -9,13 +9,16 @@ import {
   agentName,
   ago,
   describeEvent,
+  inQueueOrder,
   lastAgentLine,
   metricValue,
   money,
+  priorityTone,
   runsAgain,
   shortSha,
   stageLabel,
   stepLine,
+  topRank,
   workingLine,
 } from './format'
 
@@ -360,5 +363,54 @@ describe('lastAgentLine', () => {
       'last: Claude Code · opus',
     )
     expect(lastAgentLine({ agent: 'codex', model: null }, ptBR.board)).toBe('por último: Codex')
+  })
+})
+
+describe('the queued column', () => {
+  const at = (id: number, position: number | null) => ({
+    id,
+    queue: { position, reasons: null, readiness: null },
+  })
+
+  it('lists the queued tasks in the order the worker serves them, held ones last in the order they came', () => {
+    const tasks = [at(1, 3), at(2, null), at(3, 1), at(4, null), at(5, 2)]
+    expect(inQueueOrder(tasks).map((t) => t.id)).toEqual([3, 5, 1, 2, 4])
+  })
+
+  it('leaves a task with no place in the line after the ones that have one', () => {
+    expect(inQueueOrder([{ id: 1, queue: null }, at(2, 4)]).map((t) => t.id)).toEqual([2, 1])
+  })
+
+  it('does not reorder what it was given', () => {
+    const tasks = [at(1, 2), at(2, 1)]
+    inQueueOrder(tasks)
+    expect(tasks.map((t) => t.id)).toEqual([1, 2])
+  })
+
+  it('ranks the first ten places of the line and nothing after them', () => {
+    expect([1, 10, 11, null].map((position) => topRank(at(0, position).queue))).toEqual([
+      1,
+      10,
+      null,
+      null,
+    ])
+    expect(topRank(null)).toBeNull()
+  })
+})
+
+describe('the badge of a priority', () => {
+  it('is red for priority 1, amber for 2, violet for 3 and plain from 4 down', () => {
+    expect([1, 2, 3, 4, 5, 9].map(priorityTone)).toEqual([
+      'destructive',
+      'warning',
+      'primary',
+      'default',
+      'default',
+      'default',
+    ])
+  })
+
+  it('treats a priority under 1 as the most urgent', () => {
+    expect(priorityTone(0)).toBe('destructive')
   })
 })

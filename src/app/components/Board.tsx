@@ -2,25 +2,36 @@ import { Card as Surface, Table } from '@usetheo/ui'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 
-import { COLUMNS, type AgentSeen, type QueueView, type TaskCard } from '../../shared/panel'
+import {
+  COLUMNS,
+  type AgentSeen,
+  type Column as ColumnId,
+  type QueueView,
+  type TaskCard,
+} from '../../shared/panel'
 import { useCopy } from '../lib/copy'
 import type { Copy } from '../lib/copy/en'
 import {
   agentName,
   ago,
+  inQueueOrder,
   lastAgentLine,
   money,
   runsAgain,
   stepLine,
+  topRank,
   workingLine,
 } from '../lib/format'
 
-import { StageBadge } from './Badges'
+import { PriorityBadge, StageBadge } from './Badges'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
 
-/** Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. */
+/**
+ * Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. The
+ * priority is not in the words: the card shows it as a badge (`PriorityBadge`).
+ */
 export function queueWords(
   queue: QueueView,
   board: Copy['board'],
@@ -28,7 +39,6 @@ export function queueWords(
   const place = queue.position === null ? board.queueHeld : board.queuePlace(queue.position)
   const why = queue.reasons
     ? [
-        queue.reasons.priority === null ? null : board.priority(queue.reasons.priority),
         queue.reasons.bug ? board.bug : null,
         queue.reasons.unblocks > 0 ? board.unblocks(queue.reasons.unblocks) : null,
       ].filter((w): w is string => w !== null)
@@ -46,8 +56,13 @@ function QueueLines({ queue }: { queue: QueueView }) {
   const { place, verdict } = queueWords(queue, t.board)
   return (
     <>
-      <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={place}>
-        {place}
+      <div className="mt-1 flex items-start gap-1.5">
+        {queue.reasons?.priority != null ? (
+          <PriorityBadge priority={queue.reasons.priority} />
+        ) : null}
+        <span className="line-clamp-2 text-xs text-muted-foreground" title={place}>
+          {place}
+        </span>
       </div>
       {verdict ? (
         <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={verdict}>
@@ -153,6 +168,22 @@ function AgentPanel({ task }: { task: TaskCard }) {
   )
 }
 
+/** The place of a task among the first ten of the queue, as a number on the card; nothing past them. */
+function Rank({ queue }: { queue: TaskCard['queue'] }) {
+  const { t } = useCopy()
+  const rank = topRank(queue)
+  if (rank === null) return null
+  return (
+    <span
+      aria-label={t.board.topRank(rank)}
+      title={t.board.topRank(rank)}
+      className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center self-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground"
+    >
+      {rank}
+    </span>
+  )
+}
+
 /**
  * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
  * takes up to three lines, the agent its own panel, and the stage closes the card.
@@ -166,6 +197,7 @@ export function Card({ task }: { task: TaskCard }) {
         className="flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20"
       >
         <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+          <Rank queue={task.queue} />
           <span
             className="min-w-0 flex-1 truncate"
             title={`${task.repository} #${task.issueNumber}`}
@@ -224,16 +256,34 @@ export function Card({ task }: { task: TaskCard }) {
  */
 const COLUMN = 'minmax(176px, 1fr)'
 
+/**
+ * The queued column in the order the worker serves it, with a line under the first ten so the head of the
+ * queue reads at a glance. Every other column keeps the order it was given.
+ */
+function ordered(id: ColumnId, tasks: TaskCard[]): TaskCard[] {
+  return id === 'queued' ? inQueueOrder(tasks) : tasks
+}
+
 function Column({ title, tasks }: { title: string; tasks: TaskCard[] }) {
   const { t } = useCopy()
+  const head = tasks.filter((task) => topRank(task.queue) !== null).length
   return (
     <section aria-label={title} className="min-w-0">
       <h2 className="sticky top-0 z-10 mb-2 truncate bg-background pb-1 text-sm font-semibold text-foreground">
         {title} <span className="font-normal text-muted-foreground">{tasks.length}</span>
       </h2>
       <div className="space-y-2">
-        {tasks.map((task) => (
-          <Card key={task.id} task={task} />
+        {tasks.map((task, i) => (
+          <div key={task.id}>
+            {i === head && head > 0 ? (
+              <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                {t.board.restOfQueue}
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            ) : null}
+            <Card task={task} />
+          </div>
         ))}
         {tasks.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t.board.nothingHere}</p>
@@ -261,7 +311,10 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
           <Column
             key={column.id}
             title={t.columns[column.id]}
-            tasks={tasks.filter((t) => t.column === column.id)}
+            tasks={ordered(
+              column.id,
+              tasks.filter((t) => t.column === column.id),
+            )}
           />
         ))}
       </div>

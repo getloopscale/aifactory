@@ -2,7 +2,7 @@ import { Badge } from '@usetheo/ui'
 
 import type { Retryable, Stage } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
-import { stageLabel } from '../lib/format'
+import { priorityTone, stageLabel } from '../lib/format'
 
 type Variant = 'default' | 'primary' | 'accent' | 'success' | 'warning' | 'destructive'
 
@@ -64,5 +64,20 @@ export function Pass({ ok }: { ok: boolean }) {
       />
       {ok ? t.stages.passed : t.stages.checkFailed}
     </span>
+  )
+}
+
+/** The `priority:N` label of a queued task's issue, as a badge whose colour says how urgent it is. */
+export function PriorityBadge({ priority }: { priority: number }) {
+  const { t } = useCopy()
+  return (
+    <Badge
+      variant={priorityTone(priority)}
+      aria-label={t.board.priority(priority)}
+      title={t.board.priority(priority)}
+      className="shrink-0 whitespace-nowrap tabular-nums"
+    >
+      {t.board.priorityBadge(priority)}
+    </Badge>
   )
 }

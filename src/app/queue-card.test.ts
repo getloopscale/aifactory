@@ -14,9 +14,9 @@ const view = (over: Partial<QueueView> = {}): QueueView => ({
 })
 
 describe('what a queued card says of its place', () => {
-  it('names its place and every reason the scheduler had', () => {
+  it('names its place and every reason the scheduler had but the priority, which has a badge of its own', () => {
     expect(queueWords(view(), en.board)).toEqual({
-      place: '#3 in the queue · priority 2 · bug · unblocks 4',
+      place: '#3 in the queue · bug · unblocks 4',
       verdict: null,
     })
   })
@@ -56,7 +56,7 @@ describe('what a queued card says of its place', () => {
         ptBR.board,
       ),
     ).toEqual({
-      place: '3ª na fila · prioridade 2 · bug · desbloqueia 4',
+      place: '3ª na fila · bug · desbloqueia 4',
       verdict: 'precisa de refinamento: sem critério',
     })
   })

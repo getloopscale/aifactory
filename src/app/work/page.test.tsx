@@ -239,6 +239,97 @@ describe('board', () => {
     await waitFor(() => expect(screen.getByText(en.board.attempt(2))).toBeDefined())
   })
 
+  it('shows the queue in the order the worker serves it, the first ten ranked and the rest after them', async () => {
+    const queued = (id: number, position: number | null) =>
+      card({
+        id,
+        title: `Queued ${id}`,
+        stage: 'intake',
+        column: 'queued',
+        queue: { position, reasons: null, readiness: null },
+      })
+    // Eleven in the line, given to the board out of order, and one held.
+    const places = [11, 3, 1, 10, 2, 4, 5, 6, 7, 8, 9]
+    serve({ tasks: [queued(100, null), ...places.map((p) => queued(p, p))] })
+    render(
+      <MemoryRouter>
+        <CopyProvider>
+          <Page />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Queued 1')).toBeDefined())
+    const column = within(screen.getByRole('region', { name: en.columns.queued }))
+    const titles = column.getAllByText(/^Queued \d+$/).map((element) => element.textContent)
+    expect(titles).toEqual([
+      ...Array.from({ length: 11 }, (_, i) => `Queued ${i + 1}`),
+      'Queued 100',
+    ])
+    expect(column.getByLabelText(en.board.topRank(1))).toBeDefined()
+    expect(column.getByLabelText(en.board.topRank(10))).toBeDefined()
+    expect(column.queryByLabelText(en.board.topRank(11))).toBeNull()
+    expect(column.getByText(en.board.restOfQueue)).toBeDefined()
+  })
+
+  it('marks the priority of a queued task with a badge of its own', async () => {
+    serve({
+      tasks: [
+        card({
+          id: 1,
+          title: 'Urgent one',
+          stage: 'intake',
+          column: 'queued',
+          queue: { position: 1, reasons: { priority: 1, bug: true, unblocks: 0 }, readiness: null },
+        }),
+        card({
+          id: 2,
+          title: 'Unlabelled one',
+          stage: 'intake',
+          column: 'queued',
+          queue: {
+            position: 2,
+            reasons: { priority: null, bug: false, unblocks: 0 },
+            readiness: null,
+          },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <CopyProvider>
+          <Page />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Urgent one')).toBeDefined())
+    const badge = screen.getByLabelText(en.board.priority(1))
+    expect(badge.textContent).toBe(en.board.priorityBadge(1))
+    expect(screen.getAllByText(/^P\d$/)).toHaveLength(1)
+  })
+
+  it('draws no line under the first ten when the queue is no longer than that', async () => {
+    serve({
+      tasks: [
+        card({
+          id: 1,
+          title: 'Only one',
+          stage: 'intake',
+          column: 'queued',
+          queue: { position: 1, reasons: null, readiness: null },
+        }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <CopyProvider>
+          <Page />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Only one')).toBeDefined())
+    expect(screen.queryByText(en.board.restOfQueue)).toBeNull()
+  })
+
   it('writes the eight column titles in Portuguese, in the same order', async () => {
     window.localStorage.setItem('aifactory.language', 'pt-BR')
     serve({ tasks: [card({ id: 1, title: 'Building one' })] })
