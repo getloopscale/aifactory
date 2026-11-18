@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { createPromotionApi } from './promotion-api'
+import { RateLimited } from './rate-limit'
 
 type Call = { method: string; url: string; auth?: string }
 
@@ -229,5 +230,18 @@ describe('issueOpen', () => {
     const closed = fakeFetch({ 'GET /issues/5': { status: 200, body: { state: 'closed' } } })
     expect(await createPromotionApi(open.fetch).issueOpen('o/r', 't', 5)).toBe(true)
     expect(await createPromotionApi(closed.fetch).issueOpen('o/r', 't', 5)).toBe(false)
+  })
+})
+
+describe('a rerun refused for the rate limit', () => {
+  it('is thrown as RateLimited, not answered as a refusal to rerun', async () => {
+    const spent = async () =>
+      new Response('{"message":"API rate limit exceeded for installation ID 1."}', {
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' },
+      })
+    await expect(createPromotionApi(spent).rerunFailedJobs('o/r', 't', 9)).rejects.toBeInstanceOf(
+      RateLimited,
+    )
   })
 })

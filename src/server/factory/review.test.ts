@@ -11,6 +11,7 @@ import {
   reviewPrompt,
   reworkPrompt,
   roundsNote,
+  type Finding,
 } from './review'
 
 const answer = (verdict: unknown) => `I read the diff.\n\n${JSON.stringify(verdict)}`
@@ -96,6 +97,43 @@ describe('prompts', () => {
     expect(prompt).toContain('Do not edit, create or delete files')
     expect(prompt).toContain('"verdict"')
     expect(prompt).not.toContain("# The builder's plan")
+  })
+
+  it('in a later round, gives the reviewer its earlier findings and limits new blockers to what changed', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      earlier: {
+        sha: '1234567890abcdef',
+        findings: [
+          { severity: 'blocker', file: 'src/a.ts', issue: 'drops the error' },
+          { severity: 'minor', file: 'src/b.ts', issue: 'a nicer name' },
+        ],
+      },
+    })
+    expect(prompt).toContain('# Your earlier review of 1234567')
+    expect(prompt).toContain('- **blocker** `src/a.ts`: drops the error')
+    // A minor finding never blocked, so it is not carried into the next round.
+    expect(prompt).not.toContain('a nicer name')
+    expect(prompt).toContain('git diff 1234567890abcdef HEAD')
+    expect(prompt).toContain('A new blocker or major finding')
+    expect(prompt).toContain('would break code that is already in use')
+  })
+
+  it('says nothing about an earlier review in the first round', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+    })
+    expect(prompt).not.toContain('# Your earlier review')
   })
 
   it('gives the reviewer the plan, the files changed outside it, and what the builder said', () => {
@@ -201,6 +239,46 @@ describe('prompts', () => {
     expect(prompt).toContain('not ok 2 - fails')
     expect(prompt).toContain('**major** `a.js`: rejects nothing')
     expect(prompt).toContain('Do not run git commit or git push')
+  })
+
+  describe('when a reviewer asked for changes', () => {
+    const findings: Finding[] = [{ severity: 'major', file: 'a.js', issue: 'rejects nothing' }]
+    const prompt = reworkPrompt({ findings, failedChecks: [], reviewedSha: 'abc1234def5678' })
+
+    it('asks for a test that fails without each fix to behaviour', () => {
+      expect(prompt).toContain('first write a test that fails without the fix')
+    })
+
+    it('asks the builder to read its own diff since the reviewed commit before finishing', () => {
+      expect(prompt).toContain('`git diff abc1234def5678 HEAD`')
+      expect(prompt).toContain('new blockers only in what changed since abc1234')
+    })
+
+    it('asks to name a finding that cannot be fixed inside the issue instead of half-fixing it', () => {
+      expect(prompt).toContain('cannot fix inside this issue')
+      expect(prompt).toContain('Do not half-fix it')
+    })
+
+    it('asks for each finding and every file outside the plan to be accounted for in the summary', () => {
+      expect(prompt).toContain('list each finding with what you changed and the test that shows it')
+      expect(prompt).toContain('the reason for every file you changed that your plan did not name')
+    })
+
+    it('reads the diff of the round when the reviewed commit is not known', () => {
+      const unnamed = reworkPrompt({ findings, failedChecks: [] })
+      expect(unnamed).toContain('`git diff HEAD`')
+      expect(unnamed).not.toContain('changed since')
+    })
+  })
+
+  it('tells a builder whose checks failed nothing about review findings', () => {
+    const prompt = reworkPrompt({
+      findings: [],
+      failedChecks: [{ command: 'npm test', output: 'not ok' }],
+      reviewedSha: 'abc1234def5678',
+    })
+    expect(prompt).not.toContain('first write a test that fails without the fix')
+    expect(prompt).not.toContain('git diff')
   })
 
   it('renders findings as a list', () => {

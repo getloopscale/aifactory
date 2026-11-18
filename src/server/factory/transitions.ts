@@ -20,17 +20,25 @@ type PanelEvent =
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
- * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over task back to its
- * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left.
+ * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over or failed task back to its
+ * agent (`coordinator/apply.ts`), `coordinator_merge_base` the coordinator queueing the run that merges the integration
+ * branch into a handed-over task's branch with no agent, `merged_by_person` a person merging the pull request a handoff left,
+ * `needs_refinement` the scheduler finding a queued issue not ready to build (`scheduler/apply.ts`),
+ * `merge_due` the `merge-task` job taking approved work to its pull request and the integration branch,
+ * `run_step` a run recording the stage it reached (`enterRunStage` in `stages.ts`).
  */
 type AutomaticEvent =
   | 'retry_due'
   | 'conflict_rerun'
   | 'send_back_after_ci'
   | 'coordinator_send_back'
+  | 'coordinator_merge_base'
   | 'hand_over'
   | 'integrate'
   | 'merged_by_person'
+  | 'needs_refinement'
+  | 'merge_due'
+  | 'run_step'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
 type WebhookEvent = 'issue_labeled' | RoutedCode
@@ -60,6 +68,14 @@ export type Action =
   | 'withdraw_send_back'
   /** A person merged the work a handoff left: it is integrated, and goes on to the release like any other. */
   | 'adopt_merge'
+  /** The queued run is withdrawn and the task waits for the owner's answer to a question on its issue. */
+  | 'ask_owner'
+  /** Approved work gets its pull request and is integrated, as the run did once the review approved it. */
+  | 'integrate_approved'
+  /** The run records the stage it reached and goes on. */
+  | 'record_stage'
+  /** A new run merges the integration branch into the task's branch itself, with no agent, and checks the merge. */
+  | 'merge_base'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -101,10 +117,22 @@ const refuse = (reason: string): Outcome => ({ kind: 'refused', reason })
 const each = <S extends TaskStage>(stages: readonly S[], rule: Rule) =>
   Object.fromEntries(stages.map((stage) => [stage, rule])) as Record<S, Rule>
 
-/** The stages in which a run is alive. */
-export const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
-/** The stages the supervisor looks at for a run that stalled or was lost. */
-const SUPERVISED = ['intake', 'sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
+/**
+ * The stages in which a run is alive, or approved work waits for the `merge-task` job that takes it to the
+ * integration branch (`merge`, then `pr`).
+ */
+export const WORKING = [
+  'sandbox',
+  'plan',
+  'build',
+  'push',
+  'verify',
+  'review',
+  'merge',
+  'pr',
+] as const
+/** The stages the supervisor looks at for a run or a merge that stalled or was lost. */
+const SUPERVISED = ['intake', ...WORKING] as const
 
 const START_OVER = act('start_over')
 
@@ -113,6 +141,11 @@ const whenNeverMerged =
   (otherwise: Outcome): Rule =>
   (task) =>
     !task.mergedSha && !task.resolvedSha ? START_OVER : otherwise
+
+/** What a person asks of approved work while the factory merges it: nothing, until it is delivered. */
+const MERGING = refuse(
+  'the reviewer approved this work and the factory is merging it now: wait until it is delivered',
+)
 
 const NOT_APPROVED = refuse('only a task with a pull request can be approved')
 const approve: Rule = (task) => (task.headSha ? act('approve') : NOT_APPROVED)
@@ -157,8 +190,20 @@ const NOT_AWAITING_CHECKS = refuse(
 )
 
 const NOT_HANDED_OVER = refuse(
-  'the coordinator sends back only a task that was handed over to a person',
+  'the coordinator sends back only a task that was handed over to a person or failed',
 )
+
+const NOT_MERGED_INTO = refuse(
+  'the coordinator merges the integration branch only into the branch of a handed-over task',
+)
+/** The merge needs the task's branch on GitHub and a pull request that is not integrated yet. */
+const mergeBase: Rule = (task) => {
+  if (task.mergedSha) return ALREADY_INTEGRATED
+  if (task.branchGone) {
+    return refuse('the task has no branch on GitHub to merge the integration branch into')
+  }
+  return act('merge_base')
+}
 
 const NOBODY_WORKING = ignore(
   'no run is working on this task and nothing of it waits for the repository checks',
@@ -216,11 +261,13 @@ const ISSUE_WITHDRAWN = {
 const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
   approve: {
     ...each(['intake', ...WORKING, 'waiting', 'released', 'failed', 'cancelled'], NOT_APPROVED),
+    merge: MERGING,
     done: approve,
     handoff: approve,
   },
   request_changes: {
     ...each(['intake', ...WORKING, 'waiting', 'released', 'cancelled'], NOT_SENT_BACK),
+    merge: MERGING,
     done: sendBack,
     handoff: sendBack,
     // A run that failed after pushing (out of time, a question the sandbox could not wait for) has work
@@ -236,6 +283,7 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
   },
   retry: {
     ...each(['intake', ...WORKING, 'waiting', 'released', 'cancelled'], NOT_RETRIED),
+    merge: MERGING,
     done: whenNeverMerged(NOT_RETRIED),
     handoff: START_OVER,
     failed: START_OVER,
@@ -249,11 +297,13 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
   },
   resolve: {
     ...each(['intake', ...WORKING, 'waiting', 'done', 'released', 'cancelled'], NOT_RESOLVED),
+    merge: MERGING,
     handoff: act('resolve'),
     failed: act('resolve'),
   },
   release: {
     ...each(['intake', ...WORKING, 'waiting', 'handoff', 'failed', 'cancelled'], NOT_RELEASABLE),
+    merge: MERGING,
     done: release,
     released: refuse('this task was already released'),
   },
@@ -280,11 +330,17 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     done: (task) => (task.awaitingCiSha ? act('continue_on_branch') : NOT_AWAITING_CHECKS),
   },
   coordinator_send_back: {
+    ...each(['intake', ...WORKING, 'waiting', 'done', 'released', 'cancelled'], NOT_HANDED_OVER),
+    handoff: sendBack,
+    // A failure of the work itself (checks still red, out of time, no change) continues on its branch.
+    failed: sendBack,
+  },
+  coordinator_merge_base: {
     ...each(
       ['intake', ...WORKING, 'waiting', 'done', 'released', 'failed', 'cancelled'],
-      NOT_HANDED_OVER,
+      NOT_MERGED_INTO,
     ),
-    handoff: sendBack,
+    handoff: mergeBase,
   },
   hand_over: {
     ...each(WORKING, act('hand_over')),
@@ -293,7 +349,7 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
   },
   integrate: {
     ...each(
-      ['intake', 'sandbox', 'plan', 'build', 'push', 'verify', 'review'],
+      ['intake', 'sandbox', 'plan', 'build', 'push', 'verify', 'review', 'merge'],
       NOT_AT_ITS_PULL_REQUEST,
     ),
     pr: integrate,
@@ -308,6 +364,30 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
       ignore('only the pull request a handoff left waits for a person to merge it'),
     ),
     handoff: act('adopt_merge'),
+  },
+  needs_refinement: {
+    intake: act('ask_owner'),
+    ...each(
+      [...WORKING, 'waiting', 'done', 'released', 'handoff', 'failed', 'cancelled'],
+      ignore(
+        'only a queued task that no run has taken yet is held back for its issue to be refined',
+      ),
+    ),
+  },
+  merge_due: {
+    ...each(
+      TASK_STAGES.filter((stage) => stage !== 'merge'),
+      ignore('only approved work that waits in merge is taken to its pull request'),
+    ),
+    merge: act('integrate_approved'),
+  },
+  // Nothing brings a cancelled task back while its run goes on, so the run stops instead of writing over it.
+  run_step: {
+    ...each(
+      TASK_STAGES.filter((stage) => stage !== 'cancelled'),
+      act('record_stage'),
+    ),
+    cancelled: refuse('the task was cancelled: its issue was closed or lost the factory label'),
   },
 
   issue_labeled: {
@@ -343,9 +423,10 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
 export const EVENTS = Object.keys(TRANSITIONS) as TransitionEvent[]
 
 /**
- * The events whose outcome is declared here and read by nothing yet. The webhook intents are only recorded
- * (`ingest/decide.ts`), and a later step will act on them as this says. A run hands its own work over and
- * integrates it where it is (`Run`, `autoMergeOrMergeable`, `integrate-after-ci`); the table states what
+ * The events whose outcome is declared here and read by nothing yet. These webhook intents are only recorded
+ * (`ingest/decide.ts`), and a later step will act on them as this says; an issue that was closed or lost the
+ * label already cancels its task (`ingest/withdraw.ts`). A run hands its own work over, and the
+ * `merge-task` job integrates it where it is (`integrate`, `autoMergeOrMergeable`, `integrate-after-ci`); the table states what
  * those do, and they do not ask it.
  */
 export const NOT_WIRED: readonly TransitionEvent[] = [
@@ -358,8 +439,6 @@ export const NOT_WIRED: readonly TransitionEvent[] = [
   'pull_request_review_comment_created',
   'check_suite_completed',
   'check_run_completed',
-  'issue_unlabeled',
-  'issue_closed',
   'issue_reopened',
 ]
 

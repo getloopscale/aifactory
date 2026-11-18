@@ -41,15 +41,17 @@ src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
-                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`, `coordinate`)
+                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`, `coordinate`, `schedule`)
   metrics/          the factory's own indicators, their daily points and control bands (`config.ts`)
   knowledge/        the owner's knowledge repository: mirror, sync, the slice each agent gets, notes
   db/               Postgres config, pool, Drizzle schema, health probe
   ingest/           GitHub delivery: decide, record (ingress + task), signed webhook handler
   coordinator/      the factory's exceptions: facts, recognition, one decision, applying it (ADR 0011)
+  scheduler/        the order of the queued runs and the readiness of newly queued issues
   factory/          one task end to end: sandbox, agent, push, stage history; the repository doctor
   github/           GitHub App auth (repository-scoped tokens) and issue reads
-  jobs/             defineJob files; `run-task` runs a task, `prove-checks` proves proposed checks
+  jobs/             defineJob files; `run-task` runs a task, `merge-task` opens and integrates the pull request
+                    of approved work, `prove-checks` proves proposed checks
   routes/           file-based HTTP
 src/shared/         contracts both sides import (`panel.ts` is what the panel API returns)
 .theokit/           agent context read at runtime (no rebuild)
@@ -77,6 +79,11 @@ reads that file, not a convention.
   reaches git by file, never through a shell.
 - **GitHub tokens are repository-scoped.** The App is installed on every repository of the account,
   so `installationToken(repo)` is the only way to get one, and it always names the repository.
+- **Every call to the GitHub API goes through `gated` (`github/rate-limit.ts`).** It counts the call for the
+  cron pass it is made in, records the `x-ratelimit-*` budget GitHub reports, and throws `RateLimited` with the
+  reset time for a refusal for the limit. A cron that calls GitHub wraps its handler in `githubPass`, which logs
+  `github_requests` per pass; one that only polls passes `waitsForLimit` and skips its passes while the
+  installation's budget is under its reserve. A read that many tasks of one pass share goes through `passReads`.
 - **`src/server/jobs/` holds only jobs.** `theokit build` treats every file there as one and fails the
   build on a helper; a test guards it. Shared helpers live in `factory/`.
 - **A delivery is taken, routed or ignored, and `decideIngress` is the only place that says which.** An
@@ -84,7 +91,11 @@ reads that file, not a convention.
   comment (`issue_comment`, `pull_request_review_comment`), a submitted `pull_request_review`, a completed
   `check_suite` or `check_run`, and an issue that is closed, reopened or loses the `factory` label are
   routed: `ingress.outcome` is `routed`, the code names the intent, and `recordDelivery` creates no task and
-  queues no job for it. Nothing acts on a routed delivery yet. A new event is a new entry in `ROUTES` with a
+  queues no job for it. An issue that is closed or loses the label cancels its task when `outcome()` says
+  `cancel` (`ingest/withdraw.ts`, in the same transaction): the `cancelled` stage event names why, and the
+  task's queued jobs that no worker ever took are deleted. A run records its stages with `enterRunStage`
+  (`factory/stages.ts`), which asks `transitions.ts` (`run_step`) and throws `TaskCancelled` for a cancelled task, so
+  the run stops at its next stage, records nothing more and does not fail it. Nothing acts on the other routed deliveries yet. A new event is a new entry in `ROUTES` with a
   Zod schema that produces its intent, and the setup report reads `ROUTED_EVENTS` to say which events the
   App does not subscribe to. Any other event or action keeps the code it always had.
 - **A labelled issue is not permission.** The App is installed on every repository of the account, so ingestion
@@ -120,6 +131,13 @@ reads that file, not a convention.
   textarea has none. The premise is that the owner never has to be a programmer.
 - **Panel routes are owner-only.** `.policy(ownerOnly)` on everything under `/api/panel` but the login;
   `.policy('public')` is for the webhook and the probes. The panel never goes through the tunnel.
+- **Approved work is merged by a job of its own.** When the review approves, `Run.approved` keeps the handover
+  of work the factory never integrates (`heldFor`) and the settling of a closed pull request (`reopenedOrEmpty`),
+  then enters `merge` and queues `merge-task` in one transaction (`enterMerge` in `factory/merge-task.ts`). The
+  stage's detail holds everything the pull request and the delivery need, so the job needs no sandbox. The job
+  asks `transitions.ts` (`merge_due`) and does nothing for a task that left `merge` or a commit other than the one
+  waiting; it enters `pr`, opens the pull request, integrates it (`integrate` in `factory/integration.ts`) and
+  delivers it or leaves it waiting for CI, as below. A failure is `failed` at `merge` or `pr`, like a run's.
 - **Three branches, the same in every repository.** `workspace` integrates: the factory merges its own pull
   request there, pinned to the verified commit, once the checks pass and the review approves. When the
   integration branch requires status checks, the factory merges nothing itself: it turns on auto-merge pinned
@@ -190,15 +208,28 @@ reads that file, not a convention.
 - **The coordinator decides from a closed set and records every decision.** `coordinator/exception-facts.ts`
   reads and decides nothing; `exceptions.ts` recognises exceptions over those facts and reads nothing, and a
   fact that could not be read is an exception of kind `unknown`; `decide.ts` is a pure function from an
-  exception and the decisions already recorded to one action (`send_back`, `review_again`,
-  `retry_from_finding`, `scope`, `release` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
+  exception, the decisions already recorded and the time to one action (`send_back`, `review_again`,
+  `retry_from_finding`, `scope`, `release`, `prioritise`, `fix_base`, `merge_base`, `wait` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
   applying, where a drafter built by `buildAssistant` answers JSON that `scope.ts` parses (an answer that does not
   parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION` is `refused`); `apply.ts` is the only module with side effects and goes through the
   panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`) and, for a release, `release()`, so
   `transitions.ts` is asked first, even before a scope's only writes of its own (the follow-up issue and
   `updateIssueBody`). A handoff records its `cause`, and an older one is recognised by the start
   of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
-  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. `FACTORY_COORDINATOR_MODE`
+  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. A failure of the work is
+  told by how the run starts its reason (`factory/failure-reasons.ts`, `NO_TIME_FOR_AGENT`, `AGENT_OUT_OF_TIME`):
+  `checks_red` is sent back on its branch with what the failing checks printed on the head (`evidence`, through
+  `failingOutput`, escalated when nothing was kept), `out_of_time` is sent back to continue from the branch, and
+  `no_change` is sent back once with what the run recorded, then escalated; each is told apart by its failure
+  event (the head is `<sha>@<event id>`), a task that pushed nothing is escalated, and any other failure stays a
+  `failure`, escalated. `coordinator_send_back` takes a `failed` task as it takes a handed-over one. A
+  `checks_unchanged` whose handoff quoted no output is sent back with the same `failingOutput`, or, when the factory
+  kept none either, with what the failed checks of the pull request's head logged on GitHub (`ciFailures`, through
+  `readEvidence` and `ciFailingOutput`). One whose pull request conflicts with its base is a `merge_base`
+  (`mergeBaseByCoordinator`, which asks for `coordinator_merge_base` and queues the run with `mergeBase`), and a
+  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. An `unknown` is a
+  `wait`: the first is recorded as `deferred` (which leaves the head free and is never `seen`), later passes
+  record nothing, and it is escalated once the first wait is `UNKNOWN_LIMIT_MS` old. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
   calls a merge, and `merges-nothing.test.ts` fails if one does. A new exception is a new kind in
   `EXCEPTION_KINDS` and a new entry in `BY_KIND`; a new action goes through an action of the panel, never
@@ -215,10 +246,15 @@ reads that file, not a convention.
   the same head. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
   `MAX_APPLIED` neither counts a release nor holds one back.
   A task held by a red integration branch (`done.detail.baseHold`, set and cleared by `integrate-after-ci`, shown
-  on the panel card as `waitingOnBase`) is a `base_red` exception once the red lasts `BASE_RED_LIMIT_MS`: escalated,
-  naming the checks, one decision per commit and set of checks.
+  on the panel card as `waitingOnBase`), or a failed one still red on the base past its automatic runs, is a
+  `base_red` exception once the red lasts `BASE_RED_LIMIT_MS`, one decision per commit and set of checks. It is a
+  `fix_base`: in `auto` `apply.ts` files one issue on the repository (`base-fix.ts` writes it; labels `factory`,
+  `bug`, `priority:1`, created when missing) naming the checks, the branch and the commit, once per repository,
+  branch and set of checks (`baseSignature` in `failure_signature`, through `fileOnce`, the claim Evolve uses too),
+  and again only after that issue closed. The tasks keep waiting for the base, `MAX_APPLIED` does not count it, and
+  in `trial` it logs the issue it would file. It changes no task, so it asks `transitions.ts` nothing.
   Evolve (`evolve.ts` pure, `evolve-facts.ts` reads, `evolve-apply.ts` writes) files a failure signature seen on
-  three tasks in a week, in two incidents an hour or more apart, as a `factory` issue on this repository, once per signature (`failure_signature`), at
+  three tasks in a week, in two incidents an hour or more apart, as a `factory` issue on this repository, once per signature (`failure_signature`, never reading a `base_red:` one), at
   most one per pass and three per week, never a designed wait (`DESIGNED_WAITS`), nothing in `trial` but a
   log line, and a week after the issue closes it records both counts and comments when the signature still
   shows up.
@@ -231,6 +267,29 @@ reads that file, not a convention.
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
   however old) while it is on its way. The decision's head is the test and the fix's job (`headOf`), so a retried
   fix is decided again and an ended hold never comes back. It is not counted by `MAX_APPLIED`, and merges nothing.
+- **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
+  The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
+  `scheduler/facts.ts` reads the queued `run-task` jobs of tasks in `intake`, their issues and the decisions already
+  recorded, and decides nothing; `order.ts` and `readiness.ts` decide and read nothing; `apply.ts` is the only module
+  with side effects. First readiness: for each first run (no `decisionId`, `feedback`, `resume` or `mergeBase` in its
+  input) whose issue has no verdict for its current title and body (`bodyHash`), a judge built by `buildAssistant`
+  (`judge.ts`, the prompt in `agents/prompts/readiness.ts`) answers `ready` or `needs_refinement`, with what is missing
+  and one question. An answer that does not parse is `ready` with its error recorded, and a judge that throws records
+  nothing. In `auto` a `needs_refinement` task asks `transitions.ts` (`needs_refinement`, `ask_owner`), its queued run
+  is deleted, the question goes on the issue with `questionComment`, a `question` row with `origin` `readiness` and no
+  sandbox is stored and the task enters `waiting`, all in one transaction; `poll-answers` takes the answer, puts the
+  task back in `intake` and queues its first run, whose prompt carries the answers (`clarifications`). Then the order:
+  among the runs that are due and not held, lower `priority:N` first (no label sorts right after `priority:5`), then a
+  `bug`, then the issue more queued issues name in their `Blocked by` line, then the oldest job, then the task id. In
+  `auto` the sorted runs get the `available_at` times the queue already had, copied in one statement from the job
+  that had each, under `HOLD_LOCK`; only rows whose time changes are written. The scheduler never touches a job a
+  worker holds, that failed, that the coordinator holds (`heldFrom`, 'infinity'), that is not due, or of a task that
+  left `intake`. Every decision is a `scheduler_decision` row: a `readiness` row once per task and issue version, an
+  `order` row when a task's place or its reasons change. Each step has its own mode, `off`, `trial` (the default:
+  decide and record, change no job, task or issue) or `auto`: `FACTORY_SCHEDULER_MODE` for the order and
+  `FACTORY_READINESS_MODE` for the judge, since the order is a sort the tests prove and the judge holds back work
+  only once its verdicts are compared with what became of the tasks. The panel's queued card shows its place, why and the
+  verdict (`panel/queue-view.ts`).
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.
@@ -242,6 +301,13 @@ reads that file, not a convention.
   points. A new step is a new method, not a branch inside another. The same step goes into
   `src/server/evals/run-case.ts`, which runs evaluation cases along the factory's path without pushing:
   without it, the suite measures a factory that no longer exists.
+- **A check that fails on the base is not the task's.** When a rework after failing checks changes nothing, or
+  the same checks fail again on the next commit (`sameChecks`), `Run.refuseRedBase` runs those checks on the
+  commit the work started from (`BaseProbe` in `factory/base-checks.ts`, in a checkout of its own, each check at
+  most once per run). If every one fails there too, the run throws `BaseRed`: the
+  failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
+  environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
+  `run-case.ts` takes the same step and leaves such a case unmeasured.
 - **Whether a stage allows an event is asked of `factory/transitions.ts`.** The table there declares the
   outcome of every pair of stage and event: the action, `ignored` or `refused`, with the reason a person
   reads. A panel action or a cron that checks a stage calls `outcome()` instead of comparing stages itself,

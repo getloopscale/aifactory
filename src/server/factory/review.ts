@@ -69,6 +69,8 @@ export function reviewPrompt(input: {
   builderSummary?: string
   /** The factory checks that failed on an earlier attempt and pass now, with the files added since. */
   required?: RequiredByCheck[]
+  /** The review this one follows in the same run, when it asked for changes. */
+  earlier?: EarlierReview
 }): string {
   const required = input.required ?? []
   return `You are an independent code reviewer for the repository ${input.repo}. Another agent implemented the issue below on the branch ${input.branch}. You did not write this code and you must not change it.
@@ -87,12 +89,38 @@ ${
   input.knowledgeDir
     ? `- A change that breaks one of the owner's rules under ${input.knowledgeDir}/knowledge/ is a finding, at least major.\n\n${knowledgeRules(input.knowledgeDir)}\n`
     : ''
-}
+}${input.earlier ? earlierSection(input.earlier) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
 {"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}
 
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
+`
+}
+
+/** A review round that asked for changes: the commit it read and what it found. */
+export type EarlierReview = { sha: string; findings: Finding[] }
+
+/**
+ * What a later round is told about the one before it. A review that reads the whole diff again every round
+ * finds something new every round and never ends (the `review_plateau` handoffs), so a later round checks
+ * the earlier findings first and raises a new blocker only in code that changed since, or one that would
+ * break code already in use. Minor findings never blocked, so they are not carried.
+ */
+function earlierSection(earlier: EarlierReview): string {
+  const blocking = earlier.findings.filter((f) => f.severity !== 'minor')
+  const listed = blocking.length > 0 ? renderFindings(blocking) : '(none that blocked)'
+  return `
+# Your earlier review of ${earlier.sha.slice(0, 7)}
+
+You asked for changes on ${earlier.sha.slice(0, 7)}. What blocked it then:
+
+${listed}
+
+In this round:
+- First check each of those findings at HEAD. One that is not fixed stays, in the same words.
+- Read what changed since then with \`git diff ${earlier.sha} HEAD\`.
+- A new blocker or major finding goes only on code that changed since ${earlier.sha.slice(0, 7)}, or on a bug that would break code that is already in use; say which in the finding. Anything else you notice now and did not raise before is minor.
 `
 }
 
@@ -278,11 +306,32 @@ export function notResolvedPrompt(input: {
   ].join('\n\n')
 }
 
+/**
+ * How the builder works through a reviewer's findings. A rework round that fixes one finding and adds the next
+ * never converges (#207): the later round reads only what changed since the reviewed commit, so the builder
+ * reads that same diff before it finishes, proves each fix with a test, and accounts for every finding and
+ * every file outside its plan in the summary the reviewer reads.
+ */
+function findingsMethod(reviewedSha: string | undefined): string {
+  const diff = reviewedSha
+    ? `The reviewer looks for new blockers only in what changed since ${reviewedSha.slice(0, 7)}, so before you finish read your own change with \`git diff ${reviewedSha} HEAD\``
+    : 'Before you finish, read your own change with `git diff HEAD`'
+  return [
+    'Work through the findings one by one:',
+    '- For a finding about behaviour (a bug, a missed case), first write a test that fails without the fix, then fix it at its cause with the smallest change that does it, and run that test.',
+    `- ${diff} the way the reviewer will: errors swallowed, races, input not checked, cases the new code misses. Fix what you find.`,
+    '- A finding you cannot fix inside this issue, because it needs a release, another package or a decision only the owner can make: change nothing for it and say what is missing. Do not half-fix it.',
+    '- In your summary, list each finding with what you changed and the test that shows it, and give the reason for every file you changed that your plan did not name.',
+  ].join('\n')
+}
+
 /** What the builder is told when it has to go back to its work. */
 export function reworkPrompt(input: {
   findings: Finding[]
   failedChecks: { command: string; output: string }[]
   checks?: CheckSpec[]
+  /** The commit the reviewer read, when the work comes back from a review. */
+  reviewedSha?: string
 }): string {
   const parts = [
     'Your change was not accepted. Fix what follows, then finish with a short summary.',
@@ -296,7 +345,11 @@ export function reworkPrompt(input: {
     )
   }
   if (input.findings.length > 0) {
-    parts.push('A reviewer found:', renderFindings(input.findings))
+    parts.push(
+      'A reviewer found:',
+      renderFindings(input.findings),
+      findingsMethod(input.reviewedSha),
+    )
   }
   if (input.checks?.length) parts.push(checksRule(input.checks).trimEnd())
   parts.push(

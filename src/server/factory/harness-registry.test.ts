@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { harnessRegistry, pickHarness } from './harness-registry'
+import { harnessRegistry, pickHarness, plannerFor } from './harness-registry'
 
 const env = { ANTHROPIC_API_KEY: 'k', OPENAI_API_KEY: 'o' }
 
@@ -82,5 +82,71 @@ describe('what an agent is told about its model', () => {
       [],
     )
     expect(seen).toBeUndefined()
+  })
+})
+
+describe('plannerFor', () => {
+  const registry = harnessRegistry(env)
+  const ready = () => true
+  const notReady = () => false
+
+  it('is codex by default, when codex can start', () => {
+    expect(plannerFor(registry, { builder: 'claude-code', labels: [], ready })?.name).toBe('codex')
+  })
+
+  it('is nothing when the default planner cannot start, so the builder plans', () => {
+    expect(
+      plannerFor(registry, { builder: 'claude-code', labels: [], ready: notReady }),
+    ).toBeUndefined()
+  })
+
+  it('is nothing when the planner is the builder, so planning and building share a session', () => {
+    expect(plannerFor(registry, { builder: 'codex', labels: [], ready })).toBeUndefined()
+    expect(
+      plannerFor(registry, {
+        configured: 'claude-code',
+        builder: 'claude-code',
+        labels: [],
+        ready,
+      }),
+    ).toBeUndefined()
+  })
+
+  it('takes the planner the owner configured over the default', () => {
+    expect(
+      plannerFor(registry, { configured: 'claude-code', builder: 'codex', labels: [], ready })
+        ?.name,
+    ).toBe('claude-code')
+  })
+
+  it('takes a planner:<name> label over the configuration', () => {
+    expect(
+      plannerFor(registry, {
+        configured: 'codex',
+        builder: 'codex',
+        labels: ['planner:claude-code'],
+        ready,
+      })?.name,
+    ).toBe('claude-code')
+  })
+
+  it('refuses a configured or labelled planner it does not know, instead of planning with another', () => {
+    expect(() =>
+      plannerFor(registry, { configured: 'gemini', builder: 'codex', labels: [], ready }),
+    ).toThrow(/unknown agent "gemini"/)
+    expect(() =>
+      plannerFor(registry, { builder: 'codex', labels: ['planner:gemini'], ready }),
+    ).toThrow(/unknown agent "gemini"/)
+  })
+
+  it('gives the chosen planner its own model and effort', () => {
+    const planner = plannerFor(registry, {
+      builder: 'claude-code',
+      labels: [],
+      ready,
+      optionsFor: (engine) =>
+        engine === 'codex' ? { model: 'gpt-6.1-terra', effort: 'high' } : undefined,
+    })
+    expect(planner).toMatchObject({ name: 'codex', model: 'gpt-6.1-terra', effort: 'high' })
   })
 })

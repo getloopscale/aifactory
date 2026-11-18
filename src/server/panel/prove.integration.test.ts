@@ -3,7 +3,7 @@ import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import type { ChecksProof } from '../../shared/panel'
+import type { ChecksProof, StoredProof } from '../../shared/panel'
 import { FakeGithub } from '../../test/fake-github'
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
@@ -88,6 +88,7 @@ describe('asking for a proof', () => {
 
     const expected: ChecksProof = {
       fullName: NAME,
+      kind: 'checks',
       status: 'proving',
       at: NOW.toISOString(),
       checks: [LINT, TEST],
@@ -98,7 +99,7 @@ describe('asking for a proof', () => {
       error: null,
     }
     expect(proof).toEqual(expected)
-    expect(queued).toEqual([{ repository: NAME, at: NOW.toISOString() }])
+    expect(queued).toEqual([{ repository: NAME, at: NOW.toISOString(), kind: 'checks' }])
     expect(await saved()).toMatchObject({ checks: null, checksProof: expected })
   })
 
@@ -300,6 +301,170 @@ describe('a proof', () => {
     )
 
     expect(await saved()).toMatchObject({ checks: [TEST], checksProof: { status: 'done' } })
+  })
+})
+
+describe('a proof of integration checks', () => {
+  const E2E = { name: 'e2e', command: 'pnpm test:e2e' }
+  /** The commands that ran a check: the ones that enter the checkout. */
+  const ranChecks = (sandbox: FakeSandbox) =>
+    sandbox.backend.commands.filter((c) => c.startsWith('cd ')).map((c) => c.split(' && ')[1])
+
+  async function proveIntegration(checks: (typeof TEST)[], sandbox = sandboxWith()) {
+    await startProof(starting(), NAME, checks, 'integration')
+    await runProof(running(sandbox), queued.at(-1)!)
+    return (await saved()).integrationChecksProof!
+  }
+
+  it('is queued with its kind and kept apart from the proof of the checks', async () => {
+    const proof = await startProof(starting(), NAME, [E2E], 'integration')
+
+    expect(proof.kind).toBe('integration')
+    expect(queued).toEqual([{ repository: NAME, at: NOW.toISOString(), kind: 'integration' }])
+    expect(await saved()).toMatchObject({
+      checksProof: null,
+      integrationChecksProof: { kind: 'integration', status: 'proving', checks: [E2E] },
+    })
+  })
+
+  it('runs the repository checks first and saves only the integration checks that passed', async () => {
+    await getDb()
+      .update(repository)
+      .set({ checks: [LINT] })
+    const sandbox = sandboxWith()
+
+    const proof = await proveIntegration([E2E], sandbox)
+
+    expect(ranChecks(sandbox)).toEqual(['npm run lint', 'pnpm test:e2e'])
+    expect(proof).toMatchObject({ kind: 'integration', status: 'done', sha: SHA, saved: ['e2e'] })
+    expect(proof.setup?.map((r) => [r.name, r.status])).toEqual([['lint', 'passed']])
+    expect(proof.results.map((r) => r.name)).toEqual(['e2e'])
+    const row = await saved()
+    expect(row).toMatchObject({
+      integrationChecks: [E2E],
+      integrationChecksProvenSha: SHA,
+      checks: [LINT],
+      checksProvenSha: null,
+      checksProven: [],
+      checksProof: null,
+    })
+    expect(row.integrationChecksProven.map((c) => [c.name, c.status])).toEqual([['e2e', 'passed']])
+  })
+
+  it('does not save an integration check that fails, nor anything of a setup check that fails', async () => {
+    const sandbox = sandboxWith((command) =>
+      command.endsWith('npm test') || command.endsWith('pnpm test:e2e')
+        ? { exitCode: 1, stderr: 'broken' }
+        : undefined,
+    )
+
+    const proof = await proveIntegration([E2E], sandbox)
+
+    expect(proof).toMatchObject({ status: 'done', saved: [] })
+    expect(proof.setup).toMatchObject([{ name: 'test', status: 'failed', output: 'broken' }])
+    expect(await saved()).toMatchObject({
+      checks: null,
+      integrationChecks: [],
+      integrationChecksProvenSha: null,
+    })
+  })
+
+  it('leaves the integration checks untouched when the checks are proven', async () => {
+    await proveIntegration([E2E])
+    const before = await saved()
+
+    await prove([TEST])
+
+    const after = await saved()
+    expect(after).toMatchObject({ checks: [TEST], checksProvenSha: SHA })
+    expect(after.integrationChecks).toEqual([E2E])
+    expect(after.integrationChecksProven).toEqual(before.integrationChecksProven)
+    expect(after.integrationChecksProof).toEqual(before.integrationChecksProof)
+  })
+
+  it('does not overwrite a newer integration proof asked for while it ran', async () => {
+    await startProof(starting(), NAME, [LINT], 'integration')
+    const later = new Date(NOW.getTime() + 1_000)
+    const sandbox = sandboxWith()
+    const create = sandbox.create.bind(sandbox)
+    sandbox.create = async (spec) => {
+      await startProof(starting(later), NAME, [E2E], 'integration')
+      return create(spec)
+    }
+
+    await runProof(running(sandbox), queued[0])
+
+    expect(await saved()).toMatchObject({
+      integrationChecks: [],
+      integrationChecksProof: { status: 'proving', at: later.toISOString(), checks: [E2E] },
+    })
+  })
+
+  it('is not stopped by a proof of the checks asked for while it ran', async () => {
+    await startProof(starting(), NAME, [E2E], 'integration')
+    const sandbox = sandboxWith()
+    const create = sandbox.create.bind(sandbox)
+    sandbox.create = async (spec) => {
+      await startProof(starting(new Date(NOW.getTime() + 1_000)), NAME, [TEST])
+      return create(spec)
+    }
+
+    await runProof(running(sandbox), queued[0])
+
+    expect(await saved()).toMatchObject({
+      integrationChecks: [E2E],
+      integrationChecksProof: { status: 'done' },
+      checksProof: { status: 'proving', checks: [TEST] },
+    })
+  })
+
+  it('records why it could not run on the integration proof only', async () => {
+    const sandbox = sandboxWith((command) =>
+      command.includes('clone') ? { exitCode: 128, stderr: 'no such branch' } : undefined,
+    )
+
+    const proof = await proveIntegration([E2E], sandbox)
+
+    expect(proof.status).toBe('failed')
+    expect(proof.error).toBeTruthy()
+    expect((await saved()).checksProof).toBeNull()
+  })
+
+  it('does not have the doctor examine the repository again', async () => {
+    const examined: string[] = []
+    await startProof(starting(), NAME, [E2E], 'integration')
+
+    await runProof(
+      running(sandboxWith(), { diagnose: async (name) => void examined.push(name) }),
+      queued[0],
+    )
+
+    expect(examined).toEqual([])
+    expect((await saved()).integrationChecks).toEqual([E2E])
+  })
+
+  it('is read by its kind, and an old job with no kind runs the proof of the checks', async () => {
+    await startProof(starting(), NAME, [E2E], 'integration')
+    await startProof(starting(), NAME, [TEST])
+
+    expect((await readProof(getDb(), NAME, NOW, 'integration'))?.checks).toEqual([E2E])
+    expect((await readProof(getDb(), NAME, NOW))?.checks).toEqual([TEST])
+
+    await runProof(running(sandboxWith()), { repository: NAME, at: NOW.toISOString() })
+
+    expect(await saved()).toMatchObject({
+      checks: [TEST],
+      integrationChecks: [],
+      integrationChecksProof: { status: 'proving' },
+    })
+  })
+
+  it('reads a proof stored before proofs had a kind as a proof of the checks', async () => {
+    const old: StoredProof = await startProof(starting(), NAME, [TEST])
+    delete old.kind
+    await getDb().update(repository).set({ checksProof: old })
+
+    expect((await readProof(getDb(), NAME, NOW))?.kind).toBe('checks')
   })
 })
 

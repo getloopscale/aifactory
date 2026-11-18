@@ -32,6 +32,11 @@ export type RunTaskDeps = {
    * work in a fresh session, which is weaker: set a different agent for a real second opinion.
    */
   reviewer?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
+  /**
+   * The agent that writes the change plan, apart from the builder, chosen from the issue's labels and the
+   * builder's name. Nothing (or no function) means the builder plans in the session it then builds in.
+   */
+  planner?: (labels: string[], builder: string) => CodingHarness | undefined
   /** The commit author, so the pull request shows who wrote it. */
   author: { name: string; email: string }
   fetchIssue?: (repo: string, number: number, token: string, fetch?: FetchLike) => Promise<Issue>
@@ -87,10 +92,48 @@ export type RunResult =
       reason: string
       preRelease?: string
     }
+  /**
+   * The review approved the work and the task waits in `merge` for its `merge-task` job, which opens the pull
+   * request and integrates it (`factory/merge-task.ts`). The run's part succeeded.
+   */
+  | { status: 'merging'; branch: string; sha: string; summary: string }
   /** The code already did what the issue asks: the checks passed there, the reviewer agreed, the issue is closed. */
   | { status: 'resolved'; sha: string; summary: string }
   | { status: 'waiting'; question: string }
   | { status: 'failed'; stage: string; error: string }
+  /** The task was cancelled while the run went on: it stopped at `stage` and recorded nothing more. */
+  | { status: 'cancelled'; stage: string; reason: string }
 
-/** A question that parked a run, taken back to be resumed. */
-export type Parked = typeof questionTable.$inferSelect
+type QuestionRow = typeof questionTable.$inferSelect
+
+/** A question that parked a run, taken back to be resumed: an agent's, with the sandbox it left. */
+export type Parked = QuestionRow & {
+  snapshotId: string
+  sessionId: string
+  harness: string
+  repoDir: string
+  baseSha: string
+  attempt: number
+}
+
+/**
+ * The question as a parked run, or an error naming what is missing: only an agent's question left a sandbox
+ * to resume, and a readiness question (`scheduler/`) was asked before any run.
+ */
+export function parkedOf(row: QuestionRow): Parked {
+  const { snapshotId, sessionId, harness, repoDir, baseSha, attempt } = row
+  if (
+    row.origin !== 'agent' ||
+    snapshotId === null ||
+    sessionId === null ||
+    harness === null ||
+    repoDir === null ||
+    baseSha === null ||
+    attempt === null
+  ) {
+    throw new Error(
+      `question ${row.id} of task ${row.taskId} was asked by ${row.origin} and left no sandbox to resume`,
+    )
+  }
+  return { ...row, snapshotId, sessionId, harness, repoDir, baseSha, attempt }
+}

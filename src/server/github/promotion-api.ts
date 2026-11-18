@@ -1,4 +1,5 @@
 import type { FetchLike } from './app'
+import { gated } from './rate-limit'
 
 /** An open promotion pull request and the commit its checks run on. */
 export type PromotionPull = { number: number; url: string; headSha: string }
@@ -61,8 +62,10 @@ const refusal = async (response: Response, action: string, repo: string) => {
 
 /** Runs on the factory host with an installation token for one repository. */
 export function createPromotionApi(
-  fetchImpl: FetchLike = (url, init) => fetch(url, init),
+  plainFetch: FetchLike = (url, init) => fetch(url, init),
 ): PromotionApi {
+  // A refusal for the rate limit is thrown before RERUN_REFUSED can read it as a refusal to rerun.
+  const fetchImpl = gated(plainFetch)
   const call = async (
     repo: string,
     token: string,

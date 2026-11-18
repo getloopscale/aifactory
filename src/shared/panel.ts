@@ -11,6 +11,7 @@ export type Stage =
   | 'verify'
   | 'review'
   | 'waiting'
+  | 'merge'
   | 'pr'
   | 'done'
   | 'released'
@@ -20,13 +21,22 @@ export type Stage =
 
 /** Where a stage sits on the board. */
 export type Column =
-  'queued' | 'working' | 'waiting' | 'retrying' | 'review' | 'released' | 'resolved' | 'attention'
+  | 'queued'
+  | 'working'
+  | 'waiting'
+  | 'retrying'
+  | 'merge'
+  | 'review'
+  | 'released'
+  | 'resolved'
+  | 'attention'
 
 export const COLUMNS: { id: Column; title: string }[] = [
   { id: 'queued', title: 'Queued' },
   { id: 'working', title: 'Working' },
   { id: 'waiting', title: 'Waiting for you' },
   { id: 'retrying', title: 'Will retry itself' },
+  { id: 'merge', title: 'Merge' },
   { id: 'review', title: 'Delivered' },
   { id: 'released', title: 'Released' },
   { id: 'resolved', title: 'Already resolved' },
@@ -35,11 +45,11 @@ export const COLUMNS: { id: Column; title: string }[] = [
 
 /**
  * Why a failed task is not waiting for a person: the agent's usage limit, the environment (GitHub, the
- * network, the sandbox, a restart), or an issue it is blocked by that is still open. Each passes, and the
- * factory runs the task again once it has. A failure of the work itself is none of them, and stays with a
- * person.
+ * network, the sandbox, a restart), an issue it is blocked by that is still open, or checks that fail on the
+ * integration branch too (`base`). Each passes, and the factory runs the task again once it has. A failure of
+ * the work itself is none of them, and stays with a person.
  */
-export type Retryable = 'quota' | 'environment' | 'blocked' | null
+export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
 
 /**
  * The sandbox provider has no template of the factory's (E2B answers `404: template 'aifactory-sandbox:4' not
@@ -49,7 +59,7 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | null
 export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
 
 const ENVIRONMENT_PATTERN =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|API rate limit exceeded|Codex login[^:]*(was refused|could not be renewed)/i
 
 /**
  * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer
@@ -57,11 +67,19 @@ const ENVIRONMENT_PATTERN =
  */
 const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe failed/i
 
+/**
+ * E2B refusing a new sandbox because the account already runs as many as it may at once (`Rate limit exceeded,
+ * please try again later - you have reached the maximum number of concurrent E2B sandboxes (10)`). The slots
+ * free up as other runs end; nothing in the work asked for it.
+ */
+const SANDBOX_LIMIT = /maximum number of concurrent E2B sandboxes/i
+
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
-    SANDBOX_UNREACHABLE.test(error),
+    SANDBOX_UNREACHABLE.test(error) ||
+    SANDBOX_LIMIT.test(error),
 }
 
 /**
@@ -70,13 +88,21 @@ const ENVIRONMENT = {
  * issue or gives the agent more time. A command of the environment that timed out (a clone, an install) is
  * not this one.
  */
-const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
+export const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
+
+/** A run's record that the checks it failed on fail on the integration branch too (#219). */
+function failsOnBase(baseRed: unknown): boolean {
+  if (typeof baseRed !== 'object' || baseRed === null) return false
+  const checks = (baseRed as { checks?: unknown }).checks
+  return Array.isArray(checks) && checks.length > 0
+}
 
 /** From the detail the factory recorded when a task failed. */
 export function retryableFailure(detail: Record<string, unknown> | null | undefined): Retryable {
   if (!detail) return null
   if (detail.quota === true) return 'quota'
   if (Array.isArray(detail.blockedBy) && detail.blockedBy.length > 0) return 'blocked'
+  if (failsOnBase(detail.baseRed)) return 'base'
   if (typeof detail.error !== 'string' || AGENT_OUT_OF_TIME.test(detail.error)) return null
   return ENVIRONMENT.test(detail.error) ? 'environment' : null
 }
@@ -102,13 +128,17 @@ export function columnOf(
       return 'queued'
     case 'waiting':
       return 'waiting'
+    // Approved work on its way to the integration branch: waiting for the merge, then at its pull request.
+    case 'merge':
+    case 'pr':
+      return 'merge'
     case 'done':
       return 'review'
     case 'released':
       return 'released'
     case 'handoff':
     case 'failed':
-    // Nothing enters it yet. Until something does and says where it belongs, a person sees it.
+    // The board leaves a cancelled task off (`listTasks`); a card read on its own lands here.
     case 'cancelled':
       return 'attention'
     default:
@@ -264,6 +294,8 @@ export type TaskCard = {
    * which checks, on which branch, and since when. Null when nothing holds it.
    */
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
+  /** Where a queued task stands in the line of runs and why the scheduler put it there; null once it left `intake`. */
+  queue: QueueView | null
   /**
    * Delivered without a pull request: the agent changed nothing, the checks passed at the commit and the
    * reviewer confirmed the code already does what the issue asks. The factory closed the issue.
@@ -283,6 +315,35 @@ export type TaskCard = {
    * refused, while the task is not released. Null when none waited, or once one merged.
    */
   releaseWait: ReleaseWaitView | null
+  /** What works on the task right now, while it plans, builds, runs its checks or is reviewed; null otherwise. */
+  working: AgentStep | null
+  /** The agent that planned, built or reviewed the task last; null before any did. */
+  lastAgent: AgentSeen | null
+}
+
+/** An agent by the name the factory knows it by (`claude-code`, `codex`, ...), and the model it ran with. */
+export type AgentSeen = {
+  agent: string
+  /** Null when the stage did not record one. */
+  model: string | null
+}
+
+/**
+ * One step of a running task: an agent planning, building, fixing what a review or the checks found, or
+ * reviewing, with the attempt (the round, for a review); or the factory running the checks, with no agent.
+ */
+export type AgentStep =
+  | (AgentSeen & { step: 'planning' | 'building' | 'fixing' | 'reviewing'; attempt: number })
+  | { step: 'checks'; checks: string[] }
+
+/** A queued task's place in the line of runs, the reasons for it, and whether its issue is ready to build. */
+export type QueueView = {
+  /** Its place among the queued runs the worker serves, from 1; null while its run is held, not due or gone. */
+  position: number | null
+  /** What the scheduler last read of its issue to place it; null before it placed the task. */
+  reasons: { priority: number | null; bug: boolean; unblocks: number } | null
+  /** The scheduler's verdict on the issue, when it judged it. */
+  readiness: { verdict: 'ready' | 'needs_refinement'; missing: string } | null
 }
 
 /** A release that waits for the release branch's required checks, or why it did not happen. */
@@ -367,7 +428,7 @@ export type CoordinatorActionView = {
   title: string
   exceptionKind: string
   action: string
-  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated'
+  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated' | 'deferred'
   reason: string
   /** What a model drafted, as text, or null when nothing was. */
   draft: string | null
@@ -451,7 +512,24 @@ export type RepositoryView = {
   unprovenChecks: string[]
   /** The last proof of proposed checks, running or finished; null when none was asked for. */
   checksProof: ChecksProof | null
+  /**
+   * The checks run on the merge of the work with the integration branch, after the checks above. Empty
+   * means none: the merge is held to the development checks only.
+   */
+  integrationChecks: { name: string; command: string }[]
+  /** The commit of the integration branch the proven integration checks passed on; null when none was. */
+  integrationChecksProvenSha: string | null
+  /** The names of the saved integration checks that no proof ran. */
+  unprovenIntegrationChecks: string[]
+  /** The last proof of proposed integration checks, running or finished; null when none was asked for. */
+  integrationChecksProof: ChecksProof | null
 }
+
+/**
+ * Which list of a repository a proof is for: `checks` run on every commit of the work, `integration` on
+ * the merge of the work with the integration branch.
+ */
+export type ProofKind = 'checks' | 'integration'
 
 /**
  * How one proposed check did on the head of the integration branch. `too_slow` is a check that was still
@@ -474,6 +552,7 @@ export type ProvenCheck = {
  */
 export type ChecksProof = {
   fullName: string
+  kind: ProofKind
   status: 'proving' | 'done' | 'failed'
   /** When it was asked for. */
   at: string
@@ -486,7 +565,15 @@ export type ChecksProof = {
   results: ProvenCheck[]
   saved: string[]
   error: string | null
+  /**
+   * How the repository's own checks did, run first so the integration checks find the project installed.
+   * Only an integration proof has them; they are shown and never saved, and decide nothing.
+   */
+  setup?: ProvenCheck[]
 }
+
+/** A proof as a repository's row keeps it: one stored before proofs had a kind has none, and is of `checks`. */
+export type StoredProof = Omit<ChecksProof, 'kind'> & { kind?: ProofKind }
 
 /** What saving a repository answers with. */
 export type RepositorySaved = {
@@ -495,6 +582,8 @@ export type RepositorySaved = {
   doctor?: DoctorReport
   /** The names of the saved checks that no proof ran. */
   unprovenChecks: string[]
+  /** The names of the saved integration checks that no proof ran. */
+  unprovenIntegrationChecks: string[]
 }
 
 /** A project's `.factory/setup.json` on its default branch, and which of its domains wait for the owner. */

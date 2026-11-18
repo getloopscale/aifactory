@@ -260,6 +260,27 @@
       "when": 1794862009965,
       "tag": "0039_repository_fixes",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794914544942,
+      "tag": "0040_scheduler_decision",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794969593424,
+      "tag": "0041_repository_integration_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794975274688,
+      "tag": "0042_coordinator_deferred",
+      "breakpoints": true
     }
   ]
 }

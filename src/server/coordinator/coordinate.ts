@@ -6,7 +6,7 @@ import { task } from '../db/schema'
 import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
-import { readExceptionFacts, readRecordedActions } from './exception-facts'
+import { readExceptionFacts, readRecordedActions, type FactsDeps } from './exception-facts'
 import { readCurrentReasons, readQueueFacts } from './queue-facts'
 import { isHeld, recogniseQueue, testOf } from './queue-order'
 import { maintainHolds } from './queue-hold'
@@ -20,7 +20,8 @@ export type PassResult = Record<CoordinatorOutcome, number>
 /** What a pass needs: the panel's actions, the two GitHub writes of a scope, the drafter and the release mode. */
 export type CoordinatorDeps = ApplyDeps &
   DraftDeps &
-  Pick<ReleaseFactsDeps, 'releaseMode'> & { now?: () => Date }
+  Pick<ReleaseFactsDeps, 'releaseMode'> &
+  Pick<FactsDeps, 'ciChecks'> & { now?: () => Date }
 
 /** The exceptions of the tasks, then the release of each repository the train does not hold. */
 async function exceptionsOf(deps: CoordinatorDeps): Promise<TaskException[]> {
@@ -58,7 +59,14 @@ export async function coordinate(
   deps: CoordinatorDeps,
   mode: CoordinatorMode,
 ): Promise<PassResult> {
-  const result: PassResult = { applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 }
+  const result: PassResult = {
+    applied: 0,
+    trial: 0,
+    refused: 0,
+    failed: 0,
+    escalated: 0,
+    deferred: 0,
+  }
   // A hold made in `auto` lasts until its fix ends, whatever the mode is now.
   if (mode === 'off') {
     await maintainHolds(deps.db)
@@ -77,13 +85,15 @@ export async function coordinate(
     const forTask = recorded.get(exception.taskId)!
     const applying = exception.trialOnly ? 'trial' : mode
     if (seen(exception, forTask, applying)) continue
-    const decision = await draftScope(deps, exception, decide(exception, forTask))
+    const now = deps.now?.() ?? new Date()
+    const decision = await draftScope(deps, exception, decide(exception, forTask, now))
     const outcome = await applyDecision(deps, exception, decision, applying)
     forTask.push({
       exceptionKind: exception.kind,
       headSha: exception.head,
       action: decision.action,
       outcome,
+      at: now,
     })
     result[outcome] += 1
     if (decision.action === 'prioritise' && outcome === 'applied') {

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -21,6 +21,8 @@ import { retryAt } from '../factory/auto-retry'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
+import { cardAgent, STEP_STAGES, type StepEvent } from './card-agent'
+import { EMPTY_QUEUE, queueViews } from './queue-view'
 import {
   columnOf,
   retryableFailure,
@@ -98,6 +100,8 @@ function nextRun(
     resumesAt: typeof detail.resumesAt === 'string' ? detail.resumesAt : undefined,
     resetsAt: typeof detail.resetsAt === 'string' ? detail.resetsAt : undefined,
     automaticRetries,
+    blockedCheckedAt:
+      typeof detail.blockedCheckedAt === 'string' ? detail.blockedCheckedAt : undefined,
   })
   return at ? { retryable, at } : null
 }
@@ -150,6 +154,11 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   const lastFailure = new Map(failures.map((f) => [f.taskId, f]))
   const byTask = new Map(activity.map((a) => [a.taskId, a]))
   const holds = await baseHolds(db, rows)
+  const queues = await queueViews(
+    db,
+    rows.filter((r) => r.stage === 'intake').map((r) => r.id),
+  )
+  const steps = await stepEvents(db, ids)
   return rows.map((r) => {
     const seen = byTask.get(r.id)
     const again =
@@ -175,6 +184,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
       waitingOnBase: holds.get(r.id) ?? null,
+      queue: r.stage === 'intake' ? (queues.get(r.id) ?? EMPTY_QUEUE) : null,
       resolved: r.resolvedSha !== null,
       retryable: again?.retryable ?? null,
       retryAt: again?.at.toISOString() ?? null,
@@ -182,8 +192,28 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       release: lastDelivery(delivered, r, 'release'),
       mainRed: watched.some((w) => w.taskId === r.id && w.status === 'red' && !w.acknowledgedAt),
       releaseWait: lastReleaseWait(releases, r),
+      ...cardAgent(r.stage as Stage, steps.get(r.id) ?? []),
     }
   })
+}
+
+/** The latest event of each step stage (plan, build, review, verify) of every task, by task. */
+async function stepEvents(db: Database, ids: number[]): Promise<Map<number, StepEvent[]>> {
+  const latest = await db
+    .selectDistinctOn([stageEvent.taskId, stageEvent.stage], {
+      taskId: stageEvent.taskId,
+      id: stageEvent.id,
+      stage: stageEvent.stage,
+      detail: stageEvent.detail,
+    })
+    .from(stageEvent)
+    .where(and(inArray(stageEvent.taskId, ids), inArray(stageEvent.stage, [...STEP_STAGES])))
+    .orderBy(stageEvent.taskId, stageEvent.stage, desc(stageEvent.id))
+  const byTask = new Map<number, StepEvent[]>()
+  for (const { taskId, ...event } of latest) {
+    byTask.set(taskId, [...(byTask.get(taskId) ?? []), event])
+  }
+  return byTask
 }
 
 /** The hold a red integration branch puts on each task that waits for its checks, on its latest `done` event. */
@@ -254,9 +284,16 @@ function lastDelivery(rows: DeliveryRow[], t: TaskRow, kind: 'prerelease' | 'rel
   return last ? { tag: last.tag, url: last.url } : null
 }
 
-/** Every task, newest activity first. */
+/**
+ * Every task on the board, newest activity first. A cancelled task is left off: its issue was closed or lost
+ * the `factory` label, so nobody has anything to do with it, and the issue keeps its story.
+ */
 export async function listTasks(db: Database): Promise<TaskCard[]> {
-  const rows = await db.select().from(task).orderBy(desc(task.id))
+  const rows = await db
+    .select()
+    .from(task)
+    .where(ne(task.stage, 'cancelled'))
+    .orderBy(desc(task.id))
   return (await cards(db, rows)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 

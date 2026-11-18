@@ -166,6 +166,63 @@ describe('proving the checks', () => {
   })
 })
 
+describe('proving the integration checks', () => {
+  const integration = {
+    ...repo,
+    integrationChecks: [{ name: 'e2e', command: 'pnpm test:e2e' }],
+    unprovenIntegrationChecks: ['e2e'],
+  } as unknown as RepositoryView
+  const result = (name: string, status: string, output: string) => ({
+    name,
+    command: name,
+    status,
+    exitCode: status === 'passed' ? 0 : 1,
+    durationMs: 1000,
+    output,
+  })
+
+  it('proves them as integration checks, reads that proof and shows the setup apart', async () => {
+    api.post.mockResolvedValue({})
+    api.get.mockResolvedValue({
+      proof: {
+        kind: 'integration',
+        status: 'done',
+        setup: [result('unit', 'failed', 'setup output')],
+        results: [result('e2e', 'passed', 'e2e output')],
+        error: null,
+      },
+    })
+    mount(<ProveChecks repo={integration} kind="integration" />)
+    expect(screen.getByText('These integration checks have not been proven: e2e.')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Prove these integration checks' }))
+
+    expect(await screen.findByText('e2e output')).toBeTruthy()
+    expect(screen.getByText(/Run first, so the integration checks find the project/)).toBeTruthy()
+    expect(screen.getByText('setup output')).toBeTruthy()
+    expect(api.post).toHaveBeenCalledWith(`${base}/checks/prove`, {
+      checks: [{ name: 'e2e', command: 'pnpm test:e2e' }],
+      kind: 'integration',
+    })
+    expect(api.get).toHaveBeenCalledWith(`${base}/checks/prove?kind=integration`)
+  })
+
+  it('shows nothing for a repository with no integration checks', () => {
+    const none = { ...repo, integrationChecks: [], unprovenIntegrationChecks: [] }
+    const { container } = mount(<ProveChecks repo={none as RepositoryView} kind="integration" />)
+
+    expect(container.textContent).toBe('')
+  })
+
+  it('says in Portuguese which integration checks are not proven', () => {
+    window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
+    mount(<ProveChecks repo={integration} kind="integration" />)
+
+    expect(screen.getByRole('button', { name: ptBR.doctor.proveIntegration })).toBeTruthy()
+    expect(screen.getByText(ptBR.doctor.integrationUnprovenLine('e2e'))).toBeTruthy()
+  })
+})
+
 describe('the doctor card with items the server really made', () => {
   const REPO = 'me/app'
   const url = 'https://github.com/me/app/blob/main/.factory/setup.json'

@@ -7,14 +7,18 @@ import { outcome as transition } from '../factory/transitions'
 import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
+  mergeBaseByCoordinator,
   resolveFinding,
   sendBackByCoordinator,
   type ActionDeps,
 } from '../panel/actions'
+import { FACTORY_LABEL_SPEC } from '../panel/work'
 
+import { baseFixIssue, baseSignature } from './base-fix'
 import type { CoordinatorOutcome, Decision } from './decide'
 import type { ReadIssue } from './draft'
-import type { TaskException } from './exceptions'
+import type { RedBase, TaskException } from './exceptions'
+import { fileOnce } from './file-once'
 import type { CoordinatorMode } from './mode'
 import { HOLD_LOCK, moveAhead } from './queue-apply'
 import { readHeldTests } from './queue-facts'
@@ -24,13 +28,32 @@ import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft
 /**
  * The only module of the coordinator with side effects. It applies a decision through the panel's own
  * actions, each of which asks `factory/transitions.ts` first, and records it in `coordinator_action`,
- * applied or not. Its only writes of its own are the two a `scope` needs on GitHub: the issue body and a
- * follow-up issue. It merges nothing itself: a release goes through `release()` and every refusal of it.
+ * applied or not. Its only writes of its own are on GitHub: the issue body and the follow-up issue a `scope`
+ * needs, and the issue a `fix_base` files on a repository whose integration branch is red, which changes no
+ * task. It merges nothing itself: a release goes through `release()` and every refusal of it.
  */
 
 export type ApplyDeps = ActionDeps & {
-  issues: Pick<IssuesApi, 'createIssue' | 'updateIssueBody'>
+  issues: Pick<IssuesApi, 'createIssue' | 'updateIssueBody' | 'ensureLabel'>
   readIssue: ReadIssue
+  /** The clock a decision is recorded at, which is what the age of a `wait` is measured against. */
+  now?: () => Date
+}
+
+/** The labels of the fix of a red base: the factory builds it, and its queue takes it first. */
+const BASE_FIX_LABELS = [
+  FACTORY_LABEL_SPEC,
+  { name: 'bug', color: 'd73a4a', description: "Something isn't working" },
+  { name: 'priority:1', color: 'b60205', description: 'The factory takes this issue first' },
+]
+
+/** Whether the owner enabled the repository, which is what lets the `factory` label make a task of an issue. */
+async function enabled(deps: ApplyDeps, fullName: string): Promise<boolean> {
+  const [repo] = await deps.db
+    .select({ enabled: repository.enabled })
+    .from(repository)
+    .where(eq(repository.fullName, fullName))
+  return repo?.enabled ?? false
 }
 
 type TaskRow = typeof task.$inferSelect
@@ -39,11 +62,7 @@ type TaskRow = typeof task.$inferSelect
 async function fileFollowUp(deps: ApplyDeps, row: TaskRow, token: string, draft: ScopeDraft) {
   const issue = followUpIssue(draft, row.repository, row.issueNumber)
   if (!issue) return null
-  const [repo] = await deps.db
-    .select({ enabled: repository.enabled })
-    .from(repository)
-    .where(eq(repository.fullName, row.repository))
-  const labels = repo?.enabled ? ['factory'] : []
+  const labels = (await enabled(deps, row.repository)) ? ['factory'] : []
   return (await deps.issues.createIssue(row.repository, token, { ...issue, labels })).number
 }
 
@@ -68,28 +87,57 @@ async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promis
 }
 
 /**
- * Carries out a decision that changes something. Escalating changes nothing, so it never comes here. A
- * scope answers the number of the follow-up it filed, or null.
+ * Files the fix of a red integration branch, once per repository, branch and set of checks (`fileOnce`): an
+ * issue whose earlier one was closed is filed again. Answers what became of it, for the record.
  */
+async function fixBase(deps: ApplyDeps, base: RedBase): Promise<string> {
+  const repo = base.repository
+  const { token } = await deps.github.installationToken(repo)
+  const labels = (await enabled(deps, repo)) ? BASE_FIX_LABELS : BASE_FIX_LABELS.slice(1)
+  const claim = { signature: baseSignature(base), repository: repo, now: new Date() }
+  const done = await fileOnce(
+    deps.db,
+    claim,
+    async (previous) => {
+      for (const label of labels) await deps.issues.ensureLabel(repo, token, label)
+      const issue = baseFixIssue(base, previous)
+      return deps.issues.createIssue(repo, token, { ...issue, labels: labels.map((l) => l.name) })
+    },
+    async (number) => (await deps.readIssue(repo, number, token)).state === 'closed',
+  )
+  if ('filed' in done) return `filed as ${repo}#${done.filed.number}`
+  return done.already === null
+    ? 'another pass is filing it'
+    : `already filed as ${repo}#${done.already}, still open`
+}
+
+/** What carrying out a decision left: the follow-up a scope filed (null for none), or what a fix became. */
+type Performed = { followUpIssue?: number | null; done?: string }
+
+/** Carries out a decision that changes something. Escalating and waiting change nothing, so they never come here. */
 async function perform(
   deps: ApplyDeps,
   exception: TaskException,
   decision: Decision,
-): Promise<number | null | undefined> {
+): Promise<Performed> {
   if (decision.action === 'send_back') {
     await sendBackByCoordinator(deps, exception.taskId, decision.note ?? '')
+  } else if (decision.action === 'merge_base') {
+    await mergeBaseByCoordinator(deps, exception.taskId, decision.note ?? '')
   } else if (decision.action === 'review_again') {
     await sendBackByCoordinator(deps, exception.taskId, '')
   } else if (decision.action === 'retry_from_finding') {
     await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
   } else if (decision.action === 'scope' && decision.draft) {
-    return scope(deps, exception.taskId, decision.draft)
+    return { followUpIssue: await scope(deps, exception.taskId, decision.draft) }
   } else if (decision.action === 'release' && decision.bump) {
     await release(deps, exception.taskId, { bump: decision.bump, actor: COORDINATOR_ACTOR })
+  } else if (decision.action === 'fix_base' && decision.base) {
+    return { done: await fixBase(deps, decision.base) }
   } else {
     throw new Error(`the coordinator has no way to apply ${decision.action}`)
   }
-  return undefined
+  return {}
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
@@ -129,6 +177,23 @@ function forbidden(decision: Decision): string | undefined {
     : undefined
 }
 
+/** A decision only recorded; the issue a `fix_base` would file is logged too, so its text can be read first. */
+function inTrial(exception: TaskException, decision: Decision): Carried {
+  if (decision.action === 'fix_base' && decision.base) {
+    const { title } = baseFixIssue(decision.base)
+    console.log(
+      JSON.stringify({
+        event: 'coordinator_fix_base_trial',
+        taskId: exception.taskId,
+        repository: decision.base.repository,
+        signature: baseSignature(decision.base),
+        title,
+      }),
+    )
+  }
+  return { outcome: 'trial', reason: decision.reason }
+}
+
 /** What became of the decision, and the reason to record with it. */
 async function carryOut(
   deps: ApplyDeps,
@@ -140,12 +205,14 @@ async function carryOut(
     return notCarried(exception, decision, 'failed', decision.failure)
   }
   if (decision.action === 'escalate') return { outcome: 'escalated', reason: decision.reason }
+  if (decision.action === 'wait') return { outcome: 'deferred', reason: decision.reason }
   const refusal = forbidden(decision)
   if (refusal) return notCarried(exception, decision, 'refused', refusal)
-  if (mode !== 'auto') return { outcome: 'trial', reason: decision.reason }
+  if (mode !== 'auto') return inTrial(exception, decision)
   try {
-    const followUpIssue = await perform(deps, exception, decision)
-    return { outcome: 'applied', reason: decision.reason, followUpIssue }
+    const { followUpIssue, done } = await perform(deps, exception, decision)
+    const reason = done ? `${decision.reason}: ${done}` : decision.reason
+    return { outcome: 'applied', reason, followUpIssue }
   } catch (error) {
     const refused = error instanceof ActionRefused || error instanceof ReleaseRefused
     const outcome = refused ? 'refused' : 'failed'
@@ -177,8 +244,10 @@ export async function applyDecision(
   if (decision.action === 'prioritise' && mode === 'auto' && decision.failure === undefined) {
     return prioritiseAtomically(deps, exception, decision)
   }
+  // The first wait says since when the fact is unreadable; the ones after it add nothing to that.
+  if (decision.quiet) return 'deferred'
   const carried = await carryOut(deps, exception, decision, mode)
-  await record(deps.db, exception, decision, carried)
+  await record(deps, exception, decision, carried)
   return carried.outcome
 }
 
@@ -218,13 +287,13 @@ async function prioritiseAtomically(
     const carried: Carried = moved
       ? { outcome: 'applied', reason: decision.reason }
       : notCarried(exception, decision, 'refused', 'its job is no longer waiting in the queue')
-    await record(tx, exception, decision, carried)
+    await record({ ...deps, db: tx }, exception, decision, carried)
     return carried.outcome
   })
 }
 
 async function record(
-  db: Pick<Database, 'insert'>,
+  { db, now }: { db: Pick<Database, 'insert'>; now?: () => Date },
   exception: TaskException,
   decision: Decision,
   carried: Carried,
@@ -240,6 +309,7 @@ async function record(
       outcome: carried.outcome,
       draft: recordedDraft(decision, carried),
       costUsd: decision.costUsd ?? 0,
+      at: now?.() ?? new Date(),
     })
     .onConflictDoNothing()
 }

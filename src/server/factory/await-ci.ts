@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import { passReads } from '../github/pass-reads'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
@@ -500,9 +501,12 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
   // Read once, so the integrations held out of one promotion all go in together once its hold ends, though
   // the first of them pins the promotion again and starts a new hold.
   const holding = await heldRepositories(deps.db, deps.now?.() ?? new Date())
+  // The tasks of a repository wait on one integration branch: its head, checks and required checks are read
+  // once a pass, not once a task (#232).
+  const pass: AwaitCiDeps = { ...deps, api: passReads(deps.api) }
   for (const row of rows) {
     try {
-      await look(deps, row, result, holding)
+      await look(pass, row, result, holding)
     } catch (error) {
       result.errors.push(`task ${row.id}: ${errorMessage(error)}`)
     }

@@ -24,6 +24,7 @@ import {
   type SignatureGroup,
 } from './evolve'
 import { countSignature, readFailureEvents, readFiledSignatures } from './evolve-facts'
+import { fileOnce } from './file-once'
 import type { CoordinatorMode } from './mode'
 
 /**
@@ -74,31 +75,20 @@ function failedTo(result: EvolveResult, event: string, signature: string, error:
   result.failed.push({ signature, error: message(error) })
 }
 
-/**
- * Files one signature. Its row is written first, so a pass that raced this one files nothing, and removed
- * when the issue could not be opened, so the next pass tries again.
- */
+/** Files one signature, once (`fileOnce`): a pass that raced this one files nothing. */
 async function file(deps: EvolveDeps, g: SignatureGroup, now: Date, result: EvolveResult) {
-  const [claimed] = await deps.db
-    .insert(failureSignature)
-    .values({ signature: g.signature, repository: EVOLVE.repository, filedAt: now })
-    .onConflictDoNothing()
-    .returning({ id: failureSignature.id })
-  if (!claimed) return
   const { title, body } = issueForSignature(g)
-  let created: CreatedIssue
+  const claim = { signature: g.signature, repository: EVOLVE.repository, now }
   try {
-    created = await deps.openIssue(EVOLVE.repository, { title, body, labels: [EVOLVE.label] })
+    const filed = await fileOnce(deps.db, claim, () =>
+      deps.openIssue(EVOLVE.repository, { title, body, labels: [EVOLVE.label] }),
+    )
+    if ('filed' in filed) {
+      result.filed.push({ signature: g.signature, issueNumber: filed.filed.number })
+    }
   } catch (error) {
-    await deps.db.delete(failureSignature).where(eq(failureSignature.id, claimed.id))
     failedTo(result, 'coordinator_evolve_failed', g.signature, error)
-    return
   }
-  await deps.db
-    .update(failureSignature)
-    .set({ issueNumber: created.number })
-    .where(eq(failureSignature.id, claimed.id))
-  result.filed.push({ signature: g.signature, issueNumber: created.number })
 }
 
 /** The state of the issue, or nothing when it could not be read: then it is not measured, never guessed. */

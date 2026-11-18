@@ -16,7 +16,9 @@ for _ in $(seq 1 60); do
 done
 
 [ -f .theokit/manifest.json ] || pnpm build
-pnpm exec theokit db migrate
+# The deploy migrates before it restarts anything, and the main process migrates when it starts. Workers that
+# start at the same moment would race on the same migrations, so they leave them alone.
+[ "${FACTORY_WORKER_ONLY:-}" = 1 ] || pnpm exec theokit db migrate
 # theokit itself becomes the service's main process, so a stop's SIGTERM reaches it with no wrapper between
 # (KillMode=mixed signals only the main process). Its shim execs node.
 exec node_modules/.bin/theokit start

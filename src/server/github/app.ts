@@ -2,6 +2,7 @@ import { createSign } from 'node:crypto'
 
 import { z } from 'zod'
 
+import { gated } from './rate-limit'
 import { retryRead } from './retry-read'
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
@@ -121,7 +122,8 @@ export function createGithubApp(
   options: GithubAppOptions,
 ): GithubApp & AppHooks & AppRepos & AppEvents & AppAccess {
   const { appId, privateKey, apiUrl = 'https://api.github.com' } = options
-  const fetchImpl: FetchLike = options.fetch ?? ((url, init) => fetch(url, init))
+  // Every call goes through the rate gate: counted, its budget recorded, a refusal for the limit typed.
+  const fetchImpl: FetchLike = gated(options.fetch ?? ((url, init) => fetch(url, init)))
   const now = options.now ?? Date.now
   const wait = options.wait ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)))
   const cache = new Map<string, InstallationToken>()

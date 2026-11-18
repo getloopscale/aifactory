@@ -3,25 +3,40 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { holdNewJob } from '../coordinator/queue-hold'
 import { getPool } from '../db'
 import * as schema from '../db/schema'
-import { jobBackend } from './job-backend'
+import { AHEAD_OF_RUNS, jobBackend } from './job-backend'
 
 import type { ActionDeps } from '../panel/actions'
 import type { WorkDeps } from '../panel/work'
 
 import type { PollDeps } from './waiting'
 
-/** Runs `work` in a transaction on one connection, with `resume-task` queued through that connection. */
+/**
+ * Runs `work` in a transaction on one connection, with `resume-task` (or, after a readiness question, the
+ * task's `run-task`) queued through that connection.
+ */
 export const inTransaction: PollDeps['inTransaction'] = async (work) => {
   const client = await getPool().connect()
   try {
     return await drizzle(client, { schema }).transaction((tx) =>
-      work(tx as never, async (taskId, questionId) => {
-        await jobBackend().enqueueInTransaction(client, {
-          name: 'resume-task',
-          input: { taskId, questionId },
-          idempotencyKey: `resume-${questionId}`,
-        })
-      }),
+      work(
+        tx as never,
+        async (taskId, questionId) => {
+          await jobBackend().enqueueInTransaction(client, {
+            name: 'resume-task',
+            input: { taskId, questionId },
+            idempotencyKey: `resume-${questionId}`,
+            ...AHEAD_OF_RUNS,
+          })
+        },
+        async (taskId, questionId) => {
+          await jobBackend().enqueueInTransaction(client, {
+            name: 'run-task',
+            input: { taskId },
+            idempotencyKey: `answered-${questionId}`,
+          })
+          await holdNewJob(drizzle(client, { schema }), taskId)
+        },
+      ),
     )
   } finally {
     client.release()

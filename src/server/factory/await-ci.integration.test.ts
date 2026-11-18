@@ -316,6 +316,22 @@ describe('pollAwaitingIntegrations', () => {
     expect((await row(id)).awaitingCiSha).toBe(VERIFIED)
   })
 
+  it('reads the head of the integration branch and its required checks once a pass, however many tasks wait on it', async () => {
+    reports(failure('CI'))
+    baseIs(failure('CI'))
+    const ids = [
+      await waitingTask({ issueNumber: 7 }),
+      await waitingTask({ issueNumber: 8 }),
+      await waitingTask({ issueNumber: 9 }),
+    ]
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result).toMatchObject({ waiting: 3, waitingOnBase: ids, errors: [] })
+    expect(api.callsTo('branchHead').filter(([branch]) => branch === 'workspace')).toHaveLength(1)
+    expect(api.callsTo('requiredChecks')).toHaveLength(1)
+  })
+
   const holdOf = async (id: number) =>
     ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseHold?: unknown })
       .baseHold

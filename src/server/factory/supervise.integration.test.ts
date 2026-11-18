@@ -147,6 +147,38 @@ describe('a task queued with no job to run it', () => {
   })
 })
 
+describe('approved work in merge with no job to merge it', () => {
+  it('flags it, as a queued task is, when the merge-task job is gone or failed after the pickup time', async () => {
+    const lost = await seed('merge', 15)
+    const failed = await seed('merge', 15)
+    await job('merge-task', { taskId: failed, sha: 'abc123def' }, true)
+
+    const { found } = await detect({ db: getDb(), now })
+
+    expect(found.map((f) => f.key).sort()).toEqual([
+      `orphaned:queued_run:${lost}`,
+      `orphaned:queued_run:${failed}`,
+    ])
+    expect(found.find((f) => f.taskId === lost)?.detail).toContain('no job is left to merge it')
+    expect(found.find((f) => f.taskId === failed)?.detail).toContain(
+      'the job that should merge it failed: boom',
+    )
+  })
+
+  it('leaves alone a merge whose job still waits, however long the queue keeps it', async () => {
+    const waiting = await seed('merge', 90)
+    await job('merge-task', { taskId: waiting, sha: 'abc123def' })
+    await seed('merge', 2)
+    expect(await keys()).toEqual([])
+  })
+
+  it('does not take a run-task job for the job that merges', async () => {
+    const merging = await seed('merge', 15)
+    await job('run-task', { taskId: merging })
+    expect(await keys()).toEqual([`orphaned:queued_run:${merging}`])
+  })
+})
+
 describe('an answer nobody resumed', () => {
   async function answered(minutes: number, resumed = false) {
     const id = await seed('waiting', minutes + 30)
