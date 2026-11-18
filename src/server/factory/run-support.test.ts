@@ -132,7 +132,7 @@ describe('pullRequestBody', () => {
   it('names the issue without a keyword that makes GitHub close it on merge', () => {
     // Where the integration branch is the default one, a closing keyword closes the issue at integration,
     // before any release has shipped it; the factory closes it on release, naming the version.
-    expect(body()).toContain('#114')
+    expect(body().startsWith('For #114.')).toBe(true)
     expect(body()).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:?\s+#114\b/i)
   })
 })
