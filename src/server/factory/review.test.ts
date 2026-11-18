@@ -141,7 +141,9 @@ describe('prompts', () => {
     // The builder's answer reaches the reviewer with or without a plan.
     expect(prompt).toContain('declined x: out of scope')
     expect(prompt).not.toContain("# The builder's plan")
-    expect(reviewPrompt({ ...base, plan: 'p', builderSummary: 'declined x' })).toContain('declined x')
+    expect(reviewPrompt({ ...base, plan: 'p', builderSummary: 'declined x' })).toContain(
+      'declined x',
+    )
     expect(reviewPrompt(base)).not.toContain('What the builder said')
   })
 
