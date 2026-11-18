@@ -267,6 +267,13 @@
       "when": 1794914544942,
       "tag": "0040_scheduler_decision",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794969593424,
+      "tag": "0041_repository_integration_checks",
+      "breakpoints": true
     }
   ]
 }

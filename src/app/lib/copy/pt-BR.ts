@@ -359,6 +359,12 @@ export const ptBR: Copy = {
     tooSlow: 'Lenta demais',
     seconds: (n: string) => `${n} s`,
     proofFailed: (reason: string) => `A prova não pôde rodar: ${reason}`,
+    integrationUnprovenLine: (names: string) =>
+      `Estes checks de integração ainda não foram provados: ${names}.`,
+    integrationAllProven: 'Todos os checks de integração salvos já foram provados.',
+    proveIntegration: 'Provar estes checks de integração',
+    setupLine:
+      'Rodadas antes, para que os checks de integração encontrem o projeto instalado. Não são salvas e não decidem nada:',
     say: {
       unknown: {
         cause: (v) =>
@@ -619,6 +625,12 @@ export const ptBR: Copy = {
       saved: 'Salvo.',
       checks: 'Verificações, uma por linha no formato nome: comando',
       checksPlaceholder: 'Vazio roda npm test. Por exemplo: unit: pnpm test',
+      integrationChecks: 'Checks de integração, um por linha no formato nome: comando',
+      integrationChecksPlaceholder: 'Vazio não roda nenhum. Por exemplo: e2e: pnpm test:e2e',
+      integrationChecksHelp:
+        'Rodam no merge do trabalho com a branch de integração, depois das verificações acima.',
+      integrationChecksAssistContext:
+        'Só os checks de integração: um por linha no formato nome: comando, rodados no merge do trabalho com a branch de integração depois que as verificações acima instalaram o projeto (por exemplo testes de ponta a ponta ou de banco de dados). Não as verificações acima, nem correções.',
       fixes: 'Correções, um comando por linha, rodadas antes das verificações',
       fixesAssistContext:
         'Só os comandos de correção: um comando de shell por linha que reescreve arquivos e não decide nada (um formatador, um autofix de lint), sem nome na frente. Não são verificações.',

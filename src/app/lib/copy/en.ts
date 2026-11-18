@@ -285,6 +285,12 @@ export const en = {
     tooSlow: 'Too slow',
     seconds: (n: string) => `${n}s`,
     proofFailed: (reason: string) => `The proof could not run: ${reason}`,
+    integrationUnprovenLine: (names: string) =>
+      `These integration checks have not been proven: ${names}.`,
+    integrationAllProven: 'Every saved integration check has been proven.',
+    proveIntegration: 'Prove these integration checks',
+    setupLine:
+      'Run first, so the integration checks find the project installed. Not saved, and they decide nothing:',
     say: DOCTOR_SAY_EN,
     tried: DOCTOR_TRIED_EN,
   },
@@ -382,6 +388,12 @@ export const en = {
       saved: 'Saved.',
       checks: 'Checks, one per line as name: command',
       checksPlaceholder: 'Empty runs npm test. For example: unit: pnpm test',
+      integrationChecks: 'Integration checks, one per line as name: command',
+      integrationChecksPlaceholder: 'Empty runs none. For example: e2e: pnpm test:e2e',
+      integrationChecksHelp:
+        'They run on the merge of the work with the integration branch, after the checks above.',
+      integrationChecksAssistContext:
+        'Only the integration checks: one per line as name: command, run on the merge of the work with the integration branch after the checks above have installed the project (for example end to end or database tests). Not the checks above, and no fixes.',
       fixes: 'Fixes, one command per line, run before the checks',
       fixesAssistContext:
         'Only the fix commands: one shell command per line that rewrites files and decides nothing (a formatter, a lint autofix), with no name before it. Not checks.',

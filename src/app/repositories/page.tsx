@@ -7,6 +7,7 @@ import { Assist } from '../components/Assist'
 import { RecipeCard } from '../components/RecipeCard'
 import { ProveChecks, RepositoryDoctor } from '../components/RepositoryDoctor'
 import { put } from '../lib/api'
+import type { Proposal } from '../lib/assist'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
@@ -22,6 +23,58 @@ import {
 const selectClass =
   'h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground'
 
+/**
+ * A box of commands, one per line, with the assistant above it: how the checks, the integration checks and
+ * the fixes are written.
+ */
+function CommandsBox({
+  repository,
+  label,
+  value,
+  onChange,
+  rows,
+  placeholder,
+  context,
+  hint,
+  onUse,
+}: {
+  repository: string
+  label: string
+  value: string
+  onChange: (text: string) => void
+  rows: number
+  placeholder: string
+  /** What the assistant should know about this box, when it is not the checks. */
+  context?: string
+  /** A line under the box saying what its commands are for. */
+  hint?: string
+  /** What taking the assistant's proposal does; filling the box when absent. */
+  onUse?: (proposal: Proposal) => void
+}) {
+  return (
+    <>
+      <Assist
+        kind="setup"
+        text={value}
+        repository={repository}
+        context={context}
+        onUse={onUse ?? ((p) => onChange(p.text))}
+      />
+      <label className="block">
+        <span className="text-foreground">{label}</span>
+        <Textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={rows}
+          placeholder={placeholder}
+          className="mt-1 w-full font-mono"
+        />
+        {hint ? <span className="text-muted-foreground">{hint}</span> : null}
+      </label>
+    </>
+  )
+}
+
 function Settings({
   repo,
   agents,
@@ -34,6 +87,7 @@ function Settings({
   const { t } = useCopy()
   const s = t.repositories.settings
   const [checks, setChecks] = useState(formatChecks(repo.checks))
+  const [integration, setIntegration] = useState(formatChecks(repo.integrationChecks))
   const [fixes, setFixes] = useState(formatFixes(repo.fixes))
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
@@ -61,6 +115,7 @@ function Settings({
       const parsed = parseChecks(checks)
       await put(`/api/panel/repositories/${repo.fullName}`, {
         checks: parsed.length > 0 ? parsed : null,
+        integrationChecks: parseChecks(integration),
         fixes: parseFixes(fixes),
         egress: parseDomains(domains),
         baseBranch: baseBranch.trim() || null,
@@ -82,42 +137,37 @@ function Settings({
 
   return (
     <div className="mt-3 space-y-3 border-t border-border pt-3 text-sm">
-      <Assist
-        kind="setup"
-        text={checks}
+      <CommandsBox
         repository={repo.fullName}
+        label={s.checks}
+        value={checks}
+        onChange={setChecks}
+        rows={3}
+        placeholder={s.checksPlaceholder}
         onUse={(p) => {
           setChecks(p.text)
           if (p.domains) setDomains(formatDomains(p.domains))
         }}
       />
-      <label className="block">
-        <span className="text-foreground">{s.checks}</span>
-        <Textarea
-          value={checks}
-          onChange={(e) => setChecks(e.target.value)}
-          rows={3}
-          placeholder={s.checksPlaceholder}
-          className="mt-1 w-full font-mono"
-        />
-      </label>
-      <Assist
-        kind="setup"
-        text={fixes}
+      <CommandsBox
         repository={repo.fullName}
-        context={s.fixesAssistContext}
-        onUse={(p) => setFixes(p.text)}
+        label={s.integrationChecks}
+        value={integration}
+        onChange={setIntegration}
+        rows={2}
+        placeholder={s.integrationChecksPlaceholder}
+        context={s.integrationChecksAssistContext}
+        hint={s.integrationChecksHelp}
       />
-      <label className="block">
-        <span className="text-foreground">{s.fixes}</span>
-        <Textarea
-          value={fixes}
-          onChange={(e) => setFixes(e.target.value)}
-          rows={2}
-          placeholder={s.fixesPlaceholder}
-          className="mt-1 w-full font-mono"
-        />
-      </label>
+      <CommandsBox
+        repository={repo.fullName}
+        label={s.fixes}
+        value={fixes}
+        onChange={setFixes}
+        rows={2}
+        placeholder={s.fixesPlaceholder}
+        context={s.fixesAssistContext}
+      />
       <label className="block">
         <span className="text-foreground">{s.domains}</span>
         <Textarea
@@ -282,6 +332,7 @@ function Repo({
             <RepositoryDoctor repo={repo} />
             <Settings repo={repo} agents={agents} onSaved={onChanged} />
             <ProveChecks repo={repo} />
+            <ProveChecks repo={repo} kind="integration" />
             <div className="mt-4 border-t border-border pt-3">
               <RecipeCard fullName={repo.fullName} />
             </div>
