@@ -21,7 +21,8 @@ type PanelEvent =
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
  * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over or failed task back to its
- * agent (`coordinator/apply.ts`), `merged_by_person` a person merging the pull request a handoff left,
+ * agent (`coordinator/apply.ts`), `coordinator_merge_base` the coordinator queueing the run that merges the integration
+ * branch into a handed-over task's branch with no agent, `merged_by_person` a person merging the pull request a handoff left,
  * `needs_refinement` the scheduler finding a queued issue not ready to build (`scheduler/apply.ts`),
  * `merge_due` the `merge-task` job taking approved work to its pull request and the integration branch,
  * `run_step` a run recording the stage it reached (`enterRunStage` in `stages.ts`).
@@ -31,6 +32,7 @@ type AutomaticEvent =
   | 'conflict_rerun'
   | 'send_back_after_ci'
   | 'coordinator_send_back'
+  | 'coordinator_merge_base'
   | 'hand_over'
   | 'integrate'
   | 'merged_by_person'
@@ -72,6 +74,8 @@ export type Action =
   | 'integrate_approved'
   /** The run records the stage it reached and goes on. */
   | 'record_stage'
+  /** A new run merges the integration branch into the task's branch itself, with no agent, and checks the merge. */
+  | 'merge_base'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -188,6 +192,18 @@ const NOT_AWAITING_CHECKS = refuse(
 const NOT_HANDED_OVER = refuse(
   'the coordinator sends back only a task that was handed over to a person or failed',
 )
+
+const NOT_MERGED_INTO = refuse(
+  'the coordinator merges the integration branch only into the branch of a handed-over task',
+)
+/** The merge needs the task's branch on GitHub and a pull request that is not integrated yet. */
+const mergeBase: Rule = (task) => {
+  if (task.mergedSha) return ALREADY_INTEGRATED
+  if (task.branchGone) {
+    return refuse('the task has no branch on GitHub to merge the integration branch into')
+  }
+  return act('merge_base')
+}
 
 const NOBODY_WORKING = ignore(
   'no run is working on this task and nothing of it waits for the repository checks',
@@ -318,6 +334,13 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     handoff: sendBack,
     // A failure of the work itself (checks still red, out of time, no change) continues on its branch.
     failed: sendBack,
+  },
+  coordinator_merge_base: {
+    ...each(
+      ['intake', ...WORKING, 'waiting', 'done', 'released', 'failed', 'cancelled'],
+      NOT_MERGED_INTO,
+    ),
+    handoff: mergeBase,
   },
   hand_over: {
     ...each(WORKING, act('hand_over')),

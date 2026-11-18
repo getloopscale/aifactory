@@ -56,6 +56,7 @@ describe('the transition table', () => {
       conflict_rerun: true,
       send_back_after_ci: true,
       coordinator_send_back: true,
+      coordinator_merge_base: true,
       hand_over: true,
       integrate: true,
       merged_by_person: true,
@@ -75,7 +76,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(27 * 15)
+    expect(pairs).toHaveLength(28 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -358,6 +359,23 @@ describe('what the factory does on its own', () => {
     }
     expect(elsewhere('coordinator_send_back')).toEqual([
       refused('the coordinator sends back only a task that was handed over to a person or failed'),
+    ])
+  })
+
+  it('lets the coordinator merge the integration branch only into the branch of a handed-over task', () => {
+    expect(acting('coordinator_merge_base')).toEqual({ handoff: 'merge_base' })
+    expect(outcome({ stage: 'handoff', branchGone: true }, 'coordinator_merge_base')).toEqual(
+      refused('the task has no branch on GitHub to merge the integration branch into'),
+    )
+    expect(outcome({ stage: 'handoff', mergedSha: 'm' }, 'coordinator_merge_base')).toEqual(
+      refused(
+        'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
+      ),
+    )
+    expect(elsewhere('coordinator_merge_base')).toEqual([
+      refused(
+        'the coordinator merges the integration branch only into the branch of a handed-over task',
+      ),
     ])
   })
 

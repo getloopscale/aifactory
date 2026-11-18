@@ -4,8 +4,10 @@ import type { Database } from '../db'
 import { coordinatorAction, evidence, finding, repository, stageEvent, task } from '../db/schema'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf, type BaseHold } from '../factory/await-ci'
+import { readEvidence } from '../factory/check-evidence'
 import { readOf, unread, type Read } from '../factory/doctor'
 import type { GithubApp } from '../github/app'
+import type { PromotionApi } from '../github/promotion-api'
 import type { GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
@@ -13,7 +15,9 @@ import type { RecordedAction } from './decide'
 import {
   causeOf,
   readsChecks,
+  readsCiOutput,
   type CheckRun,
+  type CiFailure,
   type LastEvent,
   type OpenFinding,
   type PullRequestFacts,
@@ -25,6 +29,11 @@ export type FactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
   api: Pick<GithubApi, 'readPullRequest'>
+  /**
+   * The failed checks of a pull request's head and their logs, read for failed checks nothing else quoted.
+   * Without it they are not read, and such a handoff is escalated as before.
+   */
+  ciChecks?: Pick<PromotionApi, 'failedChecks' | 'jobLog' | 'annotations'>
   /** The clock the age of a hold is measured against. */
   now?: () => Date
 }
@@ -33,7 +42,8 @@ export type FactsDeps = {
  * What the coordinator reads before it decides anything, and nothing else: the tasks with an exception to
  * look at, their last events, their automatic runs, the supervisor's open findings about their runs and the
  * decisions already recorded for them, and, for a handoff on failed checks, whether its pull request conflicts
- * with its base. It decides nothing (`exceptions.ts` does). A read of the tasks, the
+ * with its base and, when nothing else quoted the checks, what the failed GitHub Actions jobs of its head logged.
+ * It decides nothing (`exceptions.ts` does). A read of the tasks, the
  * findings or the record that fails is thrown, because without them there is nothing to decide over; a read
  * of what each task says that fails is handed over as not read, and becomes an `unknown` exception.
  */
@@ -155,10 +165,55 @@ async function pullRequestOf(
     return readOf({
       conflicting: pull.mergeableState === 'dirty',
       base: integrationBranch(config ?? {}),
+      head: pull.headSha,
     })
   } catch (error) {
     return unread(tried, message(error))
   }
+}
+
+/** The most failed checks of one commit whose logs are read: each log is a download. */
+const CI_LOGS_MAX = 5
+
+/**
+ * The checks that failed on GitHub for `sha`, each with the lines its log (or its annotations) gives, or why
+ * they could not be read. The text is CI output: data for an agent to read, never a command to run.
+ */
+async function ciFailuresOf(
+  deps: FactsDeps,
+  ci: NonNullable<FactsDeps['ciChecks']>,
+  repo: string,
+  sha: string,
+): Promise<Read<CiFailure[]>> {
+  try {
+    const { token } = await deps.github.installationToken(repo)
+    const runs = (await ci.failedChecks(repo, token, sha)).slice(0, CI_LOGS_MAX)
+    const failures: CiFailure[] = []
+    for (const run of runs) {
+      const lines = await readEvidence(ci, repo, token, run)
+      failures.push({ name: run.name, url: run.url, lines })
+    }
+    return readOf(failures)
+  } catch (error) {
+    return unread(`the failed checks of ${sha.slice(0, 7)} on GitHub in ${repo}`, message(error))
+  }
+}
+
+const reasonOf = (event: Read<LastEvent | null>) =>
+  event.read && typeof event.value?.detail?.reason === 'string' ? event.value.detail.reason : ''
+
+/** The pull request of a handoff on failed checks and, when nothing else quoted them, their GitHub logs. */
+async function withPullRequest(
+  deps: FactsDeps,
+  row: PulledTask,
+  facts: TaskFacts,
+): Promise<TaskFacts> {
+  const pullRequest = await pullRequestOf(deps, row)
+  const pull = pullRequest.read ? pullRequest.value : null
+  const read = { ...facts, pullRequest }
+  const quiet = readsCiOutput(reasonOf(facts.last), facts)
+  if (!deps.ciChecks || !pull?.head || pull.conflicting || !quiet) return read
+  return { ...read, ciFailures: await ciFailuresOf(deps, deps.ciChecks, row.repository, pull.head) }
 }
 
 /** The facts of every task in `handoff` or `failed`, and of every task with an open finding about its run. */
@@ -225,7 +280,7 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
         r.stage === 'handoff' &&
         lastEvent.read &&
         causeOf(lastEvent.value?.detail ?? null) === 'checks_unchanged'
-      return onFailedChecks ? { ...facts, pullRequest: await pullRequestOf(deps, r) } : facts
+      return onFailedChecks ? withPullRequest(deps, r, facts) : facts
     }),
   )
 }

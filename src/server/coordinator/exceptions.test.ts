@@ -5,10 +5,12 @@ import { readOf, unread } from '../factory/doctor'
 import {
   CHECK_OUTPUT_MAX,
   causeOf,
+  ciFailingOutput,
   failedChecksOutput,
   failingOutput,
   failureCause,
   readsChecks,
+  readsCiOutput,
   recognise,
   type CheckRun,
   type TaskFacts,
@@ -626,5 +628,148 @@ describe('the red base a fix is filed for', () => {
     }
     expect(recognise(unreadChecks)[0].base?.commands).toEqual([])
     expect(recognise(failedWith(detail, 3))[0].base).toBeUndefined()
+  })
+})
+
+describe('the output GitHub Actions logged for failed checks', () => {
+  const failure = (name: string, lines: string[]) => ({ name, url: `https://ci/${name}`, lines })
+
+  it('quotes each failed check with its link and the lines that say why it failed', () => {
+    expect(ciFailingOutput([failure('build', ['FAIL a.test.ts', 'Error: boom'])])).toBe(
+      'build (https://ci/build):\n~~~~text\nFAIL a.test.ts\nError: boom\n~~~~',
+    )
+  })
+
+  it('leaves out a failed check whose log said nothing, and is empty when none did', () => {
+    const both = [failure('gate', []), failure('test', ['FAIL b'])]
+    expect(ciFailingOutput(both)).toBe('test (https://ci/test):\n~~~~text\nFAIL b\n~~~~')
+    expect(ciFailingOutput([failure('gate', [])])).toBe('')
+    expect(ciFailingOutput([])).toBe('')
+  })
+
+  it('keeps the first lines of each check within its share of the limit', () => {
+    const long = Array.from({ length: 40 }, (_, i) => `Error: line ${i} ${'x'.repeat(200)}`)
+    const quoted = ciFailingOutput([failure('one', long), failure('two', long)])
+    const [one, two] = quoted.split('\n\ntwo')
+    expect(one).toContain('Error: line 0 ')
+    expect(two).toContain('Error: line 0 ')
+    expect(one.length).toBeLessThanOrEqual(CHECK_OUTPUT_MAX / 2 + 60)
+    expect(quoted.length).toBeLessThanOrEqual(CHECK_OUTPUT_MAX + 120)
+  })
+
+  it('keeps a fence in a log line from closing the quote', () => {
+    expect(ciFailingOutput([failure('x', ['~~~~ done'])])).toContain('~~ done')
+    expect(ciFailingOutput([failure('x', ['~~~~ done'])])).not.toContain('~~~~ done')
+  })
+})
+
+describe('whether GitHub Actions logs are read for failed checks', () => {
+  const reason = 'the required checks failed'
+
+  it('reads them when neither the handoff nor the factory kept any output', () => {
+    expect(readsCiOutput(reason, { headSha: 'abc1234def' })).toBe(true)
+    expect(readsCiOutput(reason, { headSha: 'abc1234def', checks: readOf([]) })).toBe(true)
+    const passed = readOf([run({ passed: true })])
+    expect(readsCiOutput(reason, { headSha: 'abc1234def', checks: passed })).toBe(true)
+  })
+
+  it('does not read them when the handoff quoted the checks', () => {
+    expect(readsCiOutput(CHECKS_REASON, { headSha: 'abc1234def' })).toBe(false)
+  })
+
+  it('does not read them when the factory kept what its own checks printed on the head', () => {
+    expect(readsCiOutput(reason, { headSha: 'abc1234def', checks: readOf([run()]) })).toBe(false)
+  })
+})
+
+describe('failed checks that nothing but GitHub Actions logged', () => {
+  const base = handedOver({ reason: 'the required checks failed', cause: 'checks_unchanged' })
+  const logged = readOf([{ name: 'build', url: 'https://ci/1', lines: ['FAIL a.test.ts'] }])
+
+  it('carry what the failed jobs logged', () => {
+    const facts: TaskFacts = {
+      ...base,
+      pullRequest: readOf({ conflicting: false, base: 'workspace' }),
+      ciFailures: logged,
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc',
+        evidence: '',
+        ciOutput: 'build (https://ci/1):\n~~~~text\nFAIL a.test.ts\n~~~~',
+      },
+    ])
+  })
+
+  it('are an unknown exception when the logs could not be read', () => {
+    const facts: TaskFacts = {
+      ...base,
+      ciFailures: unread('the failed checks of abc on GitHub', 'GitHub answered 502'),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'unknown',
+        taskId: 7,
+        head: 'abc',
+        evidence: 'could not read the failed checks of abc on GitHub: GitHub answered 502',
+      },
+    ])
+  })
+
+  it('carry nothing of the logs on a pull request that conflicts with its base', () => {
+    const facts: TaskFacts = {
+      ...base,
+      pullRequest: readOf({ conflicting: true, base: 'workspace' }),
+      ciFailures: logged,
+    }
+    expect(recognise(facts)[0]).toEqual({
+      kind: 'checks_unchanged',
+      taskId: 7,
+      head: 'abc',
+      evidence: '',
+      conflictsWith: 'workspace',
+    })
+  })
+})
+
+describe('a merge of the integration branch that conflicted', () => {
+  const error =
+    'merging workspace at abc1234 into factory/12 conflicts in src/a.ts, which a person resolves'
+  const conflicted = (over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...failedWith({ error, baseConflict: { branch: 'workspace', files: ['src/a.ts'] } }),
+    headSha: 'abc1234def',
+    last: readOf({
+      stage: 'failed',
+      detail: { error, baseConflict: { branch: 'workspace', files: ['src/a.ts'] } },
+      id: 41,
+    }),
+    ...over,
+  })
+
+  it('is base_conflict on the failure event, naming the branch and the files', () => {
+    expect(recognise(conflicted())).toEqual([
+      {
+        kind: 'base_conflict',
+        taskId: 9,
+        head: 'abc1234def@41',
+        evidence: error,
+        conflictsWith: 'workspace',
+        conflictFiles: ['src/a.ts'],
+      },
+    ])
+  })
+
+  it('stays a plain failure when the conflict names no branch', () => {
+    const detail = { error, baseConflict: { files: ['src/a.ts'] } }
+    const facts = conflicted({ last: readOf({ stage: 'failed', detail, id: 41 }) })
+    expect(recognise(facts)[0].kind).toBe('failure')
+  })
+
+  it('names no files when the conflict listed none it could read', () => {
+    const detail = { error, baseConflict: { branch: 'workspace', files: 'src/a.ts' } }
+    const facts = conflicted({ last: readOf({ stage: 'failed', detail, id: 41 }) })
+    expect(recognise(facts)[0]).toMatchObject({ kind: 'base_conflict', conflictFiles: [] })
   })
 })

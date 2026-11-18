@@ -37,6 +37,23 @@ export class BaseRed extends StageFailure {
   }
 }
 
+/**
+ * Merging the integration branch into the work branch with no agent (`Run.mergeBase`) conflicted: the branch is
+ * as it was, and the files are named so the coordinator can send the merge to the agent.
+ */
+export class BaseConflict extends StageFailure {
+  constructor(
+    readonly branch: string,
+    readonly files: string[],
+    merging: string,
+    into: string,
+  ) {
+    super(
+      `merging ${merging} into ${into} conflicts in ${files.join(', ')}, which a person resolves`,
+    )
+  }
+}
+
 /** The agent's account is out of quota. It is recorded as such, because waiting fixes it. */
 export class QuotaStop extends StageFailure {
   constructor(

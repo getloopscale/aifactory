@@ -69,15 +69,96 @@ describe('deciding one action for an exception', () => {
     })
   })
 
-  it('sends work whose pull request conflicts with its base back to merge it, not with the check output', () => {
+  it('merges the base into work whose pull request conflicts with it, with no agent, before anything else', () => {
     for (const evidence of ['CI:\nnothing failed', '']) {
       expect(decide(exception({ evidence, conflictsWith: 'workspace' }), [])).toEqual({
+        action: 'merge_base',
+        reason:
+          'the required checks failed on abc1234 and the last run changed nothing, and its pull request conflicts with workspace: the factory merges workspace into its branch with no agent, and the checks and the review read the merge',
+        note: 'The coordinator merges workspace into this branch: its pull request conflicts with workspace, and the last run changed nothing after the required checks failed on abc1234. No agent runs; the checks and the review read the merge.',
+      })
+    }
+  })
+
+  it('sends work back to merge the base itself once a merge of it by the factory was applied', () => {
+    const merged = recorded({ exceptionKind: 'checks_unchanged', action: 'merge_base' })
+    for (const evidence of ['CI:\nnothing failed', '']) {
+      expect(decide(exception({ evidence, conflictsWith: 'workspace' }), [merged])).toEqual({
         action: 'send_back',
         reason:
           'the required checks failed on abc1234 and the last run changed nothing, and its pull request conflicts with workspace: sent back on its branch to merge it',
         note: conflictNote('workspace'),
       })
     }
+  })
+
+  it('merges the base again when the earlier merge of it was not applied', () => {
+    for (const outcome of ['trial', 'refused', 'failed', 'escalated'] as const) {
+      const tried = recorded({ exceptionKind: 'checks_unchanged', action: 'merge_base', outcome })
+      const decided = decide(exception({ conflictsWith: 'workspace' }), [tried])
+      expect(decided.action).toBe('merge_base')
+    }
+    const other = recorded({ exceptionKind: 'checks_unchanged', action: 'send_back' })
+    expect(decide(exception({ conflictsWith: 'workspace' }), [other]).action).toBe('merge_base')
+  })
+
+  it('sends work back with what the failed GitHub Actions jobs logged when nothing else quoted the checks', () => {
+    const logged = 'build (https://ci/1):\n~~~~text\nFAIL a.test.ts\n~~~~'
+    expect(decide(exception({ evidence: '', ciOutput: logged }), [])).toEqual({
+      action: 'send_back',
+      reason:
+        'the required checks failed on abc1234 and the last run changed nothing: sent back on its branch with what the failed GitHub Actions jobs logged',
+      note: `The coordinator sent this back: the repository's required checks failed on abc1234 and the last run changed nothing. Fix what they report.\n\n${logged}`,
+    })
+  })
+
+  it('prefers what the handoff or the factory kept to what GitHub Actions logged', () => {
+    const kept = exception({ ciOutput: 'logged' })
+    expect(decide(kept, []).note).not.toContain('logged')
+    const factory = exception({ evidence: '', checkOutput: 'printed', ciOutput: 'logged' })
+    expect(decide(factory, []).note).toContain('printed')
+    expect(decide(factory, []).note).not.toContain('logged')
+    expect(decide(factory, []).reason).toContain('with what the checks reported')
+  })
+
+  it('escalates failed checks when GitHub Actions logged nothing either', () => {
+    expect(decide(exception({ evidence: '', checkOutput: '', ciOutput: '' }), [])).toEqual({
+      action: 'escalate',
+      reason:
+        'the required checks failed on abc1234 and the last run changed nothing, but the handoff kept no output of the checks to send back',
+    })
+  })
+
+  it('sends work back to resolve a merge of the integration branch that conflicted', () => {
+    const conflicted = exception({
+      kind: 'base_conflict',
+      head: 'abc1234def@41',
+      evidence: 'merging workspace at abc1234 into factory/12 conflicts in src/a.ts',
+      conflictsWith: 'workspace',
+      conflictFiles: ['src/a.ts'],
+    })
+    expect(decide(conflicted, [])).toEqual({
+      action: 'send_back',
+      reason:
+        'the factory could not merge workspace into the branch on its own (merging workspace at abc1234 into factory/12 conflicts in src/a.ts): sent back on its branch to resolve the conflict',
+      note: conflictNote('workspace', ['src/a.ts']),
+    })
+  })
+
+  it('escalates a conflicted merge that names no branch, or a task that pushed none', () => {
+    const nameless = exception({ kind: 'base_conflict', evidence: 'conflicts' })
+    expect(decide(nameless, [])).toEqual({
+      action: 'escalate',
+      reason:
+        'the factory could not merge the integration branch on its own (conflicts), but the failure names no branch to merge',
+    })
+    const unpushed = exception({
+      kind: 'base_conflict',
+      head: 'none',
+      conflictsWith: 'workspace',
+      evidence: 'conflicts',
+    })
+    expect(decide(unpushed, []).action).toBe('escalate')
   })
 
   it('reviews again work whose review gave no usable verdict', () => {

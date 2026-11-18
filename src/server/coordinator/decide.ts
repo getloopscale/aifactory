@@ -84,24 +84,63 @@ const escalate = (reason: string): Decision => ({ action: 'escalate', reason })
 /** What the coordinator knows besides the exception: what it recorded for the task, and the time. */
 type Context = { recorded: RecordedAction[]; now: Date }
 
-function sendBack({ head, evidence, conflictsWith, checkOutput }: TaskException): Decision {
-  const what = `the required checks failed on ${short(head)} and the last run changed nothing`
-  if (conflictsWith !== undefined) {
+const mergedBefore = (recorded: RecordedAction[]) =>
+  recorded.some((r) => r.action === 'merge_base' && r.outcome === 'applied')
+
+/**
+ * A pull request that conflicts with its base gets the base merged by the factory first, with no agent; once that
+ * was applied, the agent is sent back to merge it, since a merge that conflicts needs one.
+ */
+function mergeConflictingBase(
+  { head }: TaskException,
+  base: string,
+  what: string,
+  { recorded }: Context,
+): Decision {
+  if (mergedBefore(recorded)) {
     return {
       action: 'send_back',
-      reason: `${what}, and its pull request conflicts with ${conflictsWith}: sent back on its branch to merge it`,
-      note: conflictNote(conflictsWith),
+      reason: `${what}, and its pull request conflicts with ${base}: sent back on its branch to merge it`,
+      note: conflictNote(base),
     }
   }
-  // The handoff may have kept no output; what the factory's own checks printed on the head stands in for it.
-  const output = evidence || checkOutput || ''
+  return {
+    action: 'merge_base',
+    reason: `${what}, and its pull request conflicts with ${base}: the factory merges ${base} into its branch with no agent, and the checks and the review read the merge`,
+    note: `The coordinator merges ${base} into this branch: its pull request conflicts with ${base}, and the last run changed nothing after the required checks failed on ${short(head)}. No agent runs; the checks and the review read the merge.`,
+  }
+}
+
+function sendBack(exception: TaskException, context: Context): Decision {
+  const { head, evidence, conflictsWith, checkOutput, ciOutput } = exception
+  const what = `the required checks failed on ${short(head)} and the last run changed nothing`
+  if (conflictsWith !== undefined)
+    return mergeConflictingBase(exception, conflictsWith, what, context)
+  // The handoff may have kept no output; what the factory's own checks printed on the head stands in for it,
+  // and what the failed GitHub Actions jobs logged when the factory kept nothing either.
+  const kept = evidence || checkOutput || ''
+  const output = kept || ciOutput || ''
   if (output === '') {
     return escalate(`${what}, but the handoff kept no output of the checks to send back`)
   }
+  const source = kept === '' ? 'the failed GitHub Actions jobs logged' : 'the checks reported'
   return {
     action: 'send_back',
-    reason: `${what}: sent back on its branch with what the checks reported`,
+    reason: `${what}: sent back on its branch with what ${source}`,
     note: `The coordinator sent this back: the repository's required checks failed on ${short(head)} and the last run changed nothing. Fix what they report.\n\n${output}`,
+  }
+}
+
+/** A merge of the integration branch with no agent that conflicted goes to the agent, with the files. */
+function baseConflict({ evidence, conflictsWith, conflictFiles }: TaskException): Decision {
+  const what = `the factory could not merge ${conflictsWith ?? 'the integration branch'}`
+  if (conflictsWith === undefined) {
+    return escalate(`${what} on its own (${evidence}), but the failure names no branch to merge`)
+  }
+  return {
+    action: 'send_back',
+    reason: `${what} into the branch on its own (${evidence}): sent back on its branch to resolve the conflict`,
+    note: conflictNote(conflictsWith, conflictFiles ?? []),
   }
 }
 
@@ -221,6 +260,7 @@ const BY_KIND: Partial<
   Record<ExceptionKind, (exception: TaskException, context: Context) => Decision>
 > = {
   checks_unchanged: sendBack,
+  base_conflict: onBranch(baseConflict),
   checks_red: onBranch(checksRed),
   out_of_time: onBranch(outOfTime),
   no_change: onBranch(noChange),

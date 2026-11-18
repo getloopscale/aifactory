@@ -84,6 +84,7 @@ import {
   pushWithRetry,
   resolvedComment,
   Asked,
+  BaseConflict,
   BaseRed,
   QuotaStop,
   StageFailure,
@@ -1395,9 +1396,7 @@ export class Run {
     await this.backend.uploadFile(GITCONFIG, gitConfig(deps.author))
     const merged = await mergeIntegration(this.backend, this.git, this.baseSha)
     if ('conflicts' in merged) {
-      throw new StageFailure(
-        `merging ${base} into ${branch} conflicts in ${merged.conflicts.join(', ')}, which a person resolves`,
-      )
+      throw new BaseConflict(integrationBranch(this.c.repo), merged.conflicts, base, branch)
     }
     if ('upToDate' in merged) {
       throw new StageFailure(
