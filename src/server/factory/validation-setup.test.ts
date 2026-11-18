@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
@@ -25,4 +26,13 @@ describe('validation setup', () => {
     expect(pkg.packageManager).toMatch(/^pnpm@\d/)
     expect(existsSync(new URL('../../../pnpm-lock.yaml', import.meta.url))).toBe(true)
   })
+
+  it('resolves the installed prettier through pnpm exec without changing the checkout', () => {
+    const root = new URL('../../../', import.meta.url).pathname
+    // exits non-zero (throws) when prettier is missing or the file is unformatted
+    execFileSync('pnpm', ['exec', 'prettier', '--check', 'package.json'], {
+      cwd: root,
+      stdio: 'pipe',
+    })
+  }, 60_000)
 })
