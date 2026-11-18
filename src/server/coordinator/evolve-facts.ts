@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt } from 'drizzle-orm'
+import { and, eq, gte, inArray, lt, notLike } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { failureSignature, stageEvent, task } from '../db/schema'
@@ -54,7 +54,11 @@ export async function countSignature(
   return events.filter((e) => signatureOf(e.reason) === signature).length
 }
 
-/** Every signature filed, measured or not. */
+/** Every signature Evolve filed, measured or not: the fixes of a red base (`base-fix.ts`) are not its own. */
 export async function readFiledSignatures(db: Database) {
-  return db.select().from(failureSignature).orderBy(failureSignature.id)
+  return db
+    .select()
+    .from(failureSignature)
+    .where(notLike(failureSignature.signature, 'base_red:%'))
+    .orderBy(failureSignature.id)
 }

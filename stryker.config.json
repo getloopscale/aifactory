@@ -42,6 +42,7 @@
     "src/server/factory/transitions.ts",
     "src/server/coordinator/exceptions.ts",
     "src/server/coordinator/decide.ts",
+    "src/server/coordinator/base-fix.ts",
     "src/server/coordinator/scope.ts",
     "src/server/coordinator/evolve.ts",
     "src/server/coordinator/release-train.ts",

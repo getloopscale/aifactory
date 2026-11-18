@@ -6,7 +6,7 @@ import { CoordinatorActions } from '../components/CoordinatorActions'
 import { get } from '../lib/api'
 import { useCopy } from '../lib/copy'
 
-const OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated']
+const OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated', 'deferred']
 
 type Page = { actions: CoordinatorActionView[]; more: boolean }
 

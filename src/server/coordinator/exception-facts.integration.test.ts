@@ -4,11 +4,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { coordinatorAction, ingress, stageEvent, task } from '../db/schema'
+import { coordinatorAction, evidence, ingress, repository, stageEvent, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 import { jobBackend } from '../factory/job-backend'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
+import { readExceptionFacts } from './exception-facts'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -40,7 +41,7 @@ const deps = (api: FakeGithub): CoordinatorDeps => ({
 })
 
 describe('the coordinator on a task whose recorded pull request is closed', () => {
-  it('escalates it as unknown, not sending it back on the stale merge state', async () => {
+  it('waits to read it again as unknown, not sending it back on the stale merge state', async () => {
     const db = getDb()
     const api = new FakeGithub()
     api
@@ -80,16 +81,16 @@ describe('the coordinator on a task whose recorded pull request is closed', () =
 
     const result = await coordinate(deps(api), 'auto')
 
-    expect(result).toMatchObject({ escalated: 1, applied: 0 })
+    expect(result).toMatchObject({ deferred: 1, applied: 0 })
     expect(queued).toEqual([])
     const [row] = await db.select().from(coordinatorAction)
-    expect(row).toMatchObject({ exceptionKind: 'unknown', action: 'escalate' })
+    expect(row).toMatchObject({ exceptionKind: 'unknown', action: 'wait', outcome: 'deferred' })
     expect(row.reason).toContain('the pull request is closed')
   })
 })
 
 describe('the coordinator on a task whose hold on the integration branch could not be read', () => {
-  it('escalates it as unknown and goes on with the pass', async () => {
+  it('waits to read it again as unknown and goes on with the pass', async () => {
     const db = getDb()
     const [i] = await db
       .insert(ingress)
@@ -131,9 +132,78 @@ describe('the coordinator on a task whose hold on the integration branch could n
 
     const result = await coordinate({ ...deps(new FakeGithub()), db: failing }, 'auto')
 
-    expect(result).toMatchObject({ escalated: 1 })
+    expect(result).toMatchObject({ deferred: 1 })
     const [row] = await db.select().from(coordinatorAction)
-    expect(row).toMatchObject({ exceptionKind: 'unknown', action: 'escalate' })
+    expect(row).toMatchObject({ exceptionKind: 'unknown', action: 'wait', outcome: 'deferred' })
     expect(row.reason).toContain('connection lost')
+  })
+})
+
+describe('the checks and the repository a task is read with', () => {
+  async function failedTask(issueNumber: number, error: string) {
+    const db = getDb()
+    const [i] = await db
+      .insert(ingress)
+      .values({
+        deliveryId: `checks-${issueNumber}`,
+        event: 'issues',
+        payload: {},
+        outcome: 'task_created',
+        code: 'issue_labeled',
+        reason: 'r',
+      })
+      .returning({ id: ingress.id })
+    const [t] = await db
+      .insert(task)
+      .values({
+        ingressId: i.id,
+        repository: 'paulo/app',
+        issueNumber,
+        issueTitle: 'T',
+        stage: 'failed',
+        headSha: 'abc1234def',
+      })
+      .returning({ id: task.id })
+    await db.insert(stageEvent).values({ taskId: t.id, stage: 'failed', detail: { error } })
+    await db.insert(evidence).values({
+      taskId: t.id,
+      name: 'lint',
+      command: 'pnpm lint',
+      sha: 'abc1234def',
+      exitCode: 1,
+      timedOut: false,
+      passed: false,
+      output: 'boom',
+      durationMs: 1,
+    })
+    return t.id
+  }
+
+  it('reads the checks of a failure on its checks, with the integration branch of its repository', async () => {
+    await getDb().insert(repository).values({ fullName: 'paulo/app', baseBranch: 'integration' })
+    const red = await failedTask(1, 'no pull request: "lint" failed at abc1234')
+    const other = await failedTask(2, 'the tests failed')
+
+    const facts = await readExceptionFacts({
+      db: getDb(),
+      github: { installationToken: async () => ({ token: 't', expiresAt: new Date() }) },
+      api: new FakeGithub(),
+    })
+
+    const byId = new Map(facts.map((f) => [f.taskId, f]))
+    expect(byId.get(red)).toMatchObject({
+      repository: { fullName: 'paulo/app', integrationBranch: 'integration' },
+      checks: {
+        read: true,
+        value: [
+          { name: 'lint', command: 'pnpm lint', sha: 'abc1234def', passed: false, output: 'boom' },
+        ],
+      },
+    })
+    expect(byId.get(other)?.checks).toBeUndefined()
+    expect(byId.get(other)?.repository).toEqual({
+      fullName: 'paulo/app',
+      integrationBranch: 'integration',
+    })
   })
 })

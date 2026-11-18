@@ -167,6 +167,11 @@ describe('work held behind a fix', () => {
       isHeld(exception({ evidence: 'remphase reports one fact left out of 5010' }), 'o/sdk', held),
     ).toBe(false)
   })
+  it('holds the failures the coordinator acts on, as it holds any other failure', () => {
+    for (const kind of ['checks_red', 'out_of_time', 'no_change'] as const) {
+      expect(isHeld(exception({ kind }), 'o/sdk', held)).toBe(true)
+    }
+  })
   it('is also read from the recorded failure reason of the task', () => {
     expect(isHeld(exception({ evidence: 'no change' }), 'o/sdk', held, [said()])).toBe(true)
   })

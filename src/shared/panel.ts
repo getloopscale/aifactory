@@ -70,7 +70,7 @@ const ENVIRONMENT = {
  * issue or gives the agent more time. A command of the environment that timed out (a clone, an install) is
  * not this one.
  */
-const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
+export const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
 
 /** A run's record that the checks it failed on fail on the integration branch too (#219). */
 function failsOnBase(baseRed: unknown): boolean {
@@ -406,7 +406,7 @@ export type CoordinatorActionView = {
   title: string
   exceptionKind: string
   action: string
-  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated'
+  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated' | 'deferred'
   reason: string
   /** What a model drafted, as text, or null when nothing was. */
   draft: string | null

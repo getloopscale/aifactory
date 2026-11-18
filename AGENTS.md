@@ -196,15 +196,24 @@ reads that file, not a convention.
 - **The coordinator decides from a closed set and records every decision.** `coordinator/exception-facts.ts`
   reads and decides nothing; `exceptions.ts` recognises exceptions over those facts and reads nothing, and a
   fact that could not be read is an exception of kind `unknown`; `decide.ts` is a pure function from an
-  exception and the decisions already recorded to one action (`send_back`, `review_again`,
-  `retry_from_finding`, `scope`, `release` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
+  exception, the decisions already recorded and the time to one action (`send_back`, `review_again`,
+  `retry_from_finding`, `scope`, `release`, `prioritise`, `fix_base`, `wait` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
   applying, where a drafter built by `buildAssistant` answers JSON that `scope.ts` parses (an answer that does not
   parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION` is `refused`); `apply.ts` is the only module with side effects and goes through the
   panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`) and, for a release, `release()`, so
   `transitions.ts` is asked first, even before a scope's only writes of its own (the follow-up issue and
   `updateIssueBody`). A handoff records its `cause`, and an older one is recognised by the start
   of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
-  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. `FACTORY_COORDINATOR_MODE`
+  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. A failure of the work is
+  told by how the run starts its reason (`factory/failure-reasons.ts`, `NO_TIME_FOR_AGENT`, `AGENT_OUT_OF_TIME`):
+  `checks_red` is sent back on its branch with what the failing checks printed on the head (`evidence`, through
+  `failingOutput`, escalated when nothing was kept), `out_of_time` is sent back to continue from the branch, and
+  `no_change` is sent back once with what the run recorded, then escalated; each is told apart by its failure
+  event (the head is `<sha>@<event id>`), a task that pushed nothing is escalated, and any other failure stays a
+  `failure`, escalated. `coordinator_send_back` takes a `failed` task as it takes a handed-over one. A
+  `checks_unchanged` whose handoff quoted no output is sent back with the same `failingOutput`. An `unknown` is a
+  `wait`: the first is recorded as `deferred` (which leaves the head free and is never `seen`), later passes
+  record nothing, and it is escalated once the first wait is `UNKNOWN_LIMIT_MS` old. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
   calls a merge, and `merges-nothing.test.ts` fails if one does. A new exception is a new kind in
   `EXCEPTION_KINDS` and a new entry in `BY_KIND`; a new action goes through an action of the panel, never
@@ -221,10 +230,15 @@ reads that file, not a convention.
   the same head. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
   `MAX_APPLIED` neither counts a release nor holds one back.
   A task held by a red integration branch (`done.detail.baseHold`, set and cleared by `integrate-after-ci`, shown
-  on the panel card as `waitingOnBase`) is a `base_red` exception once the red lasts `BASE_RED_LIMIT_MS`: escalated,
-  naming the checks, one decision per commit and set of checks.
+  on the panel card as `waitingOnBase`), or a failed one still red on the base past its automatic runs, is a
+  `base_red` exception once the red lasts `BASE_RED_LIMIT_MS`, one decision per commit and set of checks. It is a
+  `fix_base`: in `auto` `apply.ts` files one issue on the repository (`base-fix.ts` writes it; labels `factory`,
+  `bug`, `priority:1`, created when missing) naming the checks, the branch and the commit, once per repository,
+  branch and set of checks (`baseSignature` in `failure_signature`, through `fileOnce`, the claim Evolve uses too),
+  and again only after that issue closed. The tasks keep waiting for the base, `MAX_APPLIED` does not count it, and
+  in `trial` it logs the issue it would file. It changes no task, so it asks `transitions.ts` nothing.
   Evolve (`evolve.ts` pure, `evolve-facts.ts` reads, `evolve-apply.ts` writes) files a failure signature seen on
-  three tasks in a week, in two incidents an hour or more apart, as a `factory` issue on this repository, once per signature (`failure_signature`), at
+  three tasks in a week, in two incidents an hour or more apart, as a `factory` issue on this repository, once per signature (`failure_signature`, never reading a `base_red:` one), at
   most one per pass and three per week, never a designed wait (`DESIGNED_WAITS`), nothing in `trial` but a
   log line, and a week after the issue closes it records both counts and comments when the signature still
   shows up.
