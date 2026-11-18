@@ -4386,6 +4386,27 @@ describe('the factory always makes a pre-release', () => {
     expect(handoff.detail).toMatchObject({ cause: 'agent_configuration' })
   })
 
+  it('hands approved work that changes a quality gate of the factory to a person, merging nothing (#139)', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.includes('diff --name-status')
+          ? { stdout: 'M\tquality/crap-baseline.json\nA\tsrc/truncate.js\n' }
+          : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox, { ownRepository: 'paulo/app' }), id)
+
+    expect(result).toMatchObject({ status: 'handoff' })
+    expect(seen.merges).toEqual([])
+    expect(seen.autoMerges).toEqual([])
+    expect(seen.drafts).toEqual([true])
+    expect(seen.comments.at(-1)).toContain('quality/crap-baseline.json')
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row).toMatchObject({ stage: 'handoff', mergedSha: null })
+  })
+
   it('integrates the same change in a repository that is not the factory', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(
