@@ -814,6 +814,22 @@ describe('runCase', () => {
     expect(invalid).toMatchObject({ passed: false, reviewRounds: 1, reachedVerdict: false })
   })
 
+  it('keeps the verdict of a review when a later round ends without a valid one', async () => {
+    const result = await runCase(
+      deps(
+        sandbox(),
+        agent('builder', planned(built(), built())),
+        agent('reviewer', [
+          { ok: true, summary: CHANGES },
+          { ok: true, summary: 'not a verdict' },
+        ]),
+      ),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: false, reviewRounds: 2, reachedVerdict: true })
+  })
+
   it('records no verdict for a case stopped early', async () => {
     const early = await runCase(
       deps(sandbox({ dirty: false }), agent('builder', planned(built('nothing'))), agent('reviewer', [])),
