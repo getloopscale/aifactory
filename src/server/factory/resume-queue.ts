@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { holdNewJob } from '../coordinator/queue-hold'
 import { getPool } from '../db'
 import * as schema from '../db/schema'
-import { jobBackend } from './job-backend'
+import { AHEAD_OF_RUNS, jobBackend } from './job-backend'
 
 import type { ActionDeps } from '../panel/actions'
 import type { WorkDeps } from '../panel/work'
@@ -25,6 +25,7 @@ export const inTransaction: PollDeps['inTransaction'] = async (work) => {
             name: 'resume-task',
             input: { taskId, questionId },
             idempotencyKey: `resume-${questionId}`,
+            ...AHEAD_OF_RUNS,
           })
         },
         async (taskId, questionId) => {

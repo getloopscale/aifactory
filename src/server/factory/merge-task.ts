@@ -17,7 +17,7 @@ import {
   type ApprovedWork,
   type Integrated,
 } from './integration'
-import { jobBackend } from './job-backend'
+import { AHEAD_OF_RUNS, jobBackend } from './job-backend'
 import { loadRepoConfig } from './repo-config'
 import type { RunResult, RunTaskDeps } from './run-types'
 import { enterStage, refuseUnlessRunMayRecord } from './stages'
@@ -66,6 +66,7 @@ export async function enterMerge(taskId: number, detail: MergeDetail): Promise<v
         name: 'merge-task',
         input: { taskId, sha: detail.sha },
         idempotencyKey: `merge-${event.id}`,
+        ...AHEAD_OF_RUNS,
       })
     })
   } finally {

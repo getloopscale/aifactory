@@ -563,6 +563,26 @@ describe('runTask', () => {
     expect(sandbox.stopped).toBe(1)
   })
 
+  it('queues the merge of approved work ahead of every queued run, however old', async () => {
+    // A merge takes seconds and delivers the work; a run takes up to an hour. Workers take the job whose
+    // available_at is earliest, so a merge queued behind older runs waited for one of them to end.
+    await getPool().query(`delete from theokit_jobs where id = 'old-run'`)
+    await getPool().query(
+      `insert into theokit_jobs (id, name, input, max_attempts, available_at)
+       values ('old-run', 'run-task', '{"taskId": 999}', 1, now() - interval '400 days')`,
+    )
+    const id = await seedTask()
+
+    await runOnly(deps(new FakeSandbox(changed())), id)
+
+    const { rows } = await getPool().query<{ name: string }>(
+      `select name from theokit_jobs where name in ('merge-task', 'run-task')
+        and available_at <> 'infinity' order by available_at limit 1`,
+    )
+    await getPool().query(`delete from theokit_jobs where id = 'old-run'`)
+    expect(rows[0]?.name).toBe('merge-task')
+  })
+
   it('opens the pull request and integrates it at the approved commit when the merge-task job runs', async () => {
     const id = await seedTask()
     const given = deps(new FakeSandbox(changed()))
