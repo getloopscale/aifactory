@@ -275,6 +275,13 @@ export type IssueLink = { number: number; url: string }
 export const recurrenceIsNewIssue = (state: { issueOpen: boolean; fixIntegrated: boolean }) =>
   !state.issueOpen || state.fixIntegrated
 
+/** The log lines of a check, fenced so that nothing in them can end the block. */
+function evidenceBlock(lines: string[]): string[] {
+  return lines.length > 0
+    ? ['~~~~text', ...lines.map((line) => line.replace(/~{3,}/g, '~~')), '~~~~']
+    : ['No error line could be read from the log; open the run to see it.']
+}
+
 export const issueTitle = (check: FailedCheck, at: FailureAt): string =>
   `promotion: \`${check.name}\` fails on ${at.head} -> ${at.base}`
 
@@ -285,10 +292,7 @@ export const issueTitle = (check: FailedCheck, at: FailureAt): string =>
  */
 export function issueBody(check: FailedCheck, at: FailureAt, previous?: IssueLink): string {
   const person = needsPerson(check.name)
-  const evidence =
-    check.evidence.length > 0
-      ? ['~~~~text', ...check.evidence.map((line) => line.replace(/~{3,}/g, '~~')), '~~~~']
-      : ['No error line could be read from the log; open the run to see it.']
+  const evidence = evidenceBlock(check.evidence)
   return [
     '**Area:** promotion',
     `**Severity:** high (#${at.pullRequest.number} cannot merge, so \`${at.base}\` does not advance)`,
@@ -324,6 +328,75 @@ export function issueBody(check: FailedCheck, at: FailureAt, previous?: IssueLin
     '',
     `- \`${check.name}\` passes on the promotion pull request.`,
     '- It passes because the cause is fixed: no test is skipped and no rule is turned off to get there.',
+    '',
+    '---',
+    'Opened by the factory, which watches the promotion pull requests. The evidence is the CI log as it was.',
+  ].join('\n')
+}
+
+/** A failed check with what became of its rerun, as several checks of one head are filed. */
+export type SeenCheck = FailedCheck & { rerun: Rerun }
+
+/** Where several checks failed together: the promotion and its head commit. */
+export type HeadAt = Omit<FailureAt, 'rerun'>
+
+const TITLE_NAMES = 3
+
+const quoted = (checks: FailedCheck[]) => checks.map((check) => `\`${check.name}\``)
+
+/** `a`, `b` and `c`: every name, in the order the checks came. */
+function nameList(checks: FailedCheck[]): string {
+  const names = quoted(checks)
+  return names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`
+}
+
+export function togetherTitle(checks: FailedCheck[], at: HeadAt): string {
+  const shown = quoted(checks.slice(0, TITLE_NAMES)).join(', ')
+  const rest = checks.length - TITLE_NAMES
+  const more = rest > 0 ? ` and ${rest} more` : ''
+  return `promotion: ${checks.length} checks fail on ${at.head} -> ${at.base}: ${shown}${more}`
+}
+
+function checkSection(check: SeenCheck): string[] {
+  return [
+    `### \`${check.name}\``,
+    '',
+    `It failed${RERUN_TOLD[check.rerun]}`,
+    '',
+    `- Check: ${check.url}`,
+    '',
+    ...evidenceBlock(check.evidence),
+    '',
+  ]
+}
+
+/**
+ * One issue for the checks that failed for the first time on one head. They are filed together because the
+ * promotion merges only once all of them pass: one task per check would fix its own and still fail on the
+ * others, which fail on the base too, so each would wait for the base and none would ever merge.
+ */
+export function togetherBody(checks: SeenCheck[], at: HeadAt): string {
+  return [
+    '**Area:** promotion',
+    `**Severity:** high (#${at.pullRequest.number} cannot merge, so \`${at.base}\` does not advance)`,
+    '',
+    '## Description',
+    '',
+    `${checks.length} checks failed on the promotion ${at.head} -> ${at.base} (#${at.pullRequest.number}) at \`${at.sha.slice(0, 7)}\`. They are filed together because the pull request merges only once all of them pass: a fix for one of them alone would still fail on the others.`,
+    '',
+    '## Evidence',
+    '',
+    `- Pull request: ${at.pullRequest.url}`,
+    '',
+    ...checks.flatMap(checkSection),
+    '## Expected',
+    '',
+    `Every check above passes on \`${at.head}\`.`,
+    '',
+    '## Acceptance',
+    '',
+    `- ${nameList(checks)} pass on the promotion pull request.`,
+    '- They pass because the causes are fixed: no test is skipped and no rule is turned off to get there.',
     '',
     '---',
     'Opened by the factory, which watches the promotion pull requests. The evidence is the CI log as it was.',

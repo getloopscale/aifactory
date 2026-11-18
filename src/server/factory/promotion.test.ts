@@ -7,6 +7,8 @@ import {
   recurrenceIsNewIssue,
   issueBody,
   issueTitle,
+  togetherBody,
+  togetherTitle,
   failedStep,
   logEvidence,
   needsPerson,
@@ -15,6 +17,7 @@ import {
   withEvidence,
   type FailedCheck,
   type FailureAt,
+  type SeenCheck,
 } from './promotion'
 
 describe('newIssuesCapFromEnv', () => {
@@ -358,6 +361,71 @@ describe('the issue', () => {
 
   it('says when the log had no line to show', () => {
     expect(issueBody({ ...check, evidence: [] }, at)).toContain('No error line')
+  })
+})
+
+describe('the issue for several checks of one head', () => {
+  const where = {
+    pullRequest: { number: 979, url: 'https://github.com/o/r/pull/979' },
+    head: 'workspace',
+    base: 'develop',
+    sha: 'acf5736aaaa',
+  }
+  const seen = (name: string, rerun: SeenCheck['rerun'], evidence: string[]): SeenCheck => ({
+    name,
+    url: `https://github.com/o/r/runs/${name}`,
+    evidence,
+    rerun,
+  })
+  const checks = [
+    seen('Type tests', 'failed-again', ['error TS2345: Argument of type']),
+    seen('surface parity', 'not-actions', ['missing export applyOutputStyle']),
+    seen('Release record', 'refused', ['no dated section names it']),
+  ]
+
+  it('names every check and the promotion in its title', () => {
+    expect(togetherTitle(checks, where)).toBe(
+      'promotion: 3 checks fail on workspace -> develop: `Type tests`, `surface parity`, `Release record`',
+    )
+  })
+
+  it('names the first three checks and counts the rest when there are more', () => {
+    const five = [...checks, seen('lint', 'failed-again', []), seen('unit', 'failed-again', [])]
+    expect(togetherTitle(five, where)).toBe(
+      'promotion: 5 checks fail on workspace -> develop: `Type tests`, `surface parity`, `Release record` and 2 more',
+    )
+  })
+
+  it('carries each check with its run, its rerun and the lines its log showed', () => {
+    const body = togetherBody(checks, where)
+    expect(body).toContain('### `Type tests`')
+    expect(body).toContain('https://github.com/o/r/runs/surface parity')
+    expect(body).toContain('error TS2345: Argument of type')
+    expect(body).toContain('missing export applyOutputStyle')
+    expect(body).toContain('no dated section names it')
+    expect(body).toContain('It failed, and again after a rerun.')
+    expect(body).toContain('It failed. It is not a GitHub Actions job, so it was not rerun.')
+    expect(body).toContain('#979')
+    expect(body).toContain('`acf5736`')
+  })
+
+  it('says why the checks are filed together', () => {
+    expect(togetherBody(checks, where)).toContain(
+      'a fix for one of them alone would still fail on the others',
+    )
+  })
+
+  it('is done only when every check passes, with nothing skipped', () => {
+    const body = togetherBody(checks, where)
+    expect(body).toContain(
+      '- `Type tests`, `surface parity` and `Release record` pass on the promotion pull request.',
+    )
+    expect(body).toContain('no test is skipped and no rule is turned off')
+  })
+
+  it('keeps a fence in one log from breaking the evidence blocks', () => {
+    const body = togetherBody([seen('a', 'failed-again', ['~~~~ injected']), checks[0]], where)
+    expect(body.match(/^~~~~/gm)).toHaveLength(4)
   })
 })
 

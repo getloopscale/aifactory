@@ -46,6 +46,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Checks that fail for the first time on the same promotion head become one issue that names them all, so one task fixes them together instead of one task per check waiting on the others forever (#306)
 - A red integration branch starts its fix after 30 minutes instead of 2 hours, and its clock no longer restarts when another of its checks goes red or its checks run again (#282)
 - The issue the factory files for a check that fails on a promotion is labelled `priority:1`, so its fix runs ahead of the queue instead of after every other task while the red base holds the repository's deliveries (#300)
 - `pnpm evals:check` no longer fails every case as an environment failure while the factory's runs hold every E2B sandbox: a case waits for a slot, asking again every 30 seconds for up to 20 minutes (#261)
