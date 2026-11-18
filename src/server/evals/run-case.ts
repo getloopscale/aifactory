@@ -23,6 +23,7 @@ import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
 import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
+import { installFailure, preinstall, type Installed } from '../factory/preinstall'
 import { diffFacts } from '../factory/diff-facts'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
 import {
@@ -119,6 +120,8 @@ class CaseRun {
   /** Whether the checks the case failed fail on its base too, as `Run` asks it. */
   private readonly baseProbe = new BaseProbe()
   private readonly started = Date.now()
+  /** What the install before the first pass did, as `Run.install` keeps it. */
+  private installed: Installed | undefined
 
   constructor(
     private readonly deps: EvalDeps,
@@ -177,7 +180,19 @@ class CaseRun {
       askQuestions: false,
       knowledgeDir: this.knowledgeDir,
       checks: c.checks,
+      installFailed: installFailure(this.installed),
     }
+  }
+
+  /** The project's install in the new clone, before the plan and the build, as `Run.install` runs it (#240). */
+  private async install(): Promise<void> {
+    ensureLive(this.signal)
+    this.installed = await preinstall(
+      this.backend,
+      this.repoDir,
+      this.c.checks,
+      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    )
   }
 
   /**
@@ -185,6 +200,7 @@ class CaseRun {
    * (`Run.planChange`), what the planning turn changed is thrown away, and the work continues that session.
    */
   async build(): Promise<void> {
+    await this.install()
     const { builder, planner } = this.deps
     const apart = planner !== undefined && planner.name !== builder.name
     const discarded = apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined

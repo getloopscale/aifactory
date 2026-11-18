@@ -432,6 +432,74 @@ describe('runCase', () => {
     expect(seen[0]).toBe(CHANGESET_CHECK_SCRIPT)
   })
 
+  it('installs the project once before the plan and the build, as a task does (#240)', async () => {
+    const order: string[] = []
+    const provider = new FakeSandbox((command): Reply | undefined => {
+      if (command.endsWith('&& pnpm install')) order.push('install')
+      if (command.includes('rev-parse HEAD')) return { stdout: 'b'.repeat(40) }
+      if (command.includes('rev-list --count')) return { stdout: '0\n' }
+      if (command.includes('status --porcelain'))
+        return { stdout: order.includes('builder') ? ' M src/cli.ts\n' : '' }
+      return undefined
+    })
+    const inner = agent('builder', planned(built()))
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        order.push('builder')
+        return inner.run(b, input)
+      },
+    }
+    const checks = [{ name: 'install', command: 'pnpm install' }, ...evalCase.checks]
+
+    await runCase(deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])), {
+      ...evalCase,
+      checks,
+    })
+
+    expect(order.slice(0, 2)).toEqual(['install', 'builder'])
+    expect(order.indexOf('install', 1)).toBeGreaterThan(1)
+  })
+
+  it('tells the builder the install failed, with its last lines, as a task does (#240)', async () => {
+    const provider = new FakeSandbox((command): Reply | undefined => {
+      if (command.endsWith('&& pnpm install')) return { exitCode: 1, stderr: 'tarball missing\n' }
+      if (command.includes('rev-parse HEAD')) return { stdout: 'b'.repeat(40) }
+      if (command.includes('status --porcelain')) return { stdout: '' }
+      return undefined
+    })
+    const builder = agent('builder', planned(built()))
+    const checks = [{ name: 'install', command: 'pnpm install' }, ...evalCase.checks]
+
+    await runCase(deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])), {
+      ...evalCase,
+      checks,
+    })
+
+    expect(builder.prompts[0]).toContain("ran the project's install before your pass and it failed")
+    expect(builder.prompts[0]).toContain('tarball missing')
+  })
+
+  it('runs no install for a case whose checks have none', async () => {
+    const provider = sandbox()
+    const seenBefore: number[] = []
+    const inner = agent('builder', planned(built()))
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        seenBefore.push(provider.backend.commands.filter((c) => c.endsWith('&& pnpm test')).length)
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+
+    expect(seenBefore[0]).toBe(0)
+  })
+
   it('starts from the base commit of the case, with the same prompt a task gets', async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built()))

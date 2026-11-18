@@ -43,6 +43,7 @@ import {
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
 import { NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
+import { installFailure, preinstall, type Installed } from './preinstall'
 import { diffFacts } from './diff-facts'
 import {
   changePlanPrompt,
@@ -234,6 +235,9 @@ export class Run {
 
   /** The plan another agent wrote, which the builder's first pass is given as text. */
   private plannedBy: string | undefined
+
+  /** What the install before the first pass did, when the repository has an install check (#240). */
+  private installed: Installed | undefined
 
   private constructor(
     private readonly c: RunContext,
@@ -884,6 +888,7 @@ export class Run {
       attempt: 1,
       ...(this.feed?.delivered ? { knowledge: this.feed.delivered } : {}),
       ...(this.planned ? { planned: true } : {}),
+      ...(this.installed ? { install: this.installed } : {}),
     })
     if (this.plan && this.plannedBy) {
       const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
@@ -925,7 +930,24 @@ export class Run {
       knowledgeDir: this.feed?.dir,
       checks: this.checks,
       clarifications: this.c.clarifications,
+      installFailed: installFailure(this.installed),
     }
+  }
+
+  /**
+   * Installs the project in the new clone before the planner and the builder work in it, so the builder can run
+   * the tests it is told to run (#240). A resumed run comes back on the disk that was installed, and it is not
+   * installed again: the restored checkout may hold the builder's uncommitted work, which the install's clean-up
+   * would throw away. A renewed session keeps the disk too.
+   */
+  private async install(): Promise<void> {
+    if (this.c.resuming) return
+    this.installed = await preinstall(
+      this.backend,
+      this.repoDir,
+      this.checks,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
   }
 
   /**
@@ -1348,6 +1370,7 @@ export class Run {
    */
   async start(): Promise<{ result: RunResult } | { sha: string }> {
     if (this.c.continuation?.mergeBase) return { sha: await this.mergeBase() }
+    await this.install()
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()

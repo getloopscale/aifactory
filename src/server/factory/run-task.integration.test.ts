@@ -5955,6 +5955,135 @@ describe("a project's recipe", () => {
   })
 })
 
+describe('runTask installing the project before the builder (#240)', () => {
+  const INSTALL = { name: 'install', command: 'pnpm install' }
+  const TEST = { name: 'test', command: 'pnpm test' }
+  const withChecks = (checks: { name: string; command: string }[]) =>
+    getDb().insert(repository).values({ fullName: 'paulo/app', enabled: true, checks })
+  const installs = (commands: string[]) => commands.filter((c) => c.endsWith('&& pnpm install'))
+
+  /** A builder that keeps its prompts and how many installs had run when each pass started. */
+  function watching(sandbox: FakeSandbox) {
+    const prompts: string[] = []
+    const installsBefore: number[] = []
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async (_b, input) => {
+        prompts.push(input.prompt)
+        installsBefore.push(installs(sandbox.backend.commands).length)
+        dirty = true
+        return { ok: true, summary: 'added truncate', costUsd: 0.1 }
+      },
+    }
+    return { builder, prompts, installsBefore }
+  }
+
+  const buildDetail = async (id: number) => {
+    const [row] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'build')))
+      .orderBy(stageEvent.id)
+    return row.detail as Record<string, unknown>
+  }
+
+  it('runs the install in the checkout once, before the builder is called', async () => {
+    await withChecks([INSTALL, TEST])
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const { builder, installsBefore } = watching(sandbox)
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(installsBefore).toEqual([1])
+    // The check still installs on its own, after a clean of what git ignores.
+    expect(installs(sandbox.backend.commands)).toHaveLength(2)
+    expect(await buildDetail(id)).toMatchObject({ install: { ok: true } })
+  })
+
+  it('records a failing install, gives its last lines to the builder, and goes on', async () => {
+    await withChecks([INSTALL, TEST])
+    const id = await seedTask()
+    let ran = 0
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.endsWith('&& pnpm install') && ran++ === 0
+          ? { exitCode: 1, stderr: 'ERR_PNPM_NO_OFFLINE_TARBALL @biomejs/biome\n' }
+          : undefined,
+      ),
+    )
+    const { builder, prompts } = watching(sandbox)
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(prompts[0]).toContain(
+      "The factory ran the project's install before your pass and it failed",
+    )
+    expect(prompts[0]).toContain('ERR_PNPM_NO_OFFLINE_TARBALL @biomejs/biome')
+    expect(await buildDetail(id)).toMatchObject({
+      install: { ok: false, tail: 'ERR_PNPM_NO_OFFLINE_TARBALL @biomejs/biome' },
+    })
+  })
+
+  it('runs nothing extra when the repository has no install check', async () => {
+    await withChecks([TEST])
+    const id = await seedTask()
+    let testsBefore = -1
+    const sandbox = new FakeSandbox(changed())
+    const builder: CodingHarness = {
+      ...okHarness,
+      run: async (...args) => {
+        testsBefore = sandbox.backend.commands.filter((c) => c.endsWith('&& pnpm test')).length
+        return okHarness.run(...args)
+      },
+    }
+
+    await runTask(deps(sandbox, { harness: builder }), id)
+
+    expect(testsBefore).toBe(0)
+    expect(await buildDetail(id)).not.toHaveProperty('install')
+  })
+
+  it('installs again in the new sandbox of a run a person sent back', async () => {
+    await withChecks([INSTALL, TEST])
+    const id = await seedTask()
+    branchPushed()
+    const sandbox = new FakeSandbox(changed())
+    const { builder, installsBefore } = watching(sandbox)
+
+    await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'Rename the helper to cut.',
+    })
+
+    expect(installsBefore).toEqual([1])
+  })
+
+  it('does not install again in a sandbox restored with the disk that was installed', async () => {
+    await withChecks([INSTALL, TEST])
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const builder = askingBuilder()
+    await runTask(deps(sandbox, { harness: builder }), id)
+    replies(owner())
+    await poll(sandbox)
+    const before = installs(sandbox.backend.commands).length
+    let installsAtResume = -1
+    const resume = builder.resume!.bind(builder)
+    builder.resume = async (...args) => {
+      installsAtResume = installs(sandbox.backend.commands).length
+      return resume(...args)
+    }
+
+    await resumeTask(deps(sandbox, { harness: builder }), id)
+
+    expect(before).toBe(1)
+    expect(installsAtResume).toBe(1)
+  })
+})
+
 describe('runTask agent time', () => {
   it('plans the sandbox and the agent passes against the limit saved for the repository', async () => {
     await getDb()

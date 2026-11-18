@@ -141,6 +141,16 @@ export function checksRule(checks: CheckSpec[] | undefined): string {
     )}\n  Do not run them yourself: they are slow and your pass has a time limit. Run only the tests of the files you touched.\n  One exception: when your work changes what a generated, committed file is made from (a check such as \`generated-docs\` compares them), run the generator, and the build it needs, and commit the result.\n`
 }
 
+/** One rule saying the install before the pass failed, with its last lines, or nothing when it did not fail. */
+function installRule(tail: string | undefined): string {
+  if (tail === undefined) return ''
+  const indented = tail
+    .split('\n')
+    .map((line) => `  ${line}`)
+    .join('\n')
+  return `- The factory ran the project's install before your pass and it failed, so what it installs may be missing here. Its last lines:\n  \`\`\`\n${indented}\n  \`\`\`\n`
+}
+
 export function buildPrompt(input: {
   repo: string
   issueNumber: number
@@ -161,6 +171,8 @@ export function buildPrompt(input: {
   clarifications?: Clarification[]
   /** What the factory runs on the commit. */
   checks?: CheckSpec[]
+  /** The last lines of the install the factory ran before this pass, when it failed. */
+  installFailed?: string
 }): string {
   return `You are working on the repository ${input.repo}, on the branch ${input.branch}.
 
@@ -176,7 +188,7 @@ Rules:
 - Keep the change small and limited to what the issue asks.
 - Do not run git commit, git push or any other git command that writes. The factory commits and pushes.
 - Do not edit anything under .github/.
-${checksRule(input.checks)}${
+${checksRule(input.checks)}${installRule(input.installFailed)}${
     input.askQuestions === false
       ? '- Nobody is there to answer a question, so do not ask one. When a decision is missing, choose the most reasonable option, say in your final message what you assumed, and go on.'
       : '- If you cannot go on without a decision only a person can make, do not guess. Leave the repository as it is and end your final message with a line that starts with `QUESTION:`, followed by one specific question (offer the options you see).'

@@ -288,6 +288,25 @@ describe('buildPrompt', () => {
     expect(prompt).toContain('run the generator, and the build it needs')
   })
 
+  it('tells the builder the install failed, with its last lines, so it knows what it cannot run', () => {
+    const prompt = buildPrompt({
+      repo: 'o/r',
+      issueNumber: 1,
+      title: 't',
+      body: 'b',
+      branch: 'x',
+      installFailed: 'ERR_PNPM_FETCH_404\nexit 1',
+    })
+    expect(prompt).toContain(
+      "- The factory ran the project's install before your pass and it failed, so what it installs may be missing here. Its last lines:\n  ```\n  ERR_PNPM_FETCH_404\n  exit 1\n  ```\n",
+    )
+  })
+
+  it('says nothing about the install when it passed or did not run', () => {
+    const prompt = buildPrompt({ repo: 'o/r', issueNumber: 1, title: 't', body: 'b', branch: 'x' })
+    expect(prompt).not.toContain('install')
+  })
+
   it('names no commands when the factory has none to run', () => {
     const prompt = buildPrompt({ repo: 'o/r', issueNumber: 1, title: 't', body: 'b', branch: 'x' })
     expect(prompt).not.toContain('The factory runs these checks')
