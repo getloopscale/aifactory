@@ -40,6 +40,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A task sent back on its pushed branch that asked a question, got an answer and then changed nothing no longer fails with `the checkout is not the pushed commit`. The resumed run used to take it as a new issue the agent found already done and checked the base commit; it now checks and reviews the head of its branch (#255)
 - The board leaves cancelled tasks out. Their issue was closed or lost the `factory` label, so they no longer count in Needs a person (#253)
 - E2B refusing a sandbox because the account already runs its concurrent limit is now an environment failure. A task that meets it is retried on its own instead of going to a person, and the evaluation suite runs such a case again instead of counting it against the configuration (#249)
 - A run the coordinator sends back after it ran out of time or changed nothing now goes on with the branch head to the checks and the review when the agent changes nothing and no review approved that head. Before, a send-back with the factory's own note skipped that path and failed at `push` with "the agent made no change to the repository" (#247)
