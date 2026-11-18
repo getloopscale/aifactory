@@ -143,7 +143,7 @@ describe('recognising that a repository is ready for a release', () => {
       kind: 'release_ready',
       taskId: 4,
       head: HEAD,
-      evidence: '2 issues wait for a release of paulo/app at dev1234: #40, #60',
+      evidence: '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60',
       released: [
         { issue: 40, labels: ['factory'] },
         { issue: 60, labels: ['factory', 'bug'] },

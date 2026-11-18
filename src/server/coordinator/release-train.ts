@@ -37,7 +37,7 @@ export type RepositoryReleaseFacts = {
    * Its tasks with work that no release holds (`done` with a merge, or resolved elsewhere at a commit),
    * integrated ones first, then oldest first.
    */
-  releasable: { taskId: number; issueNumber: number }[]
+  releasable: { taskId: number; issueNumber: number; resolvedSha?: string }[]
   /** Its tasks queued, running or waiting for the integration branch's checks. */
   working: number
   /** A release or a publication of the repository that has not finished, said as a person reads it. */
@@ -155,7 +155,7 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   return {
     kind,
     ...at,
-    evidence: `${f.releasable.length} issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
+    evidence: `${f.releasable.length} integrated issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
     released: f.labels.value,
   }
 }

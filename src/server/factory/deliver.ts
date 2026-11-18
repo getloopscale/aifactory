@@ -237,6 +237,12 @@ export async function release(
   if (pr.state !== 'open') throw new ReleaseRefused('the release pull request is closed')
   if (pr.draft) throw new ReleaseRefused('the release pull request is a draft: mark it ready first')
   const sha = pr.headSha
+  // The commit that will be merged or pinned must hold the resolving commit, not only the branch a moment ago.
+  if (resolvedOnly && !(await deps.api.contains(row.repository, token, sha, row.resolvedSha!))) {
+    throw new ReleaseRefused(
+      `the release pull request (${sha.slice(0, 7)}) does not contain the commit this work was resolved at (${row.resolvedSha!.slice(0, 7)})`,
+    )
+  }
   const pull = { number: pr.number, url: pr.url }
   const required = await deps.api.requiredChecks(row.repository, token, target)
   if (required.length > 0) {
@@ -271,6 +277,9 @@ export async function release(
     await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
     throw new ReleaseRefused(`GitHub did not merge it: ${errorMessage(error)}`)
   }
+  // A resolved anchor is shipped like the other resolved tasks, by the containment of its commit once the
+  // release (or its publication) completes, so it goes back to `done` for that: the claim only guarded the merge.
+  if (resolvedOnly) await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
   return completeRelease(deps, {
     row,
     pre,
@@ -421,6 +430,10 @@ export async function completeRelease(
       detail: { sha },
     })
     return { tag: created.tag, url: created.url, mergeSha, issueErrors: shipped.issueErrors }
+  }
+  // A resolved anchor stays `done`: the publication, or a later release, ships it by its commit.
+  if (!row.mergedSha && row.resolvedSha) {
+    return { tag: undefined, url: undefined, mergeSha, releaseError, publishing }
   }
   await enterStage(deps.db, taskId, 'released', {
     actor,

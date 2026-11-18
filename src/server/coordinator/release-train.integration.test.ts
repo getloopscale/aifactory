@@ -115,6 +115,35 @@ async function integrated(labels: string[] = ['factory'], stage = 'done') {
   return t.id
 }
 
+/** A task finished with no change: done, resolved at a commit of the integration branch, nothing merged. */
+async function resolved(sha: string) {
+  const n = ++seeded
+  repo().issue(n, { title: `Issue ${n}`, labels: ['factory'] })
+  const [i] = await getDb()
+    .insert(ingress)
+    .values({
+      deliveryId: `t-${n}`,
+      event: 'issues',
+      payload: {},
+      outcome: 'task_created',
+      code: 'issue_labeled',
+      reason: 'r',
+    })
+    .returning({ id: ingress.id })
+  const [t] = await getDb()
+    .insert(task)
+    .values({
+      ingressId: i.id,
+      repository: REPO,
+      issueNumber: n,
+      issueTitle: `Issue ${n}`,
+      stage: 'done',
+      resolvedSha: sha,
+    })
+    .returning({ id: task.id })
+  return { id: t.id, issue: n }
+}
+
 const actions = () => getDb().select().from(coordinatorAction).orderBy(coordinatorAction.id)
 const promotions = () => api.callsTo('openPullRequest').filter(([pull]) => pull.head === 'develop')
 const merges = () => api.callsTo('mergePullRequest')
@@ -417,5 +446,49 @@ describe('a release that waited for the release branch checks and was refused', 
       { exceptionKind: 'release_ready', outcome: 'applied' },
       { exceptionKind: 'release_retry', outcome: 'applied' },
     ])
+  })
+})
+
+describe('the release train with work resolved elsewhere', () => {
+  it('releases a repository with only resolved tasks, ships the anchor and closes its issue', async () => {
+    await enable('auto')
+    const { id, issue } = await resolved('resolved01')
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1, refused: 0, failed: 0 })
+    expect(merges()).toHaveLength(1)
+    expect(await stageOf(id)).toBe('released')
+    expect(repo().issues.get(issue)?.state).toBe('closed')
+    expect(await actions()).toMatchObject([{ taskId: id, exceptionKind: 'release_ready' }])
+  })
+
+  it('leaves a resolved task alone while develop lacks its commit, and records nothing', async () => {
+    await enable('auto')
+    const { id, issue } = await resolved('outside01')
+    repo().unreachable.add('outside01')
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 0, refused: 0, failed: 0 })
+    expect(promotions()).toEqual([])
+    expect(await stageOf(id)).toBe('done')
+    expect(repo().issues.get(issue)?.state).toBe('open')
+    expect(await actions()).toEqual([])
+  })
+
+  it('anchors on integrated work and ships a contained resolved task with it, not an absent one', async () => {
+    await enable('auto')
+    const absent = await resolved('outside01')
+    const inside = await resolved('inside01')
+    const anchor = await integrated()
+    repo().unreachable.add('outside01')
+
+    await coordinate(deps(), 'auto')
+
+    expect(await actions()).toMatchObject([{ taskId: anchor, outcome: 'applied' }])
+    expect(await stageOf(anchor)).toBe('released')
+    expect(await stageOf(inside.id)).toBe('released')
+    expect(await stageOf(absent.id)).toBe('done')
   })
 })
