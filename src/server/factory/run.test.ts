@@ -248,9 +248,13 @@ describe('the install before the builder', () => {
     install: { exitCode?: number },
     opts: { planFirst?: boolean; resuming?: object } = {},
   ) {
-    const backend = new FakeBackend((command) =>
-      command.endsWith('&& pnpm install') ? { ...install, stderr: 'tarball missing' } : undefined,
-    )
+    const head = { sha: '' }
+    const backend = new FakeBackend((command) => {
+      if (command.endsWith('rev-parse HEAD')) return { stdout: head.sha }
+      return command.endsWith('&& pnpm install')
+        ? { ...install, stderr: 'tarball missing' }
+        : undefined
+    })
     const calls: { how: string; installs: number; prompt: string }[] = []
     const installs = () => backend.commands.filter((c) => c.endsWith('&& pnpm install')).length
     const answer = (how: string, prompt: string) => {
@@ -295,7 +299,7 @@ describe('the install before the builder', () => {
       throw new Stop()
     }
     const start = () => (run as unknown as { start: () => Promise<unknown> }).start()
-    return { start, backend, calls }
+    return { start, backend, calls, run, head }
   }
 
   const checks = [
@@ -339,6 +343,27 @@ describe('the install before the builder', () => {
     await expect(start()).rejects.toBeInstanceOf(Stop)
     expect(calls.map((c) => c.how)).toEqual(['resume'])
     expect(calls[0]!.prompt).toContain('tarball missing')
+  })
+
+  it('lets the checks clean and install on their own after the preparatory install', async () => {
+    const SHA = 'a'.repeat(40)
+    const { start, backend, run, head } = starting(checks, {})
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    const r = run as Record<string, unknown>
+    r.checkRuns = async () => []
+    ;(r.c as { api: unknown }).api = { createCheckRun: async () => {} }
+    ;(r.c as { token: string }).token = 't'
+    const sentinel = backend.commands.length
+    head.sha = SHA
+    await (r as unknown as { verify: (sha: string, attempt: number) => Promise<unknown> }).verify(
+      SHA,
+      1,
+    )
+    const after = backend.commands.slice(sentinel)
+    const clean = after.findIndex((c) => c.includes('git -C /work/repo clean -fdxq'))
+    const install = after.findIndex((c) => c.endsWith('&& pnpm install'))
+    expect(clean).toBeGreaterThanOrEqual(0)
+    expect(install).toBeGreaterThan(clean)
   })
 
   it('runs nothing extra for a repository with no install check', async () => {
