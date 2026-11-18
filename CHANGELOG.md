@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The top of the board shows the factory's speed, efficiency and quality. Closed it is one line; open it lists the tasks delivered in the last hour and in 24 hours, the hourly mean, the median lead time of the last day, the tasks queued and working, and the latest day of the first-try checks, cost per delivery, rework rounds, first-review approval, deliveries that came back and handoffs, each marked when it left its band. `GET /api/panel/pulse` serves the live numbers (#272)
+
 - Each card on the board shows the task's lead time, from entering the factory to its delivery, with its status: on track, at risk or overdue. While the clock runs, an at-risk card gets an amber border and an overdue one a red border; a delivered card keeps the time it was delivered in. Each repository sets both limits in minutes on its settings form, 120 and 480 by default (#269)
 
 - The Queued column lists its tasks in the order the worker serves them, the order the scheduler set, with tasks that have no place in the line (held, or not looked at yet) after them. The first ten carry their rank on the card, and a line marks where the rest of the queue starts. The priority of a queued task (`priority:N`) is a badge, P1 red, P2 amber, P3 violet and plain from P4 (#226)

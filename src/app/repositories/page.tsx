@@ -231,7 +231,7 @@ function Settings({
         />
         <span className="text-muted-foreground">{t.runLimit.help}</span>
       </label>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
           <span className="text-foreground">{t.leadTimeLimits.atRisk}</span>
           <Input
