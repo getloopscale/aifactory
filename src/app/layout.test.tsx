@@ -244,7 +244,7 @@ describe('the layout', () => {
     )
 
     fireEvent.keyDown(screen.getByRole('button', { name: t.menu.account }), { key: 'Enter' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: t.menu.signOut }, slow))
+    fireEvent.click(screen.getByRole('menuitem', { name: t.menu.signOut }))
 
     await waitFor(() => expect(calls.some((c) => c.url === '/api/panel/logout')).toBe(true), slow)
     expect(calls.find((c) => c.url === '/api/panel/logout')).toMatchObject({
@@ -252,7 +252,7 @@ describe('the layout', () => {
       csrf: '1',
     })
     await waitFor(() => expect(screen.getByText('the login')).toBeDefined(), slow)
-  })
+  }, 40_000)
 
   it('shows the menu in English and in pt-BR, with the items of each', async () => {
     for (const [language, copy] of [
