@@ -122,6 +122,15 @@ mostra o erro de configuração.
 
 ## Comandos
 
+Antes de formatar ou validar, instale as dependências com o lockfile congelado; as ferramentas
+(Prettier, ESLint, Vitest) rodam por `pnpm exec`:
+
+```bash
+corepack enable && pnpm install --frozen-lockfile
+pnpm exec prettier --check README.md package.json
+pnpm exec vitest run <arquivo>
+```
+
 ```bash
 pnpm dev                # servidor de desenvolvimento
 pnpm build && pnpm start

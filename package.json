@@ -26,8 +26,8 @@
     "evals:check": "EVALS_MODE=check node --env-file=.env.local node_modules/vitest/vitest.mjs run --project evals",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
+    "format": "pnpm exec prettier --write .",
+    "format:check": "pnpm exec prettier --check .",
     "typecheck": "tsc --noEmit",
     "db:generate": "theokit db generate",
     "db:migrate": "theokit db migrate"
