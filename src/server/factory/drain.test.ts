@@ -61,6 +61,21 @@ describe('a restart of a process that runs tasks', () => {
     })
   }
 
+  it('restarts each worker on its own, never ordered after the main process', () => {
+    // A restart of every process stopped the workers first and started them only after the main process
+    // drained and came back, so the factory ran no task for as long as the slowest run (2026-11-18, #228).
+    expect(unit('aifactory-worker@.service')).not.toMatch(
+      /^(After|Requires|BindsTo|PartOf)=.*aifactory\.service/m,
+    )
+  })
+
+  it('leaves the migrations to the deploy and the main process, so workers starting together do not race on them', () => {
+    const script = readFileSync('scripts/run-server.sh', 'utf8')
+    expect(script).toMatch(
+      /^\[ "\$\{FACTORY_WORKER_ONLY:-\}" = 1 \] \|\| pnpm exec theokit db migrate$/m,
+    )
+  })
+
   it('reaches theokit itself: the script that starts it hands its process over, with no wrapper between', () => {
     const lines = readFileSync('scripts/run-server.sh', 'utf8').trim().split('\n')
     expect(lines.at(-1)).toBe('exec node_modules/.bin/theokit start')
