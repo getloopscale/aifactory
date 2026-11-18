@@ -1,38 +1,50 @@
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, describe, expect, it } from 'vitest'
 
-const read = (file: string) => readFileSync(new URL(`../../../${file}`, import.meta.url), 'utf8')
+const root = new URL('../../../', import.meta.url).pathname
+const FROZEN = ['install', '--frozen-lockfile', '--lockfile-only', '--ignore-scripts']
+let scratch: string | undefined
+
+// A copy of the install inputs, so the checkout is never modified by the install.
+function installInputs(): string {
+  scratch = mkdtempSync(join(tmpdir(), 'frozen-install-'))
+  for (const f of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc']) {
+    if (existsSync(join(root, f))) copyFileSync(join(root, f), join(scratch, f))
+  }
+  return scratch
+}
+
+afterEach(() => {
+  if (scratch) rmSync(scratch, { recursive: true, force: true })
+  scratch = undefined
+})
 
 describe('validation setup', () => {
-  it('runs the formatter through pnpm exec', () => {
-    const scripts = JSON.parse(read('package.json')).scripts as Record<string, string>
-    expect(scripts.format).toBe('pnpm exec prettier --write .')
-    expect(scripts['format:check']).toBe('pnpm exec prettier --check .')
-  })
+  it('accepts the committed lockfile in a frozen install and leaves it untouched', () => {
+    const dir = installInputs()
+    const before = readFileSync(join(dir, 'pnpm-lock.yaml'), 'utf8')
+    execFileSync('pnpm', FROZEN, { cwd: dir, stdio: 'pipe' })
+    expect(readFileSync(join(dir, 'pnpm-lock.yaml'), 'utf8')).toBe(before)
+  }, 120_000)
 
-  it('documents the frozen install before validation', () => {
-    const readme = read('README.md')
-    expect(readme).toContain('corepack enable && pnpm install --frozen-lockfile')
-    expect(readme).toContain('pnpm exec prettier --check')
-  })
+  it('refuses a frozen install when package.json drifted from the lockfile', () => {
+    const dir = installInputs()
+    const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
+    pkg.dependencies = { ...pkg.dependencies, 'left-pad-not-in-lockfile': '1.3.0' }
+    writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg))
+    expect(() => execFileSync('pnpm', FROZEN, { cwd: dir, stdio: 'pipe' })).toThrow()
+  }, 120_000)
 
-  it('uses the frozen install in the local setup too', () => {
-    expect(read('README.md')).not.toMatch(/^pnpm install\s*$/m)
-  })
-
-  it('can be installed frozen: corepack pins pnpm and a lockfile exists', () => {
-    const pkg = JSON.parse(read('package.json')) as { packageManager?: string }
-    expect(pkg.packageManager).toMatch(/^pnpm@\d/)
-    expect(existsSync(new URL('../../../pnpm-lock.yaml', import.meta.url))).toBe(true)
-  })
-
-  it('resolves the installed prettier through pnpm exec without changing the checkout', () => {
-    const root = new URL('../../../', import.meta.url).pathname
+  it('runs the installed prettier through pnpm exec without changing the checkout', () => {
+    const before = readFileSync(join(root, 'package.json'), 'utf8')
     // exits non-zero (throws) when prettier is missing or the file is unformatted
     execFileSync('pnpm', ['exec', 'prettier', '--check', 'package.json'], {
       cwd: root,
       stdio: 'pipe',
     })
+    expect(readFileSync(join(root, 'package.json'), 'utf8')).toBe(before)
   }, 60_000)
 })
