@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, publication, releaseWait, repository, task, watch } from '../db/schema'
@@ -42,11 +42,21 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 const WORKING_STAGES = ['intake', ...WORKING] as const
 
 async function releasable(db: Database, repo: string) {
-  return db
-    .select({ taskId: task.id, issueNumber: task.issueNumber })
-    .from(task)
-    .where(and(eq(task.repository, repo), eq(task.stage, 'done'), isNotNull(task.mergedSha)))
-    .orderBy(asc(task.id))
+  return (
+    db
+      .select({ taskId: task.id, issueNumber: task.issueNumber })
+      .from(task)
+      .where(
+        and(
+          eq(task.repository, repo),
+          eq(task.stage, 'done'),
+          or(isNotNull(task.mergedSha), isNotNull(task.resolvedSha)),
+        ),
+      )
+      // Integrated work first: it is the anchor a release needs, and a resolved task can only anchor one
+      // once the pre-release branch holds its commit.
+      .orderBy(sql`${task.mergedSha} is null`, asc(task.id))
+  )
 }
 
 async function working(db: Database, repo: string) {

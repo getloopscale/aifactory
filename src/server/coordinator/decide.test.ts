@@ -249,7 +249,7 @@ describe('deciding a release of a repository', () => {
     exception({
       kind: 'release_ready',
       head: 'dev1234567',
-      evidence: '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60',
+      evidence: '2 issues wait for a release of paulo/app at dev1234: #40, #60',
       released: labels.map((l, i) => ({ issue: 40 + i, labels: l })),
       ...over,
     })
@@ -259,7 +259,7 @@ describe('deciding a release of a repository', () => {
       action: 'release',
       bump: 'patch',
       reason:
-        '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60: released as a patch',
+        '2 issues wait for a release of paulo/app at dev1234: #40, #60: released as a patch',
     })
   })
 
@@ -273,7 +273,7 @@ describe('deciding a release of a repository', () => {
       action: 'release',
       bump: 'patch',
       reason:
-        '2 integrated issues wait for a release of paulo/app at dev1234: #40, #60: the release on dev1234 was refused for a cause that ends by itself, so it is tried once more, as a patch',
+        '2 issues wait for a release of paulo/app at dev1234: #40, #60: the release on dev1234 was refused for a cause that ends by itself, so it is tried once more, as a patch',
     })
   })
 

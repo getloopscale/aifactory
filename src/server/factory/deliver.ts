@@ -183,13 +183,17 @@ export async function release(
   if (!row) throw new ReleaseRefused(`task ${taskId} does not exist`)
   const allowed = outcome(row, 'release')
   if (allowed.kind !== 'action') throw new ReleaseRefused(allowed.reason)
-  // Only integrated work with a commit is released.
-  const headSha = row.headSha!
-  const pre = await latestPreRelease(deps.db, taskId)
-  if (!pre) throw new ReleaseRefused('there is no pre-release for this work')
-  const checks = await latestChecks(deps.db, taskId, headSha)
-  if (checks.length === 0 || checks.some((c) => !c.passed)) {
-    throw new ReleaseRefused('the checks are not green on this commit')
+  // Work resolved elsewhere (nothing merged) has no pre-release or checks of its own: what a release needs
+  // of it is that the promoted branch contains its resolving commit, which is checked below.
+  const resolvedOnly = !row.mergedSha && !!row.resolvedSha
+  const pre = resolvedOnly ? undefined : await latestPreRelease(deps.db, taskId)
+  if (!resolvedOnly) {
+    // Only integrated work with a commit is released.
+    if (!pre) throw new ReleaseRefused('there is no pre-release for this work')
+    const checks = await latestChecks(deps.db, taskId, row.headSha!)
+    if (checks.length === 0 || checks.some((c) => !c.passed)) {
+      throw new ReleaseRefused('the checks are not green on this commit')
+    }
   }
 
   const { token } = await deps.github.installationToken(row.repository)
@@ -198,6 +202,14 @@ export async function release(
     .from(repository)
     .where(sql`lower(${repository.fullName}) = lower(${row.repository})`)
   const target = await releaseBranchOf(deps.api, row.repository, token, saved ?? {})
+  if (
+    resolvedOnly &&
+    !(await deps.api.contains(row.repository, token, PRE_RELEASE_BRANCH, row.resolvedSha!))
+  ) {
+    throw new ReleaseRefused(
+      `${PRE_RELEASE_BRANCH} does not contain the commit this work was resolved at (${row.resolvedSha!.slice(0, 7)}): promote the integration branch first`,
+    )
+  }
   const usesChangesets = await changesetsToShip(deps, row.repository, token, target)
   let opened: { number: number; url: string }
   try {
@@ -208,7 +220,9 @@ export async function release(
       body: [
         `Promotes \`${PRE_RELEASE_BRANCH}\` to \`${target}\`, with #${row.issueNumber}: ${row.issueTitle}.`,
         '',
-        `Pre-release: \`${pre.tag}\` (${pre.url}). Everything on \`${PRE_RELEASE_BRANCH}\` is released with it.`,
+        pre
+          ? `Pre-release: \`${pre.tag}\` (${pre.url}). Everything on \`${PRE_RELEASE_BRANCH}\` is released with it.`
+          : `Everything on \`${PRE_RELEASE_BRANCH}\` is released with it.`,
         '',
       ].join('\n'),
     })
@@ -371,7 +385,7 @@ async function waitForChecks(
  */
 export async function completeRelease(
   deps: DeliverDeps,
-  input: Promotion & { pre: typeof delivery.$inferSelect; mergeSha: string },
+  input: Promotion & { pre: typeof delivery.$inferSelect | undefined; mergeSha: string },
 ): Promise<ReleaseResult> {
   const { row, pre, pull, token, target, sha, mergeSha, actor } = input
   const taskId = row.id
@@ -480,7 +494,8 @@ export async function nextOwnTag(
 /** What the factory's own release of a promotion is made of. */
 export type OwnRelease = {
   row: typeof task.$inferSelect
-  pre: typeof delivery.$inferSelect
+  /** The task's pre-release; work resolved elsewhere has none. */
+  pre: typeof delivery.$inferSelect | undefined
   /** What the notes link the promotion by: the release pull request, or the merge commit. */
   promotion: { label: string; url: string }
   token: string
@@ -505,7 +520,9 @@ export async function createOwnTag(
     body: [
       `Release of #${row.issueNumber}: ${row.issueTitle}.`,
       '',
-      `Promoted from the pre-release \`${pre.tag}\` (${pre.url}) by ${input.actor}.`,
+      pre
+        ? `Promoted from the pre-release \`${pre.tag}\` (${pre.url}) by ${input.actor}.`
+        : `Promoted by ${input.actor}.`,
       `${input.promotion.label}: ${input.promotion.url}`,
       `Pull request of the work: ${row.pullRequestUrl ?? input.promotion.url}`,
       '',

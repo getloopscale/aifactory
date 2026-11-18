@@ -46,7 +46,8 @@ async function finish(
   try {
     const [row] = await deps.db.select().from(task).where(eq(task.id, wait.taskId))
     const pre = await latestPreRelease(deps.db, wait.taskId)
-    if (!pre) throw new Error('there is no pre-release for this work')
+    // Work resolved elsewhere has no pre-release: its release is of what the promotion contains.
+    if (!pre && row.mergedSha) throw new Error('there is no pre-release for this work')
     await completeRelease(deps, {
       row,
       pre,
