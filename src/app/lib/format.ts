@@ -157,63 +157,70 @@ function describeDone(d: Record<string, unknown>): string {
     .join('\n')
 }
 
+type Detail = Record<string, unknown>
+
+/** The parts of a line that have something to say, joined with commas. */
+const parts = (...values: string[]) => values.filter(Boolean).join(', ')
+
+function describeIntake(d: Detail): string {
+  if (!d.decision) return ''
+  const who = d.automatic ? 'the factory' : 'a person'
+  return `${who} ${text(d.decision).replace('_', ' ')}${d.note ? `: ${text(d.note)}` : ''}`
+}
+
+function describeSandbox(d: Detail): string {
+  return d.renewed
+    ? `${text(d.provider)}, new session: the last one had run ${text(d.sessionMinutes)} minutes, the disk moved over`
+    : text(d.provider)
+}
+
+function describeBuild(d: Detail): string {
+  return parts(
+    text(d.harness),
+    d.attempt ? `attempt ${text(d.attempt)}` : '',
+    d.resumed ? 'resumed after an answer' : '',
+    d.rework ? 'rework' : '',
+    d.planned ? 'following its plan' : '',
+  )
+}
+
+function describeReleased(d: Detail): string {
+  if (d.resolvedSha) {
+    return `already resolved at ${shortSha(d.resolvedSha as string)}, now on ${text(d.releaseBranch)}`
+  }
+  if (d.publishing === 'changesets') {
+    return `promoted by ${text(d.actor)}; the repository's release workflow publishes it`
+  }
+  return d.tag
+    ? `${text(d.tag)} by ${text(d.actor)}${d.releaseError ? `, but the release could not be created: ${text(d.releaseError)}` : ''}`
+    : `merged by ${text(d.actor)}, but the release could not be created: ${text(d.releaseError)}`
+}
+
+function describeFailed(d: Detail): string {
+  return d.quota
+    ? `out of quota${d.resetsAt ? `, resets ${text(d.resetsAt)}` : ''}`
+    : `${text(d.failedAt)}: ${text(d.error)}`
+}
+
+const DESCRIBE: Partial<Record<TimelineEvent['stage'], (d: Detail) => string>> = {
+  intake: describeIntake,
+  sandbox: describeSandbox,
+  plan: (d) => text(d.harness),
+  build: describeBuild,
+  push: (d) => text(d.branch),
+  verify: (d) => parts(shortSha(d.sha as string), d.attempt ? `attempt ${text(d.attempt)}` : ''),
+  review: (d) => parts(text(d.reviewer), shortSha(d.sha as string)),
+  waiting: (d) => text(d.question),
+  merge: (d) =>
+    parts(shortSha(d.sha as string), d.reviewer ? `approved by ${text(d.reviewer)}` : ''),
+  done: describeDone,
+  released: describeReleased,
+  handoff: (d) => text(d.reason),
+  failed: describeFailed,
+}
+
 /** One line about what happened at a stage, from what the factory recorded. */
 export function describeEvent(event: TimelineEvent): string {
-  const d = (event.detail ?? {}) as Record<string, unknown>
-  switch (event.stage) {
-    case 'intake':
-      return d.decision
-        ? `${d.automatic ? 'the factory' : 'a person'} ${text(d.decision).replace('_', ' ')}${d.note ? `: ${text(d.note)}` : ''}`
-        : ''
-    case 'sandbox':
-      return d.renewed
-        ? `${text(d.provider)}, new session: the last one had run ${text(d.sessionMinutes)} minutes, the disk moved over`
-        : text(d.provider)
-    case 'plan':
-      return text(d.harness)
-    case 'build':
-      return [
-        text(d.harness),
-        d.attempt ? `attempt ${text(d.attempt)}` : '',
-        d.resumed ? 'resumed after an answer' : '',
-        d.rework ? 'rework' : '',
-        d.planned ? 'following its plan' : '',
-      ]
-        .filter(Boolean)
-        .join(', ')
-    case 'push':
-      return text(d.branch)
-    case 'verify':
-      return [shortSha(d.sha as string), d.attempt ? `attempt ${text(d.attempt)}` : '']
-        .filter(Boolean)
-        .join(', ')
-    case 'review':
-      return [text(d.reviewer), shortSha(d.sha as string)].filter(Boolean).join(', ')
-    case 'waiting':
-      return text(d.question)
-    case 'merge':
-      return [shortSha(d.sha as string), d.reviewer ? `approved by ${text(d.reviewer)}` : '']
-        .filter(Boolean)
-        .join(', ')
-    case 'done':
-      return describeDone(d)
-    case 'released':
-      if (d.resolvedSha) {
-        return `already resolved at ${shortSha(d.resolvedSha as string)}, now on ${text(d.releaseBranch)}`
-      }
-      if (d.publishing === 'changesets') {
-        return `promoted by ${text(d.actor)}; the repository's release workflow publishes it`
-      }
-      return d.tag
-        ? `${text(d.tag)} by ${text(d.actor)}${d.releaseError ? `, but the release could not be created: ${text(d.releaseError)}` : ''}`
-        : `merged by ${text(d.actor)}, but the release could not be created: ${text(d.releaseError)}`
-    case 'handoff':
-      return text(d.reason)
-    case 'failed':
-      return d.quota
-        ? `out of quota${d.resetsAt ? `, resets ${text(d.resetsAt)}` : ''}`
-        : `${text(d.failedAt)}: ${text(d.error)}`
-    default:
-      return ''
-  }
+  const describe = DESCRIBE[event.stage]
+  return describe ? describe((event.detail ?? {}) as Detail) : ''
 }
