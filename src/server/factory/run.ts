@@ -759,6 +759,16 @@ export class Run {
     ])
   }
 
+  /**
+   * Whether the checkout started from the work branch GitHub holds rather than from the base: a continuation
+   * checks that branch out, and a run resumed from a snapshot comes back on whatever its first run had.
+   */
+  private async startedFromBranch(): Promise<boolean> {
+    if (!this.remoteHead) return false
+    const head = (await must(this.backend, `git -C ${this.repoDir} rev-parse HEAD`)).stdout.trim()
+    return head !== this.baseSha
+  }
+
   private async hasNothingToCommit(): Promise<boolean> {
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     return pending.stdout.trim() === '' && !(await this.hasUnpushedCommits())
@@ -1202,7 +1212,7 @@ export class Run {
    */
   private async resolvedAlready(first: HarnessResult): Promise<RunResult | undefined> {
     const { deps, taskId, row, api, continuation, state } = this.c
-    if (continuation) return undefined
+    if (continuation || (await this.startedFromBranch())) return undefined
     if (!(await this.hasNothingToCommit())) return undefined
     // Fixes that change the start commit make this a change after all: it goes on to be committed, checked
     // and reviewed like any other, instead of a claim the checks backed only after the fix.
@@ -1371,8 +1381,10 @@ export class Run {
     const resolved = await this.resolvedAlready(first)
     if (resolved) return { result: resolved }
     if (this.pushedFix) return { sha: this.pushedFix }
-    // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed.
-    if (this.c.continuation?.plain && (await this.hasNothingToCommit())) {
+    // A continuation the agent had nothing to add to goes on with the commit the earlier run pushed, and so
+    // does one resumed after an answer, which no longer carries the continuation it started as.
+    const resumedOnBranch = this.c.resuming !== undefined && (await this.startedFromBranch())
+    if ((this.c.continuation?.plain || resumedOnBranch) && (await this.hasNothingToCommit())) {
       return { sha: this.remoteHead }
     }
     const sha = await this.commitAndPush(this.firstMessage(), {

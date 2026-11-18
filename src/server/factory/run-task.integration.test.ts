@@ -4004,6 +4004,56 @@ describe('runTask waiting for an answer', () => {
     expect((done.detail as { costUsd: number }).costUsd).toBeGreaterThan(0.1)
   })
 
+  it('checks and reviews the pushed branch when a continuation resumed after an answer changes nothing', async () => {
+    // The work was sent back on a branch it had already pushed; the agent asked instead of changing it,
+    // and after the answer it still changed nothing. The checkout is at the pushed head, not at the base.
+    const pushed = 'e'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb().update(task).set({ stage: 'intake', headSha: pushed }).where(eq(task.id, id))
+    // The clone is at the base until the run checks out the pushed branch.
+    let onBranch = false
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('checkout -B')) onBranch = true
+        if (command.includes('ls-remote')) return { stdout: `${pushed}\trefs/heads/factory/7\n` }
+        if (command.endsWith('rev-parse HEAD')) {
+          return { stdout: `${onBranch ? pushed : 'b'.repeat(40)}\n` }
+        }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'QUESTION: Can it stay async?', sessionId: 'sess-c' }
+      },
+      resume: async (_backend, sessionId) => {
+        dirty = false
+        return { ok: true, summary: 'It stays async, which the branch already does.', sessionId }
+      },
+    }
+    const parked = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'Two findings of the last review are open; fix only these.',
+      fromChecks: true,
+    })
+    expect(parked.status).toBe('waiting')
+    replies(owner())
+    await poll(sandbox)
+
+    await resumeTask(deps(sandbox, { harness: builder }), id)
+
+    const verified = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'verify'))
+    ).map((e) => (e.detail as { sha: string }).sha)
+    expect(verified).toEqual([pushed])
+    const stages = await stagesOf(id)
+    expect(stages).toContain('review')
+    expect(stages).not.toContain('failed')
+  })
+
   it('does not let a question be resumed twice, or before it has an answer', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())
