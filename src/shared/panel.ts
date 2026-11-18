@@ -67,11 +67,19 @@ const ENVIRONMENT_PATTERN =
  */
 const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe failed/i
 
+/**
+ * E2B refusing a new sandbox because the account already runs as many as it may at once (`Rate limit exceeded,
+ * please try again later - you have reached the maximum number of concurrent E2B sandboxes (10)`). The slots
+ * free up as other runs end; nothing in the work asked for it.
+ */
+const SANDBOX_LIMIT = /maximum number of concurrent E2B sandboxes/i
+
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
-    SANDBOX_UNREACHABLE.test(error),
+    SANDBOX_UNREACHABLE.test(error) ||
+    SANDBOX_LIMIT.test(error),
 }
 
 /**
