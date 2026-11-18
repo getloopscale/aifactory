@@ -160,6 +160,15 @@ describe('the change the factory holds for an evaluation', () => {
     ).toEqual(['src/server/factory/harness-codex.ts', 'src/server/agents/prompts/build.md'])
   })
 
+  it('holds the planning prompts, which every planned run and the goal planner are told', () => {
+    expect(
+      heldForEvaluation(FACTORY_REPOSITORY, [
+        'src/server/factory/change-plan.ts',
+        'src/server/factory/plan.ts',
+      ]),
+    ).toEqual(['src/server/factory/change-plan.ts', 'src/server/factory/plan.ts'])
+  })
+
   it('is nothing for a change that leaves the agent configuration alone', () => {
     expect(heldForEvaluation(FACTORY_REPOSITORY, ['src/server/factory/run.ts'])).toEqual([])
   })
