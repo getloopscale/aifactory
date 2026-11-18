@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, repository, stageEvent, task } from '../db/schema'
+import { ingress, publication, releaseWait, repository, stageEvent, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { catchUpResolved, resolvedCatchUp } from './resolved-release'
@@ -97,6 +97,59 @@ describe('catchUpResolved', () => {
 
     expect(result.released).toEqual([])
     expect(await stageOf(id)).toBe('done')
+  })
+
+  it('leaves resolved tasks to a release that waits, a publication that waits, or one that just ended', async () => {
+    const a = await resolved('paulo/a', 1, 'aaa111')
+    const b = await resolved('paulo/b', 1, 'aaa111')
+    const c = await resolved('paulo/c', 1, 'aaa111')
+    const d = await resolved('paulo/d', 1, 'aaa111')
+    await getDb().insert(releaseWait).values({
+      taskId: a,
+      repository: 'paulo/a',
+      pullRequestNumber: 1,
+      pullRequestUrl: 'u',
+      releaseBranch: 'main',
+      sha: 's',
+      actor: 'human',
+      bump: 'patch',
+      changesets: false,
+      checks: [],
+    })
+    await getDb().insert(releaseWait).values({
+      taskId: c,
+      repository: 'paulo/c',
+      pullRequestNumber: 1,
+      pullRequestUrl: 'u',
+      releaseBranch: 'main',
+      sha: 's',
+      actor: 'human',
+      bump: 'patch',
+      changesets: false,
+      checks: [],
+      status: 'merged',
+      endedAt: new Date(),
+    })
+    await getDb().insert(publication).values({
+      taskId: b,
+      repository: 'paulo/b',
+      releaseBranch: 'main',
+      promotedSha: 'aaa111',
+      actor: 'human',
+    })
+    const gh = fakeGithub({
+      'paulo/a:main': ['aaa111'],
+      'paulo/b:main': ['aaa111'],
+      'paulo/c:main': ['aaa111'],
+      'paulo/d:main': ['aaa111'],
+    })
+
+    const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+
+    expect(result.released).toEqual([d])
+    expect(await stageOf(a)).toBe('done')
+    expect(await stageOf(b)).toBe('done')
+    expect(await stageOf(c)).toBe('done')
   })
 
   it('compares against the release branch the owner set for the repository', async () => {
