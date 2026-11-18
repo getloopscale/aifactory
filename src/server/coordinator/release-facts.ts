@@ -192,6 +192,10 @@ async function readRecovery(
       failingStatuses: red.statuses,
       developRuns: develop.checkRuns,
       developStatuses: develop.statuses,
+      failingContexts: (red.statusContexts ?? [])
+        .filter((s) => s.state === 'failure' || s.state === 'error')
+        .map((s) => s.context),
+      developContexts: develop.statusContexts ?? [],
     })
   } catch (error) {
     return unread(

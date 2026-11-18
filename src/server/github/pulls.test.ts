@@ -703,11 +703,19 @@ describe('commitChecks', () => {
         status: 200,
         body: { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure', id: 1 }] },
       },
-      'GET /commits/abc/status': { status: 200, body: { state: 'pending', total_count: 2 } },
+      'GET /commits/abc/status': {
+        status: 200,
+        body: {
+          state: 'pending',
+          total_count: 2,
+          statuses: [{ context: 'deploy', state: 'pending', id: 3 }],
+        },
+      },
     })
     expect(await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')).toEqual({
       checkRuns: [{ name: 'ci', status: 'completed', conclusion: 'failure' }],
       statuses: 'pending',
+      statusContexts: [{ context: 'deploy', state: 'pending' }],
     })
     expect(calls[0].url).toContain('per_page=100')
   })
@@ -720,6 +728,7 @@ describe('commitChecks', () => {
     expect(await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')).toEqual({
       checkRuns: [],
       statuses: 'none',
+      statusContexts: [],
     })
   })
 })

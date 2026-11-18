@@ -65,6 +65,9 @@ export type RedRecovery = {
   failingStatuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
   developRuns: CheckReport[]
   developStatuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
+  /** The contexts of the commit statuses that failed on the watched commit, and each status of `develop`. */
+  failingContexts?: string[]
+  developContexts?: { context: string; state: string }[]
 }
 
 const FAILED = ['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']
@@ -84,18 +87,26 @@ export const failingNames = (runs: CheckReport[]): string[] => [
  * known, nothing says the branch is fixed.
  */
 export function releaseFixesRed(r: RedRecovery): boolean {
-  // A commit status that failed on the red commit is not named in what is read, so a green one on develop
-  // cannot be matched to it: the release cannot be shown to fix it.
-  if (['failure', 'error'].includes(r.failingStatuses)) return false
-  if (r.failing.length === 0) return false
+  // A commit status that failed on the red commit must be named, and matched by context to a green one on
+  // develop; one that cannot be named cannot be shown fixed.
+  const failedContexts = r.failingContexts ?? []
+  if (['failure', 'error'].includes(r.failingStatuses) && failedContexts.length === 0) return false
+  if (r.failing.length === 0 && failedContexts.length === 0) return false
   if (['failure', 'error', 'pending'].includes(r.developStatuses)) return false
-  return r.failing.every((name) => {
-    const reports = r.developRuns.filter((run) => run.name === name)
-    return (
-      reports.length > 0 &&
-      reports.every((run) => run.status === 'completed' && run.conclusion === 'success')
-    )
+  const contextsFixed = failedContexts.every((context) => {
+    const reports = (r.developContexts ?? []).filter((s) => s.context === context)
+    return reports.length > 0 && reports.every((s) => s.state === 'success')
   })
+  return (
+    contextsFixed &&
+    r.failing.every((name) => {
+      const reports = r.developRuns.filter((run) => run.name === name)
+      return (
+        reports.length > 0 &&
+        reports.every((run) => run.status === 'completed' && run.conclusion === 'success')
+      )
+    })
+  )
 }
 
 /** A red release branch that the release itself fixes, so it does not hold the train. */

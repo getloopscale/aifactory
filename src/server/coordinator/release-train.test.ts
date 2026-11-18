@@ -371,6 +371,22 @@ describe('a red release branch that the release itself fixes', () => {
     }
   })
 
+  it('matches a failed commit status by context to a green one on develop', () => {
+    const base = { failingStatuses: 'failure' as const, developStatuses: 'success' as const }
+    const ctx = { failingContexts: ['deploy'] }
+    expect(
+      releaseFixesRed(
+        recovery({ ...base, ...ctx, developContexts: [{ context: 'deploy', state: 'success' }] }),
+      ),
+    ).toBe(true)
+    expect(releaseFixesRed(recovery({ ...base, ...ctx, developContexts: [] }))).toBe(false)
+    expect(
+      releaseFixesRed(
+        recovery({ ...base, ...ctx, developContexts: [{ context: 'deploy', state: 'pending' }] }),
+      ),
+    ).toBe(false)
+  })
+
   it('carries the develop head its checks were read at into the release exception', () => {
     expect(recogniseRelease(red(readOf(recovery())))).toMatchObject({ verifiedHead: HEAD })
     expect(recogniseRelease(facts())).not.toHaveProperty('verifiedHead')

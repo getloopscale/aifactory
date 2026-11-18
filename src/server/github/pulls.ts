@@ -71,6 +71,8 @@ export type CommitChecks = {
   checkRuns: { name: string; status: string; conclusion: string | null }[]
   /** The combined state of the older commit statuses. `none` when there are no statuses at all. */
   statuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
+  /** Each commit status by its context, the latest state of each. */
+  statusContexts?: { context: string; state: string }[]
 }
 
 /**
@@ -862,8 +864,16 @@ export function createGithubApi(
           `reading the statuses of ${sha.slice(0, 7)} on ${repo}`,
           [200],
         )
-      ).json()) as { state: 'success' | 'failure' | 'error' | 'pending'; total_count: number }
+      ).json()) as {
+        state: 'success' | 'failure' | 'error' | 'pending'
+        total_count: number
+        statuses?: { context: string; state: string }[]
+      }
       return {
+        statusContexts: (combined.statuses ?? []).map((s) => ({
+          context: s.context,
+          state: s.state,
+        })),
         checkRuns: runs.check_runs.map((r) => ({
           name: r.name,
           status: r.status,
