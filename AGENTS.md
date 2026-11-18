@@ -91,7 +91,9 @@ reads that file, not a convention.
   comment (`issue_comment`, `pull_request_review_comment`), a submitted `pull_request_review`, a completed
   `check_suite` or `check_run`, and an issue that is closed, reopened or loses the `factory` label are
   routed: `ingress.outcome` is `routed`, the code names the intent, and `recordDelivery` creates no task and
-  queues no job for it. Nothing acts on a routed delivery yet. A new event is a new entry in `ROUTES` with a
+  queues no job for it. An issue that is closed or loses the label cancels its task when `outcome()` says
+  `cancel` (`ingest/withdraw.ts`, in the same transaction): the `cancelled` stage event names why, and the
+  task's queued jobs that no worker holds are deleted. Nothing acts on the other routed deliveries yet. A new event is a new entry in `ROUTES` with a
   Zod schema that produces its intent, and the setup report reads `ROUTED_EVENTS` to say which events the
   App does not subscribe to. Any other event or action keeps the code it always had.
 - **A labelled issue is not permission.** The App is installed on every repository of the account, so ingestion

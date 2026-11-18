@@ -116,8 +116,6 @@ describe('the transition table', () => {
         'pull_request_review_comment_created',
         'check_suite_completed',
         'check_run_completed',
-        'issue_unlabeled',
-        'issue_closed',
         'issue_reopened',
       ].sort(),
     )

@@ -1,4 +1,4 @@
-import { count } from 'drizzle-orm'
+import { and, count, desc, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { PostgresJobBackend, createOutbox, createQueueClient } from 'theokit/server/jobs'
 import { getStorageManager } from 'theokit/server/storage'
@@ -6,7 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { createPool, getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, task } from '../db/schema'
+import { ingress, stageEvent, task } from '../db/schema'
 
 import { recordAndQueue } from './queue'
 import type { Delivery } from './record'
@@ -112,5 +112,152 @@ describe('a delivery and its job', () => {
 
     expect(result.status).toBe('task_created')
     expect(await jobs()).toHaveLength(1)
+  })
+})
+
+describe('an issue that no longer asks for the work', () => {
+  const changed = (action: string, extra: object = {}): unknown => ({
+    ...(labeled() as object),
+    action,
+    sender: { login: 'alice' },
+    ...extra,
+  })
+  const closed = () => changed('closed')
+  const unlabeled = () => changed('unlabeled', { label: { name: 'factory' } })
+
+  /** A task for issue 7 in `stage`, with a `run-task` job queued for it that no worker took. */
+  async function taskIn(stage: string): Promise<number> {
+    await recordAndQueue(delivery('take'), queue)
+    const [{ id }] = await getDb().select().from(task)
+    await getPool().query('update task set stage = $1 where id = $2', [stage, id])
+    return id
+  }
+
+  const stageOf = async (id: number) =>
+    (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
+  const lastEvent = async (id: number) =>
+    (
+      await getDb()
+        .select()
+        .from(stageEvent)
+        .where(eq(stageEvent.taskId, id))
+        .orderBy(desc(stageEvent.id))
+        .limit(1)
+    )[0]
+
+  it('cancels a queued task when its issue is closed, and deletes its queued run', async () => {
+    const id = await taskIn('intake')
+
+    const result = await recordAndQueue(delivery('close', closed()), queue)
+
+    expect(result).toMatchObject({ status: 'routed', code: 'issue_closed' })
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await lastEvent(id)).toMatchObject({
+      stage: 'cancelled',
+      detail: { reason: 'the issue was closed', by: 'alice' },
+    })
+    expect(await jobs()).toEqual([])
+  })
+
+  it('cancels a failed task, so it does not run again on its own', async () => {
+    const id = await taskIn('failed')
+
+    await recordAndQueue(delivery('close', closed()), queue)
+
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await jobs()).toEqual([])
+  })
+
+  it('cancels a queued task when the factory label is removed', async () => {
+    const id = await taskIn('intake')
+
+    const result = await recordAndQueue(delivery('unlabel', unlabeled()), queue)
+
+    expect(result).toMatchObject({ status: 'routed', code: 'issue_unlabeled' })
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await lastEvent(id)).toMatchObject({
+      stage: 'cancelled',
+      detail: { reason: 'the factory label was removed', by: 'alice' },
+    })
+    expect(await jobs()).toEqual([])
+  })
+
+  it('deletes the merge-task job of approved work waiting in merge', async () => {
+    const id = await taskIn('merge')
+    await getPool().query(`delete from theokit_jobs`)
+    await queue.enqueue('merge-task', { taskId: id, sha: 'abc1234' })
+
+    await recordAndQueue(delivery('close', closed()), queue)
+
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await jobs()).toEqual([])
+  })
+
+  it('deletes the resume-task job of a waiting task whose answer was taken', async () => {
+    const id = await taskIn('waiting')
+    await getPool().query(`delete from theokit_jobs`)
+    await queue.enqueue('resume-task', { taskId: id, questionId: 1 })
+
+    await recordAndQueue(delivery('close', closed()), queue)
+
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await jobs()).toEqual([])
+  })
+
+  it('cancels a task whose run a worker holds, and leaves the held job alone', async () => {
+    const id = await taskIn('build')
+    await getPool().query(`update theokit_jobs set locked_until = now() + interval '2 minutes'`)
+
+    await recordAndQueue(delivery('close', closed()), queue)
+
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await jobs()).toEqual([{ name: 'run-task', input: { taskId: id } }])
+  })
+
+  it.each(['done', 'handoff'])('leaves a task in %s and its jobs untouched', async (stage) => {
+    const id = await taskIn(stage)
+    const before = await lastEvent(id)
+
+    await recordAndQueue(delivery('close', closed()), queue)
+    await recordAndQueue(delivery('unlabel', unlabeled()), queue)
+
+    expect(await stageOf(id)).toBe(stage)
+    expect(await lastEvent(id)).toEqual(before)
+    expect(await jobs()).toEqual([{ name: 'run-task', input: { taskId: id } }])
+  })
+
+  it('leaves the task of another issue alone', async () => {
+    const id = await taskIn('intake')
+
+    await recordAndQueue(
+      delivery('close', changed('closed', { issue: { number: 8, title: 'Other', labels: [] } })),
+      queue,
+    )
+
+    expect(await stageOf(id)).toBe('intake')
+    expect(await jobs()).toHaveLength(1)
+  })
+
+  it('brings nothing back when the issue is reopened after it was cancelled', async () => {
+    const id = await taskIn('intake')
+    await recordAndQueue(delivery('close', closed()), queue)
+
+    const result = await recordAndQueue(delivery('reopen', changed('reopened')), queue)
+
+    expect(result).toMatchObject({ status: 'routed', code: 'issue_reopened' })
+    expect(await stageOf(id)).toBe('cancelled')
+    expect(await jobs()).toEqual([])
+  })
+
+  it('cancels nothing twice when the same close is delivered again', async () => {
+    const id = await taskIn('intake')
+    await recordAndQueue(delivery('close', closed()), queue)
+    await recordAndQueue(delivery('close-2', closed()), queue)
+
+    const cancelled = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'cancelled')))
+    expect(cancelled).toHaveLength(1)
   })
 })
