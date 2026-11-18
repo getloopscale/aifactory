@@ -36,6 +36,8 @@ export type ReleaseBranchView = {
   actor: string
   /** The commit a release promoted, when a release is what brought the commit there. */
   mergeSha?: string
+  /** Asked just before each task moves; true leaves it for a later pass (a shipment began meanwhile). */
+  hold?: () => Promise<boolean>
   /**
    * Runs for each task as it is released, with its issue. A release that has a tag uses it to tell the
    * issue where the fix is; a catch-up has none. It runs after the stage changed. It returns what went wrong, never throws.
@@ -75,6 +77,7 @@ async function releaseEach(
     }
     try {
       if (!(await onBranch.get(sha))) continue
+      if (await view.hold?.()) continue
       await enterStage(deps.db, row.id, 'released', {
         actor: view.actor,
         releaseBranch: view.releaseBranch,
@@ -216,6 +219,8 @@ export async function catchUpResolved(
         token,
         releaseRef: branch,
         releaseBranch: branch,
+        // A release or publication may begin between the check above and each task: it keeps those tasks.
+        hold: () => shipping(deps.db, repo, deps.now?.() ?? new Date()),
       }
       // A release that is landing may not have shipped these tasks yet, and once they are `released` it
       // never will: an issue still open is closed here, so no pass leaves one open.
