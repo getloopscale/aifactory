@@ -88,7 +88,7 @@ type World = {
   /** Whether a fix command leaves a change in the checkout. */
   fixChanges?: boolean
   /** What the install check answers (the command ends with `&& pnpm install`). */
-  install?: Reply
+  install?: Reply[]
 }
 
 function sandbox(world: World = {}) {
@@ -100,7 +100,7 @@ function sandbox(world: World = {}) {
   return new FakeSandbox((command): Reply | undefined => {
     if (command.includes('commit -F')) commits += 1
     if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
-    if (command.endsWith('&& pnpm install') && world.install) return world.install
+    if (command.endsWith('&& pnpm install') && world.install?.length) return world.install.shift()
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
@@ -988,7 +988,7 @@ describe('runCase install', () => {
   })
 
   it('tells the builder a failed install and goes on', async () => {
-    const provider = sandbox({ install: { exitCode: 1, stderr: 'tarball missing' } })
+    const provider = sandbox({ install: [{ exitCode: 1, stderr: 'tarball missing' }] })
     const builder = agent('builder', planned(built()))
 
     const result = await runCase(
@@ -998,7 +998,10 @@ describe('runCase install', () => {
 
     expect(builder.prompts[0]).toContain('before your pass to install')
     expect(builder.prompts[0]).toContain('tarball missing')
-    expect(result).toBeDefined()
+    // Only the preparatory install failed: the work went on, in the same session, and the checks installed again.
+    expect(builder.prompts).toHaveLength(2)
+    expect(installs(provider)).toHaveLength(2)
+    expect(result).toMatchObject({ passed: true, reason: 'approved' })
   })
 
   it('runs no install for a case with no install check', async () => {

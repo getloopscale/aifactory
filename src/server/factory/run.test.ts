@@ -10,10 +10,14 @@ import { GET } from '../routes/panel/codex/login'
 import { CREDENTIAL_RENEWAL_MS, githubEgress } from './credential-renewal'
 import { FakeBackend, FakeSandbox } from './fake-sandbox'
 import { codexHarness } from './harness-codex'
-import { buildPrompt } from './harness'
 import { heldFor, Run } from './run'
 import { StageFailure } from './run-support'
 import type { EgressRule } from './sandbox'
+
+vi.mock('./stages', async (original) => ({
+  ...(await original<typeof import('./stages')>()),
+  enterRunStage: async () => {},
+}))
 
 const NOW = 1_800_000_000_000
 const jwt = (claims: object) =>
@@ -227,38 +231,71 @@ describe('approved work the factory holds for its owner', () => {
 
 describe('the install before the builder', () => {
   class Stop extends Error {}
+  const PLAN = JSON.stringify({
+    files: [{ path: 'a.ts', why: 'x' }],
+    order: [],
+    risks: [],
+    proof: [],
+    outOfScope: [],
+  })
 
-  /** A Run that has only what `start` touches up to the builder's first pass, which records what it saw. */
-  function starting(checks: { name: string; command: string }[], install: { exitCode?: number }) {
+  /**
+   * A Run with the real `start`, `planChange`, `firstPass` and `buildInput`; only the database, the transcript
+   * and the stop after the first pass are faked. The builder records what it was told and how many installs had run.
+   */
+  function starting(
+    checks: { name: string; command: string }[],
+    install: { exitCode?: number },
+    opts: { planFirst?: boolean; resuming?: object } = {},
+  ) {
     const backend = new FakeBackend((command) =>
       command.endsWith('&& pnpm install') ? { ...install, stderr: 'tarball missing' } : undefined,
     )
-    const seen: { installs: number; prompt: string }[] = []
+    const calls: { how: string; installs: number; prompt: string }[] = []
+    const installs = () => backend.commands.filter((c) => c.endsWith('&& pnpm install')).length
+    const answer = (how: string, prompt: string) => {
+      calls.push({ how, installs: installs(), prompt })
+      return Promise.resolve({ ok: true, summary: `${PLAN}`, sessionId: 's1' })
+    }
+    const builder = {
+      name: 'fake-builder',
+      run: (_b: unknown, o: { prompt: string }) => answer('run', o.prompt),
+      resume: (_b: unknown, _s: string, o: { prompt: string }) => answer('resume', o.prompt),
+    }
+    const chain = { values: async () => {}, set: () => ({ where: async () => {} }) }
+    const db = {
+      insert: () => chain,
+      update: () => chain,
+      transaction: async () => {},
+    }
     const run = Object.create(Run.prototype) as Record<string, unknown>
     run.c = {
-      deps: { checks, sandbox: {} },
+      taskId: 1,
+      deps: { checks, sandbox: {}, db, planFirst: opts.planFirst },
       repo: {},
       row: { repository: 'o/r', issueNumber: 7 },
       issue: { title: 'T', body: 'B' },
       branch: 'factory/7',
       state: { current: 'start' },
+      resuming: opts.resuming,
     }
+    run.builder = builder
     run.sandbox = { backend }
     run.repoDir = '/work/repo'
     run.baseSha = 'a'.repeat(40)
-    run.planChange = async () => {}
+    run.startedAt = Date.now()
+    run.sessionStartedAt = Date.now()
+    run.cost = 0
+    run.transcript = { sink: () => () => {}, drain: async () => {}, flush: async () => {} }
+    run.storedPlan = async () => undefined
     run.failUnfinished = async () => {
       throw new Stop()
     }
-    run.firstPass = async function (this: { buildInput: () => Parameters<typeof buildPrompt>[0] }) {
-      seen.push({
-        installs: backend.commands.filter((c) => c.endsWith('&& pnpm install')).length,
-        prompt: buildPrompt(this.buildInput()),
-      })
-      return { ok: false, summary: 'stop here' }
+    run.keepLearned = async () => {
+      throw new Stop()
     }
     const start = () => (run as unknown as { start: () => Promise<unknown> }).start()
-    return { start, backend, seen }
+    return { start, backend, calls }
   }
 
   const checks = [
@@ -266,27 +303,48 @@ describe('the install before the builder', () => {
     { name: 'test', command: 'pnpm test' },
   ]
 
-  it('runs the install in the checkout once, before the builder is called', async () => {
-    const { start, backend, seen } = starting(checks, {})
+  it('runs the install in the checkout once, before the builder is called, and not again for the session', async () => {
+    const { start, backend, calls } = starting(checks, {})
     await expect(start()).rejects.toBeInstanceOf(Stop)
-    expect(backend.commands).toEqual(['cd /work/repo && pnpm install'])
-    expect(seen).toHaveLength(1)
-    expect(seen[0]!.installs).toBe(1)
-    expect(seen[0]!.prompt).not.toContain('before your pass to install')
+    expect(backend.commands.filter((c) => c.includes('pnpm install'))).toEqual([
+      'cd /work/repo && pnpm install',
+    ])
+    expect(calls.map((c) => [c.how, c.installs])).toEqual([
+      ['run', 1],
+      ['resume', 1],
+    ])
+    expect(calls[0]!.prompt).not.toContain('before your pass to install')
+    // The factory's own clean is the checks' business, never the preparation's.
+    expect(backend.commands.some((c) => c.includes('git clean'))).toBe(false)
   })
 
-  it('records a failed install in the prompt and goes on to the builder', async () => {
-    const { start, seen } = starting(checks, { exitCode: 1 })
+  it('tells the builder a failed install, in the prompt it is called with, and goes on', async () => {
+    const { start, calls } = starting(checks, { exitCode: 1 })
     await expect(start()).rejects.toBeInstanceOf(Stop)
-    expect(seen).toHaveLength(1)
-    expect(seen[0]!.prompt).toContain('before your pass to install')
-    expect(seen[0]!.prompt).toContain('tarball missing')
+    expect(calls.map((c) => c.how)).toEqual(['run', 'resume'])
+    expect(calls[0]!.prompt).toContain('before your pass to install')
+    expect(calls[0]!.prompt).toContain('tarball missing')
+  })
+
+  it('gives the failure to a builder that is not planned first', async () => {
+    const { start, calls } = starting(checks, { exitCode: 1 }, { planFirst: false })
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    expect(calls.map((c) => c.how)).toEqual(['run'])
+    expect(calls[0]!.prompt).toContain('tarball missing')
+  })
+
+  it('gives the failure to a session resumed with an answer', async () => {
+    const resuming = { sessionId: 's0', attempt: 2, body: 'q', answer: 'a', answeredBy: 'x' }
+    const { start, calls } = starting(checks, { exitCode: 1 }, { resuming })
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    expect(calls.map((c) => c.how)).toEqual(['resume'])
+    expect(calls[0]!.prompt).toContain('tarball missing')
   })
 
   it('runs nothing extra for a repository with no install check', async () => {
-    const { start, backend, seen } = starting([{ name: 'test', command: 'pnpm test' }], {})
+    const { start, backend, calls } = starting([{ name: 'test', command: 'pnpm test' }], {})
     await expect(start()).rejects.toBeInstanceOf(Stop)
-    expect(backend.commands).toEqual([])
-    expect(seen).toHaveLength(1)
+    expect(backend.commands.some((c) => c.includes('install'))).toBe(false)
+    expect(calls.length).toBeGreaterThan(0)
   })
 })

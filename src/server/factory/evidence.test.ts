@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { FakeBackend } from './fake-sandbox'
-import { failingChecks, gate, prepareInstall, runChecks } from './evidence'
+import { failingChecks, gate, runChecks } from './evidence'
 
 const row = (name: string, sha: string, passed: boolean) => ({ name, sha, passed })
 
@@ -185,37 +185,5 @@ describe('what the checks default to and how they are timed', () => {
       open: false,
       reasons: ['no evidence for "a" at abcdef1', '"b" failed at abcdef1'],
     })
-  })
-})
-
-describe('prepareInstall', () => {
-  const install = { name: 'install', command: 'pnpm install' }
-
-  it('runs the install check once, in the repository, and answers nothing when it passes', async () => {
-    const backend = new FakeBackend(() => ({}))
-    const failed = await prepareInstall(
-      backend,
-      '/work/repo',
-      [install, { name: 'test', command: 'npm test' }],
-      1_000,
-    )
-    expect(failed).toBeUndefined()
-    expect(backend.commands).toEqual(['cd /work/repo && pnpm install'])
-  })
-
-  it('answers the failure with its output, without running it again', async () => {
-    const backend = new FakeBackend(() => ({ exitCode: 1, stderr: 'tarball missing' }))
-    const failed = await prepareInstall(backend, '/work/repo', [install], 1_000)
-    expect(failed?.passed).toBe(false)
-    expect(failed?.output).toContain('tarball missing')
-    expect(backend.commands).toHaveLength(1)
-  })
-
-  it('runs nothing for a repository with no install check', async () => {
-    const backend = new FakeBackend(() => ({}))
-    expect(
-      await prepareInstall(backend, '/work/repo', [{ name: 'test', command: 'npm test' }], 1_000),
-    ).toBeUndefined()
-    expect(backend.commands).toEqual([])
   })
 })
