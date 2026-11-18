@@ -1026,11 +1026,13 @@ export class Run {
   /**
    * A run that was sent back changed nothing, and no review approved the head of its branch: an earlier run
    * fixed what was asked and stopped before a review, or a person pushed the fix. Ending here would deliver
-   * work nobody checked, so the run goes on from that head.
+   * work nobody checked, so the run goes on from that head. That holds for a send-back with the factory's own
+   * note too (`fromChecks`: the coordinator's after a run that ran out of time or changed nothing): the head a
+   * failed check sent back was approved, so that case still reaches `checksUnanswered`.
    */
   private async unreviewedHeadLeftAsItIs(): Promise<boolean> {
     const { continuation, deps, taskId } = this.c
-    if (!continuation || continuation.plain || continuation.fromChecks || !this.remoteHead) {
+    if (!continuation || continuation.plain || !this.remoteHead) {
       return false
     }
     if (!(await this.hasNothingToCommit())) return false
