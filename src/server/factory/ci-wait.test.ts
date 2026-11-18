@@ -8,6 +8,7 @@ import {
   checksFeedback,
   decideWaitingIntegration,
   fixedBaseNote,
+  isFixedBaseNote,
   readRequired,
 } from './ci-wait'
 
@@ -223,6 +224,13 @@ describe('fixedBaseNote', () => {
   it('says the factory merges the branch, and that the merge is checked and reviewed', () => {
     expect(note).toContain('The factory merges workspace into this branch')
     expect(note).toContain('checks and reviews the merge')
+  })
+
+  it('is recognised as the note of a run that only merges the base, and a send-back note is not', () => {
+    expect(isFixedBaseNote(note)).toBe(true)
+    expect(isFixedBaseNote(fixedBaseNote('develop', ['CI']))).toBe(true)
+    expect(isFixedBaseNote("The repository's required checks failed on abc1234, so")).toBe(false)
+    expect(isFixedBaseNote(undefined)).toBe(false)
   })
 
   it('speaks of a single check in the singular', () => {

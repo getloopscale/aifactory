@@ -18,6 +18,7 @@ import type {
   RepositoryView,
 } from '../../shared/panel'
 
+import { leadTimeLimitsProblem } from '../../shared/lead-time'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 import { ActionRefused } from './actions'
 
@@ -71,6 +72,10 @@ export type RepositoryPatch = {
   releaseMode?: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; `null` clears it, so the factory's default applies. */
   runLimitMinutes?: number | null
+  /** From this many minutes of lead time a task is at risk; `null` clears it, so the default applies. */
+  leadTimeAtRiskMinutes?: number | null
+  /** From this many minutes of lead time a task is overdue; `null` clears it, so the default applies. */
+  leadTimeOverdueMinutes?: number | null
 }
 
 const CHECK_NAME = /^[a-z0-9][a-z0-9_-]{0,30}$/
@@ -117,6 +122,11 @@ export function patchProblem(patch: RepositoryPatch, agents: string[]): string |
   if (minutes != null && (minutes < MIN_RUN_MINUTES || minutes > MAX_RUN_MINUTES)) {
     return `a run may last from ${MIN_RUN_MINUTES} to ${MAX_RUN_MINUTES} minutes`
   }
+  const leadTime = leadTimeLimitsProblem({
+    atRiskMinutes: patch.leadTimeAtRiskMinutes ?? null,
+    overdueMinutes: patch.leadTimeOverdueMinutes ?? null,
+  })
+  if (leadTime) return leadTime
   for (const name of [patch.baseBranch, patch.releaseBranch]) {
     if (name && !validBranch(name)) return `"${name}" is not a branch name`
   }
@@ -176,6 +186,8 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
       runLimitMinutes: row?.runLimitMinutes ?? null,
+      leadTimeAtRiskMinutes: row?.leadTimeAtRiskMinutes ?? null,
+      leadTimeOverdueMinutes: row?.leadTimeOverdueMinutes ?? null,
       checksProvenSha: row?.checksProvenSha ?? null,
       unprovenChecks: unprovenChecks(row?.checks ?? null, row?.checksProven ?? []),
       checksProof: proofView(row?.checksProof ?? null, now),
@@ -332,6 +344,12 @@ export async function saveRepository(
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),
     ...(patch.runLimitMinutes === undefined ? {} : { runLimitMinutes: patch.runLimitMinutes }),
+    ...(patch.leadTimeAtRiskMinutes === undefined
+      ? {}
+      : { leadTimeAtRiskMinutes: patch.leadTimeAtRiskMinutes }),
+    ...(patch.leadTimeOverdueMinutes === undefined
+      ? {}
+      : { leadTimeOverdueMinutes: patch.leadTimeOverdueMinutes }),
     updatedAt: new Date(),
   }
   await deps.db

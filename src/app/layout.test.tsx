@@ -151,14 +151,21 @@ describe('the layout', () => {
   it('filters the conversations from the search box', async () => {
     serve(signedIn)
     renderAt('/')
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Outra' })).toBeDefined())
+    // Both conversations must be listed before filtering; on a loaded host the default 1 s wait is too short.
+    await waitFor(
+      () => {
+        expect(screen.getByRole('link', { name: 'Fixa' })).toBeDefined()
+        expect(screen.getByRole('link', { name: 'Outra' })).toBeDefined()
+      },
+      { timeout: 10_000 },
+    )
     fireEvent.click(screen.getByRole('button', { name: t.menu.searchChats }))
     fireEvent.change(screen.getByLabelText(t.menu.searchInChats), { target: { value: 'out' } })
     expect(screen.queryByRole('link', { name: 'Fixa' })).toBeNull()
     expect(screen.getByRole('link', { name: 'Outra' })).toBeDefined()
     fireEvent.change(screen.getByLabelText(t.menu.searchInChats), { target: { value: 'zzz' } })
     expect(screen.getByText(t.menu.noneFound)).toBeDefined()
-  })
+  }, 15_000)
 
   it('folds the menu into a strip of icons, remembers it, and brings the menu back', async () => {
     serve(signedIn)

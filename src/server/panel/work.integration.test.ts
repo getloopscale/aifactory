@@ -358,6 +358,49 @@ describe('the repositories page', () => {
     })
   })
 
+  describe('the lead time limits through the settings endpoints', () => {
+    type Call = (ctx: { params: unknown; body: unknown }) => Promise<unknown>
+    const put = async (body: unknown) => {
+      const parsed = PUT.body!.safeParse(body)
+      if (!parsed.success) return { status: 400 }
+      const out = (await (PUT.handler as unknown as Call)({
+        params: PUT.params!.parse({ owner: 'paulo', name: 'app' }),
+        body: parsed.data,
+      })) as Response | object
+      return out instanceof Response ? { status: out.status } : { status: 200 }
+    }
+    const listed = async () => {
+      const view = (await (GET.handler as unknown as Call)({ params: {}, body: {} })) as {
+        repositories: {
+          fullName: string
+          leadTimeAtRiskMinutes: number | null
+          leadTimeOverdueMinutes: number | null
+        }[]
+      }
+      const r = view.repositories.find((x) => x.fullName === 'Paulo/App')
+      return [r?.leadTimeAtRiskMinutes, r?.leadTimeOverdueMinutes]
+    }
+
+    it('saves both limits, refuses an at-risk limit that is not under the overdue one, and clears with null', async () => {
+      await enable()
+      expect(await put({ leadTimeAtRiskMinutes: 60, leadTimeOverdueMinutes: 240 })).toEqual({
+        status: 200,
+      })
+      expect(await listed()).toEqual([60, 240])
+
+      expect(
+        (await put({ leadTimeAtRiskMinutes: 300, leadTimeOverdueMinutes: 240 })).status,
+      ).not.toBe(200)
+      expect(await put({ leadTimeAtRiskMinutes: 2 })).toEqual({ status: 400 })
+      expect(await listed()).toEqual([60, 240])
+
+      expect(await put({ leadTimeAtRiskMinutes: null, leadTimeOverdueMinutes: null })).toEqual({
+        status: 200,
+      })
+      expect(await listed()).toEqual([null, null])
+    })
+  })
+
   it('creates the integration and pre-release branches when a repository is enabled, and touches none that exist', async () => {
     await enable()
     expect(created()).toEqual(['workspace', 'develop'])

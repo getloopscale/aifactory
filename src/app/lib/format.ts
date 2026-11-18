@@ -102,6 +102,16 @@ export function ago(iso: string, now = Date.now(), t: Copy['time'] = en.time): s
   return t.daysAgo(Math.floor(seconds / 86_400))
 }
 
+/** A length of time in whole minutes, in the largest two units that say it: `45m`, `3h 10m`, `1d 4h`. */
+export function duration(minutes: number): string {
+  const days = Math.floor(minutes / 1440)
+  const hours = Math.floor((minutes % 1440) / 60)
+  const rest = minutes % 60
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`
+  if (hours > 0) return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`
+  return `${rest}m`
+}
+
 /** How long until the factory runs a failed task again on its own. */
 export function runsAgain(iso: string, now = Date.now(), t: Copy['time'] = en.time): string {
   const seconds = Math.round((Date.parse(iso) - now) / 1000)
