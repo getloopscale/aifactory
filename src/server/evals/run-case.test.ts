@@ -1004,6 +1004,20 @@ describe('runCase install', () => {
     expect(result).toMatchObject({ passed: true, reason: 'approved' })
   })
 
+  it('gives the failure to the builder call that does the work, when another agent planned', async () => {
+    const provider = sandbox({ install: [{ exitCode: 1, stderr: 'tarball missing' }] })
+    const planner = agent('codex', [{ ok: true, summary: PLAN, sessionId: 'p1' }])
+    const builder = agent('builder', [built()])
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase({ ...deps(provider, builder, reviewer), planner }, withInstall)
+
+    expect(result).toMatchObject({ passed: true, reason: 'approved' })
+    expect(builder.prompts).toHaveLength(1)
+    expect(builder.prompts[0]).toContain('tarball missing')
+    expect(installs(provider)).toHaveLength(2)
+  })
+
   it('runs no install for a case with no install check', async () => {
     const provider = sandbox()
     await runCase(
