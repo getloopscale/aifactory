@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import {
   copyFileSync,
   existsSync,
@@ -13,13 +14,17 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 const root = new URL('../../../', import.meta.url).pathname
-const pnpm = (args: string[], cwd: string) =>
-  execFileSync('pnpm', args, {
+/** A subprocess that is killed at its limit, so a stalled command cannot outlive the test. */
+const run = (command: string, args: string[], cwd: string, timeout: number) =>
+  execFileSync(command, args, {
     cwd,
     stdio: 'pipe',
     encoding: 'utf8',
     env: { ...process.env, CI: '1' },
+    timeout,
+    killSignal: 'SIGKILL',
   })
+const pnpm = (args: string[], cwd: string, timeout = 100_000) => run('pnpm', args, cwd, timeout)
 let scratch: string | undefined
 
 // The inputs of an install, copied, so the install never touches the checkout.
@@ -31,12 +36,25 @@ function installInputs(): string {
   return scratch
 }
 
-/** Everything git sees as changed or untracked, plus the content of the tracked changes. */
-const checkoutState = () =>
-  execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {
-    cwd: root,
-    encoding: 'utf8',
-  }) + execFileSync('git', ['diff', 'HEAD'], { cwd: root, encoding: 'utf8' })
+/** What git sees as changed, the content of tracked changes and of every untracked file. */
+const checkoutState = (cwd = root) => {
+  const git = (...args: string[]) => run('git', args, cwd, 30_000)
+  const untracked = git('ls-files', '--others', '--exclude-standard', '-z')
+    .split('\0')
+    .filter(Boolean)
+  const contents = untracked.map(
+    (f) =>
+      `${f}:${createHash('sha256')
+        .update(readFileSync(join(cwd, f)))
+        .digest('hex')}`,
+  )
+  return [
+    git('status', '--porcelain', '--untracked-files=all'),
+    git('diff'),
+    git('diff', '--cached'),
+    ...contents,
+  ].join('\n')
+}
 
 afterEach(() => {
   if (scratch) rmSync(scratch, { recursive: true, force: true })
@@ -83,4 +101,23 @@ describe('validation setup', () => {
     )
     expect(checkoutState()).toBe(before)
   }, 120_000)
+
+  it('kills a subprocess that outlives its limit', () => {
+    const started = Date.now()
+    expect(() => run('sleep', ['30'], root, 300)).toThrow()
+    expect(Date.now() - started).toBeLessThan(10_000)
+  })
+
+  it('sees a change in the content of an already untracked file', () => {
+    const repo = mkdtempSync(join(tmpdir(), 'state-'))
+    try {
+      run('git', ['init', '-q'], repo, 30_000)
+      writeFileSync(join(repo, 'untracked.txt'), 'one')
+      const before = checkoutState(repo)
+      writeFileSync(join(repo, 'untracked.txt'), 'two')
+      expect(checkoutState(repo)).not.toBe(before)
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
+  })
 })
