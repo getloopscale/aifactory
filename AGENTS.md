@@ -209,7 +209,7 @@ reads that file, not a convention.
   reads and decides nothing; `exceptions.ts` recognises exceptions over those facts and reads nothing, and a
   fact that could not be read is an exception of kind `unknown`; `decide.ts` is a pure function from an
   exception, the decisions already recorded and the time to one action (`send_back`, `review_again`,
-  `retry_from_finding`, `scope`, `release`, `prioritise`, `fix_base`, `wait` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
+  `retry_from_finding`, `scope`, `release`, `prioritise`, `fix_base`, `merge_base`, `wait` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
   applying, where a drafter built by `buildAssistant` answers JSON that `scope.ts` parses (an answer that does not
   parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION` is `refused`); `apply.ts` is the only module with side effects and goes through the
   panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`) and, for a release, `release()`, so
@@ -223,7 +223,11 @@ reads that file, not a convention.
   `no_change` is sent back once with what the run recorded, then escalated; each is told apart by its failure
   event (the head is `<sha>@<event id>`), a task that pushed nothing is escalated, and any other failure stays a
   `failure`, escalated. `coordinator_send_back` takes a `failed` task as it takes a handed-over one. A
-  `checks_unchanged` whose handoff quoted no output is sent back with the same `failingOutput`. An `unknown` is a
+  `checks_unchanged` whose handoff quoted no output is sent back with the same `failingOutput`, or, when the factory
+  kept none either, with what the failed checks of the pull request's head logged on GitHub (`ciFailures`, through
+  `readEvidence` and `ciFailingOutput`). One whose pull request conflicts with its base is a `merge_base`
+  (`mergeBaseByCoordinator`, which asks for `coordinator_merge_base` and queues the run with `mergeBase`), and a
+  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. An `unknown` is a
   `wait`: the first is recorded as `deferred` (which leaves the head free and is never `seen`), later passes
   record nothing, and it is escalated once the first wait is `UNKNOWN_LIMIT_MS` old. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`

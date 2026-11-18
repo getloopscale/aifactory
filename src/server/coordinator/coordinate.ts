@@ -6,7 +6,7 @@ import { task } from '../db/schema'
 import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
 import { draftScope, type DraftDeps } from './draft'
-import { readExceptionFacts, readRecordedActions } from './exception-facts'
+import { readExceptionFacts, readRecordedActions, type FactsDeps } from './exception-facts'
 import { readCurrentReasons, readQueueFacts } from './queue-facts'
 import { isHeld, recogniseQueue, testOf } from './queue-order'
 import { maintainHolds } from './queue-hold'
@@ -20,7 +20,8 @@ export type PassResult = Record<CoordinatorOutcome, number>
 /** What a pass needs: the panel's actions, the two GitHub writes of a scope, the drafter and the release mode. */
 export type CoordinatorDeps = ApplyDeps &
   DraftDeps &
-  Pick<ReleaseFactsDeps, 'releaseMode'> & { now?: () => Date }
+  Pick<ReleaseFactsDeps, 'releaseMode'> &
+  Pick<FactsDeps, 'ciChecks'> & { now?: () => Date }
 
 /** The exceptions of the tasks, then the release of each repository the train does not hold. */
 async function exceptionsOf(deps: CoordinatorDeps): Promise<TaskException[]> {

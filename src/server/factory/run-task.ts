@@ -9,7 +9,14 @@ import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
 import { createGithubApi } from '../github/pulls'
 
-import { Asked, BaseRed, QuotaStop, quotaDetail, type Continuation } from './run-support'
+import {
+  Asked,
+  BaseConflict,
+  BaseRed,
+  QuotaStop,
+  quotaDetail,
+  type Continuation,
+} from './run-support'
 import { loadRepoConfig } from './repo-config'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
@@ -202,5 +209,8 @@ async function recordFailure(
     ...(error instanceof QuotaStop ? quotaDetail(error, new Date()) : {}),
     ...(error instanceof BlockedByOpenIssues ? { blockedBy: error.blockedBy } : {}),
     ...(error instanceof BaseRed ? { baseRed: { sha: error.baseSha, checks: error.checks } } : {}),
+    ...(error instanceof BaseConflict
+      ? { baseConflict: { branch: error.branch, files: error.files } }
+      : {}),
   })
 }

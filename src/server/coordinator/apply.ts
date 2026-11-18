@@ -7,6 +7,7 @@ import { outcome as transition } from '../factory/transitions'
 import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
+  mergeBaseByCoordinator,
   resolveFinding,
   sendBackByCoordinator,
   type ActionDeps,
@@ -121,6 +122,8 @@ async function perform(
 ): Promise<Performed> {
   if (decision.action === 'send_back') {
     await sendBackByCoordinator(deps, exception.taskId, decision.note ?? '')
+  } else if (decision.action === 'merge_base') {
+    await mergeBaseByCoordinator(deps, exception.taskId, decision.note ?? '')
   } else if (decision.action === 'review_again') {
     await sendBackByCoordinator(deps, exception.taskId, '')
   } else if (decision.action === 'retry_from_finding') {

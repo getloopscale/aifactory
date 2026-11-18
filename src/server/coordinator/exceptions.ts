@@ -34,7 +34,10 @@ export type TaskRepository = { fullName: string; integrationBranch: string }
 export type OpenFinding = { id: number; kind: 'stalled' | 'orphaned'; detail: string }
 
 /** What GitHub says of the pull request of a task: whether it conflicts with its base, and which base. */
-export type PullRequestFacts = { conflicting: boolean; base: string }
+export type PullRequestFacts = { conflicting: boolean; base: string; head?: string }
+
+/** A check that failed on GitHub for the head of a pull request, with the lines its log or annotations gave. */
+export type CiFailure = { name: string; url: string; lines: string[] }
 
 /** What is known of one task when the coordinator looks at it. */
 export type TaskFacts = {
@@ -65,6 +68,11 @@ export type TaskFacts = {
   checks?: Read<CheckRun[]>
   /** Where the task's work integrates, which a fix of a red base is filed on. */
   repository?: TaskRepository
+  /**
+   * The checks that failed on GitHub for the head of the pull request, read only where `readsCiOutput` says
+   * nothing else quoted them and the pull request merges cleanly: absent for any other task.
+   */
+  ciFailures?: Read<CiFailure[]>
 }
 
 /** An integration branch red this long while it holds a task is for a person. */
@@ -87,6 +95,10 @@ export type TaskException = {
   trialOnly?: true
   /** What the checks that fail on the task's head printed, for a send-back (`failingOutput`). */
   checkOutput?: string
+  /** What the failed GitHub Actions jobs of the pull request's head logged, for a send-back (`ciFailingOutput`). */
+  ciOutput?: string
+  /** The files a merge of the integration branch with no agent conflicted in (`base_conflict`). */
+  conflictFiles?: string[]
   /** The integration branch that is red, for the issue that fixes it. */
   base?: RedBase
 }
@@ -155,6 +167,34 @@ export function failingOutput(runs: CheckRun[], head: string): string {
     .join('\n\n')
 }
 
+const fencedStart = (lines: string[], max: number) =>
+  lines.join('\n').replace(/~{3,}/g, '~~').slice(0, max)
+
+/**
+ * What each failed check of the pull request's head said on GitHub, with its link, the first lines of each kept.
+ * A check whose log or annotations said nothing is left out: its name alone gives the agent nothing to fix.
+ */
+export function ciFailingOutput(failures: CiFailure[]): string {
+  const telling = failures.filter((f) => f.lines.length > 0)
+  const share = Math.floor(CHECK_OUTPUT_MAX / Math.max(telling.length, 1))
+  return telling
+    .map((f) => `${f.name} (${f.url}):\n~~~~text\n${fencedStart(f.lines, share)}\n~~~~`)
+    .join('\n\n')
+}
+
+/**
+ * Whether failed checks handed over are read from GitHub Actions: only when neither the handoff nor the
+ * factory's own checks on the head kept any output to send back.
+ */
+export function readsCiOutput(
+  reason: string,
+  facts: Pick<TaskFacts, 'checks' | 'headSha'>,
+): boolean {
+  if (failedChecksOutput(reason) !== '') return false
+  const runs = facts.checks?.read ? facts.checks.value : []
+  return failingOutput(runs, facts.headSha ?? '') === ''
+}
+
 /** Checks still red after the run's attempts, as the run says it: one of them `failed at` a commit. */
 const CHECKS_RED = new RegExp(`^${NO_PULL_REQUEST}.*"[^"]*" failed at [0-9a-f]{7}`, 's')
 
@@ -179,7 +219,10 @@ export function readsChecks(stage: TaskStage, detail: Record<string, unknown> | 
 
 const unknown = (evidence: string) => ({ kind: 'unknown' as const, evidence })
 
-type Found = Pick<TaskException, 'kind' | 'evidence' | 'conflictsWith' | 'checkOutput' | 'base'> & {
+type Found = Pick<
+  TaskException,
+  'kind' | 'evidence' | 'conflictsWith' | 'checkOutput' | 'ciOutput' | 'conflictFiles' | 'base'
+> & {
   identity?: string
 }
 
@@ -196,17 +239,23 @@ function lastOf(facts: TaskFacts): LastEvent | Found {
 
 /** Failed checks the agent did not answer, with the base to merge when their pull request conflicts with it. */
 function checksUnchanged(reason: string, facts: TaskFacts): Found {
-  const { pullRequest, checks } = facts
+  const { pullRequest, checks, ciFailures } = facts
   if (pullRequest && !pullRequest.read) {
     return unknown(`could not read ${pullRequest.tried}: ${pullRequest.error}`)
   }
   const found: Found = { kind: 'checks_unchanged', evidence: failedChecksOutput(reason) }
-  // The handoff may have kept no output: what the factory's own checks printed on the head stands in for it.
+  const pull = pullRequest?.value
+  if (pull?.conflicting) return { ...found, conflictsWith: pull.base }
+  if (ciFailures && !ciFailures.read) {
+    return unknown(`could not read ${ciFailures.tried}: ${ciFailures.error}`)
+  }
+  // The handoff may have kept no output: what the factory's own checks printed on the head stands in for it,
+  // and what GitHub Actions logged for the pull request's head when the factory kept nothing either.
   const quoted = checks?.read
     ? { checkOutput: failingOutput(checks.value, facts.headSha ?? '') }
     : {}
-  const pull = pullRequest?.value
-  return pull?.conflicting ? { ...found, conflictsWith: pull.base } : { ...found, ...quoted }
+  const logged = ciFailures ? { ciOutput: ciFailingOutput(ciFailures.value) } : {}
+  return { ...found, ...quoted, ...logged }
 }
 
 function handedOver(last: LastEvent, facts: TaskFacts): Found {
@@ -217,15 +266,17 @@ function handedOver(last: LastEvent, facts: TaskFacts): Found {
 }
 
 /**
- * A failure of the work by its cause. The three the coordinator acts on are told apart by their event, since an
+ * A failure of the work by its cause, or a merge of the integration branch with no agent that conflicted. Those the
+ * coordinator acts on are told apart by their event, since an
  * agent that is sent back and fails the same way on the same head is a second failure, not the first one again.
  */
 function failedWork(error: string, last: LastEvent, facts: TaskFacts): Found {
-  const kind = failureCause(error)
+  const conflict = baseConflictOf(last.detail)
+  const kind = conflict ? 'base_conflict' : failureCause(error)
   if (kind === 'failure') return { kind, evidence: error }
   const identity =
     facts.headSha !== null && last.id !== undefined ? `${facts.headSha}@${last.id}` : undefined
-  const found: Found = { kind, evidence: error, ...(identity ? { identity } : {}) }
+  const found: Found = { kind, evidence: error, ...(identity ? { identity } : {}), ...conflict }
   if (kind !== 'checks_red') return found
   const checks = facts.checks
   if (checks && !checks.read) return unknown(`could not read ${checks.tried}: ${checks.error}`)
@@ -244,6 +295,19 @@ function redBase(facts: TaskFacts, red: { sha: string; checks: string[] }): Pick
   const { fullName, integrationBranch } = facts.repository
   const base: RedBase = { repository: fullName, branch: integrationBranch, ...red, commands }
   return { base }
+}
+
+/**
+ * A merge of the integration branch with no agent that conflicted (`Run.mergeBase`), with the branch and the
+ * files the run recorded; nothing when the failure names no branch.
+ */
+function baseConflictOf(detail: Record<string, unknown> | null) {
+  const conflict = detail?.baseConflict as { branch?: unknown; files?: unknown } | undefined
+  if (typeof conflict?.branch !== 'string') return undefined
+  const files = Array.isArray(conflict.files)
+    ? conflict.files.filter((f): f is string => typeof f === 'string')
+    : []
+  return { conflictsWith: conflict.branch, conflictFiles: files }
 }
 
 const baseRedOf = (detail: Record<string, unknown> | null) =>

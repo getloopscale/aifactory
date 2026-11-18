@@ -146,17 +146,62 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
     expect(await getDb().select().from(decision)).toEqual([])
   })
 
-  it('sends a task whose pull request conflicts with its base back to merge it, not with the check output', async () => {
+  /** A handed-over task whose pull request conflicts with its base, with its branch on GitHub. */
+  async function conflicting() {
     const id = await checksUnchanged()
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    api.repo('paulo/app').heads.set(`factory/${row.issueNumber}`, 'd'.repeat(40))
     api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', mergeableState: 'dirty' })
+    return id
+  }
+
+  it('merges the base into a task whose pull request conflicts with it, with no agent and not with the check output', async () => {
+    const id = await conflicting()
 
     const result = await coordinate(deps(), 'auto')
 
     expect(result).toMatchObject({ applied: 1 })
     expect(await stageOf(id)).toBe('intake')
+    expect(queued.map((q) => q.input)).toEqual([{ taskId: id, mergeBase: true }])
+    expect(await actions()).toMatchObject([{ action: 'merge_base', outcome: 'applied' }])
+  })
+
+  it('sends the merge to the agent, naming the files, when the merge of the base conflicted', async () => {
+    const id = await conflicting()
+    await coordinate(deps(), 'auto')
+    // The run it queued could not merge the base on its own, and failed with the files.
+    const error =
+      'merging workspace at bbbbbbb into factory/1 conflicts in CHANGELOG.md, which a person resolves'
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+    await getDb()
+      .insert(stageEvent)
+      .values({
+        taskId: id,
+        stage: 'failed',
+        detail: { error, baseConflict: { branch: 'workspace', files: ['CHANGELOG.md'] } },
+      })
+    queued.length = 0
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
     expect(queued).toHaveLength(1)
-    expect(queued[0].input.feedback).toBe(conflictNote('workspace'))
-    expect(await actions()).toMatchObject([{ action: 'send_back', outcome: 'applied' }])
+    expect(queued[0].input.feedback).toBe(conflictNote('workspace', ['CHANGELOG.md']))
+    expect(await actions()).toMatchObject([
+      { action: 'merge_base', outcome: 'applied' },
+      { exceptionKind: 'base_conflict', action: 'send_back', outcome: 'applied' },
+    ])
+  })
+
+  it('refuses to merge the base of a task whose branch is gone, leaving it handed over', async () => {
+    const id = await checksUnchanged()
+    api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', mergeableState: 'dirty' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ refused: 1, applied: 0 })
+    expect(await stageOf(id)).toBe('handoff')
+    expect(queued).toEqual([])
   })
 
   it('waits to read it again as unknown, sending nothing back, when the pull request could not be read', async () => {

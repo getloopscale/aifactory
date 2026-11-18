@@ -11,6 +11,7 @@ import { fetchIssue } from '../github/issues'
 import { createIssuesApi } from '../github/issues-api'
 import { actionDeps } from '../panel/deps'
 import { githubPass } from '../github/budget-pass'
+import { createPromotionApi } from '../github/promotion-api'
 
 /**
  * The coordinator's pass, every ten minutes: the exceptions of the factory's tasks, one action from a
@@ -35,6 +36,7 @@ export default defineCron('coordinate', {
             fetchIssue(repo, number, token),
           drafter: modelScopeDrafter(),
           releaseMode: releaseModeFromEnv(process.env),
+          ciChecks: createPromotionApi(),
         }
       } catch (error) {
         console.error(JSON.stringify({ event: 'coordinate_not_configured', error: String(error) }))
