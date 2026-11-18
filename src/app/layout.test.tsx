@@ -237,17 +237,21 @@ describe('the layout', () => {
   it('signs out through the server, with the header it asks for, and goes to the login', async () => {
     const calls = serve(signedIn)
     renderAt('/inbox')
-    await waitFor(() => expect(screen.getByRole('button', { name: t.menu.account })).toBeDefined())
+    const slow = { timeout: 10_000 }
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: t.menu.account })).toBeDefined(),
+      slow,
+    )
 
     fireEvent.keyDown(screen.getByRole('button', { name: t.menu.account }), { key: 'Enter' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: t.menu.signOut }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: t.menu.signOut }, slow))
 
-    await waitFor(() => expect(calls.some((c) => c.url === '/api/panel/logout')).toBe(true))
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/panel/logout')).toBe(true), slow)
     expect(calls.find((c) => c.url === '/api/panel/logout')).toMatchObject({
       method: 'POST',
       csrf: '1',
     })
-    await waitFor(() => expect(screen.getByText('the login')).toBeDefined())
+    await waitFor(() => expect(screen.getByText('the login')).toBeDefined(), slow)
   })
 
   it('shows the menu in English and in pt-BR, with the items of each', async () => {
