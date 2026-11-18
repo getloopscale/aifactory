@@ -723,6 +723,26 @@ describe('commitChecks', () => {
     expect(checks.checkRuns.at(-1)?.name).toBe('late')
   })
 
+  it('refuses to answer when a page comes back empty before the reported total', async () => {
+    const { fetch } = paged(5, (page) => (page === 1 ? [run('a'), run('b')] : []), 'runs')
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /2 of 5 reports/,
+    )
+  })
+
+  it('refuses to answer when the statuses are fewer than the total says', async () => {
+    const fetch = async (url: string) => {
+      const checks = new URL(url).pathname.endsWith('/check-runs')
+      const body = checks
+        ? { total_count: 0, check_runs: [] }
+        : { state: 'failure', total_count: 3, statuses: [] }
+      return new Response(JSON.stringify(body), { status: 200 })
+    }
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /0 of 3 reports/,
+    )
+  })
+
   it('refuses to answer when the reports run past what it reads', async () => {
     const { fetch } = paged(1_000_000, () => [run('x')], 'runs')
     await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(

@@ -868,7 +868,12 @@ export function createGithubApi(
           const body = await response.json()
           const got = take(body)
           items.push(...got)
-          if (got.length === 0 || items.length >= (body.total_count ?? 0)) return { items, body }
+          const total = body.total_count ?? 0
+          if (items.length >= total) return { items, body }
+          if (got.length === 0)
+            throw new Error(
+              `${what}: GitHub listed ${items.length} of ${total} reports, not all of them read`,
+            )
         }
         throw new Error(`${what}: more than ${MAX_CHECK_PAGES * 100} reports, not all of them read`)
       }
