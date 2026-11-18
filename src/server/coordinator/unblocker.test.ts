@@ -248,15 +248,8 @@ describe('the references and the evidence the unblocker names', () => {
     )
   })
 
-  it('takes a commit or a GitHub Actions run as evidence', () => {
-    for (const evidence of [
-      'abc1234',
-      'b'.repeat(40),
-      ` ${'C'.repeat(40)} `,
-      `https://github.com/o/r/commit/${'b'.repeat(40)}`,
-      'https://github.com/o/r/actions/runs/123',
-      'https://github.com/o/r/actions/runs/123/job/456/',
-    ]) {
+  it('takes the full sha of a commit as evidence', () => {
+    for (const evidence of ['b'.repeat(40), ` ${'C'.repeat(40)} `]) {
       expect(isEvidence(evidence), evidence).toBe(true)
     }
   })
@@ -265,7 +258,12 @@ describe('the references and the evidence the unblocker names', () => {
     for (const evidence of [
       '',
       'abc123',
+      'abc1234',
+      'b'.repeat(39),
       'b'.repeat(41),
+      `https://github.com/o/r/commit/${'b'.repeat(40)}`,
+      'https://github.com/o/r/actions/runs/123',
+      'https://github.com/o/r/actions/runs/123/job/456/',
       'it is merged',
       'https://example.com/o/r/actions/runs/123',
       'https://github.com/o/r/pull/3',
@@ -318,15 +316,18 @@ describe('what the unblocker may not do', () => {
     expect(refused(failure, { action: 'escalate', reason: 'r' })).toContain('this one named none')
   })
 
-  it('resolves elsewhere only with a commit or a run', () => {
+  it('resolves elsewhere only with the full sha of a commit', () => {
     expect(refused(failure, { action: 'resolve_elsewhere', reason: 'r' })).toBe(
-      'a resolution elsewhere names the commit or the GitHub Actions run that shows it, and this one named none',
+      'a resolution elsewhere names the full sha of the commit that holds the work, and this one named none',
     )
     expect(
       refused(failure, { action: 'resolve_elsewhere', evidence: 'merged', reason: 'r' }),
     ).toContain('this one named merged')
     expect(
       refused(failure, { action: 'resolve_elsewhere', evidence: 'abc1234', reason: 'r' }),
+    ).toContain('this one named abc1234')
+    expect(
+      refused(failure, { action: 'resolve_elsewhere', evidence: 'b'.repeat(40), reason: 'r' }),
     ).toBeUndefined()
   })
 

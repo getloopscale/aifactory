@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 
-import { task } from '../db/schema'
+import { repository, task } from '../db/schema'
+import { integrationBranch } from '../factory/branches'
 import { outcome as transition } from '../factory/transitions'
 import type { PollDeps } from '../factory/waiting'
 import type { IssuesApi } from '../github/issues-api'
@@ -17,7 +18,7 @@ import {
 import type { CoordinatorActionKind, Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { TaskException } from './exceptions'
-import { issueRefOf, withBlocker, type UnblockerVerdict } from './unblocker'
+import { isEvidence, issueRefOf, withBlocker, type UnblockerVerdict } from './unblocker'
 
 /**
  * Carries out the actions only the unblocker decides, each through the panel's own actions, which ask
@@ -103,6 +104,56 @@ async function blockedBy(deps: UnblockerApplyDeps, taskId: number, issue: string
   return updated === undefined ? 'the issue already declared the blocker' : 'the blocker was added'
 }
 
+/**
+ * Starts the task over only when it pushed nothing: starting over deletes its branch, and work that a run pushed is
+ * sent back on its branch instead, so a model's choice never throws it away.
+ */
+async function startOver(deps: UnblockerApplyDeps, taskId: number): Promise<string> {
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
+  if (row.headSha || row.pullRequestUrl) {
+    const at = row.headSha ? ` at ${short(row.headSha)}` : ''
+    throw new ActionRefused(
+      `the task has pushed work${at}; starting over would delete its branch, so send it back on it instead`,
+    )
+  }
+  await retry(deps, taskId, { automatic: true })
+  return 'started over from the integration branch'
+}
+
+/**
+ * Resolves the task elsewhere only when the commit the unblocker names is in the integration branch's history: a
+ * resolution marks the task delivered and a release then closes its issue, so a commit a model made up, or a run
+ * that shows no change in that branch, is refused. A commit GitHub does not know fails the read, and nothing changes.
+ */
+async function resolvedIn(
+  deps: UnblockerApplyDeps,
+  taskId: number,
+  evidence: string,
+  note: string,
+) {
+  const sha = evidence.trim()
+  if (!isEvidence(sha)) {
+    throw new ActionRefused(
+      `a resolution elsewhere names the full commit that holds the work, and ${sha || 'none'} is not one`,
+    )
+  }
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
+  const [config] = await deps.db
+    .select({ baseBranch: repository.baseBranch })
+    .from(repository)
+    .where(eq(repository.fullName, row.repository))
+  const branch = integrationBranch(config ?? {})
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, branch)
+  if (!head || !(await deps.api.contains(row.repository, token, head, sha))) {
+    throw new ActionRefused(`${branch} of ${row.repository} does not hold ${short(sha)}`)
+  }
+  await resolveElsewhere(deps, taskId, note)
+  return `resolved elsewhere, in ${short(sha)} on ${branch}`
+}
+
 async function answer(
   deps: UnblockerApplyDeps,
   exception: TaskException,
@@ -138,11 +189,9 @@ export async function applyUnblocker(
     case 'blocked_by':
       return blockedBy(deps, taskId, verdict.issue)
     case 'retry':
-      await retry(deps, taskId, { automatic: true })
-      return 'started over from the integration branch'
+      return startOver(deps, taskId)
     case 'resolve_elsewhere':
-      await resolveElsewhere(deps, taskId, decision.note ?? verdict.reason)
-      return 'resolved elsewhere'
+      return resolvedIn(deps, taskId, verdict.evidence ?? '', decision.note ?? verdict.reason)
     default:
       throw new Error(`the unblocker has no way to apply ${verdict.action} here`)
   }

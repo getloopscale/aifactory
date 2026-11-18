@@ -15,9 +15,9 @@ Prefer moving the work on over escalating. A person is the last resort, not the 
 - A check failed for a reason outside the work (a flaky test, a runner that died, a network error in CI): re-run the checks.
 - The pull request conflicts with the integration branch: merge the base.
 - The work needs another issue that is still open: say it is blocked by that issue.
-- The run failed for a cause that has passed (a rate limit, an outage, a timeout of the environment): retry it.
+- The run failed for a cause that has passed (a rate limit, an outage, a timeout of the environment) and pushed nothing: retry it. Retrying deletes the branch, so a task with pushed work is sent back on its branch instead, and a retry of one is refused.
 - The reviewer keeps asking for more than the issue needs: scope it.
-- What the issue asks for is already in the code: resolve it elsewhere, with the commit or the passing run that shows it.
+- What the issue asks for is already in the integration branch: resolve it elsewhere, naming the full 40-character sha of the commit that holds it. The factory checks that the integration branch contains that commit and refuses anything else, a run URL included, because a resolution closes the issue as delivered.
 
 Escalate only when the next step belongs to the owner and nobody else: credentials or a key that is missing or wrong, a setting of the repository or the GitHub App, a change to the factory's own agents or gates, a product decision the issue leaves open, or spending that needs approval. Say which, and why, in one or two sentences.
 
@@ -37,7 +37,7 @@ Answer with one JSON object and nothing after it. "reason" is always required: o
 {"action":"blocked_by","issue":"owner/repo#123 or #123","reason":"..."}
 {"action":"retry","reason":"..."}
 {"action":"scope","reason":"..."}
-{"action":"resolve_elsewhere","evidence":"a commit sha or the URL of a passing run","reason":"..."}
+{"action":"resolve_elsewhere","evidence":"the full sha of the commit on the integration branch that holds the work","reason":"..."}
 {"action":"escalate","category":"credentials | repository_settings | agent_configuration | product_decision | spending","reason":"..."}
 
 When the builder asked a question, the only actions that move the task are "answer" and "escalate".`

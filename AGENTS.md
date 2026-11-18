@@ -242,13 +242,15 @@ reads that file, not a convention.
   `agents/prompts/unblocker.ts`. `unblocker.ts` is pure: it parses the one action it answers (`answer`, `send_back`,
   `rerun_checks`, `merge_base`, `blocked_by`, `retry`, `scope`, `resolve_elsewhere`, `escalate`), keeps the
   escalation with the parse error for an answer that does not parse, and refuses an `escalate` without an owner
-  category (`OWNER_CATEGORIES`), a `resolve_elsewhere` without a commit or a run (`isEvidence`), a text that names a
+  category (`OWNER_CATEGORIES`), a `resolve_elsewhere` that names no full commit sha (`isEvidence`), a text that names a
   `QUALITY_CONFIGURATION`, and anything but `answer` or `escalate` for a waiting task. Its rows carry `by: unblocker`
   in `draft`, and `unblockerGate` stops it after `UNBLOCKER_MAX_APPLIED` applied actions on one commit or
   `UNBLOCKER_MAX_PER_TASK` on the task. `unblocker-apply.ts` carries out the actions only it decides through the
   panel's: an `answer` goes through `answerByCoordinator` (`coordinator_answer`), which stores the answer and queues
   `resume-task` in one transaction, since `pickAnswer` never takes a comment of the factory's own; `rerun_checks` and
-  `blocked_by` ask `coordinator_send_back` before they touch GitHub and then send the task back with no note. A pass
+  `blocked_by` ask `coordinator_send_back` before they touch GitHub and then send the task back with no note. A `retry`
+  is refused for a task with pushed work, since starting over deletes its branch, and a `resolve_elsewhere` only goes
+  through when the integration branch's history holds the named commit (`contains`), since it delivers the task. A pass
   without an unblocker in its dependencies escalates as before and reads no question.
   The release train (ADR 0010) is the `release_ready` playbook: `release-facts.ts` reads each enabled repository,
   `release-train.ts` decides over it and reads nothing. A repository in `auto` (its `release_mode`, or

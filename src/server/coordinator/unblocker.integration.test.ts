@@ -406,15 +406,28 @@ describe('the unblocker on what the coordinator would escalate', () => {
     expect((await actions())[0].reason).toContain('GitHub answered 403')
   })
 
-  it('starts the task over', async () => {
+  it('starts over a task that pushed no work', async () => {
     const id = await handedOver()
+    await getDb().update(task).set({ headSha: null }).where(eq(task.id, id))
+    api.repo(REPO).heads.delete(`factory/${await issueOf(id)}`)
     answers({ action: 'retry', reason: 'the rate limit passed' })
 
     await coordinate(deps(), 'auto')
 
     expect(await stageOf(id)).toBe('intake')
-    expect(api.repo(REPO).heads.has(`factory/${await issueOf(id)}`)).toBe(false)
     expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
+  })
+
+  it('refuses to start over a task with pushed work, keeping its branch', async () => {
+    const id = await handedOver()
+    answers({ action: 'retry', reason: 'start clean' })
+
+    await coordinate(deps(), 'auto')
+
+    expect(await stageOf(id)).toBe('handoff')
+    expect(api.repo(REPO).heads.get(`factory/${await issueOf(id)}`)).toBe(SHA)
+    expect(queued).toEqual([])
+    expect(await actions()).toMatchObject([{ action: 'retry', outcome: 'refused' }])
   })
 
   it('resolves the task elsewhere at the head of the integration branch, with the evidence', async () => {
@@ -427,6 +440,34 @@ describe('the unblocker on what the coordinator would escalate', () => {
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ stage: 'done', resolvedSha: 'e'.repeat(40) })
     expect(await actions()).toMatchObject([{ action: 'resolve_elsewhere', outcome: 'applied' }])
+  })
+  it('refuses a resolution whose commit the integration branch does not hold', async () => {
+    const id = await handedOver()
+    api.repo(REPO).heads.set('workspace', 'e'.repeat(40))
+    api.repo(REPO).unreachable.add('d'.repeat(40))
+    answers({ action: 'resolve_elsewhere', evidence: 'd'.repeat(40), reason: 'merged by hand' })
+
+    await coordinate(deps(), 'auto')
+
+    expect(await stageOf(id)).toBe('handoff')
+    const [row] = await actions()
+    expect(row).toMatchObject({ action: 'resolve_elsewhere', outcome: 'refused' })
+    expect(row.reason).toContain('ddddddd')
+  })
+
+  it('refuses a resolution whose only evidence is a workflow run', async () => {
+    const id = await handedOver()
+    api.repo(REPO).heads.set('workspace', 'e'.repeat(40))
+    answers({
+      action: 'resolve_elsewhere',
+      evidence: 'https://github.com/paulo/app/actions/runs/123',
+      reason: 'the run passed',
+    })
+
+    await coordinate(deps(), 'auto')
+
+    expect(await stageOf(id)).toBe('handoff')
+    expect(await actions()).toMatchObject([{ action: 'resolve_elsewhere', outcome: 'refused' }])
   })
 })
 

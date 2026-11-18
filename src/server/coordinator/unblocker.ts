@@ -160,13 +160,14 @@ export function withBlocker(body: string, ref: IssueRef, repository: string): st
   return [body.trimEnd(), `Blocked by ${nameOf(ref)}`].filter((part) => part !== '').join('\n\n')
 }
 
-const SHA = /^[0-9a-f]{7,40}$/i
-const GITHUB_EVIDENCE =
-  /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:commit\/[0-9a-f]{7,40}|actions\/runs\/\d+(?:\/job\/\d+)?)\/?$/i
+const FULL_SHA = /^[0-9a-f]{40}$/i
 
-/** Whether a resolution names what shows it: a commit, or a run on GitHub Actions. */
-export const isEvidence = (evidence: string): boolean =>
-  SHA.test(evidence.trim()) || GITHUB_EVIDENCE.test(evidence.trim())
+/**
+ * Whether a resolution names what holds the work: the full sha of a commit, which the apply step then finds in the
+ * integration branch. A run shows no change on that branch and a short sha can name more than one commit, so
+ * neither is evidence.
+ */
+export const isEvidence = (evidence: string): boolean => FULL_SHA.test(evidence.trim())
 
 /** Where the task the unblocker decides for is, which its references are read against. */
 export type UnblockerTarget = { repository: string; issueNumber: number }
@@ -195,7 +196,7 @@ export function refusalOf(
     return `an escalation names one of ${OWNER_CATEGORIES.join(', ')}, and this one named ${verdict.category ?? 'none'}`
   }
   if (verdict.action === 'resolve_elsewhere' && !isEvidence(verdict.evidence ?? '')) {
-    return `a resolution elsewhere names the commit or the GitHub Actions run that shows it, and this one named ${verdict.evidence || 'none'}`
+    return `a resolution elsewhere names the full sha of the commit that holds the work, and this one named ${verdict.evidence || 'none'}`
   }
   if (verdict.action === 'blocked_by') return blockerRefusal(verdict.issue, target)
   return undefined
