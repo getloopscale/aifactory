@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { RecipeWhy } from '../../shared/doctor-say'
 import type { FetchLike } from '../github/app'
 import { retryRead } from '../github/retry-read'
+import { gated } from '../github/rate-limit'
 
 import type { CheckSpec } from './evidence'
 import { DOMAIN, type RepoConfig } from './repo-config'
@@ -113,7 +114,7 @@ export async function readRecipe(
   // A read GitHub answers with a 5xx, or the network drops, is asked again with a pause.
   const response = await retryRead(
     () =>
-      fetchImpl(`https://api.github.com/repos/${repo}/contents/${RECIPE_PATH}`, {
+      gated(fetchImpl)(`https://api.github.com/repos/${repo}/contents/${RECIPE_PATH}`, {
         headers: {
           accept: 'application/vnd.github.raw+json',
           'x-github-api-version': '2022-11-28',

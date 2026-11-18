@@ -5,6 +5,7 @@ import { factoryDeps } from '../factory/deps'
 import { pollPublications } from '../factory/publish'
 import { mainProcessOnly } from '../factory/worker-only'
 import { createGithubApi } from '../github/pulls'
+import { githubPass } from '../github/budget-pass'
 
 /**
  * Carries a release in a repository that publishes with changesets to npm, every minute: merges the Version
@@ -15,28 +16,34 @@ import { createGithubApi } from '../github/pulls'
 export default defineCron('publish-changesets', {
   schedule: '* * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    let deps
-    try {
-      deps = factoryDeps()
-    } catch (error) {
-      console.error(
-        JSON.stringify({ event: 'publish_changesets_not_configured', error: String(error) }),
-      )
-      return
-    }
-    const result = await pollPublications({
-      db: getDb(),
-      github: deps.github,
-      api: createGithubApi(),
-    })
-    const changed =
-      result.merged.length +
-      result.published.length +
-      result.failed.length +
-      result.backMerged.length
-    if (changed > 0 || result.errors.length > 0) {
-      console.log(JSON.stringify({ event: 'publish_changesets', ...result }))
-    }
-  }),
+  handler: mainProcessOnly(
+    githubPass(
+      'publish-changesets',
+      async () => {
+        let deps
+        try {
+          deps = factoryDeps()
+        } catch (error) {
+          console.error(
+            JSON.stringify({ event: 'publish_changesets_not_configured', error: String(error) }),
+          )
+          return
+        }
+        const result = await pollPublications({
+          db: getDb(),
+          github: deps.github,
+          api: createGithubApi(),
+        })
+        const changed =
+          result.merged.length +
+          result.published.length +
+          result.failed.length +
+          result.backMerged.length
+        if (changed > 0 || result.errors.length > 0) {
+          console.log(JSON.stringify({ event: 'publish_changesets', ...result }))
+        }
+      },
+      { waitsForLimit: true },
+    ),
+  ),
 })

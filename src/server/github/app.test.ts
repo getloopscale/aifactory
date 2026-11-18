@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { CREDENTIAL_RENEWAL_MS } from '../factory/credential-renewal'
 
 import { createGithubApp, TOKEN_LIFE_LEFT_MS, type FetchLike } from './app'
+import { RateLimited } from './rate-limit'
 
 const { privateKey, publicKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
@@ -559,5 +560,19 @@ describe('what an installation was granted', () => {
     )
     await expect(app(fetch).installationPermissions('o/r/x')).rejects.toThrow(/owner\/name/)
     expect(urls).toHaveLength(3)
+  })
+})
+
+describe('the App refused for the rate limit', () => {
+  it('throws RateLimited while minting a token, with the reset time', async () => {
+    const spent: FetchLike = async () =>
+      new Response('{"message":"API rate limit exceeded"}', {
+        status: 403,
+        headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' },
+      })
+    const error = await app(spent)
+      .installationToken('o/r')
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RateLimited)
   })
 })

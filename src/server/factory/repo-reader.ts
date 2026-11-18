@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { repository } from '../db/schema'
 import type { FetchLike, GithubApp } from '../github/app'
+import { gated } from '../github/rate-limit'
 
 /**
  * What the assistant may read of a repository: the files that say how a project is built and tested,
@@ -79,7 +80,7 @@ const headers = (token: string) => ({
 export async function repoTree(deps: ReaderDeps, fullName: string): Promise<string[]> {
   const { name, ref } = await enabled(deps.db, fullName)
   const { token } = await deps.github.installationToken(name)
-  const response = await (deps.fetch ?? ((url, init) => fetch(url, init)))(
+  const response = await gated(deps.fetch ?? ((url, init) => fetch(url, init)))(
     `https://api.github.com/repos/${name}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
     { headers: headers(token) },
   )
@@ -99,7 +100,7 @@ export async function repoFile(deps: ReaderDeps, fullName: string, path: string)
   const { name, ref } = await enabled(deps.db, fullName)
   const { token } = await deps.github.installationToken(name)
   const branch = ref === 'HEAD' ? '' : `?ref=${encodeURIComponent(ref)}`
-  const response = await (deps.fetch ?? ((url, init) => fetch(url, init)))(
+  const response = await gated(deps.fetch ?? ((url, init) => fetch(url, init)))(
     `https://api.github.com/repos/${name}/contents/${path.split('/').map(encodeURIComponent).join('/')}${branch}`,
     { headers: { ...headers(token), accept: 'application/vnd.github.raw+json' } },
   )

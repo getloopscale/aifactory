@@ -97,6 +97,15 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure(undefined)).toBeNull()
   })
 
+  it('reads a run GitHub refused for the spent rate limit as the environment, which passes at the reset', () => {
+    expect(
+      retryableFailure({
+        error:
+          'GitHub rate limit spent: GET /repos/o/r/issues/3 was refused with 403 for the core limit, until 2026-11-18T01:22:00.000Z',
+      }),
+    ).toBe('environment')
+  })
+
   it('waits, rather than going to a person, while an issue the task is blocked by is open', () => {
     const detail = { error: 'blocked by o/a#1, still open; …', blockedBy: ['o/a#1'] }
 

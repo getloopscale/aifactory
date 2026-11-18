@@ -7,6 +7,7 @@ import { SNAPSHOT_TTL_MS } from '../factory/vercel-sandbox'
 import { pollAnswers } from '../factory/waiting'
 import { createGithubApi } from '../github/pulls'
 import { mainProcessOnly } from '../factory/worker-only'
+import { githubPass } from '../github/budget-pass'
 
 /**
  * Looks for answers to the questions agents asked, every minute. A comment webhook would be quicker,
@@ -16,24 +17,32 @@ import { mainProcessOnly } from '../factory/worker-only'
 export default defineCron('poll-answers', {
   schedule: '* * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    let deps
-    try {
-      deps = factoryDeps()
-    } catch (error) {
-      console.error(JSON.stringify({ event: 'poll_answers_not_configured', error: String(error) }))
-      return
-    }
-    const result = await pollAnswers({
-      db: getDb(),
-      github: deps.github,
-      api: createGithubApi(),
-      inTransaction,
-      deleteSnapshot: deps.sandbox.deleteSnapshot?.bind(deps.sandbox),
-      ttlMs: SNAPSHOT_TTL_MS,
-    })
-    if (result.answered.length > 0 || result.expired.length > 0) {
-      console.log(JSON.stringify({ event: 'poll_answers', ...result }))
-    }
-  }),
+  handler: mainProcessOnly(
+    githubPass(
+      'poll-answers',
+      async () => {
+        let deps
+        try {
+          deps = factoryDeps()
+        } catch (error) {
+          console.error(
+            JSON.stringify({ event: 'poll_answers_not_configured', error: String(error) }),
+          )
+          return
+        }
+        const result = await pollAnswers({
+          db: getDb(),
+          github: deps.github,
+          api: createGithubApi(),
+          inTransaction,
+          deleteSnapshot: deps.sandbox.deleteSnapshot?.bind(deps.sandbox),
+          ttlMs: SNAPSHOT_TTL_MS,
+        })
+        if (result.answered.length > 0 || result.expired.length > 0) {
+          console.log(JSON.stringify({ event: 'poll_answers', ...result }))
+        }
+      },
+      { waitsForLimit: true },
+    ),
+  ),
 })

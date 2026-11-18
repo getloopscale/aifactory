@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
+import { RateLimited } from './rate-limit'
 
 const noWait = async () => {}
 
@@ -1519,5 +1520,31 @@ describe('what the doctor reads of a repository', () => {
     await expect(
       createGithubApi(fetch).recentPullRequestHeads('o/r', 't', 'workspace', 3),
     ).rejects.toThrow(/403 listing the pull requests into workspace on o\/r/)
+  })
+})
+
+describe('a call refused for the rate limit', () => {
+  const spent = async () =>
+    new Response('{"message":"API rate limit exceeded for installation ID 1."}', {
+      status: 403,
+      headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' },
+    })
+
+  it('is thrown as RateLimited with the reset time, not as a plain 403', async () => {
+    const error = await createGithubApi(spent, noWait)
+      .branchHead('o/r', 't', 'workspace')
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RateLimited)
+    expect((error as RateLimited).resetAt.toISOString()).toBe(
+      new Date(1_795_000_000_000).toISOString(),
+    )
+  })
+
+  it('is thrown as RateLimited from a GraphQL change too', async () => {
+    const graphqlSpent = async (url: string) =>
+      url.endsWith('/graphql') ? spent() : Response.json({ node_id: 'PR_1' })
+    await expect(
+      createGithubApi(graphqlSpent, noWait).markReadyForReview('o/r', 't', 7, 'T'),
+    ).rejects.toBeInstanceOf(RateLimited)
   })
 })
