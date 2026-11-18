@@ -1,6 +1,6 @@
 {
-  "commit": "314dc06ad6cc931a91b42f2886b545746d4778a2",
-  "ranAt": "2026-11-16T17:57:00.000Z",
+  "commit": "aee5efef741a92f1d11c9a7cb8761761843e1229",
+  "ranAt": "2026-11-18T04:26:18.424Z",
   "setup": {
     "paulohenriquevn/aifactory-playground builder": "claude-code",
     "paulohenriquevn/aifactory-playground builderModel": "default",
@@ -8,213 +8,99 @@
     "paulohenriquevn/aifactory-playground reviewer": "codex",
     "paulohenriquevn/aifactory-playground reviewerModel": "gpt-6.1-terra",
     "paulohenriquevn/aifactory-playground reviewerEffort": "medium",
+    "paulohenriquevn/aifactory-playground planner": "codex",
+    "paulohenriquevn/aifactory-playground plannerModel": "gpt-6.1-terra",
+    "paulohenriquevn/aifactory-playground plannerEffort": "medium",
     "usetheokit/theokit builder": "claude-code",
     "usetheokit/theokit builderModel": "default",
     "usetheokit/theokit builderEffort": "default",
     "usetheokit/theokit reviewer": "codex",
     "usetheokit/theokit reviewerModel": "gpt-6.1-terra",
     "usetheokit/theokit reviewerEffort": "medium",
+    "usetheokit/theokit planner": "codex",
+    "usetheokit/theokit plannerModel": "gpt-6.1-terra",
+    "usetheokit/theokit plannerEffort": "medium",
     "usetheokit/theokit-gateways builder": "claude-code",
     "usetheokit/theokit-gateways builderModel": "default",
     "usetheokit/theokit-gateways builderEffort": "default",
     "usetheokit/theokit-gateways reviewer": "codex",
     "usetheokit/theokit-gateways reviewerModel": "gpt-6.1-terra",
     "usetheokit/theokit-gateways reviewerEffort": "medium",
+    "usetheokit/theokit-gateways planner": "codex",
+    "usetheokit/theokit-gateways plannerModel": "gpt-6.1-terra",
+    "usetheokit/theokit-gateways plannerEffort": "medium",
     "usetheokit/theokit-plugins builder": "claude-code",
     "usetheokit/theokit-plugins builderModel": "default",
     "usetheokit/theokit-plugins builderEffort": "default",
     "usetheokit/theokit-plugins reviewer": "codex",
     "usetheokit/theokit-plugins reviewerModel": "gpt-6.1-terra",
     "usetheokit/theokit-plugins reviewerEffort": "medium",
+    "usetheokit/theokit-plugins planner": "codex",
+    "usetheokit/theokit-plugins plannerModel": "gpt-6.1-terra",
+    "usetheokit/theokit-plugins plannerEffort": "medium",
     "usetheokit/theokit-sdk builder": "claude-code",
     "usetheokit/theokit-sdk builderModel": "default",
     "usetheokit/theokit-sdk builderEffort": "default",
     "usetheokit/theokit-sdk reviewer": "codex",
     "usetheokit/theokit-sdk reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-sdk reviewerEffort": "medium"
+    "usetheokit/theokit-sdk reviewerEffort": "medium",
+    "usetheokit/theokit-sdk planner": "codex",
+    "usetheokit/theokit-sdk plannerModel": "gpt-6.1-terra",
+    "usetheokit/theokit-sdk plannerEffort": "medium"
   },
   "results": [
     {
-      "id": "paulohenriquevn/aifactory-playground#63",
-      "passed": true,
-      "reason": "approved",
-      "costUsd": 0.0691561,
-      "durationMs": 44475,
-      "attempts": 1,
-      "reviewRounds": 1
-    },
-    {
-      "id": "usetheokit/theokit#1731",
-      "passed": true,
-      "reason": "approved",
-      "costUsd": 0.9777755,
-      "durationMs": 894153,
-      "attempts": 3,
-      "reviewRounds": 2
-    },
-    {
-      "id": "usetheokit/theokit-gateways#364",
-      "passed": false,
-      "reason": "checks failed: guards",
-      "costUsd": 2.8999361,
-      "durationMs": 2387878,
-      "attempts": 3,
-      "reviewRounds": 1
-    },
-    {
       "id": "usetheokit/theokit-plugins#235",
-      "passed": false,
-      "reason": "the reviewer asked for changes",
-      "costUsd": 5.8257475,
-      "durationMs": 1649225,
-      "attempts": 4,
-      "reviewRounds": 4
-    },
-    {
-      "id": "usetheokit/theokit-ui#178",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.10028800000000002,
-      "durationMs": 224911,
-      "attempts": 1,
-      "reviewRounds": 1
+      "costUsd": 1.5664943,
+      "durationMs": 695435,
+      "attempts": 2,
+      "reviewRounds": 2
     },
     {
       "id": "paulohenriquevn/aifactory-playground#61",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.0585593,
-      "durationMs": 46175,
+      "costUsd": 0.0509342,
+      "durationMs": 50141,
       "attempts": 1,
       "reviewRounds": 1
     },
     {
-      "id": "usetheokit/theokit#1726",
+      "id": "usetheokit/theokit-gateways#348",
       "passed": true,
       "reason": "approved",
-      "costUsd": 1.2528684,
-      "durationMs": 943383,
-      "attempts": 4,
-      "reviewRounds": 3
-    },
-    {
-      "id": "usetheokit/theokit-sdk#985",
-      "passed": false,
-      "reason": "the reviewer asked for changes",
-      "costUsd": 1.2617468000000003,
-      "durationMs": 2129135,
-      "attempts": 4,
-      "reviewRounds": 3
-    },
-    {
-      "id": "usetheokit/theokit-gateways#354",
-      "passed": true,
-      "reason": "approved",
-      "costUsd": 0.1605179,
-      "durationMs": 458065,
-      "attempts": 1,
-      "reviewRounds": 1
-    },
-    {
-      "id": "usetheokit/theokit-ui#175",
-      "passed": false,
-      "reason": "the agent made no change",
-      "costUsd": 0.21752469999999996,
-      "durationMs": 240062,
-      "attempts": 2,
-      "reviewRounds": 1
-    },
-    {
-      "id": "usetheokit/theokit-sdk#981",
-      "passed": true,
-      "reason": "approved",
-      "costUsd": 0.1068203,
-      "durationMs": 483203,
-      "attempts": 1,
-      "reviewRounds": 1
-    },
-    {
-      "id": "usetheokit/theokit#1725",
-      "passed": true,
-      "reason": "approved",
-      "costUsd": 0.2256438,
-      "durationMs": 466186,
+      "costUsd": 0.6717182000000002,
+      "durationMs": 1166876,
       "attempts": 2,
       "reviewRounds": 2
     },
     {
-      "id": "usetheokit/theokit-gateways#348",
-      "passed": false,
-      "reason": "the reviewer asked for changes",
-      "costUsd": 2.4886439000000005,
-      "durationMs": 1912779,
-      "attempts": 4,
-      "reviewRounds": 3
-    },
-    {
-      "id": "usetheokit/theokit-ui#172",
-      "passed": false,
-      "reason": "[unknown] terminated: The sandbox could not be reached and its health probe failed too (The operation was aborted due to timeout). It was not confirmed to be stopped \u2014 this is likely a network issue or envd inside the sandbox not being up yet; check the sandbox state with 'Sandbox.getInfo()'.",
-      "costUsd": 0,
-      "durationMs": 1030957,
-      "attempts": 0,
-      "reviewRounds": 0
-    },
-    {
       "id": "usetheokit/theokit-sdk#975",
       "passed": false,
-      "reason": "checks failed: tests",
-      "costUsd": 1.7132717999999998,
-      "durationMs": 2654795,
+      "reason": "checks failed: generated-docs, tests",
+      "costUsd": 0.9707335000000001,
+      "durationMs": 1692280,
       "attempts": 3,
-      "reviewRounds": 1
-    },
-    {
-      "id": "usetheokit/theokit#1690",
-      "passed": false,
-      "reason": "cannot replace /tmp/factory-prompt.md in the sandbox: timed out after 600000 ms",
-      "costUsd": 0,
-      "durationMs": 575876,
-      "attempts": 0,
       "reviewRounds": 0
     },
     {
-      "id": "usetheokit/theokit#1690",
-      "passed": false,
-      "reason": "2: [unknown] fetch failed",
-      "costUsd": 0,
-      "durationMs": 60465,
-      "attempts": 0,
-      "reviewRounds": 0
-    },
-    {
-      "id": "usetheokit/theokit-gateways#347",
-      "passed": false,
-      "reason": "the reviewer asked for changes",
-      "costUsd": 1.7275976999999998,
-      "durationMs": 2123468,
-      "attempts": 4,
-      "reviewRounds": 3
-    },
-    {
-      "id": "usetheokit/theokit-sdk#966",
+      "id": "usetheokit/theokit#1685",
       "passed": true,
       "reason": "approved",
-      "costUsd": 1.5307989999999998,
-      "durationMs": 2254667,
-      "attempts": 4,
-      "reviewRounds": 3
-    },
-    {
-      "id": "usetheokit/theokit#1686",
-      "passed": false,
-      "reason": "checks failed: tests, theoclaw-types",
-      "costUsd": 0.41821470000000005,
-      "durationMs": 847534,
-      "attempts": 3,
+      "costUsd": 0.0603135,
+      "durationMs": 291535,
+      "attempts": 1,
       "reviewRounds": 1
     }
   ],
-  "spentUsd": 21.0333,
-  "note": "Recorded from the eval_case lines of the 30-case run of 314dc06 on 2026-11-16, which reached the suite timeout after 20 cases (#180); the 10 cases it did not reach are absent. usetheokit/theokit-sdk#975, an environment failure in that run, was run again alone on 314dc06 on 2026-11-17 and its entry is that result. Its sandbox carried metadata so the live factory's reaper would leave it alone; 314dc06 creates sandboxes without any, and the reaper stops those after 10 minutes."
+  "spentUsd": 3.678650264,
+  "summary": {
+    "cases": 5,
+    "passed": 4,
+    "passRate": 0.8,
+    "meanCostUsd": 0.66403874,
+    "meanDurationMs": 779253.4
+  }
 }
