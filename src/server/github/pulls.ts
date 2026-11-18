@@ -67,6 +67,9 @@ export type BranchAhead = { sha: string; aheadBy: number; committedAt: Date }
 /** A full release a repository published, as its own release workflow names it. */
 export type PublishedRelease = { tag: string; url: string; publishedAt: Date }
 
+/** The most pages of 100 reports `commitChecks` reads of one commit before it says it could not read them all. */
+const MAX_CHECK_PAGES = 20
+
 export type CommitChecks = {
   checkRuns: { name: string; status: string; conclusion: string | null }[]
   /** The combined state of the older commit statuses. `none` when there are no statuses at all. */
@@ -849,37 +852,45 @@ export function createGithubApi(
     },
 
     async commitChecks(repo, token, sha) {
-      const runs = (await (
-        await ensure(
-          await call(repo, token, `/commits/${sha}/check-runs?per_page=100`),
-          `reading the check runs of ${sha.slice(0, 7)} on ${repo}`,
-          [200],
-        )
-      ).json()) as {
-        check_runs: { name: string; status: string; conclusion: string | null }[]
+      // Every page is read: a failure left on a later page would make the evidence look complete when it is not.
+      const pages = async <T>(path: string, what: string, take: (body: any) => T[]) => {
+        const items: T[] = []
+        for (let page = 1; page <= MAX_CHECK_PAGES; page++) {
+          const response = await ensure(
+            await call(
+              repo,
+              token,
+              `${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`,
+            ),
+            what,
+            [200],
+          )
+          const body = await response.json()
+          const got = take(body)
+          items.push(...got)
+          if (got.length === 0 || items.length >= (body.total_count ?? 0)) return { items, body }
+        }
+        throw new Error(`${what}: more than ${MAX_CHECK_PAGES * 100} reports, not all of them read`)
       }
-      const combined = (await (
-        await ensure(
-          await call(repo, token, `/commits/${sha}/status`),
-          `reading the statuses of ${sha.slice(0, 7)} on ${repo}`,
-          [200],
-        )
-      ).json()) as {
-        state: 'success' | 'failure' | 'error' | 'pending'
-        total_count: number
-        statuses?: { context: string; state: string }[]
-      }
+      const runs = await pages<{ name: string; status: string; conclusion: string | null }>(
+        `/commits/${sha}/check-runs`,
+        `reading the check runs of ${sha.slice(0, 7)} on ${repo}`,
+        (b) => b.check_runs ?? [],
+      )
+      const combined = await pages<{ context: string; state: string }>(
+        `/commits/${sha}/status`,
+        `reading the statuses of ${sha.slice(0, 7)} on ${repo}`,
+        (b) => b.statuses ?? [],
+      )
+      const state = combined.body.state as 'success' | 'failure' | 'error' | 'pending'
       return {
-        statusContexts: (combined.statuses ?? []).map((s) => ({
-          context: s.context,
-          state: s.state,
-        })),
-        checkRuns: runs.check_runs.map((r) => ({
+        checkRuns: runs.items.map((r) => ({
           name: r.name,
           status: r.status,
           conclusion: r.conclusion,
         })),
-        statuses: combined.total_count === 0 ? 'none' : combined.state,
+        statuses: combined.body.total_count === 0 ? ('none' as const) : state,
+        statusContexts: combined.items.map((s) => ({ context: s.context, state: s.state })),
       }
     },
 

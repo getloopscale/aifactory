@@ -18,7 +18,7 @@ import {
 } from '../db/schema'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { CI_SILENCE_MS } from '../factory/ci-wait'
-import { release, ReleaseRefused, type ReleaseMode } from '../factory/deliver'
+import { type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
@@ -350,24 +350,35 @@ describe('a red release branch that develop already fixed', () => {
   })
 })
 
-describe('a release asked for at a develop head that has since moved', () => {
+describe('a release the train decided at a develop head that has since moved', () => {
   it('is refused without merging or turning on auto-merge', async () => {
     await enable('auto')
     const id = await integrated()
-    const readAt = 'e'.repeat(40)
-
-    const asked = release(deps(), id, {
-      bump: 'patch',
-      actor: 'agent:coordinator',
-      expectedHead: readAt,
+    await getDb()
+      .insert(watch)
+      .values({
+        taskId: id,
+        repository: REPO,
+        sha: 'm'.repeat(40),
+        pullRequestNumber: 9,
+        status: 'red',
+        detail: 'failing: CI',
+      })
+    repo().checkRun('m'.repeat(40), { name: 'CI', conclusion: 'failure' })
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'success' })
+    // develop moves once its checks were read and the release goes to open its pull request.
+    api.before('openPullRequest', (_call, r) => void r.heads.set('develop', 'e'.repeat(40)), {
+      once: true,
     })
 
-    await expect(asked).rejects.toBeInstanceOf(ReleaseRefused)
-    await expect(asked).rejects.toThrow(
-      /moved to ccccccc after the release was asked for at eeeeeee/,
-    )
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 0 })
     expect(merges()).toEqual([])
     expect(api.callsTo('enableAutoMerge')).toEqual([])
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'release_ready', headSha: DEVELOP, outcome: 'refused' },
+    ])
   })
 })
 
