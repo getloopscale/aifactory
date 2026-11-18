@@ -8,6 +8,7 @@ import {
   COORDINATOR_ACTOR,
   passingRefusal,
   recogniseRelease,
+  RELEASE_MAX_WAIT_MINUTES,
   trainHolds,
   type RepositoryReleaseFacts,
 } from './release-train'
@@ -121,8 +122,15 @@ describe('whether the release train holds a repository without looking further',
     expect(trainHolds(facts({ releasable: [] }))).toBe(true)
   })
 
-  it('holds a repository with a task still working', () => {
+  it('holds a repository with a task still working, while its oldest integrated work waited under an hour', () => {
     expect(trainHolds(facts({ working: 1 }))).toBe(true)
+    expect(trainHolds(facts({ working: 1, waitedMinutes: RELEASE_MAX_WAIT_MINUTES - 1 }))).toBe(
+      true,
+    )
+  })
+
+  it('stops holding for a working task once the oldest integrated work waited an hour, so a busy queue still releases', () => {
+    expect(trainHolds(facts({ working: 3, waitedMinutes: RELEASE_MAX_WAIT_MINUTES }))).toBe(false)
   })
 
   it('holds a repository whose last release is still in flight or still watched', () => {

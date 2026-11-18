@@ -45,6 +45,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The release train releases a repository that keeps working: a queued task no longer holds it, and a running one holds it only until the oldest integrated work has waited an hour (#303)
 - `pnpm evals:check` no longer fails every case as an environment failure while the factory's runs hold every E2B sandbox: a case waits for a slot, asking again every 30 seconds for up to 20 minutes (#261)
 - `change_failure` no longer counts a delivery whose next run only merged the integration branch after a required check failed there too; that failure was the base's, not the work's (#274)
 - A task that failed because its harness would not install in the sandbox (`claude did not install`, `codex did not install`) or because the provider ended the sandbox in the middle of a command (`The sandbox was killed or reached its end of life`) now runs again on its own like any other failure of the environment, instead of waiting in Failed for a person (#266)

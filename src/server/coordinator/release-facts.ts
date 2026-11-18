@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, ne, or } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, publication, releaseWait, repository, task, watch } from '../db/schema'
@@ -34,12 +34,16 @@ export type ReleaseFactsDeps = {
   readIssue: ReadIssue
   /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
   releaseMode: ReleaseMode
+  now?: () => Date
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
-/** A task queued, running, or waiting for the integration branch's checks: its work would join the release. */
-const WORKING_STAGES = ['intake', ...WORKING] as const
+/**
+ * A task running, or waiting for the integration branch's checks: its work would join the release soon. A queued
+ * task has not started, so it holds nothing (ADR 0010: "no task of the repository is in a working stage").
+ */
+const WORKING_STAGES = WORKING
 
 async function releasable(db: Database, repo: string) {
   return db
@@ -60,6 +64,21 @@ async function working(db: Database, repo: string) {
       ),
     )
   return Number(row.n)
+}
+
+/** Minutes since the oldest task with integrated work that no release holds was delivered (its last `done`). */
+async function waitedMinutes(db: Database, repo: string, now: Date): Promise<number> {
+  const rows = await db.execute<{ since: Date | string | null }>(sql`
+    select min(coalesce(
+      (select max(e.at) from stage_event e where e.task_id = t.id and e.stage = 'done'),
+      t.created_at
+    )) as since
+    from task t
+    where t.repository = ${repo} and t.stage = 'done' and t.merged_sha is not null
+  `)
+  const since = rows.rows[0]?.since
+  if (!since) return 0
+  return Math.max(0, Math.floor((now.getTime() - new Date(since).getTime()) / 60_000))
 }
 
 async function inFlight(db: Database, repo: string): Promise<string | undefined> {
@@ -208,6 +227,7 @@ export async function readReleaseFacts(deps: ReleaseFactsDeps): Promise<Reposito
       mode,
       releasable: await releasable(deps.db, repo.fullName),
       working: await working(deps.db, repo.fullName),
+      waitedMinutes: await waitedMinutes(deps.db, repo.fullName, deps.now?.() ?? new Date()),
       inFlight: await inFlight(deps.db, repo.fullName),
       branch: await branchState(deps.db, repo.fullName),
     }

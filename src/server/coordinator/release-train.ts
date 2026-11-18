@@ -35,8 +35,10 @@ export type RepositoryReleaseFacts = {
   mode: ReleaseMode
   /** Its tasks with integrated work that no release holds (`done` with a merge), oldest first. */
   releasable: { taskId: number; issueNumber: number }[]
-  /** Its tasks queued, running or waiting for the integration branch's checks. */
+  /** Its tasks running or waiting for the integration branch's checks. */
   working: number
+  /** Minutes since the oldest of `releasable` was delivered. */
+  waitedMinutes?: number
   /** A release or a publication of the repository that has not finished, said as a person reads it. */
   inFlight: string | undefined
   branch: { state: ReleaseBranchState; detail: string }
@@ -52,6 +54,12 @@ export type RepositoryReleaseFacts = {
   waitRefusal?: string
   labels?: Read<ReleasedIssue[]>
 }
+
+/**
+ * How long integrated work waits for the repository's running tasks to join it in one release. A repository
+ * that is never idle still releases: past this, a running task no longer holds the train.
+ */
+export const RELEASE_MAX_WAIT_MINUTES = 60
 
 /** Labels that make an issue a feature, which bumps the minor version. */
 const FEATURE_LABELS = ['enhancement', 'feature']
@@ -96,7 +104,7 @@ export const passingRefusal = (reason: string): boolean =>
 export const trainHolds = (f: RepositoryReleaseFacts): boolean =>
   f.mode === 'manual' ||
   f.releasable.length === 0 ||
-  f.working > 0 ||
+  (f.working > 0 && (f.waitedMinutes ?? 0) < RELEASE_MAX_WAIT_MINUTES) ||
   f.inFlight !== undefined ||
   f.branch.state === 'watching'
 
