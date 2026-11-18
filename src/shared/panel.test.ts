@@ -109,6 +109,15 @@ describe('a failure that passes by itself', () => {
     ).toBe('environment')
   })
 
+  it('reads a run that failed on the rate limit before the factory named it as the environment', () => {
+    expect(
+      retryableFailure({
+        error:
+          'GitHub answered 403 creating the check run on o/r: {"message": "API rate limit exceeded for installation ID 178693604."}',
+      }),
+    ).toBe('environment')
+  })
+
   it('waits, rather than going to a person, while an issue the task is blocked by is open', () => {
     const detail = { error: 'blocked by o/a#1, still open; …', blockedBy: ['o/a#1'] }
 
