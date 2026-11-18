@@ -76,7 +76,7 @@ export type TaskFacts = {
 }
 
 /** An integration branch red this long while it holds a task is for a person. */
-export const BASE_RED_LIMIT_MS = 2 * 60 * 60 * 1000
+export const BASE_RED_LIMIT_MS = 30 * 60 * 1000
 
 /** One exception: its kind, the task, the head it was seen on and what it was recognised by. */
 export type TaskException = {
@@ -353,10 +353,11 @@ function ofBase(facts: TaskFacts): Found | undefined {
   const since = Date.parse(hold.since)
   const red = (facts.at ?? new Date()).getTime() - since
   if (red < BASE_RED_LIMIT_MS) return undefined
-  const hours = Math.floor(red / 3_600_000)
+  const minutes = Math.floor(red / 60_000)
+  const forHow = minutes < 120 ? `${minutes} minutes` : `${Math.floor(minutes / 60)} hours`
   return {
     kind: 'base_red',
-    evidence: `the integration branch has been red for ${hours} hours on ${hold.checks.join(', ')}, and the task waits for ${hold.checks.length === 1 ? 'it' : 'them'} to pass there`,
+    evidence: `the integration branch has been red for ${forHow} on ${hold.checks.join(', ')}, and the task waits for ${hold.checks.length === 1 ? 'it' : 'them'} to pass there`,
     // The start is part of it: a hold that cleared and came back on the same commit is another hold.
     identity: `${short(hold.sha)}:${hold.checks.join(',')}@${hold.since}`,
     ...redBase({ ...facts, checks: undefined }, { sha: hold.sha, checks: hold.checks }),

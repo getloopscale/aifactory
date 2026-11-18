@@ -296,7 +296,7 @@ export function baseHoldOf(detail: unknown, sha: string | null): BaseHold | null
   return { sha: hold.sha, checks: hold.checks, since: hold.since }
 }
 
-/** The hold after a pass: the checks red now, keeping `since` while the same checks stay red; none when no check is. */
+/** The hold after a pass: the checks red now, keeping `since` while any check stays red; none when no check is. */
 export function nextBaseHold(
   before: BaseHold | null,
   sha: string,
@@ -305,8 +305,8 @@ export function nextBaseHold(
 ): BaseHold | null {
   if (!red || red.length === 0) return null
   const checks = [...new Set(red)].sort()
-  const since =
-    before && before.checks.join('\n') === checks.join('\n') ? before.since : now.toISOString()
+  // A base that never went green is one red, whichever of its checks fail now: the clock goes on.
+  const since = before ? before.since : now.toISOString()
   return { sha, checks, since }
 }
 

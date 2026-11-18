@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The board shows, above the metrics, each red integration branch that holds delivered work, how long it has been red and how many tasks it holds (#282)
 - The top of the board shows the factory's speed, efficiency and quality. Closed it is one line; open it lists the tasks delivered in the last hour and in 24 hours, the hourly mean, the median lead time of the last day, the tasks queued and working, and the latest day of the first-try checks, cost per delivery, rework rounds, first-review approval, deliveries that came back and handoffs, each marked when it left its band. `GET /api/panel/pulse` serves the live numbers (#272)
 
 - Each card on the board shows the task's lead time, from entering the factory to its delivery, with its status: on track, at risk or overdue. While the clock runs, an at-risk card gets an amber border and an overdue one a red border; a delivered card keeps the time it was delivered in. Each repository sets both limits in minutes on its settings form, 120 and 480 by default (#269)
@@ -45,6 +46,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A red integration branch starts its fix after 30 minutes instead of 2 hours, and its clock no longer restarts when another of its checks goes red or its checks run again (#282)
 - `change_failure` no longer counts a delivery whose next run only merged the integration branch after a required check failed there too; that failure was the base's, not the work's (#274)
 - A task that failed because its harness would not install in the sandbox (`claude did not install`, `codex did not install`) or because the provider ended the sandbox in the middle of a command (`The sandbox was killed or reached its end of life`) now runs again on its own like any other failure of the environment, instead of waiting in Failed for a person (#266)
 
