@@ -1,4 +1,5 @@
 import { isMergeConflict } from '../factory/auto-retry'
+import { isFixedBaseNote } from '../factory/ci-wait'
 import type { decision, TaskStage } from '../db/schema'
 
 import type { MetricName } from './config'
@@ -107,8 +108,9 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     if (typeof cost === 'number') values.cost_per_delivery = cost
     const after = run.events.slice(doneAt + 1)
     // A release that went red belongs to the last delivery; an earlier one already came back to a new run.
-    const failed =
-      next !== undefined || after.some((e) => CAME_BACK.includes(e.stage)) || h.releaseWentRed
+    // A next run that only merges the base the checks failed on does not bring this work back.
+    const cameBack = next !== undefined && !isFixedBaseNote(next.events[0]?.detail?.note)
+    const failed = cameBack || after.some((e) => CAME_BACK.includes(e.stage)) || h.releaseWentRed
     values.change_failure = failed ? 1 : 0
     const cause = failed
       ? causeOfReturn(done, next, h.releaseWentRed && next === undefined)

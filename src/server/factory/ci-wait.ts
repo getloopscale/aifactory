@@ -266,6 +266,13 @@ function blameFailures(failed: string[], base: CheckReport[], blamed: string[]):
   return blame
 }
 
+const NOT_THIS_CHANGE = "so the failure was not this change's."
+
+/** Whether a run was opened by `fixedBaseNote`: it only merges the base, so the work it carries did not fail. */
+export function isFixedBaseNote(note: unknown): boolean {
+  return typeof note === 'string' && note.includes(NOT_THIS_CHANGE)
+}
+
 /**
  * What the task's record says when the checks its pull request failed were the base's and the base passes
  * them now: the factory merges the base into the branch itself (`mergeIntegration`), so the checks run again
@@ -274,7 +281,7 @@ function blameFailures(failed: string[], base: CheckReport[], blamed: string[]):
 export function fixedBaseNote(base: string, checks: string[]): string {
   const one = checks.length === 1
   return [
-    `The required check${one ? '' : 's'} ${checks.join(', ')} failed on this pull request while ${one ? 'it' : 'they'} failed on ${base} too, so the failure was not this change's.`,
+    `The required check${one ? '' : 's'} ${checks.join(', ')} failed on this pull request while ${one ? 'it' : 'they'} failed on ${base} too, ${NOT_THIS_CHANGE}`,
     `${base} passes ${one ? 'it' : 'them'} now, and a check runs again only on a new commit.`,
     `The factory merges ${base} into this branch and checks and reviews the merge.`,
   ].join(' ')

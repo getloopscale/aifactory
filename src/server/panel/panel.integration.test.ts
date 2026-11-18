@@ -20,6 +20,7 @@ import {
   task,
   watch,
   releaseWait,
+  repository,
   TASK_STAGES,
 } from '../db/schema'
 import { COLUMNS } from '../../shared/panel'
@@ -281,6 +282,52 @@ describe('listTasks', () => {
     expect(cards.get(work)).toMatchObject({ column: 'attention', retryable: null })
     expect(cards.get(healed)).toMatchObject({ column: 'attention', retryable: null })
     expect(cards.get(running)).toMatchObject({ column: 'working', retryable: null })
+  })
+})
+
+describe('listTasks and the lead time', () => {
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000)
+
+  beforeEach(async () => {
+    await getPool().query('truncate table repository restart identity cascade')
+  })
+
+  it("runs the clock of a task not delivered yet against the factory's default limits", async () => {
+    const onTrack = await seed('build', { createdAt: hoursAgo(1) })
+    const atRisk = await seed('verify', { createdAt: hoursAgo(3) })
+    const overdue = await seed('failed', { createdAt: hoursAgo(9) })
+
+    const cards = new Map((await listTasks(getDb())).map((c) => [c.id, c]))
+
+    expect(cards.get(onTrack)?.leadTime).toMatchObject({ status: 'on_track', running: true })
+    expect(cards.get(atRisk)?.leadTime).toMatchObject({ status: 'at_risk', running: true })
+    expect(cards.get(overdue)?.leadTime).toMatchObject({ status: 'overdue', running: true })
+    expect(cards.get(atRisk)?.leadTime?.minutes).toBeGreaterThanOrEqual(179)
+  })
+
+  it('stops the clock at the last delivery of a delivered task', async () => {
+    const id = await seed('done', { createdAt: hoursAgo(10) })
+    await getDb()
+      .insert(stageEvent)
+      .values([
+        { taskId: id, stage: 'done', at: hoursAgo(9.5) },
+        { taskId: id, stage: 'done', at: hoursAgo(9) },
+      ])
+
+    const card = (await listTasks(getDb())).find((c) => c.id === id)!
+
+    expect(card.leadTime).toEqual({ minutes: 60, status: 'on_track', running: false })
+  })
+
+  it("uses the repository's own limits where it set them", async () => {
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', leadTimeAtRiskMinutes: 30, leadTimeOverdueMinutes: 50 })
+    const id = await seed('build', { createdAt: hoursAgo(0.75) })
+
+    const card = (await listTasks(getDb())).find((c) => c.id === id)!
+
+    expect(card.leadTime).toMatchObject({ status: 'at_risk', running: true })
   })
 })
 

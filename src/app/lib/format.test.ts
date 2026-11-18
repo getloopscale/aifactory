@@ -9,6 +9,7 @@ import {
   agentName,
   ago,
   describeEvent,
+  duration,
   inQueueOrder,
   lastAgentLine,
   metricValue,
@@ -419,5 +420,16 @@ describe('the badge of a priority', () => {
 
   it('treats a priority under 1 as the most urgent', () => {
     expect(priorityTone(0)).toBe('destructive')
+  })
+})
+
+describe('duration', () => {
+  it('reads minutes under an hour, hours and minutes under a day, and days and hours after', () => {
+    expect(duration(0)).toBe('0m')
+    expect(duration(45)).toBe('45m')
+    expect(duration(60)).toBe('1h')
+    expect(duration(190)).toBe('3h 10m')
+    expect(duration(1440)).toBe('1d')
+    expect(duration(1440 + 4 * 60 + 30)).toBe('1d 4h')
   })
 })

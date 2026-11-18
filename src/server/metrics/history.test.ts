@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { COORDINATOR_ACTOR } from '../coordinator/release-train'
+import { fixedBaseNote } from '../factory/ci-wait'
 
 import { METRICS } from './config'
 import { observe, personDecisions, type HistoryEvent, type TaskHistory } from './history'
@@ -254,6 +255,20 @@ describe('observe', () => {
     expect(causes(other)).toEqual({ total: [1], checks: [0], conflict: [0], red: [0], other: [1] })
     const held = history({ events: [ev(0, 'intake'), ev(30, 'done', {})] })
     expect(causes(held)).toEqual({ total: [0], checks: [0], conflict: [0], red: [0], other: [0] })
+  })
+
+  it('does not say a delivery failed when the next run only merged the base its checks failed on', () => {
+    const h = history({
+      events: [
+        ev(0, 'intake'),
+        ev(30, 'done', { sha: 'a1', baseBlame: { sha: 'a1', checks: ['CI'] } }),
+        ev(60, 'intake', { note: fixedBaseNote('workspace', ['CI']), automatic: true }),
+        ev(90, 'done', { sha: 'b2' }),
+      ],
+    })
+
+    expect(value(h, 'change_failure')).toEqual([0, 0])
+    expect(value(h, 'change_failure_other')).toEqual([0, 0])
   })
 
   it('gives a red release only to the last delivery; an earlier return is another cause', () => {

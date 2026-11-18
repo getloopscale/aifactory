@@ -6,6 +6,8 @@ import {
   COLUMNS,
   type AgentSeen,
   type Column as ColumnId,
+  type LeadTime,
+  type LeadTimeStatus,
   type QueueView,
   type TaskCard,
 } from '../../shared/panel'
@@ -14,6 +16,7 @@ import type { Copy } from '../lib/copy/en'
 import {
   agentName,
   ago,
+  duration,
   inQueueOrder,
   lastAgentLine,
   money,
@@ -184,6 +187,47 @@ function Rank({ queue }: { queue: TaskCard['queue'] }) {
   )
 }
 
+/** The border of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
+const LEAD_BORDER: Record<LeadTimeStatus, string> = {
+  on_track: '',
+  at_risk: 'border-warning ring-1 ring-warning/40',
+  overdue: 'border-destructive ring-1 ring-destructive/40',
+}
+
+const LEAD_TEXT: Record<LeadTimeStatus, string> = {
+  on_track: 'text-muted-foreground',
+  at_risk: 'font-medium text-foreground',
+  overdue: 'font-medium text-destructive',
+}
+
+/** Colour that is not text: amber and red read on a dot where amber text would not. */
+const LEAD_DOT: Record<LeadTimeStatus, string> = {
+  on_track: '',
+  at_risk: 'bg-warning',
+  overdue: 'bg-destructive',
+}
+
+/** The lead time line: how long the task has taken, and whether that is on track, at risk or overdue. */
+function LeadTimeLine({ lead }: { lead: LeadTime }) {
+  const { t } = useCopy()
+  const copy = t.board.leadTime
+  const say = lead.running ? copy.running : copy.delivered
+  return (
+    <div
+      data-lead-time={lead.status}
+      className={`mt-1 text-xs tabular-nums ${lead.running ? LEAD_TEXT[lead.status] : 'text-muted-foreground'}`}
+    >
+      {lead.running && lead.status !== 'on_track' ? (
+        <span
+          aria-hidden
+          className={`mr-1.5 inline-block size-2 rounded-full ${LEAD_DOT[lead.status]}`}
+        />
+      ) : null}
+      {say(duration(lead.minutes), copy[lead.status])}
+    </div>
+  )
+}
+
 /**
  * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
  * takes up to three lines, the agent its own panel, and the stage closes the card.
@@ -194,7 +238,8 @@ export function Card({ task }: { task: TaskCard }) {
     <Link to={openTask(task.id)} className="group block">
       <Surface
         size="sm"
-        className="flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20"
+        data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
+        className={`flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
       >
         <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
           <Rank queue={task.queue} />
@@ -215,6 +260,7 @@ export function Card({ task }: { task: TaskCard }) {
         >
           {task.title}
         </div>
+        {task.leadTime ? <LeadTimeLine lead={task.leadTime} /> : null}
         {task.mainRed ? (
           <div className="mt-1 text-xs font-medium text-destructive">
             {t.board.mainRedAfterRelease}

@@ -1,4 +1,7 @@
 import type { DoctorSay } from './doctor-say'
+import type { LeadTime } from './lead-time'
+
+export type { LeadTime, LeadTimeStatus } from './lead-time'
 
 /** What the panel's API returns. The server builds these, the interface reads them. */
 
@@ -74,11 +77,25 @@ const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe f
  */
 const SANDBOX_LIMIT = /maximum number of concurrent E2B sandboxes/i
 
+/**
+ * e2b ending the stream of a command because the sandbox itself went away (`The sandbox was killed or reached
+ * its end of life while the request was in flight`). The provider stopped it; the work did not.
+ */
+const SANDBOX_ENDED = /sandbox was killed or reached its end of life/i
+
+/**
+ * The harness's own install failing (`claude did not install`, `codex did not install`): npm or its download
+ * of the native binary, before the agent wrote anything. The same install passes on the next sandbox.
+ */
+const HARNESS_INSTALL = /\b(claude|codex) did not install\b/i
+
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
     SANDBOX_UNREACHABLE.test(error) ||
+    SANDBOX_ENDED.test(error) ||
+    HARNESS_INSTALL.test(error) ||
     SANDBOX_LIMIT.test(error),
 }
 
@@ -252,6 +269,18 @@ export type MetricSignalView = {
 
 export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
 
+/** How fast the factory delivers right now, measured live rather than by the daily indicators. */
+export type PulseReport = {
+  /** Tasks delivered (their last `done`) in the last hour, and in the last 24 hours. */
+  deliveredLastHour: number
+  deliveredLast24Hours: number
+  /** The median lead time, entering to delivery, of the tasks delivered in the last 24 hours; null with none. */
+  leadTimeP50Minutes: number | null
+  /** Tasks waiting in the queue, and tasks a run is working on. */
+  queued: number
+  working: number
+}
+
 export type HealthReport = {
   cost: {
     last24HoursUsd: number
@@ -280,6 +309,11 @@ export type TaskCard = {
   createdAt: string
   /** The last time anything happened to the task. */
   updatedAt: string
+  /**
+   * From entering the factory to the delivery, or to now while it is not delivered, against the repository's
+   * limits. Null for a cancelled task, which has no delivery to count to.
+   */
+  leadTime: LeadTime | null
   /** Whether a person approved the commit the pull request is at. */
   approved: boolean
   /** The pull request was merged into the integration branch, so it is on the pre-release branch too. */
@@ -506,6 +540,10 @@ export type RepositoryView = {
   releaseMode: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; null means the factory's default. */
   runLimitMinutes: number | null
+  /** From this many minutes of lead time a task is at risk; null means the factory's default. */
+  leadTimeAtRiskMinutes: number | null
+  /** From this many minutes of lead time a task is overdue; null means the factory's default. */
+  leadTimeOverdueMinutes: number | null
   /** The commit of the integration branch the proven checks passed on; null when none was proven. */
   checksProvenSha: string | null
   /** The names of the saved checks that no proof ran: the owner typed them, and the first task tries them. */

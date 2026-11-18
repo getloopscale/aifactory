@@ -40,6 +40,7 @@ const base: TaskCard = {
   attempts: 2,
   createdAt: '2026-11-04T10:00:00Z',
   updatedAt: '2026-11-04T10:05:00Z',
+  leadTime: { minutes: 5, status: 'on_track', running: true },
   approved: false,
   integrated: false,
   waitingForChecks: false,

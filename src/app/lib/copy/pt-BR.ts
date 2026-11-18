@@ -163,6 +163,13 @@ export const ptBR: Copy = {
     needsRefinement: (missing: string) =>
       missing ? `precisa de refinamento: ${missing}` : 'precisa de refinamento',
     attempt: (n: number) => `tentativa ${n} de 3`,
+    leadTime: {
+      on_track: 'No prazo',
+      at_risk: 'Em risco',
+      overdue: 'Estourado',
+      running: (time: string, status: string) => `Lead time ${time} · ${status}`,
+      delivered: (time: string, status: string) => `Entregue em ${time} · ${status}`,
+    },
     steps: {
       planning: 'planejando',
       building: 'construindo',
@@ -548,6 +555,38 @@ export const ptBR: Copy = {
     askChange: 'Pedir uma mudança',
     changePlaceholder: 'Quer diferente? Diga o quê, com as suas palavras',
     change: 'Mudar',
+  },
+  pulse: {
+    region: 'Métricas da fábrica',
+    show: 'Ver métricas',
+    hide: 'Esconder métricas',
+    groups: { speed: 'Velocidade', efficiency: 'Eficiência', quality: 'Qualidade' },
+    labels: {
+      deliveredLastHour: 'Entregas na última hora',
+      perHour: 'Por hora, últimas 24h',
+      leadTime: 'Lead time mediano, 24h',
+      deliveredLast24Hours: 'Entregas em 24h',
+      queued: 'Na fila',
+      working: 'Em andamento',
+      first_pass_checks: 'Checks verdes de primeira',
+      cost_per_delivery: 'Custo por entrega',
+      rework_rounds: 'Rodadas de retrabalho por tarefa',
+      first_review_approval: 'Aprovadas na 1ª revisão',
+      change_failure: 'Entregas que voltaram',
+      handoff_share: 'Passadas para uma pessoa',
+    } as Record<string, string>,
+    out: 'fora da faixa normal',
+    drift: 'desviando',
+    day: (day: string) => `medido em ${day}`,
+  },
+  leadTimeLimits: {
+    atRisk: 'Minutos até uma tarefa ficar em risco',
+    overdue: 'Minutos até uma tarefa estourar o prazo',
+    atRiskPlaceholder: 'Vazio: o padrão da fábrica (120 minutos, 2 horas)',
+    overduePlaceholder: 'Vazio: o padrão da fábrica (480 minutos, 8 horas)',
+    help: 'O lead time conta do momento em que a issue entra na fábrica até a entrega do trabalho. Passado o primeiro limite, o card ganha borda âmbar; passado o segundo, borda vermelha.',
+    invalid: (min: number, max: number) =>
+      `Cada limite é um número inteiro de minutos, de ${min} a ${max}, e o primeiro é menor que o segundo.`,
   },
   runLimit: {
     label: 'Minutos que uma execução pode durar',

@@ -150,6 +150,22 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure({ error: `the sandbox did not start: ${refused}` })).toBe('environment')
   })
 
+  it('reads a harness that would not install as the environment', () => {
+    expect(retryableFailure({ error: 'claude did not install: added 1 package in 1s' })).toBe(
+      'environment',
+    )
+    expect(retryableFailure({ error: 'codex did not install: npm error code E404' })).toBe(
+      'environment',
+    )
+  })
+
+  it('reads a sandbox that the provider ended mid-command as the environment', () => {
+    const ended =
+      '[unavailable] the connection to sandbox i0ry24bnztijroi40rdot ended before the stream completed: The sandbox was killed or reached its end of life while the request was in flight. (cause: [unavailable] the connection to sandbox i0ry24bnztijroi40rdot ended before the stream completed)'
+
+    expect(retryableFailure({ error: ended })).toBe('environment')
+  })
+
   it('reads a sandbox provider that refuses for billing as the environment, not as the work', () => {
     expect(
       retryableFailure({ error: 'the sandbox did not start: 403: team is blocked: spend_limit' }),
