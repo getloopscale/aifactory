@@ -117,14 +117,14 @@ describe('compareWithBaseline', () => {
 
   it('refuses a cost rise that one early failure at zero cost would hide', () => {
     const run = [
-      ...before.results.slice(0, 4).map((r) => ({ ...r, costUsd: 0.8 })),
+      ...before.results.slice(0, 4).map((r) => ({ ...r, costUsd: 0.75 })),
       { ...result('e', false, 0), attempts: 0, reviewRounds: 0, reachedVerdict: false },
     ]
     const compared = compareWithBaseline(run, before)
 
     expect(compared.ok).toBe(false)
     expect(compared.reasons).toEqual([
-      'the mean cost per case rose from US$ 0.50 to US$ 0.80 (4 cases that ran to a verdict in both runs)',
+      'the mean cost per case rose from US$ 0.50 to US$ 0.75 (4 cases that ran to a verdict in both runs)',
     ])
   })
 
