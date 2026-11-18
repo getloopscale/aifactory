@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { publication, releaseWait, repository, task } from '../db/schema'
+import { repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { Issue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
@@ -144,31 +144,20 @@ export type CatchUpPage = {
   limit: number
 }
 
-/** The repositories with a release waiting for checks or a publication that has not finished. */
-async function inFlight(db: Database): Promise<Set<string>> {
-  const waits = await db
-    .select({ repository: releaseWait.repository })
-    .from(releaseWait)
-    .where(eq(releaseWait.status, 'waiting'))
-  const publishing = await db
-    .select({ repository: publication.repository })
-    .from(publication)
-    .where(eq(publication.status, 'waiting'))
-  return new Set([...waits, ...publishing].map((r) => r.repository))
-}
-
 /**
  * Catches up the tasks that finished with no change before a release could move them, `limit` at a time:
  * each is compared with the head of its repository's release branch (the owner's choice, or the default
  * branch). `next` is where the following pass starts, and 0 once a pass reaches the last task, so a task
  * whose commit is not there yet is looked at again later. A released task no longer matches, so running it
- * again changes nothing. Its issue is left alone: no tag is known here to tell it the version.
+ * again changes nothing. An issue still open is closed with a comment that names the branch, as no tag is known here.
  */
 export async function catchUpResolved(
   deps: {
     db: Database
     app: Pick<GithubApp, 'installationToken'>
-    api: Pick<GithubApi, 'contains' | 'defaultBranch'>
+    api: Pick<GithubApi, 'contains' | 'defaultBranch' | 'commentOnIssue' | 'closeIssue'>
+    /** How an issue is read before it is closed; without it a catch-up leaves issues alone. */
+    fetchIssue?: (repo: string, issueNumber: number, token: string) => Promise<Pick<Issue, 'state'>>
   },
   page: CatchUpPage,
 ): Promise<ResolvedReleased & { next: number }> {
@@ -180,11 +169,7 @@ export async function catchUpResolved(
     .orderBy(asc(task.id))
     .limit(page.limit)
   const result: ResolvedReleased = { released: [], errors: [] }
-  const releasing = await inFlight(deps.db)
   for (const repo of new Set(rows.map((r) => r.repository))) {
-    // A release or publication that waits ships these tasks itself, with their issues closed: moving them
-    // to `released` here would leave it nothing to select.
-    if (releasing.has(repo)) continue
     const mine = rows.filter((r) => r.repository === repo)
     try {
       const { token } = await deps.app.installationToken(repo)
@@ -195,8 +180,23 @@ export async function catchUpResolved(
         releaseRef: branch,
         releaseBranch: branch,
       }
-      const done = await releaseEach(deps, { ...view, actor: 'factory' }, mine)
+      // A release that is landing may not have shipped these tasks yet, and once they are `released` it
+      // never will: an issue still open is closed here, so no pass leaves one open.
+      const read = deps.fetchIssue
+      const afterRelease = read
+        ? (row: { issueNumber: number }) =>
+            closeOpenIssue(
+              deps.api,
+              (n) => read(repo, n, token),
+              repo,
+              token,
+              row.issueNumber,
+              `Released: the commit this was resolved at is on \`${branch}\`.`,
+            )
+        : undefined
+      const done = await releaseEach(deps, { ...view, actor: 'factory', afterRelease }, mine)
       result.released.push(...done.released)
+      if (done.issueErrors) (result.issueErrors ??= []).push(...done.issueErrors)
       result.errors.push(...done.errors)
     } catch (error) {
       result.errors.push(`${repo}: ${message(error)}`)

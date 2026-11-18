@@ -18,7 +18,7 @@ import {
 } from '../db/schema'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { CI_SILENCE_MS } from '../factory/ci-wait'
-import type { ReleaseMode } from '../factory/deliver'
+import { release, ReleaseRefused, type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
@@ -490,5 +490,24 @@ describe('the release train with work resolved elsewhere', () => {
     expect(await stageOf(anchor)).toBe('released')
     expect(await stageOf(inside.id)).toBe('released')
     expect(await stageOf(absent.id)).toBe('done')
+  })
+
+  it('refuses a release whose pull request head lacks the resolved commit though develop holds it, and merges nothing', async () => {
+    const { id, issue } = await resolved('resolved01')
+    // The branch holds the commit when the pull request is opened, the head that would be merged does not.
+    repo().holds('develop', ['resolved01'])
+    repo().holds(DEVELOP, [])
+
+    await expect(
+      release({ db: getDb(), github: deps().github, api }, id, {
+        bump: 'patch',
+        actor: 'agent:coordinator',
+      }),
+    ).rejects.toThrow(ReleaseRefused)
+
+    expect(merges()).toEqual([])
+    expect(api.callsTo('enableAutoMerge')).toEqual([])
+    expect(await stageOf(id)).toBe('done')
+    expect(repo().issues.get(issue)?.state).toBe('open')
   })
 })

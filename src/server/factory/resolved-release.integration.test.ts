@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, publication, repository, stageEvent, task } from '../db/schema'
+import { ingress, repository, stageEvent, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { catchUpResolved, resolvedCatchUp } from './resolved-release'
@@ -92,23 +92,6 @@ describe('catchUpResolved', () => {
   it('leaves a resolved task alone while its commit is not on the release branch', async () => {
     const id = await resolved('paulo/app', 1, 'bbb222')
     const gh = fakeGithub({ 'paulo/app:main': [] })
-
-    const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
-
-    expect(result.released).toEqual([])
-    expect(await stageOf(id)).toBe('done')
-  })
-
-  it('leaves a resolved task to the publication that waits, so it can ship it and close its issue', async () => {
-    const id = await resolved('paulo/app', 1, 'aaa111')
-    await getDb().insert(publication).values({
-      taskId: id,
-      repository: 'paulo/app',
-      releaseBranch: 'main',
-      promotedSha: 'aaa111',
-      actor: 'human',
-    })
-    const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
 
     const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
 
@@ -233,15 +216,28 @@ describe('catchUpResolved', () => {
     expect(await stageOf(broken)).toBe('done')
   })
 
-  it('releases without touching the issue: no tag is known in a catch-up', async () => {
+  it('closes an issue still open when it releases, so a release landing at the same time cannot leave it open', async () => {
     const open = await resolved('paulo/app', 1, 'aaa111')
     const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
     gh.api.repo('paulo/app').issue(1, { state: 'open' })
 
-    const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+    const result = await catchUpResolved(
+      { db: getDb(), ...gh, fetchIssue: (r, n) => gh.api.readIssue(r, n) },
+      { after: 0, limit: 10 },
+    )
 
     expect(result.released).toEqual([open])
+    expect(gh.api.repo('paulo/app').issue(1).state).toBe('closed')
+    expect(gh.api.repo('paulo/app').issue(1).comments).toHaveLength(1)
+  })
+
+  it('leaves the issue alone when no way to read it is given', async () => {
+    await resolved('paulo/app', 1, 'aaa111')
+    const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })
+    gh.api.repo('paulo/app').issue(1, { state: 'open' })
+
+    await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+
     expect(gh.api.repo('paulo/app').issue(1).state).toBe('open')
-    expect(gh.api.repo('paulo/app').issue(1).comments).toEqual([])
   })
 })
