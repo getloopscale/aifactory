@@ -777,7 +777,8 @@ export const metricSignal = pgTable(
  * refused release on the same head, a red release branch that holds the train, and an integration branch
  * red for too long while it holds tasks (`base_red`). A failure whose reason the coordinator acts on is its own
  * kind: checks still red after the attempts (`checks_red`), a run out of time (`out_of_time`) and an agent that
- * changed nothing (`no_change`); any other is a `failure`.
+ * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
+ * (`base_conflict`); any other is a `failure`.
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -797,11 +798,13 @@ export const EXCEPTION_KINDS = [
   'release_blocked',
   'queue_blocked',
   'base_red',
+  'base_conflict',
 ] as const
 
 /**
  * The closed set of actions the coordinator decides between (`coordinator/decide.ts`). `fix_base` files the
- * fix of a red integration branch as an issue of its repository; `wait` reads a fact again on the next passes.
+ * fix of a red integration branch as an issue of its repository; `merge_base` queues the run that merges the
+ * integration branch into the task's branch with no agent; `wait` reads a fact again on the next passes.
  */
 export const COORDINATOR_ACTIONS = [
   'send_back',
@@ -811,6 +814,7 @@ export const COORDINATOR_ACTIONS = [
   'release',
   'prioritise',
   'fix_base',
+  'merge_base',
   'wait',
   'escalate',
 ] as const

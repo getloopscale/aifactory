@@ -63,6 +63,7 @@ import { queuedMerges, thenMerge } from '../../test/merge-job'
 import { runContinuation } from './run-support'
 import { fixedBaseNote } from './ci-wait'
 import {
+  mergeBaseByCoordinator,
   mergeFixedBase,
   requestChanges,
   retryAutomatically,
@@ -3458,6 +3459,90 @@ describe('runTask merging an integration branch that passes the checks again', (
     })
     expect(pushesOf(sandbox)).toEqual([])
     expect(retryableFailure({ error: (result as { error: string }).error })).toBeNull()
+  })
+
+  it('records the branch and the files of a conflict, for the coordinator to send the merge to the agent', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
+        if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
+        if (command.includes('--diff-filter=U')) return { stdout: 'CHANGELOG.md\nsrc/a.ts\n' }
+        return undefined
+      }),
+    )
+    const input = queued[0]!
+
+    await runTask(
+      deps(sandbox),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    const [failed] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'failed')))
+    expect(failed!.detail).toMatchObject({
+      baseConflict: { branch: 'workspace', files: ['CHANGELOG.md', 'src/a.ts'] },
+    })
+  })
+
+  it('queues the same run for a handed-over task the coordinator merges the base of', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+
+    await mergeBaseByCoordinator(
+      {
+        db: getDb(),
+        github,
+        api: githubApi,
+        enqueueResume: async () => {},
+        deleteSnapshot: async () => {},
+        inTransaction: (work) =>
+          getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+      },
+      id,
+      'merges workspace',
+    )
+
+    expect(queued).toEqual([{ taskId: id, mergeBase: true }])
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row!.stage).toBe('intake')
+  })
+
+  it('refuses to merge the base for a handed-over task whose branch is gone', async () => {
+    const id = await seedTask()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+
+    const merging = mergeBaseByCoordinator(
+      {
+        db: getDb(),
+        github,
+        api: githubApi,
+        enqueueResume: async () => {},
+        deleteSnapshot: async () => {},
+        inTransaction: (work) =>
+          getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+      },
+      id,
+      'merges workspace',
+    )
+
+    await expect(merging).rejects.toThrow(
+      'the task has no branch on GitHub to merge the integration branch into',
+    )
+    expect(queued).toEqual([])
   })
 })
 
