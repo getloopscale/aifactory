@@ -30,6 +30,7 @@ import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
 import { outcome } from './transitions'
 import { squashTitle } from './run-support'
+import { selfCiRefusal } from './self-ci'
 
 export type AwaitCiDeps = {
   db: Database
@@ -247,6 +248,8 @@ async function readFailure(
  */
 async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]): Promise<boolean> {
   const { row, verifiedSha, token, number } = w
+  const refusal = selfCiRefusal(row.repository, required)
+  if (refusal) throw new Error(refusal)
   const pull = { repo: row.repository, token, number, sha: verifiedSha }
   if (required.length > 0 && (await autoMergeOrMergeable(deps.api, pull)) === 'waiting') {
     await deps.db

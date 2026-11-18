@@ -160,6 +160,8 @@ async function waitingTask(
     awaiting?: string | null
     stage?: string
     issueNumber?: number
+    repository?: string
+    held?: boolean
   } = {},
 ) {
   const db = getDb()
@@ -178,8 +180,9 @@ async function waitingTask(
     .insert(task)
     .values({
       ingressId: i.id,
-      repository: 'paulo/app',
+      repository: options.repository ?? 'paulo/app',
       issueNumber: options.issueNumber ?? 7,
+      integrationHeld: options.held ?? false,
       issueTitle: 'Add truncate',
       stage: (options.stage ?? 'done') as never,
       headSha: VERIFIED,
@@ -744,6 +747,33 @@ describe('pollAwaitingIntegrations', () => {
 
     expect(result.errors).toEqual([expect.stringMatching(new RegExp(`^task ${id}: .*502`))])
     expect(await row(id)).toMatchObject({ stage: 'done', awaitingCiSha: VERIFIED })
+  })
+})
+
+describe('a held integration of the factory repository', () => {
+  const OWN = 'paulohenriquevn/aifactory'
+
+  it('is not merged when the CI check stopped being required during the hold', async () => {
+    api.repo(OWN).prepare()
+    api.repo(OWN).pullRequest({
+      number: 12,
+      url: 'https://github.com/paulohenriquevn/aifactory/pull/12',
+      headRef: 'factory/7',
+      baseRef: 'workspace',
+      headSha: VERIFIED,
+      mergeableState: 'clean',
+    })
+    const id = await waitingTask({ repository: OWN, held: true })
+    await getDb()
+      .update(task)
+      .set({ pullRequestUrl: 'https://github.com/paulohenriquevn/aifactory/pull/12' })
+      .where(eq(task.id, id))
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(api.callsTo('mergePullRequest')).toEqual([])
+    expect(await row(id)).toMatchObject({ mergedSha: null, awaitingCiSha: VERIFIED })
   })
 })
 
