@@ -74,11 +74,25 @@ const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe f
  */
 const SANDBOX_LIMIT = /maximum number of concurrent E2B sandboxes/i
 
+/**
+ * e2b ending the stream of a command because the sandbox itself went away (`The sandbox was killed or reached
+ * its end of life while the request was in flight`). The provider stopped it; the work did not.
+ */
+const SANDBOX_ENDED = /sandbox was killed or reached its end of life/i
+
+/**
+ * The harness's own install failing (`claude did not install`, `codex did not install`): npm or its download
+ * of the native binary, before the agent wrote anything. The same install passes on the next sandbox.
+ */
+const HARNESS_INSTALL = /\b(claude|codex) did not install\b/i
+
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
     SANDBOX_UNREACHABLE.test(error) ||
+    SANDBOX_ENDED.test(error) ||
+    HARNESS_INSTALL.test(error) ||
     SANDBOX_LIMIT.test(error),
 }
 
