@@ -18,7 +18,7 @@ import {
 } from '../db/schema'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { CI_SILENCE_MS } from '../factory/ci-wait'
-import type { ReleaseMode } from '../factory/deliver'
+import { type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
@@ -334,6 +334,75 @@ describe('the release train on a red release branch', () => {
       outcome: 'escalated',
     })
     expect(row.reason).toContain('the checks of mmmmmmm failed: CI')
+  })
+})
+
+describe('a red release branch that develop already fixed', () => {
+  const RED = 'm'.repeat(40)
+  const seedRed = async () => {
+    await enable('auto')
+    const id = await integrated()
+    await getDb().insert(watch).values({
+      taskId: id,
+      repository: REPO,
+      sha: RED,
+      pullRequestNumber: 9,
+      status: 'red',
+      detail: 'failing: CI',
+    })
+    repo().checkRun(RED, { name: 'CI', conclusion: 'failure' })
+  }
+
+  it('releases when the failing check passes on the head of develop', async () => {
+    await seedRed()
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'success' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(promotions()).toHaveLength(1)
+  })
+
+  it('stays blocked when the check does not pass on develop', async () => {
+    await seedRed()
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'failure' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ escalated: 1, applied: 0 })
+    expect(promotions()).toEqual([])
+  })
+})
+
+describe('a release the train decided at a develop head that has since moved', () => {
+  it('is refused without merging or turning on auto-merge', async () => {
+    await enable('auto')
+    const id = await integrated()
+    await getDb()
+      .insert(watch)
+      .values({
+        taskId: id,
+        repository: REPO,
+        sha: 'm'.repeat(40),
+        pullRequestNumber: 9,
+        status: 'red',
+        detail: 'failing: CI',
+      })
+    repo().checkRun('m'.repeat(40), { name: 'CI', conclusion: 'failure' })
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'success' })
+    // develop moves once its checks were read and the release goes to open its pull request.
+    api.before('openPullRequest', (_call, r) => void r.heads.set('develop', 'e'.repeat(40)), {
+      once: true,
+    })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 0 })
+    expect(merges()).toEqual([])
+    expect(api.callsTo('enableAutoMerge')).toEqual([])
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'release_ready', headSha: DEVELOP, outcome: 'refused' },
+    ])
   })
 })
 
