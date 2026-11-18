@@ -1,15 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ChecksProof, ProvenCheck } from '../../shared/panel'
+import type { ChecksProof, ProvenCheck, StoredProof } from '../../shared/panel'
 import { FakeGithub } from '../../test/fake-github'
 
 import { DEFAULT_CHECK_MS } from './agent-time'
 import { CREDENTIAL_RENEWAL_MS, githubEgress } from './credential-renewal'
-import type { CheckResult } from './evidence'
+import { DEFAULT_CHECKS, type CheckResult } from './evidence'
 import { FakeSandbox, type Reply } from './fake-sandbox'
 import {
   PROOF_SANDBOX_MS,
   PROOF_STALE_MS,
+  effectiveChecks,
+  kindOf,
   passedChecks,
   proofView,
   proveChecks,
@@ -157,10 +159,29 @@ describe('provenAfter', () => {
   })
 })
 
+describe('kindOf', () => {
+  it('reads a proof or a job stored before proofs had a kind as one of checks', () => {
+    expect(kindOf({})).toBe('checks')
+  })
+
+  it('keeps the kind a proof or a job names', () => {
+    expect(kindOf({ kind: 'integration' })).toBe('integration')
+    expect(kindOf({ kind: 'checks' })).toBe('checks')
+  })
+})
+
+describe('effectiveChecks', () => {
+  it('is what the owner saved, and npm test when nothing was', () => {
+    expect(effectiveChecks({ ...NO_CONFIG, checks: [LINT] })).toEqual([LINT])
+    expect(effectiveChecks(NO_CONFIG)).toEqual(DEFAULT_CHECKS)
+  })
+})
+
 describe('proofView', () => {
   const at = new Date('2026-11-13T12:00:00.000Z')
   const proof = (over: Partial<ChecksProof> = {}): ChecksProof => ({
     fullName: NAME,
+    kind: 'checks',
     status: 'proving',
     at: at.toISOString(),
     checks: [TEST],
@@ -196,6 +217,20 @@ describe('proofView', () => {
     const done = proof({ status: 'done', sha: SHA, results: [proven()], saved: ['test'] })
 
     expect(proofView(done, after(PROOF_STALE_MS * 10))).toEqual(done)
+  })
+
+  it('shows a proof stored before proofs had a kind as a proof of checks', () => {
+    const stored: StoredProof = proof({ status: 'done', sha: SHA })
+    delete stored.kind
+
+    expect(proofView(stored, at)).toEqual({ ...stored, kind: 'checks' })
+  })
+
+  it('keeps the kind of an integration proof, also when it is shown as failed', () => {
+    const integration = proof({ kind: 'integration' })
+
+    expect(proofView(integration, at)?.kind).toBe('integration')
+    expect(proofView(integration, after(PROOF_STALE_MS + 1))?.kind).toBe('integration')
   })
 })
 
@@ -236,6 +271,56 @@ describe('proveChecks', () => {
     expect(sandbox.stopped).toBe(1)
     expect(cloned(sandbox)).toMatch(/checkout[^\n]*workspace/)
     expect(cloned(sandbox)).toContain(`https://github.com/${NAME}.git`)
+  })
+
+  it('runs the setup first and keeps its results apart from the proposed checks', async () => {
+    const INSTALL = { name: 'install', command: 'pnpm install' }
+    const E2E = { name: 'e2e', command: 'pnpm test:e2e' }
+    const { deps, sandbox, repository } = world()
+
+    const proof = await proveChecks(deps, repository, [E2E], { setup: () => [INSTALL, LINT] })
+
+    expect(checkCommands(sandbox)).toEqual(['pnpm install', 'npm run lint', 'pnpm test:e2e'])
+    expect(proof.results.map((r) => r.name)).toEqual(['e2e'])
+    expect(proof.setup?.map((r) => [r.name, r.status])).toEqual([
+      ['install', 'passed'],
+      ['lint', 'passed'],
+    ])
+    expect(sandbox.specs).toHaveLength(1)
+    expect(sandbox.stopped).toBe(1)
+  })
+
+  it('runs the proposed checks after a setup check that failed, and the failure decides nothing', async () => {
+    const E2E = { name: 'e2e', command: 'pnpm test:e2e' }
+    const { deps, repository } = world(
+      script((command) =>
+        command.endsWith('npm run lint') ? { exitCode: 1, stderr: 'lint broke' } : undefined,
+      ),
+    )
+
+    const proof = await proveChecks(deps, repository, [E2E], { setup: () => [LINT] })
+
+    expect(proof.setup).toMatchObject([{ name: 'lint', status: 'failed', output: 'lint broke' }])
+    expect(passedChecks(proof.results).map((r) => r.name)).toEqual(['e2e'])
+  })
+
+  it('reads the setup from the configuration with the recipe in it', async () => {
+    const { deps, sandbox, repository } = world()
+    const recipe = { install: 'pnpm install', egress: [] }
+
+    await proveChecks({ ...deps, fetchRecipe: async () => recipe }, repository, [TEST], {
+      setup: effectiveChecks,
+    })
+
+    expect(checkCommands(sandbox)).toEqual(['pnpm install', 'npm test'])
+  })
+
+  it('has no setup results when no setup was asked for', async () => {
+    const { deps, repository } = world()
+
+    const proof = await proveChecks(deps, repository, [TEST])
+
+    expect(proof.setup).toBeUndefined()
   })
 
   it('stops the sandbox also when a check throws, and lets the error out', async () => {

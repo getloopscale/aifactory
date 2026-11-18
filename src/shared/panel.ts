@@ -490,7 +490,24 @@ export type RepositoryView = {
   unprovenChecks: string[]
   /** The last proof of proposed checks, running or finished; null when none was asked for. */
   checksProof: ChecksProof | null
+  /**
+   * The checks run on the merge of the work with the integration branch, after the checks above. Empty
+   * means none: the merge is held to the development checks only.
+   */
+  integrationChecks: { name: string; command: string }[]
+  /** The commit of the integration branch the proven integration checks passed on; null when none was. */
+  integrationChecksProvenSha: string | null
+  /** The names of the saved integration checks that no proof ran. */
+  unprovenIntegrationChecks: string[]
+  /** The last proof of proposed integration checks, running or finished; null when none was asked for. */
+  integrationChecksProof: ChecksProof | null
 }
+
+/**
+ * Which list of a repository a proof is for: `checks` run on every commit of the work, `integration` on
+ * the merge of the work with the integration branch.
+ */
+export type ProofKind = 'checks' | 'integration'
 
 /**
  * How one proposed check did on the head of the integration branch. `too_slow` is a check that was still
@@ -513,6 +530,7 @@ export type ProvenCheck = {
  */
 export type ChecksProof = {
   fullName: string
+  kind: ProofKind
   status: 'proving' | 'done' | 'failed'
   /** When it was asked for. */
   at: string
@@ -525,7 +543,15 @@ export type ChecksProof = {
   results: ProvenCheck[]
   saved: string[]
   error: string | null
+  /**
+   * How the repository's own checks did, run first so the integration checks find the project installed.
+   * Only an integration proof has them; they are shown and never saved, and decide nothing.
+   */
+  setup?: ProvenCheck[]
 }
+
+/** A proof as a repository's row keeps it: one stored before proofs had a kind has none, and is of `checks`. */
+export type StoredProof = Omit<ChecksProof, 'kind'> & { kind?: ProofKind }
 
 /** What saving a repository answers with. */
 export type RepositorySaved = {
@@ -534,6 +560,8 @@ export type RepositorySaved = {
   doctor?: DoctorReport
   /** The names of the saved checks that no proof ran. */
   unprovenChecks: string[]
+  /** The names of the saved integration checks that no proof ran. */
+  unprovenIntegrationChecks: string[]
 }
 
 /** A project's `.factory/setup.json` on its default branch, and which of its domains wait for the owner. */

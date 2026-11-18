@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-import type { ChecksProof, DoctorReport, ProvenCheck } from '../../shared/panel'
+import type { DoctorReport, ProvenCheck, StoredProof } from '../../shared/panel'
 
 /**
  * The stages of a task, in the order a successful run passes through them, then the ways a run ends
@@ -544,7 +544,24 @@ export const repository = pgTable('repository', {
   /** The saved checks a proof ran and saw pass, each with its result; one the owner typed is not here. */
   checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
   /** The last proof of proposed checks, running or finished. */
-  checksProof: jsonb('checks_proof').$type<ChecksProof>(),
+  checksProof: jsonb('checks_proof').$type<StoredProof>(),
+  /**
+   * The checks run on the merge of the work with the integration branch, after the checks above:
+   * `[{ name, command }]`. Empty means none.
+   */
+  integrationChecks: jsonb('integration_checks')
+    .$type<{ name: string; command: string }[]>()
+    .notNull()
+    .default([]),
+  /** The commit of the integration branch the checks in `integrationChecksProven` passed on. */
+  integrationChecksProvenSha: text('integration_checks_proven_sha'),
+  /** The saved integration checks a proof ran and saw pass, each with its result. */
+  integrationChecksProven: jsonb('integration_checks_proven')
+    .$type<ProvenCheck[]>()
+    .notNull()
+    .default([]),
+  /** The last proof of proposed integration checks, running or finished. */
+  integrationChecksProof: jsonb('integration_checks_proof').$type<StoredProof>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

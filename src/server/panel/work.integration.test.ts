@@ -213,10 +213,12 @@ describe('the repositories page', () => {
     expect(await saveRepository(deps(), 'paulo/app', { harness: 'codex' })).toEqual({
       fullName: 'Paulo/App',
       unprovenChecks: [],
+      unprovenIntegrationChecks: [],
     })
     expect(await saveRepository(deps(), 'paulo/app', { enabled: false })).toEqual({
       fullName: 'Paulo/App',
       unprovenChecks: [],
+      unprovenIntegrationChecks: [],
     })
     expect(before).toBe(1)
     expect(examined()).toBe(1)
@@ -391,7 +393,11 @@ describe('the repositories page', () => {
         checks: [LINT, { name: 'unit', command: ' pnpm test ' }],
       })
 
-      expect(answer).toEqual({ fullName: 'Paulo/App', unprovenChecks: ['lint', 'unit'] })
+      expect(answer).toEqual({
+        fullName: 'Paulo/App',
+        unprovenChecks: ['lint', 'unit'],
+        unprovenIntegrationChecks: [],
+      })
       const [row] = await getDb().select().from(repository)
       expect(row).toMatchObject({ checks: [LINT, UNIT], checksProvenSha: null, checksProven: [] })
       expect(await listed()).toMatchObject({
@@ -464,6 +470,106 @@ describe('the repositories page', () => {
       await getDb().update(repository).set({ checksProof: proof })
 
       expect((await listed()).checksProof).toMatchObject({ status: 'failed', checks: [LINT] })
+    })
+  })
+
+  describe('integration checks the owner types', () => {
+    const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+    const LINT = { name: 'lint', command: 'npm run lint' }
+    const E2E = { name: 'e2e', command: 'pnpm test:e2e' }
+    const DB = { name: 'db', command: 'pnpm test:db' }
+    const passed = (check: typeof E2E) => ({
+      ...check,
+      status: 'passed' as const,
+      exitCode: 0,
+      durationMs: 5,
+      output: '',
+    })
+    /** A repository whose two integration checks a proof ran and saved, and whose checks it did not. */
+    const proven = async () => {
+      await saveRepository(deps(), 'paulo/app', { checks: [LINT], integrationChecks: [E2E, DB] })
+      await getDb()
+        .update(repository)
+        .set({
+          integrationChecksProvenSha: SHA,
+          integrationChecksProven: [passed(E2E), passed(DB)],
+        })
+    }
+    const listed = async () => (await listRepositories(deps())).repositories[0]
+
+    it('are saved as typed, and the answer names each as not proven', async () => {
+      const answer = await saveRepository(deps(), 'paulo/app', {
+        integrationChecks: [E2E, { name: 'db', command: ' pnpm test:db ' }],
+      })
+
+      expect(answer).toEqual({
+        fullName: 'Paulo/App',
+        unprovenChecks: [],
+        unprovenIntegrationChecks: ['e2e', 'db'],
+      })
+      const [row] = await getDb().select().from(repository)
+      expect(row).toMatchObject({
+        integrationChecks: [E2E, DB],
+        integrationChecksProvenSha: null,
+        integrationChecksProven: [],
+        checks: null,
+      })
+      expect(await listed()).toMatchObject({
+        integrationChecks: [E2E, DB],
+        integrationChecksProvenSha: null,
+        unprovenIntegrationChecks: ['e2e', 'db'],
+        integrationChecksProof: null,
+      })
+    })
+
+    it('lose the proof of the one the owner changed, and keep the others', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', {
+        integrationChecks: [E2E, { ...DB, command: 'pnpm test:db --all' }],
+      })
+
+      expect(answer).toMatchObject({ unprovenChecks: ['lint'], unprovenIntegrationChecks: ['db'] })
+      const [row] = await getDb().select().from(repository)
+      expect(row.integrationChecksProvenSha).toBe(SHA)
+      expect(row.integrationChecksProven.map((c) => c.name)).toEqual(['e2e'])
+    })
+
+    it('keep their proof through a save that says nothing about them', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', { checks: [LINT] })
+
+      expect(answer.unprovenIntegrationChecks).toEqual([])
+      const [row] = await getDb().select().from(repository)
+      expect(row).toMatchObject({ integrationChecks: [E2E, DB], integrationChecksProvenSha: SHA })
+      expect(await listed()).toMatchObject({ unprovenIntegrationChecks: [] })
+    })
+
+    it('forget the proof when the owner clears them', async () => {
+      await proven()
+
+      const answer = await saveRepository(deps(), 'paulo/app', { integrationChecks: [] })
+
+      expect(answer.unprovenIntegrationChecks).toEqual([])
+      const [row] = await getDb().select().from(repository)
+      expect(row).toMatchObject({
+        integrationChecks: [],
+        integrationChecksProvenSha: null,
+        integrationChecksProven: [],
+        checks: [LINT],
+      })
+    })
+
+    it('are refused with two of the same name, as checks are', async () => {
+      await expect(
+        saveRepository(deps(), 'paulo/app', { integrationChecks: [E2E, { ...E2E, command: 'x' }] }),
+      ).rejects.toThrow(/two checks are named "e2e"/)
+      await expect(
+        saveRepository(deps(), 'paulo/app', {
+          integrationChecks: [{ name: 'Not A Name', command: 'x' }],
+        }),
+      ).rejects.toThrow(/is not a check name/)
     })
   })
 

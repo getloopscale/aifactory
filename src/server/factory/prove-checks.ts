@@ -1,4 +1,4 @@
-import type { ChecksProof, ProvenCheck } from '../../shared/panel'
+import type { ChecksProof, ProofKind, ProvenCheck, StoredProof } from '../../shared/panel'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
 
@@ -6,7 +6,7 @@ import { DEFAULT_CHECK_MS, fitToSession } from './agent-time'
 import { ensureBranches, integrationBranch } from './branches'
 import { cloneRepository } from './clone'
 import { githubEgress, renewGithubCredential } from './credential-renewal'
-import { runChecks, type CheckResult, type CheckSpec } from './evidence'
+import { DEFAULT_CHECKS, runChecks, type CheckResult, type CheckSpec } from './evidence'
 import { withRecipe, type Recipe } from './recipe'
 import type { RepoConfig } from './repo-config'
 import { must } from './run-support'
@@ -31,8 +31,20 @@ export type ProveDeps = {
   sandboxMs?: number
 }
 
-/** What a proof found: the commit the checks ran on, the limit each had, and how each did. */
-export type Proof = { sha: string; limitMs: number; results: ProvenCheck[] }
+/**
+ * What a proof found: the commit the checks ran on, the limit each had, and how each did. `setup` is how
+ * the checks run before them did, when some were: they are kept apart, since nothing of them is saved.
+ */
+export type Proof = { sha: string; limitMs: number; results: ProvenCheck[]; setup?: ProvenCheck[] }
+
+export type ProveOptions = {
+  /**
+   * The checks to run before the proposed ones, read from the repository's configuration with its recipe
+   * in it. Integration checks usually need the project installed, and the repository's checks are what
+   * installs it in a run. How they do is reported and decides nothing.
+   */
+  setup?: (config: RepoConfig) => CheckSpec[]
+}
 
 /** What a repository's row says about its proven checks, and the saved checks that are not among them. */
 export type ProvenState = {
@@ -69,6 +81,16 @@ export function provenResults(checks: CheckSpec[], results: CheckResult[]): Prov
   })
 }
 
+/** A proof or a `prove-checks` job stored before proofs had a kind is one of the repository's checks. */
+export function kindOf(value: { kind?: ProofKind }): ProofKind {
+  return value.kind ?? 'checks'
+}
+
+/** The checks a run of the repository makes before its changeset check: the owner's, the recipe's or the default. */
+export function effectiveChecks(config: RepoConfig): CheckSpec[] {
+  return config.checks ?? DEFAULT_CHECKS
+}
+
 /** The checks a proof may store: the ones that passed. */
 export function passedChecks(results: ProvenCheck[]): ProvenCheck[] {
   return results.filter((result) => result.status === 'passed')
@@ -101,9 +123,14 @@ export function provenAfter(
   }
 }
 
-/** The stored proof as it is shown: one left `proving` by a job that died is shown as failed. */
-export function proofView(proof: ChecksProof | null, now: Date): ChecksProof | null {
-  if (proof?.status !== 'proving') return proof
+/**
+ * The stored proof as it is shown: one left `proving` by a job that died is shown as failed, and one stored
+ * before proofs had a kind is a proof of checks.
+ */
+export function proofView(stored: StoredProof | null, now: Date): ChecksProof | null {
+  if (!stored) return null
+  const proof: ChecksProof = { ...stored, kind: kindOf(stored) }
+  if (proof.status !== 'proving') return proof
   if (now.getTime() - new Date(proof.at).getTime() <= PROOF_STALE_MS) return proof
   return {
     ...proof,
@@ -123,6 +150,7 @@ export async function proveChecks(
   deps: ProveDeps,
   repository: { fullName: string; config: RepoConfig },
   checks: CheckSpec[],
+  options: ProveOptions = {},
 ): Promise<Proof> {
   const { fullName } = repository
   const { token } = await deps.github.installationToken(fullName)
@@ -157,8 +185,11 @@ export async function proveChecks(
       instanceId: PROOF_INSTANCE,
     })
     const sha = (await must(sandbox.backend, `git -C ${repoDir} rev-parse HEAD`)).stdout.trim()
-    const results = await runChecks(sandbox.backend, repoDir, checks, limitMs)
-    return { sha, limitMs, results: provenResults(checks, results) }
+    const run = async (list: CheckSpec[]) =>
+      provenResults(list, await runChecks(sandbox.backend, repoDir, list, limitMs))
+    const setup = options.setup ? await run(options.setup(config)) : undefined
+    const results = await run(checks)
+    return { sha, limitMs, results, ...(setup ? { setup } : {}) }
   } finally {
     await sandbox.stop()
   }
