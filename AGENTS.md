@@ -50,7 +50,8 @@ src/server/         backend — never leaves the machine
   scheduler/        the order of the queued runs and the readiness of newly queued issues
   factory/          one task end to end: sandbox, agent, push, stage history; the repository doctor
   github/           GitHub App auth (repository-scoped tokens) and issue reads
-  jobs/             defineJob files; `run-task` runs a task, `prove-checks` proves proposed checks
+  jobs/             defineJob files; `run-task` runs a task, `merge-task` opens and integrates the pull request
+                    of approved work, `prove-checks` proves proposed checks
   routes/           file-based HTTP
 src/shared/         contracts both sides import (`panel.ts` is what the panel API returns)
 .theokit/           agent context read at runtime (no rebuild)
@@ -126,6 +127,13 @@ reads that file, not a convention.
   textarea has none. The premise is that the owner never has to be a programmer.
 - **Panel routes are owner-only.** `.policy(ownerOnly)` on everything under `/api/panel` but the login;
   `.policy('public')` is for the webhook and the probes. The panel never goes through the tunnel.
+- **Approved work is merged by a job of its own.** When the review approves, `Run.approved` keeps the handover
+  of work the factory never integrates (`heldFor`) and the settling of a closed pull request (`reopenedOrEmpty`),
+  then enters `merge` and queues `merge-task` in one transaction (`enterMerge` in `factory/merge-task.ts`). The
+  stage's detail holds everything the pull request and the delivery need, so the job needs no sandbox. The job
+  asks `transitions.ts` (`merge_due`) and does nothing for a task that left `merge` or a commit other than the one
+  waiting; it enters `pr`, opens the pull request, integrates it (`integrate` in `factory/integration.ts`) and
+  delivers it or leaves it waiting for CI, as below. A failure is `failed` at `merge` or `pr`, like a run's.
 - **Three branches, the same in every repository.** `workspace` integrates: the factory merges its own pull
   request there, pinned to the verified commit, once the checks pass and the review approves. When the
   integration branch requires status checks, the factory merges nothing itself: it turns on auto-merge pinned

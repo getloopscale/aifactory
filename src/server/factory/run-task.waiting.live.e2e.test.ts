@@ -14,9 +14,19 @@ import { deletePreReleases, resetIntegrationBranches } from '../../test/playgrou
 import { createGithubApi } from '../github/pulls'
 
 import { DEFAULT_HARNESS, harnessRegistry, pickHarness } from './harness-registry'
-import { resumeTask, runTask } from './run-task'
+import { resumeTask as resumeOnly, runTask as runOnly } from './run-task'
+import { jobBackend } from './job-backend'
+import { thenMerge } from '../../test/merge-job'
 import { vercelSandboxProvider } from './vercel-sandbox'
 import { pollAnswers } from './waiting'
+
+/** A run, and the merge-task job it queued when the review approved its work, as a worker runs it. */
+const runTask = async (...args: Parameters<typeof runOnly>) =>
+  thenMerge(args[0], args[1], await runOnly(...args))
+
+/** A resumed run, and the merge-task job it queued when the review approved its work. */
+const resumeTask = async (...args: Parameters<typeof resumeOnly>) =>
+  thenMerge(args[0], args[1], await resumeOnly(...args))
 
 // The whole round trip, for real: Claude Code is told to ask before it writes anything, the sandbox is
 // snapshotted on Vercel, the question goes to a GitHub issue, a person answers it (the `gh` login of
@@ -51,6 +61,8 @@ describe.skipIf(!live)('a task that waits for an answer, with the real agent', (
   beforeAll(async () => {
     getStorageManager().configure(storageFromEnv()!)
     await migrate(getDb(), { migrationsFolder: 'drizzle' })
+    // The run queues its merge-task job in TheoKit's table, which its own migration creates.
+    await jobBackend().migrate()
     await getPool().query(
       'truncate table question, review, evidence, stage_event, task, ingress restart identity cascade',
     )

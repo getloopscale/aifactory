@@ -653,26 +653,37 @@ describe('actions', () => {
       const inEvery = (stages: readonly string[], message: string) =>
         Object.fromEntries(stages.map((stage) => [stage, message]))
       const except = (...taken: string[]) => TASK_STAGES.filter((stage) => !taken.includes(stage))
+      /** What a person is told while the factory merges approved work, whatever they asked. */
+      const merging = {
+        merge:
+          'the reviewer approved this work and the factory is merging it now: wait until it is delivered',
+      }
 
       it('approve', async () => {
         const no = 'only a task with a pull request can be approved'
-        expect(await refusals({ headSha: 'abc' }, (id) => approve(deps(), id))).toEqual(
-          inEvery(except('done', 'handoff'), no),
-        )
-        expect(await refusals({}, (id) => approve(deps(), id))).toEqual(inEvery(TASK_STAGES, no))
+        expect(await refusals({ headSha: 'abc' }, (id) => approve(deps(), id))).toEqual({
+          ...inEvery(except('done', 'handoff'), no),
+          ...merging,
+        })
+        expect(await refusals({}, (id) => approve(deps(), id))).toEqual({
+          ...inEvery(TASK_STAGES, no),
+          ...merging,
+        })
       })
 
       it('request changes', async () => {
         const no = 'only a task with a pull request can be sent back'
         const integrated =
           'this work is already integrated, so there is no pull request to send back: open a new job for what should change'
-        expect(await refusals({}, (id) => requestChanges(deps(), id, 'Rename it.'))).toEqual(
-          inEvery(except('done', 'handoff', 'failed'), no),
-        )
+        expect(await refusals({}, (id) => requestChanges(deps(), id, 'Rename it.'))).toEqual({
+          ...inEvery(except('done', 'handoff', 'failed'), no),
+          ...merging,
+        })
         expect(
           await refusals({ mergedSha: 'm' }, (id) => requestChanges(deps(), id, 'Rename it.')),
         ).toEqual({
           ...inEvery(TASK_STAGES, no),
+          ...merging,
           done: integrated,
           handoff: integrated,
           failed: integrated,
@@ -682,10 +693,11 @@ describe('actions', () => {
       it('retry, and retry from a finding', async () => {
         const no =
           'only a failed or handed-over task, or one whose pull request was never merged, can be retried'
-        const settled = inEvery(except('failed', 'handoff'), no)
-        expect(await refusals({}, (id) => retry(deps(), id))).toEqual(
-          inEvery(except('failed', 'handoff', 'done'), no),
-        )
+        const settled = { ...inEvery(except('failed', 'handoff'), no), ...merging }
+        expect(await refusals({}, (id) => retry(deps(), id))).toEqual({
+          ...inEvery(except('failed', 'handoff', 'done'), no),
+          ...merging,
+        })
         expect(await refusals({ mergedSha: 'm' }, (id) => retry(deps(), id))).toEqual(settled)
         expect(await refusals({ resolvedSha: 'r' }, (id) => retry(deps(), id))).toEqual(settled)
         expect(
@@ -702,12 +714,13 @@ describe('actions', () => {
               'Fixed by hand.',
             ),
           ),
-        ).toEqual(
-          inEvery(
+        ).toEqual({
+          ...inEvery(
             except('failed', 'handoff'),
             'only a failed or handed-over task can be resolved another way',
           ),
-        )
+          ...merging,
+        })
       })
 
       it('run again on its own', async () => {
@@ -736,7 +749,7 @@ describe('actions', () => {
       it('release', async () => {
         const unfinished = 'only a finished task with a pull request can be released'
         const released = 'this task was already released'
-        const all = { ...inEvery(TASK_STAGES, unfinished), released }
+        const all = { ...inEvery(TASK_STAGES, unfinished), released, ...merging }
         const release = (id: number) => releaseTask(deps(), id, 'patch')
         expect(await refusals({}, release)).toEqual(all)
         expect(await refusals({ mergedSha: 'm' }, release)).toEqual(all)

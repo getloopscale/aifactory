@@ -23,8 +23,8 @@ export { mergeEgress } from './run-support'
  * Runs one task: reads the issue, starts an isolated sandbox, has the agent implement it, pushes
  * the result to `factory/<issue>`, runs the checks on the pushed commit and has an independent
  * reviewer read it. Checks that fail or a review that asks for changes send the work back to the
- * same agent session, up to three attempts. A pull request opens only on green evidence for the
- * pushed commit plus an approval; when attempts run out after green checks, a draft pull request
+ * same agent session, up to three attempts. Green evidence for the pushed commit plus an approval
+ * moves the task to `merge`, where the `merge-task` job opens the pull request; when attempts run out after green checks, a draft pull request
  * and a comment on the issue hand the work to a person. Each stage is recorded as the run enters
  * it, the sandbox is always stopped, and a failure is recorded as `failed` with its reason.
  */

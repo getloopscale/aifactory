@@ -191,6 +191,10 @@ export function describeEvent(event: TimelineEvent): string {
       return [text(d.reviewer), shortSha(d.sha as string)].filter(Boolean).join(', ')
     case 'waiting':
       return text(d.question)
+    case 'merge':
+      return [shortSha(d.sha as string), d.reviewer ? `approved by ${text(d.reviewer)}` : '']
+        .filter(Boolean)
+        .join(', ')
     case 'done':
       return describeDone(d)
     case 'released':

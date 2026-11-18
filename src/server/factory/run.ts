@@ -13,13 +13,7 @@ import {
   task,
 } from '../db/schema'
 import type { Issue } from '../github/issues'
-import {
-  autoMergeOrMergeable,
-  NEEDS_A_PERSON,
-  titleToRestore,
-  type GithubApi,
-  type PullRequest,
-} from '../github/pulls'
+import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
 import { parseLearned, withoutLearned } from '../knowledge/format'
 
@@ -36,17 +30,9 @@ import { ensureBranches, integrationBranch } from './branches'
 import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
 import { githubEgress, renewGithubCredential } from './credential-renewal'
-import { createPreRelease } from './deliver'
-import {
-  advancePreRelease,
-  describeDelivery,
-  describeIntegration,
-  releaseByMode,
-  type Handed,
-  type Integrated,
-} from './integration'
+import { deliverPreRelease, describeDelivery, type Handed } from './integration'
+import { enterMerge } from './merge-task'
 import { heldForEvaluation, heldForReview } from '../evals/cases'
-import { integrationHeldUntil } from './promotion-merge'
 import {
   DEFAULT_CHECKS,
   failingChecks,
@@ -162,8 +148,6 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
  * needs, not by the hour a token lasts. A first build that adds a package needs more than 25 minutes, and four
  * were cut at 25 on 2026-11-11 (paulohenriquevn/aifactory#23), so a pass may take 45.
  */
-/** GitHub failing: not a refusal of the work, so the run fails and repeats. */
-const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
 
 /** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
 type Held = { headline: string; reason: string; cause: HandoffCause }
@@ -211,7 +195,7 @@ type Checked = { results: CheckResult[]; here: StoredCheck[]; verdict: Verdict }
 const refreshers = new WeakMap<EgressRule[], (rule: EgressRule) => Promise<void>>()
 
 /**
- * One run of a task, from the sandbox to the pull request. It holds what changes as the run goes
+ * One run of a task, from the sandbox to the approval. It holds what changes as the run goes
  * (what it has cost, what the agent last said, the agent's session) and has a method for each step, so
  * no step has to be read inside another. `openRun` builds it, `start` does the first pass, and `loop`
  * checks, reviews and reworks until the work is approved or handed over.
@@ -1640,129 +1624,38 @@ export class Run {
     return merged
   }
 
-  /**
-   * Integrates the approved work: the pull request is merged into the integration branch, pinned to the
-   * commit that was verified and reviewed, and the pre-release branch then advances to include it. Nobody
-   * is asked, because the checks and the review are the decision. A merge GitHub refuses (a conflict, a
-   * protected branch) leaves the pull request open for a person and does not fail the task.
-   *
-   * An integration branch that requires status checks gets the repository's own CI first: GitHub merges
-   * the pull request through auto-merge once they pass, pinned to the same commit, and the
-   * `integrate-after-ci` cron does the rest. When GitHub refuses auto-merge because the checks already
-   * passed (the pull request is clean), it is merged at once like one with no required checks. When it
-   * refuses because the pull request is a draft, the pull request is marked ready and asked once more. Any
-   * other refusal fails the run, with what to set.
-   *
-   * The pull request may be the draft a handoff left, when a person asked for changes and the new run was
-   * approved. A draft is marked ready for review first, with its title restored, on either path: GitHub
-   * merges no draft. One that is not a draft gets no call.
-   */
-  private async integrate(sha: string, opened: PullRequest): Promise<Integrated> {
-    const { deps, taskId, row, api, branch } = this.c
-    const pullNumber = opened.number
-    const markReady = (title: string) =>
-      api.markReadyForReview(row.repository, this.c.token, pullNumber, title)
-    const restored = titleToRestore(opened, this.title)
-    if (restored !== undefined) await markReady(restored)
-    const integration = integrationBranch(this.c.repo)
-    const heldUntil = await integrationHeldUntil(deps.db, row.repository, new Date())
-    if (heldUntil) return { heldUntil }
-    const required = await api.requiredChecks(row.repository, this.c.token, integration)
-    const pull = { repo: row.repository, token: this.c.token, number: pullNumber, sha }
-    if (
-      required.length > 0 &&
-      (await autoMergeOrMergeable(api, pull, () => markReady(this.title))) === 'waiting'
-    ) {
-      return { awaitingChecks: required }
-    }
-    let merged: { sha: string }
-    try {
-      merged = await api.mergePullRequest(row.repository, this.c.token, pullNumber, sha, {
-        method: 'squash',
-        title: this.title,
-      })
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      // GitHub failing is the environment's: the run fails and repeats, it is not an integration refusal.
-      if (GITHUB_SERVER_ERROR.test(message)) throw error
-      return { error: message }
-    }
-    await deps.db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, taskId))
-    await api.deleteBranch(row.repository, this.c.token, branch).catch((error: unknown) => {
-      // GitHub failing is the environment's and surfaces; any other cleanup failure is left alone.
-      if (GITHUB_SERVER_ERROR.test(error instanceof Error ? error.message : String(error))) {
-        throw error
-      }
-    })
-    const advanced = await advancePreRelease(
-      { api, db: deps.db },
-      {
-        repository: row.repository,
-        token: this.c.token,
-        integration,
-        mergedSha: merged.sha,
-      },
-    )
-    return { mergedSha: merged.sha, ...advanced }
-  }
-
-  private async deliver(
-    sha: string,
-    pullRequestUrl: string,
-    attempts: number,
-    integrated?: Integrated,
-  ): Promise<Handed> {
+  private deliver(sha: string, pullRequestUrl: string, attempts: number): Promise<Handed> {
     const { deps, taskId, row, issue, api } = this.c
-    try {
-      return await createPreRelease(
-        { db: deps.db, api },
-        {
-          taskId,
-          repository: row.repository,
-          token: this.c.token,
-          issueNumber: row.issueNumber,
-          title: issue.title,
-          sha,
-          tagSha:
-            integrated && 'mergedSha' in integrated
-              ? (integrated.developSha ?? integrated.mergedSha)
-              : undefined,
-          pullRequestUrl,
-          attempts,
-          costUsd: this.cost,
-          agentSummary: this.summary,
-        },
-      )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      // GitHub failing is the environment's: the run fails and repeats, it is not a delivery refusal.
-      if (GITHUB_SERVER_ERROR.test(message)) throw error
-      return { error: message }
-    }
-  }
-
-  /** What the release mode says to do once a commit is delivered and approved (see `releaseByMode`). */
-  private releaseByMode(sha: string): Promise<string | undefined> {
-    const { deps, taskId, api } = this.c
-    return releaseByMode(
-      { db: deps.db, github: deps.github, api },
+    return deliverPreRelease(
+      { db: deps.db, api },
       {
         taskId,
+        repository: row.repository,
+        token: this.c.token,
+        issueNumber: row.issueNumber,
+        title: issue.title,
         sha,
-        mode: this.c.repo.releaseMode ?? deps.releaseMode,
-        actor: `agent:${this.reviewer.name}`,
+        pullRequestUrl,
+        attempts,
+        costUsd: this.cost,
+        agentSummary: this.summary,
       },
     )
   }
 
-  /** The work was approved: open the pull request, hand it over as a pre-release, and finish. */
+  /**
+   * The work was approved: the run ends by moving the task to `merge`, with all the pull request and the
+   * delivery need, and the `merge-task` job opens the pull request and integrates it (`factory/merge-task.ts`).
+   * A change the factory never integrates on its own goes to a person instead, and a pull request a person
+   * closed is settled here, while the run still has its branch.
+   */
   private async approved(
     sha: string,
     attempt: number,
     here: StoredCheck[],
     outcome: ReviewVerdict,
   ): Promise<RunResult> {
-    const { deps, taskId, row, api, branch, state } = this.c
+    const { deps, taskId, row, branch, state } = this.c
     const held = heldFor(
       heldForEvaluation(row.repository, this.touched, deps.ownRepository),
       heldForReview(row.repository, this.touched, deps.ownRepository),
@@ -1770,13 +1663,17 @@ export class Run {
     if (held) return this.handOver(sha, attempt, here, outcome, [], held)
     const empty = await this.reopenedOrEmpty(sha)
     if (empty) return empty
-    state.current = 'pr'
-    await enterStage(deps.db, taskId, 'pr', { branch, sha })
-    const pull = await api.openPullRequest(row.repository, this.c.token, {
-      head: branch,
-      base: integrationBranch(this.c.repo),
+    state.current = 'merge'
+    await enterMerge(taskId, {
+      branch,
+      sha,
+      attempts: attempt,
+      costUsd: this.cost,
+      agentSummary: this.summary,
+      reviewer: this.reviewer.name,
       title: this.title,
-      body: pullRequestBody({
+      issueTitle: this.c.issue.title,
+      pullRequestBody: pullRequestBody({
         issueNumber: row.issueNumber,
         sha,
         rows: here,
@@ -1785,72 +1682,7 @@ export class Run {
         plan: this.renderedPlan,
       }),
     })
-    const integrated = await this.integrate(sha, pull)
-    if (integrated.awaitingChecks || integrated.heldUntil) {
-      return this.awaitChecks(sha, attempt, pull.url, integrated)
-    }
-    const handed = await this.deliver(sha, pull.url, attempt, integrated)
-    await enterStage(
-      deps.db,
-      taskId,
-      'done',
-      {
-        branch,
-        sha,
-        pullRequestUrl: pull.url,
-        costUsd: this.cost,
-        attempts: attempt,
-        ...describeIntegration(integrated),
-        ...describeDelivery(handed),
-      },
-      { pullRequestUrl: pull.url },
-    )
-    const preRelease = 'tag' in handed ? handed.tag : undefined
-    // A release follows only a delivery that was made.
-    const released = preRelease ? await this.releaseByMode(sha) : undefined
-    return {
-      status: 'done',
-      branch,
-      sha,
-      pullRequestUrl: pull.url,
-      summary: this.summary,
-      preRelease,
-      released,
-    }
-  }
-
-  /**
-   * The work is approved and its pull request waits for the repository's required checks. The run ends here:
-   * the pre-release and the release follow the merge, from the `integrate-after-ci` cron, which reads what it
-   * needs for them from this stage's detail.
-   */
-  private async awaitChecks(
-    sha: string,
-    attempt: number,
-    pullRequestUrl: string,
-    integrated: Integrated,
-  ): Promise<RunResult> {
-    const { deps, taskId, branch } = this.c
-    await enterStage(
-      deps.db,
-      taskId,
-      'done',
-      {
-        branch,
-        sha,
-        pullRequestUrl,
-        costUsd: this.cost,
-        attempts: attempt,
-        agentSummary: this.summary,
-        ...describeIntegration(integrated),
-      },
-      {
-        pullRequestUrl,
-        awaitingCiSha: sha,
-        integrationHeld: integrated.heldUntil !== undefined,
-      },
-    )
-    return { status: 'done', branch, sha, pullRequestUrl, summary: this.summary }
+    return { status: 'merging', branch, sha, summary: this.summary }
   }
 
   /**
@@ -2025,7 +1857,7 @@ export class Run {
 
   /**
    * Checks the commit and has it reviewed, up to three attempts, or six while the blocking findings fall. Failing checks and a review that
-   * asks for changes send the work back to the same agent session; an approval opens the pull request,
+   * asks for changes send the work back to the same agent session; an approval moves the task to `merge`,
    * and running out of attempts after green checks hands the work to a person.
    */
   async loop(pushed: string): Promise<RunResult> {

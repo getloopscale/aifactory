@@ -16,6 +16,7 @@ const TONE: Record<Stage, Variant> = {
   review: 'primary',
   pr: 'primary',
   waiting: 'warning',
+  merge: 'primary',
   done: 'success',
   released: 'accent',
   handoff: 'warning',

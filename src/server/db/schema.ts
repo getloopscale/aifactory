@@ -29,6 +29,7 @@ export const TASK_STAGES = [
   'verify',
   'review',
   'waiting',
+  'merge',
   'pr',
   'done',
   'released',
