@@ -126,6 +126,18 @@ describe('listTasks', () => {
     expect(new Set(cards.map((c) => c.column))).toEqual(new Set(['review', 'attention']))
   })
 
+  it('leaves a cancelled task off the board, since its issue was withdrawn and nobody has anything to do', async () => {
+    const kept = await seed('failed')
+    const withdrawn = await seed('cancelled', {}, [
+      { stage: 'cancelled', detail: { reason: 'closed' } },
+    ])
+
+    const ids = (await listTasks(getDb())).map((c) => c.id)
+
+    expect(ids).toContain(kept)
+    expect(ids).not.toContain(withdrawn)
+  })
+
   it('names the agent at work on a running card, and the last one on a card that stopped', async () => {
     const reviewing = await seed('review', {}, [
       { stage: 'plan', detail: { harness: 'claude-code' } },

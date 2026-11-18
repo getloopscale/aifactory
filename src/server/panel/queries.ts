@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -284,9 +284,16 @@ function lastDelivery(rows: DeliveryRow[], t: TaskRow, kind: 'prerelease' | 'rel
   return last ? { tag: last.tag, url: last.url } : null
 }
 
-/** Every task, newest activity first. */
+/**
+ * Every task on the board, newest activity first. A cancelled task is left off: its issue was closed or lost
+ * the `factory` label, so nobody has anything to do with it, and the issue keeps its story.
+ */
 export async function listTasks(db: Database): Promise<TaskCard[]> {
-  const rows = await db.select().from(task).orderBy(desc(task.id))
+  const rows = await db
+    .select()
+    .from(task)
+    .where(ne(task.stage, 'cancelled'))
+    .orderBy(desc(task.id))
   return (await cards(db, rows)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 

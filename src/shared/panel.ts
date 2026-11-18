@@ -138,7 +138,7 @@ export function columnOf(
       return 'released'
     case 'handoff':
     case 'failed':
-    // Nothing enters it yet. Until something does and says where it belongs, a person sees it.
+    // The board leaves a cancelled task off (`listTasks`); a card read on its own lands here.
     case 'cancelled':
       return 'attention'
     default:

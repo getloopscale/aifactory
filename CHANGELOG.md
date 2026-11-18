@@ -38,6 +38,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The board leaves cancelled tasks out. Their issue was closed or lost the `factory` label, so they no longer count in Needs a person (#253)
 - E2B refusing a sandbox because the account already runs its concurrent limit is now an environment failure. A task that meets it is retried on its own instead of going to a person, and the evaluation suite runs such a case again instead of counting it against the configuration (#249)
 - A run the coordinator sends back after it ran out of time or changed nothing now goes on with the branch head to the checks and the review when the agent changes nothing and no review approved that head. Before, a send-back with the factory's own note skipped that path and failed at `push` with "the agent made no change to the repository" (#247)
 - A task that failed when GitHub refused a call for the spent rate limit, before the factory named that refusal (#236), now runs again on its own like any failure of the environment. Its reason still reads "API rate limit exceeded", which the factory did not recognise, so it waited for a person (#239)
