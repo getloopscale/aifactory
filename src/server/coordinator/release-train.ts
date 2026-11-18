@@ -61,11 +61,12 @@ type CheckReport = { name: string; status: string; conclusion: string | null }
 /** The checks that failed on the watched commit of the release branch, and what `develop` reports at its head. */
 export type RedRecovery = {
   failing: string[]
+  /** The combined commit status of the watched commit. */
+  failingStatuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
   developRuns: CheckReport[]
   developStatuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
 }
 
-const PASSED = ['success', 'neutral', 'skipped']
 const FAILED = ['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']
 
 /** The names of the check runs that finished red. */
@@ -83,13 +84,20 @@ export const failingNames = (runs: CheckReport[]): string[] => [
  * known, nothing says the branch is fixed.
  */
 export function releaseFixesRed(r: RedRecovery): boolean {
-  if (r.failing.length === 0 || r.developStatuses === 'failure') return false
-  if (['error', 'pending'].includes(r.developStatuses)) return false
+  const statusFailed = ['failure', 'error'].includes(r.failingStatuses)
+  if (r.failing.length === 0 && !statusFailed) return false
+  // A status that failed on the red commit is fixed only by a green status on develop.
+  if (
+    statusFailed
+      ? r.developStatuses !== 'success'
+      : ['failure', 'error', 'pending'].includes(r.developStatuses)
+  )
+    return false
   return r.failing.every((name) => {
     const reports = r.developRuns.filter((run) => run.name === name)
     return (
       reports.length > 0 &&
-      reports.every((run) => run.status === 'completed' && PASSED.includes(run.conclusion ?? ''))
+      reports.every((run) => run.status === 'completed' && run.conclusion === 'success')
     )
   })
 }
@@ -206,6 +214,7 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   return {
     kind,
     ...at,
+    ...(f.branch.state === 'red' ? { verifiedHead: head } : {}),
     evidence: `${f.releasable.length} integrated issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
     released: f.labels.value,
   }

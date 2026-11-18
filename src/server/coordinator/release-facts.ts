@@ -189,6 +189,7 @@ async function readRecovery(
     const develop = await deps.api.commitChecks(f.repository, token, head)
     return readOf({
       failing: failingNames(red.checkRuns),
+      failingStatuses: red.statuses,
       developRuns: develop.checkRuns,
       developStatuses: develop.statuses,
     })

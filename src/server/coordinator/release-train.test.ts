@@ -298,6 +298,7 @@ describe('a red release branch that the release itself fixes', () => {
   const ok = { status: 'completed', conclusion: 'success' }
   const recovery = (over: Partial<RedRecovery> = {}): RedRecovery => ({
     failing: ['check', 'quality'],
+    failingStatuses: 'none',
     developRuns: [
       { name: 'check', ...ok },
       { name: 'quality', ...ok },
@@ -342,12 +343,42 @@ describe('a red release branch that the release itself fixes', () => {
       recovery({ developStatuses: 'failure' }),
       recovery({ developStatuses: 'pending' }),
       recovery({ failing: [] }),
+      recovery({
+        developRuns: [
+          { name: 'check', ...ok },
+          { name: 'quality', status: 'completed', conclusion: 'skipped' },
+        ],
+      }),
+      recovery({
+        developRuns: [
+          { name: 'check', ...ok },
+          { name: 'quality', status: 'completed', conclusion: 'neutral' },
+        ],
+      }),
+      recovery({ failingStatuses: 'failure', developStatuses: 'none' }),
+      recovery({ failingStatuses: 'error', developStatuses: 'pending' }),
     ]
     for (const r of bad) {
       expect(releaseFixesRed(r)).toBe(false)
       expect(recogniseRelease(red(readOf(r)))?.kind).toBe('release_blocked')
       expect(attemptDue(red(readOf(r)))).toBeUndefined()
     }
+  })
+
+  it('is fixed by a green status on develop when a status failed on the red commit too', () => {
+    expect(
+      releaseFixesRed(recovery({ failingStatuses: 'failure', developStatuses: 'success' })),
+    ).toBe(true)
+    expect(
+      releaseFixesRed(
+        recovery({ failing: [], failingStatuses: 'error', developStatuses: 'success' }),
+      ),
+    ).toBe(true)
+  })
+
+  it('carries the develop head its checks were read at into the release exception', () => {
+    expect(recogniseRelease(red(readOf(recovery())))).toMatchObject({ verifiedHead: HEAD })
+    expect(recogniseRelease(facts())).not.toHaveProperty('verifiedHead')
   })
 
   it('is unknown when the checks could not be read', () => {

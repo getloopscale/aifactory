@@ -313,6 +313,43 @@ describe('the release train on a red release branch', () => {
   })
 })
 
+describe('a red release branch that develop already fixed', () => {
+  const RED = 'm'.repeat(40)
+  const seedRed = async () => {
+    await enable('auto')
+    const id = await integrated()
+    await getDb().insert(watch).values({
+      taskId: id,
+      repository: REPO,
+      sha: RED,
+      pullRequestNumber: 9,
+      status: 'red',
+      detail: 'failing: CI',
+    })
+    repo().checkRun(RED, { name: 'CI', conclusion: 'failure' })
+  }
+
+  it('releases when the failing check passes on the head of develop', async () => {
+    await seedRed()
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'success' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(promotions()).toHaveLength(1)
+  })
+
+  it('stays blocked when the check does not pass on develop', async () => {
+    await seedRed()
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'failure' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ escalated: 1, applied: 0 })
+    expect(promotions()).toEqual([])
+  })
+})
+
 describe('a refused release', () => {
   const headMoved = () =>
     githubAnswered(
