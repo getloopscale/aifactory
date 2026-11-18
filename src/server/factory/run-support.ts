@@ -144,9 +144,12 @@ const OWN_REPOSITORY = 'paulohenriquevn/aifactory'
  */
 export function unestablishedGates(repository: string, rows: StoredCheck[]): string[] {
   if (repository.toLowerCase() !== OWN_REPOSITORY) return []
-  const passed = rows.filter((r) => r.passed).map((r) => r.command)
+  const passed = new Set(rows.filter((r) => r.passed).map((r) => r.command.trim()))
+  // Only the whole command counts: a wrapper, an argument or a masked exit status proves nothing.
   const ran = (gate: string) =>
-    passed.some((c) => new RegExp(`\\bpnpm (run )?(${gate}|quality)\\b`).test(c))
+    [`pnpm ${gate}`, `pnpm run ${gate}`, 'pnpm quality', 'pnpm run quality'].some((c) =>
+      passed.has(c),
+    )
   return CI_QUALITY_GATES.filter((g) => !ran(g))
 }
 

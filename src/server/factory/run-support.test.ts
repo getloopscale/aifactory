@@ -175,6 +175,22 @@ describe('unestablishedGates', () => {
     expect(unestablishedGates(own, [row('pnpm quality')])).toEqual([])
   })
 
+  it.each([
+    'echo pnpm quality',
+    'pnpm crap || true',
+    'pnpm coverage --help',
+    'pnpm crap; pnpm test',
+    'pnpm dup | cat',
+    'pnpm quality --help',
+  ])('does not take `%s` as a gate that passed', (command) => {
+    expect(unestablishedGates(own, [row(command)]).length).toBeGreaterThan(0)
+    expect(unestablishedGates(own, [row(command)])).toContain('mutation')
+  })
+
+  it('takes the whole command, spaces around it aside', () => {
+    expect(unestablishedGates(own, [row(' pnpm run crap ')])).not.toContain('crap')
+  })
+
   it('says nothing for another repository', () => {
     expect(unestablishedGates('someone/else', [row('npm test')])).toEqual([])
   })
