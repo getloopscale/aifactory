@@ -2,6 +2,7 @@ import type {
   AgentSeen,
   AgentStep,
   MetricRow,
+  QueueView,
   Retryable,
   Stage,
   TimelineEvent,
@@ -32,6 +33,24 @@ function stepCount(step: Extract<AgentStep, { agent: string }>, board: Copy['boa
   return step.step === 'reviewing'
     ? board.reviewRound(step.attempt)
     : board.stepAttempt(step.attempt)
+}
+
+/** How many places at the head of the queue the board ranks. */
+export const TOP_OF_QUEUE = 10
+
+/**
+ * The queued tasks in the order the worker serves them (`queue.position`), and after them the ones with no
+ * place in the line (held, or not looked at yet) in the order they came. The list given is not changed.
+ */
+export function inQueueOrder<T extends { queue: QueueView | null }>(tasks: T[]): T[] {
+  const place = (task: T) => task.queue?.position ?? Number.MAX_SAFE_INTEGER
+  return [...tasks].sort((a, b) => place(a) - place(b))
+}
+
+/** The rank of a queued task among the first `TOP_OF_QUEUE` places of the line, or nothing past them. */
+export function topRank(queue: QueueView | null): number | null {
+  const position = queue?.position ?? null
+  return position !== null && position <= TOP_OF_QUEUE ? position : null
 }
 
 /** What an agent does on a running task, with its attempt or round past the first, without naming the agent. */

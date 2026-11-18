@@ -79,6 +79,8 @@ export const en = {
     waitingOnBase: (checks: string, branch: string) => `waits for ${checks} to pass on ${branch}`,
     queuePlace: (n: number) => `#${n} in the queue`,
     queueHeld: 'held in the queue',
+    topRank: (n: number) => `priority ${n} of the top 10`,
+    restOfQueue: 'rest of the queue',
     priority: (n: number) => `priority ${n}`,
     bug: 'bug',
     unblocks: (n: number) => `unblocks ${n}`,

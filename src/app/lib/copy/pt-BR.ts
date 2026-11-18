@@ -153,6 +153,8 @@ export const ptBR: Copy = {
     waitingOnBase: (checks: string, branch: string) => `espera ${checks} passar em ${branch}`,
     queuePlace: (n: number) => `${n}ª na fila`,
     queueHeld: 'retida na fila',
+    topRank: (n: number) => `prioridade ${n} do top 10`,
+    restOfQueue: 'resto da fila',
     priority: (n: number) => `prioridade ${n}`,
     bug: 'bug',
     unblocks: (n: number) => `desbloqueia ${n}`,
