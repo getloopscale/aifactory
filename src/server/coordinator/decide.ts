@@ -69,6 +69,7 @@ const FAMILY: Partial<Record<ExceptionKind, Family>> = {
   pull_conflict: 'checks',
   base_fixed: 'checks',
   ci_red: 'checks',
+  checks_broke_after_review: 'checks',
   review_plateau: 'review',
   review_unusable: 'review',
   stalled: 'review',
@@ -190,6 +191,25 @@ function ciRed({ head, evidence, ciOutput }: TaskException): Decision {
     action: 'send_back',
     reason: `${what}: sent back on its branch with what ${source}`,
     note: `The coordinator sent this back: the repository's required checks still failed on ${short(head)} after the automatic runs. Start from the branch as it is and fix what they report.\n\n${output}`,
+  }
+}
+
+/**
+ * The rework after a review broke the checks, and the branch went back to the reviewed commit that passed them. The
+ * review was not the problem, so nothing is scoped: the agent gets the branch back with what the checks printed on
+ * the commit that broke them, to make the change the review asked for without breaking them.
+ */
+function checksBroke({ head, evidence, checkOutput, ciOutput }: TaskException): Decision {
+  const what = `the rework after the review broke the checks, and the branch went back to ${short(head)} (${evidence})`
+  const output = checkOutput || ciOutput || ''
+  if (output === '') {
+    return escalate(`${what}, but no output of the checks it broke was found to send back`)
+  }
+  const source = checkOutput ? 'the checks reported' : 'the failed GitHub Actions jobs logged'
+  return {
+    action: 'send_back',
+    reason: `${what}: sent back on its branch with what ${source}`,
+    note: `The coordinator sent this back: the last rework after the review broke the repository's required checks, so the branch was restored to ${short(head)}, which passed them and was reviewed. Start from the branch as it is, make the change the review asked for (its findings are on the draft pull request), and keep these checks passing. What they reported on the rework that broke them:\n\n${output}`,
   }
 }
 
@@ -329,6 +349,7 @@ const BY_KIND: Partial<
   pull_conflict: pullConflict,
   base_fixed: baseFixed,
   ci_red: onBranch(ciRed),
+  checks_broke_after_review: onBranch(checksBroke),
   review_plateau: ({ head, evidence }) => ({
     action: 'scope',
     reason: `the reviewer still asked for changes on ${short(head)} (${evidence}): the requests are scoped, the rest filed as a follow-up, and the task sent back on its branch`,
@@ -355,6 +376,10 @@ const BY_KIND: Partial<
       `the release branch is red (${evidence}): the release train waits on ${short(head)} until it is green again, and a person looks at it`,
     ),
   base_red: fixBase,
+  publication_stalled: ({ evidence }) =>
+    escalate(
+      `${evidence}. The release train holds the repository until it ends, so a person looks at the release workflow and its Version Packages pull request`,
+    ),
 }
 
 /**

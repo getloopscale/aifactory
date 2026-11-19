@@ -1353,6 +1353,25 @@ describe('a failure of the work that the coordinator acts on', () => {
       { exceptionKind: 'checks_unchanged', action: 'send_back', outcome: 'applied' },
     ])
   })
+  it('sends a rework that broke the checks after the review back with what they printed on it, and scopes nothing', async () => {
+    const id = await checksUnchanged({
+      reason:
+        'the last rework broke the checks ("quality" failed at bad0000), so the branch is back at abc, which passed them and was reviewed',
+      cause: 'checks_broke_after_review',
+    })
+    await checkRun(id, { sha: 'bad0000', output: 'ERROR: the rework broke it' })
+    await checkRun(id, { sha: 'abc', passed: true, exitCode: 0, output: 'fine' })
+
+    expect(await coordinate(deps(), 'auto')).toMatchObject({ applied: 1 })
+
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued[0].input.feedback).toContain('ERROR: the rework broke it')
+    expect(queued[0].input).not.toHaveProperty('fromReview')
+    expect(model.asked).toEqual([])
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'checks_broke_after_review', action: 'send_back', outcome: 'applied' },
+    ])
+  })
 })
 
 describe('a fact the coordinator could not read', () => {

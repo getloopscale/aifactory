@@ -42,11 +42,12 @@ export type RepositoryReleaseFacts = {
   /** A release of the repository that waits for the release branch's checks, said as a person reads it. */
   inFlight: string | undefined
   /**
-   * The publication of the repository that has not finished, and why it is stalled: what failed on its
-   * Version Packages pull request, so that only a new promotion ends it (#367), or undefined when it can still
-   * end by itself.
+   * The publication of the repository that waits, if one does: read whether or not the train holds it, since
+   * its age is what `publication_stalled` measures and its stall is what `trainHolds` weighs.
    */
-  publication?: { id: number; stalled: Read<string | undefined> }
+  publication?: WaitingPublication
+  /** When the facts were read, which is what the age of a publication is measured against. */
+  at?: Date
   /** `sha` is the commit `watch-main` last watched on the release branch. */
   branch: { state: ReleaseBranchState; detail: string; sha?: string }
   /** The facts below are read only when the train does not hold the repository (`trainHolds`). */
@@ -63,6 +64,26 @@ export type RepositoryReleaseFacts = {
   /** Read only for a red release branch with commits to release: the checks of the red commit and of `head`. */
   recovery?: Read<RedRecovery>
 }
+
+/**
+ * A publication that has not finished: the task whose release started it, since when, what it waits for, and
+ * why it is stalled: what failed on its Version Packages pull request, so that only a new promotion ends it
+ * (#367), or undefined when it can still end by itself.
+ */
+export type WaitingPublication = {
+  id: number
+  taskId: number
+  startedAt: string
+  detail: string | null
+  stalled: Read<string | undefined>
+}
+
+/**
+ * A publication that waits this long holds the train for a person to look at: the Version Packages pull request,
+ * the release workflow or the releases of its packages are not coming by themselves. Nine in ten publications end
+ * within two hours, and the slowest that still published took under three.
+ */
+export const PUBLICATION_STALL_MS = 3 * 60 * 60_000
 
 /**
  * How long integrated work waits for the repository's running tasks to join it in one release. A repository
@@ -166,13 +187,16 @@ const PASSING_CAUSES = [
 export const passingRefusal = (reason: string): boolean =>
   PASSING_CAUSES.some((cause) => cause.test(reason))
 
+/** What failed on the Version Packages pull request of a publication, when it was read and something did. */
+const failedOn = (p: WaitingPublication) => (p.stalled.read ? p.stalled.value : undefined)
+
 /**
  * Whether a publication holds the train: one that can still end by itself does, and so does one whose
  * Version Packages pull request could not be read. One stalled on a failed check does not, since only the
  * next promotion ends it (`release()` lets that promotion through and supersedes it).
  */
-const publicationHolds = (p: RepositoryReleaseFacts['publication']) =>
-  p !== undefined && !(p.stalled.read && p.stalled.value !== undefined)
+const publicationHolds = (p: WaitingPublication | undefined) =>
+  p !== undefined && failedOn(p) === undefined
 
 /**
  * Whether the train leaves the repository alone without reading anything more: a `manual` repository, no
@@ -247,5 +271,27 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
     ...(f.branch.state === 'red' ? { verifiedHead: head } : {}),
     evidence: `${f.releasable.length} integrated issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
     released: f.labels.value,
+  }
+}
+
+/**
+ * A publication that has waited past the limit, as an exception on the task whose release started it, once per
+ * publication: the train holds the repository while it waits, and the hold is no longer silent. One stalled on a
+ * failed check of its Version Packages pull request is not held, and its evidence names the check.
+ */
+export function recognisePublicationStall(f: RepositoryReleaseFacts): TaskException | undefined {
+  const { publication, at } = f
+  if (!publication || !at) return undefined
+  const waited = at.getTime() - Date.parse(publication.startedAt)
+  if (waited < PUBLICATION_STALL_MS) return undefined
+  const hours = Math.floor(waited / (60 * 60_000))
+  const waitsFor = publication.detail || 'it recorded nothing it waits for'
+  const failed = failedOn(publication)
+  const train = !failed ? 'and the release train waits for it' : 'and only a new promotion ends it'
+  return {
+    kind: 'publication_stalled',
+    taskId: publication.taskId,
+    head: `publication:${publication.id}`,
+    evidence: `publication ${publication.id} of ${f.repository} has waited ${hours} hours since ${publication.startedAt}, ${train}: ${waitsFor}${failed ? `; ${failed}` : ''}`,
   }
 }

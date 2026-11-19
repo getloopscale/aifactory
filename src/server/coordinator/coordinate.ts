@@ -15,7 +15,7 @@ import { maintainHolds } from './queue-hold'
 import { recognise, type TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
 import { readReleaseFacts, type ReleaseFactsDeps } from './release-facts'
-import { recogniseRelease } from './release-train'
+import { recognisePublicationStall, recogniseRelease } from './release-train'
 
 export type PassResult = Record<CoordinatorOutcome, number>
 
@@ -25,10 +25,16 @@ export type CoordinatorDeps = ApplyDeps &
   Pick<ReleaseFactsDeps, 'releaseMode'> &
   Pick<FactsDeps, 'ciChecks'> & { now?: () => Date }
 
-/** The exceptions of the tasks, then the release of each repository the train does not hold. */
+/**
+ * The exceptions of the tasks, then the release of each repository the train does not hold and the publication that
+ * holds it for too long.
+ */
 async function exceptionsOf(deps: CoordinatorDeps): Promise<TaskException[]> {
   const ofTasks = (await readExceptionFacts(deps)).flatMap(recognise)
-  const ofReleases = (await readReleaseFacts(deps)).map(recogniseRelease)
+  const ofReleases = (await readReleaseFacts(deps)).flatMap((f) => [
+    recogniseRelease(f),
+    recognisePublicationStall(f),
+  ])
   const ofQueues = (await readQueueFacts(deps)).map(recogniseQueue)
   // The queue first: a task that failed on the test must find its fix already moved when its turn comes.
   return [

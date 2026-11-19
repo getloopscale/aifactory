@@ -23,7 +23,7 @@ import { type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
-import { RELEASE_MAX_WAIT_MINUTES } from './release-train'
+import { PUBLICATION_STALL_MS, RELEASE_MAX_WAIT_MINUTES } from './release-train'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -561,6 +561,74 @@ describe('a release that waited for the release branch checks and was refused', 
     expect(await actions()).toMatchObject([
       { exceptionKind: 'release_ready', outcome: 'applied' },
       { exceptionKind: 'release_retry', outcome: 'applied' },
+    ])
+  })
+})
+
+describe('a publication that keeps the release train waiting', () => {
+  const STARTED = new Date('2026-11-19T02:07:00Z')
+  const clocked = (now: Date): CoordinatorDeps => ({ ...deps(), now: () => now })
+
+  async function publishing() {
+    await enable('auto')
+    const released = await integrated(['factory'], 'released')
+    const waiting = await integrated()
+    const [row] = await getDb()
+      .insert(publication)
+      .values({
+        taskId: released,
+        repository: REPO,
+        releaseBranch: 'main',
+        promotedSha: 'promoted1',
+        actor: 'agent:coordinator',
+        startedAt: STARTED,
+        detail: 'waits for the Version Packages pull request',
+      })
+      .returning({ id: publication.id })
+    return { released, waiting, id: row.id }
+  }
+
+  it('holds the train silently under the limit, and records nothing', async () => {
+    await publishing()
+
+    await coordinate(clocked(new Date(STARTED.getTime() + PUBLICATION_STALL_MS - 60_000)), 'auto')
+
+    expect(promotions()).toEqual([])
+    expect(await actions()).toEqual([])
+  })
+
+  it('escalates it once past the limit, on the task that started it, and still releases nothing', async () => {
+    const { released, id } = await publishing()
+    const later = new Date(STARTED.getTime() + 5 * 60 * 60_000)
+
+    expect(await coordinate(clocked(later), 'auto')).toMatchObject({ escalated: 1 })
+    expect(await coordinate(clocked(new Date(later.getTime() + 60_000)), 'auto')).toMatchObject({
+      escalated: 0,
+    })
+
+    expect(promotions()).toEqual([])
+    const rows = await actions()
+    expect(rows).toMatchObject([
+      {
+        taskId: released,
+        exceptionKind: 'publication_stalled',
+        headSha: `publication:${id}`,
+        action: 'escalate',
+        outcome: 'escalated',
+      },
+    ])
+    expect(rows[0].reason).toContain('waits for the Version Packages pull request')
+  })
+
+  it('escalates it in trial too, once', async () => {
+    await publishing()
+    const later = new Date(STARTED.getTime() + 4 * 60 * 60_000)
+
+    await coordinate(clocked(later), 'trial')
+    await coordinate(clocked(later), 'trial')
+
+    expect((await actions()).map((r) => [r.exceptionKind, r.outcome])).toEqual([
+      ['publication_stalled', 'escalated'],
     ])
   })
 })

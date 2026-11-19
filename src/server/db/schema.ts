@@ -844,6 +844,8 @@ export const EXCEPTION_KINDS = [
   'pull_conflict',
   'base_fixed',
   'ci_red',
+  'checks_broke_after_review',
+  'publication_stalled',
 ] as const
 
 /**

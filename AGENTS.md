@@ -255,7 +255,11 @@ reads that file, not a convention.
   merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. The handoffs
   `integrate-after-ci` writes after the automatic runs carry a cause too (`ci-wait.ts`): `pull_conflict` and
   `base_fixed` are a `merge_base`, and `ci_red` is sent back with what the handoff quoted of the failed checks, or
-  what their GitHub Actions jobs logged; a required check that never reported stays a plain `handoff`. An `unknown` is a
+  what their GitHub Actions jobs logged; a required check that never reported stays a plain `handoff`. A
+  `checks_broke_after_review` (the rework after a review broke the checks and `Run.restoreReviewed` put the branch back
+  at the reviewed commit) is a rework of the checks, never a `scope`: it is sent back with what the checks printed on
+  the commit that broke them (`brokenOutput`), or what the GitHub Actions jobs of the pull request's head logged, and
+  escalated when neither kept anything. An `unknown` is a
   `wait`: the first is recorded as `deferred` (which leaves the head free and is never `seen`), later passes
   record nothing, and it is escalated once the first wait is `UNKNOWN_LIMIT_MS` old. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
@@ -272,7 +276,9 @@ reads that file, not a convention.
   `bumpFor`: `major` only for an issue labelled `breaking`, `minor` for one labelled `enhancement` or `feature`,
   `patch` otherwise; a changesets repository follows its changesets. A red release branch is a `release_blocked`
   exception, escalated, and nothing is called; the one retry of a passing refusal is a `release_retry` exception on
-  the same head. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
+  the same head. A publication that has waited `PUBLICATION_STALL_MS` (three hours) is a `publication_stalled`
+  exception on the task whose release started it, escalated once per publication (the head is `publication:<id>`),
+  so a train held behind it shows up for a person instead of waiting in silence. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
   `MAX_APPLIED` neither counts a release nor holds one back.
   A task held by a red integration branch (`done.detail.baseHold`, set and cleared by `integrate-after-ci`, shown
   on the panel card as `waitingOnBase`), or a failed one still red on the base past its automatic runs, is a
