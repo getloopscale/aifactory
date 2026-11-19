@@ -50,6 +50,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A deploy no longer waits for the runs in progress to end: the workers are restarted without blocking and each comes back on the new build once its run finishes, so one long run no longer holds the next deploys for hours (#356)
 - E2B's `403: team is blocked: credit_exhausted` is now an environment failure that retries by itself, and the doctor shows it as the sandbox provider refusing. It used to go to a person as a failure of the work, which the coordinator escalated with no action (#339)
 - A run no longer fails for want of a free sandbox slot after waiting 20 minutes. Before its first stage it waits in the queue while the account already has as many sandboxes up as it allows (10 on E2B unless `E2B_MAX_SANDBOXES` says more), for up to three hours (#341)
 - The evidence of a failed CI job keeps the line that reports the failure (a test marked `FAIL`, the runner's `##[error]`) when more than forty lines match, reads a line a script starts with `✗`, and no longer takes a package manager's `WARN` for it, so an agent sent back after failing checks reads why they failed instead of the errors passing tests logged (#326).
