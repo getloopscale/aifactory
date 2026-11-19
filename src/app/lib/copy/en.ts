@@ -507,6 +507,7 @@ export const en = {
     kind: {
       run: 'A run stopped moving',
       queued_run: 'A task is queued and nothing will run it',
+      queue: 'Queued runs of a repository are not starting',
       answer_resume: 'An answer was never resumed',
       snapshot: 'A snapshot nothing needs',
       revert: 'A revert was never confirmed',

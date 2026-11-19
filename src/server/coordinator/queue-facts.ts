@@ -86,7 +86,11 @@ export async function readQueueFacts(
  * from there, and the repository's other work must not wait on a person.
  */
 const ENDS = ['failed', 'cancelled', 'released', 'handoff', 'waiting'] as const
-const FINISHED = ['released', 'failed', 'cancelled']
+/**
+ * A fix in `done` passed its checks and its review, so the test it fixes passes on its branch: the others may
+ * run again. Waiting for its CI and its promotion as well held a whole repository for hours.
+ */
+const VERIFIED = ['done', 'released', 'failed', 'cancelled']
 /** Stages that only a person moves a task out of. */
 const WITH_A_PERSON = ['handoff', 'waiting']
 /** The stages whose event records why a task stopped. */
@@ -106,8 +110,6 @@ export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldT
       taskId: task.id,
       at: coordinatorAction.at,
       stage: task.stage,
-      awaiting: task.awaitingCiSha,
-      merged: task.mergedSha,
     })
     .from(coordinatorAction)
     .innerJoin(task, eq(task.id, coordinatorAction.taskId))
@@ -129,10 +131,7 @@ export async function readHeldTests(db: Pick<Database, 'select'>): Promise<HeldT
       (r) =>
         !ended.some((e) => e.taskId === r.taskId && e.at >= r.at) &&
         !WITH_A_PERSON.includes(r.stage) &&
-        !(
-          r.awaiting === null &&
-          (FINISHED.includes(r.stage) || (r.stage === 'done' && r.merged !== null))
-        ),
+        !VERIFIED.includes(r.stage),
     )
     .map(({ repository, test, taskId, at }) => ({ repository, test: testOf(test), taskId, at }))
 }

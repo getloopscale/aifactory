@@ -12,10 +12,11 @@ import { useResource } from '../lib/live'
 type Action = 'retry' | 'resume' | 'delete_snapshot' | 'mark_revert_unknown'
 
 /** The kinds of finding a person resolves from the panel. */
-type Actionable = Exclude<FindingView['subject'], 'back_merge'>
+type Actionable = Exclude<FindingView['subject'], 'back_merge' | 'queue'>
 
 /**
- * What a person does about each kind of finding; the words come from the dictionary. A back-merge that
+ * What a person does about each kind of finding; the words come from the dictionary. A stalled queue has
+ * nothing to do from here: its detail says what holds it. A back-merge that
  * conflicts is resolved on GitHub, so its finding links there and has no button: the factory clears it once
  * the conflict is gone.
  */
@@ -28,7 +29,7 @@ const ACTION: Record<Actionable, Action> = {
 }
 
 const actionable = (subject: FindingView['subject']): subject is Actionable =>
-  subject !== 'back_merge'
+  subject !== 'back_merge' && subject !== 'queue'
 
 function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => void }) {
   const { t } = useCopy()
