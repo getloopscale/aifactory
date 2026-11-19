@@ -89,7 +89,7 @@ ${
   input.knowledgeDir
     ? `- A change that breaks one of the owner's rules under ${input.knowledgeDir}/knowledge/ is a finding, at least major.\n\n${knowledgeRules(input.knowledgeDir)}\n`
     : ''
-}${WHAT_BLOCKS}${input.earlier ? earlierSection(input.earlier) : ''}
+}${input.earlier ? earlierSection(input.earlier) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
 {"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}
@@ -97,26 +97,6 @@ Finish with one JSON object on its own, and nothing after it:
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
 `
 }
-
-/**
- * What a finding may block on. Without it every edge case a careful reader can think of is major, each round
- * finds one level deeper, and a third of the factory's runs end in `review_plateau` (#305). The work the
- * issue asks for still blocks; hardening it does not ask for is reported and does not hold the delivery.
- */
-const WHAT_BLOCKS = `
-# What blocks
-
-A finding is a blocker or major only when the change:
-- does not do something the issue asks, or does it wrong for an input the issue covers;
-- breaks behaviour that worked before the change, or code that already calls what it changed;
-- has no test that fails without it for the behaviour the issue asks, or weakens an existing test;
-- leaks a secret, opens a security hole, or breaks one of the owner's rules;
-- changes a file outside the plan with no reason the issue needs.
-
-Anything else is minor, however real: a failure mode, a race, a crash between two steps or an input the issue does not mention, when the change does not make it worse than it was before. Say what it is and where; it does not hold the delivery.
-
-List every blocking finding in this round. A blocker you could have seen now and raise only in a later round costs the factory a whole run.
-`
 
 /** A review round that asked for changes: the commit it read and what it found. */
 export type EarlierReview = { sha: string; findings: Finding[] }
