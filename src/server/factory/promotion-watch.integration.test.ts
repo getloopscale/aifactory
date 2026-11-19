@@ -149,7 +149,9 @@ describe('the promotion watch', () => {
       world.logs = { 1: LOG, 2: 'AssertionError: two' }
       const result = await pollPromotions(deps())
       expect(reruns).toEqual([9])
-      expect(created).toHaveLength(2)
+      expect(created).toHaveLength(1)
+      expect(created[0].body).toContain('### `validate`')
+      expect(created[0].body).toContain('### `unit`')
       expect(result.errors).toHaveLength(1)
     })
   })
@@ -316,14 +318,85 @@ describe('the promotion watch', () => {
   })
 
   it('opens no more new issues in a pass than the cap allows', async () => {
-    world.runs = [actionsRun(1, 'validate'), actionsRun(2, 'unit')]
+    world.runs = [actionsRun(1, 'validate'), actionsRun(2, 'trufflehog / TruffleHog')]
     world.attempts = { 1: 2, 2: 2 }
-    world.logs = { 1: LOG, 2: 'AssertionError: two' }
+    world.logs = { 1: LOG, 2: '##[error]found 1 unverified secret' }
     const result = await pollPromotions(deps({ maxNewIssuesPerRepository: 1 }))
     expect(created).toHaveLength(1)
     expect(result.capped).toBe(1)
     await pollPromotions(deps({ maxNewIssuesPerRepository: 1 }))
     expect(created).toHaveLength(2)
+  })
+
+  describe('when several checks fail for the first time on one head', () => {
+    beforeEach(() => {
+      world.runs = [actionsRun(1, 'validate'), actionsRun(2, 'unit'), actionsRun(3, 'types')]
+      world.attempts = { 1: 2, 2: 2, 3: 2 }
+      world.logs = { 1: LOG, 2: 'AssertionError: two', 3: 'error TS2345: three' }
+    })
+
+    it('opens one issue for the factory that names all of them', async () => {
+      const result = await pollPromotions(deps())
+      expect(created).toHaveLength(1)
+      expect(created[0].title).toBe(
+        'promotion: 3 checks fail on workspace -> develop: `validate`, `unit`, `types`',
+      )
+      expect(created[0].labels).toEqual(['factory', 'priority:1'])
+      expect(result.opened).toEqual(['https://github.com/paulo/app/issues/51'])
+    })
+
+    it('points every check at that issue', async () => {
+      await pollPromotions(deps())
+      const rows = await getDb().select().from(promotionFinding)
+      expect(rows.map((r) => [r.checkName, r.issueNumber]).sort()).toEqual([
+        ['types', 51],
+        ['unit', 51],
+        ['validate', 51],
+      ])
+    })
+
+    it('counts the issue once against the cap', async () => {
+      const result = await pollPromotions(deps({ maxNewIssuesPerRepository: 1 }))
+      expect(created).toHaveLength(1)
+      expect(result.capped).toBe(0)
+    })
+
+    it('holds them all back when the cap is reached', async () => {
+      const result = await pollPromotions(deps({ maxNewIssuesPerRepository: 0 }))
+      expect(created).toEqual([])
+      expect(result.capped).toBe(1)
+      expect(await getDb().select().from(promotionFinding)).toEqual([])
+    })
+
+    it('keeps a check a person must decide on its own issue', async () => {
+      world.runs.push(actionsRun(4, 'trufflehog / TruffleHog'))
+      world.attempts[4] = 2
+      world.logs[4] = '##[error]found 1 unverified secret'
+      await pollPromotions(deps())
+      expect(created).toHaveLength(2)
+      expect(created.filter((c) => c.labels?.length === 0)).toHaveLength(1)
+    })
+
+    it('comments on the shared issue for each check that is back on a new commit', async () => {
+      await pollPromotions(deps())
+      world.head = 'sha0002bbbb'
+      await pollPromotions(deps())
+      expect(created).toHaveLength(1)
+      expect(comments().map((c) => c.number)).toEqual([51, 51, 51])
+    })
+
+    it('takes every check back when GitHub refuses to open the issue', async () => {
+      const refusing = deps({
+        issues: {
+          ensureLabel: async () => {},
+          createIssue: async () => {
+            throw new Error('GitHub answered 410 creating an issue on paulo/app')
+          },
+        },
+      })
+      await pollPromotions(refusing)
+      expect(await getDb().select().from(promotionFinding)).toEqual([])
+    })
   })
 
   it('watches only the repositories the owner enabled', async () => {
