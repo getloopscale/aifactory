@@ -172,7 +172,7 @@ reads that file, not a convention.
   from the integration branch of the same repository into `develop` (`isFactoryPromotion`: never a fork, never
   another head); a clean one is merged at once with a merge commit pinned to the same head. An open promotion that nothing waits on, in a repository whose integrated work waits for a release, is pinned the same way by the `integrate-after-ci` cron (`adoptPromotions`). While it waits in
   `promotion_wait`, new integrations are held out of the integration branch until `hold_until`
-  (`PROMOTION_HOLD_MS`), so its checks can finish: the task waits in `done` with `awaiting_ci_sha` and
+  (`PROMOTION_HOLD_MS`, or `FACTORY_PROMOTION_HOLD_MS`, where 0 turns the hold off), so its checks can finish: the task waits in `done` with `awaiting_ci_sha` and
   `integration_held`, and the `integrate-after-ci` cron integrates it on the first pass after the hold expires
   or after GitHub merged the promotion. A head that moved before the pin is not merged; the next pass pins the new
   head. Nothing else merges a pull request into `develop`. The default branch
