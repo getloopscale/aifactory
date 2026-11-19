@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { CHANGESET_CHECK_SCRIPT } from '../factory/changeset-check'
 import { CHANGESET_CHECK_PATH, withChangesetCheck } from '../factory/changesets'
@@ -8,6 +11,7 @@ import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harn
 import type { EvalCase } from './cases'
 import { failedForEnvironment } from './compare'
 import { runCase } from './run-case'
+import { writeJson } from './suite'
 
 const BASE = 'a'.repeat(40)
 
@@ -953,5 +957,31 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false })
     expect(result.reason).toContain('is not a commit hash')
     expect(provider.specs).toEqual([])
+  })
+})
+
+describe('runCase review record', () => {
+  it('keeps the verdict, summary and findings of every review round in the run file', async () => {
+    const found = {
+      verdict: 'changes',
+      summary: 'no test',
+      findings: [{ severity: 'major', file: 'src/a.ts', issue: 'add a test' }],
+    }
+    const builder = agent('builder', planned(built(), built(), built()))
+    const reviewer = agent(
+      'reviewer',
+      [1, 2, 3].map((): HarnessResult => ({ ok: true, summary: JSON.stringify(found) })),
+    )
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(result.passed).toBe(false)
+
+    const dir = mkdtempSync(join(tmpdir(), 'evals-'))
+    const path = join(dir, 'run.json')
+    writeJson(path, { results: [result] })
+    const written = JSON.parse(readFileSync(path, 'utf8'))
+
+    expect(written.results[0].reviews).toHaveLength(result.reviewRounds)
+    expect(written.results[0].reviews[0]).toEqual(found)
+    rmSync(dir, { recursive: true })
   })
 })

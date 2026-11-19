@@ -104,6 +104,8 @@ class CaseRun {
   cost = 0
   attempts = 1
   reviewRounds = 0
+  /** The verdict of each review round that completed, as it came back. */
+  private readonly reviews: ReviewVerdict[] = []
   /** The findings that block, in each review round so far. */
   private readonly blockingCounts: number[] = []
   /** The last commit this case made or found, from which the next round counts what the builder committed. */
@@ -393,9 +395,11 @@ class CaseRun {
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
     await must(this.backend, `${this.git} reset --hard ${sha}`)
     await must(this.backend, `${this.git} clean -fd`)
-    return result.ok
+    const verdict: ReviewVerdict = result.ok
       ? parseVerdict(result.summary)
       : { verdict: 'invalid', summary: result.summary, findings: [] }
+    this.reviews.push(verdict)
+    return verdict
   }
 
   private canResume(): boolean {
@@ -484,6 +488,7 @@ class CaseRun {
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
+      reviews: this.reviews,
     }
   }
 }
@@ -545,6 +550,7 @@ export async function runCase(
     durationMs: Date.now() - started,
     attempts: 0,
     reviewRounds: 0,
+    reviews: [],
   })
   // The hash reaches a shell, so only a full commit hash gets that far.
   if (!COMMIT.test(c.baseSha))

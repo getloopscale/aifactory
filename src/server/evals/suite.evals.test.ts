@@ -10,7 +10,7 @@
 //   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -41,6 +41,7 @@ import {
   runSuiteFromTestStart,
   spentOn,
   startMarginFor,
+  writeJson,
   writeRunOutcome,
 } from './suite'
 
@@ -50,8 +51,6 @@ const env = process.env
 const mode = env.EVALS_MODE ?? 'run'
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T
-const writeJson = (path: string, value: unknown) =>
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 
 beforeAll(() => getStorageManager().configure(storageFromUrl(readDatabaseUrl())))
 afterAll(() => getStorageManager().dispose())
