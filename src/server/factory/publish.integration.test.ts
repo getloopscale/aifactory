@@ -806,6 +806,7 @@ describe('merging the back-merge after a changesets release', () => {
 
   it('leaves it open while its checks fail or run, and merges it on a later pass once they pass', async () => {
     await publishedRelease()
+    repo().required.set('workspace', ['CI'])
     open(backMerge())
     const failing: CommitChecks = {
       checkRuns: [{ name: 'CI', status: 'completed', conclusion: 'failure' }],
@@ -824,6 +825,27 @@ describe('merging the back-merge after a changesets release', () => {
     checks(green)
     expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
   })
+
+  // usetheokit/theokit-sdk#1248 waited from 04:31 on, as a Dependabot run had failed on the head of main and
+  // workspace, which runs no CI, would never report anything else (2026-11-19).
+  for (const [what, seen] of [
+    [
+      'a failed check',
+      {
+        checkRuns: [{ name: 'Dependabot', status: 'completed', conclusion: 'failure' }],
+        statuses: 'none',
+      },
+    ],
+    ['no check at all', { checkRuns: [], statuses: 'none' }],
+  ] as [string, CommitChecks][]) {
+    it(`merges it into an integration branch that requires no check, with ${what} on the released head`, async () => {
+      await publishedRelease()
+      open(backMerge())
+      checks(seen)
+
+      expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
+    })
+  }
 
   it('merges it when the required checks of the integration branch pass and a check it does not require failed', async () => {
     await publishedRelease()
