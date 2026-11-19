@@ -99,6 +99,8 @@ export type TaskException = {
   checkOutput?: string
   /** What the failed GitHub Actions jobs of the pull request's head logged, for a send-back (`ciFailingOutput`). */
   ciOutput?: string
+  /** The integration branch a merge with no agent brings into the branch of the task (`base_fixed`). */
+  mergeFrom?: string
   /** The files a merge of the integration branch with no agent conflicted in (`base_conflict`). */
   conflictFiles?: string[]
   /** The integration branch that is red, for the issue that fixes it. */
@@ -125,6 +127,10 @@ const CAUSES = [
   'review_plateau',
   'review_unusable',
   'checks_unchanged',
+  'checks_broke_after_review',
+  'pull_conflict',
+  'base_fixed',
+  'ci_red',
 ] as const satisfies readonly HandoffCause[]
 
 /** How a handoff recorded before it carried a `cause` says why, at the start of its reason (`Run`). */
@@ -152,6 +158,15 @@ export function failedChecksOutput(reason: string): string {
   return at < 0 ? '' : reason.slice(at + FAILED_CHECKS.length).trim()
 }
 
+/**
+ * What a `ci_red` reason quotes of the failed checks: everything after the line that names them, as
+ * `integrate-after-ci` writes it (`evidenceOfNote`), or nothing.
+ */
+export function quotedCiOutput(reason: string): string {
+  const at = reason.indexOf('\n\n')
+  return at < 0 ? '' : reason.slice(at + 2).trim()
+}
+
 /** How much of the checks' output a send-back quotes, shared between the checks that fail. */
 export const CHECK_OUTPUT_MAX = 3_000
 
@@ -168,6 +183,19 @@ export function failingOutput(runs: CheckRun[], head: string): string {
     .map((r) => `${r.name} (\`${r.command}\`):\n~~~~text\n${fenced(r.output, share)}\n~~~~`)
     .join('\n\n')
 }
+
+/**
+ * What the checks printed on the last commit one of them failed on: for a branch restored to a reviewed commit, the
+ * rework that broke them. Empty when no check failed.
+ */
+export function brokenOutput(runs: CheckRun[]): string {
+  const broken = runs.filter((run) => !run.passed).at(-1)
+  return broken ? failingOutput(runs, broken.sha) : ''
+}
+
+/** Whether a rework that broke the checks reads them from GitHub Actions: only when the factory kept no output. */
+export const readsBrokenCiOutput = (facts: Pick<TaskFacts, 'checks'>): boolean =>
+  brokenOutput(facts.checks?.read ? facts.checks.value : []) === ''
 
 const fencedStart = (lines: string[], max: number) =>
   lines.join('\n').replace(/~{3,}/g, '~~').slice(0, max)
@@ -212,9 +240,12 @@ export function failureCause(error: string): ExceptionKind {
   return FAILURE_CAUSES.find(([, matches]) => matches(error))?.[0] ?? 'failure'
 }
 
+/** The handoffs whose exception quotes the checks the factory ran. */
+const CHECKED_CAUSES: ExceptionKind[] = ['checks_unchanged', 'checks_broke_after_review']
+
 /** Whether recognising the exception of a task in `stage` needs the checks the factory ran on it. */
 export function readsChecks(stage: TaskStage, detail: Record<string, unknown> | null): boolean {
-  if (stage === 'handoff') return causeOf(detail) === 'checks_unchanged'
+  if (stage === 'handoff') return CHECKED_CAUSES.includes(causeOf(detail))
   if (stage !== 'failed') return false
   return failureCause(text(detail?.error)) === 'checks_red' || retryableFailure(detail) === 'base'
 }
@@ -223,7 +254,14 @@ const unknown = (evidence: string) => ({ kind: 'unknown' as const, evidence })
 
 type Found = Pick<
   TaskException,
-  'kind' | 'evidence' | 'conflictsWith' | 'checkOutput' | 'ciOutput' | 'conflictFiles' | 'base'
+  | 'kind'
+  | 'evidence'
+  | 'conflictsWith'
+  | 'mergeFrom'
+  | 'checkOutput'
+  | 'ciOutput'
+  | 'conflictFiles'
+  | 'base'
 > & {
   identity?: string
 }
@@ -260,11 +298,57 @@ function checksUnchanged(reason: string, facts: TaskFacts): Found {
   return { ...found, ...quoted, ...logged }
 }
 
-function handedOver(last: LastEvent, facts: TaskFacts): Found {
+/** Required checks that still fail after the automatic runs, with what the handoff or GitHub Actions said of them. */
+function ciRed(reason: string, facts: TaskFacts): Found {
+  const { ciFailures } = facts
+  if (ciFailures && !ciFailures.read) {
+    return unknown(`could not read ${ciFailures.tried}: ${ciFailures.error}`)
+  }
+  const found: Found = { kind: 'ci_red', evidence: quotedCiOutput(reason) }
+  return ciFailures ? { ...found, ciOutput: ciFailingOutput(ciFailures.value) } : found
+}
+
+/**
+ * A rework after the review that broke the checks, its branch restored to the reviewed commit, with what the checks
+ * printed on the commit that broke them, or what GitHub Actions logged when the factory kept nothing.
+ */
+function checksBroke(evidence: string, facts: TaskFacts): Found {
+  for (const read of [facts.checks, facts.ciFailures]) {
+    if (read && !read.read) return unknown(`could not read ${read.tried}: ${read.error}`)
+  }
+  const { checks, ciFailures } = facts
+  return {
+    kind: 'checks_broke_after_review',
+    evidence,
+    checkOutput: brokenOutput(checks?.read ? checks.value : []),
+    ...(ciFailures?.read ? { ciOutput: ciFailingOutput(ciFailures.value) } : {}),
+  }
+}
+
+/** The integration branch of the task, when its repository is known. */
+const integrationOf = (facts: TaskFacts) => facts.repository?.integrationBranch
+
+function byCause(last: LastEvent, facts: TaskFacts): Found {
   const kind = causeOf(last.detail)
   const reason = text(last.detail?.reason)
+  const evidence = reason || 'the handoff recorded no reason'
+  const base = integrationOf(facts)
   if (kind === 'checks_unchanged') return checksUnchanged(reason, facts)
-  return { kind, evidence: reason || 'the handoff recorded no reason' }
+  if (kind === 'ci_red') return ciRed(reason, facts)
+  if (kind === 'checks_broke_after_review') return checksBroke(evidence, facts)
+  if (kind === 'pull_conflict' && base) return { kind, evidence, conflictsWith: base }
+  if (kind === 'base_fixed' && base) return { kind, evidence, mergeFrom: base }
+  return { kind, evidence }
+}
+
+/**
+ * A handoff by its cause. Like a failure, it is told apart by its event: a run sent back that hands over again on
+ * the same head is a second handoff, which gets a decision of its own.
+ */
+function handedOver(last: LastEvent, facts: TaskFacts): Found {
+  const found = byCause(last, facts)
+  if (found.kind === 'unknown' || facts.headSha === null || last.id === undefined) return found
+  return { ...found, identity: `${facts.headSha}@${last.id}` }
 }
 
 /**

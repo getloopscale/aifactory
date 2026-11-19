@@ -171,6 +171,10 @@ describe('a failure that passes by itself', () => {
       retryableFailure({ error: 'the sandbox did not start: 403: team is blocked: spend_limit' }),
     ).toBe('environment')
     expect(retryableFailure({ error: '403: team is blocked: spend_limit' })).toBe('environment')
+    // E2B on 2026-11-19, once the team's credit ran out.
+    expect(retryableFailure({ error: '403: team is blocked: credit_exhausted' })).toBe(
+      'environment',
+    )
     expect(retryableFailure({ error: "404: template 'aifactory-sandbox' not found" })).toBe(
       'environment',
     )

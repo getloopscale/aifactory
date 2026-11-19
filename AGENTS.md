@@ -77,6 +77,12 @@ reads that file, not a convention.
   explicit domain allowlist (`createIsolatedSandbox`). Credentials are attached by the firewall and
   never written to a command, a file or an env var inside the sandbox. Text that came from an issue
   reaches git by file, never through a shell.
+- **A run waits in the queue for the sandbox provider, never fails for it.** Before its first stage a run waits
+  while the account has `maxSandboxes` up (`untilSlotFree` in `factory/sandbox-slot.ts`). A refusal for credit or
+  spending (`SANDBOX_PROVIDER_BLOCKED` in `shared/panel.ts`) pauses every run's sandbox for `PROVIDER_PAUSE_MS`
+  (`factory/provider-pause.ts` decides, `provider-pause-store.ts` keeps it in `setting`): `run-task` and
+  `resume-task` queue their job again for after it, one run probes the provider once it ends, and a sandbox that
+  starts ends it. The supervisor reports a repository whose queued runs nobody starts (`factory/queue-stall.ts`).
 - **GitHub tokens are repository-scoped.** The App is installed on every repository of the account,
   so `installationToken(repo)` is the only way to get one, and it always names the repository.
 - **Every call to the GitHub API goes through `gated` (`github/rate-limit.ts`).** It counts the call for the
@@ -143,7 +149,8 @@ reads that file, not a convention.
   integration branch requires status checks, the factory merges nothing itself: it turns on auto-merge pinned
   to the verified commit (`task.awaiting_ci_sha`), and the `integrate-after-ci` cron finishes the integration
   after GitHub merges, or sends the work back when a required check fails. A required check that fails on the head of
-  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`): the
+  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`), and
+  one the head of the integration branch has no run of yet is nobody's until it has, for up to `CI_SILENCE_MS`: the
   task keeps waiting, the checks blamed on the base are kept on its `done` event (`baseBlame`, for the verified commit),
   and once the base passes all of them the task runs again only to merge the base (`mergeFixedBase`, the job's
   `mergeBase`): `Run.mergeBase` merges the head of the integration branch into the work branch itself, with no agent,
@@ -156,7 +163,9 @@ reads that file, not a convention.
   either path. Nothing else may merge there, with one
   exception: after a changesets release, `publish-changesets` merges the repository's back-merge, the open pull
   request from the release branch into the integration branch of the same repository (never a fork), with a
-  merge commit pinned to its head once its checks are green (`pickBackMerge` in `factory/changesets.ts`). `develop` is
+  merge commit pinned to its head once the checks the integration branch requires are green, or at once when it
+  requires none, since its commits are the release (`pickBackMerge` in `factory/changesets.ts`); a back-merge that conflicts is a `back_merge` finding on the health page until the
+  conflict is gone, and is never merged. `develop` is
   the pre-release: it advances to each integration, which gets a pre-release tag. When `develop` takes changes
   only through a pull request, the factory opens its promotion from the integration branch and turns on
   auto-merge pinned to the head it saw (`pinPromotion` in `factory/promotion-merge.ts`), only on a pull request
@@ -175,7 +184,9 @@ reads that file, not a convention.
   `release_wait`, and the `integrate-after-ci` cron finishes the release after GitHub merges, or refuses it
   with the reason when a required check fails. A clean release pull request is merged at once, the same way. A refused release is retried only by the release train, once per head of `develop`, and only when
   its cause ends by itself (`passingRefusal`: required checks still expected, running or never reported, a head
-  that moved); a second refusal on the same head stays refused, and a new head is a new attempt. Every release, tagged by the factory or published by changesets, releases each finished task
+  that moved); a second refusal on the same head stays refused, and a new head is a new attempt. An agent's
+  release of a head whose release pull request already conflicted with the release branch is refused before
+  anything opens (`ReleaseAlreadyRefused`), and `releaseByMode` does not record it again; a person may still ask. Every release, tagged by the factory or published by changesets, releases each finished task
   whose merge is in the promoted commit and closes its issue through `shipContained` in `factory/ship.ts`; an
   issue that will not close is recorded, never thrown. `ensureBranches` creates the two missing
   branches, never touches one that exists, and refuses the default branch as the integration branch.
@@ -187,8 +198,15 @@ reads that file, not a convention.
   With no changeset waiting, it reads what that comparison lists (`changed-packages.ts`):
   when a package changesets publishes changed, it refuses and names the package; when every change is in a
   private package, an ignored one (`ignore` in `.changeset/config.json`) or no package, the release is the
-  factory's own, tagged after the highest `v` tag, since no changeset can exist for those. The `publish-changesets` cron merges the Version Packages pull
-  request (`changeset-release/<release branch>`) once its checks are green, under the same decision, and
+  factory's own, tagged after the highest `v` tag, since no changeset can exist for those. While a publication of
+  the repository waits, `release()` refuses (`refuseWhilePublishing`), since a promotion before the Version Packages
+  merge makes the workflow version again instead of publishing; a publication whose Version Packages pull request
+  failed a check on its head (`stalledPublication` in `stalled-publication.ts`, the same reading of the checks the
+  cron merges by) is let through, because only a promotion can bring its fix. Once that promotion lands,
+  `completeRelease` ends it as `failed`, its detail starting `superseded by the promotion` (`supersedeUnmerged`),
+  and the next release that contains its task's merge releases that task too (`shipContained`). The `publish-changesets` cron merges the Version Packages pull
+  request (`changeset-release/<release branch>`) once the checks the release branch requires are green (every check,
+  when it requires none), under the same decision, and
   only that pull request; when the workflow has published, it releases the tasks in the promoted commit and
   closes their issues with the versions. The workflow creates the releases one package at a time, so the
   publication waits for a release of every published package whose version the Version Packages merge moved
@@ -211,12 +229,19 @@ reads that file, not a convention.
   exception, the decisions already recorded and the time to one action (`send_back`, `review_again`,
   `retry_from_finding`, `scope`, `release`, `prioritise`, `fix_base`, `merge_base`, `wait` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
   applying, where a drafter built by `buildAssistant` answers JSON that `scope.ts` parses (an answer that does not
-  parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION` is `refused`); `apply.ts` is the only module with side effects and goes through the
+  parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION`, or putting in scope what the sandbox cannot do
+  (`infeasibleNamed`: a change under `.github/`, publishing a package, editing an issue or a pull request), is `refused`).
+  A task files at most one follow-up, labelled `follow-up`: a second scope names the first, an open issue that is a
+  follow-up of the same issue or has the same title is named instead of filing one, and the `factory` label goes only
+  on the follow-up of an issue that is not itself a follow-up (`followUpOrigin`), so a chain stops at a person. The
+  scope's note reaches the run with `fromReview`, so the builder is never told the checks failed; `apply.ts` is the only module with side effects and goes through the
   panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`) and, for a release, `release()`, so
   `transitions.ts` is asked first, even before a scope's only writes of its own (the follow-up issue and
   `updateIssueBody`). A handoff records its `cause`, and an older one is recognised by the start
-  of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
-  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. A failure of the work is
+  of its `reason`. A handoff, like a failure, is told apart by its event (the head is `<sha>@<event id>`), so a
+  second handoff on the same head is decided again. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
+  task gets at most two applied actions of each family (`MAX_APPLIED`, `FAMILY` in `decide.ts`: reworking the checks,
+  or unblocking the review), then the next one of that family is escalated. A failure of the work is
   told by how the run starts its reason (`factory/failure-reasons.ts`, `NO_TIME_FOR_AGENT`, `AGENT_OUT_OF_TIME`):
   `checks_red` is sent back on its branch with what the failing checks printed on the head (`evidence`, through
   `failingOutput`, escalated when nothing was kept), `out_of_time` is sent back to continue from the branch, and
@@ -227,7 +252,14 @@ reads that file, not a convention.
   kept none either, with what the failed checks of the pull request's head logged on GitHub (`ciFailures`, through
   `readEvidence` and `ciFailingOutput`). One whose pull request conflicts with its base is a `merge_base`
   (`mergeBaseByCoordinator`, which asks for `coordinator_merge_base` and queues the run with `mergeBase`), and a
-  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. An `unknown` is a
+  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. The handoffs
+  `integrate-after-ci` writes after the automatic runs carry a cause too (`ci-wait.ts`): `pull_conflict` and
+  `base_fixed` are a `merge_base`, and `ci_red` is sent back with what the handoff quoted of the failed checks, or
+  what their GitHub Actions jobs logged; a required check that never reported stays a plain `handoff`. A
+  `checks_broke_after_review` (the rework after a review broke the checks and `Run.restoreReviewed` put the branch back
+  at the reviewed commit) is a rework of the checks, never a `scope`: it is sent back with what the checks printed on
+  the commit that broke them (`brokenOutput`), or what the GitHub Actions jobs of the pull request's head logged, and
+  escalated when neither kept anything. An `unknown` is a
   `wait`: the first is recorded as `deferred` (which leaves the head free and is never `seen`), later passes
   record nothing, and it is escalated once the first wait is `UNKNOWN_LIMIT_MS` old. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
@@ -237,13 +269,16 @@ reads that file, not a convention.
   The release train (ADR 0010) is the `release_ready` playbook: `release-facts.ts` reads each enabled repository,
   `release-train.ts` decides over it and reads nothing. A repository in `auto` (its `release_mode`, or
   `FACTORY_RELEASE_MODE` when it has none) with integrated work (`done` with a `merged_sha`) that has reached `develop` (it holds commits the release branch lacks), no task queued, running or
-  waiting for CI, no release or publication in flight and its release branch not red or still watched by
+  waiting for CI, no release or publication in flight (a publication stalled on a failed check of its Version
+  Packages pull request does not count) and its release branch not red or still watched by
   `watch-main` gets one `release()` call per head of `develop`, as `agent:coordinator`, so `personDecisions` does
   not count it. The row is recorded on the repository's oldest such task, with the head of `develop`. The bump is
   `bumpFor`: `major` only for an issue labelled `breaking`, `minor` for one labelled `enhancement` or `feature`,
   `patch` otherwise; a changesets repository follows its changesets. A red release branch is a `release_blocked`
   exception, escalated, and nothing is called; the one retry of a passing refusal is a `release_retry` exception on
-  the same head. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
+  the same head. A publication that has waited `PUBLICATION_STALL_MS` (three hours) is a `publication_stalled`
+  exception on the task whose release started it, escalated once per publication (the head is `publication:<id>`),
+  so a train held behind it shows up for a person instead of waiting in silence. A repository in `trial` gets its decision recorded as `trial`, and one in `manual` is never read.
   `MAX_APPLIED` neither counts a release nor holds one back.
   A task held by a red integration branch (`done.detail.baseHold`, set and cleared by `integrate-after-ci`, shown
   on the panel card as `waitingOnBase`), or a failed one still red on the base past its automatic runs, is a
@@ -262,11 +297,23 @@ reads that file, not a convention.
   repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
   `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
   `run-task` job ahead of the repository's other pending jobs, by `available_at` in `theokit_jobs` (TheoKit has no
-  call for it, usetheokit/theokit#2117), and holds that repository's other pending jobs back until the fix integrates, fails, waits for an answer or is handed
+  call for it, usetheokit/theokit#2117), and holds that repository's other pending jobs back until the fix is done (verified and reviewed, without waiting for its CI), fails, waits for an answer or is handed
   to a person (only a person moves it on from there, so the others do not wait on one). The failures of the same test on
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
   however old) while it is on its way. The decision's head is the test and the fix's job (`headOf`), so a retried
   fix is decided again and an ended hold never comes back. It is not counted by `MAX_APPLIED`, and merges nothing.
+- **A red promotion stops the line.** With `FACTORY_LINE_STOP_MODE=auto`, `factory/promotion-line.ts` takes the
+  failures of the integration branch's promotion away from the per-check filing: `line/decide.ts` decides over
+  what was read (open, note, retry, escalate, resolve) and reads nothing, and `line/incident.ts` holds the
+  `line_incident` reads and writes. One incident per repository is open at a time, with one fix issue for every
+  failure of the head. While it is open, `maintainHolds` holds every other queued run of the repository
+  (`holdRepository` before the fix has a task), `integrationHeldUntil` and `integrate-after-ci` hold every
+  integration but the fix's, and the coordinator skips the repository's other exceptions. It ends only when every
+  check of a promotion head passed; a fix that ended with the promotion still red is followed by one more, then a
+  person (`MAX_ATTEMPTS`), and the line stays stopped until it is green. These holds all go through `holdingLines`:
+  with `FACTORY_LINE_STOP_SCOPE=fix_first` it returns none, so the incident and its fix issue stay, the issue's
+  priority label takes the fix ahead, and the rest of the repository keeps running and integrating (`hold`, the
+  default, is what is described above).
 - **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
   The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
   `scheduler/facts.ts` reads the queued `run-task` jobs of tasks in `intake`, their issues and the decisions already
@@ -308,6 +355,13 @@ reads that file, not a convention.
   failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
   environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
+- **A merge of the base is not the task's change.** The review and `diffFacts` measure the change from
+  `reviewBase` (`factory/diff-facts.ts`): the merge base of HEAD and the integration branch fetched before each
+  review. A run that only merges the base (`mergeBase`, or a conflict send-back) keeps the last approval when
+  `samePatch` finds the task's patch unchanged, and records it for the merge without asking the reviewer
+  (`Run.approvalKept`). Reworks for failing checks (`MAX_CHECK_REWORKS`) and review rounds (`reviewAllowsRework`
+  over the rounds) are separate budgets, and `automaticRunsSincePerson` leaves out `Blocked by` checks and, up to
+  `FREE_BASE_RUNS`, the runs that only bring the base in.
 - **Whether a stage allows an event is asked of `factory/transitions.ts`.** The table there declares the
   outcome of every pair of stage and event: the action, `ignored` or `refused`, with the reason a person
   reads. A panel action or a cron that checks a stage calls `outcome()` instead of comparing stages itself,

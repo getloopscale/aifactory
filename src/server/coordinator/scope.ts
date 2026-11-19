@@ -67,6 +67,36 @@ export function qualityConfigurationNamed(draft: ScopeDraft): string | undefined
   return QUALITY_CONFIGURATION.find((name) => told.includes(name))
 }
 
+/**
+ * Work a scope decision may not put in scope, since the factory cannot do it from its sandbox: `diffGuards` refuses a
+ * change under `.github/`, nothing there publishes a package, and its token cannot edit an issue or a pull request.
+ * Each is named as the refusal says it.
+ */
+const INFEASIBLE: [string, RegExp[]][] = [
+  ['a change under .github/', [/\.github\//]],
+  [
+    'publishing a package',
+    [/\b(npm|pnpm|yarn) publish\b/, /\bpublish(es|ing)?\b[^.]*\b(package|npm|registry)\b/],
+  ],
+  [
+    'editing an issue or a pull request on GitHub',
+    [
+      /\bon github\b/,
+      /\b(issue|pull request|pr)('s)? (body|title|description)\b/,
+      /\b(body|title|description) of (the )?(issue|pull request|pr)\b/,
+      /#\d+('s)? (body|title|description)\b/,
+    ],
+  ],
+]
+
+/** The first work in scope the factory cannot do, or nothing. */
+export function infeasibleNamed(draft: ScopeDraft): string | undefined {
+  const told = draft.inScope.map((item) => item.toLowerCase().replace(/\s+/g, ' '))
+  return INFEASIBLE.find(([, patterns]) =>
+    told.some((item) => patterns.some((pattern) => pattern.test(item))),
+  )?.[0]
+}
+
 const list = (items: string[]) =>
   (items.length > 0 ? items : ['nothing']).map((item) => `- ${item}`).join('\n')
 
@@ -87,13 +117,45 @@ export function scopeSection(draft: ScopeDraft, date: string, followUp: number |
   ].join('\n')
 }
 
+const FOLLOW_UP_OF = 'Follow-up of'
+
 /** The follow-up issue the draft files, its body ending with a line linking the original issue. */
 export function followUpIssue(draft: ScopeDraft, repo: string, issueNumber: number) {
   if (!draft.followUp) return undefined
   return {
     title: draft.followUp.title,
-    body: `${draft.followUp.body}\n\nFollow-up of ${repo}#${issueNumber}.`,
+    body: `${draft.followUp.body}\n\n${FOLLOW_UP_OF} ${repo}#${issueNumber}.`,
   }
+}
+
+const ORIGIN = new RegExp(`^${FOLLOW_UP_OF} ([\\w.-]+/[\\w.-]+)#(\\d+)\\.$`, 'm')
+
+/** The issue a follow-up was filed for, read from the line `followUpIssue` ends its body with; nothing for any other issue. */
+export function followUpOrigin(body: string): { repo: string; issue: number } | undefined {
+  const found = ORIGIN.exec(body)
+  return found ? { repo: found[1], issue: Number(found[2]) } : undefined
+}
+
+/** A title as two people would write it: its case, spacing and punctuation set aside. */
+const normalised = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+
+/**
+ * Whether an open issue already is the follow-up `title` would file for `repo#issueNumber`: a follow-up of the same
+ * issue, or an issue with the same title.
+ */
+export function sameFollowUp(
+  open: { title: string; body: string },
+  repo: string,
+  issueNumber: number,
+  title: string,
+): boolean {
+  const origin = followUpOrigin(open.body)
+  if (origin?.repo === repo && origin.issue === issueNumber) return true
+  return normalised(open.title) === normalised(title)
 }
 
 /** One review round of the task, as the `review` table holds it. */

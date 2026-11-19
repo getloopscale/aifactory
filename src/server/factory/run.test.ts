@@ -12,6 +12,7 @@ import { FakeBackend, FakeSandbox } from './fake-sandbox'
 import { codexHarness } from './harness-codex'
 import { heldFor, Run } from './run'
 import { StageFailure } from './run-support'
+import { Preparation } from './sandbox-prepared'
 import type { EgressRule } from './sandbox'
 
 vi.mock('./stages', async (original) => ({
@@ -364,6 +365,31 @@ describe('the install before the builder', () => {
     const install = after.findIndex((c) => c.endsWith('&& pnpm install'))
     expect(clean).toBeGreaterThanOrEqual(0)
     expect(install).toBeGreaterThan(clean)
+  })
+
+  it('times the install as the last step of the preparation and logs it before the builder runs', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const { start, run, calls } = starting(checks, {})
+    let at = 0
+    run.preparation = new Preparation(1, () => (at += 100))
+    const loggedBeforeBuilder: boolean[] = []
+    const builder = run.builder as { run: (b: unknown, o: { prompt: string }) => Promise<unknown> }
+    const inner = builder.run
+    builder.run = (b, o) => {
+      loggedBeforeBuilder.push(
+        log.mock.calls.some(([line]) => String(line).includes('sandbox_prepared')),
+      )
+      return inner(b, o)
+    }
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    const lines = log.mock.calls
+      .map(([line]) => String(line))
+      .filter((line) => line.includes('sandbox_prepared'))
+      .map((line) => JSON.parse(line))
+    log.mockRestore()
+    expect(lines).toEqual([expect.objectContaining({ taskId: 1, steps: { install: 100 } })])
+    expect(loggedBeforeBuilder).toEqual([true])
+    expect(calls.length).toBeGreaterThan(0)
   })
 
   it('runs nothing extra for a repository with no install check', async () => {

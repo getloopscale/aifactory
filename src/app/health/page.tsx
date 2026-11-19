@@ -11,8 +11,16 @@ import { useResource } from '../lib/live'
 
 type Action = 'retry' | 'resume' | 'delete_snapshot' | 'mark_revert_unknown'
 
-/** What a person does about each kind of finding; the words come from the dictionary. */
-const ACTION: Record<FindingView['subject'], Action> = {
+/** The kinds of finding a person resolves from the panel. */
+type Actionable = Exclude<FindingView['subject'], 'back_merge' | 'queue'>
+
+/**
+ * What a person does about each kind of finding; the words come from the dictionary. A stalled queue has
+ * nothing to do from here: its detail says what holds it. A back-merge that
+ * conflicts is resolved on GitHub, so its finding links there and has no button: the factory clears it once
+ * the conflict is gone.
+ */
+const ACTION: Record<Actionable, Action> = {
   run: 'retry',
   queued_run: 'retry',
   answer_resume: 'resume',
@@ -20,15 +28,22 @@ const ACTION: Record<FindingView['subject'], Action> = {
   revert: 'mark_revert_unknown',
 }
 
+const actionable = (subject: FindingView['subject']): subject is Actionable =>
+  subject !== 'back_merge' && subject !== 'queue'
+
 function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => void }) {
   const { t } = useCopy()
   const [message, setMessage] = useState<string>()
-  const todo: { label: string; confirm?: string } = t.health.actions[finding.subject]
+  const subject = finding.subject
+  const todo: { label: string; confirm?: string } | undefined = actionable(subject)
+    ? t.health.actions[subject]
+    : undefined
 
   async function resolve() {
-    if (todo.confirm && !window.confirm(todo.confirm)) return
+    if (!actionable(subject)) return
+    if (todo?.confirm && !window.confirm(todo.confirm)) return
     try {
-      await post(`/api/panel/findings/${finding.id}/resolve`, { action: ACTION[finding.subject] })
+      await post(`/api/panel/findings/${finding.id}/resolve`, { action: ACTION[subject] })
       onDone()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
@@ -59,9 +74,23 @@ function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => v
         </div>
       ) : null}
       <p className="mt-1 text-foreground">{finding.detail}</p>
-      <Button size="sm" variant="secondary" className="mt-2" onClick={() => void resolve()}>
-        {todo.label}
-      </Button>
+      {subject === 'back_merge' && finding.ref ? (
+        <div className="mt-1 text-xs">
+          <a
+            href={finding.ref}
+            target="_blank"
+            rel="noreferrer"
+            className="text-foreground underline underline-offset-2"
+          >
+            {t.health.openOnGithub}
+          </a>
+        </div>
+      ) : null}
+      {todo ? (
+        <Button size="sm" variant="secondary" className="mt-2" onClick={() => void resolve()}>
+          {todo.label}
+        </Button>
+      ) : null}
       {message ? (
         <p role="status" className="mt-2 text-destructive">
           {message}

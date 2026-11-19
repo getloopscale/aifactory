@@ -10,6 +10,7 @@ import {
   fixedBaseNote,
   isFixedBaseNote,
   readRequired,
+  requiredState,
 } from './ci-wait'
 
 const VERIFIED = 'abc1234def'
@@ -37,7 +38,8 @@ const decide = (over: Partial<Parameters<typeof decideWaitingIntegration>[0]> = 
     reports: [report('CI', 'pending'), report('Lint', 'success')],
     waitedMs: 60_000,
     automaticRuns: 0,
-    baseReports: [],
+    // The base passes every required check unless a test says otherwise, so a failure is the change's.
+    baseReports: [report('CI', 'success'), report('Lint', 'success')],
     blamedOnBase: [],
     ...over,
   })
@@ -55,7 +57,7 @@ describe('decideWaitingIntegration with a red base', () => {
   it('sends back only the checks the base does not fail', () => {
     const step = decide({
       reports: [report('CI', 'failure'), report('Lint', 'failure')],
-      baseReports: [report('CI', 'failure')],
+      baseReports: [report('CI', 'failure'), report('Lint', 'success')],
     })
     expect(step).toMatchObject({ kind: 'send_back', failed: ['Lint'] })
   })
@@ -63,19 +65,30 @@ describe('decideWaitingIntegration with a red base', () => {
   it('sends back only the report of the check the base does not fail', () => {
     const step = decide({
       reports: [report('CI', 'failure'), report('Lint', 'failure')],
-      baseReports: [report('CI', 'failure')],
+      baseReports: [report('CI', 'failure'), report('Lint', 'success')],
     })
     expect(step).toMatchObject({ reports: [report('Lint', 'failure')] })
   })
 
-  it.each([
-    ['green', [report('CI', 'success')]],
-    ['absent', []],
-  ])('sends back when the check is %s on the base', (_name, baseReports) => {
-    expect(decide({ reports: failing, baseReports })).toMatchObject({
+  it('sends back when the check is green on the base', () => {
+    expect(decide({ reports: failing, baseReports: [report('CI', 'success')] })).toMatchObject({
       kind: 'send_back',
       failed: ['CI'],
     })
+  })
+
+  it('waits, blaming nobody, while the base has no run of the check yet', () => {
+    // The base runs its CI only once a promotion opens from it, minutes after each integration.
+    expect(decide({ reports: failing, baseReports: [] })).toEqual({ kind: 'wait' })
+    expect(decide({ reports: failing, baseReports: [], automaticRuns: AUTOMATIC_RETRIES })).toEqual(
+      { kind: 'wait' },
+    )
+  })
+
+  it('sends back a check the base never ran once the pull request has waited as long as a silent check may', () => {
+    expect(
+      decide({ reports: failing, baseReports: [], waitedMs: CI_SILENCE_MS + 1 }),
+    ).toMatchObject({ kind: 'send_back', failed: ['CI'] })
   })
 
   it('reads a check as red on the base when one of its runs failed beside one that passed', () => {
@@ -105,6 +118,7 @@ describe('decideWaitingIntegration with a red base', () => {
       waitedMs: CI_SILENCE_MS + 1,
     })
     expect(step).toMatchObject({ kind: 'person', stopAutoMerge: true })
+    expect(step).not.toHaveProperty('cause')
   })
 })
 
@@ -194,10 +208,11 @@ describe('decideWaitingIntegration after the base was blamed', () => {
       kind: 'person',
       reason: expect.stringContaining('CI'),
       stopAutoMerge: true,
+      cause: 'base_fixed',
     })
   })
 
-  it('tells a person of a silent check before it merges the base', () => {
+  it('tells a person of a silent check before it merges the base, with no cause the coordinator acts on', () => {
     const step = decide({
       required: ['CI', 'Lint'],
       reports: [report('CI', 'failure')],
@@ -334,6 +349,7 @@ describe('decideWaitingIntegration', () => {
       kind: 'person',
       reason: expect.stringMatching(/conflicts with its base after 3 automatic runs/),
       stopAutoMerge: true,
+      cause: 'pull_conflict',
     })
   })
 
@@ -372,6 +388,7 @@ describe('decideWaitingIntegration', () => {
       reason: expect.stringMatching(/required checks still fail after 3 automatic runs: CI/),
       stopAutoMerge: true,
       reports: [report('CI', 'failure')],
+      cause: 'ci_red',
     })
   })
 
@@ -697,5 +714,34 @@ describe('checksFeedback with the step that exited', () => {
     expect(note).toContain(
       'CI:\nStep that exited: quality:loc (ran: pnpm quality)\n~~~~text\nERROR: "quality:loc" exited with 1.\n~~~~',
     )
+  })
+})
+
+describe('requiredState', () => {
+  const required = ['CI', 'Lint']
+
+  it('is green once every required check passed, whatever a check the branch does not require says', () => {
+    const reports = [report('CI', 'success'), report('Lint', 'success'), report('Docs', 'failure')]
+    expect(requiredState({ required, reports })).toEqual({ state: 'green', failing: [] })
+  })
+
+  it('is red naming the required checks that failed, even while another runs', () => {
+    const reports = [report('CI', 'failure'), report('Lint', 'pending')]
+    expect(requiredState({ required, reports })).toEqual({ state: 'red', failing: ['CI'] })
+  })
+
+  it('is pending while a required check runs, and while one has not reported', () => {
+    expect(
+      requiredState({ required, reports: [report('CI', 'success'), report('Lint', 'pending')] }),
+    ).toEqual({ state: 'pending', failing: [] })
+    expect(requiredState({ required, reports: [report('CI', 'success')] })).toEqual({
+      state: 'pending',
+      failing: [],
+    })
+  })
+
+  it('is not held by a check the branch does not require that still runs', () => {
+    const reports = [report('CI', 'success'), report('Lint', 'success'), report('Docs', 'pending')]
+    expect(requiredState({ required, reports }).state).toBe('green')
   })
 })

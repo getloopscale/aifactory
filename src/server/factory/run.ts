@@ -44,7 +44,7 @@ import {
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
 import { NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
-import { diffFacts } from './diff-facts'
+import { diffFacts, reviewBase, samePatch } from './diff-facts'
 import {
   changePlanPrompt,
   givenPlanPrompt,
@@ -63,7 +63,6 @@ import {
 } from './harness'
 import {
   blockingCount,
-  MAX_ATTEMPTS,
   notResolvedPrompt,
   OUTSIDE_THE_PLAN,
   parseVerdict,
@@ -82,9 +81,11 @@ import {
   GITCONFIG,
   INSTANCE,
   checkSummary,
+  feedbackSource,
   gitConfig,
   mergeEgress,
   must,
+  MAX_CHECK_REWORKS,
   oneLine,
   squashTitle,
   pullRequestBody,
@@ -115,6 +116,7 @@ import {
   type EgressRule,
   type SandboxSpec,
 } from './sandbox'
+import { Preparation } from './sandbox-prepared'
 import { enterRunStage } from './stages'
 import type { AgentEvent } from './transcript'
 import { Transcript } from './transcript-store'
@@ -144,6 +146,8 @@ export type RunContext = {
   startingOver?: Continuation
   /** The owner's answers to the questions the scheduler asked on the issue before any run. */
   clarifications?: Clarification[]
+  /** Times the steps of `Run.open` for the `sandbox_prepared` log line; untimed when absent. */
+  preparation?: Preparation
 }
 
 type Timeouts = NonNullable<RunTaskDeps['timeouts']>
@@ -427,15 +431,19 @@ export class Run {
    * secret is read here, on the host, and becomes a firewall rule, so the sandbox never holds one.
    */
   static async open(given: RunContext): Promise<Run> {
-    const c = await Run.withoutLostBranch(given)
+    const prep = given.preparation ?? new Preparation(given.taskId)
+    const c = await prep.step('branches', async () => {
+      const told = await Run.withoutLostBranch(given)
+      // Before any sandbox exists: a repository without the integration and pre-release branches gets them.
+      if (!told.resuming) {
+        await ensureBranches(told.api, told.row.repository, told.token, {
+          integration: integrationBranch(told.repo),
+          release: told.repo.releaseBranch,
+        })
+      }
+      return told
+    })
     const { deps, issue, resuming } = c
-    // Before any sandbox exists: a repository without the integration and pre-release branches gets them.
-    if (!resuming) {
-      await ensureBranches(c.api, c.row.repository, c.token, {
-        integration: integrationBranch(c.repo),
-        release: c.repo.releaseBranch,
-      })
-    }
     const labels = labelsWithRepoChoice(issue.labels ?? [], c.repo)
     const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
     const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
@@ -444,7 +452,9 @@ export class Run {
     const agents = [builder, reviewer, planner].filter(
       (agent, at, all) => all.findIndex((other) => other.name === agent.name) === at,
     )
-    const agentEgress = mergeEgress(await Promise.all(agents.map((a) => a.egress())))
+    const agentEgress = await prep.step('credentials', async () =>
+      mergeEgress(await Promise.all(agents.map((a) => a.egress()))),
+    )
 
     const spec: SandboxSpec = {
       timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs)
@@ -463,9 +473,11 @@ export class Run {
     await deps.db.update(task).set({ sandboxRun }).where(eq(task.id, c.taskId))
     spec.owner = { owner: 'task', taskId: c.taskId, run: sandboxRun }
     const startedAt = Date.now()
-    const started = resuming
-      ? await restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)
-      : await createIsolatedSandbox(deps.sandbox, spec)
+    const started = await prep.step('sandbox', () =>
+      resuming
+        ? restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)
+        : createIsolatedSandbox(deps.sandbox, spec),
+    )
     c.state.sandbox = started
     const sandbox = Run.withCredentials(c, started, spec.egress)
     c.state.sandbox = sandbox
@@ -476,22 +488,28 @@ export class Run {
       once: true,
     })
 
-    const { repoDir, baseSha } = await Run.checkout(c, sandbox.backend)
-    for (const agent of agents) await agent.prepare?.(sandbox.backend)
-    const feed = await KnowledgeFeed.open(deps.knowledge, sandbox.backend, c.row.repository, {
-      taskId: c.taskId,
+    const { repoDir, baseSha } = await prep.step('clone', () => Run.checkout(c, sandbox.backend))
+    await prep.step('harness', async () => {
+      for (const agent of agents) await agent.prepare?.(sandbox.backend)
     })
+    const feed = await prep.step('knowledge', () =>
+      KnowledgeFeed.open(deps.knowledge, sandbox.backend, c.row.repository, { taskId: c.taskId }),
+    )
     // Stopping the sandbox stops the feed first, so no copy goes into a sandbox that is gone.
-    c.state.sandbox = feed.attachTo(sandbox)
-    const told = await Run.withConflictFiles(c, sandbox.backend, repoDir, baseSha)
-    const run = new Run(told, builder, reviewer, c.state.sandbox, spec, repoDir, baseSha, startedAt)
-    run.planner = planner
-    run.feed = feed
-    run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
-    run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
-    // Before the builder's first pass, so it can run the check it is told to run.
-    await uploadChangesetCheck(sandbox.backend, run.checks)
-    return run
+    const attached = feed.attachTo(sandbox)
+    c.state.sandbox = attached
+    return prep.step('repository_facts', async () => {
+      const told = await Run.withConflictFiles(c, sandbox.backend, repoDir, baseSha)
+      const run = new Run(told, builder, reviewer, attached, spec, repoDir, baseSha, startedAt)
+      run.planner = planner
+      run.feed = feed
+      run.preparation = prep
+      run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
+      run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
+      // Before the builder's first pass, so it can run the check it is told to run.
+      await uploadChangesetCheck(sandbox.backend, run.checks)
+      return run
+    })
   }
 
   /**
@@ -929,6 +947,9 @@ export class Run {
   /** The install the factory ran before the builder's first pass, when it failed. */
   private installFailed: CheckResult | undefined
 
+  /** The preparation `open` timed; `start` adds the install to it and logs it. */
+  private preparation: Preparation | undefined
+
   /**
    * Installs the project before the builder's first pass, once per sandbox, so it can run the tests it is told
    * to run. A failure does not fail the run: the builder is told, and `verify` cleans and installs on its own.
@@ -953,7 +974,7 @@ export class Run {
       body: issue.body,
       branch,
       feedback: sentBack?.feedback,
-      feedbackFrom: sentBack?.fromChecks ? 'checks' : 'person',
+      feedbackFrom: feedbackSource(sentBack),
       startsOver: startingOver !== undefined,
       askQuestions: this.c.repo.askQuestions,
       knowledgeDir: this.feed?.dir,
@@ -1385,8 +1406,14 @@ export class Run {
    * something (the run parks) or when a person's requested change needed no change.
    */
   async start(): Promise<{ result: RunResult } | { sha: string }> {
-    if (this.c.continuation?.mergeBase) return { sha: await this.mergeBase() }
-    await this.installProject()
+    const prep = this.preparation
+    if (this.c.continuation?.mergeBase) {
+      prep?.log()
+      return { sha: await this.mergeBase() }
+    }
+    await (prep ? prep.step('install', () => this.installProject()) : this.installProject())
+    // The install is the last step of the preparation, so the line is logged once it ends.
+    prep?.log()
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()
@@ -1606,8 +1633,13 @@ export class Run {
       attempt,
       ...reviewerFacts(this.reviewer),
     })
-    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
+    // The integration branch as it is now: a merge of it into the work is not the work's change (#348).
+    const base = await reviewBase(this.backend, this.repoDir, {
       baseSha: this.baseSha,
+      integration: integrationBranch(this.c.repo),
+    })
+    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
+      baseSha: base,
       plan: this.plan,
       issue,
       checkRuns: await this.checkRuns(),
@@ -1623,7 +1655,7 @@ export class Run {
           title: issue.title,
           body: issue.body,
           branch,
-          baseSha: this.baseSha,
+          baseSha: base,
           knowledgeDir: this.feed?.dir,
           required,
           ...(this.earlier ? { earlier: this.earlier } : {}),
@@ -1665,6 +1697,69 @@ export class Run {
     })
     this.earlier = merged.verdict === 'changes' ? { sha, findings: merged.findings } : undefined
     return merged
+  }
+
+  /** Whether this run only merges the integration branch into the work: no agent was asked to change it. */
+  private mergesOnly(): boolean {
+    const continuation = this.c.continuation
+    return (
+      continuation?.mergeBase === true ||
+      continuation?.feedback?.startsWith(CONFLICT_NOTE_OPENING) === true
+    )
+  }
+
+  /**
+   * The approval a merge of the integration branch keeps (#349). When this run only merged that branch into
+   * work a review approved, and the task's patch on `sha` is the patch the review approved, that review still
+   * reads what `sha` changes: it is recorded again for `sha` and no reviewer is asked. A blocking fact about the
+   * diff, a later review that asked for changes, or a patch the merge changed, and the merge is reviewed as any
+   * work.
+   */
+  private async approvalKept(sha: string, attempt: number): Promise<ReviewVerdict | undefined> {
+    if (!this.mergesOnly()) return undefined
+    const { deps, taskId } = this.c
+    const [last] = await deps.db
+      .select()
+      .from(reviewTable)
+      .where(eq(reviewTable.taskId, taskId))
+      .orderBy(desc(reviewTable.id))
+      .limit(1)
+    if (last?.verdict !== 'approve' || last.sha === sha) return undefined
+    const integration = integrationBranch(this.c.repo)
+    const same = await samePatch(this.backend, this.repoDir, {
+      integration,
+      approved: last.sha,
+      head: sha,
+    })
+    if (!same) return undefined
+    const base = await reviewBase(this.backend, this.repoDir, {
+      baseSha: this.baseSha,
+      integration,
+    })
+    const { guards, touched } = await diffFacts(this.backend, this.repoDir, {
+      baseSha: base,
+      plan: this.plan,
+      issue: this.c.issue,
+    })
+    if (guards.some((g) => g.severity !== 'minor')) return undefined
+    this.touched = touched
+    this.c.state.current = 'review'
+    await enterRunStage(deps.db, taskId, 'review', { sha, attempt, approvalOf: last.sha })
+    const kept: ReviewVerdict = {
+      verdict: 'approve',
+      summary: `The approval of ${last.sha.slice(0, 7)} holds: merging ${integration} left the task's patch as it was. ${last.summary}`,
+      findings: last.findings as Finding[],
+    }
+    await deps.db.insert(reviewTable).values({
+      taskId,
+      round: attempt,
+      sha,
+      reviewer: last.reviewer,
+      verdict: 'approve',
+      summary: kept.summary,
+      findings: kept.findings,
+    })
+    return kept
   }
 
   private deliver(sha: string, pullRequestUrl: string, attempts: number): Promise<Handed> {
@@ -1764,7 +1859,7 @@ export class Run {
     return this.handOver(sha, kept.attempt, checked.here, kept.outcome, kept.counts, {
       headline: 'The last rework broke the checks',
       reason: `the last rework broke the checks (${reasons.join('; ')}), so the branch is back at ${short}, which passed them and was reviewed`,
-      cause: 'review_plateau',
+      cause: 'checks_broke_after_review',
     })
   }
 
@@ -1797,7 +1892,7 @@ export class Run {
       held?.reason ??
       (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(counts.length, counts)}`)
     const empty = await this.reopenedOrEmpty(sha)
     if (empty) return empty
     state.current = 'pr'
@@ -1912,9 +2007,11 @@ export class Run {
     let reviewed: Reviewed | undefined
     // The checks that failed on the commit before, while they keep failing.
     let failedBefore: CheckResult[] | undefined
+    // Reworks for failing checks have their own budget: they never use up the review's rounds (#347).
+    let checkReworks = 0
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
-        attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
+        checkReworks < MAX_CHECK_REWORKS && this.builder.resume !== undefined && !!this.sessionId
       const fixed = await this.applyFixes(sha, { attempt })
       sha = fixed.sha
       const checked = await this.verify(sha, attempt, { publish: true, fixed })
@@ -1932,6 +2029,7 @@ export class Run {
         // A builder that changed nothing said the failure is not its change's: a timeout, often, and then the
         // checks run again on the same commit, within the same attempts. When the failing checks fail on the
         // integration branch too, the failure is the base's, and no rework fixes it (#219).
+        checkReworks += 1
         const reworked = await this.rework(attempt + 1, [], failed)
         if (reworked === undefined) await this.refuseRedBase(failed)
         sha = reworked ?? sha
@@ -1939,12 +2037,16 @@ export class Run {
       }
 
       failedBefore = undefined
+      const kept = counts.length === 0 ? await this.approvalKept(sha, attempt) : undefined
+      if (kept) return this.approved(sha, attempt, checked.here, kept)
       const outcome = await this.review(sha, attempt)
       if (outcome.verdict === 'approve') return this.approved(sha, attempt, checked.here, outcome)
       counts.push(blockingCount(outcome.findings))
       reviewed = { sha, attempt, here: checked.here, outcome, counts: [...counts] }
       const mayRework =
-        this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
+        this.builder.resume !== undefined &&
+        !!this.sessionId &&
+        reviewAllowsRework(counts.length, counts)
       if (outcome.verdict === 'changes' && mayRework) {
         const reworked = await this.rework(attempt + 1, outcome.findings, [], sha)
         // Reviewing the same commit again would get the same verdict: the disagreement goes to a person.

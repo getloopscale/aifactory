@@ -31,6 +31,19 @@ describe('a restart of a process that runs tasks', () => {
     expect(loaded.jobs?.worker.shutdownTimeoutMs).toBe(JOB_SHUTDOWN_WAIT_MS)
   })
 
+  it('keeps the queue and the cron lock in a server-only process, and takes no job there', async () => {
+    vi.stubEnv('DATABASE_URL', 'postgres://factory:factory@localhost:1/factory')
+    vi.stubEnv('FACTORY_JOBS', '')
+    vi.stubEnv('FACTORY_SERVER_ONLY', '1')
+    vi.resetModules()
+    const { default: loaded } = await import('../../../theo.config')
+    vi.unstubAllEnvs()
+
+    expect(loaded.jobs?.worker.enabled).toBe(false)
+    expect(loaded.jobs?.backend).toBeDefined()
+    expect(loaded.cron?.lock).toBeDefined()
+  })
+
   it('lets a run last long enough for a builder, slow checks, a review, a rework and the checks again', () => {
     expect(DEFAULT_TIMEOUTS.sandboxMs).toBe(90 * 60_000)
   })
@@ -49,17 +62,28 @@ describe('a restart of a process that runs tasks', () => {
     expect(JOB_SHUTDOWN_WAIT_MS).toBeGreaterThan(DEFAULT_TIMEOUTS.sandboxMs)
   })
 
-  for (const name of ['aifactory.service', 'aifactory-worker@.service']) {
-    it(`is not cut short by systemd in ${name}`, () => {
-      expect(stopTimeoutMs(unit(name))).toBeGreaterThanOrEqual(
-        JOB_SHUTDOWN_WAIT_MS + AFTER_THE_JOB_MS,
-      )
-    })
+  it('is not cut short by systemd in a worker', () => {
+    expect(stopTimeoutMs(unit('aifactory-worker@.service'))).toBeGreaterThanOrEqual(
+      JOB_SHUTDOWN_WAIT_MS + AFTER_THE_JOB_MS,
+    )
+  })
 
+  for (const name of ['aifactory.service', 'aifactory-worker@.service']) {
     it(`signals only the server in ${name}, so the agent's commands keep running while it drains`, () => {
       expect(unit(name)).toMatch(/^KillMode=mixed$/m)
     })
   }
+
+  it('starts the main process as server only, so a restart never waits for a run and stops no cron for it', () => {
+    // The main process took run-task jobs too, and a deploy left it draining one for 34 minutes while
+    // integrate-after-ci, publish-changesets, coordinate and schedule fired nowhere (2026-11-19).
+    expect(unit('aifactory.service')).toMatch(/^Environment=FACTORY_SERVER_ONLY=1$/m)
+    expect(unit('aifactory-worker@.service')).not.toMatch(/FACTORY_SERVER_ONLY/)
+  })
+
+  it('stops the main process in minutes, since it holds no run', () => {
+    expect(stopTimeoutMs(unit('aifactory.service'))).toBeLessThanOrEqual(5 * 60_000)
+  })
 
   it('restarts each worker on its own, never ordered after the main process', () => {
     // A restart of every process stopped the workers first and started them only after the main process

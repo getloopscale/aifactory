@@ -485,10 +485,13 @@ export const finding = pgTable('finding', {
   key: text('key').notNull().unique(),
   kind: text('kind', { enum: ['stalled', 'orphaned'] }).notNull(),
   subject: text('subject', {
-    enum: ['run', 'queued_run', 'answer_resume', 'snapshot', 'revert'],
+    enum: ['run', 'queued_run', 'queue', 'answer_resume', 'snapshot', 'revert', 'back_merge'],
   }).notNull(),
   taskId: integer('task_id').references(() => task.id),
-  /** What the finding points at when it is not a task: a snapshot id, a question or a watch. */
+  /**
+   * What the finding points at when it is not a task: a snapshot id, a question, a watch, or the link of a
+   * back-merge that conflicts with the integration branch.
+   */
   ref: text('ref'),
   detail: text('detail').notNull(),
   firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
@@ -734,6 +737,39 @@ export const promotionFinding = pgTable(
 )
 
 /**
+ * A stopped line (`line/`): something that blocks every task of a repository at once, such as a red
+ * promotion. While it is open no new run of the repository starts and nothing of it integrates but its fix,
+ * which is one issue for all the failures. It ends only when the blocked surface is green again.
+ */
+export const lineIncident = pgTable(
+  'line_incident',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    cause: text('cause', { enum: ['promotion_red', 'mass_failure'] }).notNull(),
+    /** What is blocked, as a person reads it: `workspace -> develop`, or the failure signature. */
+    surface: text('surface').notNull(),
+    /** The issue of the fix now on its way. */
+    issueNumber: integer('issue_number').notNull(),
+    issueUrl: text('issue_url').notNull(),
+    /** The head the failures were last read on. */
+    lastSha: text('last_sha').notNull(),
+    /** How many fix issues the incident has had: one more each time a fix integrated and the line stayed red. */
+    attempts: integer('attempts').notNull().default(1),
+    status: text('status', { enum: ['open', 'escalated', 'resolved'] })
+      .notNull()
+      .default('open'),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('line_incident_one_per_repository')
+      .on(table.repository)
+      .where(sql`${table.status} <> 'resolved'`),
+  ],
+)
+
+/**
  * One day of one indicator the factory keeps about itself (`metrics/config.ts`), for one repository or for
  * all of them (`*`): the mean of what was observed that day and how many observations made it. The
  * `measure` cron writes it again on every pass for the days it still covers.
@@ -782,7 +818,9 @@ export const metricSignal = pgTable(
  * red for too long while it holds tasks (`base_red`). A failure whose reason the coordinator acts on is its own
  * kind: checks still red after the attempts (`checks_red`), a run out of time (`out_of_time`) and an agent that
  * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
- * (`base_conflict`); any other is a `failure`.
+ * (`base_conflict`); any other is a `failure`. A handoff of integrated work after its automatic runs is its own kind
+ * too: a pull request that still conflicts with its base (`pull_conflict`), a base that passes the checks blamed on
+ * it again (`base_fixed`) and required checks that still fail (`ci_red`).
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -803,6 +841,11 @@ export const EXCEPTION_KINDS = [
   'queue_blocked',
   'base_red',
   'base_conflict',
+  'pull_conflict',
+  'base_fixed',
+  'ci_red',
+  'checks_broke_after_review',
+  'publication_stalled',
 ] as const
 
 /**

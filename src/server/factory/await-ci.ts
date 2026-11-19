@@ -26,6 +26,8 @@ import {
   releaseByMode,
   type Handed,
 } from './integration'
+import { lineHolds } from '../line/incident'
+
 import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
 import { outcome } from './transitions'
@@ -203,6 +205,7 @@ async function toPerson(
       stage: 'handoff',
       detail: {
         reason: step.reason,
+        ...(step.cause ? { cause: step.cause } : {}),
         sha: verifiedSha,
         pullRequestUrl: row.pullRequestUrl,
         costUsd: row.costUsd,
@@ -398,7 +401,12 @@ async function look(
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
-      ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
+      ? {
+          held:
+            holding.has(row.repository) || (await lineHolds(deps.db, row.repository, row.id))
+              ? ('holding' as const)
+              : ('released' as const),
+        }
       : {}),
   }
   let step = decideWaitingIntegration(input)

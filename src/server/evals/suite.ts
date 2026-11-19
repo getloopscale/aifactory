@@ -287,6 +287,11 @@ export type RunOutcome = {
   baselineRefused?: string
 }
 
+/** Writes a value as the JSON file a run or a baseline is kept in. */
+export function writeJson(path: string, value: unknown): void {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
+}
+
 /**
  * Writes what the run came to (the cases finished and the ones left, and the baseline's refusal when it left any)
  * as soon as `runSuite` returns, before anything that can block, so a cut-off run still says what it lacked.
@@ -304,6 +309,6 @@ export function writeRunOutcome(
   if (run.baseline && ran.skipped.length > 0)
     outcome.baselineRefused = `baseline.json not written: the run left ${ran.skipped.length} case(s) (${ran.skipped.join(', ')})`
   mkdirSync(dirname(path), { recursive: true })
-  writeFileSync(path, `${JSON.stringify(outcome, null, 2)}\n`)
+  writeJson(path, outcome)
   return outcome
 }
