@@ -7,6 +7,7 @@
   "coverageAnalysis": "perTest",
   "mutate": [
     "src/server/ingest/decide.ts",
+    "src/server/line/decide.ts",
     "src/server/factory/evidence.ts",
     "src/server/factory/release.ts",
     "src/server/factory/review.ts:64-177",

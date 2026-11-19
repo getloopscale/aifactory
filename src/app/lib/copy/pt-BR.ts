@@ -556,6 +556,14 @@ export const ptBR: Copy = {
     changePlaceholder: 'Quer diferente? Diga o quê, com as suas palavras',
     change: 'Mudar',
   },
+  lineAlert: {
+    region: 'Linhas paradas',
+    line: (repository: string, surface: string, forHow: string) =>
+      `${repository}: linha parada há ${forHow}, ${surface} está vermelha. Nada mais roda nem integra ali até ficar verde.`,
+    fix: (issue: number, attempt: number) =>
+      attempt > 1 ? `Correção #${issue}, tentativa ${attempt}` : `Correção #${issue}`,
+    person: (issue: number) => `#${issue} precisa de uma pessoa`,
+  },
   baseAlert: {
     region: 'Branches de integração vermelhas',
     line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>
@@ -736,10 +744,13 @@ export const ptBR: Copy = {
     kind: {
       run: 'Uma execução parou de andar',
       queued_run: 'Uma tarefa está na fila e nada vai executá-la',
+      queue: 'As execuções na fila de um repositório não estão começando',
       answer_resume: 'Uma resposta nunca foi retomada',
       snapshot: 'Um instantâneo de que ninguém precisa',
       revert: 'Uma reversão nunca foi confirmada',
+      back_merge: 'Um back-merge tem conflito e nada vai fazer o merge dele',
     },
+    openOnGithub: 'Abrir no GitHub',
     actions: {
       run: {
         label: 'Recomeçar',

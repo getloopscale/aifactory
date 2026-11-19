@@ -9,6 +9,8 @@ import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions, type FactsDeps } from './exception-facts'
 import { readCurrentReasons, readQueueFacts } from './queue-facts'
 import { isHeld, recogniseQueue, testOf } from './queue-order'
+import { stoppedLines } from '../line/incident'
+
 import { maintainHolds } from './queue-hold'
 import { recognise, type TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
@@ -77,9 +79,17 @@ export async function coordinate(
   const held = await maintainHolds(deps.db)
   const reasons = await readCurrentReasons(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   const recorded = await readRecordedActions(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
+  const lines = await stoppedLines(deps.db)
   for (const exception of exceptions) {
     // The fix of this failure is on its way: the task waits for it, not sent back to fail the same way.
     const repository = repositories.get(exception.taskId)
+    // A stopped line does only its fix (`line/`): sending a task back, scoping or releasing waits for it.
+    if (
+      repository !== undefined &&
+      lines.has(repository) &&
+      lines.get(repository) !== exception.taskId
+    )
+      continue
     const reason = reasons.get(exception.taskId)
     if (isHeld(exception, repository, held, reason === undefined ? [] : [reason])) continue
     const forTask = recorded.get(exception.taskId)!

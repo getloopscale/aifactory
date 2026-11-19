@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm'
+import { sql, type SQL } from 'drizzle-orm'
 
 import type { Database } from '../db'
 
@@ -16,13 +16,17 @@ export const HOLD_LOCK = sql`select pg_advisory_xact_lock(hashtext('prioritise')
 
 export type QueueDb = Pick<Database, 'execute'>
 
-/** Pending `run-task` jobs of the repository of `taskId` that no worker holds, of tasks still in `intake`. */
-const PENDING = (taskId: number) => sql`select j.id, j.available_at, t.id as task_id
+/** Pending `run-task` jobs of a repository that no worker holds, of tasks still in `intake`. */
+const PENDING_IN = (repository: SQL) => sql`select j.id, j.available_at, t.id as task_id
           from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
           where j.name = 'run-task' and j.failed_at is null
             and (j.locked_until is null or j.locked_until < now()) and t.stage = 'intake'
-            and t.repository = (select repository from task where id = ${taskId})
+            and t.repository = ${repository}
           for update of j skip locked`
+
+/** The same, for the repository of `taskId`. */
+const PENDING = (taskId: number) =>
+  PENDING_IN(sql`(select repository from task where id = ${taskId})`)
 
 /** The fix's own job is never held: a hold an earlier fix of the repository put on it ends first. */
 async function releaseOwn(db: QueueDb, fixTaskId: number): Promise<void> {
@@ -53,6 +57,20 @@ export async function holdOthers(db: QueueDb, fixTaskId: number): Promise<void> 
           available_at = (select at from until)
         where id in (select id from pending where task_id <> ${fixTaskId})
           and available_at < (select at from until)`,
+  )
+}
+
+/**
+ * Holds every pending job of a repository whose line is stopped before its fix has a task (`line/`), the same
+ * way `holdOthers` does: until `releaseHolds` gives them back.
+ */
+export async function holdRepository(db: QueueDb, repository: string): Promise<void> {
+  await db.execute(
+    sql`with pending as (${PENDING_IN(sql`${repository}`)})
+        update theokit_jobs set
+          input = input || jsonb_build_object('heldFrom', coalesce(input->>'heldFrom', available_at::text)),
+          available_at = 'infinity'::timestamptz
+        where id in (select id from pending) and available_at < 'infinity'::timestamptz`,
   )
 }
 
