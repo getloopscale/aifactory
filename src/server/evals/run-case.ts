@@ -104,6 +104,8 @@ class CaseRun {
   cost = 0
   attempts = 1
   reviewRounds = 0
+  /** The verdict of each review round that completed, as it came back. */
+  readonly reviews: ReviewVerdict[] = []
   /** The findings that block, in each review round so far. */
   private readonly blockingCounts: number[] = []
   /** The last commit this case made or found, from which the next round counts what the builder committed. */
@@ -393,9 +395,11 @@ class CaseRun {
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
     await must(this.backend, `${this.git} reset --hard ${sha}`)
     await must(this.backend, `${this.git} clean -fd`)
-    return result.ok
+    const verdict: ReviewVerdict = result.ok
       ? parseVerdict(result.summary)
       : { verdict: 'invalid', summary: result.summary, findings: [] }
+    this.reviews.push(verdict)
+    return verdict
   }
 
   private canResume(): boolean {
@@ -484,6 +488,7 @@ class CaseRun {
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
+      reviews: this.reviews,
     }
   }
 }
@@ -538,6 +543,8 @@ export async function runCase(
   signal?: AbortSignal,
 ): Promise<CaseResult> {
   const started = Date.now()
+  // The case's run once it exists, so a case stopped later still reports the reviews it completed.
+  const held: { sandbox?: IsolatedSandbox; run?: CaseRun } = {}
   const stoppedAs = (reason: string): CaseResult => ({
     id: c.id,
     ...caseOutcome({ stopped: reason }),
@@ -545,6 +552,7 @@ export async function runCase(
     durationMs: Date.now() - started,
     attempts: 0,
     reviewRounds: 0,
+    reviews: held.run ? [...held.run.reviews] : [],
   })
   // The hash reaches a shell, so only a full commit hash gets that far.
   if (!COMMIT.test(c.baseSha))
@@ -554,7 +562,6 @@ export async function runCase(
   const live = () => ensureLive(signal)
   if (signal?.aborted) return stoppedAs(ABANDONED)
 
-  const held: { sandbox?: IsolatedSandbox } = {}
   let stopped = false
   const stopSandbox = async () => {
     if (stopped || !held.sandbox) return
@@ -590,6 +597,7 @@ export async function runCase(
     held.sandbox = sandbox
     live()
     const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir, signal)
+    held.run = run
     // Before the builder's first pass, so it can run the check it is told to run.
     await uploadChangesetCheck(sandbox.backend, c.checks)
     live()

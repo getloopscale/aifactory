@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { promotionFinding, repository, task } from '../db/schema'
@@ -17,11 +17,14 @@ import {
   promotionPullRequests,
   recurrenceComment,
   recurrenceIsNewIssue,
+  togetherBody,
+  togetherTitle,
   withEvidence,
   type FailedCheck,
   type FailureAt,
   type IssueLink,
   type Rerun,
+  type SeenCheck,
 } from './promotion'
 
 /** The label the scheduler sorts first. */
@@ -71,7 +74,12 @@ export function passLog(result: PromotionWatchResult): { level: 'log' | 'error';
 }
 
 /** A failed check with its evidence, and what became of its rerun. */
-type Seen = FailedCheck & { rerun: Rerun }
+type Seen = SeenCheck
+
+/** A failure no finding knows yet, with the signature its finding will carry. */
+type Fresh = { check: Seen; signature: string }
+
+type Where = { head: string; base: string }
 
 /** One repository in one pass: where to write, and how many issues it opened so far. */
 type Pass = {
@@ -124,9 +132,14 @@ async function watchRepository(
   for (const promotion of promotionPullRequests(release)) {
     const pull = await deps.api.openPullRequest(row.fullName, token, promotion.head, promotion.base)
     if (!pull) continue
+    const fresh: Fresh[] = []
     for (const check of withEvidence(await failuresOf(pass, pull.headSha))) {
-      await report(pass, check, at(pull, promotion, check.rerun))
+      const signature = findingSignature(check.name, check.evidence)
+      const known = await knownFinding(pass, check.name, signature)
+      if (!known && !needsPerson(check.name)) fresh.push({ check, signature })
+      else await report(pass, check, at(pull, promotion, check.rerun), signature, known)
     }
+    await fileTogether(pass, fresh, pull, promotion)
   }
 }
 
@@ -192,22 +205,33 @@ async function rerunOnce(pass: Pass, runId: number, reruns: Map<number, RerunAns
   return answer
 }
 
-/**
- * Files a failure once: a new one opens an issue, a known one on a new commit comments on its issue, or
- * opens a new one when that issue is closed or its fix is already integrated (`recurrenceIsNewIssue`).
- */
-async function report(pass: Pass, check: FailedCheck, where: FailureAt) {
-  const signature = findingSignature(check.name, check.evidence)
+async function knownFinding(pass: Pass, checkName: string, signature: string) {
   const [known] = await pass.deps.db
     .select()
     .from(promotionFinding)
     .where(
       and(
         eq(promotionFinding.repository, pass.repo),
-        eq(promotionFinding.checkName, check.name),
+        eq(promotionFinding.checkName, checkName),
         eq(promotionFinding.signature, signature),
       ),
     )
+  return known
+}
+
+type Finding = NonNullable<Awaited<ReturnType<typeof knownFinding>>>
+
+/**
+ * Files a failure once: a new one opens an issue, a known one on a new commit comments on its issue, or
+ * opens a new one when that issue is closed or its fix is already integrated (`recurrenceIsNewIssue`).
+ */
+async function report(
+  pass: Pass,
+  check: FailedCheck,
+  where: FailureAt,
+  signature: string,
+  known: Finding | undefined,
+) {
   if (!known) return fileNew(pass, check, where, signature)
   if (known.issueNumber === null || known.issueUrl === null || known.lastSha === where.sha) return
   const previous: IssueLink = { number: known.issueNumber, url: known.issueUrl }
@@ -261,6 +285,64 @@ async function fileNew(pass: Pass, check: FailedCheck, where: FailureAt, signatu
     await pass.deps.db.delete(promotionFinding).where(eq(promotionFinding.id, claim.id))
     throw error
   }
+}
+
+/**
+ * The new failures of one head that the factory can fix become one issue, since its promotion merges only
+ * once all of them pass: one task per check would fix its own and still fail on the others, which fail on
+ * the base too, so each would wait for the base and none would ever merge. Each check keeps its finding,
+ * pointing at that issue, so a recurrence is still told check by check.
+ */
+async function fileTogether(pass: Pass, fresh: Fresh[], pull: PromotionPull, promotion: Where) {
+  if (fresh.length === 1) {
+    const [{ check, signature }] = fresh
+    return fileNew(pass, check, at(pull, promotion, check.rerun), signature)
+  }
+  if (fresh.length === 0 || capReached(pass)) return
+  const claimed = await claimAll(pass, fresh, pull.headSha)
+  if (claimed.length === 0) return
+  const ids = claimed.map((c) => c.id)
+  try {
+    await createAndLink(pass, issueText(claimed, pull, promotion), true, ids)
+  } catch (error) {
+    await pass.deps.db.delete(promotionFinding).where(inArray(promotionFinding.id, ids))
+    throw error
+  }
+}
+
+/** Claims each failure before the issue is opened, so that two passes cannot open two. */
+async function claimAll(pass: Pass, fresh: Fresh[], sha: string) {
+  const claimed: { id: number; check: Seen }[] = []
+  for (const { check, signature } of fresh) {
+    const [claim] = await pass.deps.db
+      .insert(promotionFinding)
+      .values({
+        repository: pass.repo,
+        checkName: check.name,
+        signature,
+        forFactory: true,
+        lastSha: sha,
+      })
+      .onConflictDoNothing()
+      .returning({ id: promotionFinding.id })
+    if (claim) claimed.push({ id: claim.id, check })
+  }
+  return claimed
+}
+
+/** The text of the issue for the claimed failures: a single one keeps the issue of one check. */
+function issueText(claimed: { check: Seen }[], pull: PromotionPull, promotion: Where): IssueText {
+  const checks = claimed.map((c) => c.check)
+  if (checks.length === 1) {
+    const where = at(pull, promotion, checks[0].rerun)
+    return { title: issueTitle(checks[0], where), body: issueBody(checks[0], where) }
+  }
+  const where = {
+    pullRequest: { number: pull.number, url: pull.url },
+    sha: pull.headSha,
+    ...promotion,
+  }
+  return { title: togetherTitle(checks, where), body: togetherBody(checks, where) }
 }
 
 type Known = { id: number; lastSha: string }
@@ -330,7 +412,19 @@ async function openIssue(
   findingId: number,
   previous?: IssueLink,
 ) {
-  const forFactory = !needsPerson(check.name)
+  const text = { title: issueTitle(check, where), body: issueBody(check, where, previous) }
+  await createAndLink(pass, text, !needsPerson(check.name), [findingId])
+}
+
+type IssueText = { title: string; body: string }
+
+/** Opens the issue and points the findings it files at it. */
+async function createAndLink(
+  pass: Pass,
+  text: IssueText,
+  forFactory: boolean,
+  findingIds: number[],
+) {
   const { deps, repo, token } = pass
   if (forFactory) {
     await deps.issues.ensureLabel(repo, token, {
@@ -341,15 +435,14 @@ async function openIssue(
     await deps.issues.ensureLabel(repo, token, FIRST)
   }
   const issue = await deps.issues.createIssue(repo, token, {
-    title: issueTitle(check, where),
-    body: issueBody(check, where, previous),
+    ...text,
     // A red promotion holds every release of the repository, so its fix goes ahead of the queue.
     labels: forFactory ? [FACTORY_LABEL, FIRST.name] : [],
   })
   await deps.db
     .update(promotionFinding)
     .set({ issueNumber: issue.number, issueUrl: issue.url, updatedAt: new Date() })
-    .where(eq(promotionFinding.id, findingId))
+    .where(inArray(promotionFinding.id, findingIds))
   pass.opened++
   pass.result.opened.push(issue.url)
 }

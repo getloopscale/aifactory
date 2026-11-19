@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { CHANGESET_CHECK_SCRIPT } from '../factory/changeset-check'
 import { CHANGESET_CHECK_PATH, withChangesetCheck } from '../factory/changesets'
@@ -8,6 +11,7 @@ import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harn
 import type { EvalCase } from './cases'
 import { failedForEnvironment } from './compare'
 import { runCase } from './run-case'
+import { writeJson } from './suite'
 
 const BASE = 'a'.repeat(40)
 
@@ -953,5 +957,61 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false })
     expect(result.reason).toContain('is not a commit hash')
     expect(provider.specs).toEqual([])
+  })
+})
+
+describe('runCase review record', () => {
+  const round = (n: number) => ({
+    verdict: 'changes',
+    summary: `round ${n}`,
+    findings: [{ severity: n === 2 ? 'minor' : 'major', file: `src/f${n}.ts`, issue: `problem ${n}` }],
+  })
+  const answer = (n: number): HarnessResult => ({ ok: true, summary: JSON.stringify(round(n)) })
+
+  it('keeps the distinct verdict of every review round in the run file', async () => {
+    const builder = agent('builder', planned(built(), built(), built()))
+    const reviewer = agent('reviewer', [answer(1), answer(2), answer(3)])
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(result.passed).toBe(false)
+
+    const dir = mkdtempSync(join(tmpdir(), 'evals-'))
+    const path = join(dir, 'run.json')
+    writeJson(path, { results: [result] })
+    const written = JSON.parse(readFileSync(path, 'utf8'))
+
+    expect(written.results[0].reviews).toEqual([round(1), round(2), round(3)])
+    rmSync(dir, { recursive: true })
+  })
+
+  it('keeps the completed reviews of a case that is abandoned during a later review', async () => {
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [answer(1)])
+    const first = reviewer.run
+    const controller = new AbortController()
+    reviewer.run = (backend, input) => {
+      reviewer.run = () => new Promise(() => {})
+      return first(backend, input)
+    }
+    const pending = runCase(deps(sandbox(), builder, reviewer), evalCase, controller.signal)
+    await vi.waitFor(() => expect(builder.prompts.length).toBeGreaterThanOrEqual(3))
+    await new Promise((r) => setTimeout(r, 50))
+    controller.abort()
+
+    const result = await pending
+    expect(result.reason).toContain('abandoned')
+    expect(result.reviews).toEqual([round(1)])
+  })
+
+  it('keeps the completed reviews of a case that fails with an error after a review', async () => {
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [answer(1)])
+    const first = reviewer.run
+    reviewer.run = (backend, input) => {
+      reviewer.run = () => Promise.reject(new Error('boom'))
+      return first(backend, input)
+    }
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(result.reason).toContain('boom')
+    expect(result.reviews).toEqual([round(1)])
   })
 })
