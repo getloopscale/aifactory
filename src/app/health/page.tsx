@@ -11,8 +11,11 @@ import { useResource } from '../lib/live'
 
 type Action = 'retry' | 'resume' | 'delete_snapshot' | 'mark_revert_unknown'
 
-/** What a person does about each kind of finding; the words come from the dictionary. */
-const ACTION: Record<FindingView['subject'], Action> = {
+/**
+ * What a person does about each kind of finding; the words come from the dictionary. A stalled queue has nothing to
+ * do from here: its detail says what holds it, and it resolves once its runs start.
+ */
+const ACTION: Record<Exclude<FindingView['subject'], 'queue'>, Action> = {
   run: 'retry',
   queued_run: 'retry',
   answer_resume: 'resume',
@@ -23,12 +26,15 @@ const ACTION: Record<FindingView['subject'], Action> = {
 function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => void }) {
   const { t } = useCopy()
   const [message, setMessage] = useState<string>()
-  const todo: { label: string; confirm?: string } = t.health.actions[finding.subject]
+  const subject = finding.subject
+  const todo: { label: string; confirm?: string } | undefined =
+    subject === 'queue' ? undefined : t.health.actions[subject]
 
   async function resolve() {
+    if (subject === 'queue' || !todo) return
     if (todo.confirm && !window.confirm(todo.confirm)) return
     try {
-      await post(`/api/panel/findings/${finding.id}/resolve`, { action: ACTION[finding.subject] })
+      await post(`/api/panel/findings/${finding.id}/resolve`, { action: ACTION[subject] })
       onDone()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
@@ -59,9 +65,11 @@ function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => v
         </div>
       ) : null}
       <p className="mt-1 text-foreground">{finding.detail}</p>
-      <Button size="sm" variant="secondary" className="mt-2" onClick={() => void resolve()}>
-        {todo.label}
-      </Button>
+      {todo ? (
+        <Button size="sm" variant="secondary" className="mt-2" onClick={() => void resolve()}>
+          {todo.label}
+        </Button>
+      ) : null}
       {message ? (
         <p role="status" className="mt-2 text-destructive">
           {message}

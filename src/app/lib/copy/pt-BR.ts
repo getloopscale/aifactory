@@ -744,6 +744,7 @@ export const ptBR: Copy = {
     kind: {
       run: 'Uma execução parou de andar',
       queued_run: 'Uma tarefa está na fila e nada vai executá-la',
+      queue: 'As execuções na fila de um repositório não estão começando',
       answer_resume: 'Uma resposta nunca foi retomada',
       snapshot: 'Um instantâneo de que ninguém precisa',
       revert: 'Uma reversão nunca foi confirmada',

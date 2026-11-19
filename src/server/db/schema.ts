@@ -485,7 +485,7 @@ export const finding = pgTable('finding', {
   key: text('key').notNull().unique(),
   kind: text('kind', { enum: ['stalled', 'orphaned'] }).notNull(),
   subject: text('subject', {
-    enum: ['run', 'queued_run', 'answer_resume', 'snapshot', 'revert'],
+    enum: ['run', 'queued_run', 'queue', 'answer_resume', 'snapshot', 'revert'],
   }).notNull(),
   taskId: integer('task_id').references(() => task.id),
   /** What the finding points at when it is not a task: a snapshot id, a question or a watch. */

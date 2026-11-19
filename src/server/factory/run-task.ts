@@ -17,7 +17,9 @@ import {
   quotaDetail,
   type Continuation,
 } from './run-support'
+import { endPause, pauseOnRefusal } from './provider-pause-store'
 import { loadRepoConfig } from './repo-config'
+import { untilSlotFree } from './sandbox-slot'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
 import { parkedOf, type Parked, type RunResult, type RunTaskDeps } from './run-types'
@@ -90,6 +92,8 @@ async function execute(
 
   const state: RunState = { current: 'sandbox', sandbox: undefined }
   try {
+    // In the queue, before any stage: a run that waits here for a slot is not one stuck in `sandbox`.
+    await waitForSlot(deps, taskId, signal)
     // A job a worker took just before its task was cancelled ends here, before any sandbox exists.
     await enterRunStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
 
@@ -118,12 +122,22 @@ async function execute(
       continuation,
       clarifications: await clarificationsOf(deps, taskId),
     })
+    // A sandbox started: the provider accepts again, so a pause it caused ends for every process.
+    await endPause(db)
     const started = await run.start()
     return 'result' in started ? started.result : await run.loop(started.sha)
   } catch (error) {
     return fail(deps, taskId, state, error, signal)
   } finally {
     await state.sandbox?.stop().catch(() => {})
+  }
+}
+
+/** Waits while every sandbox the account allows is up, and says in the log how long it waited. */
+async function waitForSlot(deps: RunTaskDeps, taskId: number, signal: AbortSignal | undefined) {
+  const waited = await untilSlotFree(deps.sandbox, { ...deps.slotWait, signal })
+  if (waited.waitedMs > 0 || waited.unread) {
+    console.log(JSON.stringify({ event: 'sandbox_slot_waited', taskId, ...waited }))
   }
 }
 
@@ -180,6 +194,8 @@ async function fail(
     : errorMessage(error)
   try {
     await recordFailure(deps, taskId, state, error, message)
+    // A refusal for credit or spending pauses every run's sandbox, so the queue waits instead of failing.
+    await pauseOnRefusal(deps.db, message)
   } catch (refused) {
     if (refused instanceof TaskCancelled) return cancelled(taskId, state, refused)
     throw refused
