@@ -109,6 +109,7 @@ import {
   type EgressRule,
   type SandboxSpec,
 } from './sandbox'
+import { Preparation } from './sandbox-prepared'
 import { enterRunStage } from './stages'
 import type { AgentEvent } from './transcript'
 import { Transcript } from './transcript-store'
@@ -138,6 +139,8 @@ export type RunContext = {
   startingOver?: Continuation
   /** The owner's answers to the questions the scheduler asked on the issue before any run. */
   clarifications?: Clarification[]
+  /** Times the steps of `Run.open` for the `sandbox_prepared` log line; untimed when absent. */
+  preparation?: Preparation
 }
 
 type Timeouts = NonNullable<RunTaskDeps['timeouts']>
@@ -421,15 +424,19 @@ export class Run {
    * secret is read here, on the host, and becomes a firewall rule, so the sandbox never holds one.
    */
   static async open(given: RunContext): Promise<Run> {
-    const c = await Run.withoutLostBranch(given)
+    const prep = given.preparation ?? new Preparation(given.taskId)
+    const c = await prep.step('branches', async () => {
+      const told = await Run.withoutLostBranch(given)
+      // Before any sandbox exists: a repository without the integration and pre-release branches gets them.
+      if (!told.resuming) {
+        await ensureBranches(told.api, told.row.repository, told.token, {
+          integration: integrationBranch(told.repo),
+          release: told.repo.releaseBranch,
+        })
+      }
+      return told
+    })
     const { deps, issue, resuming } = c
-    // Before any sandbox exists: a repository without the integration and pre-release branches gets them.
-    if (!resuming) {
-      await ensureBranches(c.api, c.row.repository, c.token, {
-        integration: integrationBranch(c.repo),
-        release: c.repo.releaseBranch,
-      })
-    }
     const labels = labelsWithRepoChoice(issue.labels ?? [], c.repo)
     const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
     const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
@@ -438,7 +445,9 @@ export class Run {
     const agents = [builder, reviewer, planner].filter(
       (agent, at, all) => all.findIndex((other) => other.name === agent.name) === at,
     )
-    const agentEgress = mergeEgress(await Promise.all(agents.map((a) => a.egress())))
+    const agentEgress = await prep.step('credentials', async () =>
+      mergeEgress(await Promise.all(agents.map((a) => a.egress()))),
+    )
 
     const spec: SandboxSpec = {
       timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs)
@@ -457,9 +466,11 @@ export class Run {
     await deps.db.update(task).set({ sandboxRun }).where(eq(task.id, c.taskId))
     spec.owner = { owner: 'task', taskId: c.taskId, run: sandboxRun }
     const startedAt = Date.now()
-    const started = resuming
-      ? await restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)
-      : await createIsolatedSandbox(deps.sandbox, spec)
+    const started = await prep.step('sandbox', () =>
+      resuming
+        ? restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)
+        : createIsolatedSandbox(deps.sandbox, spec),
+    )
     c.state.sandbox = started
     const sandbox = Run.withCredentials(c, started, spec.egress)
     c.state.sandbox = sandbox
@@ -470,22 +481,27 @@ export class Run {
       once: true,
     })
 
-    const { repoDir, baseSha } = await Run.checkout(c, sandbox.backend)
-    for (const agent of agents) await agent.prepare?.(sandbox.backend)
-    const feed = await KnowledgeFeed.open(deps.knowledge, sandbox.backend, c.row.repository, {
-      taskId: c.taskId,
+    const { repoDir, baseSha } = await prep.step('clone', () => Run.checkout(c, sandbox.backend))
+    await prep.step('harness', async () => {
+      for (const agent of agents) await agent.prepare?.(sandbox.backend)
     })
+    const feed = await prep.step('knowledge', () =>
+      KnowledgeFeed.open(deps.knowledge, sandbox.backend, c.row.repository, { taskId: c.taskId }),
+    )
     // Stopping the sandbox stops the feed first, so no copy goes into a sandbox that is gone.
-    c.state.sandbox = feed.attachTo(sandbox)
-    const told = await Run.withConflictFiles(c, sandbox.backend, repoDir, baseSha)
-    const run = new Run(told, builder, reviewer, c.state.sandbox, spec, repoDir, baseSha, startedAt)
-    run.planner = planner
-    run.feed = feed
-    run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
-    run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
-    // Before the builder's first pass, so it can run the check it is told to run.
-    await uploadChangesetCheck(sandbox.backend, run.checks)
-    return run
+    const attached = feed.attachTo(sandbox)
+    c.state.sandbox = attached
+    return prep.step('repository_facts', async () => {
+      const told = await Run.withConflictFiles(c, sandbox.backend, repoDir, baseSha)
+      const run = new Run(told, builder, reviewer, attached, spec, repoDir, baseSha, startedAt)
+      run.planner = planner
+      run.feed = feed
+      run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
+      run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
+      // Before the builder's first pass, so it can run the check it is told to run.
+      await uploadChangesetCheck(sandbox.backend, run.checks)
+      return run
+    })
   }
 
   /**

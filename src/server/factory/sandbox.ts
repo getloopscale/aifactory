@@ -48,6 +48,23 @@ export type StreamingBackend = SandboxBackend & {
 export const streams = (backend: SandboxBackend): backend is StreamingBackend =>
   typeof (backend as Partial<StreamingBackend>).executeStreaming === 'function'
 
+/** A file to write into a sandbox: its absolute path there and what it holds. */
+export type SandboxFile = { path: string; content: string | Buffer }
+
+/**
+ * A backend that can write many files at once. `SandboxBackend` writes one file per call
+ * (usetheokit/theokit-sdk#1279), and on E2B each call costs about half a second, so the knowledge base of a
+ * large project (nearly a thousand files) took most of a run's preparation. A provider that can adds this, and
+ * a caller asks `uploadsInBatch` before using it. It is for paths that do not exist yet: unlike `uploadFile`,
+ * it removes nothing first.
+ */
+export type BatchUploadBackend = SandboxBackend & {
+  uploadFiles(files: readonly SandboxFile[]): Promise<void>
+}
+
+export const uploadsInBatch = (backend: SandboxBackend): backend is BatchUploadBackend =>
+  typeof (backend as Partial<BatchUploadBackend>).uploadFiles === 'function'
+
 /**
  * A running sandbox: the TheoKit `SandboxBackend` the agent tools and the factory talk to, plus the
  * way to stop it. `SandboxBackend` has no lifecycle and no network policy, so both live here.

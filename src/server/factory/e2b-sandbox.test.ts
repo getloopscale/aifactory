@@ -18,6 +18,7 @@ import {
   networkFor,
   SANDBOX_ENV,
   sandboxOptions,
+  UPLOAD_BATCH,
 } from './e2b-sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
 
@@ -204,6 +205,46 @@ describe('E2BBackend', () => {
     await backend.uploadFile('/work/b.bin', Buffer.from([1, 2]))
     expect(writes[0]).toEqual(['/work/a.txt', 'hi', { user: 'node' }])
     expect(new Uint8Array(writes[1]?.[1] as ArrayBuffer)).toEqual(new Uint8Array([1, 2]))
+  })
+})
+
+describe('E2BBackend writing many files', () => {
+  it('writes them as the image user in one request, with no command per file', async () => {
+    const { backend, calls, writes } = backendThat(async () => ({
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+    }))
+    await backend.uploadFiles([
+      { path: '/tmp/k/a.md', content: 'a' },
+      { path: '/tmp/k/b/c.bin', content: Buffer.from([1, 2]) },
+    ])
+    expect(calls).toEqual([])
+    expect(writes).toHaveLength(1)
+    const [entries, opts] = writes[0] as [{ path: string; data: unknown }[], unknown]
+    expect(opts).toEqual({ user: 'node' })
+    expect(entries.map((entry) => entry.path)).toEqual(['/tmp/k/a.md', '/tmp/k/b/c.bin'])
+    expect(entries[0]?.data).toBe('a')
+    expect(new Uint8Array(entries[1]?.data as ArrayBuffer)).toEqual(new Uint8Array([1, 2]))
+  })
+
+  it('splits a large set into requests of at most UPLOAD_BATCH files, in order', async () => {
+    const { backend, writes } = backendThat(async () => ({ stdout: '', stderr: '', exitCode: 0 }))
+    const files = Array.from({ length: UPLOAD_BATCH * 2 + 1 }, (_, i) => ({
+      path: `/tmp/k/${i}.md`,
+      content: String(i),
+    }))
+    await backend.uploadFiles(files)
+    const sizes = writes.map((args) => (args[0] as unknown[]).length)
+    expect(sizes).toEqual([UPLOAD_BATCH, UPLOAD_BATCH, 1])
+    const paths = writes.flatMap((args) => (args[0] as { path: string }[]).map((e) => e.path))
+    expect(paths).toEqual(files.map((file) => file.path))
+  })
+
+  it('makes no request for no files', async () => {
+    const { backend, writes } = backendThat(async () => ({ stdout: '', stderr: '', exitCode: 0 }))
+    await backend.uploadFiles([])
+    expect(writes).toEqual([])
   })
 })
 

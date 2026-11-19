@@ -504,6 +504,13 @@ class RealGit {
   }
 }
 
+/** The `sandbox_prepared` lines a run logged, parsed. */
+const preparedLines = (log: { mock: { calls: unknown[][] } }) =>
+  log.mock.calls
+    .map(([line]) => String(line))
+    .filter((line) => line.includes('"sandbox_prepared"'))
+    .map((line) => JSON.parse(line))
+
 describe('runTask', () => {
   it('pushes factory/<issue> and records the stages in order', async () => {
     const id = await seedTask()
@@ -1378,6 +1385,52 @@ describe('runTask', () => {
     const result = await runTask(deps(sandbox), id)
     expect(sandbox.specs[0].egress.length).toBeGreaterThan(0)
     expect(result.status).toBe('done')
+  })
+
+  it('logs how long each step of the sandbox preparation took, once, before the first agent', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await runTask(deps(sandbox), id)
+
+    const prepared = preparedLines(log)
+    expect(prepared).toHaveLength(1)
+    expect(prepared[0]).toMatchObject({ event: 'sandbox_prepared', taskId: id })
+    expect(Object.keys(prepared[0].steps)).toEqual([
+      'inputs',
+      'branches',
+      'credentials',
+      'sandbox',
+      'clone',
+      'harness',
+      'knowledge',
+      'repository_facts',
+    ])
+    expect(prepared[0].failedAt).toBeUndefined()
+    expect(prepared[0].totalMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('logs a preparation that failed with the step it failed in', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const noInstall: GithubApp = {
+      installationToken: async () => {
+        throw new Error('the GitHub App is not installed on paulo/app')
+      },
+    }
+
+    await runTask(deps(sandbox, { github: noInstall }), id)
+
+    const prepared = preparedLines(log)
+    expect(prepared).toEqual([
+      expect.objectContaining({
+        taskId: id,
+        failedAt: 'inputs',
+        steps: { inputs: expect.any(Number) },
+      }),
+    ])
   })
 
   it('fails the stage, not the process, when the app is not installed on the repository', async () => {
