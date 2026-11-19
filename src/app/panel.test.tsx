@@ -920,6 +920,33 @@ describe('health', () => {
     )
   })
 
+  it('shows a stalled queue with what holds it, and no action, since it resolves once its runs start', async () => {
+    serve({
+      'GET /api/panel/health': report({
+        findings: [
+          found({
+            id: 6,
+            kind: 'stalled',
+            subject: 'queue',
+            ref: 'usetheokit/theokit',
+            detail: '58 queued runs of usetheokit/theokit, none started for 70 minutes',
+          }),
+        ],
+      }),
+    })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('Queued runs of a repository are not starting')).toBeDefined(),
+    )
+    expect(screen.getByText(/58 queued runs of usetheokit\/theokit/)).toBeDefined()
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   it('shows the executions of a task, and a cost that was not reported as such', async () => {
     serve({
       'GET /api/panel/tasks/5': detail({

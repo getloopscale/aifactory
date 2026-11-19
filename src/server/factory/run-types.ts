@@ -1,3 +1,4 @@
+import type { untilSlotFree } from './sandbox-slot'
 import type { Recipe } from './recipe'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { Database } from '../db'
@@ -62,6 +63,8 @@ export type RunTaskDeps = {
   timeouts?: { sandboxMs: number; agentMs: number; checkMs?: number; reviewMs?: number }
   /** Wait between push attempts. */
   pushRetryDelayMs?: number
+  /** How the run waits for a free sandbox slot before it starts (`untilSlotFree`); the tests pass a clock. */
+  slotWait?: Parameters<typeof untilSlotFree>[1]
   /**
    * Where the knowledge base comes from. Every agent the run starts reads it at `/tmp/knowledge`, kept
    * current while it works; without a source (the tests) the agents work without one.

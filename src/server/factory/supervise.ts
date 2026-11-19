@@ -1,8 +1,10 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { finding, question, stageEvent, task, watch } from '../db/schema'
+import { finding, lineIncident, question, stageEvent, task, watch } from '../db/schema'
 
+import { readPause } from './provider-pause-store'
+import { stalledQueues, type QueueFacts } from './queue-stall'
 import { reapSandboxes } from './reap-sandboxes'
 import type { ListedSandbox } from './sandbox'
 import { WATCH_WINDOW_MS } from './watch'
@@ -11,7 +13,7 @@ import { WATCH_WINDOW_MS } from './watch'
 export type Found = {
   key: string
   kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'answer_resume' | 'snapshot' | 'revert'
+  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert'
   taskId: number | null
   ref: string | null
   detail: string
@@ -27,12 +29,20 @@ export type Limits = {
   pickupMs: number
   /** A snapshot younger than this may belong to a question still being written. */
   snapshotGraceMs: number
+  /**
+   * How long a repository's queued runs may wait with none of its runs started before the queue is said to be
+   * stalled. Past a run's own length, since a queue of runs that start as others end is not stalled.
+   */
+  queueStallMs?: number
 }
+
+const QUEUE_STALL_MS = 60 * 60_000
 
 export const LIMITS: Limits = {
   stallMs: 45 * 60_000,
   pickupMs: 10 * 60_000,
   snapshotGraceMs: 5 * 60_000,
+  queueStallMs: QUEUE_STALL_MS,
 }
 
 export type SuperviseDeps = {
@@ -122,6 +132,85 @@ async function joblessTasks(
   return found
 }
 
+/**
+ * The queued runs of each repository that are due or held with no end, of tasks in `intake`, with when a run of
+ * the repository last started; or nothing when there is no queue table. A job a worker holds is not waiting.
+ */
+async function waitingQueues(db: Database, now: Date): Promise<QueueFacts[] | null> {
+  try {
+    const rows = await db.execute<{
+      repository: string
+      waiting: number
+      held: number
+      oldest_task_id: number
+      waiting_since: Date | string
+      last_started_at: Date | string | null
+    }>(
+      sql`with waiting as (
+            select t.repository, t.id as task_id, j.available_at,
+              greatest(j.created_at, coalesce((j.input->>'heldFrom')::timestamptz, j.available_at)) as since
+            from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
+            where j.name = 'run-task' and j.failed_at is null
+              and (j.locked_until is null or j.locked_until < ${now})
+              and t.stage = 'intake'
+              and (j.available_at <= ${now} or j.available_at = 'infinity'::timestamptz)
+          )
+          select w.repository, count(*)::int as waiting,
+            (count(*) filter (where w.available_at = 'infinity'::timestamptz))::int as held,
+            (array_agg(w.task_id order by w.since, w.task_id))[1] as oldest_task_id,
+            min(w.since) as waiting_since,
+            (select max(e.at) from stage_event e join task s on s.id = e.task_id
+              where s.repository = w.repository and e.stage = 'sandbox') as last_started_at
+          from waiting w group by w.repository`,
+    )
+    return rows.rows.map((r) => ({
+      repository: r.repository,
+      waiting: r.waiting,
+      held: r.held,
+      oldestTaskId: r.oldest_task_id,
+      waitingSince: new Date(r.waiting_since),
+      lastStartedAt: r.last_started_at === null ? null : new Date(r.last_started_at),
+    }))
+  } catch (error) {
+    // The table is made when the worker first starts. Without it there is no queue to be stalled.
+    if (String(error).includes('theokit_jobs')) return null
+    throw error
+  }
+}
+
+/** The repositories whose queued runs nobody starts, with the cause when the facts tell it. */
+async function stalledQueueFindings(
+  db: Database,
+  now: Date,
+  stallMs: number,
+): Promise<Found[] | null> {
+  const queues = await waitingQueues(db, now)
+  if (!queues) return null
+  if (queues.length === 0) return []
+  const [started] = await db
+    .select({ at: sql<Date | string | null>`max(${stageEvent.at})` })
+    .from(stageEvent)
+    .where(eq(stageEvent.stage, 'sandbox'))
+  const lines = await db
+    .select({
+      repository: lineIncident.repository,
+      surface: lineIncident.surface,
+      issueNumber: lineIncident.issueNumber,
+    })
+    .from(lineIncident)
+    .where(sql`${lineIncident.status} <> 'resolved'`)
+  return stalledQueues(
+    queues,
+    {
+      lastStartedAnywhere: started?.at ? new Date(started.at) : null,
+      stoppedLines: new Map(lines.map((l) => [l.repository, l])),
+      providerPause: await readPause(db),
+    },
+    now,
+    stallMs,
+  )
+}
+
 export type Detected = {
   found: Found[]
   /** The checks that actually ran. A check that could not run says nothing about its findings. */
@@ -163,6 +252,13 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
   if (jobless) {
     checked.add('queued_run')
     found.push(...jobless)
+  }
+
+  // A repository whose queued runs nobody starts: held, or due with no worker taking them.
+  const stalledQueue = await stalledQueueFindings(db, now, limits.queueStallMs ?? QUEUE_STALL_MS)
+  if (stalledQueue) {
+    checked.add('queue')
+    found.push(...stalledQueue)
   }
 
   // An answer nobody resumed.
