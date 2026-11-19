@@ -878,17 +878,18 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     expect(other).toBeGreaterThan(0)
   })
 
-  it('keeps the hold of a fix that is done without a merge, and ends it once merged', async () => {
+  it('ends the hold once the fix is done, while its pull request still waits for CI', async () => {
     const { fix } = await incident()
     await coordinate(deps(), 'auto')
     // A worker takes the fix's job, as it would once the fix is first.
     expect(await dequeue()).toEqual([`job-${fix}`])
-    await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, fix))
-    await coordinate(deps(), 'auto')
-    expect(await dequeue()).toEqual([])
+    await getDb()
+      .update(task)
+      .set({ stage: 'done', awaitingCiSha: 'verified0001' })
+      .where(eq(task.id, fix))
 
-    await getDb().update(task).set({ mergedSha: 'abc' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
+
     expect((await dequeue())[0]).toBeDefined()
   })
 
