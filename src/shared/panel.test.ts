@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { columnOf, COLUMNS, retryableFailure, type Column, type Stage } from './panel'
+import {
+  columnOf,
+  COLUMNS,
+  mergeBreakdown,
+  mergeState,
+  retryableFailure,
+  type Column,
+  type Stage,
+  type TaskCard,
+} from './panel'
 
 describe('columnOf', () => {
   const expected: Record<Stage, Column> = {
@@ -14,7 +23,8 @@ describe('columnOf', () => {
     merge: 'merge',
     pr: 'merge',
     waiting: 'waiting',
-    done: 'review',
+    // A done task with nothing merged yet: its integration is still ahead of it.
+    done: 'merge',
     released: 'released',
     handoff: 'attention',
     failed: 'attention',
@@ -68,8 +78,8 @@ describe('a task that finished with no change', () => {
     expect(columnOf('done', null, { resolved: true, integrated: true })).toBe('review')
   })
 
-  it('keeps a pull request that is not integrated yet in Delivered', () => {
-    expect(columnOf('done', null, { resolved: false, integrated: false })).toBe('review')
+  it('keeps approved work that is not integrated yet in Merge, waiting for CI or for its merge', () => {
+    expect(columnOf('done', null, { resolved: false, integrated: false })).toBe('merge')
   })
 
   it('only changes the column of a done task', () => {
@@ -211,5 +221,43 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure({ error: 'the agent did not finish: GitHub answered 502' })).toBe(
       'environment',
     )
+  })
+})
+
+describe('the Merge column', () => {
+  const card = (over: Partial<Pick<TaskCard, 'stage' | 'integrated' | 'waitingForChecks'>>) => ({
+    stage: 'done' as Stage,
+    integrated: false,
+    waitingForChecks: false,
+    ...over,
+  })
+
+  it('tells what approved work that is not integrated yet waits for', () => {
+    expect(mergeState(card({ stage: 'merge' }))).toBe('merging')
+    expect(mergeState(card({ stage: 'pr' }))).toBe('opening_pr')
+    expect(mergeState(card({ waitingForChecks: true }))).toBe('waiting_for_checks')
+    expect(mergeState(card({}))).toBe('awaiting_merge')
+  })
+
+  it('says nothing of integrated work or of a task outside the column', () => {
+    expect(mergeState(card({ integrated: true }))).toBeNull()
+    expect(mergeState(card({ stage: 'build' }))).toBeNull()
+  })
+
+  it('counts every card of the column in exactly one state', () => {
+    const cards = [
+      card({ waitingForChecks: true }),
+      card({ waitingForChecks: true }),
+      card({}),
+      card({ stage: 'pr' }),
+      card({ integrated: true }),
+    ]
+
+    expect(mergeBreakdown(cards)).toEqual({
+      merging: 0,
+      opening_pr: 1,
+      waiting_for_checks: 2,
+      awaiting_merge: 1,
+    })
   })
 })
