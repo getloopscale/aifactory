@@ -1,49 +1,49 @@
 {
-  "commit": "aee5efef741a92f1d11c9a7cb8761761843e1229",
-  "ranAt": "2026-11-18T04:26:18.424Z",
+  "commit": "a8a15d7c1c9eac5e717ff0c22156b48f793e7609",
+  "ranAt": "2026-11-19T19:50:52.670Z",
   "setup": {
     "paulohenriquevn/aifactory-playground builder": "claude-code",
     "paulohenriquevn/aifactory-playground builderModel": "default",
     "paulohenriquevn/aifactory-playground builderEffort": "default",
-    "paulohenriquevn/aifactory-playground reviewer": "codex",
-    "paulohenriquevn/aifactory-playground reviewerModel": "gpt-6.1-terra",
-    "paulohenriquevn/aifactory-playground reviewerEffort": "medium",
+    "paulohenriquevn/aifactory-playground reviewer": "claude-code",
+    "paulohenriquevn/aifactory-playground reviewerModel": "default",
+    "paulohenriquevn/aifactory-playground reviewerEffort": "default",
     "paulohenriquevn/aifactory-playground planner": "codex",
     "paulohenriquevn/aifactory-playground plannerModel": "gpt-6.1-terra",
     "paulohenriquevn/aifactory-playground plannerEffort": "medium",
     "usetheokit/theokit builder": "claude-code",
     "usetheokit/theokit builderModel": "default",
     "usetheokit/theokit builderEffort": "default",
-    "usetheokit/theokit reviewer": "codex",
-    "usetheokit/theokit reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit reviewerEffort": "medium",
+    "usetheokit/theokit reviewer": "claude-code",
+    "usetheokit/theokit reviewerModel": "default",
+    "usetheokit/theokit reviewerEffort": "default",
     "usetheokit/theokit planner": "codex",
     "usetheokit/theokit plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit plannerEffort": "medium",
     "usetheokit/theokit-gateways builder": "claude-code",
     "usetheokit/theokit-gateways builderModel": "default",
     "usetheokit/theokit-gateways builderEffort": "default",
-    "usetheokit/theokit-gateways reviewer": "codex",
-    "usetheokit/theokit-gateways reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-gateways reviewerEffort": "medium",
+    "usetheokit/theokit-gateways reviewer": "claude-code",
+    "usetheokit/theokit-gateways reviewerModel": "default",
+    "usetheokit/theokit-gateways reviewerEffort": "default",
     "usetheokit/theokit-gateways planner": "codex",
     "usetheokit/theokit-gateways plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit-gateways plannerEffort": "medium",
     "usetheokit/theokit-plugins builder": "claude-code",
     "usetheokit/theokit-plugins builderModel": "default",
     "usetheokit/theokit-plugins builderEffort": "default",
-    "usetheokit/theokit-plugins reviewer": "codex",
-    "usetheokit/theokit-plugins reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-plugins reviewerEffort": "medium",
+    "usetheokit/theokit-plugins reviewer": "claude-code",
+    "usetheokit/theokit-plugins reviewerModel": "default",
+    "usetheokit/theokit-plugins reviewerEffort": "default",
     "usetheokit/theokit-plugins planner": "codex",
     "usetheokit/theokit-plugins plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit-plugins plannerEffort": "medium",
     "usetheokit/theokit-sdk builder": "claude-code",
     "usetheokit/theokit-sdk builderModel": "default",
     "usetheokit/theokit-sdk builderEffort": "default",
-    "usetheokit/theokit-sdk reviewer": "codex",
-    "usetheokit/theokit-sdk reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-sdk reviewerEffort": "medium",
+    "usetheokit/theokit-sdk reviewer": "claude-code",
+    "usetheokit/theokit-sdk reviewerModel": "default",
+    "usetheokit/theokit-sdk reviewerEffort": "default",
     "usetheokit/theokit-sdk planner": "codex",
     "usetheokit/theokit-sdk plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit-sdk plannerEffort": "medium"
@@ -53,54 +53,122 @@
       "id": "usetheokit/theokit-plugins#235",
       "passed": true,
       "reason": "approved",
-      "costUsd": 1.5664943,
-      "durationMs": 695435,
-      "attempts": 2,
-      "reviewRounds": 2
+      "costUsd": 0.6912442000000001,
+      "durationMs": 446360,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "This adds an on-device template-matching wake-word detector with a recorder stream handoff. The headless-Chromium e2e test uses real WAV fixtures as the microphone. It checks that 'theo' fires a wake event and starts a recording, and that the sentence fires nothing and sends no STT request, checked against the request log. I ran the wake-word, e2e and recorder tests: 21 passed. The e2e test actually runs, so it is not skipped or weakened.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/tests/wake-word.test.ts",
+              "issue": "The plan promised tests for the detector's lifecycle: stop and release, permission failure, repeated start, and cleanup. Only the pure matcher and enrollment are unit-tested. `createWakeWordDetector` itself (`teardown`, `start` idempotence, the `NotAllowedError` and `NotFoundError` mapping) has no test with a mocked `getUserMedia`. Add some."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/src/wake-word.ts",
+              "issue": "If `stop()` is called while `getUserMedia` is still pending, `teardown` runs with `stream` still null. When the promise resolves, `doStart` then sets `state='listening'` and leaves the microphone open. Guard against this with a generation or abort flag."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/tests/wake-word.e2e.test.ts",
+              "issue": "The e2e test depends on `@sparticuz/chromium` extraction into `/tmp` and takes about 20 to 30 seconds, mostly a 12-second negative-case wait. Both fixtures and the enrollment come from the same synthesizer voice, so the accuracy claim is narrow. The README says the matcher is speaker-dependent, which covers this."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "paulohenriquevn/aifactory-playground#61",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.0509342,
-      "durationMs": 50141,
+      "costUsd": 0.0872088,
+      "durationMs": 54697,
       "attempts": 1,
-      "reviewRounds": 1
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "`truncate` does what the issue asks. `max` is validated with a `RangeError` for 0, negatives and non-integers, and the result is capped at `max` characters with a trailing `…` when cut. The change touches only the two planned files, and the full `npm test` passes (11 tests).",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "src/truncate.js",
+              "issue": "`truncate` counts code points, so a cut can still split a grapheme cluster such as a ZWJ emoji or a combining mark. The builder disclosed this and the issue doesn't require more, so no action is needed."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "usetheokit/theokit-gateways#348",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.6717182000000002,
-      "durationMs": 1166876,
-      "attempts": 2,
-      "reviewRounds": 2
+      "costUsd": 0.3544862,
+      "durationMs": 544640,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "A first connect now takes UIDNEXT and UIDVALIDITY as the baseline and dispatches nothing older. `connect()` resolves before the first drain, and drains are serialized. The cursor persists through an optional `cursorStore` and resets when UIDVALIDITY changes. All 150 gateway-email tests pass.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway-email/src/imap-client.ts",
+              "issue": "The IMAP range `N:*` always matches the highest UID, even when N is past it. Each idle poll can therefore re-download the full source of the newest message if it is still unseen. The client-side `uid >= fromUid` check discards the result, but the download still happens. Consider fetching without `source` first, or using a UID search before the fetch."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-email/src/adapter.ts",
+              "issue": "Without a `cursorStore`, a new process takes a fresh baseline and skips mail that arrived while it was down. The README documents this, but it is a trade-off the host has to accept. The cursor also moves past mail whose dispatch threw, so that mail is not retried."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "usetheokit/theokit-sdk#975",
       "passed": false,
-      "reason": "checks failed: generated-docs, tests",
-      "costUsd": 0.9707335000000001,
-      "durationMs": 1692280,
+      "reason": "no time left for another agent pass: 39 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
+      "costUsd": 0.603288,
+      "durationMs": 2356031,
       "attempts": 3,
-      "reviewRounds": 0
+      "reviewRounds": 0,
+      "reviews": []
     },
     {
       "id": "usetheokit/theokit#1685",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.0603135,
-      "durationMs": 291535,
+      "costUsd": 0.1265148,
+      "durationMs": 253635,
       "attempts": 1,
-      "reviewRounds": 1
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "`mammoth` and `unpdf` are pinned to the exact versions that were already resolved (1.13.0 and 2.1.0). The lockfile importer specifiers match, with no change to resolved versions. A changelog entry went under Unreleased as the owner's rules require. I did not run the vitest file. The checkout has no installed dependencies, and the builder didn't run it either. I judged the change from the diff and the lockfile.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tools/check-exact-versions.test.mjs",
+              "issue": "The plan listed targeted regression tests, but none were added. This is acceptable because the existing whole-manifest test already fails on these two entries."
+            }
+          ]
+        }
+      ]
     }
   ],
-  "spentUsd": 3.678650264,
+  "spentUsd": 2.1990353959999998,
   "summary": {
     "cases": 5,
     "passed": 4,
     "passRate": 0.8,
-    "meanCostUsd": 0.66403874,
-    "meanDurationMs": 779253.4
+    "meanCostUsd": 0.3725484,
+    "meanDurationMs": 731072.6
   }
 }
