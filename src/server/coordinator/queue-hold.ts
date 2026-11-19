@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm'
 import type { Database } from '../db'
 import { task } from '../db/schema'
 
-import { stoppedLines } from '../line/incident'
+import { holdingLines } from '../line/incident'
 
 import { HOLD_LOCK, holdOthers, holdRepository, releaseHolds } from './queue-apply'
 import { readHeldTests } from './queue-facts'
@@ -30,7 +30,7 @@ export async function maintainHolds(db: Database): Promise<HeldTest[]> {
   return db.transaction(async (tx) => {
     await tx.execute(HOLD_LOCK)
     const held = await readHeldTests(tx)
-    const lines = await stoppedLines(tx)
+    const lines = await holdingLines(tx)
     for (const h of firstPerRepository(held)) {
       if (!lines.has(h.repository)) await holdOthers(tx, h.taskId!)
     }
@@ -57,7 +57,7 @@ export async function holdNewJob(
   const active = firstPerRepository(
     (await readHeldTests(db)).filter((h) => h.repository === row.repository),
   )[0]
-  const lines = await stoppedLines(db)
+  const lines = await holdingLines(db)
   if (lines.has(row.repository)) {
     const fix = lines.get(row.repository)
     if (fix !== taskId) await holdLines(db, new Map([[row.repository, fix]]))

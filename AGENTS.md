@@ -297,7 +297,10 @@ reads that file, not a convention.
   (`holdRepository` before the fix has a task), `integrationHeldUntil` and `integrate-after-ci` hold every
   integration but the fix's, and the coordinator skips the repository's other exceptions. It ends only when every
   check of a promotion head passed; a fix that ended with the promotion still red is followed by one more, then a
-  person (`MAX_ATTEMPTS`), and the line stays stopped until it is green.
+  person (`MAX_ATTEMPTS`), and the line stays stopped until it is green. These holds all go through `holdingLines`:
+  with `FACTORY_LINE_STOP_SCOPE=fix_first` it returns none, so the incident and its fix issue stay, the issue's
+  priority label takes the fix ahead, and the rest of the repository keeps running and integrating (`hold`, the
+  default, is what is described above).
 - **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
   The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
   `scheduler/facts.ts` reads the queued `run-task` jobs of tasks in `intake`, their issues and the decisions already
