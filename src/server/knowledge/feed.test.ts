@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { FakeBackend } from '../factory/fake-sandbox'
+import type { SandboxFile } from '../factory/sandbox'
 
 import { KnowledgeFeed, REFRESH_MS } from './feed'
 import type { KnowledgeSource, Slice } from './source'
@@ -65,6 +66,44 @@ describe('the knowledge base in an agent sandbox', () => {
     expect(delivered).toEqual([
       { recipient: { taskId: 9 }, project: 'acme/app', pin: pin('a', 'b'), files: 2 },
     ])
+  })
+
+  it('is written in one batch, guide included, when the sandbox can write many files at once', async () => {
+    class BatchBackend extends FakeBackend {
+      batches: string[][] = []
+      async uploadFile(): Promise<void> {
+        throw new Error('a file was written on its own')
+      }
+      async uploadFiles(files: readonly SandboxFile[]) {
+        this.batches.push(files.map((file) => file.path))
+        for (const file of files) this.files.set(file.path, String(file.content))
+      }
+    }
+    const backend = new BatchBackend(() => ({}))
+    const { fake, delivered } = source([pin('a')], {
+      files: [
+        { path: 'README.md', content: Buffer.from('readme') },
+        { path: 'knowledge/global/tests.md', content: Buffer.from('write tests first') },
+      ],
+      left: [],
+    })
+
+    const feed = await KnowledgeFeed.open(fake, backend, 'acme/app', { taskId: 9 })
+    feed.stop()
+
+    expect(backend.batches).toEqual([
+      [
+        '/tmp/knowledge.next/index.md',
+        '/tmp/knowledge.next/README.md',
+        '/tmp/knowledge.next/knowledge/global/tests.md',
+      ],
+    ])
+    expect(backend.files.get('/tmp/knowledge.next/README.md')).toBe('readme')
+    expect(backend.commands).toEqual([
+      'rm -rf /tmp/knowledge.next',
+      'rm -rf /tmp/knowledge && mv /tmp/knowledge.next /tmp/knowledge',
+    ])
+    expect(delivered).toHaveLength(1)
   })
 
   it('is not copied again while the base has not moved', async () => {

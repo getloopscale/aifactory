@@ -16,6 +16,7 @@ import {
   causeOf,
   quotedCiOutput,
   readsChecks,
+  readsBrokenCiOutput,
   readsCiOutput,
   type CheckRun,
   type CiFailure,
@@ -206,11 +207,13 @@ const reasonOf = (event: Read<LastEvent | null>) =>
 /** Whether nothing the handoff or the factory kept quotes the failed checks, so their GitHub logs are read. */
 function quietOn(cause: string, facts: TaskFacts): boolean {
   const reason = reasonOf(facts.last)
-  return cause === 'ci_red' ? quotedCiOutput(reason) === '' : readsCiOutput(reason, facts)
+  if (cause === 'ci_red') return quotedCiOutput(reason) === ''
+  if (cause === 'checks_broke_after_review') return readsBrokenCiOutput(facts)
+  return readsCiOutput(reason, facts)
 }
 
 /** The causes of a handoff on failed checks: their pull request is read, and their GitHub logs when nothing quoted them. */
-const ON_FAILED_CHECKS = ['checks_unchanged', 'ci_red']
+const ON_FAILED_CHECKS = ['checks_unchanged', 'ci_red', 'checks_broke_after_review']
 
 /** The pull request of a handoff on failed checks and, when nothing else quoted them, their GitHub logs. */
 async function withPullRequest(

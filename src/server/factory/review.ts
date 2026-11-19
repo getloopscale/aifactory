@@ -78,7 +78,7 @@ export function reviewPrompt(input: {
 # ${input.title} (#${input.issueNumber})
 
 ${input.body || '(the issue has no description)'}
-${input.plan === undefined ? '' : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
+${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
 Review the work:
 - Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches.
 - Decide whether it does what the issue asks, no more and no less.
@@ -118,7 +118,8 @@ You asked for changes on ${earlier.sha.slice(0, 7)}. What blocked it then:
 ${listed}
 
 In this round:
-- First check each of those findings at HEAD. One that is not fixed stays, in the same words.
+- First check each of those findings at HEAD. One that is not fixed stays, unless the builder answered it (see what the builder said, when it is given): the builder may have declined it with a reason.
+- For each finding the builder declined, judge the reason, and do not repeat the finding without answering it. When the reason is that the fix is outside the issue or the plan, either say in the finding why the issue still needs it, or lower it to minor with a note for the owner. A finding the builder did not answer and did not fix stays, in the same words.
 - Read what changed since then with \`git diff ${earlier.sha} HEAD\`.
 - A new blocker or major finding goes only on code that changed since ${earlier.sha.slice(0, 7)}, or on a bug that would break code that is already in use; say which in the finding. Anything else you notice now and did not raise before is minor.
 `
@@ -148,7 +149,14 @@ ${plan}
 ${outside}
 
 Measure the diff against the plan. A file changed outside the plan is a finding, at least major, unless the builder's summary gives a reason the issue needs it; then judge the reason. Edits the issue does not need (a reformat, a lint fix in an unrelated file) are not a reason.
-${builderSummary ? `\nWhat the builder said when it finished:\n\n${builderSummary.slice(0, 3_000)}\n` : ''}`
+${saidSection(builderSummary)}`
+}
+
+/** What the builder said when it finished, where it gives its reasons for a finding it did not fix. */
+function saidSection(builderSummary: string | undefined): string {
+  return builderSummary
+    ? `\nWhat the builder said when it finished:\n\n${builderSummary.slice(0, 3_000)}\n`
+    : ''
 }
 
 /**

@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { isWorkerOnly, mainProcessCronLock, mainProcessOnly } from './worker-only'
+import { isServerOnly, isWorkerOnly, mainProcessCronLock, mainProcessOnly } from './worker-only'
+
+describe('isServerOnly', () => {
+  it('is on only for FACTORY_SERVER_ONLY=1', () => {
+    expect(isServerOnly({ FACTORY_SERVER_ONLY: '1' })).toBe(true)
+    for (const value of [undefined, '', '0', 'true', ' 1']) {
+      expect(isServerOnly({ FACTORY_SERVER_ONLY: value }), String(value)).toBe(false)
+    }
+  })
+})
 
 describe('isWorkerOnly', () => {
   it('is on only for FACTORY_WORKER_ONLY=1', () => {

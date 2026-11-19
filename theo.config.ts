@@ -4,7 +4,7 @@ import { storageFromEnv } from './src/server/db/config'
 import { JOB_SHUTDOWN_WAIT_MS } from './src/server/factory/drain'
 import { jobBackend } from './src/server/factory/job-backend'
 import { LOCK_SECONDS } from './src/server/factory/lease'
-import { mainProcessCronLock } from './src/server/factory/worker-only'
+import { isServerOnly, mainProcessCronLock } from './src/server/factory/worker-only'
 
 /**
  * The project has two surfaces, and one of them is the whole backend.
@@ -42,7 +42,8 @@ function jobsFromEnv(): TheoConfigJobs | undefined {
   return {
     backend: jobBackend(),
     worker: {
-      enabled: true,
+      // The main process of the service only serves and runs the crons; the workers run the jobs.
+      enabled: !isServerOnly(),
       pollIntervalMs: 2_000,
       batchSize: 1,
       lockSeconds: LOCK_SECONDS,

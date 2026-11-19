@@ -741,6 +741,23 @@ describe('runCase', () => {
     expect(reviewer.prompts[1]).toContain('add a test')
   })
 
+  it('keeps the builder\'s answer to a review for the next review, past a rework for failing checks', async () => {
+    const provider = sandbox({ checkExits: [0, 1, 1, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('declined: out of scope'), built('fixed the check')),
+    )
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(reviewer.prompts[1]).toContain('declined: out of scope')
+    expect(reviewer.prompts[1]).not.toContain('fixed the check')
+  })
+
   it('runs the checks again on the same commit when the rework after them changes nothing, as the factory does', async () => {
     const provider = sandbox({ cleanAfterCommit: true, checkExits: [1, 1, 0] })
     const builder = agent('builder', planned(built(), built('the failure was a timeout')))

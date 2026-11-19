@@ -11,6 +11,7 @@ import {
   failureCause,
   readsChecks,
   quotedCiOutput,
+  readsBrokenCiOutput,
   readsCiOutput,
   recognise,
   type CheckRun,
@@ -52,7 +53,7 @@ describe('the cause of a handoff', () => {
         'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d',
     }
 
-    expect(causeOf(detail)).toBe('handoff')
+    expect(causeOf(detail)).toBe('checks_broke_after_review')
   })
 
   it('is read from the reason of a handoff recorded before causes were', () => {
@@ -898,5 +899,66 @@ describe('the handoffs of an integration that waited for the required checks', (
   it('reads the failed checks of the pull request only when the handoff quoted none', () => {
     expect(quotedCiOutput('the required checks still fail after 3 automatic runs: CI')).toBe('')
     expect(quotedCiOutput(RED_REASON)).toBe('CI:\n~~~~text\nTypeError: x is undefined\n~~~~')
+  })
+})
+
+describe('a rework after the review that broke the checks', () => {
+  const REASON =
+    'the last rework broke the checks ("quality" failed at bad0000), so the branch is back at abc1234, which passed them and was reviewed'
+  const restored = (over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...handedOver({ reason: REASON, cause: 'checks_broke_after_review' }),
+    headSha: 'abc1234def',
+    last: readOf({
+      stage: 'handoff',
+      detail: { reason: REASON, cause: 'checks_broke_after_review' },
+      id: 70,
+    }),
+    ...over,
+  })
+
+  it('reads the checks the factory ran, since they say what the rework broke', () => {
+    expect(readsChecks('handoff', { cause: 'checks_broke_after_review', reason: REASON })).toBe(
+      true,
+    )
+  })
+
+  it('quotes what the checks printed on the commit the branch was restored from', () => {
+    const checks = readOf([
+      run({ sha: 'old1111', output: 'an older failure' }),
+      run({ sha: 'bad0000', output: 'ERROR: broke it' }),
+      run({ name: 'lint', command: 'pnpm lint', sha: 'bad0000', passed: true, output: 'ok' }),
+      run({ sha: 'abc1234def', passed: true, output: 'fine' }),
+    ])
+    expect(recognise(restored({ checks }))).toEqual([
+      {
+        kind: 'checks_broke_after_review',
+        taskId: 7,
+        head: 'abc1234def@70',
+        evidence: REASON,
+        checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: broke it\n~~~~',
+      },
+    ])
+  })
+
+  it('quotes nothing of the checks when none failed, and what GitHub Actions logged when it was read', () => {
+    const ciFailures = readOf([{ name: 'CI', url: 'https://ci/1', lines: ['boom'] }])
+    const found = recognise(restored({ checks: readOf([run({ passed: true })]), ciFailures }))
+    expect(found[0]).toMatchObject({
+      kind: 'checks_broke_after_review',
+      checkOutput: '',
+      ciOutput: 'CI (https://ci/1):\n~~~~text\nboom\n~~~~',
+    })
+  })
+
+  it('is unknown when the checks or the GitHub logs could not be read', () => {
+    const unreadChecks = restored({ checks: unread('the checks', 'x') })
+    expect(recognise(unreadChecks)[0]).toMatchObject({ kind: 'unknown', head: 'abc1234def' })
+    const unreadCi = restored({ ciFailures: unread('the failed checks', 'GitHub answered 502') })
+    expect(recognise(unreadCi)[0]).toMatchObject({ kind: 'unknown', head: 'abc1234def' })
+  })
+
+  it('reads the GitHub logs only when the factory kept no output of the broken checks', () => {
+    expect(readsBrokenCiOutput({ checks: readOf([run({ sha: 'bad0000' })]) })).toBe(false)
+    expect(readsBrokenCiOutput({ checks: readOf([]) })).toBe(true)
   })
 })

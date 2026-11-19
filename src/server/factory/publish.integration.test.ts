@@ -11,6 +11,7 @@ import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
 import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
 
 import { pollPublications } from './publish'
+import { shipContained } from './ship'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -340,6 +341,65 @@ describe('publishing a changesets release', () => {
     expect(comments()[0].body).toContain('Available in `@theokit/ui@1.13.0`')
     const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, alsoShipped))
     expect(events.at(-1)?.detail).toMatchObject({ tag: '@theokit/ui@1.13.0', actor: 'human' })
+  })
+
+  it('releases the task of a publication its promotion superseded, and not one of a publication that failed for itself', async () => {
+    /** A publication of an earlier promotion that ended without publishing anything, with this detail. */
+    const ended = async (mergedSha: string, detail: string) => {
+      const id = await seedTask('released', mergedSha)
+      await getDb()
+        .insert(publication)
+        .values({
+          taskId: id,
+          repository: REPO,
+          releaseBranch: 'main',
+          promotedSha: `${mergedSha}-promotion`,
+          actor: 'agent:coordinator',
+          status: 'failed',
+          detail,
+          startedAt: new Date(STARTED.getTime() - 3_600_000),
+        })
+      return id
+    }
+    const superseded = await ended(
+      'old1',
+      'superseded by the promotion promote of task 9: checks failed on Version Packages #170: CI',
+    )
+    const failed = await ended(
+      'old2',
+      'the release workflow opened no Version Packages pull request',
+    )
+    await waitingPublication()
+    versionPr()
+    releasesAre(published('@theokit/ui@1.13.0'))
+
+    await pollPublications(deps())
+
+    const releases = await getDb().select().from(delivery).where(eq(delivery.kind, 'release'))
+    expect(releases.filter((d) => d.taskId === superseded)).toMatchObject([
+      { tag: '@theokit/ui@1.13.0', sha: 'promoted1' },
+    ])
+    expect(releases.filter((d) => d.taskId === failed)).toEqual([])
+    const issueOf = async (id: number) =>
+      (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
+    expect(closed()).toContain(await issueOf(superseded))
+    expect(closed()).not.toContain(await issueOf(failed))
+
+    // Released once: a later release does not carry it again.
+    await shipContained(deps(), {
+      repository: REPO,
+      token: 't',
+      promotedSha: 'promoted2',
+      releaseBranch: 'main',
+      askedTaskId: failed,
+      actor: 'human',
+      tags: [published('@theokit/ui@1.14.0')],
+    })
+    const later = await getDb()
+      .select()
+      .from(delivery)
+      .where(eq(delivery.tag, '@theokit/ui@1.14.0'))
+    expect(later.map((d) => d.taskId)).toEqual([failed])
   })
 
   it('releases a task resolved with no change whose commit the promotion carries, and leaves one it does not', async () => {
@@ -806,6 +866,7 @@ describe('merging the back-merge after a changesets release', () => {
 
   it('leaves it open while its checks fail or run, and merges it on a later pass once they pass', async () => {
     await publishedRelease()
+    repo().required.set('workspace', ['CI'])
     open(backMerge())
     const failing: CommitChecks = {
       checkRuns: [{ name: 'CI', status: 'completed', conclusion: 'failure' }],
@@ -824,6 +885,27 @@ describe('merging the back-merge after a changesets release', () => {
     checks(green)
     expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
   })
+
+  // usetheokit/theokit-sdk#1248 waited from 04:31 on, as a Dependabot run had failed on the head of main and
+  // workspace, which runs no CI, would never report anything else (2026-11-19).
+  for (const [what, seen] of [
+    [
+      'a failed check',
+      {
+        checkRuns: [{ name: 'Dependabot', status: 'completed', conclusion: 'failure' }],
+        statuses: 'none',
+      },
+    ],
+    ['no check at all', { checkRuns: [], statuses: 'none' }],
+  ] as [string, CommitChecks][]) {
+    it(`merges it into an integration branch that requires no check, with ${what} on the released head`, async () => {
+      await publishedRelease()
+      open(backMerge())
+      checks(seen)
+
+      expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
+    })
+  }
 
   it('merges it when the required checks of the integration branch pass and a check it does not require failed', async () => {
     await publishedRelease()

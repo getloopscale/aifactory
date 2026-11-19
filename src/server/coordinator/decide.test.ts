@@ -642,3 +642,72 @@ describe('the handoffs of an integration that waited for the required checks', (
     expect(decide(exception({ kind: 'review_plateau' }), two).action).toBe('scope')
   })
 })
+
+describe('a rework after the review that broke the checks', () => {
+  const broke = (over: Partial<TaskException> = {}) =>
+    exception({
+      kind: 'checks_broke_after_review',
+      head: 'abc1234def@70',
+      evidence: 'the last rework broke the checks ("quality" failed at bad0000)',
+      checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: broke it\n~~~~',
+      ...over,
+    })
+
+  it('sends the task back on its branch with what the broken checks printed', () => {
+    const decided = decide(broke(), [])
+    expect(decided.action).toBe('send_back')
+    expect(decided.note).toContain('ERROR: broke it')
+    expect(decided.note).toContain('abc1234')
+    expect(decided.reason).toContain('the checks reported')
+  })
+
+  it('takes what GitHub Actions logged when the factory kept no output', () => {
+    const decided = decide(broke({ checkOutput: '', ciOutput: 'CI (u): boom' }), [])
+    expect(decided).toMatchObject({ action: 'send_back' })
+    expect(decided.note).toContain('CI (u): boom')
+    expect(decided.reason).toContain('GitHub Actions')
+  })
+
+  it('escalates when nothing said what the checks reported', () => {
+    expect(decide(broke({ checkOutput: '' }), []).action).toBe('escalate')
+  })
+
+  it('never scopes the review, since the review was not the problem', () => {
+    for (const over of [{}, { checkOutput: '' }, { checkOutput: '', ciOutput: 'x' }]) {
+      expect(decide(broke(over), []).action).not.toBe('scope')
+    }
+  })
+
+  it('counts as a rework of the checks', () => {
+    const two = [
+      recorded({ exceptionKind: 'checks_broke_after_review', action: 'send_back', headSha: 'c1' }),
+      recorded({ exceptionKind: 'ci_red', action: 'send_back', headSha: 'c2' }),
+    ]
+    expect(decide(broke(), two).action).toBe('escalate')
+    expect(decide(exception({ kind: 'review_plateau' }), two).action).toBe('scope')
+  })
+})
+
+describe('a publication that keeps the release train waiting', () => {
+  const stalled = exception({
+    kind: 'publication_stalled',
+    head: 'publication:52',
+    evidence: 'publication 52 of paulo/app has waited 5 hours',
+  })
+
+  it('is escalated for a person, naming what it waits for', () => {
+    const decided = decide(stalled, [])
+    expect(decided.action).toBe('escalate')
+    expect(decided.reason).toContain('publication 52 of paulo/app has waited 5 hours')
+    expect(decided.reason).toContain('a person')
+  })
+
+  it('is escalated even after the task used up its reworks, which it does not count', () => {
+    const two = [
+      recorded({ exceptionKind: 'publication_stalled', action: 'escalate', outcome: 'escalated' }),
+      recorded({ exceptionKind: 'ci_red', action: 'send_back', headSha: 'c1' }),
+      recorded({ exceptionKind: 'checks_red', action: 'send_back', headSha: 'c2' }),
+    ]
+    expect(decide(stalled, two).reason).toContain('publication 52')
+  })
+})
