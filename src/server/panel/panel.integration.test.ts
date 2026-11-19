@@ -1319,6 +1319,43 @@ describe('actions', () => {
       expect(card.retryAt).toBe(new Date(now.getTime() + 30 * 60_000).toISOString())
     })
 
+    it('rewrites the reason with the blockers still open, leaving out the ones that closed', async () => {
+      const id = await seed('failed', { issueNumber: 86 }, [
+        {
+          stage: 'failed',
+          detail: {
+            error:
+              'blocked by paulo/app#4, paulo/app#5, still open; the task runs again on its own once they are closed',
+            blockedBy: ['paulo/app#4', 'paulo/app#5'],
+          },
+        },
+      ])
+      const reads = {
+        ...deps(),
+        fetchIssue: async (_repo: string, number: number) => {
+          if (number === 4 || number === 5) {
+            const state = number === 4 ? ('closed' as const) : ('open' as const)
+            return { number, title: 'b', body: '', labels: [], state }
+          }
+          return {
+            number,
+            title: 't',
+            body: 'Blocked by #4, #5',
+            labels: [],
+            state: 'open' as const,
+          }
+        },
+      }
+
+      await runDueRetries(reads, { limit: 3, now: later() })
+
+      expect((await failureOf(id))?.detail).toMatchObject({
+        error:
+          'blocked by paulo/app#5, still open; the task runs again on its own once they are closed',
+        blockedBy: ['paulo/app#5'],
+      })
+    })
+
     it('runs again once its blocker is closed', async () => {
       const id = await blocked(82)
       expect(await runDueRetries(issues('closed'), { limit: 3, now: later() })).toEqual({

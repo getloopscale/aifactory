@@ -47,6 +47,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The Version Packages pull request and the back-merge wait only for the checks their target branch requires, so a red check that branch does not require (`Dependabot`, a matrix job) no longer holds a publication, and every release refused behind it, forever (#343).
+- A required check that fails on a pull request while the integration branch has no run of it yet keeps the task waiting, for up to six hours, instead of sending the work back for a failure the base may have; a repository whose CI runs only on pull requests has no run on its integration branch until a promotion opens (#344).
+- A blocker in the same repository whose task found the issue already resolved on the integration branch no longer blocks, and the reason of a blocked task names the blockers still open each time they are read again (#345).
+- A back-merge that conflicts with the integration branch shows on the health page, with its link, until the conflict is gone, and is logged once; before, it waited for checks GitHub never runs on a conflicting pull request (#307).
+- An agent no longer asks again for the release of a head whose release pull request already conflicted with the release branch, so the same refusal is not opened and recorded once per integration; a person may still ask (#346).
 - The evidence of a failed CI job keeps the line that reports the failure (a test marked `FAIL`, the runner's `##[error]`) when more than forty lines match, reads a line a script starts with `✗`, and no longer takes a package manager's `WARN` for it, so an agent sent back after failing checks reads why they failed instead of the errors passing tests logged (#326).
 - A release is refused while a changesets publication of the repository still waits for its Version Packages to publish, so a promotion no longer lands changesets on the release branch that keep the workflow versioning instead of publishing (#319).
 - A run refused for the sandbox provider's concurrent limit waits for a free slot, as an evaluation case does, instead of failing and waiting about 20 minutes for its retry (#314).

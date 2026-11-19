@@ -143,7 +143,8 @@ reads that file, not a convention.
   integration branch requires status checks, the factory merges nothing itself: it turns on auto-merge pinned
   to the verified commit (`task.awaiting_ci_sha`), and the `integrate-after-ci` cron finishes the integration
   after GitHub merges, or sends the work back when a required check fails. A required check that fails on the head of
-  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`): the
+  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`), and
+  one the head of the integration branch has no run of yet is nobody's until it has, for up to `CI_SILENCE_MS`: the
   task keeps waiting, the checks blamed on the base are kept on its `done` event (`baseBlame`, for the verified commit),
   and once the base passes all of them the task runs again only to merge the base (`mergeFixedBase`, the job's
   `mergeBase`): `Run.mergeBase` merges the head of the integration branch into the work branch itself, with no agent,
@@ -156,7 +157,9 @@ reads that file, not a convention.
   either path. Nothing else may merge there, with one
   exception: after a changesets release, `publish-changesets` merges the repository's back-merge, the open pull
   request from the release branch into the integration branch of the same repository (never a fork), with a
-  merge commit pinned to its head once its checks are green (`pickBackMerge` in `factory/changesets.ts`). `develop` is
+  merge commit pinned to its head once the checks the integration branch requires are green (`pickBackMerge` in
+  `factory/changesets.ts`); a back-merge that conflicts is a `back_merge` finding on the health page until the
+  conflict is gone, and is never merged. `develop` is
   the pre-release: it advances to each integration, which gets a pre-release tag. When `develop` takes changes
   only through a pull request, the factory opens its promotion from the integration branch and turns on
   auto-merge pinned to the head it saw (`pinPromotion` in `factory/promotion-merge.ts`), only on a pull request
@@ -175,7 +178,9 @@ reads that file, not a convention.
   `release_wait`, and the `integrate-after-ci` cron finishes the release after GitHub merges, or refuses it
   with the reason when a required check fails. A clean release pull request is merged at once, the same way. A refused release is retried only by the release train, once per head of `develop`, and only when
   its cause ends by itself (`passingRefusal`: required checks still expected, running or never reported, a head
-  that moved); a second refusal on the same head stays refused, and a new head is a new attempt. Every release, tagged by the factory or published by changesets, releases each finished task
+  that moved); a second refusal on the same head stays refused, and a new head is a new attempt. An agent's
+  release of a head whose release pull request already conflicted with the release branch is refused before
+  anything opens (`ReleaseAlreadyRefused`), and `releaseByMode` does not record it again; a person may still ask. Every release, tagged by the factory or published by changesets, releases each finished task
   whose merge is in the promoted commit and closes its issue through `shipContained` in `factory/ship.ts`; an
   issue that will not close is recorded, never thrown. `ensureBranches` creates the two missing
   branches, never touches one that exists, and refuses the default branch as the integration branch.
@@ -188,7 +193,8 @@ reads that file, not a convention.
   when a package changesets publishes changed, it refuses and names the package; when every change is in a
   private package, an ignored one (`ignore` in `.changeset/config.json`) or no package, the release is the
   factory's own, tagged after the highest `v` tag, since no changeset can exist for those. The `publish-changesets` cron merges the Version Packages pull
-  request (`changeset-release/<release branch>`) once its checks are green, under the same decision, and
+  request (`changeset-release/<release branch>`) once the checks the release branch requires are green (every check,
+  when it requires none), under the same decision, and
   only that pull request; when the workflow has published, it releases the tasks in the promoted commit and
   closes their issues with the versions. The workflow creates the releases one package at a time, so the
   publication waits for a release of every published package whose version the Version Packages merge moved

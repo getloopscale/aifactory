@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, like, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -20,6 +20,7 @@ import { PRE_RELEASE_BRANCH, releaseBranchOf } from './branches'
 import { changesetsWaiting, publishedPackagesChanged } from './changed-packages'
 import { usesChangesets } from './changesets'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
+import { CONFLICT_REFUSAL } from './release-wait'
 import { shipContained } from './ship'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
@@ -127,6 +128,17 @@ export class ReleaseRefused extends Error {
   }
 }
 
+/**
+ * An agent asked for a release that was already refused for the same head, for a cause that does not end by
+ * itself: asking again would open a wait only to refuse it again, and record the same refusal once more.
+ */
+export class ReleaseAlreadyRefused extends ReleaseRefused {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReleaseAlreadyRefused'
+  }
+}
+
 export type ReleaseResult = {
   tag: string | undefined
   url: string | undefined
@@ -228,6 +240,7 @@ export async function release(
     throw new ReleaseRefused(
       `the pre-release branch moved to ${sha.slice(0, 7)} after the release was asked for at ${options.expectedHead.slice(0, 7)}: its checks were read at the older commit`,
     )
+  await refuseKnownConflict(deps, { repository: row.repository, sha, target, actor: options.actor })
   const pull = { number: pr.number, url: pr.url }
   const required = await deps.api.requiredChecks(row.repository, token, target)
   if (required.length > 0) {
@@ -452,6 +465,35 @@ async function changesetsToShip(
     )
   }
   return false
+}
+
+/**
+ * Refuses an agent's release of a head of the pre-release branch whose release pull request already conflicted
+ * with the release branch. The conflict ends only with a new head (the release branch merged into the
+ * pre-release branch) or a fix on the release branch that only a person makes, so a person may still ask; an
+ * agent's release, asked after every integration and by the release train, would only be refused again.
+ */
+async function refuseKnownConflict(
+  deps: Pick<DeliverDeps, 'db'>,
+  input: { repository: string; sha: string; target: string; actor: string },
+) {
+  if (!input.actor.startsWith('agent:')) return
+  const [refused] = await deps.db
+    .select({ id: releaseWait.id })
+    .from(releaseWait)
+    .where(
+      and(
+        eq(releaseWait.repository, input.repository),
+        eq(releaseWait.sha, input.sha),
+        eq(releaseWait.status, 'refused'),
+        like(releaseWait.detail, `${CONFLICT_REFUSAL} %`),
+      ),
+    )
+    .limit(1)
+  if (!refused) return
+  throw new ReleaseAlreadyRefused(
+    `the release pull request already conflicted with ${input.target} at ${input.sha.slice(0, 7)} of ${PRE_RELEASE_BRANCH}, and an agent does not ask again for the same head: merge ${input.target} into ${PRE_RELEASE_BRANCH}, or ask for the release as a person`,
+  )
 }
 
 /**

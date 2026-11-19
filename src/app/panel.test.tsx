@@ -857,6 +857,36 @@ describe('health', () => {
     })
   })
 
+  it('shows a conflicting back-merge with its link on GitHub and no button, since it is resolved there', async () => {
+    serve({
+      'GET /api/panel/health': report({
+        findings: [
+          found({
+            id: 6,
+            subject: 'back_merge',
+            taskId: null,
+            taskTitle: null,
+            ref: 'https://github.com/o/r/pull/9',
+            detail: 'the back-merge #9 from main into workspace conflicts with workspace',
+          }),
+        ],
+      }),
+    })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('A back-merge conflicts and nothing will merge it')).toBeDefined(),
+    )
+    expect(screen.getByRole('link', { name: 'Open it on GitHub' }).getAttribute('href')).toBe(
+      'https://github.com/o/r/pull/9',
+    )
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   it('does not act when the person declines the confirmation', async () => {
     const calls = serve({
       'GET /api/panel/health': report({

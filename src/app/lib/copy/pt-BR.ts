@@ -747,7 +747,9 @@ export const ptBR: Copy = {
       answer_resume: 'Uma resposta nunca foi retomada',
       snapshot: 'Um instantâneo de que ninguém precisa',
       revert: 'Uma reversão nunca foi confirmada',
+      back_merge: 'Um back-merge tem conflito e nada vai fazer o merge dele',
     },
+    openOnGithub: 'Abrir no GitHub',
     actions: {
       run: {
         label: 'Recomeçar',
