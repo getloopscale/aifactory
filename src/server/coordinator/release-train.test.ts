@@ -142,6 +142,21 @@ describe('whether the release train holds a repository without looking further',
     expect(trainHolds(facts({ branch: { state: 'watching', detail: '' } }))).toBe(true)
   })
 
+  it('holds a repository whose publication still waits and is not stalled, or could not be read', () => {
+    expect(trainHolds(facts({ publication: { id: 52, stalled: readOf(undefined) } }))).toBe(true)
+    expect(
+      trainHolds(
+        facts({ publication: { id: 52, stalled: unread('Version Packages', 'GitHub said 502') } }),
+      ),
+    ).toBe(true)
+  })
+
+  it('does not hold a repository whose publication waits on a Version Packages pull request with a failed check', () => {
+    const stalled = readOf('checks failed on Version Packages #583: dep-check / suite')
+
+    expect(trainHolds(facts({ publication: { id: 52, stalled } }))).toBe(false)
+  })
+
   it('looks further at a repository in auto or trial with integrated work and nothing working', () => {
     expect(trainHolds(facts())).toBe(false)
     expect(trainHolds(facts({ mode: 'trial' }))).toBe(false)

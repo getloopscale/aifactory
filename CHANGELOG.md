@@ -54,6 +54,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A changesets publication whose Version Packages pull request failed a check on its head no longer blocks the next release. That release is the only way the fix reaches the release branch, so the factory now promotes it, from the panel or the release train, and records the stalled publication as `failed`, superseded by the promotion. The tasks of the superseded publication are released and their issues closed by the next publication. While the Version Packages checks pass, run or have not reported, releases are still refused (#367)
 - An evaluation case prepares and lets through a planner apart from the builder and the reviewer, as a task's run does, so a reviewer other than the planner can be evaluated (#358)
 - The back-merge after a changesets release is merged as soon as it does not conflict when the integration branch requires no status check. It used to wait for every check on the released head, so a failed Dependabot run there, or a branch that runs no CI, held it open and left consumed changesets on `develop` (#365)
 - The Version Packages pull request and the back-merge wait only for the checks their target branch requires, so a red check that branch does not require (`Dependabot`, a matrix job) no longer holds a publication, and every release refused behind it, forever (#343).
