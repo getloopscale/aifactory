@@ -32,6 +32,7 @@ const deps = (api: FakeGithub): CoordinatorDeps => ({
   api,
   issues: api,
   readIssue: (repo, number) => api.readIssue(repo, number),
+  listOpenIssues: (repo, label) => api.listOpenIssues(repo, label),
   drafter: async () => ({ response: '', cost: 0 }),
   releaseMode: 'manual',
   enqueueResume: async () => undefined,
@@ -233,7 +234,10 @@ describe('the coordinator on failed checks whose handoff kept no output', () => 
     }
   }
 
-  async function handedOver(mergeableState: string) {
+  async function handedOver(
+    mergeableState: string,
+    detail: object = { reason: 'the required checks failed', cause: 'checks_unchanged' },
+  ) {
     const db = getDb()
     const api = new FakeGithub()
     const repo = api.repo('paulo/app')
@@ -264,11 +268,7 @@ describe('the coordinator on failed checks whose handoff kept no output', () => 
       .returning({ id: task.id })
     await db.insert(stageEvent).values([
       { taskId: t.id, stage: 'intake', detail: null },
-      {
-        taskId: t.id,
-        stage: 'handoff',
-        detail: { reason: 'the required checks failed', cause: 'checks_unchanged' },
-      },
+      { taskId: t.id, stage: 'handoff', detail },
     ])
     return { api, id: t.id }
   }
@@ -315,6 +315,33 @@ describe('the coordinator on failed checks whose handoff kept no output', () => 
     expect(feedback).toContain('test (https://ci/11):')
     expect(feedback).toContain('AssertionError: expected 3 to be 4')
     expect(feedback).not.toContain('gate')
+  })
+
+  it('sends checks that still fail after the automatic runs back with what their jobs logged, when the handoff quoted nothing', async () => {
+    const reason = 'the required checks still fail after 3 automatic runs: test'
+    const { api, id } = await handedOver('blocked', { reason, cause: 'ci_red' })
+    const asked: string[] = []
+
+    const result = await coordinate({ ...deps(api), ciChecks: ciChecks(asked) }, 'auto')
+
+    expect(asked).toEqual(['pr-head'])
+    expect(result).toMatchObject({ applied: 1 })
+    const [row] = await getDb().select().from(coordinatorAction)
+    expect(row).toMatchObject({ taskId: id, exceptionKind: 'ci_red', action: 'send_back' })
+    expect((queued[0] as { feedback: string }).feedback).toContain(
+      'AssertionError: expected 3 to be 4',
+    )
+  })
+
+  it('reads no log for checks that still fail when the handoff quoted them', async () => {
+    const reason = 'the required checks still fail after 3 automatic runs: test\n\ntest:\nboom'
+    const { api } = await handedOver('blocked', { reason, cause: 'ci_red' })
+    const asked: string[] = []
+
+    await coordinate({ ...deps(api), ciChecks: ciChecks(asked) }, 'auto')
+
+    expect(asked).toEqual([])
+    expect((queued[0] as { feedback: string }).feedback).toContain('boom')
   })
 
   it('waits to read them again when GitHub would not give them', async () => {
