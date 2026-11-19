@@ -1,5 +1,7 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
+import { whenSlotFree } from './sandbox-slot'
+
 /** A destination the sandbox may reach, optionally with headers the firewall attaches to it. */
 export type EgressRule = {
   domain: string
@@ -121,13 +123,18 @@ export function assertIsolated(spec: SandboxSpec): void {
   }
 }
 
-/** Creates a sandbox, after checking the spec. Every run goes through here. */
+/**
+ * Creates a sandbox, after checking the spec. Every run goes through here. While the provider refuses for its
+ * concurrent limit, it waits for a slot instead of failing the run: a refused run waited for a retry far longer
+ * than a slot takes to free.
+ */
 export async function createIsolatedSandbox(
   provider: IsolatedSandboxProvider,
   spec: SandboxSpec,
+  slot: Parameters<typeof whenSlotFree>[1] = {},
 ): Promise<IsolatedSandbox> {
   assertIsolated(spec)
-  return provider.create(spec)
+  return whenSlotFree(() => provider.create(spec), slot)
 }
 
 /** Restores a sandbox from a snapshot, after the same check as a new one. */

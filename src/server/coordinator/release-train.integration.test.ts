@@ -22,6 +22,7 @@ import { type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
+import { RELEASE_MAX_WAIT_MINUTES } from './release-train'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -205,6 +206,29 @@ describe('the release train in a repository in auto', () => {
 
     expect(promotions()).toEqual([])
     expect(await actions()).toEqual([])
+  })
+})
+
+describe('the release train while the repository keeps working', () => {
+  it('releases while a task of the repository only waits in the queue', async () => {
+    await enable('auto')
+    await integrated()
+    await integrated(['factory'], 'intake')
+
+    await coordinate(deps(), 'auto')
+
+    expect(promotions()).toHaveLength(1)
+  })
+
+  it('releases once the oldest integrated work waited an hour, while a task still works', async () => {
+    await enable('auto')
+    await integrated()
+    await integrated(['factory'], 'build')
+    const later = new Date(Date.now() + (RELEASE_MAX_WAIT_MINUTES + 1) * 60_000)
+
+    await coordinate({ ...deps(), now: () => later }, 'auto')
+
+    expect(promotions()).toHaveLength(1)
   })
 })
 
