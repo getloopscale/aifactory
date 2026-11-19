@@ -63,6 +63,7 @@ import { queuedMerges, thenMerge } from '../../test/merge-job'
 import { runContinuation } from './run-support'
 import { fixedBaseNote } from './ci-wait'
 import {
+  conflictNote,
   mergeBaseByCoordinator,
   mergeFixedBase,
   requestChanges,
@@ -2049,6 +2050,30 @@ describe('runTask review loop', () => {
     expect(await stagesOf(id)).not.toContain('failed')
   })
 
+  it('still gives the review its own rounds after two reworks for failing checks', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]), verdictJson('approve'))
+    let runs = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (!c.endsWith('npm test') || onBase(c)) return undefined
+        runs += 1
+        // The first two commits fail the tests, each run twice; the third passes them.
+        return runs <= 4 ? { exitCode: 1, stdout: 'not ok 1 - rejects max below 1' } : undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def4' })
+    expect(reviewer.prompts).toHaveLength(2)
+    expect((await reviewsOf(id)).map((r) => [r.sha, r.verdict])).toEqual([
+      ['abc123def3', 'changes'],
+      ['abc123def4', 'approve'],
+    ])
+  })
+
   it('opens the pull request without a rework when a check fails once and passes when run again', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
@@ -2278,24 +2303,25 @@ describe('runTask review loop', () => {
         }
         if (!c.endsWith('npm test') || onBase(c)) return undefined
         tests += 1
-        // The first commit passes and is reviewed; every rework after it breaks the tests; the restored one passes.
+        // The first commit passes and is reviewed; the review's rework and the two reworks for the checks after it
+        // break the tests; the restored one passes.
         return tests === 1 || restored ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
       }),
     )
 
     const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
 
-    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def4' })
+    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def5' })
     expect(await reviewsOf(id)).toHaveLength(1)
     expect(seen.drafts).toEqual([true])
     expect(await handoffDetail(id)).toMatchObject({
-      cause: 'review_plateau',
-      sha: 'abc123def4',
+      cause: 'checks_broke_after_review',
+      sha: 'abc123def5',
       reason:
         'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d, which passed them and was reviewed',
     })
     const evidenceOfRestored = (await getDb().select().from(evidence)).filter(
-      (e) => e.sha === 'abc123def4',
+      (e) => e.sha === 'abc123def5',
     )
     expect(evidenceOfRestored.map((e) => e.passed)).toEqual([true])
   })
@@ -3144,6 +3170,54 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(stages).not.toContain('failed')
   })
 
+  it('keeps the approval of work the agent only merged the base into, when the patch of the work is the same', async () => {
+    const approved = 'a'.repeat(40)
+    const merge = 'b'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: approved, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    await getDb().insert(review).values({
+      taskId: id,
+      round: 1,
+      sha: approved,
+      reviewer: 'fake-reviewer',
+      verdict: 'approve',
+      summary: 'looks right',
+      findings: [],
+    })
+    let merged = false
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${approved}\trefs/heads/factory/7\n` }
+        if (command.includes('rev-list --count')) return { stdout: merged ? '1\n' : '0\n' }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${merged ? merge : approved}\n` }
+        if (command.includes('merge-base FETCH_HEAD')) return { stdout: `${'d'.repeat(40)}\n` }
+        if (command.includes('patch-id --stable')) return { stdout: `p1 ${'0'.repeat(40)}\n` }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        merged = true
+        dirty = false
+        return { ok: true, summary: 'Merged the integration branch; nothing conflicted.' }
+      },
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id, undefined, {
+      feedback: conflictNote('workspace'),
+    })
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toEqual([])
+  })
+
   it('tells the agent which files git finds in conflict, and no other path', async () => {
     const id = await seedTask()
     branchPushed()
@@ -3505,6 +3579,18 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(intake!.detail.note).not.toMatch(/\bgit\b/)
   })
 
+  it('marks its intake as a merge of the base, which the allowance of automatic runs leaves out', async () => {
+    const { id } = await sentToMergeTheBase()
+
+    const [intake] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'intake')))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(intake!.detail).toMatchObject({ automatic: true, mergeBase: true })
+  })
+
   it('merges the base it cloned, pushes the merge with no agent asked anything, and checks and reviews it', async () => {
     const { id, queued } = await sentToMergeTheBase()
     const sandbox = mergingSandbox()
@@ -3540,6 +3626,90 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(stages).toContain('verify')
     expect(stages).toContain('review')
     expect(stages).not.toContain('build')
+  })
+
+  /** The review that approved `verified`, before the task went to wait for its checks. */
+  const approvedEarlier = (id: number) =>
+    getDb().insert(review).values({
+      taskId: id,
+      round: 1,
+      sha: verified,
+      reviewer: 'fake-reviewer',
+      verdict: 'approve',
+      summary: 'looks right',
+      findings: [],
+    })
+
+  /** `mergingSandbox`, whose patch of the task is `before` at the approved commit and `after` at the merge. */
+  function patchedSandbox(before: string, after: string) {
+    const inner = mergingSandbox()
+    const answer = inner.backend
+    const original = answer.execute.bind(answer)
+    answer.execute = async (command: string) => {
+      if (command.includes('merge-base FETCH_HEAD')) {
+        await original(command)
+        return { stdout: `${'d'.repeat(40)}\n`, stderr: '', exitCode: 0, timedOut: false }
+      }
+      if (command.includes('patch-id --stable')) {
+        await original(command)
+        const at = command.includes(` ${verified} |`) ? before : after
+        return { stdout: `${at} ${'0'.repeat(40)}\n`, stderr: '', exitCode: 0, timedOut: false }
+      }
+      return original(command)
+    }
+    return inner
+  }
+
+  it('keeps the approval of the work when merging the base left its patch as it was, with no reviewer asked', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    await approvedEarlier(id)
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(patchedSandbox('p1', 'p1'), { reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toEqual([])
+    const reviews = await reviewsOf(id)
+    expect(reviews.at(-1)).toMatchObject({ sha: merge, verdict: 'approve' })
+    expect(reviews.at(-1)!.summary).toContain(verified.slice(0, 7))
+  })
+
+  it('reviews the merge again when merging the base changed the patch of the work', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    await approvedEarlier(id)
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(patchedSandbox('p1', 'p2'), { reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toHaveLength(1)
+  })
+
+  it('reviews the merge when no review approved the work before it', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const input = queued[0]!
+
+    await runTask(
+      deps(patchedSandbox('p1', 'p1'), { reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(reviewer.prompts).toHaveLength(1)
   })
 
   it('fails for a person, naming the files, when the base conflicts with the branch', async () => {
@@ -4344,9 +4514,10 @@ describe('runTask waiting for an answer', () => {
     await poll(sandbox)
     const result = await resumeTask(deps(sandbox, { harness: builder, reviewer }), id)
 
-    expect(result.status).toBe('handoff')
-    expect(reviewer.prompts).toHaveLength(2)
-    expect(result.status === 'handoff' && result.reason).toContain('4, 5')
+    // Two review rounds, 4 then 5: the review still has a round left, which approves. The old round 2 of six
+    // filled in would have made it three rounds that do not converge, and a handoff.
+    expect(result.status).toBe('done')
+    expect(reviewer.prompts).toHaveLength(3)
   })
 
   it('lets a question that nobody answered fail its task and frees the snapshot', async () => {
