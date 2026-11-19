@@ -14,11 +14,10 @@ import {
   versionBranchFor,
   type ReleasesRead,
 } from './changesets'
-import { requiredState } from './ci-wait'
 import { clearFinding, raiseFinding } from './findings'
 import { endWithoutVersionPullRequest, type Ending } from './publication-end'
 import { shipContained, unclosedNote } from './ship'
-import { classify } from './watch'
+import { checksFailedOn, checksOn } from './stalled-publication'
 
 export type PublishDeps = { db: Database; github: GithubApp; api: GithubApi; now?: () => Date }
 
@@ -86,21 +85,6 @@ type Mergeable = {
 }
 
 /**
- * What the checks on the head of a pull request say. When its base requires status checks, only those count,
- * as GitHub counts them: a check the branch does not require, red or running, holds nothing. A base that
- * requires none has every check read, and no check at all is not green.
- */
-async function checksOn(deps: PublishDeps, m: Mergeable) {
-  const required = await deps.api.requiredChecks(m.repo, m.token, m.base)
-  if (required.length === 0)
-    return classify(await deps.api.commitChecks(m.repo, m.token, m.pr.headSha))
-  return requiredState({
-    required,
-    reports: await deps.api.checkReports(m.repo, m.token, m.pr.headSha),
-  })
-}
-
-/**
  * Merges an open pull request with a merge commit once the checks on its head are green, pinned to that
  * head, so a push between the look and the merge makes GitHub refuse it. A draft, a conflict with its base,
  * or checks that failed, still run or are missing, leave it open for a later pass.
@@ -112,10 +96,8 @@ async function mergeWhenGreen(deps: PublishDeps, m: Mergeable): Promise<VersionS
   const detail = await deps.api.readPullRequest(repo, token, pr.number)
   if (detail.mergeableState === 'dirty')
     return { wait: `${name} conflicts with ${m.base}`, conflict: true }
-  const seen = await checksOn(deps, m)
-  if (seen.state === 'red') {
-    return { wait: `checks failed on ${name}: ${seen.failing.join(', ')}` }
-  }
+  const seen = await checksOn(deps.api, { repo, token, base: m.base, sha: pr.headSha })
+  if (seen.state === 'red') return { wait: checksFailedOn(name, seen.failing) }
   if (seen.state !== 'green') return { wait: `the checks on ${name} are not green yet` }
   await deps.api.mergePullRequest(repo, token, pr.number, pr.headSha, { method: 'merge' })
   return { merged: pr.number }

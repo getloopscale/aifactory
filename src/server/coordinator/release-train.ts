@@ -39,8 +39,14 @@ export type RepositoryReleaseFacts = {
   working: number
   /** Minutes since the oldest of `releasable` was delivered. */
   waitedMinutes?: number
-  /** A release or a publication of the repository that has not finished, said as a person reads it. */
+  /** A release of the repository that waits for the release branch's checks, said as a person reads it. */
   inFlight: string | undefined
+  /**
+   * The publication of the repository that has not finished, and why it is stalled: what failed on its
+   * Version Packages pull request, so that only a new promotion ends it (#367), or undefined when it can still
+   * end by itself.
+   */
+  publication?: { id: number; stalled: Read<string | undefined> }
   /** `sha` is the commit `watch-main` last watched on the release branch. */
   branch: { state: ReleaseBranchState; detail: string; sha?: string }
   /** The facts below are read only when the train does not hold the repository (`trainHolds`). */
@@ -161,15 +167,24 @@ export const passingRefusal = (reason: string): boolean =>
   PASSING_CAUSES.some((cause) => cause.test(reason))
 
 /**
+ * Whether a publication holds the train: one that can still end by itself does, and so does one whose
+ * Version Packages pull request could not be read. One stalled on a failed check does not, since only the
+ * next promotion ends it (`release()` lets that promotion through and supersedes it).
+ */
+const publicationHolds = (p: RepositoryReleaseFacts['publication']) =>
+  p !== undefined && !(p.stalled.read && p.stalled.value !== undefined)
+
+/**
  * Whether the train leaves the repository alone without reading anything more: a `manual` repository, no
- * integrated work to release, a task still working on what would join it, a release still in flight, or the
- * last release still watched on the release branch.
+ * integrated work to release, a task still working on what would join it, a release or a publication still
+ * in flight, or the last release still watched on the release branch.
  */
 export const trainHolds = (f: RepositoryReleaseFacts): boolean =>
   f.mode === 'manual' ||
   f.releasable.length === 0 ||
   (f.working > 0 && (f.waitedMinutes ?? 0) < RELEASE_MAX_WAIT_MINUTES) ||
   f.inFlight !== undefined ||
+  publicationHolds(f.publication) ||
   f.branch.state === 'watching'
 
 const short = (sha: string) => sha.slice(0, 7)
