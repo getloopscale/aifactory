@@ -46,4 +46,33 @@ describe('createIsolatedSandbox', () => {
     await createIsolatedSandbox(provider, ok)
     expect(provider.specs).toEqual([ok])
   })
+
+  it('waits for a free slot while the provider refuses for its concurrent limit', async () => {
+    const provider = new FakeSandbox()
+    const create = provider.create.bind(provider)
+    let refusals = 2
+    provider.create = (spec) =>
+      refusals-- > 0
+        ? Promise.reject(
+            new Error('You have reached the maximum number of concurrent E2B sandboxes (10)'),
+          )
+        : create(spec)
+    const waits: number[] = []
+
+    await createIsolatedSandbox(provider, ok, { sleep: async (ms) => void waits.push(ms) })
+
+    expect(provider.specs).toEqual([ok])
+    expect(waits).toHaveLength(2)
+  })
+
+  it('throws any other refusal at once', async () => {
+    const provider = new FakeSandbox()
+    provider.create = () => Promise.reject(new Error('401 unauthorized'))
+    const waits: number[] = []
+
+    await expect(
+      createIsolatedSandbox(provider, ok, { sleep: async (ms) => void waits.push(ms) }),
+    ).rejects.toThrow('401 unauthorized')
+    expect(waits).toHaveLength(0)
+  })
 })
