@@ -163,8 +163,8 @@ reads that file, not a convention.
   either path. Nothing else may merge there, with one
   exception: after a changesets release, `publish-changesets` merges the repository's back-merge, the open pull
   request from the release branch into the integration branch of the same repository (never a fork), with a
-  merge commit pinned to its head once the checks the integration branch requires are green (`pickBackMerge` in
-  `factory/changesets.ts`); a back-merge that conflicts is a `back_merge` finding on the health page until the
+  merge commit pinned to its head once the checks the integration branch requires are green, or at once when it
+  requires none, since its commits are the release (`pickBackMerge` in `factory/changesets.ts`); a back-merge that conflicts is a `back_merge` finding on the health page until the
   conflict is gone, and is never merged. `develop` is
   the pre-release: it advances to each integration, which gets a pre-release tag. When `develop` takes changes
   only through a pull request, the factory opens its promotion from the integration branch and turns on

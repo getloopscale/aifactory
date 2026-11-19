@@ -83,6 +83,13 @@ type Mergeable = {
   pr: { number: number; headSha: string; draft: boolean }
   name: string
   base: string
+  /**
+   * A base that requires no check takes the pull request whatever its head reports. Only the back-merge asks for
+   * it: its commits are the release, verified before they reached the release branch, and an integration branch
+   * that runs no CI would never report a check on it (usetheokit/theokit-sdk#1248 waited behind a failed
+   * Dependabot run).
+   */
+  unprotectedBaseIsGreen?: boolean
 }
 
 /**
@@ -92,12 +99,15 @@ type Mergeable = {
  */
 async function checksOn(deps: PublishDeps, m: Mergeable) {
   const required = await deps.api.requiredChecks(m.repo, m.token, m.base)
-  if (required.length === 0)
-    return classify(await deps.api.commitChecks(m.repo, m.token, m.pr.headSha))
-  return requiredState({
+  if (required.length === 0) {
+    const seen = classify(await deps.api.commitChecks(m.repo, m.token, m.pr.headSha))
+    return { ...seen, unprotected: true }
+  }
+  const seen = requiredState({
     required,
     reports: await deps.api.checkReports(m.repo, m.token, m.pr.headSha),
   })
+  return { ...seen, unprotected: false }
 }
 
 /**
@@ -113,6 +123,10 @@ async function mergeWhenGreen(deps: PublishDeps, m: Mergeable): Promise<VersionS
   if (detail.mergeableState === 'dirty')
     return { wait: `${name} conflicts with ${m.base}`, conflict: true }
   const seen = await checksOn(deps, m)
+  if (m.unprotectedBaseIsGreen && seen.unprotected) {
+    await deps.api.mergePullRequest(repo, token, pr.number, pr.headSha, { method: 'merge' })
+    return { merged: pr.number }
+  }
   if (seen.state === 'red') {
     return { wait: `checks failed on ${name}: ${seen.failing.join(', ')}` }
   }
@@ -311,6 +325,7 @@ async function mergeBackMerges(deps: PublishDeps, result: PublishResult) {
         pr,
         name,
         base: branches.integration,
+        unprotectedBaseIsGreen: true,
       })
       if ('wait' in step && step.conflict) {
         await raiseBackMergeConflict(deps, { ...branches, pr, why: step.wait })
