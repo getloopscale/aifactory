@@ -12,6 +12,15 @@ export type CaseResult = {
   /** How many builder passes the case took. */
   attempts: number
   reviewRounds: number
+  /** What each completed review round found, in order; absent from results written before it was kept. */
+  reviews?: ReviewRecord[]
+}
+
+/** The verdict of one review round, kept so a failed case can be read from the run's file. */
+export type ReviewRecord = {
+  verdict: 'approve' | 'changes' | 'invalid'
+  summary: string
+  findings: { severity: string; file?: string; issue: string }[]
 }
 
 /** Which agents ran, and with what model, so a change made outside the code still counts as a change. */
