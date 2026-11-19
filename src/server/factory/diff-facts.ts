@@ -74,6 +74,73 @@ export async function diffFacts(
   return { guards, unplanned: withoutRequired(unplanned, required), required, touched }
 }
 
+/** A branch name with nothing a shell reads as more than a name. */
+const PLAIN_BRANCH = /^[\w.][\w./-]*$/
+
+/**
+ * Where the change on HEAD starts, measured again before each review: the merge base of HEAD and the head of
+ * the integration branch as it is now, fetched. The head the run cloned (`baseSha`) goes stale once the work
+ * branch merges the integration branch after it moved, and the diff from it then holds other tasks' commits,
+ * which the review reads as changes outside the plan. When the fetched head shares no commit with HEAD, the
+ * cloned head stays the base.
+ */
+export async function reviewBase(
+  backend: SandboxBackend,
+  repoDir: string,
+  input: { baseSha: string; integration: string },
+): Promise<string> {
+  const git = await fetchIntegration(backend, repoDir, input.integration)
+  const merged = await backend.execute(`${git} merge-base FETCH_HEAD HEAD`)
+  // git answers 1, and prints nothing, for two commits with no common ancestor; anything else is an error.
+  if (merged.exitCode !== 0 && merged.exitCode !== 1) {
+    throw new Error(`git merge-base exited ${merged.exitCode}: ${merged.stderr.trim().slice(-500)}`)
+  }
+  return merged.stdout.trim() || input.baseSha
+}
+
+const COMMIT_HASH = /^[0-9a-f]{7,64}$/
+
+/** Fetches the integration branch into `FETCH_HEAD`, and answers the git command prefix for `repoDir`. */
+async function fetchIntegration(
+  backend: SandboxBackend,
+  repoDir: string,
+  integration: string,
+): Promise<string> {
+  if (!PLAIN_BRANCH.test(integration)) {
+    throw new Error(
+      `the integration branch ${JSON.stringify(integration)} is not a plain branch name, so it is not handed to a shell`,
+    )
+  }
+  const git = `git -C ${repoDir}`
+  await must(backend, `${git} fetch -q origin ${integration}`)
+  return git
+}
+
+/**
+ * Whether `head` carries the same change as `approved`, each measured from where it meets the head of the
+ * integration branch, fetched (`git patch-id --stable`). A merge of the integration branch that conflicted
+ * nowhere and changed nothing the task wrote leaves the patch as it was, so the review of `approved` still
+ * reads what `head` changes. A patch that cannot be measured, or an empty one, is never the same.
+ */
+export async function samePatch(
+  backend: SandboxBackend,
+  repoDir: string,
+  input: { integration: string; approved: string; head: string },
+): Promise<boolean> {
+  for (const sha of [input.approved, input.head]) {
+    if (!COMMIT_HASH.test(sha)) throw new Error(`${JSON.stringify(sha)} is not a commit hash`)
+  }
+  const git = await fetchIntegration(backend, repoDir, input.integration)
+  const patchOf = async (sha: string): Promise<string> => {
+    const base = (await must(backend, `${git} merge-base FETCH_HEAD ${sha}`)).stdout.trim()
+    if (!COMMIT_HASH.test(base)) return ''
+    const id = await must(backend, `${git} diff ${base} ${sha} | ${git} patch-id --stable`)
+    return id.stdout.trim().split(/\s+/)[0] ?? ''
+  }
+  const before = await patchOf(input.approved)
+  return before !== '' && before === (await patchOf(input.head))
+}
+
 /** The repaired checks of the change on HEAD, each with the files added while it was repaired. */
 async function requiredByChecks(
   backend: SandboxBackend,

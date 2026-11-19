@@ -1,9 +1,10 @@
-import { and, eq } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, repository, task } from '../db/schema'
 import { release, ReleaseRefused } from '../factory/deliver'
 import { outcome as transition } from '../factory/transitions'
+import type { Issue } from '../github/issues'
 import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
@@ -12,7 +13,7 @@ import {
   sendBackByCoordinator,
   type ActionDeps,
 } from '../panel/actions'
-import { FACTORY_LABEL_SPEC } from '../panel/work'
+import { FACTORY_LABEL, FACTORY_LABEL_SPEC } from '../panel/work'
 
 import { baseFixIssue, baseSignature } from './base-fix'
 import type { CoordinatorOutcome, Decision } from './decide'
@@ -23,7 +24,15 @@ import type { CoordinatorMode } from './mode'
 import { HOLD_LOCK, moveAhead } from './queue-apply'
 import { readHeldTests } from './queue-facts'
 import { COORDINATOR_ACTOR } from './release-train'
-import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft } from './scope'
+import {
+  followUpIssue,
+  followUpOrigin,
+  infeasibleNamed,
+  qualityConfigurationNamed,
+  sameFollowUp,
+  scopeSection,
+  type ScopeDraft,
+} from './scope'
 
 /**
  * The only module of the coordinator with side effects. It applies a decision through the panel's own
@@ -36,6 +45,8 @@ import { followUpIssue, qualityConfigurationNamed, scopeSection, type ScopeDraft
 export type ApplyDeps = ActionDeps & {
   issues: Pick<IssuesApi, 'createIssue' | 'updateIssueBody' | 'ensureLabel'>
   readIssue: ReadIssue
+  /** The open issues of a repository that carry a label, as `listOpenIssues` reads them: where a follow-up is looked for. */
+  listOpenIssues: (repo: string, label: string, token: string) => Promise<Issue[]>
   /** The clock a decision is recorded at, which is what the age of a `wait` is measured against. */
   now?: () => Date
 }
@@ -58,11 +69,64 @@ async function enabled(deps: ApplyDeps, fullName: string): Promise<boolean> {
 
 type TaskRow = typeof task.$inferSelect
 
-/** The follow-up the draft files, labelled for the factory only in a repository the owner enabled. */
-async function fileFollowUp(deps: ApplyDeps, row: TaskRow, token: string, draft: ScopeDraft) {
+/** Every follow-up a scope files carries it, so a person finds them, and so does the next scope looking for one. */
+export const FOLLOW_UP_LABEL_SPEC = {
+  name: 'follow-up',
+  color: 'c5def5',
+  description: 'Work a scope decision of the factory left out of another issue',
+}
+
+/** The follow-up an earlier scope of the task filed, if one did. */
+async function followUpOfTask(deps: ApplyDeps, taskId: number): Promise<number | undefined> {
+  const [row] = await deps.db
+    .select({ number: sql<number>`(${coordinatorAction.draft}->>'followUpIssue')::int` })
+    .from(coordinatorAction)
+    .where(
+      and(
+        eq(coordinatorAction.taskId, taskId),
+        eq(coordinatorAction.outcome, 'applied'),
+        isNotNull(sql`${coordinatorAction.draft}->>'followUpIssue'`),
+      ),
+    )
+    .orderBy(desc(coordinatorAction.id))
+    .limit(1)
+  return row?.number ?? undefined
+}
+
+/** An open issue of the repository that already is this follow-up: one filed for the same issue, or with its title. */
+async function openFollowUp(deps: ApplyDeps, row: TaskRow, token: string, title: string) {
+  for (const label of [FOLLOW_UP_LABEL_SPEC.name, FACTORY_LABEL]) {
+    const open = await deps.listOpenIssues(row.repository, label, token)
+    const same = open.find(
+      (i) =>
+        i.number !== row.issueNumber && sameFollowUp(i, row.repository, row.issueNumber, title),
+    )
+    if (same) return same.number
+  }
+  return undefined
+}
+
+/**
+ * The follow-up the draft files, once per task: a second scope of the task names the one the first filed, and an
+ * open issue that already is the follow-up is named instead of filing another. It is labelled for the factory
+ * only in a repository the owner enabled, and only when the issue is not a follow-up itself: a follow-up of a
+ * follow-up is for a person to triage, so no chain of them grows on its own.
+ */
+async function fileFollowUp(
+  deps: ApplyDeps,
+  row: TaskRow,
+  token: string,
+  draft: ScopeDraft,
+  body: string,
+) {
   const issue = followUpIssue(draft, row.repository, row.issueNumber)
   if (!issue) return null
-  const labels = (await enabled(deps, row.repository)) ? ['factory'] : []
+  const earlier =
+    (await followUpOfTask(deps, row.id)) ?? (await openFollowUp(deps, row, token, issue.title))
+  if (earlier !== undefined) return earlier
+  const forFactory = (await enabled(deps, row.repository)) && !followUpOrigin(body)
+  await deps.issues.ensureLabel(row.repository, token, FOLLOW_UP_LABEL_SPEC)
+  const labels = [...(forFactory ? [FACTORY_LABEL] : []), FOLLOW_UP_LABEL_SPEC.name]
   return (await deps.issues.createIssue(row.repository, token, { ...issue, labels })).number
 }
 
@@ -77,12 +141,12 @@ async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promis
   const allowed = transition(row, 'coordinator_send_back')
   if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
   const { token } = await deps.github.installationToken(row.repository)
-  const followUp = await fileFollowUp(deps, row, token, draft)
   const { body } = await deps.readIssue(row.repository, row.issueNumber, token)
+  const followUp = await fileFollowUp(deps, row, token, draft, body)
   const section = scopeSection(draft, new Date().toISOString().slice(0, 10), followUp ?? undefined)
   const updated = [body.trimEnd(), section].filter((part) => part !== '').join('\n\n')
   await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, updated)
-  await sendBackByCoordinator(deps, taskId, draft.note)
+  await sendBackByCoordinator(deps, taskId, draft.note, { fromReview: true })
   return followUp
 }
 
@@ -175,9 +239,13 @@ function notCarried(
 
 /** Why a decision may not be applied at all, whatever the mode, or nothing. */
 function forbidden(decision: Decision): string | undefined {
-  const named = decision.draft && qualityConfigurationNamed(decision.draft)
-  return named
-    ? `the draft names ${named}, and no quality gate is loosened to make a review converge`
+  if (!decision.draft) return undefined
+  const named = qualityConfigurationNamed(decision.draft)
+  if (named)
+    return `the draft names ${named}, and no quality gate is loosened to make a review converge`
+  const infeasible = infeasibleNamed(decision.draft)
+  return infeasible
+    ? `the draft puts in scope ${infeasible}, which the factory cannot do from its sandbox`
     : undefined
 }
 

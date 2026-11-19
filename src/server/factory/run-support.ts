@@ -2,13 +2,19 @@ import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import type { EgressRule } from './sandbox'
 import type { CheckResult } from './evidence'
-import { renderFindings, type ReviewVerdict } from './review'
+import { MAX_ATTEMPTS, renderFindings, type ReviewVerdict } from './review'
 import type { RunResult } from './run-types'
 import { quotaResumesAt } from './quota-reset'
 
 export const INSTANCE = 'work'
 export const GITCONFIG = '/tmp/factory.gitconfig'
 export const COMMIT_MESSAGE = '/tmp/factory-commit-message.txt'
+
+/**
+ * The reworks a run gives failing checks, counted apart from the review's rounds: a run whose first commits
+ * failed the checks still gets every review round `reviewAllowsRework` grants (#347).
+ */
+export const MAX_CHECK_REWORKS = MAX_ATTEMPTS - 1
 
 /** Thrown inside a stage so the run can report which stage failed. */
 export class StageFailure extends Error {}
@@ -243,8 +249,13 @@ export function gitConfig(author: { name: string; email: string }): string {
 /** A run that continues on the branch the agent pushed, with what to change. */
 export type Continuation = {
   feedback: string
-  /** The repository's required checks sent the work back, not a person. */
+  /** The factory sent the work back with its own note, not a person: the repository's checks, or the coordinator. */
   fromChecks?: boolean
+  /**
+   * The note is the coordinator's decision on a review that did not converge (`scope`), not what failed checks
+   * reported: the builder is never told the checks failed.
+   */
+  fromReview?: boolean
   /** The run only continues a branch an earlier run pushed before it finished: nobody asked for anything. */
   plain?: boolean
   /**
@@ -265,9 +276,18 @@ export function runContinuation(
   feedback: string | undefined,
   resume?: boolean,
   mergeBase?: boolean,
+  fromReview?: boolean,
 ): Continuation | undefined {
   if (mergeBase) return { feedback: '', mergeBase: true }
   if (decided?.kind === 'request_changes') return { feedback: decided.note }
-  if (feedback) return { feedback, fromChecks: true }
+  if (feedback) return { feedback, fromChecks: true, ...(fromReview ? { fromReview: true } : {}) }
   return resume ? { feedback: '', plain: true } : undefined
 }
+
+/**
+ * Who the builder's prompt says sent the work back: the required checks only for their own feedback. The prompt
+ * has no words yet for the coordinator's decision on a review (they belong in `harness.ts`, which is agent
+ * configuration), so that one is read as a request for changes, which is what the review made.
+ */
+export const feedbackSource = (sentBack: Continuation | undefined): 'person' | 'checks' =>
+  sentBack?.fromChecks && !sentBack.fromReview ? 'checks' : 'person'

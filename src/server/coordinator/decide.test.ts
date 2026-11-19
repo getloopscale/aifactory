@@ -222,17 +222,40 @@ describe('deciding one action for an exception', () => {
     }
   })
 
-  it('escalates the exception after two applied actions, naming them', () => {
+  it('escalates the exception after two applied actions of its family, naming them', () => {
     expect(MAX_APPLIED).toBe(2)
     const tried = [
       recorded({ action: 'retry_from_finding', exceptionKind: 'stalled', headSha: 'old0000aa' }),
       recorded({ action: 'review_again', exceptionKind: 'review_unusable', headSha: 'mid1111bb' }),
     ]
-    expect(decide(exception(), tried)).toEqual({
+    expect(decide(exception({ kind: 'review_plateau' }), tried)).toEqual({
       action: 'escalate',
       reason:
         'the coordinator already applied retry_from_finding for stalled on old0000, review_again for review_unusable on mid1111 on this task: a person decides what comes next',
     })
+  })
+
+  it('counts the reworks of the checks and the unblocking of the review apart', () => {
+    const review = [
+      recorded({ action: 'scope', exceptionKind: 'review_plateau', headSha: 'a1' }),
+      recorded({ action: 'scope', exceptionKind: 'review_plateau', headSha: 'a2' }),
+    ]
+    const checks = [
+      recorded({ action: 'send_back', exceptionKind: 'checks_red', headSha: 'b1' }),
+      recorded({ action: 'merge_base', exceptionKind: 'checks_unchanged', headSha: 'b2' }),
+    ]
+    expect(decide(exception(), review).action).toBe('send_back')
+    expect(decide(exception({ kind: 'review_plateau' }), checks).action).toBe('scope')
+    expect(decide(exception(), checks).action).toBe('escalate')
+    expect(decide(exception({ kind: 'review_plateau' }), review).action).toBe('escalate')
+  })
+
+  it('still scopes a review after one rework of the checks and one scope', () => {
+    const mixed = [
+      recorded({ action: 'send_back', exceptionKind: 'checks_red', headSha: 'b1' }),
+      recorded({ action: 'scope', exceptionKind: 'review_plateau', headSha: 'a1' }),
+    ]
+    expect(decide(exception({ kind: 'review_plateau' }), mixed).action).toBe('scope')
   })
 
   it('counts only applied actions toward the limit', () => {
@@ -472,8 +495,11 @@ describe('a failure the coordinator acts on', () => {
     }
   })
 
-  it('escalates any of them once two actions were applied on the task', () => {
-    const two = [recorded(), recorded({ headSha: 'o2' })]
+  it('escalates any of them once two reworks of the checks were applied on the task', () => {
+    const two = [
+      recorded({ exceptionKind: 'out_of_time', action: 'send_back' }),
+      recorded({ exceptionKind: 'base_conflict', action: 'send_back', headSha: 'o2' }),
+    ]
     for (const kind of ['checks_red', 'out_of_time', 'no_change'] as const) {
       expect(decide(exception({ kind, head: 'abc1234def@40', checkOutput: 'x' }), two).action).toBe(
         'escalate',
@@ -560,5 +586,59 @@ describe('a fact the coordinator could not read', () => {
     for (const mode of ['trial', 'auto'] as const) {
       expect(seen(unreadable, [waited(10)], mode)).toBe(false)
     }
+  })
+})
+
+describe('the handoffs of an integration that waited for the required checks', () => {
+  it('merges the base with no agent into a pull request that still conflicts with it', () => {
+    const decided = decide(
+      exception({ kind: 'pull_conflict', evidence: 'conflicts', conflictsWith: 'workspace' }),
+      [],
+    )
+    expect(decided).toMatchObject({ action: 'merge_base' })
+    expect(decided.note).toContain('The coordinator merges workspace into this branch')
+    expect(decided.note).toContain('No agent runs')
+  })
+
+  it('sends the merge to the agent once a merge of the base by the factory was applied', () => {
+    const merged = recorded({ action: 'merge_base', exceptionKind: 'pull_conflict' })
+    expect(
+      decide(exception({ kind: 'pull_conflict', conflictsWith: 'workspace' }), [merged]),
+    ).toMatchObject({ action: 'send_back', note: conflictNote('workspace') })
+  })
+
+  it('merges the base with no agent once it passes the checks again', () => {
+    const decided = decide(exception({ kind: 'base_fixed', mergeFrom: 'workspace' }), [])
+    expect(decided).toMatchObject({ action: 'merge_base' })
+    expect(decided.note).toContain('The coordinator merges workspace into this branch')
+  })
+
+  it('escalates either one when the integration branch is not known', () => {
+    expect(decide(exception({ kind: 'pull_conflict' }), []).action).toBe('escalate')
+    expect(decide(exception({ kind: 'base_fixed' }), []).action).toBe('escalate')
+  })
+
+  it('sends checks that still fail back on the branch with what they reported', () => {
+    const decided = decide(exception({ kind: 'ci_red', evidence: 'CI:\nboom' }), [])
+    expect(decided).toMatchObject({ action: 'send_back' })
+    expect(decided.note).toContain('CI:\nboom')
+    const logged = decide(exception({ kind: 'ci_red', evidence: '', ciOutput: 'CI (u): x' }), [])
+    expect(logged.note).toContain('CI (u): x')
+    expect(logged.reason).toContain('GitHub Actions')
+  })
+
+  it('escalates checks that still fail when nothing said what failed', () => {
+    expect(decide(exception({ kind: 'ci_red', evidence: '' }), []).action).toBe('escalate')
+  })
+
+  it('counts each of them as a rework of the checks', () => {
+    const two = [
+      recorded({ exceptionKind: 'ci_red', action: 'send_back', headSha: 'c1' }),
+      recorded({ exceptionKind: 'base_fixed', action: 'merge_base', headSha: 'c2' }),
+    ]
+    expect(decide(exception({ kind: 'pull_conflict', conflictsWith: 'w' }), two).action).toBe(
+      'escalate',
+    )
+    expect(decide(exception({ kind: 'review_plateau' }), two).action).toBe('scope')
   })
 })

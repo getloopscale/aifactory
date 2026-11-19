@@ -52,6 +52,7 @@ const deps = (releaseMode: ReleaseMode = 'manual'): CoordinatorDeps => ({
   api,
   issues: api,
   readIssue: (r, number) => api.readIssue(r, number),
+  listOpenIssues: (r, label) => api.listOpenIssues(r, label),
   drafter: async () => ({ response: '', cost: 0 }),
   releaseMode,
   enqueueResume: async () => undefined,
