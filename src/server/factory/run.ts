@@ -208,6 +208,8 @@ const refreshers = new WeakMap<EgressRule[], (rule: EgressRule) => Promise<void>
 export class Run {
   cost: number
   summary = ''
+  /** What the builder said to the findings of the last review, kept while checks rework the same commit. */
+  reviewAnswer: string | undefined
   sessionId: string | undefined
   /** The knowledge base in the sandbox, kept current while the run goes; the same for every agent. */
   feed?: KnowledgeFeed
@@ -1489,6 +1491,7 @@ export class Run {
     const asked = parseQuestion(result.summary)
     if (asked) await this.ask(asked, attempt)
     this.summary = result.summary
+    if (findings.length > 0) this.reviewAnswer = result.summary
     if (await this.hasNothingToCommit()) return undefined
     return this.commitAndPush(`${this.title}: address feedback (attempt ${attempt})`, {
       attempt,
@@ -1624,9 +1627,8 @@ export class Run {
           knowledgeDir: this.feed?.dir,
           required,
           ...(this.earlier ? { earlier: this.earlier } : {}),
-          ...(this.plan
-            ? { plan: this.renderedPlan, unplanned, builderSummary: this.summary }
-            : {}),
+          builderSummary: this.reviewAnswer ?? this.summary,
+          ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
         }),
       }),
     )
