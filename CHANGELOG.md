@@ -46,6 +46,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The builder starts with the project installed: the factory runs the repository's `install` check in the checkout before the builder's first pass in a sandbox, so it can run the tests it is told to run. An install that fails does not fail the run, and the builder is told, with the install's last lines (#240)
 - Checks that fail for the first time on the same promotion head become one issue that names them all, so one task fixes them together instead of one task per check waiting on the others forever (#306)
 - A red integration branch starts its fix after 30 minutes instead of 2 hours, and its clock no longer restarts when another of its checks goes red or its checks run again (#282)
 - The issue the factory files for a check that fails on a promotion is labelled `priority:1`, so its fix runs ahead of the queue instead of after every other task while the red base holds the repository's deliveries (#300)
