@@ -247,19 +247,27 @@ describe('the install before the builder', () => {
   function starting(
     checks: { name: string; command: string }[],
     install: { exitCode?: number },
-    opts: { planFirst?: boolean; resuming?: object } = {},
+    opts: { planFirst?: boolean; resuming?: object; dirtyAfterInstall?: boolean } = {},
   ) {
     const head = { sha: '' }
-    const backend = new FakeBackend((command) => {
+    const backend: FakeBackend = new FakeBackend((command) => {
       if (command.endsWith('rev-parse HEAD')) return { stdout: head.sha }
+      if (command.endsWith('status --porcelain')) {
+        const installed = backend.commands.some((c) => c.endsWith('&& pnpm install'))
+        const restored = backend.commands.some((c) => c.includes('restore --staged'))
+        return {
+          stdout: opts.dirtyAfterInstall && installed && !restored ? ' M pnpm-lock.yaml\n' : '',
+        }
+      }
       return command.endsWith('&& pnpm install')
         ? { ...install, stderr: 'tarball missing' }
         : undefined
     })
-    const calls: { how: string; installs: number; prompt: string }[] = []
+    const calls: { how: string; installs: number; restoresBefore: number; prompt: string }[] = []
     const installs = () => backend.commands.filter((c) => c.endsWith('&& pnpm install')).length
+    const restores = () => backend.commands.filter((c) => c.includes('restore --staged')).length
     const answer = (how: string, prompt: string) => {
-      calls.push({ how, installs: installs(), prompt })
+      calls.push({ how, installs: installs(), restoresBefore: restores(), prompt })
       return Promise.resolve({ ok: true, summary: `${PLAN}`, sessionId: 's1' })
     }
     const builder = {
@@ -338,12 +346,26 @@ describe('the install before the builder', () => {
     expect(calls[0]!.prompt).toContain('tarball missing')
   })
 
-  it('gives the failure to a session resumed with an answer', async () => {
+  it('does not install again a session resumed from a snapshot, whose checkout may hold uncommitted work', async () => {
     const resuming = { sessionId: 's0', attempt: 2, body: 'q', answer: 'a', answeredBy: 'x' }
-    const { start, calls } = starting(checks, { exitCode: 1 }, { resuming })
+    const { start, backend, calls } = starting(checks, { exitCode: 1 }, { resuming })
     await expect(start()).rejects.toBeInstanceOf(Stop)
-    expect(calls.map((c) => c.how)).toEqual(['resume'])
-    expect(calls[0]!.prompt).toContain('tarball missing')
+    expect(calls.map((c) => [c.how, c.installs])).toEqual([['resume', 0]])
+    expect(calls[0]!.prompt).not.toContain('before your pass to install')
+    expect(backend.commands.some((c) => c.includes('restore') || c.includes('clean'))).toBe(false)
+  })
+
+  it('puts back what the install changed in the checkout before the builder is called', async () => {
+    const { start, backend, calls } = starting(checks, {}, { dirtyAfterInstall: true })
+    await expect(start()).rejects.toBeInstanceOf(Stop)
+    const at = (needle: string) => backend.commands.findIndex((c) => c.includes(needle))
+    expect(at('git -C /work/repo restore --staged --worktree :/')).toBeGreaterThan(
+      at('pnpm install'),
+    )
+    expect(backend.commands).toContain('git -C /work/repo clean -fdq')
+    // What git ignores, the dependencies, stays: never `clean -x` here.
+    expect(backend.commands.some((c) => c.includes('clean -fdxq'))).toBe(false)
+    expect(calls[0]!.restoresBefore).toBe(1)
   })
 
   it('lets the checks clean and install on their own after the preparatory install', async () => {

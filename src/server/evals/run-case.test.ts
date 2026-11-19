@@ -93,6 +93,8 @@ type World = {
   fixChanges?: boolean
   /** What the install check answers (the command ends with `&& pnpm install`). */
   install?: Reply[]
+  /** What `git status --porcelain` says right after an install: what it changed in the checkout. */
+  installChanges?: string
 }
 
 function sandbox(world: World = {}) {
@@ -101,10 +103,15 @@ function sandbox(world: World = {}) {
   let statuses = 0
   let commits = 0
   let fixed = false
+  let installedLast = false
   return new FakeSandbox((command): Reply | undefined => {
+    const afterInstall = installedLast
+    installedLast = command.endsWith('&& pnpm install')
     if (command.includes('commit -F')) commits += 1
     if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
     if (command.endsWith('&& pnpm install') && world.install?.length) return world.install.shift()
+    if (afterInstall && command.includes('status --porcelain'))
+      return { stdout: world.installChanges ?? '' }
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
@@ -1068,6 +1075,29 @@ describe('runCase install', () => {
     expect(builder.prompts).toHaveLength(1)
     expect(builder.prompts[0]).toContain('tarball missing')
     expect(installs(provider)).toHaveLength(2)
+  })
+
+  it('puts back what the install changed in the checkout before the builder runs', async () => {
+    const provider = sandbox({ installChanges: ' M pnpm-lock.yaml\n' })
+    const inner = agent('builder', planned(built()))
+    const restoredBefore: boolean[] = []
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        restoredBefore.push(
+          provider.backend.commands.some((c) => c.endsWith(' clean -fdq')) &&
+            provider.backend.commands.some((c) => c.includes('restore --staged --worktree :/')),
+        )
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      withInstall,
+    )
+
+    expect(restoredBefore[0]).toBe(true)
   })
 
   it('runs no install for a case with no install check', async () => {

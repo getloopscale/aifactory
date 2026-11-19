@@ -21,7 +21,14 @@ import {
 import { BaseProbe, sameChecks } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
-import { failingChecks, prepareInstall, runChecks, type CheckResult } from '../factory/evidence'
+import {
+  failedInstall,
+  failingChecks,
+  prepareInstall,
+  runChecks,
+  type CheckResult,
+  type PreparedInstall,
+} from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
 import { diffFacts } from '../factory/diff-facts'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
@@ -182,12 +189,12 @@ class CaseRun {
       askQuestions: false,
       knowledgeDir: this.knowledgeDir,
       checks: c.checks,
-      ...(this.installFailed ? { installFailed: this.installFailed } : {}),
+      installFailed: failedInstall(this.installed),
     }
   }
 
-  /** The install that failed before the builder's first pass, as `Run.installProject` keeps it. */
-  private installFailed: CheckResult | undefined
+  /** The install before the builder's first pass, as `Run.installProject` keeps it. */
+  private installed: PreparedInstall | undefined
 
   /**
    * The builder's work, as `Run.build` does it: a builder that can continue a session first writes a plan
@@ -195,7 +202,7 @@ class CaseRun {
    */
   async build(): Promise<void> {
     const { builder, planner } = this.deps
-    this.installFailed = await prepareInstall(
+    this.installed = await prepareInstall(
       this.backend,
       this.repoDir,
       this.c.checks,

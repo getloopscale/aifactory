@@ -38,8 +38,11 @@ import {
   failingChecks,
   gate,
   runChecks,
+  failedInstall,
+  installDetail,
   prepareInstall,
   type CheckResult,
+  type PreparedInstall,
   type Verdict,
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
@@ -54,13 +57,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from './change-plan'
-import {
-  buildPrompt,
-  installFailureRule,
-  type Clarification,
-  type CodingHarness,
-  type HarnessResult,
-} from './harness'
+import { buildPrompt, type Clarification, type CodingHarness, type HarnessResult } from './harness'
 import {
   blockingCount,
   notResolvedPrompt,
@@ -901,11 +898,11 @@ export class Run {
         attempt: resuming.attempt,
         resumed: true,
       })
-      const prompt = `${installFailureRule(this.installFailed)}${answerPrompt(
+      const prompt = answerPrompt(
         resuming.body,
         resuming.answer ?? '',
         resuming.answeredBy ?? 'a person',
-      )}`
+      )
       return this.settle(builder, 'builder', resuming.attempt, (onEvent) =>
         builder.resume!(backend, resuming.sessionId, {
           onEvent,
@@ -920,6 +917,7 @@ export class Run {
       attempt: 1,
       ...(this.feed?.delivered ? { knowledge: this.feed.delivered } : {}),
       ...(this.planned ? { planned: true } : {}),
+      ...(this.installed ? { install: installDetail(this.installed) } : {}),
     })
     if (this.plan && this.plannedBy) {
       const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
@@ -944,18 +942,21 @@ export class Run {
     )
   }
 
-  /** The install the factory ran before the builder's first pass, when it failed. */
-  private installFailed: CheckResult | undefined
+  /** The install the factory ran before the builder's first pass, when the repository has one. */
+  private installed: PreparedInstall | undefined
 
   /** The preparation `open` timed; `start` adds the install to it and logs it. */
   private preparation: Preparation | undefined
 
   /**
-   * Installs the project before the builder's first pass, once per sandbox, so it can run the tests it is told
-   * to run. A failure does not fail the run: the builder is told, and `verify` cleans and installs on its own.
+   * Installs the project before the builder's first pass, so it can run the tests it is told to run. A failure
+   * does not fail the run: the builder is told, and `verify` cleans and installs on its own. A run resumed from
+   * a snapshot is not installed again: its disk was installed before it parked, and its checkout may hold the
+   * builder's uncommitted work, which putting the checkout back after the install would throw away.
    */
   private async installProject(): Promise<void> {
-    this.installFailed = await prepareInstall(
+    if (this.c.resuming) return
+    this.installed = await prepareInstall(
       this.backend,
       this.repoDir,
       this.checks,
@@ -980,7 +981,7 @@ export class Run {
       knowledgeDir: this.feed?.dir,
       checks: this.checks,
       clarifications: this.c.clarifications,
-      ...(this.installFailed ? { installFailed: this.installFailed } : {}),
+      installFailed: failedInstall(this.installed),
     }
   }
 

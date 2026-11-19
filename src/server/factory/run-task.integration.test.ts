@@ -6566,6 +6566,29 @@ describe("a project's recipe", () => {
     expect(domainsOf(after)).toContain('files.example.org')
   })
 
+  it('records the install before the builder on the build stage, with its last lines', async () => {
+    let installs = 0
+    // Only the install before the builder fails; the one the checks run passes.
+    const sandbox = new FakeSandbox(
+      changed((command) =>
+        command.endsWith('&& pnpm install') && installs++ === 0
+          ? { exitCode: 1, stderr: 'tarball missing\n' }
+          : undefined,
+      ),
+    )
+    const id = await seedTask()
+    await runTask(deps(sandbox, { fetchRecipe: async () => recipe }), id)
+    const [build] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'build')))
+      .orderBy(stageEvent.id)
+      .limit(1)
+    expect(build.detail).toMatchObject({
+      install: { ok: false, seconds: expect.any(Number), tail: 'tarball missing' },
+    })
+  })
+
   it("runs the recipe's install and checks when the panel sets none", async () => {
     const sandbox = new FakeSandbox(changed())
     const id = await seedTask()
