@@ -191,6 +191,7 @@ export async function release(
   if (checks.length === 0 || checks.some((c) => !c.passed)) {
     throw new ReleaseRefused('the checks are not green on this commit')
   }
+  await refuseWhilePublishing(deps, row.repository)
 
   const { token } = await deps.github.installationToken(row.repository)
   const [saved] = await deps.db
@@ -451,6 +452,24 @@ async function changesetsToShip(
     )
   }
   return false
+}
+
+/**
+ * Refuses a release while a changesets publication of the repository waits. Changesets publishes only from a
+ * release branch with no changeset left on it, so a promotion that lands before the Version Packages merge brings
+ * new changesets and the workflow versions again instead of publishing: theokit-sdk went from 5.23.0 to 5.25.0
+ * on `main` on 2026-11-18 with neither version published (#319).
+ */
+async function refuseWhilePublishing(deps: Pick<DeliverDeps, 'db'>, repo: string) {
+  const [waiting] = await deps.db
+    .select({ versionPullRequest: publication.versionPullRequest })
+    .from(publication)
+    .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
+  if (!waiting) return
+  const what = waiting.versionPullRequest
+    ? `Version Packages #${waiting.versionPullRequest}`
+    : 'its Version Packages pull request'
+  throw new ReleaseRefused(`a publication of ${repo} still waits for ${what} to publish`)
 }
 
 /**

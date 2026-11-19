@@ -46,6 +46,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A release is refused while a changesets publication of the repository still waits for its Version Packages to publish, so a promotion no longer lands changesets on the release branch that keep the workflow versioning instead of publishing (#319).
 - A run refused for the sandbox provider's concurrent limit waits for a free slot, as an evaluation case does, instead of failing and waiting about 20 minutes for its retry (#314).
 - The release train releases a repository that keeps working: a queued task no longer holds it, and a running one holds it only until the oldest integrated work has waited an hour (#303)
 - Checks that fail for the first time on the same promotion head become one issue that names them all, so one task fixes them together instead of one task per check waiting on the others forever (#306)
