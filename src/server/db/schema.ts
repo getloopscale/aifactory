@@ -815,7 +815,9 @@ export const metricSignal = pgTable(
  * red for too long while it holds tasks (`base_red`). A failure whose reason the coordinator acts on is its own
  * kind: checks still red after the attempts (`checks_red`), a run out of time (`out_of_time`) and an agent that
  * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
- * (`base_conflict`); any other is a `failure`.
+ * (`base_conflict`); any other is a `failure`. A handoff of integrated work after its automatic runs is its own kind
+ * too: a pull request that still conflicts with its base (`pull_conflict`), a base that passes the checks blamed on
+ * it again (`base_fixed`) and required checks that still fail (`ci_red`).
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -836,6 +838,9 @@ export const EXCEPTION_KINDS = [
   'queue_blocked',
   'base_red',
   'base_conflict',
+  'pull_conflict',
+  'base_fixed',
+  'ci_red',
 ] as const
 
 /**

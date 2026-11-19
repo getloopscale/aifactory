@@ -782,8 +782,12 @@ describe('runCase', () => {
   })
 
   it('ends as the factory hands it over when the last rework breaks the checks of a reviewed commit, restored', async () => {
-    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 0] })
-    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    // The review's rework breaks the checks, and so do both reworks the checks get after it.
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('third rework')),
+    )
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
     const result = await runCase(deps(provider, builder, reviewer), evalCase)
@@ -795,9 +799,29 @@ describe('runCase', () => {
     )
   })
 
+  it('still gives the review its own rounds after two reworks for failing checks', async () => {
+    const provider = sandbox({ checkExits: [1, 1, 1, 1, 0, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('review rework')),
+    )
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: true })
+    expect(reviewer.prompts).toHaveLength(2)
+  })
+
   it('fails on the checks when they fail on the restored commit too', async () => {
-    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1] })
-    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1, 1, 1] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('third rework')),
+    )
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
     const result = await runCase(deps(provider, builder, reviewer), evalCase)
