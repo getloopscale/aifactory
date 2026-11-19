@@ -3,7 +3,9 @@ import { eq } from 'drizzle-orm'
 import type { Database } from '../db'
 import { task } from '../db/schema'
 
-import { HOLD_LOCK, holdOthers, releaseHolds } from './queue-apply'
+import { stoppedLines } from '../line/incident'
+
+import { HOLD_LOCK, holdOthers, holdRepository, releaseHolds } from './queue-apply'
 import { readHeldTests } from './queue-facts'
 import type { HeldTest } from './queue-order'
 
@@ -28,8 +30,12 @@ export async function maintainHolds(db: Database): Promise<HeldTest[]> {
   return db.transaction(async (tx) => {
     await tx.execute(HOLD_LOCK)
     const held = await readHeldTests(tx)
-    for (const h of firstPerRepository(held)) await holdOthers(tx, h.taskId!)
-    await releaseHolds(tx, [...new Set(held.map((h) => h.repository))])
+    const lines = await stoppedLines(tx)
+    for (const h of firstPerRepository(held)) {
+      if (!lines.has(h.repository)) await holdOthers(tx, h.taskId!)
+    }
+    await holdLines(tx, lines)
+    await releaseHolds(tx, [...new Set([...held.map((h) => h.repository), ...lines.keys()])])
     return held
   })
 }
@@ -51,5 +57,25 @@ export async function holdNewJob(
   const active = firstPerRepository(
     (await readHeldTests(db)).filter((h) => h.repository === row.repository),
   )[0]
+  const lines = await stoppedLines(db)
+  if (lines.has(row.repository)) {
+    const fix = lines.get(row.repository)
+    if (fix !== taskId) await holdLines(db, new Map([[row.repository, fix]]))
+    return
+  }
   if (active && active.taskId !== taskId) await holdOthers(db, active.taskId!)
+}
+
+/**
+ * A stopped line (`line/`) holds every other run of its repository, ahead of any `prioritise` hold: only its
+ * fix runs. Before the fix has a task, every run waits.
+ */
+async function holdLines(
+  db: Parameters<typeof holdOthers>[0],
+  lines: Map<string, number | undefined>,
+) {
+  for (const [repository, fixTaskId] of lines) {
+    if (fixTaskId === undefined) await holdRepository(db, repository)
+    else await holdOthers(db, fixTaskId)
+  }
 }

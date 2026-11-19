@@ -881,3 +881,21 @@ export type CodexConnection = {
  */
 export const MIN_RUN_MINUTES = 50
 export const MAX_RUN_MINUTES = 240
+
+/**
+ * A repository whose line is stopped (`server/line/`): nothing of it runs or integrates but one fix, shown at
+ * the top of the board.
+ */
+export type StoppedLine = {
+  repository: string
+  cause: 'promotion_red' | 'mass_failure'
+  /** What is blocked: `workspace -> develop`, or the failure signature. */
+  surface: string
+  issueNumber: number
+  issueUrl: string
+  /** `escalated` once the fixes ran out and a person has it. */
+  status: 'open' | 'escalated'
+  attempts: number
+  /** ISO time the line stopped. */
+  since: string
+}
