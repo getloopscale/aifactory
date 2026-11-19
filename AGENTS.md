@@ -77,6 +77,12 @@ reads that file, not a convention.
   explicit domain allowlist (`createIsolatedSandbox`). Credentials are attached by the firewall and
   never written to a command, a file or an env var inside the sandbox. Text that came from an issue
   reaches git by file, never through a shell.
+- **A run waits in the queue for the sandbox provider, never fails for it.** Before its first stage a run waits
+  while the account has `maxSandboxes` up (`untilSlotFree` in `factory/sandbox-slot.ts`). A refusal for credit or
+  spending (`SANDBOX_PROVIDER_BLOCKED` in `shared/panel.ts`) pauses every run's sandbox for `PROVIDER_PAUSE_MS`
+  (`factory/provider-pause.ts` decides, `provider-pause-store.ts` keeps it in `setting`): `run-task` and
+  `resume-task` queue their job again for after it, one run probes the provider once it ends, and a sandbox that
+  starts ends it. The supervisor reports a repository whose queued runs nobody starts (`factory/queue-stall.ts`).
 - **GitHub tokens are repository-scoped.** The App is installed on every repository of the account,
   so `installationToken(repo)` is the only way to get one, and it always names the repository.
 - **Every call to the GitHub API goes through `gated` (`github/rate-limit.ts`).** It counts the call for the
@@ -272,7 +278,7 @@ reads that file, not a convention.
   repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
   `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
   `run-task` job ahead of the repository's other pending jobs, by `available_at` in `theokit_jobs` (TheoKit has no
-  call for it, usetheokit/theokit#2117), and holds that repository's other pending jobs back until the fix integrates, fails, waits for an answer or is handed
+  call for it, usetheokit/theokit#2117), and holds that repository's other pending jobs back until the fix is done (verified and reviewed, without waiting for its CI), fails, waits for an answer or is handed
   to a person (only a person moves it on from there, so the others do not wait on one). The failures of the same test on
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
   however old) while it is on its way. The decision's head is the test and the fix's job (`headOf`), so a retried

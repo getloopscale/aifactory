@@ -7,6 +7,7 @@ import { getDb } from '../db'
 import { decision } from '../db/schema'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
+import { deferJobWhilePaused } from '../factory/provider-pause-store'
 import { sendBackWithdrawn } from '../factory/send-back'
 import { runTask } from '../factory/run-task'
 import { runContinuation } from '../factory/run-support'
@@ -34,6 +35,8 @@ export default defineJob('run-task', {
       console.log(JSON.stringify({ event: 'task_skipped', taskId: input.taskId, why: 'withdrawn' }))
       return
     }
+    // While the sandbox provider refuses for credit, the run waits in the queue instead of failing.
+    if (await deferJobWhilePaused({ name: 'run-task', input, taskId: input.taskId })) return
     const deps = await jobDeps(input.taskId)
 
     // The lease is two minutes and a run up to half an hour: renew it while the run is alive.

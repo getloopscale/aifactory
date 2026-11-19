@@ -61,8 +61,17 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
  */
 export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
 
+/**
+ * The sandbox provider refusing every new sandbox until someone pays: E2B answers `403: team is blocked:
+ * credit_exhausted` once the team's credit is gone and `403: team is blocked: spend_limit` past its spending
+ * limit, and Vercel `Status code 402` past its plan. Nothing in the work caused it, and no run starts until it
+ * ends, so the factory pauses its sandboxes while it lasts (`factory/provider-pause.ts`).
+ */
+export const SANDBOX_PROVIDER_BLOCKED =
+  /\bteam is blocked: (?:credit_exhausted|spend_limit)\b|Status code 402/i
+
 const ENVIRONMENT_PATTERN =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|API rate limit exceeded|Codex login[^:]*(was refused|could not be renewed)/i
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|API rate limit exceeded|Codex login[^:]*(was refused|could not be renewed)/i
 
 /**
  * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer
@@ -92,6 +101,7 @@ const HARNESS_INSTALL = /\b(claude|codex) did not install\b/i
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
+    SANDBOX_PROVIDER_BLOCKED.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
     SANDBOX_UNREACHABLE.test(error) ||
     SANDBOX_ENDED.test(error) ||
@@ -208,7 +218,7 @@ export type RunView = {
 export type FindingView = {
   id: number
   kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'answer_resume' | 'snapshot' | 'revert'
+  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert'
   taskId: number | null
   taskTitle: string | null
   ref: string | null
