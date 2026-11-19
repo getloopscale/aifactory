@@ -5435,6 +5435,24 @@ describe('release', () => {
       expect(await waits()).toHaveLength(1)
     })
 
+    it('refuses a release while a changesets publication of the repository is still waiting', async () => {
+      const id = await delivered()
+      await getDb().insert(publication).values({
+        taskId: id,
+        repository: 'paulo/app',
+        releaseBranch: 'main',
+        promotedSha: 'main0000001',
+        actor: 'agent:codex',
+        versionPullRequest: 21,
+      })
+
+      await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+        /a publication of paulo\/app still waits for Version Packages #21 to publish/,
+      )
+      // Nothing is promoted while the publication waits: the task is not released.
+      expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+    })
+
     it('refuses, and records why, when GitHub will not turn auto-merge on', async () => {
       const id = await delivered()
       repo().required.set('main', ['CI'])
