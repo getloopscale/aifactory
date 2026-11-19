@@ -103,6 +103,8 @@ async function requeue(
             automatic: true,
             ...(rework?.preAgent ? { kept: true } : {}),
             ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
+            // A run that only merges the base is left out of the allowance of automatic runs (`panel/queries.ts`).
+            ...(rework?.mergeBase ? { mergeBase: true } : {}),
           },
         })
         .returning({ id: stageEvent.id })

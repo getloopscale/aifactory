@@ -44,6 +44,16 @@ describe('the cause of a handoff', () => {
     expect(causeOf({ cause: 'review_plateau', reason: '' })).toBe('review_plateau')
   })
 
+  it('is not a review plateau when the last rework broke the checks of a reviewed commit', () => {
+    const detail = {
+      cause: 'checks_broke_after_review',
+      reason:
+        'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d',
+    }
+
+    expect(causeOf(detail)).toBe('handoff')
+  })
+
   it('is read from the reason of a handoff recorded before causes were', () => {
     expect(causeOf({ reason: CHECKS_REASON })).toBe('checks_unchanged')
     expect(causeOf({ reason: 'the review gave no usable verdict: it said nothing' })).toBe(
