@@ -43,7 +43,7 @@ import {
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
 import { NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
-import { diffFacts } from './diff-facts'
+import { diffFacts, reviewBase, samePatch } from './diff-facts'
 import {
   changePlanPrompt,
   givenPlanPrompt,
@@ -56,7 +56,6 @@ import {
 import { buildPrompt, type Clarification, type CodingHarness, type HarnessResult } from './harness'
 import {
   blockingCount,
-  MAX_ATTEMPTS,
   notResolvedPrompt,
   OUTSIDE_THE_PLAN,
   parseVerdict,
@@ -79,6 +78,7 @@ import {
   gitConfig,
   mergeEgress,
   must,
+  MAX_CHECK_REWORKS,
   oneLine,
   squashTitle,
   pullRequestBody,
@@ -1582,8 +1582,13 @@ export class Run {
       attempt,
       ...reviewerFacts(this.reviewer),
     })
-    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
+    // The integration branch as it is now: a merge of it into the work is not the work's change (#348).
+    const base = await reviewBase(this.backend, this.repoDir, {
       baseSha: this.baseSha,
+      integration: integrationBranch(this.c.repo),
+    })
+    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
+      baseSha: base,
       plan: this.plan,
       issue,
       checkRuns: await this.checkRuns(),
@@ -1599,7 +1604,7 @@ export class Run {
           title: issue.title,
           body: issue.body,
           branch,
-          baseSha: this.baseSha,
+          baseSha: base,
           knowledgeDir: this.feed?.dir,
           required,
           ...(this.earlier ? { earlier: this.earlier } : {}),
@@ -1641,6 +1646,69 @@ export class Run {
     })
     this.earlier = merged.verdict === 'changes' ? { sha, findings: merged.findings } : undefined
     return merged
+  }
+
+  /** Whether this run only merges the integration branch into the work: no agent was asked to change it. */
+  private mergesOnly(): boolean {
+    const continuation = this.c.continuation
+    return (
+      continuation?.mergeBase === true ||
+      continuation?.feedback?.startsWith(CONFLICT_NOTE_OPENING) === true
+    )
+  }
+
+  /**
+   * The approval a merge of the integration branch keeps (#349). When this run only merged that branch into
+   * work a review approved, and the task's patch on `sha` is the patch the review approved, that review still
+   * reads what `sha` changes: it is recorded again for `sha` and no reviewer is asked. A blocking fact about the
+   * diff, a later review that asked for changes, or a patch the merge changed, and the merge is reviewed as any
+   * work.
+   */
+  private async approvalKept(sha: string, attempt: number): Promise<ReviewVerdict | undefined> {
+    if (!this.mergesOnly()) return undefined
+    const { deps, taskId } = this.c
+    const [last] = await deps.db
+      .select()
+      .from(reviewTable)
+      .where(eq(reviewTable.taskId, taskId))
+      .orderBy(desc(reviewTable.id))
+      .limit(1)
+    if (last?.verdict !== 'approve' || last.sha === sha) return undefined
+    const integration = integrationBranch(this.c.repo)
+    const same = await samePatch(this.backend, this.repoDir, {
+      integration,
+      approved: last.sha,
+      head: sha,
+    })
+    if (!same) return undefined
+    const base = await reviewBase(this.backend, this.repoDir, {
+      baseSha: this.baseSha,
+      integration,
+    })
+    const { guards, touched } = await diffFacts(this.backend, this.repoDir, {
+      baseSha: base,
+      plan: this.plan,
+      issue: this.c.issue,
+    })
+    if (guards.some((g) => g.severity !== 'minor')) return undefined
+    this.touched = touched
+    this.c.state.current = 'review'
+    await enterRunStage(deps.db, taskId, 'review', { sha, attempt, approvalOf: last.sha })
+    const kept: ReviewVerdict = {
+      verdict: 'approve',
+      summary: `The approval of ${last.sha.slice(0, 7)} holds: merging ${integration} left the task's patch as it was. ${last.summary}`,
+      findings: last.findings as Finding[],
+    }
+    await deps.db.insert(reviewTable).values({
+      taskId,
+      round: attempt,
+      sha,
+      reviewer: last.reviewer,
+      verdict: 'approve',
+      summary: kept.summary,
+      findings: kept.findings,
+    })
+    return kept
   }
 
   private deliver(sha: string, pullRequestUrl: string, attempts: number): Promise<Handed> {
@@ -1740,7 +1808,7 @@ export class Run {
     return this.handOver(sha, kept.attempt, checked.here, kept.outcome, kept.counts, {
       headline: 'The last rework broke the checks',
       reason: `the last rework broke the checks (${reasons.join('; ')}), so the branch is back at ${short}, which passed them and was reviewed`,
-      cause: 'review_plateau',
+      cause: 'checks_broke_after_review',
     })
   }
 
@@ -1773,7 +1841,7 @@ export class Run {
       held?.reason ??
       (outcome.verdict === 'invalid'
         ? `the review gave no usable verdict: ${outcome.summary}`
-        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(attempt, counts)}`)
+        : `the reviewer still asked for changes after ${attempt} attempt${attempt === 1 ? '' : 's'}${roundsNote(counts.length, counts)}`)
     const empty = await this.reopenedOrEmpty(sha)
     if (empty) return empty
     state.current = 'pr'
@@ -1888,9 +1956,11 @@ export class Run {
     let reviewed: Reviewed | undefined
     // The checks that failed on the commit before, while they keep failing.
     let failedBefore: CheckResult[] | undefined
+    // Reworks for failing checks have their own budget: they never use up the review's rounds (#347).
+    let checkReworks = 0
     for (let attempt = this.c.resuming?.attempt ?? 1; ; attempt++) {
       const canRework =
-        attempt < MAX_ATTEMPTS && this.builder.resume !== undefined && !!this.sessionId
+        checkReworks < MAX_CHECK_REWORKS && this.builder.resume !== undefined && !!this.sessionId
       const fixed = await this.applyFixes(sha, { attempt })
       sha = fixed.sha
       const checked = await this.verify(sha, attempt, { publish: true, fixed })
@@ -1908,6 +1978,7 @@ export class Run {
         // A builder that changed nothing said the failure is not its change's: a timeout, often, and then the
         // checks run again on the same commit, within the same attempts. When the failing checks fail on the
         // integration branch too, the failure is the base's, and no rework fixes it (#219).
+        checkReworks += 1
         const reworked = await this.rework(attempt + 1, [], failed)
         if (reworked === undefined) await this.refuseRedBase(failed)
         sha = reworked ?? sha
@@ -1915,12 +1986,16 @@ export class Run {
       }
 
       failedBefore = undefined
+      const kept = counts.length === 0 ? await this.approvalKept(sha, attempt) : undefined
+      if (kept) return this.approved(sha, attempt, checked.here, kept)
       const outcome = await this.review(sha, attempt)
       if (outcome.verdict === 'approve') return this.approved(sha, attempt, checked.here, outcome)
       counts.push(blockingCount(outcome.findings))
       reviewed = { sha, attempt, here: checked.here, outcome, counts: [...counts] }
       const mayRework =
-        this.builder.resume !== undefined && !!this.sessionId && reviewAllowsRework(attempt, counts)
+        this.builder.resume !== undefined &&
+        !!this.sessionId &&
+        reviewAllowsRework(counts.length, counts)
       if (outcome.verdict === 'changes' && mayRework) {
         const reworked = await this.rework(attempt + 1, outcome.findings, [], sha)
         // Reviewing the same commit again would get the same verdict: the disagreement goes to a person.

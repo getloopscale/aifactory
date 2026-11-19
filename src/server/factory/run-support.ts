@@ -2,13 +2,19 @@ import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import type { EgressRule } from './sandbox'
 import type { CheckResult } from './evidence'
-import { renderFindings, type ReviewVerdict } from './review'
+import { MAX_ATTEMPTS, renderFindings, type ReviewVerdict } from './review'
 import type { RunResult } from './run-types'
 import { quotaResumesAt } from './quota-reset'
 
 export const INSTANCE = 'work'
 export const GITCONFIG = '/tmp/factory.gitconfig'
 export const COMMIT_MESSAGE = '/tmp/factory-commit-message.txt'
+
+/**
+ * The reworks a run gives failing checks, counted apart from the review's rounds: a run whose first commits
+ * failed the checks still gets every review round `reviewAllowsRework` grants (#347).
+ */
+export const MAX_CHECK_REWORKS = MAX_ATTEMPTS - 1
 
 /** Thrown inside a stage so the run can report which stage failed. */
 export class StageFailure extends Error {}

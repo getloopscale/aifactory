@@ -333,6 +333,13 @@ reads that file, not a convention.
   failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
   environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
+- **A merge of the base is not the task's change.** The review and `diffFacts` measure the change from
+  `reviewBase` (`factory/diff-facts.ts`): the merge base of HEAD and the integration branch fetched before each
+  review. A run that only merges the base (`mergeBase`, or a conflict send-back) keeps the last approval when
+  `samePatch` finds the task's patch unchanged, and records it for the merge without asking the reviewer
+  (`Run.approvalKept`). Reworks for failing checks (`MAX_CHECK_REWORKS`) and review rounds (`reviewAllowsRework`
+  over the rounds) are separate budgets, and `automaticRunsSincePerson` leaves out `Blocked by` checks and, up to
+  `FREE_BASE_RUNS`, the runs that only bring the base in.
 - **Whether a stage allows an event is asked of `factory/transitions.ts`.** The table there declares the
   outcome of every pair of stage and event: the action, `ignored` or `refused`, with the reason a person
   reads. A panel action or a cron that checks a stage calls `outcome()` instead of comparing stages itself,
