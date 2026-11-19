@@ -3,7 +3,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { stageEvent, task } from '../db/schema'
 import { rerunsAfterConflict } from '../factory/auto-retry'
 import { openBlockersOf, type BlockerReads } from '../factory/blocker-check'
-import { nameOf, type IssueRef } from '../factory/blockers'
+import { BlockedByOpenIssues, nameOf, type IssueRef } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
 import { fetchIssue } from '../github/issues'
 import { ActionRefused, retry, retryAutomatically, type ActionDeps } from './actions'
@@ -39,8 +39,8 @@ export async function retryWaiting(
  * sandboxes in the same minute. A task that moved on since the board was read is counted and left.
  *
  * A task blocked by an open issue has its blockers read here first, and runs again only once none is open:
- * while one is, the check is recorded on its failure (`blockedCheckedAt`), which sets its next one half an
- * hour later, and the task stays failed. So a blocked task neither joins the queue nor takes a start of the
+ * while one is, the check is recorded on its failure (`blockedCheckedAt`), with the reason rewritten to name
+ * the blockers still open, which sets its next one half an hour later, and the task stays failed. So a blocked task neither joins the queue nor takes a start of the
  * pass from a task that can run. A blocker that cannot be read is logged and checked on the next pass.
  */
 export async function runDueRetries(
@@ -109,6 +109,8 @@ async function stillBlocked(
       .set({
         detail: {
           ...((failure.detail ?? {}) as object),
+          // The reason a person reads names the blockers open now, not the ones open when it first failed.
+          error: new BlockedByOpenIssues(open).message,
           blockedBy: open.map(nameOf),
           blockedCheckedAt: now.toISOString(),
         },

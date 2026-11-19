@@ -30,6 +30,9 @@ export type WaitingRelease = {
 
 const short = (sha: string) => sha.slice(0, 7)
 
+/** How a refusal for a release pull request that conflicts with the release branch starts. */
+export const CONFLICT_REFUSAL = 'the release pull request conflicts with'
+
 const refuse = (reason: string, stopAutoMerge: boolean): ReleaseStep => ({
   kind: 'refuse',
   reason,
@@ -74,7 +77,7 @@ export function decideWaitingRelease(input: WaitingRelease): ReleaseStep {
   if (done) return done
   const branch = input.releaseBranch
   if (input.pull.mergeableState === 'dirty') {
-    return refuse(`the release pull request conflicts with ${branch}`, true)
+    return refuse(`${CONFLICT_REFUSAL} ${branch}`, true)
   }
   if (!input.pull.autoMerge) {
     return refuse(

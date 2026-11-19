@@ -3,21 +3,14 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { finding, lineIncident, question, stageEvent, task, watch } from '../db/schema'
 
+import { raiseFinding, type Found } from './findings'
 import { readPause } from './provider-pause-store'
 import { stalledQueues, type QueueFacts } from './queue-stall'
 import { reapSandboxes } from './reap-sandboxes'
 import type { ListedSandbox } from './sandbox'
 import { WATCH_WINDOW_MS } from './watch'
 
-/** What the supervisor reports. `key` is what makes the same problem one finding, not many. */
-export type Found = {
-  key: string
-  kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert'
-  taskId: number | null
-  ref: string | null
-  detail: string
-}
+export type { Found }
 
 /** The stages in which a run is alive and should be producing events. */
 const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
@@ -354,26 +347,10 @@ export async function supervise(deps: SuperviseDeps): Promise<SuperviseResult> {
   const { found, checked } = await detect(deps)
   const keys = new Set(found.map((f) => f.key))
   const existing = await db.select().from(finding)
-  const byKey = new Map(existing.map((f) => [f.key, f]))
   const result: SuperviseResult = { opened: [], resolved: [], open: found.length }
 
   for (const f of found) {
-    const known = byKey.get(f.key)
-    if (!known) {
-      await db.insert(finding).values({ ...f, firstSeenAt: now, lastSeenAt: now })
-      result.opened.push(f.key)
-    } else if (known.resolvedAt) {
-      await db
-        .update(finding)
-        .set({ detail: f.detail, firstSeenAt: now, lastSeenAt: now, resolvedAt: null })
-        .where(eq(finding.id, known.id))
-      result.opened.push(f.key)
-    } else {
-      await db
-        .update(finding)
-        .set({ detail: f.detail, lastSeenAt: now })
-        .where(eq(finding.id, known.id))
-    }
+    if ((await raiseFinding(db, f, now)) === 'opened') result.opened.push(f.key)
   }
   const gone = existing.filter((f) => !f.resolvedAt && !keys.has(f.key) && checked.has(f.subject))
   if (gone.length > 0) {

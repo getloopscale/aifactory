@@ -54,6 +54,11 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - An evaluation case prepares and lets through a planner apart from the builder and the reviewer, as a task's run does, so a reviewer other than the planner can be evaluated (#358)
+- The Version Packages pull request and the back-merge wait only for the checks their target branch requires, so a red check that branch does not require (`Dependabot`, a matrix job) no longer holds a publication, and every release refused behind it, forever (#343).
+- A required check that fails on a pull request while the integration branch has no run of it yet keeps the task waiting, for up to six hours, instead of sending the work back for a failure the base may have; a repository whose CI runs only on pull requests has no run on its integration branch until a promotion opens (#344).
+- A blocker in the same repository whose task found the issue already resolved on the integration branch no longer blocks, and the reason of a blocked task names the blockers still open each time they are read again (#345).
+- A back-merge that conflicts with the integration branch shows on the health page, with its link, until the conflict is gone, and is logged once; before, it waited for checks GitHub never runs on a conflicting pull request (#307).
+- An agent no longer asks again for the release of a head whose release pull request already conflicted with the release branch, so the same refusal is not opened and recorded once per integration; a person may still ask (#346).
 - A task handed over a second time on the same head now gets a coordinator decision, or at least an escalation, instead of none: a handoff is identified by its head and its event, as a failure is. Decisions recorded before are moved to the handoff they were decided for (#335)
 - The builder is no longer told that the required checks failed when the coordinator sends it a scope decision about the review (#338)
 - Reworks for failing checks and review rounds have separate budgets, so a run whose first commits failed the checks still gets every review round instead of going to a person after its first review (#347).

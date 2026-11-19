@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { delivery, ingress, publication, repository, stageEvent, task } from '../db/schema'
+import { delivery, finding, ingress, publication, repository, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
 import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
@@ -82,7 +82,7 @@ const opened = () => api.callsTo('openPullRequest').map(([pull]) => pull)
 
 beforeEach(async () => {
   await getPool().query(
-    'truncate table repository, publication, watch, delivery, decision, question, review, evidence, stage_event, task, ingress restart identity cascade',
+    'truncate table finding, repository, publication, watch, delivery, decision, question, review, evidence, stage_event, task, ingress restart identity cascade',
   )
   api = new FakeGithub()
   // GitHub merges at the moment of the promotion, and the next pull request it opens is #1975.
@@ -215,6 +215,71 @@ describe('publishing a changesets release', () => {
       expect((await row()).detail).toMatch(why)
     }
     expect(merges()).toEqual([])
+  })
+
+  describe('when the release branch requires status checks', () => {
+    const optionalRed: CommitChecks = {
+      checkRuns: [
+        { name: 'CI', status: 'completed', conclusion: 'success' },
+        { name: 'dep-check / suite', status: 'completed', conclusion: 'failure' },
+      ],
+      statuses: 'none',
+    }
+
+    it('merges it when the required checks pass and only a check the branch does not require failed', async () => {
+      repo().required.set('main', ['CI'])
+      await waitingPublication()
+      versionPr()
+      checks(optionalRed)
+
+      expect((await pollPublications(deps())).merged).toHaveLength(1)
+      expect(merges()).toEqual([{ number: 180, sha: 'version-head', merge: { method: 'merge' } }])
+    })
+
+    it('waits while a required check failed, runs or has not reported, whatever the others say', async () => {
+      repo().required.set('main', ['CI', 'Lint'])
+      await waitingPublication()
+      versionPr()
+      const cases: [CommitChecks, RegExp][] = [
+        [
+          {
+            checkRuns: [
+              { name: 'CI', status: 'completed', conclusion: 'failure' },
+              { name: 'Lint', status: 'completed', conclusion: 'success' },
+            ],
+            statuses: 'none',
+          },
+          /checks failed on .*#180: CI/,
+        ],
+        [
+          {
+            checkRuns: [
+              { name: 'CI', status: 'in_progress', conclusion: null },
+              { name: 'Lint', status: 'completed', conclusion: 'success' },
+            ],
+            statuses: 'none',
+          },
+          /not green yet/,
+        ],
+        [optionalRed, /not green yet/],
+      ]
+      for (const [seen, why] of cases) {
+        checks(seen)
+        expect((await pollPublications(deps())).waiting).toBe(1)
+        expect((await row()).detail).toMatch(why)
+      }
+      expect(merges()).toEqual([])
+    })
+
+    it('waits, saying so, while the Version Packages pull request conflicts with the release branch', async () => {
+      repo().required.set('main', ['CI'])
+      await waitingPublication()
+      versionPr({ mergeableState: 'dirty' })
+
+      expect((await pollPublications(deps())).waiting).toBe(1)
+      expect((await row()).detail).toMatch(/Version Packages #180 conflicts with main/)
+      expect(merges()).toEqual([])
+    })
   })
 
   it('takes a Version Packages pull request a person merged after the promotion, and ignores an older one', async () => {
@@ -758,6 +823,75 @@ describe('merging the back-merge after a changesets release', () => {
 
     checks(green)
     expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
+  })
+
+  it('merges it when the required checks of the integration branch pass and a check it does not require failed', async () => {
+    await publishedRelease()
+    repo().required.set('workspace', ['CI'])
+    open(backMerge())
+    checks({
+      checkRuns: [
+        { name: 'CI', status: 'completed', conclusion: 'success' },
+        { name: 'Dependabot', status: 'completed', conclusion: 'failure' },
+      ],
+      statuses: 'none',
+    })
+
+    expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
+  })
+
+  it('leaves it open while a required check of the integration branch fails', async () => {
+    await publishedRelease()
+    repo().required.set('workspace', ['CI'])
+    open(backMerge())
+    checks({
+      checkRuns: [
+        { name: 'CI', status: 'completed', conclusion: 'failure' },
+        { name: 'Dependabot', status: 'completed', conclusion: 'success' },
+      ],
+      statuses: 'none',
+    })
+
+    expect((await pollPublications(deps())).backMerged).toEqual([])
+    expect(merges()).toEqual([])
+  })
+
+  describe('that conflicts with the integration branch', () => {
+    const findings = () =>
+      getDb().select().from(finding).where(eq(finding.key, 'stalled:back_merge:usetheokit/ui'))
+
+    it('records it as a finding the panel shows, once, and merges nothing', async () => {
+      await publishedRelease()
+      repo().pullRequest({ ...backMerge(), mergeableState: 'dirty' })
+
+      const first = await pollPublications(deps())
+      await pollPublications(deps())
+
+      expect(merges()).toEqual([])
+      expect(first.backMergeConflicts).toEqual(['usetheokit/ui#1738'])
+      const [found, ...more] = await findings()
+      expect(more).toEqual([])
+      expect(found).toMatchObject({
+        kind: 'stalled',
+        subject: 'back_merge',
+        taskId: null,
+        ref: 'https://github.com/usetheokit/ui/pull/1738',
+        resolvedAt: null,
+      })
+      expect(found.detail).toMatch(/#1738 from main into workspace conflicts with workspace/)
+    })
+
+    it('resolves the finding once the back-merge no longer conflicts, and merges it', async () => {
+      await publishedRelease()
+      repo().pullRequest({ ...backMerge(), mergeableState: 'dirty' })
+      await pollPublications(deps())
+
+      repo().pullRequest({ ...backMerge(), mergeableState: undefined })
+      expect((await pollPublications(deps())).backMerged).toEqual(['usetheokit/ui#1738'])
+
+      const [found] = await findings()
+      expect(found.resolvedAt).not.toBeNull()
+    })
   })
 
   it('never merges a draft, a pull request from another head, or one from a fork', async () => {

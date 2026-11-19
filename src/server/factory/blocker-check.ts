@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, isNotNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { task } from '../db/schema'
@@ -15,7 +15,8 @@ export type BlockerReads = {
 /**
  * The blockers an issue body declares that are still open. Each blocker is read with a token for its own
  * repository. A blocker in the task's own repository stops blocking once the factory has integrated its
- * fix: the run starts from the integration branch, where that code already is. Its issue stays open until
+ * fix, or found it already resolved on the integration branch: the run starts from there, where that code
+ * already is. Its issue stays open until
  * the release, which can take hours, and a chain of dependent issues would otherwise wait a release per
  * link. Reads only; a read GitHub refuses is thrown.
  */
@@ -35,7 +36,10 @@ export async function openBlockersOf(
   })
 }
 
-/** Whether a task for this issue has been merged into the repository's integration branch. */
+/**
+ * Whether the integration branch already holds what a task for this issue was for: its work was merged
+ * there, or the task found the issue already resolved there (checked and reviewed, with nothing to change).
+ */
 async function integrated(db: Database, repository: string, issueNumber: number): Promise<boolean> {
   const [merged] = await db
     .select({ id: task.id })
@@ -44,7 +48,7 @@ async function integrated(db: Database, repository: string, issueNumber: number)
       and(
         eq(task.repository, repository),
         eq(task.issueNumber, issueNumber),
-        isNotNull(task.mergedSha),
+        or(isNotNull(task.mergedSha), isNotNull(task.resolvedSha)),
       ),
     )
     .limit(1)

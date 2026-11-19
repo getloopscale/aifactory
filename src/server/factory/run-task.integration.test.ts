@@ -73,6 +73,7 @@ import {
 import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
+import { releaseByMode } from './integration'
 import { pollAnswers } from './waiting'
 import { jobBackend } from './job-backend'
 import { pauseOnRefusal, readPause } from './provider-pause-store'
@@ -1440,10 +1441,13 @@ describe('runTask', () => {
     expect(sandbox.specs).toHaveLength(1)
   })
 
-  it('runs when an open blocker in the same repository is already integrated', async () => {
+  it.each([
+    ['is already integrated', { mergedSha: 'abc123' }],
+    ['was found already resolved on the integration branch', { resolvedSha: 'abc123' }],
+  ])('runs when an open blocker in the same repository %s', async (_name, settled) => {
     const id = await seedTask()
     const blocker = await seedTask(5)
-    await getDb().update(task).set({ mergedSha: 'abc123' }).where(eq(task.id, blocker))
+    await getDb().update(task).set(settled).where(eq(task.id, blocker))
     const sandbox = new FakeSandbox(changed())
     const fetchIssue: RunTaskDeps['fetchIssue'] = async (_repo, number) =>
       number === 7
@@ -5664,6 +5668,68 @@ describe('release', () => {
       )
       expect(seen.autoMerges).toHaveLength(1)
       expect(await waits()).toHaveLength(1)
+    })
+
+    describe('of a head whose release pull request already conflicted with the release branch', () => {
+      /** The release of develop0001 an earlier pass refused because its pull request conflicted with main. */
+      const conflicted = (taskId: number) =>
+        getDb()
+          .insert(releaseWait)
+          .values({
+            taskId,
+            repository: 'paulo/app',
+            pullRequestNumber: 13,
+            pullRequestUrl: RELEASE_PR_URL,
+            sha: 'develop0001',
+            releaseBranch: 'main',
+            bump: 'patch',
+            actor: 'agent:coordinator',
+            changesets: false,
+            checks: ['CI'],
+            status: 'refused',
+            detail: 'the release pull request conflicts with main',
+            endedAt: new Date(),
+          })
+
+      it("refuses an agent's release up front, and opens no second wait", async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await expect(
+          release(dependencies(), id, { bump: 'patch', actor: 'agent:codex' }),
+        ).rejects.toThrow(/already conflicted with main at .*: merge main into develop/)
+        expect(seen.autoMerges).toEqual([])
+        expect(await waits()).toHaveLength(1)
+      })
+
+      it('records no second refusal of an automatic release for it', async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await releaseByMode(dependencies(), {
+          taskId: id,
+          sha: 'abc123def',
+          mode: 'auto',
+          actor: 'agent:codex',
+        })
+
+        // No second wait, whose refusal would be recorded again, and no refusal recorded now either.
+        expect(await waits()).toHaveLength(1)
+        expect(await getDb().select().from(decision).where(eq(decision.taskId, id))).toEqual([])
+      })
+
+      it('still tries when a person asks, since only a person may have fixed the release branch', async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(seen.autoMerges).toEqual([{ number: 13, sha: 'develop0001' }])
+        expect((await waits()).map((w) => w.status)).toEqual(['refused', 'waiting'])
+      })
     })
 
     it('refuses a release while a changesets publication of the repository is still waiting', async () => {

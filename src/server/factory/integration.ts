@@ -11,7 +11,7 @@ import {
 } from '../github/pulls'
 
 import { PRE_RELEASE_BRANCH } from './branches'
-import { createPreRelease, release } from './deliver'
+import { createPreRelease, release, ReleaseAlreadyRefused } from './deliver'
 import type { ReleaseMode } from './deliver'
 import {
   integrationHeldUntil,
@@ -142,8 +142,8 @@ export async function advancePreRelease(
 
 /**
  * What the release mode says to do once a commit is delivered and approved. `trial` records what an agent
- * would have released; `auto` releases it, and records why when that is refused. It returns the tag of a
- * release that was made.
+ * would have released; `auto` releases it, and records why when that is refused, unless the same head was
+ * already refused for the same cause (`ReleaseAlreadyRefused`). It returns the tag of a release that was made.
  */
 export async function releaseByMode(
   deps: { db: Database; github: GithubApp; api: GithubApi },
@@ -160,6 +160,13 @@ export async function releaseByMode(
   try {
     return (await release(deps, taskId, { bump: 'patch', actor })).tag
   } catch (error) {
+    // The same refusal of the same head is on record already: logged, not recorded twice.
+    if (error instanceof ReleaseAlreadyRefused) {
+      console.log(
+        JSON.stringify({ event: 'release_already_refused', taskId, reason: error.message }),
+      )
+      return undefined
+    }
     await record(`an automatic release was refused: ${message(error)}`)
     return undefined
   }
