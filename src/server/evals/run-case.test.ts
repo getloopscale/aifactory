@@ -91,6 +91,10 @@ type World = {
   fix?: { exitCode?: number; timedOut?: boolean }
   /** Whether a fix command leaves a change in the checkout. */
   fixChanges?: boolean
+  /** What the install check answers (the command ends with `&& pnpm install`). */
+  install?: Reply[]
+  /** What `git status --porcelain` says right after an install: what it changed in the checkout. */
+  installChanges?: string
 }
 
 function sandbox(world: World = {}) {
@@ -99,9 +103,15 @@ function sandbox(world: World = {}) {
   let statuses = 0
   let commits = 0
   let fixed = false
+  let installedLast = false
   return new FakeSandbox((command): Reply | undefined => {
+    const afterInstall = installedLast
+    installedLast = command.endsWith('&& pnpm install')
     if (command.includes('commit -F')) commits += 1
     if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
+    if (command.endsWith('&& pnpm install') && world.install?.length) return world.install.shift()
+    if (afterInstall && command.includes('status --porcelain'))
+      return { stdout: world.installChanges ?? '' }
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
@@ -1034,6 +1044,98 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false })
     expect(result.reason).toContain('is not a commit hash')
     expect(provider.specs).toEqual([])
+  })
+})
+
+describe('runCase install', () => {
+  const withInstall = {
+    ...evalCase,
+    checks: [{ name: 'install', command: 'pnpm install' }, ...evalCase.checks],
+  }
+  const installs = (provider: FakeSandbox) =>
+    provider.backend.commands.filter((c) => c.endsWith('&& pnpm install'))
+
+  it('installs the project before the builder runs, and again for the checks', async () => {
+    const provider = sandbox()
+    const inner = agent('builder', planned(built()))
+    const seen: number[] = []
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        seen.push(installs(provider).length)
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])), withInstall)
+
+    expect(seen[0]).toBe(1)
+    // The checks clean and install on their own: one for the builder, one for the commit.
+    expect(installs(provider)).toHaveLength(2)
+    expect(builder.prompts[0]).not.toContain('before your pass to install')
+  })
+
+  it('tells the builder a failed install and goes on', async () => {
+    const provider = sandbox({ install: [{ exitCode: 1, stderr: 'tarball missing' }] })
+    const builder = agent('builder', planned(built()))
+
+    const result = await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      withInstall,
+    )
+
+    expect(builder.prompts[0]).toContain('before your pass to install')
+    expect(builder.prompts[0]).toContain('tarball missing')
+    // Only the preparatory install failed: the work went on, in the same session, and the checks installed again.
+    expect(builder.prompts).toHaveLength(2)
+    expect(installs(provider)).toHaveLength(2)
+    expect(result).toMatchObject({ passed: true, reason: 'approved' })
+  })
+
+  it('gives the failure to the builder call that does the work, when another agent planned', async () => {
+    const provider = sandbox({ install: [{ exitCode: 1, stderr: 'tarball missing' }] })
+    const planner = agent('codex', [{ ok: true, summary: PLAN, sessionId: 'p1' }])
+    const builder = agent('builder', [built()])
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase({ ...deps(provider, builder, reviewer), planner }, withInstall)
+
+    expect(result).toMatchObject({ passed: true, reason: 'approved' })
+    expect(builder.prompts).toHaveLength(1)
+    expect(builder.prompts[0]).toContain('tarball missing')
+    expect(installs(provider)).toHaveLength(2)
+  })
+
+  it('puts back what the install changed in the checkout before the builder runs', async () => {
+    const provider = sandbox({ installChanges: ' M pnpm-lock.yaml\n' })
+    const inner = agent('builder', planned(built()))
+    const restoredBefore: boolean[] = []
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        restoredBefore.push(
+          provider.backend.commands.some((c) => c.endsWith(' clean -fdq')) &&
+            provider.backend.commands.some((c) => c.includes('restore --staged --worktree :/')),
+        )
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      withInstall,
+    )
+
+    expect(restoredBefore[0]).toBe(true)
+  })
+
+  it('runs no install for a case with no install check', async () => {
+    const provider = sandbox()
+    await runCase(
+      deps(provider, agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    expect(installs(provider)).toEqual([])
   })
 })
 

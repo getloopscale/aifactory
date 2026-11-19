@@ -38,7 +38,11 @@ import {
   failingChecks,
   gate,
   runChecks,
+  failedInstall,
+  installDetail,
+  prepareInstall,
   type CheckResult,
+  type PreparedInstall,
   type Verdict,
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
@@ -500,6 +504,7 @@ export class Run {
       const run = new Run(told, builder, reviewer, attached, spec, repoDir, baseSha, startedAt)
       run.planner = planner
       run.feed = feed
+      run.preparation = prep
       run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
       run.usesChangesets = await Run.publishesWithChangesets(sandbox.backend, repoDir)
       // Before the builder's first pass, so it can run the check it is told to run.
@@ -916,6 +921,7 @@ export class Run {
       attempt: 1,
       ...(this.feed?.delivered ? { knowledge: this.feed.delivered } : {}),
       ...(this.planned ? { planned: true } : {}),
+      ...(this.installed ? { install: installDetail(this.installed) } : {}),
     })
     if (this.plan && this.plannedBy) {
       const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
@@ -940,6 +946,28 @@ export class Run {
     )
   }
 
+  /** The install the factory ran before the builder's first pass, when the repository has one. */
+  private installed: PreparedInstall | undefined
+
+  /** The preparation `open` timed; `start` adds the install to it and logs it. */
+  private preparation: Preparation | undefined
+
+  /**
+   * Installs the project before the builder's first pass, so it can run the tests it is told to run. A failure
+   * does not fail the run: the builder is told, and `verify` cleans and installs on its own. A run resumed from
+   * a snapshot is not installed again: its disk was installed before it parked, and its checkout may hold the
+   * builder's uncommitted work, which putting the checkout back after the install would throw away.
+   */
+  private async installProject(): Promise<void> {
+    if (this.c.resuming) return
+    this.installed = await prepareInstall(
+      this.backend,
+      this.repoDir,
+      this.checks,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
+  }
+
   /** What the builder is told about the issue and its rules, the same for the plan and the work. */
   private buildInput(): Parameters<typeof buildPrompt>[0] {
     const { row, issue, branch, startingOver } = this.c
@@ -957,6 +985,7 @@ export class Run {
       knowledgeDir: this.feed?.dir,
       checks: this.checks,
       clarifications: this.c.clarifications,
+      installFailed: failedInstall(this.installed),
     }
   }
 
@@ -1382,7 +1411,14 @@ export class Run {
    * something (the run parks) or when a person's requested change needed no change.
    */
   async start(): Promise<{ result: RunResult } | { sha: string }> {
-    if (this.c.continuation?.mergeBase) return { sha: await this.mergeBase() }
+    const prep = this.preparation
+    if (this.c.continuation?.mergeBase) {
+      prep?.log()
+      return { sha: await this.mergeBase() }
+    }
+    await (prep ? prep.step('install', () => this.installProject()) : this.installProject())
+    // The install is the last step of the preparation, so the line is logged once it ends.
+    prep?.log()
     await this.planChange()
     this.c.state.current = 'build'
     const first = await this.firstPass()
