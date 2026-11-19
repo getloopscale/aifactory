@@ -53,6 +53,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A deploy no longer stops the crons for as long as a run lasts. The main process (`aifactory.service`) now starts with `FACTORY_SERVER_ONLY=1`: it serves the panel and the webhook and runs the crons, takes no job, and stops within 2 minutes. The workers run every job (#363)
 - A task handed over a second time on the same head now gets a coordinator decision, or at least an escalation, instead of none: a handoff is identified by its head and its event, as a failure is. Decisions recorded before are moved to the handoff they were decided for (#335)
 - The builder is no longer told that the required checks failed when the coordinator sends it a scope decision about the review (#338)
 - Reworks for failing checks and review rounds have separate budgets, so a run whose first commits failed the checks still gets every review round instead of going to a person after its first review (#347).
