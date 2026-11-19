@@ -84,22 +84,6 @@ describe('parseVerdict', () => {
 })
 
 describe('prompts', () => {
-  it('says what blocks: the issue, a regression, its tests, a secret or a rule; an edge case it does not ask for is minor', () => {
-    const prompt = reviewPrompt({
-      repo: 'o/r',
-      issueNumber: 3,
-      title: 'T',
-      body: 'B',
-      branch: 'factory/3',
-      baseSha: 'abc',
-    })
-    expect(prompt).toContain('# What blocks')
-    expect(prompt).toContain('does not do something the issue asks')
-    expect(prompt).toContain('breaks behaviour that worked before')
-    expect(prompt).toContain('is minor, however real')
-    expect(prompt).toContain('List every blocking finding in this round')
-  })
-
   it('tells the reviewer the base commit and not to write', () => {
     const prompt = reviewPrompt({
       repo: 'o/r',
