@@ -357,7 +357,9 @@ reads that file, not a convention.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
 - **A merge of the base is not the task's change.** The review and `diffFacts` measure the change from
   `reviewBase` (`factory/diff-facts.ts`): the merge base of HEAD and the integration branch fetched before each
-  review. A run that only merges the base (`mergeBase`, or a conflict send-back) keeps the last approval when
+  review. A later round reads what the task changed since the reviewed commit through `changedSinceCommand`
+  (`factory/review.ts`): the task's own commits, with no merge commit and nothing the integration branch brought
+  in, never a plain diff between the two commits. A run that only merges the base (`mergeBase`, or a conflict send-back) keeps the last approval when
   `samePatch` finds the task's patch unchanged, and records it for the merge without asking the reviewer
   (`Run.approvalKept`). Reworks for failing checks (`MAX_CHECK_REWORKS`) and review rounds (`reviewAllowsRework`
   over the rounds) are separate budgets, and `automaticRunsSincePerson` leaves out `Blocked by` checks and, up to

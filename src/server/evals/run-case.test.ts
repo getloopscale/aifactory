@@ -727,6 +727,18 @@ describe('runCase', () => {
     expect(builder.prompts[2]).toContain('add a test')
   })
 
+  it('tells the builder of a review rework where its whole change starts, as the factory does', async () => {
+    const builder = agent('builder', planned(built(), built('added the test')))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(sandbox(), builder, reviewer), evalCase)
+
+    expect(builder.prompts[2]).toContain(`read your whole change again with \`git diff ${BASE}\``)
+  })
+
   it('gives the second review round the findings of the first, as the factory does', async () => {
     const builder = agent('builder', planned(built(), built('added the test')))
     const reviewer = agent('reviewer', [

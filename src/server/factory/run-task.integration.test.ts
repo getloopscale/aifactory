@@ -1912,6 +1912,8 @@ describe('runTask review loop', () => {
     expect(builder.resumed).toHaveLength(1)
     expect(builder.resumed[0]).toContain('sess-1:')
     expect(builder.resumed[0]).toContain('max=0 is not rejected')
+    // The rework reads its whole change from where the review measured it.
+    expect(builder.resumed[0]).toMatch(/read your whole change again with `git diff \w+`/)
     expect(await stagesOf(id)).toEqual([
       'sandbox',
       'build',

@@ -210,6 +210,8 @@ export class Run {
   summary = ''
   /** What the builder said to the findings of the last review, kept while checks rework the same commit. */
   reviewAnswer: string | undefined
+  /** Where the last review measured the change from (`reviewBase`): a review rework reads the whole change from there. */
+  private reviewedFrom: string | undefined
   sessionId: string | undefined
   /** The knowledge base in the sandbox, kept current while the run goes; the same for every agent. */
   feed?: KnowledgeFeed
@@ -1483,6 +1485,7 @@ export class Run {
           failedChecks: failed,
           checks: this.checks,
           ...(reviewedSha ? { reviewedSha } : {}),
+          ...(reviewedSha && this.reviewedFrom ? { changeBase: this.reviewedFrom } : {}),
         }),
       }),
     )
@@ -1606,6 +1609,7 @@ export class Run {
       baseSha: this.baseSha,
       integration: integrationBranch(this.c.repo),
     })
+    this.reviewedFrom = base
     const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,

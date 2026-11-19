@@ -273,7 +273,7 @@ class CaseRun {
       findings,
       failedChecks: failed,
       checks: this.c.checks,
-      ...(reviewedSha ? { reviewedSha } : {}),
+      ...(reviewedSha ? { reviewedSha, changeBase: this.c.baseSha } : {}),
     })
     const result = await this.agentCall(() =>
       this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt)),
