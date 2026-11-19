@@ -149,9 +149,17 @@ describe('prompts', () => {
       'A new blocker or major finding goes only on code the task changed since 1234567, or on another instance of a class of defect you already named',
     )
     expect(prompt).toContain(
-      'A concern about code that was already there, unchanged, when you first reviewed it is minor, not blocking',
+      'A concern about code that was already there, unchanged, that the change does not break is minor, not blocking',
     )
     expect(prompt).not.toContain('would break code that is already in use')
+  })
+
+  it('in a later round, still blocks on unchanged code the change breaks, with the evidence of what breaks', () => {
+    const prompt = laterRound()
+    expect(prompt).toContain(
+      'or on code that did not change when the change breaks it: a caller, a contract or a behaviour that worked on the review base and no longer does',
+    )
+    expect(prompt).toContain('give the evidence of what breaks')
   })
 
   it('in a later round, keeps a finding the builder declined blocking only by saying why its reason is wrong', () => {

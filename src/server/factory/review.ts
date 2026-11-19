@@ -116,7 +116,8 @@ export function changedSinceCommand(earlier: string, base: string): string {
  * What a later round is told about the one before it. A review that reads the whole diff again every round
  * finds something new every round and never ends (the `review_plateau` handoffs), so a later round checks
  * the earlier findings first, judges the reason the builder gave for one it declined, and raises a new blocker
- * only in code the task changed since, or on another instance of a class it already named. Minor findings
+ * only in code the task changed since, on another instance of a class it already named, or on unchanged code the
+ * change breaks. Minor findings
  * never blocked, so they are not carried.
  */
 function earlierSection(earlier: EarlierReview, base: string): string {
@@ -134,7 +135,7 @@ In this round:
 - First check each of those findings at HEAD. One that is not fixed stays, unless the builder answered it (see what the builder said, when it is given): the builder may have declined it with a reason.
 - For each finding the builder declined, judge the reason, and do not repeat the finding without answering it. Keep it blocking only by saying, in the finding, why the reason is wrong; otherwise lower it to minor with a note for the owner. A finding the builder did not answer and did not fix stays, in the same words.
 - Read what the task changed since then with \`${changedSinceCommand(earlier.sha, base)}\`. It leaves out what a merge of the integration branch brought in: that is other work, not this task's.
-- A new blocker or major finding goes only on code the task changed since ${short}, or on another instance of a class of defect you already named; say which in the finding. A concern about code that was already there, unchanged, when you first reviewed it is minor, not blocking. Anything else you notice now and did not raise before is minor.
+- A new blocker or major finding goes only on code the task changed since ${short}, or on another instance of a class of defect you already named, or on code that did not change when the change breaks it: a caller, a contract or a behaviour that worked on the review base and no longer does. Say which in the finding, and for a break give the evidence of what breaks. A concern about code that was already there, unchanged, that the change does not break is minor, not blocking. Anything else you notice now and did not raise before is minor.
 `
 }
 
