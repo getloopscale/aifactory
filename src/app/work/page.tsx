@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router'
 
 import type { TaskCard } from '../../shared/panel'
 
+import { BaseAlerts } from '../components/BaseAlerts'
 import { Board, TaskList } from '../components/Board'
 import { NewJob, type CreatedJob } from '../components/NewJob'
 import { Pulse } from '../components/Pulse'
@@ -64,6 +65,7 @@ export default function Page() {
           </div>
         </div>
       </div>
+      <BaseAlerts tasks={tasks.data?.tasks ?? []} />
       <Pulse />
       {opened ? (
         <p role="status" className="mb-3 text-sm text-foreground">
