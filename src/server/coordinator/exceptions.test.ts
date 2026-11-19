@@ -10,6 +10,7 @@ import {
   failingOutput,
   failureCause,
   readsChecks,
+  quotedCiOutput,
   readsCiOutput,
   recognise,
   type CheckRun,
@@ -787,5 +788,115 @@ describe('a merge of the integration branch that conflicted', () => {
     const detail = { error, baseConflict: { branch: 'workspace', files: 'src/a.ts' } }
     const facts = conflicted({ last: readOf({ stage: 'failed', detail, id: 41 }) })
     expect(recognise(facts)[0]).toMatchObject({ kind: 'base_conflict', conflictFiles: [] })
+  })
+})
+
+describe('the identity of a handoff', () => {
+  const onEvent = (detail: Record<string, unknown>, id?: number): TaskFacts => ({
+    ...handedOver(detail),
+    last: readOf({ stage: 'handoff', detail, ...(id === undefined ? {} : { id }) }),
+  })
+  const PLATEAU = { reason: 'the reviewer still asked for changes after 3 attempts' }
+
+  it('is its head and its event, so a second handoff on the same head is another exception', () => {
+    expect(recognise(onEvent({ ...PLATEAU, cause: 'review_plateau' }, 41))[0].head).toBe('abc@41')
+    expect(recognise(onEvent({ ...PLATEAU, cause: 'review_plateau' }, 52))[0].head).toBe('abc@52')
+    expect(recognise(onEvent({ reason: CHECKS_REASON, cause: 'checks_unchanged' }, 41))[0]).toEqual(
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc@41',
+        evidence: 'CI:\n~~~~text\nERROR: lint exited with 1\n~~~~',
+      },
+    )
+  })
+
+  it('stays on the head alone for an event with no id, a task that never pushed, or a fact not read', () => {
+    expect(recognise(onEvent(PLATEAU))[0].head).toBe('abc')
+    expect(recognise({ ...onEvent(PLATEAU, 41), headSha: null })[0].head).toBe('none')
+    const unreadPull = {
+      ...onEvent({ reason: CHECKS_REASON, cause: 'checks_unchanged' }, 41),
+      pullRequest: unread('the pull request of task 7', 'GitHub answered 502'),
+    }
+    expect(recognise(unreadPull)[0]).toMatchObject({ kind: 'unknown', head: 'abc' })
+  })
+})
+
+describe('the handoffs of an integration that waited for the required checks', () => {
+  const REPO = { fullName: 'o/r', integrationBranch: 'workspace' }
+  const waited = (detail: Record<string, unknown>, over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...handedOver(detail),
+    last: readOf({ stage: 'handoff', detail, id: 60 }),
+    repository: REPO,
+    ...over,
+  })
+  const RED_REASON =
+    'the required checks still fail after 3 automatic runs: CI\n\nCI:\n~~~~text\nTypeError: x is undefined\n~~~~'
+
+  it('is told by the cause the integration recorded', () => {
+    expect(causeOf({ cause: 'pull_conflict', reason: '' })).toBe('pull_conflict')
+    expect(causeOf({ cause: 'base_fixed', reason: '' })).toBe('base_fixed')
+    expect(causeOf({ cause: 'ci_red', reason: '' })).toBe('ci_red')
+  })
+
+  it('names the integration branch to merge for a pull request that still conflicts with it', () => {
+    const reason = 'the pull request conflicts with its base after 3 automatic runs'
+    expect(recognise(waited({ reason, cause: 'pull_conflict' }))).toEqual([
+      {
+        kind: 'pull_conflict',
+        taskId: 7,
+        head: 'abc@60',
+        evidence: reason,
+        conflictsWith: 'workspace',
+      },
+    ])
+  })
+
+  it('names the integration branch to merge for a base that passes the checks again', () => {
+    const reason =
+      'the integration branch passes CI again, and the pull request still has to merge it after 3 automatic runs'
+    expect(recognise(waited({ reason, cause: 'base_fixed' }))).toEqual([
+      { kind: 'base_fixed', taskId: 7, head: 'abc@60', evidence: reason, mergeFrom: 'workspace' },
+    ])
+  })
+
+  it('names no branch when the repository of the task is not known', () => {
+    const facts = waited({ reason: 'r', cause: 'pull_conflict' }, { repository: undefined })
+    expect(recognise(facts)[0]).not.toHaveProperty('conflictsWith')
+  })
+
+  it('quotes what the failed checks reported for checks that still fail', () => {
+    expect(recognise(waited({ reason: RED_REASON, cause: 'ci_red' }))).toEqual([
+      {
+        kind: 'ci_red',
+        taskId: 7,
+        head: 'abc@60',
+        evidence: 'CI:\n~~~~text\nTypeError: x is undefined\n~~~~',
+      },
+    ])
+  })
+
+  it('takes what GitHub Actions logged when the handoff quoted nothing', () => {
+    const reason = 'the required checks still fail after 3 automatic runs: CI'
+    const ciFailures = readOf([{ name: 'CI', url: 'https://ci/1', lines: ['boom'] }])
+    expect(recognise(waited({ reason, cause: 'ci_red' }, { ciFailures }))).toEqual([
+      {
+        kind: 'ci_red',
+        taskId: 7,
+        head: 'abc@60',
+        evidence: '',
+        ciOutput: 'CI (https://ci/1):\n~~~~text\nboom\n~~~~',
+      },
+    ])
+    const failed = { ciFailures: unread('the failed checks', 'GitHub answered 502') }
+    expect(recognise(waited({ reason, cause: 'ci_red' }, failed))[0]).toMatchObject({
+      kind: 'unknown',
+      head: 'abc',
+    })
+  })
+
+  it('reads the failed checks of the pull request only when the handoff quoted none', () => {
+    expect(quotedCiOutput('the required checks still fail after 3 automatic runs: CI')).toBe('')
+    expect(quotedCiOutput(RED_REASON)).toBe('CI:\n~~~~text\nTypeError: x is undefined\n~~~~')
   })
 })

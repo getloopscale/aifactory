@@ -576,6 +576,18 @@ export class FakeGithub implements GithubApi {
     return { number, title, body, labels: [...labels], state }
   }
 
+  /** Lists the open issues that carry `label`, as `listOpenIssues` does. */
+  listOpenIssues = async (repo: string, label: string): Promise<Issue[]> =>
+    [...this.repo(repo).issues.values()]
+      .filter((i) => i.state === 'open' && i.labels.includes(label))
+      .map(({ number, title, body, labels }) => ({
+        number,
+        title,
+        body,
+        labels: [...labels],
+        state: 'open' as const,
+      }))
+
   /** Every repository the fake holds, declared or reached by a call. */
   get repos(): FakeRepository[] {
     return [...this.repositories.values()]

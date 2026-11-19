@@ -118,6 +118,7 @@ describe('decideWaitingIntegration with a red base', () => {
       waitedMs: CI_SILENCE_MS + 1,
     })
     expect(step).toMatchObject({ kind: 'person', stopAutoMerge: true })
+    expect(step).not.toHaveProperty('cause')
   })
 })
 
@@ -207,10 +208,11 @@ describe('decideWaitingIntegration after the base was blamed', () => {
       kind: 'person',
       reason: expect.stringContaining('CI'),
       stopAutoMerge: true,
+      cause: 'base_fixed',
     })
   })
 
-  it('tells a person of a silent check before it merges the base', () => {
+  it('tells a person of a silent check before it merges the base, with no cause the coordinator acts on', () => {
     const step = decide({
       required: ['CI', 'Lint'],
       reports: [report('CI', 'failure')],
@@ -347,6 +349,7 @@ describe('decideWaitingIntegration', () => {
       kind: 'person',
       reason: expect.stringMatching(/conflicts with its base after 3 automatic runs/),
       stopAutoMerge: true,
+      cause: 'pull_conflict',
     })
   })
 
@@ -385,6 +388,7 @@ describe('decideWaitingIntegration', () => {
       reason: expect.stringMatching(/required checks still fail after 3 automatic runs: CI/),
       stopAutoMerge: true,
       reports: [report('CI', 'failure')],
+      cause: 'ci_red',
     })
   })
 

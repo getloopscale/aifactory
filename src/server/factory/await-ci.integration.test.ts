@@ -618,6 +618,7 @@ describe('pollAwaitingIntegrations', () => {
       reason: expect.stringMatching(/still fail after 3 automatic runs: CI/),
       pullRequestUrl: PR_URL,
       sha: VERIFIED,
+      cause: 'ci_red',
     })
     expect(comments()).toEqual([
       {

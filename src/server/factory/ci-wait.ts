@@ -1,6 +1,7 @@
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import type { FailedStep } from './promotion'
+import type { HandoffCause } from './run-types'
 import { AUTOMATIC_RETRIES, automaticRunsLeft } from './transitions'
 
 /**
@@ -69,7 +70,17 @@ export type WaitingStep =
    * task starts over from the integration branch.
    */
   | { kind: 'start_over'; reason: string }
-  | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
+  /**
+   * For a person. `cause` names a handoff the coordinator has a playbook for (`coordinator/exceptions.ts`): a pull
+   * request that still conflicts, a base that passes again, checks that still fail. Any other is for a person only.
+   */
+  | {
+      kind: 'person'
+      reason: string
+      stopAutoMerge: boolean
+      reports?: CheckReport[]
+      cause?: HandoffCause
+    }
   /**
    * A promotion into the pre-release branch held the integration out and the hold expired: the verified
    * commit is integrated now, as the run would have done.
@@ -211,6 +222,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
           kind: 'person',
           reason: `the pull request conflicts with its base after ${runs}`,
           stopAutoMerge: true,
+          cause: 'pull_conflict',
         }
   }
   if (input.held && !input.pull.autoMerge) {
@@ -240,6 +252,7 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
         reason: `the required checks still fail after ${runs}: ${blame.own.join(', ')}`,
         stopAutoMerge: true,
         reports,
+        cause: 'ci_red',
       }
     }
     return { kind: 'send_back', failed: blame.own, reports }
@@ -259,6 +272,7 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
         kind: 'person',
         reason: `the integration branch passes ${blame.fixed.join(', ')} again, and the pull request still has to merge it after ${runs}`,
         stopAutoMerge: true,
+        cause: 'base_fixed',
       }
 }
 

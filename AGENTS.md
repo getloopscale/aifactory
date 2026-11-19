@@ -223,12 +223,19 @@ reads that file, not a convention.
   exception, the decisions already recorded and the time to one action (`send_back`, `review_again`,
   `retry_from_finding`, `scope`, `release`, `prioritise`, `fix_base`, `merge_base`, `wait` or `escalate`). A `scope` gets its text from `draft.ts`, the step between deciding and
   applying, where a drafter built by `buildAssistant` answers JSON that `scope.ts` parses (an answer that does not
-  parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION` is `refused`); `apply.ts` is the only module with side effects and goes through the
+  parse is an `escalate`, and a draft naming a `QUALITY_CONFIGURATION`, or putting in scope what the sandbox cannot do
+  (`infeasibleNamed`: a change under `.github/`, publishing a package, editing an issue or a pull request), is `refused`).
+  A task files at most one follow-up, labelled `follow-up`: a second scope names the first, an open issue that is a
+  follow-up of the same issue or has the same title is named instead of filing one, and the `factory` label goes only
+  on the follow-up of an issue that is not itself a follow-up (`followUpOrigin`), so a chain stops at a person. The
+  scope's note reaches the run with `fromReview`, so the builder is never told the checks failed; `apply.ts` is the only module with side effects and goes through the
   panel's actions (`sendBackByCoordinator`, which asks for `coordinator_send_back`, and `resolveFinding` with `automatic`, so a retry records no `decision`) and, for a release, `release()`, so
   `transitions.ts` is asked first, even before a scope's only writes of its own (the follow-up issue and
   `updateIssueBody`). A handoff records its `cause`, and an older one is recognised by the start
-  of its `reason`. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
-  task gets at most two applied actions (`MAX_APPLIED`), then the next one is escalated. A failure of the work is
+  of its `reason`. A handoff, like a failure, is told apart by its event (the head is `<sha>@<event id>`), so a
+  second handoff on the same head is decided again. Every decision is a `coordinator_action` row, unique on task, exception kind and head except for a `trial` one, which leaves the head free for `auto`; a
+  task gets at most two applied actions of each family (`MAX_APPLIED`, `FAMILY` in `decide.ts`: reworking the checks,
+  or unblocking the review), then the next one of that family is escalated. A failure of the work is
   told by how the run starts its reason (`factory/failure-reasons.ts`, `NO_TIME_FOR_AGENT`, `AGENT_OUT_OF_TIME`):
   `checks_red` is sent back on its branch with what the failing checks printed on the head (`evidence`, through
   `failingOutput`, escalated when nothing was kept), `out_of_time` is sent back to continue from the branch, and
@@ -239,7 +246,10 @@ reads that file, not a convention.
   kept none either, with what the failed checks of the pull request's head logged on GitHub (`ciFailures`, through
   `readEvidence` and `ciFailingOutput`). One whose pull request conflicts with its base is a `merge_base`
   (`mergeBaseByCoordinator`, which asks for `coordinator_merge_base` and queues the run with `mergeBase`), and a
-  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. An `unknown` is a
+  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. The handoffs
+  `integrate-after-ci` writes after the automatic runs carry a cause too (`ci-wait.ts`): `pull_conflict` and
+  `base_fixed` are a `merge_base`, and `ci_red` is sent back with what the handoff quoted of the failed checks, or
+  what their GitHub Actions jobs logged; a required check that never reported stays a plain `handoff`. An `unknown` is a
   `wait`: the first is recorded as `deferred` (which leaves the head free and is never `seen`), later passes
   record nothing, and it is escalated once the first wait is `UNKNOWN_LIMIT_MS` old. `FACTORY_COORDINATOR_MODE`
   is `off`, `trial` (the default: decide and record, apply nothing) or `auto`. No file under `coordinator/`
