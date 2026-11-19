@@ -64,7 +64,7 @@ const TELLING = [
   /\bFAIL\b/,
   /\b[A-Z]\w*Error\b:/,
   /\berror TS\d+/,
-  /^[✖×]/,
+  /^[✖×✗]/,
   /^\d+:\d+\s+error\s/,
   /^ERROR: /,
   /^error [\w-]+: /,

@@ -46,7 +46,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- The evidence of a failed CI job keeps the line that reports the failure (a test marked `FAIL`, the runner's `##[error]`) when more than forty lines match, and no longer takes a package manager's `WARN` for it, so an agent sent back after failing checks reads why they failed instead of the errors passing tests logged (#326).
+- The evidence of a failed CI job keeps the line that reports the failure (a test marked `FAIL`, the runner's `##[error]`) when more than forty lines match, reads a line a script starts with `✗`, and no longer takes a package manager's `WARN` for it, so an agent sent back after failing checks reads why they failed instead of the errors passing tests logged (#326).
 - The reviewer is told which findings block a delivery and which are minor, and to list every blocker in the same round, so a review converges instead of raising a deeper edge case each round (#305).
 - A release is refused while a changesets publication of the repository still waits for its Version Packages to publish, so a promotion no longer lands changesets on the release branch that keep the workflow versioning instead of publishing (#319).
 - A run refused for the sandbox provider's concurrent limit waits for a free slot, as an evaluation case does, instead of failing and waiting about 20 minutes for its retry (#314).

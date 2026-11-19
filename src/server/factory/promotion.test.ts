@@ -202,6 +202,17 @@ describe('logEvidence', () => {
     expect(logEvidence(stamp('TypeError: cannot read x'))).toEqual(['TypeError: cannot read x'])
   })
 
+  it('keeps a line a script starts with a ballot cross, as a changelog check prints its failure', () => {
+    const log = [
+      stamp('✗ [changelog] @theokit/agents@16.11.0 shipped on 2026-11-19 and no dated section names it.'),
+      stamp('##[error]Process completed with exit code 1.'),
+    ].join('\n')
+
+    expect(logEvidence(log)).toEqual([
+      '✗ [changelog] @theokit/agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
+    ])
+  })
+
   it('keeps a cross only when the line starts with it', () => {
     expect(logEvidence(stamp('✖ 3 problems'))).toEqual(['✖ 3 problems'])
     expect(logEvidence(stamp('built ✖ nothing'))).toEqual([])
