@@ -50,6 +50,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Reworks for failing checks and review rounds have separate budgets, so a run whose first commits failed the checks still gets every review round instead of going to a person after its first review (#347).
+- The review and the facts about the diff measure the change from the integration branch as it is when the review starts, so files another task brought in through a merge of that branch are no longer listed as changed outside the plan (#348).
+- A merge of the integration branch into approved work keeps the approval when the task's patch is the same before and after it, so the merge goes on to integration with no new review (#349).
+- Send-backs for a conflict and merges of the base (up to six), and checks of a `Blocked by` issue, no longer use up the three automatic runs of a task, so approved work that only needed the base merged stops reaching a person (#350).
+- A handoff made after the last rework broke the checks records the cause `checks_broke_after_review`, so the coordinator no longer treats it as a review plateau (#351).
 - E2B's `403: team is blocked: credit_exhausted` is now an environment failure that retries by itself, and the doctor shows it as the sandbox provider refusing. It used to go to a person as a failure of the work, which the coordinator escalated with no action (#339)
 - A run no longer fails for want of a free sandbox slot after waiting 20 minutes. Before its first stage it waits in the queue while the account already has as many sandboxes up as it allows (10 on E2B unless `E2B_MAX_SANDBOXES` says more), for up to three hours (#341)
 - The evidence of a failed CI job keeps the line that reports the failure (a test marked `FAIL`, the runner's `##[error]`) when more than forty lines match, reads a line a script starts with `✗`, and no longer takes a package manager's `WARN` for it, so an agent sent back after failing checks reads why they failed instead of the errors passing tests logged (#326).

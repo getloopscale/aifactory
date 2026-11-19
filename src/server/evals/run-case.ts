@@ -33,7 +33,6 @@ import {
 } from '../factory/harness'
 import {
   blockingCount,
-  MAX_ATTEMPTS,
   OUTSIDE_THE_PLAN,
   parseVerdict,
   reviewAllowsRework,
@@ -48,6 +47,7 @@ import {
   COMMIT_MESSAGE,
   GITCONFIG,
   INSTANCE,
+  MAX_CHECK_REWORKS,
   gitConfig,
   must,
   oneLine,
@@ -93,7 +93,7 @@ function ensureLive(signal: AbortSignal | undefined): void {
 
 /**
  * One case run the way the factory runs a task (`factory/run.ts`): the same prompts, agents, plan, checks,
- * facts about the diff and review, and up to `MAX_ATTEMPTS` passes. A step added to `Run` is added here too,
+ * facts about the diff and review, and the same budgets: `MAX_CHECK_REWORKS` for failing checks and the review's own rounds. A step added to `Run` is added here too,
  * or the suite measures a factory that no longer exists. It writes nowhere but the sandbox: GitHub is
  * reachable without a credential, so the clone works and a push cannot, and nothing here pushes, opens a
  * pull request or records a stage.
@@ -108,6 +108,8 @@ class CaseRun {
   readonly reviews: ReviewVerdict[] = []
   /** The findings that block, in each review round so far. */
   private readonly blockingCounts: number[] = []
+  /** The reworks failing checks asked for, apart from the review's rounds, as `Run.loop` counts them. */
+  private checkReworks = 0
   /** The last commit this case made or found, from which the next round counts what the builder committed. */
   private committed: string | undefined
   /** The last commit the fixes ran on or made, so they never run twice on the same commit, as in `Run`. */
@@ -406,9 +408,9 @@ class CaseRun {
     return this.deps.builder.resume !== undefined && !!this.sessionId
   }
 
-  /** Failing checks send the builder back up to `MAX_ATTEMPTS`; a review has its own rule. */
+  /** Failing checks send the builder back up to `MAX_CHECK_REWORKS` times, as `Run.loop`; a review has its own rule. */
   private canRework(): boolean {
-    return this.attempts < MAX_ATTEMPTS && this.canResume()
+    return this.checkReworks < MAX_CHECK_REWORKS && this.canResume()
   }
 
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
@@ -430,6 +432,7 @@ class CaseRun {
         }
         // A rework that changed nothing has the checks run again on the same commit (#214), unless they fail on
         // the case's base too, as `Run.refuseRedBase` asks (#219).
+        this.checkReworks++
         if (await this.rework([], failed)) sha = await this.applyFixes(await this.commit())
         else {
           const red = await this.failingOnBase(failed)
@@ -467,7 +470,7 @@ class CaseRun {
       if (
         read.verdict === 'invalid' ||
         !this.canResume() ||
-        !reviewAllowsRework(this.attempts, this.blockingCounts)
+        !reviewAllowsRework(this.blockingCounts.length, this.blockingCounts)
       ) {
         return handedOver
       }

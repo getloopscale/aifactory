@@ -461,6 +461,14 @@ export function stagesWhere(event: TransitionEvent, task: Omit<Facts, 'stage'>):
  */
 export const AUTOMATIC_RETRIES = 3
 
+/**
+ * How many automatic runs that only bring the integration branch into the work (a send-back for a conflict, a
+ * merge of the base with no agent) are left out of `AUTOMATIC_RETRIES`: they are no failure of the work, and
+ * approved work meets them each time the base moves. Past these they count, so a conflict that never resolves
+ * still reaches a person.
+ */
+export const FREE_BASE_RUNS = 6
+
 /** Whether a task that ran `automaticRuns` times since a person last started it may run on its own again. */
 export const automaticRunsLeft = (automaticRuns: number): boolean =>
   automaticRuns < AUTOMATIC_RETRIES
