@@ -267,6 +267,15 @@ reads that file, not a convention.
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
   however old) while it is on its way. The decision's head is the test and the fix's job (`headOf`), so a retried
   fix is decided again and an ended hold never comes back. It is not counted by `MAX_APPLIED`, and merges nothing.
+- **A red promotion stops the line.** With `FACTORY_LINE_STOP_MODE=auto`, `factory/promotion-line.ts` takes the
+  failures of the integration branch's promotion away from the per-check filing: `line/decide.ts` decides over
+  what was read (open, note, retry, escalate, resolve) and reads nothing, and `line/incident.ts` holds the
+  `line_incident` reads and writes. One incident per repository is open at a time, with one fix issue for every
+  failure of the head. While it is open, `maintainHolds` holds every other queued run of the repository
+  (`holdRepository` before the fix has a task), `integrationHeldUntil` and `integrate-after-ci` hold every
+  integration but the fix's, and the coordinator skips the repository's other exceptions. It ends only when every
+  check of a promotion head passed; a fix that ended with the promotion still red is followed by one more, then a
+  person (`MAX_ATTEMPTS`), and the line stays stopped until it is green.
 - **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
   The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
   `scheduler/facts.ts` reads the queued `run-task` jobs of tasks in `intake`, their issues and the decisions already

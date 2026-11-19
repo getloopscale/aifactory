@@ -206,7 +206,7 @@ export async function integrate(
   const markReady = (to: string) => api.markReadyForReview(repository, token, opened.number, to)
   const restored = titleToRestore(opened, title)
   if (restored !== undefined) await markReady(restored)
-  const heldUntil = await integrationHeldUntil(db, repository, new Date())
+  const heldUntil = await integrationHeldUntil(db, repository, new Date(), work.taskId)
   if (heldUntil) return { heldUntil }
   const required = await api.requiredChecks(repository, token, work.integration)
   const refusal = selfCiRefusal(repository, required)

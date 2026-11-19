@@ -734,6 +734,39 @@ export const promotionFinding = pgTable(
 )
 
 /**
+ * A stopped line (`line/`): something that blocks every task of a repository at once, such as a red
+ * promotion. While it is open no new run of the repository starts and nothing of it integrates but its fix,
+ * which is one issue for all the failures. It ends only when the blocked surface is green again.
+ */
+export const lineIncident = pgTable(
+  'line_incident',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    cause: text('cause', { enum: ['promotion_red', 'mass_failure'] }).notNull(),
+    /** What is blocked, as a person reads it: `workspace -> develop`, or the failure signature. */
+    surface: text('surface').notNull(),
+    /** The issue of the fix now on its way. */
+    issueNumber: integer('issue_number').notNull(),
+    issueUrl: text('issue_url').notNull(),
+    /** The head the failures were last read on. */
+    lastSha: text('last_sha').notNull(),
+    /** How many fix issues the incident has had: one more each time a fix integrated and the line stayed red. */
+    attempts: integer('attempts').notNull().default(1),
+    status: text('status', { enum: ['open', 'escalated', 'resolved'] })
+      .notNull()
+      .default('open'),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('line_incident_one_per_repository')
+      .on(table.repository)
+      .where(sql`${table.status} <> 'resolved'`),
+  ],
+)
+
+/**
  * One day of one indicator the factory keeps about itself (`metrics/config.ts`), for one repository or for
  * all of them (`*`): the mean of what was observed that day and how many observations made it. The
  * `measure` cron writes it again on every pass for the days it still covers.

@@ -8,7 +8,11 @@ import type { FailedRun, PromotionApi, PromotionPull, RerunAnswer } from '../git
 import type { GithubApi } from '../github/pulls'
 import { FACTORY_LABEL } from '../ingest/decide'
 
+import type { CoordinatorMode } from '../coordinator/mode'
+
+import { INTEGRATION_BRANCH } from './branches'
 import { readEvidence } from './check-evidence'
+import { watchLine } from './promotion-line'
 import {
   findingSignature,
   issueBody,
@@ -38,10 +42,12 @@ export type PromotionWatchDeps = {
   db: Database
   app: GithubApp
   api: PromotionApi
-  github: Pick<GithubApi, 'defaultBranch' | 'commentOnIssue'>
+  github: Pick<GithubApi, 'defaultBranch' | 'commentOnIssue' | 'closeIssue'>
   issues: Pick<IssuesApi, 'createIssue' | 'ensureLabel'>
   /** New issues one pass may open in one repository, so a broken pipeline does not flood the tracker. */
   maxNewIssuesPerRepository: number
+  /** Whether a red promotion of the integration branch stops the line (`promotion-line.ts`). Off when unset. */
+  lineMode?: CoordinatorMode
 }
 
 export type PromotionWatchResult = {
@@ -51,6 +57,8 @@ export type PromotionWatchResult = {
   commented: string[]
   /** New failures left for a later pass because the cap was reached. */
   capped: number
+  /** What the stopped line did (`promotion-line.ts`). */
+  line: string[]
   errors: string[]
 }
 
@@ -67,7 +75,8 @@ export function passLog(result: PromotionWatchResult): { level: 'log' | 'error';
       line: JSON.stringify({ event: 'watch_promotions_failed', errors }),
     })
   }
-  const acted = done.reruns + done.opened.length + done.commented.length + done.capped > 0
+  const acted =
+    done.reruns + done.opened.length + done.commented.length + done.capped + done.line.length > 0
   if (acted)
     lines.push({ level: 'log', line: JSON.stringify({ event: 'watch_promotions', ...done }) })
   return lines
@@ -103,6 +112,7 @@ export async function pollPromotions(deps: PromotionWatchDeps): Promise<Promotio
     opened: [],
     commented: [],
     capped: 0,
+    line: [],
     errors: [],
   }
   const repositories = await deps.db
@@ -132,8 +142,11 @@ async function watchRepository(
   for (const promotion of promotionPullRequests(release)) {
     const pull = await deps.api.openPullRequest(row.fullName, token, promotion.head, promotion.base)
     if (!pull) continue
+    const seen = withEvidence(await failuresOf(pass, pull.headSha))
+    const lineTook = await stopsLine(pass, seen, pull, promotion)
     const fresh: Fresh[] = []
-    for (const check of withEvidence(await failuresOf(pass, pull.headSha))) {
+    for (const check of seen) {
+      if (lineTook && !needsPerson(check.name)) continue
       const signature = findingSignature(check.name, check.evidence)
       const known = await knownFinding(pass, check.name, signature)
       if (!known && !needsPerson(check.name)) fresh.push({ check, signature })
@@ -141,6 +154,28 @@ async function watchRepository(
     }
     await fileTogether(pass, fresh, pull, promotion)
   }
+}
+
+/**
+ * The red promotion of the integration branch stops the line: its failures go to one incident instead of one
+ * issue per check. A failure only a person can fix keeps its own issue.
+ */
+async function stopsLine(pass: Pass, seen: Seen[], pull: PromotionPull, promotion: Where) {
+  if (promotion.head !== INTEGRATION_BRANCH || !pass.deps.lineMode) return false
+  return watchLine(
+    {
+      db: pass.deps.db,
+      api: pass.deps.api,
+      github: pass.deps.github,
+      issues: pass.deps.issues,
+      repo: pass.repo,
+      token: pass.token,
+      mode: pass.deps.lineMode,
+      done: pass.result.line,
+    },
+    seen.filter((check) => !needsPerson(check.name)),
+    { pull, head: promotion.head, base: promotion.base },
+  )
 }
 
 const at = (

@@ -556,6 +556,14 @@ export const ptBR: Copy = {
     changePlaceholder: 'Quer diferente? Diga o quê, com as suas palavras',
     change: 'Mudar',
   },
+  lineAlert: {
+    region: 'Linhas paradas',
+    line: (repository: string, surface: string, forHow: string) =>
+      `${repository}: linha parada há ${forHow}, ${surface} está vermelha. Nada mais roda nem integra ali até ficar verde.`,
+    fix: (issue: number, attempt: number) =>
+      attempt > 1 ? `Correção #${issue}, tentativa ${attempt}` : `Correção #${issue}`,
+    person: (issue: number) => `#${issue} precisa de uma pessoa`,
+  },
   baseAlert: {
     region: 'Branches de integração vermelhas',
     line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>

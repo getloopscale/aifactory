@@ -322,6 +322,14 @@ export const en = {
     changePlaceholder: 'Something different? Say what, in your words',
     change: 'Change it',
   },
+  lineAlert: {
+    region: 'Stopped lines',
+    line: (repository: string, surface: string, forHow: string) =>
+      `${repository}: the line has been stopped for ${forHow}, ${surface} is red. Nothing else runs or integrates there until it is green.`,
+    fix: (issue: number, attempt: number) =>
+      attempt > 1 ? `Fix #${issue}, attempt ${attempt}` : `Fix #${issue}`,
+    person: (issue: number) => `#${issue} needs a person`,
+  },
   baseAlert: {
     region: 'Red integration branches',
     line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>

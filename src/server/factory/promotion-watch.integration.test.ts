@@ -30,6 +30,7 @@ type World = {
   attempts: Record<number, number>
   logs: Record<number, string>
   issueOpen: boolean
+  pending?: number
   /** Set when GitHub refuses to rerun a run: the refusal it answers with. */
   rerunRefusal?: string
 }
@@ -71,6 +72,7 @@ const api: PromotionApi = {
       ? { number: 979, url: 'https://github.com/paulo/app/pull/979', headSha: world.head }
       : undefined,
   failedChecks: async () => world.runs,
+  pendingChecks: async () => world.pending ?? 0,
   jobAttempt: async (_repo, _token, jobId) => ({ runId: 9, attempt: world.attempts[jobId] ?? 1 }),
   jobLog: async (_repo, _token, jobId) => world.logs[jobId] ?? '',
   annotations: async () => ['apps/a.ts:118 Server-side request forgery: depends on user input.'],
