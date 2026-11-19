@@ -149,7 +149,8 @@ reads that file, not a convention.
   integration branch requires status checks, the factory merges nothing itself: it turns on auto-merge pinned
   to the verified commit (`task.awaiting_ci_sha`), and the `integrate-after-ci` cron finishes the integration
   after GitHub merges, or sends the work back when a required check fails. A required check that fails on the head of
-  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`): the
+  the integration branch too is the base's, not the task's (`decideWaitingIntegration` in `factory/ci-wait.ts`), and
+  one the head of the integration branch has no run of yet is nobody's until it has, for up to `CI_SILENCE_MS`: the
   task keeps waiting, the checks blamed on the base are kept on its `done` event (`baseBlame`, for the verified commit),
   and once the base passes all of them the task runs again only to merge the base (`mergeFixedBase`, the job's
   `mergeBase`): `Run.mergeBase` merges the head of the integration branch into the work branch itself, with no agent,
@@ -162,7 +163,9 @@ reads that file, not a convention.
   either path. Nothing else may merge there, with one
   exception: after a changesets release, `publish-changesets` merges the repository's back-merge, the open pull
   request from the release branch into the integration branch of the same repository (never a fork), with a
-  merge commit pinned to its head once its checks are green (`pickBackMerge` in `factory/changesets.ts`). `develop` is
+  merge commit pinned to its head once the checks the integration branch requires are green, or at once when it
+  requires none, since its commits are the release (`pickBackMerge` in `factory/changesets.ts`); a back-merge that conflicts is a `back_merge` finding on the health page until the
+  conflict is gone, and is never merged. `develop` is
   the pre-release: it advances to each integration, which gets a pre-release tag. When `develop` takes changes
   only through a pull request, the factory opens its promotion from the integration branch and turns on
   auto-merge pinned to the head it saw (`pinPromotion` in `factory/promotion-merge.ts`), only on a pull request
@@ -181,7 +184,9 @@ reads that file, not a convention.
   `release_wait`, and the `integrate-after-ci` cron finishes the release after GitHub merges, or refuses it
   with the reason when a required check fails. A clean release pull request is merged at once, the same way. A refused release is retried only by the release train, once per head of `develop`, and only when
   its cause ends by itself (`passingRefusal`: required checks still expected, running or never reported, a head
-  that moved); a second refusal on the same head stays refused, and a new head is a new attempt. Every release, tagged by the factory or published by changesets, releases each finished task
+  that moved); a second refusal on the same head stays refused, and a new head is a new attempt. An agent's
+  release of a head whose release pull request already conflicted with the release branch is refused before
+  anything opens (`ReleaseAlreadyRefused`), and `releaseByMode` does not record it again; a person may still ask. Every release, tagged by the factory or published by changesets, releases each finished task
   whose merge is in the promoted commit and closes its issue through `shipContained` in `factory/ship.ts`; an
   issue that will not close is recorded, never thrown. `ensureBranches` creates the two missing
   branches, never touches one that exists, and refuses the default branch as the integration branch.
@@ -193,8 +198,15 @@ reads that file, not a convention.
   With no changeset waiting, it reads what that comparison lists (`changed-packages.ts`):
   when a package changesets publishes changed, it refuses and names the package; when every change is in a
   private package, an ignored one (`ignore` in `.changeset/config.json`) or no package, the release is the
-  factory's own, tagged after the highest `v` tag, since no changeset can exist for those. The `publish-changesets` cron merges the Version Packages pull
-  request (`changeset-release/<release branch>`) once its checks are green, under the same decision, and
+  factory's own, tagged after the highest `v` tag, since no changeset can exist for those. While a publication of
+  the repository waits, `release()` refuses (`refuseWhilePublishing`), since a promotion before the Version Packages
+  merge makes the workflow version again instead of publishing; a publication whose Version Packages pull request
+  failed a check on its head (`stalledPublication` in `stalled-publication.ts`, the same reading of the checks the
+  cron merges by) is let through, because only a promotion can bring its fix. Once that promotion lands,
+  `completeRelease` ends it as `failed`, its detail starting `superseded by the promotion` (`supersedeUnmerged`),
+  and the next release that contains its task's merge releases that task too (`shipContained`). The `publish-changesets` cron merges the Version Packages pull
+  request (`changeset-release/<release branch>`) once the checks the release branch requires are green (every check,
+  when it requires none), under the same decision, and
   only that pull request; when the workflow has published, it releases the tasks in the promoted commit and
   closes their issues with the versions. The workflow creates the releases one package at a time, so the
   publication waits for a release of every published package whose version the Version Packages merge moved
@@ -257,7 +269,8 @@ reads that file, not a convention.
   The release train (ADR 0010) is the `release_ready` playbook: `release-facts.ts` reads each enabled repository,
   `release-train.ts` decides over it and reads nothing. A repository in `auto` (its `release_mode`, or
   `FACTORY_RELEASE_MODE` when it has none) with integrated work (`done` with a `merged_sha`) that has reached `develop` (it holds commits the release branch lacks), no task queued, running or
-  waiting for CI, no release or publication in flight and its release branch not red or still watched by
+  waiting for CI, no release or publication in flight (a publication stalled on a failed check of its Version
+  Packages pull request does not count) and its release branch not red or still watched by
   `watch-main` gets one `release()` call per head of `develop`, as `agent:coordinator`, so `personDecisions` does
   not count it. The row is recorded on the repository's oldest such task, with the head of `develop`. The bump is
   `bumpFor`: `major` only for an issue labelled `breaking`, `minor` for one labelled `enhancement` or `feature`,
@@ -297,7 +310,10 @@ reads that file, not a convention.
   (`holdRepository` before the fix has a task), `integrationHeldUntil` and `integrate-after-ci` hold every
   integration but the fix's, and the coordinator skips the repository's other exceptions. It ends only when every
   check of a promotion head passed; a fix that ended with the promotion still red is followed by one more, then a
-  person (`MAX_ATTEMPTS`), and the line stays stopped until it is green.
+  person (`MAX_ATTEMPTS`), and the line stays stopped until it is green. These holds all go through `holdingLines`:
+  with `FACTORY_LINE_STOP_SCOPE=fix_first` it returns none, so the incident and its fix issue stay, the issue's
+  priority label takes the fix ahead, and the rest of the repository keeps running and integrating (`hold`, the
+  default, is what is described above).
 - **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
   The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
   `scheduler/facts.ts` reads the queued `run-task` jobs of tasks in `intake`, their issues and the decisions already

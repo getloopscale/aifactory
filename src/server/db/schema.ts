@@ -485,10 +485,13 @@ export const finding = pgTable('finding', {
   key: text('key').notNull().unique(),
   kind: text('kind', { enum: ['stalled', 'orphaned'] }).notNull(),
   subject: text('subject', {
-    enum: ['run', 'queued_run', 'queue', 'answer_resume', 'snapshot', 'revert'],
+    enum: ['run', 'queued_run', 'queue', 'answer_resume', 'snapshot', 'revert', 'back_merge'],
   }).notNull(),
   taskId: integer('task_id').references(() => task.id),
-  /** What the finding points at when it is not a task: a snapshot id, a question or a watch. */
+  /**
+   * What the finding points at when it is not a task: a snapshot id, a question, a watch, or the link of a
+   * back-merge that conflicts with the integration branch.
+   */
   ref: text('ref'),
   detail: text('detail').notNull(),
   firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),

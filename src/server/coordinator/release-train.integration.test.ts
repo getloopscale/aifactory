@@ -211,6 +211,56 @@ describe('the release train in a repository in auto', () => {
   })
 })
 
+describe('the release train while a publication of the repository waits', () => {
+  /**
+   * The publication of an earlier promotion, still waiting for Version Packages #21, whose head reports this
+   * conclusion of its one check.
+   */
+  async function waitingOnVersionPackages(conclusion: 'failure' | 'success') {
+    const earlier = await integrated(['factory'], 'released')
+    await getDb().insert(publication).values({
+      taskId: earlier,
+      repository: REPO,
+      releaseBranch: 'main',
+      promotedSha: 'main0000001',
+      actor: 'agent:coordinator',
+    })
+    repo().pullRequest({
+      number: 21,
+      headRef: 'changeset-release/main',
+      baseRef: 'main',
+      headSha: 'version01',
+    })
+    repo().report('version01', { name: 'dep-check', state: conclusion })
+  }
+  const publications = () => getDb().select().from(publication).orderBy(publication.id)
+
+  it('promotes when a check failed on the head of its Version Packages pull request, superseding it', async () => {
+    await enable('auto')
+    await waitingOnVersionPackages('failure')
+    await integrated()
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1, refused: 0, failed: 0 })
+    expect(promotions()).toHaveLength(1)
+    expect(await publications()).toMatchObject([{ status: 'failed' }])
+    expect((await publications())[0].detail).toMatch(/^superseded by the promotion /)
+  })
+
+  it('holds while the checks of its Version Packages pull request pass', async () => {
+    await enable('auto')
+    await waitingOnVersionPackages('success')
+    await integrated()
+
+    await coordinate(deps(), 'auto')
+
+    expect(promotions()).toEqual([])
+    expect(await actions()).toEqual([])
+    expect(await publications()).toMatchObject([{ status: 'waiting' }])
+  })
+})
+
 describe('the release train while the repository keeps working', () => {
   it('releases while a task of the repository only waits in the queue', async () => {
     await enable('auto')

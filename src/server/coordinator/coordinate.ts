@@ -9,7 +9,7 @@ import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions, type FactsDeps } from './exception-facts'
 import { readCurrentReasons, readQueueFacts } from './queue-facts'
 import { isHeld, recogniseQueue, testOf } from './queue-order'
-import { stoppedLines } from '../line/incident'
+import { holdingLines } from '../line/incident'
 
 import { maintainHolds } from './queue-hold'
 import { recognise, type TaskException } from './exceptions'
@@ -85,7 +85,7 @@ export async function coordinate(
   const held = await maintainHolds(deps.db)
   const reasons = await readCurrentReasons(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
   const recorded = await readRecordedActions(deps.db, [...new Set(exceptions.map((e) => e.taskId))])
-  const lines = await stoppedLines(deps.db)
+  const lines = await holdingLines(deps.db)
   for (const exception of exceptions) {
     // The fix of this failure is on its way: the task waits for it, not sent back to fail the same way.
     const repository = repositories.get(exception.taskId)

@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, like, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -20,7 +20,9 @@ import { PRE_RELEASE_BRANCH, releaseBranchOf } from './branches'
 import { changesetsWaiting, publishedPackagesChanged } from './changed-packages'
 import { usesChangesets } from './changesets'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
+import { CONFLICT_REFUSAL } from './release-wait'
 import { shipContained } from './ship'
+import { stalledPublication, supersedeUnmerged } from './stalled-publication'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
 
@@ -127,6 +129,17 @@ export class ReleaseRefused extends Error {
   }
 }
 
+/**
+ * An agent asked for a release that was already refused for the same head, for a cause that does not end by
+ * itself: asking again would open a wait only to refuse it again, and record the same refusal once more.
+ */
+export class ReleaseAlreadyRefused extends ReleaseRefused {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ReleaseAlreadyRefused'
+  }
+}
+
 export type ReleaseResult = {
   tag: string | undefined
   url: string | undefined
@@ -191,9 +204,9 @@ export async function release(
   if (checks.length === 0 || checks.some((c) => !c.passed)) {
     throw new ReleaseRefused('the checks are not green on this commit')
   }
-  await refuseWhilePublishing(deps, row.repository)
 
   const { token } = await deps.github.installationToken(row.repository)
+  await refuseWhilePublishing(deps, row.repository, token)
   const [saved] = await deps.db
     .select({ releaseBranch: repository.releaseBranch })
     .from(repository)
@@ -228,6 +241,7 @@ export async function release(
     throw new ReleaseRefused(
       `the pre-release branch moved to ${sha.slice(0, 7)} after the release was asked for at ${options.expectedHead.slice(0, 7)}: its checks were read at the older commit`,
     )
+  await refuseKnownConflict(deps, { repository: row.repository, sha, target, actor: options.actor })
   const pull = { number: pr.number, url: pr.url }
   const required = await deps.api.requiredChecks(row.repository, token, target)
   if (required.length > 0) {
@@ -380,6 +394,7 @@ export async function completeRelease(
 ): Promise<ReleaseResult> {
   const { row, pre, pull, token, target, sha, mergeSha, actor } = input
   const taskId = row.id
+  await supersedeUnmerged(deps.db, { repository: row.repository, mergeSha, taskId })
   const published: Published = input.changesets
     ? await handToChangesets(deps, { row, target, mergeSha, actor })
     : await createOwnRelease(deps, { row, pre, pr: pull, token, mergeSha, bump: input.bump, actor })
@@ -455,17 +470,55 @@ async function changesetsToShip(
 }
 
 /**
+ * Refuses an agent's release of a head of the pre-release branch whose release pull request already conflicted
+ * with the release branch. The conflict ends only with a new head (the release branch merged into the
+ * pre-release branch) or a fix on the release branch that only a person makes, so a person may still ask; an
+ * agent's release, asked after every integration and by the release train, would only be refused again.
+ */
+async function refuseKnownConflict(
+  deps: Pick<DeliverDeps, 'db'>,
+  input: { repository: string; sha: string; target: string; actor: string },
+) {
+  if (!input.actor.startsWith('agent:')) return
+  const [refused] = await deps.db
+    .select({ id: releaseWait.id })
+    .from(releaseWait)
+    .where(
+      and(
+        eq(releaseWait.repository, input.repository),
+        eq(releaseWait.sha, input.sha),
+        eq(releaseWait.status, 'refused'),
+        like(releaseWait.detail, `${CONFLICT_REFUSAL} %`),
+      ),
+    )
+    .limit(1)
+  if (!refused) return
+  throw new ReleaseAlreadyRefused(
+    `the release pull request already conflicted with ${input.target} at ${input.sha.slice(0, 7)} of ${PRE_RELEASE_BRANCH}, and an agent does not ask again for the same head: merge ${input.target} into ${PRE_RELEASE_BRANCH}, or ask for the release as a person`,
+  )
+}
+
+/**
  * Refuses a release while a changesets publication of the repository waits. Changesets publishes only from a
  * release branch with no changeset left on it, so a promotion that lands before the Version Packages merge brings
  * new changesets and the workflow versions again instead of publishing: theokit-sdk went from 5.23.0 to 5.25.0
  * on `main` on 2026-11-18 with neither version published (#319).
+ *
+ * A publication whose Version Packages pull request failed a check on its head is let through: its fix reaches
+ * the release branch only through a promotion, so refusing it would hold the repository until a person edits
+ * the database (#367). The promotion supersedes it once it lands (`completeRelease`).
  */
-async function refuseWhilePublishing(deps: Pick<DeliverDeps, 'db'>, repo: string) {
+async function refuseWhilePublishing(
+  deps: Pick<DeliverDeps, 'db' | 'api'>,
+  repo: string,
+  token: string,
+) {
   const [waiting] = await deps.db
-    .select({ versionPullRequest: publication.versionPullRequest })
+    .select()
     .from(publication)
     .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
   if (!waiting) return
+  if (await stalledPublication(deps.api, waiting, token)) return
   const what = waiting.versionPullRequest
     ? `Version Packages #${waiting.versionPullRequest}`
     : 'its Version Packages pull request'

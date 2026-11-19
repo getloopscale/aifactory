@@ -548,6 +548,30 @@ describe('runCase', () => {
     ])
   })
 
+  it('lets a planner apart from the builder and the reviewer reach its service and prepares it in the sandbox', async () => {
+    const provider = sandbox()
+    const planner = agent('planner', [])
+    let prepared = false
+    planner.prepare = async () => {
+      prepared = true
+    }
+
+    await runCase(
+      {
+        ...deps(
+          provider,
+          agent('builder', planned(built())),
+          agent('reviewer', [{ ok: true, summary: APPROVE }]),
+        ),
+        planner,
+      },
+      evalCase,
+    )
+
+    expect(provider.specs[0].egress.map((r) => r.domain)).toContain('planner.example.com')
+    expect(prepared).toBe(true)
+  })
+
   it('sends failed checks back to the builder and passes when the rework fixes them', async () => {
     const provider = sandbox({ checkExits: [1, 1, 0] })
     const builder = agent('builder', planned(built('done', 0.2), built('fixed', 0.1)))

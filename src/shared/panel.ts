@@ -218,7 +218,7 @@ export type RunView = {
 export type FindingView = {
   id: number
   kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert'
+  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert' | 'back_merge'
   taskId: number | null
   taskTitle: string | null
   ref: string | null

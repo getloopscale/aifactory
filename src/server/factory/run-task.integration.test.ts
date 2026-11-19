@@ -39,7 +39,7 @@ import {
   readsHistory,
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
-import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
+import { FakeGithub, type FakeCheckRun, type FakePullRequest } from '../../test/fake-github'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { NewNote } from '../knowledge/store'
@@ -73,6 +73,7 @@ import {
 import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
+import { releaseByMode } from './integration'
 import { pollAnswers } from './waiting'
 import { jobBackend } from './job-backend'
 import { pauseOnRefusal, readPause } from './provider-pause-store'
@@ -1440,10 +1441,13 @@ describe('runTask', () => {
     expect(sandbox.specs).toHaveLength(1)
   })
 
-  it('runs when an open blocker in the same repository is already integrated', async () => {
+  it.each([
+    ['is already integrated', { mergedSha: 'abc123' }],
+    ['was found already resolved on the integration branch', { resolvedSha: 'abc123' }],
+  ])('runs when an open blocker in the same repository %s', async (_name, settled) => {
     const id = await seedTask()
     const blocker = await seedTask(5)
-    await getDb().update(task).set({ mergedSha: 'abc123' }).where(eq(task.id, blocker))
+    await getDb().update(task).set(settled).where(eq(task.id, blocker))
     const sandbox = new FakeSandbox(changed())
     const fetchIssue: RunTaskDeps['fetchIssue'] = async (_repo, number) =>
       number === 7
@@ -5666,6 +5670,68 @@ describe('release', () => {
       expect(await waits()).toHaveLength(1)
     })
 
+    describe('of a head whose release pull request already conflicted with the release branch', () => {
+      /** The release of develop0001 an earlier pass refused because its pull request conflicted with main. */
+      const conflicted = (taskId: number) =>
+        getDb()
+          .insert(releaseWait)
+          .values({
+            taskId,
+            repository: 'paulo/app',
+            pullRequestNumber: 13,
+            pullRequestUrl: RELEASE_PR_URL,
+            sha: 'develop0001',
+            releaseBranch: 'main',
+            bump: 'patch',
+            actor: 'agent:coordinator',
+            changesets: false,
+            checks: ['CI'],
+            status: 'refused',
+            detail: 'the release pull request conflicts with main',
+            endedAt: new Date(),
+          })
+
+      it("refuses an agent's release up front, and opens no second wait", async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await expect(
+          release(dependencies(), id, { bump: 'patch', actor: 'agent:codex' }),
+        ).rejects.toThrow(/already conflicted with main at .*: merge main into develop/)
+        expect(seen.autoMerges).toEqual([])
+        expect(await waits()).toHaveLength(1)
+      })
+
+      it('records no second refusal of an automatic release for it', async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await releaseByMode(dependencies(), {
+          taskId: id,
+          sha: 'abc123def',
+          mode: 'auto',
+          actor: 'agent:codex',
+        })
+
+        // No second wait, whose refusal would be recorded again, and no refusal recorded now either.
+        expect(await waits()).toHaveLength(1)
+        expect(await getDb().select().from(decision).where(eq(decision.taskId, id))).toEqual([])
+      })
+
+      it('still tries when a person asks, since only a person may have fixed the release branch', async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(seen.autoMerges).toEqual([{ number: 13, sha: 'develop0001' }])
+        expect((await waits()).map((w) => w.status)).toEqual(['refused', 'waiting'])
+      })
+    })
+
     it('refuses a release while a changesets publication of the repository is still waiting', async () => {
       const id = await delivered()
       await getDb().insert(publication).values({
@@ -5682,6 +5748,79 @@ describe('release', () => {
       )
       // Nothing is promoted while the publication waits: the task is not released.
       expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+    })
+
+    describe('while a publication waits on a Version Packages pull request that is not merged', () => {
+      /**
+       * The publication of an earlier promotion, released for issue 8, still waiting for Version Packages #21,
+       * whose head `version01` reports these checks.
+       */
+      type Check = Partial<FakeCheckRun> & { name: string }
+      async function waitingOnVersionPackages(checks: Check[]) {
+        const earlier = await integrated(8, 'inside01')
+        await getDb().update(task).set({ stage: 'released' }).where(eq(task.id, earlier))
+        await getDb().insert(publication).values({
+          taskId: earlier,
+          repository: 'paulo/app',
+          releaseBranch: 'main',
+          promotedSha: 'main0000001',
+          actor: 'agent:coordinator',
+          detail: 'checks failed on Version Packages #21: dep-check',
+        })
+        repo().pullRequest({
+          number: 21,
+          headRef: 'changeset-release/main',
+          baseRef: 'main',
+          headSha: 'version01',
+        })
+        checksAre(checks)
+        return earlier
+      }
+      function checksAre(checks: Check[]) {
+        repo().clearChecks('version01')
+        for (const check of checks) repo().checkRun('version01', check)
+      }
+      const ran = (conclusion: string | null): Check => ({
+        name: 'dep-check',
+        status: conclusion ? 'completed' : 'in_progress',
+        conclusion,
+      })
+
+      it('releases when a check failed on its head, and records that publication as superseded by the promotion', async () => {
+        const id = await delivered()
+        const earlier = await waitingOnVersionPackages([ran('failure')])
+        onDevelop({ changesets: ['config.json', 'README.md', 'brave-fox.md'] })
+        repo().compare('main', 'develop', [added('.changeset/brave-fox.md')])
+
+        const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(result).toMatchObject({ mergeSha: 'merge0002', publishing: 'changesets' })
+        const rows = await getDb().select().from(publication).orderBy(publication.id)
+        expect(rows).toMatchObject([
+          { taskId: earlier, status: 'failed', versionPullRequest: null },
+          { taskId: id, status: 'waiting', promotedSha: 'merge0002' },
+        ])
+        expect(rows[0].detail).toMatch(
+          new RegExp(
+            `^superseded by the promotion merge00 of task ${id}.*checks failed on Version Packages #21: dep-check`,
+          ),
+        )
+      })
+
+      it('still refuses while its checks pass, run or have not reported', async () => {
+        const id = await delivered()
+        await waitingOnVersionPackages([])
+        for (const checks of [[ran('success')], [ran(null)], []]) {
+          checksAre(checks)
+
+          await expect(
+            release(dependencies(), id, { bump: 'patch', actor: 'human' }),
+          ).rejects.toThrow(/a publication of paulo\/app still waits for/)
+        }
+        expect(seen.merges).toHaveLength(1)
+        expect(await stageOf(id)).toBe('done')
+        expect(await getDb().select().from(publication)).toMatchObject([{ status: 'waiting' }])
+      })
     })
 
     it('refuses, and records why, when GitHub will not turn auto-merge on', async () => {

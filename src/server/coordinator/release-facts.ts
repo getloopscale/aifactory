@@ -5,6 +5,7 @@ import { coordinatorAction, publication, releaseWait, repository, task, watch } 
 import { PRE_RELEASE_BRANCH, releaseBranchOf } from '../factory/branches'
 import type { ReleaseMode } from '../factory/deliver'
 import { readOf, unread, type Read } from '../factory/doctor'
+import { stalledPublication, type VersionChecksApi } from '../factory/stalled-publication'
 import { WORKING } from '../factory/transitions'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
@@ -24,10 +25,10 @@ import {
 
 /**
  * What the release train reads of each enabled repository, and nothing else: its release mode, its tasks
- * with integrated work, the ones still working, a release or a publication in flight (and since when a
- * publication waits), the last watch of its release branch, then, only when the train does not hold it, the
- * head of the pre-release branch, the decisions already recorded on that head, the release that waited on it
- * and the labels of the issues. It
+ * with integrated work, the ones still working, a release or a publication in flight (since when a publication
+ * waits and, for one whose Version Packages pull request is not merged, its checks), the last watch of its
+ * release branch, then, only when the train does not hold it, the head of the pre-release branch, the
+ * decisions already recorded on that head, the release that waited on it and the labels of the issues. It
  * decides nothing (`release-train.ts` does). A read of GitHub that fails is handed over as not read and
  * becomes an `unknown` exception.
  */
@@ -35,7 +36,7 @@ import {
 export type ReleaseFactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
-  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks'>
+  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks'> & VersionChecksApi
   readIssue: ReadIssue
   /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
   releaseMode: ReleaseMode
@@ -86,36 +87,51 @@ async function waitedMinutes(db: Database, repo: string, now: Date): Promise<num
   return Math.max(0, Math.floor((now.getTime() - new Date(since).getTime()) / 60_000))
 }
 
-/** The publication of the repository that waits, if one does. */
+/**
+ * The publication of the repository that waits, if one does, with what stalls it: the checks of its Version
+ * Packages pull request, read the way `release()` reads them (`stalledPublication`), only for one whose
+ * Version Packages pull request is not merged.
+ */
 async function waitingPublication(
-  db: Database,
+  deps: ReleaseFactsDeps,
   repo: string,
 ): Promise<WaitingPublication | undefined> {
-  const [row] = await db
-    .select({
-      id: publication.id,
-      taskId: publication.taskId,
-      startedAt: publication.startedAt,
-      detail: publication.detail,
-    })
+  const [row] = await deps.db
+    .select()
     .from(publication)
     .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
     .orderBy(asc(publication.id))
     .limit(1)
-  return row && { ...row, startedAt: row.startedAt.toISOString() }
+  if (!row) return undefined
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    startedAt: row.startedAt.toISOString(),
+    detail: row.detail,
+    stalled: await stalledOf(deps, row),
+  }
 }
 
-async function inFlight(
-  db: Database,
-  repo: string,
-  publishing: WaitingPublication | undefined,
-): Promise<string | undefined> {
+async function stalledOf(
+  deps: ReleaseFactsDeps,
+  row: typeof publication.$inferSelect,
+): Promise<Read<string | undefined>> {
+  if (row.versionPullRequest !== null) return readOf(undefined)
+  try {
+    const { token } = await deps.github.installationToken(row.repository)
+    return readOf(await stalledPublication(deps.api, row, token))
+  } catch (error) {
+    const tried = `the Version Packages pull request of publication ${row.id} of ${row.repository}`
+    return unread(tried, message(error))
+  }
+}
+
+async function inFlight(db: Database, repo: string): Promise<string | undefined> {
   const [waiting] = await db
     .select({ url: releaseWait.pullRequestUrl })
     .from(releaseWait)
     .where(and(eq(releaseWait.repository, repo), eq(releaseWait.status, 'waiting')))
-  if (waiting) return `a release waits for the checks of ${waiting.url}`
-  return publishing ? `publication ${publishing.id} has not finished` : undefined
+  return waiting ? `a release waits for the checks of ${waiting.url}` : undefined
 }
 
 /**
@@ -290,15 +306,15 @@ export async function readReleaseFacts(deps: ReleaseFactsDeps): Promise<Reposito
     const mode = repo.releaseMode ?? deps.releaseMode
     if (mode === 'manual') continue
     const at = deps.now?.() ?? new Date()
-    const publishing = await waitingPublication(deps.db, repo.fullName)
+    const waiting = await waitingPublication(deps, repo.fullName)
     const f: RepositoryReleaseFacts = {
       repository: repo.fullName,
       mode,
       releasable: await releasable(deps.db, repo.fullName),
       working: await working(deps.db, repo.fullName),
       waitedMinutes: await waitedMinutes(deps.db, repo.fullName, at),
-      inFlight: await inFlight(deps.db, repo.fullName, publishing),
-      ...(publishing ? { publishing } : {}),
+      inFlight: await inFlight(deps.db, repo.fullName),
+      ...(waiting ? { publication: waiting } : {}),
       at,
       branch: await branchState(deps.db, repo.fullName),
     }
