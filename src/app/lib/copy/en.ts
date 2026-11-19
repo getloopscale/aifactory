@@ -511,7 +511,9 @@ export const en = {
       answer_resume: 'An answer was never resumed',
       snapshot: 'A snapshot nothing needs',
       revert: 'A revert was never confirmed',
+      back_merge: 'A back-merge conflicts and nothing will merge it',
     },
+    openOnGithub: 'Open it on GitHub',
     actions: {
       run: {
         label: 'Start again',
