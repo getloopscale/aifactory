@@ -7,6 +7,8 @@ import {
   bumpFor,
   COORDINATOR_ACTOR,
   passingRefusal,
+  PUBLICATION_STALL_MS,
+  recognisePublicationStall,
   recogniseRelease,
   RELEASE_MAX_WAIT_MINUTES,
   releaseFixesRed,
@@ -429,5 +431,51 @@ describe('a red release branch that the release itself fixes', () => {
         { name: 'c', status: 'in_progress', conclusion: null },
       ]),
     ).toEqual(['a'])
+  })
+})
+
+describe('a publication that keeps the release train waiting', () => {
+  const STARTED = '2026-11-19T02:07:00Z'
+  const publishing = {
+    id: 52,
+    taskId: 6,
+    startedAt: STARTED,
+    detail: 'waits for the Version Packages pull request',
+  }
+  const at = (ms: number) => new Date(Date.parse(STARTED) + ms)
+  const stalled = (over: Partial<RepositoryReleaseFacts> = {}) =>
+    facts({ inFlight: 'publication 52 has not finished', publishing, ...over })
+
+  it('holds the train silently while it is younger than the limit', () => {
+    expect(trainHolds(stalled())).toBe(true)
+    expect(recognisePublicationStall(stalled({ at: at(PUBLICATION_STALL_MS - 60_000) }))).toBe(
+      undefined,
+    )
+  })
+
+  it('is an exception once it has waited the limit, on the task that started it, once per publication', () => {
+    expect(recognisePublicationStall(stalled({ at: at(5 * 60 * 60_000) }))).toEqual({
+      kind: 'publication_stalled',
+      taskId: 6,
+      head: 'publication:52',
+      evidence:
+        'publication 52 of paulo/app has waited 5 hours since 2026-11-19T02:07:00Z, and the release train waits for it: waits for the Version Packages pull request',
+    })
+  })
+
+  it('says how long in hours, and when nothing said what it waits for', () => {
+    const limit = stalled({
+      at: at(PUBLICATION_STALL_MS),
+      publishing: { ...publishing, detail: null },
+    })
+    expect(PUBLICATION_STALL_MS).toBe(3 * 60 * 60_000)
+    expect(recognisePublicationStall(limit)?.evidence).toBe(
+      'publication 52 of paulo/app has waited 3 hours since 2026-11-19T02:07:00Z, and the release train waits for it: it recorded nothing it waits for',
+    )
+  })
+
+  it('is none with no publication waiting, or no time to measure it against', () => {
+    expect(recognisePublicationStall(facts({ at: at(10 * PUBLICATION_STALL_MS) }))).toBe(undefined)
+    expect(recognisePublicationStall(stalled())).toBe(undefined)
   })
 })

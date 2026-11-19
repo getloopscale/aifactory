@@ -41,6 +41,10 @@ export type RepositoryReleaseFacts = {
   waitedMinutes?: number
   /** A release or a publication of the repository that has not finished, said as a person reads it. */
   inFlight: string | undefined
+  /** The publication of the repository that waits, if one does: read whether or not the train holds it. */
+  publishing?: WaitingPublication
+  /** When the facts were read, which is what the age of a publication is measured against. */
+  at?: Date
   /** `sha` is the commit `watch-main` last watched on the release branch. */
   branch: { state: ReleaseBranchState; detail: string; sha?: string }
   /** The facts below are read only when the train does not hold the repository (`trainHolds`). */
@@ -57,6 +61,21 @@ export type RepositoryReleaseFacts = {
   /** Read only for a red release branch with commits to release: the checks of the red commit and of `head`. */
   recovery?: Read<RedRecovery>
 }
+
+/** A publication that has not finished: the task whose release started it, since when, and what it waits for. */
+export type WaitingPublication = {
+  id: number
+  taskId: number
+  startedAt: string
+  detail: string | null
+}
+
+/**
+ * A publication that waits this long holds the train for a person to look at: the Version Packages pull request,
+ * the release workflow or the releases of its packages are not coming by themselves. Nine in ten publications end
+ * within two hours, and the slowest that still published took under three.
+ */
+export const PUBLICATION_STALL_MS = 3 * 60 * 60_000
 
 /**
  * How long integrated work waits for the repository's running tasks to join it in one release. A repository
@@ -232,5 +251,24 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
     ...(f.branch.state === 'red' ? { verifiedHead: head } : {}),
     evidence: `${f.releasable.length} integrated issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
     released: f.labels.value,
+  }
+}
+
+/**
+ * A publication that has waited past the limit, as an exception on the task whose release started it, once per
+ * publication: the train holds the repository while it waits, and the hold is no longer silent.
+ */
+export function recognisePublicationStall(f: RepositoryReleaseFacts): TaskException | undefined {
+  const { publishing, at } = f
+  if (!publishing || !at) return undefined
+  const waited = at.getTime() - Date.parse(publishing.startedAt)
+  if (waited < PUBLICATION_STALL_MS) return undefined
+  const hours = Math.floor(waited / (60 * 60_000))
+  const waitsFor = publishing.detail || 'it recorded nothing it waits for'
+  return {
+    kind: 'publication_stalled',
+    taskId: publishing.taskId,
+    head: `publication:${publishing.id}`,
+    evidence: `publication ${publishing.id} of ${f.repository} has waited ${hours} hours since ${publishing.startedAt}, and the release train waits for it: ${waitsFor}`,
   }
 }

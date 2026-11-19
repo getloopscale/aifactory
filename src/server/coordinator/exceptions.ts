@@ -127,6 +127,7 @@ const CAUSES = [
   'review_plateau',
   'review_unusable',
   'checks_unchanged',
+  'checks_broke_after_review',
   'pull_conflict',
   'base_fixed',
   'ci_red',
@@ -183,6 +184,19 @@ export function failingOutput(runs: CheckRun[], head: string): string {
     .join('\n\n')
 }
 
+/**
+ * What the checks printed on the last commit one of them failed on: for a branch restored to a reviewed commit, the
+ * rework that broke them. Empty when no check failed.
+ */
+export function brokenOutput(runs: CheckRun[]): string {
+  const broken = runs.filter((run) => !run.passed).at(-1)
+  return broken ? failingOutput(runs, broken.sha) : ''
+}
+
+/** Whether a rework that broke the checks reads them from GitHub Actions: only when the factory kept no output. */
+export const readsBrokenCiOutput = (facts: Pick<TaskFacts, 'checks'>): boolean =>
+  brokenOutput(facts.checks?.read ? facts.checks.value : []) === ''
+
 const fencedStart = (lines: string[], max: number) =>
   lines.join('\n').replace(/~{3,}/g, '~~').slice(0, max)
 
@@ -226,9 +240,12 @@ export function failureCause(error: string): ExceptionKind {
   return FAILURE_CAUSES.find(([, matches]) => matches(error))?.[0] ?? 'failure'
 }
 
+/** The handoffs whose exception quotes the checks the factory ran. */
+const CHECKED_CAUSES: ExceptionKind[] = ['checks_unchanged', 'checks_broke_after_review']
+
 /** Whether recognising the exception of a task in `stage` needs the checks the factory ran on it. */
 export function readsChecks(stage: TaskStage, detail: Record<string, unknown> | null): boolean {
-  if (stage === 'handoff') return causeOf(detail) === 'checks_unchanged'
+  if (stage === 'handoff') return CHECKED_CAUSES.includes(causeOf(detail))
   if (stage !== 'failed') return false
   return failureCause(text(detail?.error)) === 'checks_red' || retryableFailure(detail) === 'base'
 }
@@ -291,6 +308,23 @@ function ciRed(reason: string, facts: TaskFacts): Found {
   return ciFailures ? { ...found, ciOutput: ciFailingOutput(ciFailures.value) } : found
 }
 
+/**
+ * A rework after the review that broke the checks, its branch restored to the reviewed commit, with what the checks
+ * printed on the commit that broke them, or what GitHub Actions logged when the factory kept nothing.
+ */
+function checksBroke(evidence: string, facts: TaskFacts): Found {
+  for (const read of [facts.checks, facts.ciFailures]) {
+    if (read && !read.read) return unknown(`could not read ${read.tried}: ${read.error}`)
+  }
+  const { checks, ciFailures } = facts
+  return {
+    kind: 'checks_broke_after_review',
+    evidence,
+    checkOutput: brokenOutput(checks?.read ? checks.value : []),
+    ...(ciFailures?.read ? { ciOutput: ciFailingOutput(ciFailures.value) } : {}),
+  }
+}
+
 /** The integration branch of the task, when its repository is known. */
 const integrationOf = (facts: TaskFacts) => facts.repository?.integrationBranch
 
@@ -301,6 +335,7 @@ function byCause(last: LastEvent, facts: TaskFacts): Found {
   const base = integrationOf(facts)
   if (kind === 'checks_unchanged') return checksUnchanged(reason, facts)
   if (kind === 'ci_red') return ciRed(reason, facts)
+  if (kind === 'checks_broke_after_review') return checksBroke(evidence, facts)
   if (kind === 'pull_conflict' && base) return { kind, evidence, conflictsWith: base }
   if (kind === 'base_fixed' && base) return { kind, evidence, mergeFrom: base }
   return { kind, evidence }
