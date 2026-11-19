@@ -509,10 +509,18 @@ const checksFailed = (failed: CheckResult[]): CaseEnd => ({
 /** Names this process's evaluation runs; the sandbox's metadata also carries the process, which says whether it lives. */
 const PROCESS_RUN = randomUUID()
 
+/** The agents a case runs, each once by name: the builder, the reviewer and a planner apart from them (run.ts). */
+function caseAgents(deps: EvalDeps): CodingHarness[] {
+  const byName = new Map<string, CodingHarness>()
+  for (const agent of [deps.builder, deps.reviewer, deps.planner]) {
+    if (agent && !byName.has(agent.name)) byName.set(agent.name, agent)
+  }
+  return [...byName.values()]
+}
+
 /** What the sandbox of a case may reach: GitHub without a credential, the agents, the registry. */
 async function specFor(deps: EvalDeps, c: EvalCase): Promise<SandboxSpec> {
-  const agents =
-    deps.reviewer.name === deps.builder.name ? [deps.builder] : [deps.builder, deps.reviewer]
+  const agents = caseAgents(deps)
   const agentEgress = (await Promise.all(agents.map((a) => a.egress()))).flat()
   return {
     owner: { owner: 'eval', caseId: c.id, runId: PROCESS_RUN },
@@ -591,7 +599,7 @@ export async function runCase(
     live()
     const repoDir = await checkout(sandbox.backend, c)
     live()
-    for (const agent of new Set([deps.builder, deps.reviewer])) {
+    for (const agent of caseAgents(deps)) {
       await agent.prepare?.(sandbox.backend)
       live()
     }

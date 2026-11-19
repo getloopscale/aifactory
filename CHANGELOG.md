@@ -53,6 +53,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- An evaluation case prepares and lets through a planner apart from the builder and the reviewer, as a task's run does, so a reviewer other than the planner can be evaluated (#358)
 - The Version Packages pull request and the back-merge wait only for the checks their target branch requires, so a red check that branch does not require (`Dependabot`, a matrix job) no longer holds a publication, and every release refused behind it, forever (#343).
 - A required check that fails on a pull request while the integration branch has no run of it yet keeps the task waiting, for up to six hours, instead of sending the work back for a failure the base may have; a repository whose CI runs only on pull requests has no run on its integration branch until a promotion opens (#344).
 - A blocker in the same repository whose task found the issue already resolved on the integration branch no longer blocks, and the reason of a blocked task names the blockers still open each time they are read again (#345).
