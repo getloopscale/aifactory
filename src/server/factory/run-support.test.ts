@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   checkSummary,
+  feedbackSource,
   unestablishedGates,
   pullRequestBody,
   pushWithRetry,
@@ -116,9 +117,32 @@ describe('runContinuation', () => {
     })
   })
 
+  it("marks the coordinator's decision on a review apart from the checks' feedback", () => {
+    expect(runContinuation(undefined, 'scope note', undefined, undefined, true)).toEqual({
+      feedback: 'scope note',
+      fromChecks: true,
+      fromReview: true,
+    })
+  })
+
   it('starts from the beginning for any other decision, or none', () => {
     expect(runContinuation({ kind: 'retry', note: '' }, undefined)).toBeUndefined()
     expect(runContinuation(undefined, undefined)).toBeUndefined()
+  })
+})
+
+describe('who the builder is told sent the work back', () => {
+  it('is the checks for the feedback of the required checks', () => {
+    expect(feedbackSource({ feedback: 'CI failed', fromChecks: true })).toBe('checks')
+  })
+
+  it("is never the checks for the coordinator's decision on a review", () => {
+    expect(feedbackSource({ feedback: 'n', fromChecks: true, fromReview: true })).toBe('person')
+  })
+
+  it('is a person for a request for changes, or no continuation', () => {
+    expect(feedbackSource({ feedback: 'rename it' })).toBe('person')
+    expect(feedbackSource(undefined)).toBe('person')
   })
 })
 

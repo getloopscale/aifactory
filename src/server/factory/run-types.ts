@@ -17,7 +17,16 @@ import type { IsolatedSandboxProvider } from './sandbox'
  * changed nothing. The coordinator reads it (`coordinator/exceptions.ts`).
  */
 export type HandoffCause =
-  'review_plateau' | 'review_unusable' | 'checks_unchanged' | 'agent_configuration'
+  | 'review_plateau'
+  | 'review_unusable'
+  | 'checks_unchanged'
+  | 'agent_configuration'
+  /** Integrated work whose pull request still conflicts with its base after the automatic runs (`ci-wait.ts`). */
+  | 'pull_conflict'
+  /** The base passes the checks blamed on it again, and the pull request still has to merge it (`ci-wait.ts`). */
+  | 'base_fixed'
+  /** The required checks of the pull request still fail after the automatic runs (`ci-wait.ts`). */
+  | 'ci_red'
 
 export type HarnessChoice = CodingHarness | ((labels: string[]) => CodingHarness)
 

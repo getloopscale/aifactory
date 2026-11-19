@@ -205,6 +205,7 @@ async function toPerson(
       stage: 'handoff',
       detail: {
         reason: step.reason,
+        ...(step.cause ? { cause: step.cause } : {}),
         sha: verifiedSha,
         pullRequestUrl: row.pullRequestUrl,
         costUsd: row.costUsd,

@@ -243,8 +243,13 @@ export function gitConfig(author: { name: string; email: string }): string {
 /** A run that continues on the branch the agent pushed, with what to change. */
 export type Continuation = {
   feedback: string
-  /** The repository's required checks sent the work back, not a person. */
+  /** The factory sent the work back with its own note, not a person: the repository's checks, or the coordinator. */
   fromChecks?: boolean
+  /**
+   * The note is the coordinator's decision on a review that did not converge (`scope`), not what failed checks
+   * reported: the builder is never told the checks failed.
+   */
+  fromReview?: boolean
   /** The run only continues a branch an earlier run pushed before it finished: nobody asked for anything. */
   plain?: boolean
   /**
@@ -265,9 +270,18 @@ export function runContinuation(
   feedback: string | undefined,
   resume?: boolean,
   mergeBase?: boolean,
+  fromReview?: boolean,
 ): Continuation | undefined {
   if (mergeBase) return { feedback: '', mergeBase: true }
   if (decided?.kind === 'request_changes') return { feedback: decided.note }
-  if (feedback) return { feedback, fromChecks: true }
+  if (feedback) return { feedback, fromChecks: true, ...(fromReview ? { fromReview: true } : {}) }
   return resume ? { feedback: '', plain: true } : undefined
 }
+
+/**
+ * Who the builder's prompt says sent the work back: the required checks only for their own feedback. The prompt
+ * has no words yet for the coordinator's decision on a review (they belong in `harness.ts`, which is agent
+ * configuration), so that one is read as a request for changes, which is what the review made.
+ */
+export const feedbackSource = (sentBack: Continuation | undefined): 'person' | 'checks' =>
+  sentBack?.fromChecks && !sentBack.fromReview ? 'checks' : 'person'

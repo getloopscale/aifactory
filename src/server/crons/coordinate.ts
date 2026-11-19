@@ -7,7 +7,7 @@ import { evolve, evolveDeps } from '../coordinator/evolve-apply'
 import { coordinatorModeFromEnv } from '../coordinator/mode'
 import { releaseModeFromEnv } from '../factory/deps'
 import { mainProcessOnly } from '../factory/worker-only'
-import { fetchIssue } from '../github/issues'
+import { fetchIssue, listOpenIssues } from '../github/issues'
 import { createIssuesApi } from '../github/issues-api'
 import { actionDeps } from '../panel/deps'
 import { githubPass } from '../github/budget-pass'
@@ -34,6 +34,8 @@ export default defineCron('coordinate', {
           issues: createIssuesApi(),
           readIssue: (repo: string, number: number, token: string) =>
             fetchIssue(repo, number, token),
+          listOpenIssues: (repo: string, label: string, token: string) =>
+            listOpenIssues(repo, label, token),
           drafter: modelScopeDrafter(),
           releaseMode: releaseModeFromEnv(process.env),
           ciChecks: createPromotionApi(),

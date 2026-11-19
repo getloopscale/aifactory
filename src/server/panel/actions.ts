@@ -38,6 +38,7 @@ export type ActionDeps = {
           feedback?: string
           resume?: boolean
           mergeBase?: boolean
+          fromReview?: boolean
         },
         key: string,
       ) => Promise<void>,
@@ -134,6 +135,8 @@ type Rework = {
   plain?: boolean
   /** The run merges the integration branch into the work branch itself, and no agent is given the note. */
   mergeBase?: boolean
+  /** The note is the coordinator's decision on a review, not what failed checks reported. */
+  fromReview?: boolean
   /** The run that failed never started an agent (its sandbox failed), so it was no attempt of the work. */
   preAgent: boolean
 }
@@ -143,7 +146,10 @@ function queuedInput(taskId: number, note: string, changes: boolean, rework?: Re
   if (rework?.mergeBase) return { taskId, mergeBase: true }
   if (rework?.plain) return { taskId, resume: true }
   if (!changes) return { taskId }
-  return rework?.decisionId ? { taskId, decisionId: rework.decisionId } : { taskId, feedback: note }
+  if (rework?.decisionId) return { taskId, decisionId: rework.decisionId }
+  return rework?.fromReview
+    ? { taskId, feedback: note, fromReview: true }
+    : { taskId, feedback: note }
 }
 
 /**
@@ -481,7 +487,12 @@ export async function mergeFixedBase(deps: ActionDeps, taskId: number, note: str
  * that goes through the checks and the review again. Like an automatic send-back, nothing is decided in
  * anybody's name; the coordinator's own record says why (`coordinator/apply.ts`).
  */
-export async function sendBackByCoordinator(deps: ActionDeps, taskId: number, note: string) {
+export async function sendBackByCoordinator(
+  deps: ActionDeps,
+  taskId: number,
+  note: string,
+  { fromReview = false }: { fromReview?: boolean } = {},
+) {
   const row = await load(deps.db, taskId)
   mustAllow(row, 'coordinator_send_back')
   const from = stagesWhere('coordinator_send_back', row)
@@ -494,7 +505,8 @@ export async function sendBackByCoordinator(deps: ActionDeps, taskId: number, no
     })
     return
   }
-  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha)
+  const rework = fromReview ? { note: text, fromReview, preAgent: false } : undefined
+  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha, rework)
 }
 
 /**
