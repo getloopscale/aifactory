@@ -303,7 +303,13 @@ describe('a task held by a red integration branch', () => {
   })
 
   it('is no exception before the limit', () => {
-    expect(recognise(held('2026-11-17T10:30:00Z'))).toEqual([])
+    expect(recognise(held('2026-11-17T11:45:00Z'))).toEqual([])
+  })
+
+  it('is base_red half an hour after the base went red, so a fix starts before the queue piles up', () => {
+    const [found] = recognise(held('2026-11-17T11:20:00Z'))
+    expect(found).toMatchObject({ kind: 'base_red', taskId: 5 })
+    expect(found.evidence).toContain('40 minutes')
   })
 
   it('is base_red past the limit, naming the checks and the commit they hold', () => {

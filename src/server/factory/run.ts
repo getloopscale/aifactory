@@ -1279,6 +1279,7 @@ export class Run {
         reviewer: this.reviewer.name,
         review: outcome.summary,
         rows: checked.here,
+        repository: row.repository,
       }),
     )
     await api.closeIssue(row.repository, this.c.token, row.issueNumber)
@@ -1581,7 +1582,7 @@ export class Run {
       headSha: sha,
       conclusion: verdict.open ? 'success' : 'failure',
       title: verdict.open ? 'All checks passed' : 'Checks did not pass',
-      summary: checkSummary(here),
+      summary: checkSummary(here, row.repository),
     })
     return { results, here, verdict }
   }
@@ -1722,6 +1723,7 @@ export class Run {
         agentSummary: this.summary,
         review: { reviewer: this.reviewer.name, attempt, outcome },
         plan: this.renderedPlan,
+        repository: row.repository,
       }),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
@@ -1812,6 +1814,7 @@ export class Run {
         review: { reviewer: this.reviewer.name, attempt, outcome },
         handoff: reason,
         plan: this.renderedPlan,
+        repository: row.repository,
       }),
     })
     await api.commentOnIssue(

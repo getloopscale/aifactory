@@ -556,6 +556,11 @@ export const ptBR: Copy = {
     changePlaceholder: 'Quer diferente? Diga o quê, com as suas palavras',
     change: 'Mudar',
   },
+  baseAlert: {
+    region: 'Branches de integração vermelhas',
+    line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>
+      `${repository}: ${branch} está vermelha há ${forHow} em ${checks}, segurando ${held} ${held === 1 ? 'entrega' : 'entregas'}.`,
+  },
   pulse: {
     region: 'Métricas da fábrica',
     show: 'Ver métricas',

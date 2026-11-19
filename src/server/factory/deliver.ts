@@ -177,7 +177,7 @@ type Published = {
 export async function release(
   deps: DeliverDeps,
   taskId: number,
-  options: { bump: Bump; actor: string },
+  options: { bump: Bump; actor: string; expectedHead?: string },
 ): Promise<ReleaseResult> {
   const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
   if (!row) throw new ReleaseRefused(`task ${taskId} does not exist`)
@@ -223,6 +223,10 @@ export async function release(
   if (pr.state !== 'open') throw new ReleaseRefused('the release pull request is closed')
   if (pr.draft) throw new ReleaseRefused('the release pull request is a draft: mark it ready first')
   const sha = pr.headSha
+  if (options.expectedHead && options.expectedHead !== sha)
+    throw new ReleaseRefused(
+      `the pre-release branch moved to ${sha.slice(0, 7)} after the release was asked for at ${options.expectedHead.slice(0, 7)}: its checks were read at the older commit`,
+    )
   const pull = { number: pr.number, url: pr.url }
   const required = await deps.api.requiredChecks(row.repository, token, target)
   if (required.length > 0) {

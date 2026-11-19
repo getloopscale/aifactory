@@ -64,6 +64,7 @@ import type { KnowledgeSource } from '../knowledge/source'
 
 import type { EvalCase } from './cases'
 import { caseOutcome, MEASURED_ITS_BASE, type CaseEnd, type CaseResult } from './compare'
+import { whenSlotFree } from './sandbox-slot'
 
 export type EvalDeps = {
   sandbox: IsolatedSandboxProvider
@@ -586,7 +587,8 @@ export async function runCase(
   const work = async (): Promise<CaseResult> => {
     const spec = await specFor(deps, c)
     live()
-    let sandbox = await createIsolatedSandbox(deps.sandbox, spec)
+    // The factory's runs may hold every sandbox the provider allows; the case waits for one to free (#261).
+    let sandbox = await whenSlotFree(() => createIsolatedSandbox(deps.sandbox, spec), { signal })
     held.sandbox = sandbox
     // Abandoned while it was being created: the abort handler and `finally` found nothing to stop.
     if (signal?.aborted) await stopSandbox()

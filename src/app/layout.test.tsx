@@ -151,14 +151,21 @@ describe('the layout', () => {
   it('filters the conversations from the search box', async () => {
     serve(signedIn)
     renderAt('/')
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Outra' })).toBeDefined())
+    // Both conversations must be listed before filtering; on a loaded host the default 1 s wait is too short.
+    await waitFor(
+      () => {
+        expect(screen.getByRole('link', { name: 'Fixa' })).toBeDefined()
+        expect(screen.getByRole('link', { name: 'Outra' })).toBeDefined()
+      },
+      { timeout: 10_000 },
+    )
     fireEvent.click(screen.getByRole('button', { name: t.menu.searchChats }))
     fireEvent.change(screen.getByLabelText(t.menu.searchInChats), { target: { value: 'out' } })
     expect(screen.queryByRole('link', { name: 'Fixa' })).toBeNull()
     expect(screen.getByRole('link', { name: 'Outra' })).toBeDefined()
     fireEvent.change(screen.getByLabelText(t.menu.searchInChats), { target: { value: 'zzz' } })
     expect(screen.getByText(t.menu.noneFound)).toBeDefined()
-  })
+  }, 15_000)
 
   it('folds the menu into a strip of icons, remembers it, and brings the menu back', async () => {
     serve(signedIn)
@@ -237,18 +244,22 @@ describe('the layout', () => {
   it('signs out through the server, with the header it asks for, and goes to the login', async () => {
     const calls = serve(signedIn)
     renderAt('/inbox')
-    await waitFor(() => expect(screen.getByRole('button', { name: t.menu.account })).toBeDefined())
+    const slow = { timeout: 10_000 }
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: t.menu.account })).toBeDefined(),
+      slow,
+    )
 
     fireEvent.keyDown(screen.getByRole('button', { name: t.menu.account }), { key: 'Enter' })
-    fireEvent.click(await screen.findByRole('menuitem', { name: t.menu.signOut }))
+    fireEvent.click(screen.getByRole('menuitem', { name: t.menu.signOut }))
 
-    await waitFor(() => expect(calls.some((c) => c.url === '/api/panel/logout')).toBe(true))
+    await waitFor(() => expect(calls.some((c) => c.url === '/api/panel/logout')).toBe(true), slow)
     expect(calls.find((c) => c.url === '/api/panel/logout')).toMatchObject({
       method: 'POST',
       csrf: '1',
     })
-    await waitFor(() => expect(screen.getByText('the login')).toBeDefined())
-  })
+    await waitFor(() => expect(screen.getByText('the login')).toBeDefined(), slow)
+  }, 40_000)
 
   it('shows the menu in English and in pt-BR, with the items of each', async () => {
     for (const [language, copy] of [

@@ -796,6 +796,30 @@ describe('runTask', () => {
     expect(row).toMatchObject({ headSha: 'abc123def', pullRequestUrl: PR_URL })
   })
 
+  it("discloses the CI quality gates the checks left out on the factory's own repository", async () => {
+    const id = await seedTask()
+    await getDb()
+      .update(task)
+      .set({ repository: 'paulohenriquevn/aifactory' })
+      .where(eq(task.id, id))
+    githubApi.repo('paulohenriquevn/aifactory').prepare()
+    githubApi.repo('paulohenriquevn/aifactory').nextNumber = 12
+    await runTask(deps(new FakeSandbox(changed())), id)
+
+    const check = seen.checkRuns[0] as { summary: string }
+    expect(check.summary).toContain('passed: `')
+    expect(check.summary).toContain('Not run by the factory: `pnpm coverage`, `pnpm crap`')
+    expect(seen.bodies[0]).toContain('Not run by the factory: `pnpm coverage`')
+  })
+
+  it('discloses nothing on another repository', async () => {
+    const id = await seedTask()
+    await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect((seen.checkRuns[0] as { summary: string }).summary).not.toContain('Not run')
+    expect(seen.bodies[0]).not.toContain('Not run')
+  })
+
   it('opens no pull request when the agent says the tests pass and they do not', async () => {
     const id = await seedTask()
     const liar: CodingHarness = {
