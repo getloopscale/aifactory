@@ -100,6 +100,9 @@ beforeEach(async () => {
   )
   api = new FakeGithub()
   repo().prepare().required.set('workspace', ['CI'])
+  // The head of the integration branch passes the checks the tests require unless a test says otherwise, so
+  // a check that fails on the pull request is the change's.
+  for (const name of ['CI', 'Lint', 'CodeQL']) repo().report('b'.repeat(40), { name })
   pull()
   reports({ name: 'CI', state: 'pending', detail: '', url: 'u' })
   Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
@@ -305,6 +308,18 @@ describe('pollAwaitingIntegrations', () => {
   const blameOf = async (id: number) =>
     ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseBlame?: unknown })
       .baseBlame
+
+  it('waits, and sends nothing back, while the integration branch has no run of the failed check yet', async () => {
+    reports(failure('CI'))
+    baseIs()
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [] })
+
+    expect(sentBack).toEqual([])
+    expect(autoMergeOff()).toEqual([])
+    expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+  })
 
   it('waits, and sends nothing back, when the failed check also fails on the integration branch', async () => {
     reports(failure('CI'))
@@ -603,6 +618,7 @@ describe('pollAwaitingIntegrations', () => {
       reason: expect.stringMatching(/still fail after 3 automatic runs: CI/),
       pullRequestUrl: PR_URL,
       sha: VERIFIED,
+      cause: 'ci_red',
     })
     expect(comments()).toEqual([
       {

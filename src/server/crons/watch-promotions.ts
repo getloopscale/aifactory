@@ -1,5 +1,6 @@
 import { defineCron } from 'theokit/server/cron'
 
+import { modeFromEnv } from '../coordinator/mode'
 import { mainProcessOnly } from '../factory/worker-only'
 import { newIssuesCapFromEnv } from '../factory/promotion'
 import { passLog, pollPromotions } from '../factory/promotion-watch'
@@ -22,9 +23,11 @@ export default defineCron('watch-promotions', {
       async () => {
         let deps
         let cap
+        let lineMode
         try {
           deps = actionDeps()
           cap = newIssuesCapFromEnv(process.env)
+          lineMode = modeFromEnv(process.env, 'FACTORY_LINE_STOP_MODE')
         } catch (error) {
           console.error(
             JSON.stringify({ event: 'watch_promotions_not_configured', error: String(error) }),
@@ -38,6 +41,7 @@ export default defineCron('watch-promotions', {
           github: deps.api,
           issues: createIssuesApi(),
           maxNewIssuesPerRepository: cap,
+          lineMode,
         })
         for (const { level, line } of passLog(result)) console[level](line)
       },

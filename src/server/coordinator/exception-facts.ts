@@ -14,6 +14,7 @@ import { automaticRunsSincePerson } from '../panel/queries'
 import type { RecordedAction } from './decide'
 import {
   causeOf,
+  quotedCiOutput,
   readsChecks,
   readsCiOutput,
   type CheckRun,
@@ -202,16 +203,26 @@ async function ciFailuresOf(
 const reasonOf = (event: Read<LastEvent | null>) =>
   event.read && typeof event.value?.detail?.reason === 'string' ? event.value.detail.reason : ''
 
+/** Whether nothing the handoff or the factory kept quotes the failed checks, so their GitHub logs are read. */
+function quietOn(cause: string, facts: TaskFacts): boolean {
+  const reason = reasonOf(facts.last)
+  return cause === 'ci_red' ? quotedCiOutput(reason) === '' : readsCiOutput(reason, facts)
+}
+
+/** The causes of a handoff on failed checks: their pull request is read, and their GitHub logs when nothing quoted them. */
+const ON_FAILED_CHECKS = ['checks_unchanged', 'ci_red']
+
 /** The pull request of a handoff on failed checks and, when nothing else quoted them, their GitHub logs. */
 async function withPullRequest(
   deps: FactsDeps,
   row: PulledTask,
   facts: TaskFacts,
+  cause: string,
 ): Promise<TaskFacts> {
   const pullRequest = await pullRequestOf(deps, row)
   const pull = pullRequest.read ? pullRequest.value : null
   const read = { ...facts, pullRequest }
-  const quiet = readsCiOutput(reasonOf(facts.last), facts)
+  const quiet = quietOn(cause, facts)
   if (!deps.ciChecks || !pull?.head || pull.conflicting || !quiet) return read
   return { ...read, ciFailures: await ciFailuresOf(deps, deps.ciChecks, row.repository, pull.head) }
 }
@@ -276,11 +287,9 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
       if (r.stage === 'done' && r.awaitingCiSha !== null) {
         return { ...facts, baseHold: holds(r.id, null), at }
       }
-      const onFailedChecks =
-        r.stage === 'handoff' &&
-        lastEvent.read &&
-        causeOf(lastEvent.value?.detail ?? null) === 'checks_unchanged'
-      return onFailedChecks ? withPullRequest(deps, r, facts) : facts
+      const cause = lastEvent.read ? causeOf(lastEvent.value?.detail ?? null) : 'unknown'
+      const onFailedChecks = r.stage === 'handoff' && ON_FAILED_CHECKS.includes(cause)
+      return onFailedChecks ? withPullRequest(deps, r, facts, cause) : facts
     }),
   )
 }

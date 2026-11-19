@@ -118,6 +118,69 @@ describe('logEvidence', () => {
     expect(logEvidence(many)).toHaveLength(40)
   })
 
+  it('keeps the failure the runner reports even after forty lines of errors that tests logged and passed', () => {
+    // A suite that passes prints the errors its tests provoke on purpose; the failure is reported at the end.
+    const noise = Array.from({ length: 60 }, (_, i) =>
+      stamp(`TypeError: run.events(...) is not a function (logged by passing test ${i})`),
+    )
+    const log = [
+      ...noise,
+      stamp(
+        ' FAIL   @theokit/agents  tests/unit/capability-map-is-current.test.ts > has NOT drifted',
+      ),
+      stamp('##[error]AssertionError: docs/capability-map.md has drifted from the package'),
+      stamp('##[error]Process completed with exit code 1.'),
+    ].join('\n')
+
+    const evidence = logEvidence(log)
+
+    expect(evidence).toHaveLength(40)
+    expect(evidence.slice(-2)).toEqual([
+      'FAIL   @theokit/agents  tests/unit/capability-map-is-current.test.ts > has NOT drifted',
+      'AssertionError: docs/capability-map.md has drifted from the package',
+    ])
+  })
+
+  it('keeps a failure the log printed plainly before the runner annotated it', () => {
+    const noise = Array.from({ length: 60 }, (_, i) =>
+      stamp(`TypeError: logged by passing test ${i}`),
+    )
+    const log = [
+      ...noise,
+      stamp('AssertionError: the map has drifted'),
+      stamp('##[error]AssertionError: the map has drifted'),
+    ].join('\n')
+
+    const evidence = logEvidence(log)
+
+    expect(evidence).toHaveLength(40)
+    expect(evidence.at(-1)).toBe('AssertionError: the map has drifted')
+  })
+
+  it('keeps forty lines when more than forty report the failure', () => {
+    const log = Array.from({ length: 50 }, (_, i) => stamp(` FAIL  tests/case-${i}.test.ts`)).join(
+      '\n',
+    )
+
+    const evidence = logEvidence(log)
+
+    expect(evidence).toHaveLength(40)
+    expect(evidence[39]).toBe('FAIL  tests/case-39.test.ts')
+  })
+
+  it('drops the warnings a package manager prints while installing', () => {
+    const log = [
+      stamp(
+        ' WARN  Failed to create bin at /home/runner/work/theokit/theokit/apps/theoclaw/node_modules/.bin/theokit. ENOENT: no such file or directory',
+      ),
+      stamp('error TS2322: Type string is not assignable to type number.'),
+    ].join('\n')
+
+    expect(logEvidence(log)).toEqual([
+      'error TS2322: Type string is not assignable to type number.',
+    ])
+  })
+
   it('cuts a very long line', () => {
     const line = `AssertionError: ${'x'.repeat(500)}`
     expect(logEvidence(stamp(line))[0]).toHaveLength(300)
@@ -137,6 +200,19 @@ describe('logEvidence', () => {
 
   it('keeps an error named by its class, such as a TypeError', () => {
     expect(logEvidence(stamp('TypeError: cannot read x'))).toEqual(['TypeError: cannot read x'])
+  })
+
+  it('keeps a line a script starts with a ballot cross, as a changelog check prints its failure', () => {
+    const log = [
+      stamp(
+        '✗ [changelog] @theokit/agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
+      ),
+      stamp('##[error]Process completed with exit code 1.'),
+    ].join('\n')
+
+    expect(logEvidence(log)).toEqual([
+      '✗ [changelog] @theokit/agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
+    ])
   })
 
   it('keeps a cross only when the line starts with it', () => {

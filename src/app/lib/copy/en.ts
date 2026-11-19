@@ -322,6 +322,14 @@ export const en = {
     changePlaceholder: 'Something different? Say what, in your words',
     change: 'Change it',
   },
+  lineAlert: {
+    region: 'Stopped lines',
+    line: (repository: string, surface: string, forHow: string) =>
+      `${repository}: the line has been stopped for ${forHow}, ${surface} is red. Nothing else runs or integrates there until it is green.`,
+    fix: (issue: number, attempt: number) =>
+      attempt > 1 ? `Fix #${issue}, attempt ${attempt}` : `Fix #${issue}`,
+    person: (issue: number) => `#${issue} needs a person`,
+  },
   baseAlert: {
     region: 'Red integration branches',
     line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>
@@ -499,10 +507,13 @@ export const en = {
     kind: {
       run: 'A run stopped moving',
       queued_run: 'A task is queued and nothing will run it',
+      queue: 'Queued runs of a repository are not starting',
       answer_resume: 'An answer was never resumed',
       snapshot: 'A snapshot nothing needs',
       revert: 'A revert was never confirmed',
+      back_merge: 'A back-merge conflicts and nothing will merge it',
     },
+    openOnGithub: 'Open it on GitHub',
     actions: {
       run: {
         label: 'Start again',

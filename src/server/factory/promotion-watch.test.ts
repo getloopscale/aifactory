@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { passLog, type PromotionWatchResult } from './promotion-watch'
 
-const quiet: PromotionWatchResult = { reruns: 0, opened: [], commented: [], capped: 0, errors: [] }
+const quiet: PromotionWatchResult = {
+  reruns: 0,
+  opened: [],
+  commented: [],
+  capped: 0,
+  line: [],
+  errors: [],
+}
 
 describe('passLog', () => {
   it('says nothing for a pass that did nothing', () => {
@@ -15,6 +22,7 @@ describe('passLog', () => {
       { ...quiet, opened: ['u'] },
       { ...quiet, commented: ['o/r#1'] },
       { ...quiet, capped: 1 },
+      { ...quiet, line: ['o/r: line stopped'] },
     ]) {
       const lines = passLog(result)
       expect(lines).toHaveLength(1)
@@ -25,6 +33,7 @@ describe('passLog', () => {
         opened: result.opened,
         commented: result.commented,
         capped: result.capped,
+        line: result.line,
       })
     }
   })

@@ -548,6 +548,30 @@ describe('runCase', () => {
     ])
   })
 
+  it('lets a planner apart from the builder and the reviewer reach its service and prepares it in the sandbox', async () => {
+    const provider = sandbox()
+    const planner = agent('planner', [])
+    let prepared = false
+    planner.prepare = async () => {
+      prepared = true
+    }
+
+    await runCase(
+      {
+        ...deps(
+          provider,
+          agent('builder', planned(built())),
+          agent('reviewer', [{ ok: true, summary: APPROVE }]),
+        ),
+        planner,
+      },
+      evalCase,
+    )
+
+    expect(provider.specs[0].egress.map((r) => r.domain)).toContain('planner.example.com')
+    expect(prepared).toBe(true)
+  })
+
   it('sends failed checks back to the builder and passes when the rework fixes them', async () => {
     const provider = sandbox({ checkExits: [1, 1, 0] })
     const builder = agent('builder', planned(built('done', 0.2), built('fixed', 0.1)))
@@ -758,8 +782,12 @@ describe('runCase', () => {
   })
 
   it('ends as the factory hands it over when the last rework breaks the checks of a reviewed commit, restored', async () => {
-    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 0] })
-    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    // The review's rework breaks the checks, and so do both reworks the checks get after it.
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('third rework')),
+    )
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
     const result = await runCase(deps(provider, builder, reviewer), evalCase)
@@ -771,9 +799,29 @@ describe('runCase', () => {
     )
   })
 
+  it('still gives the review its own rounds after two reworks for failing checks', async () => {
+    const provider = sandbox({ checkExits: [1, 1, 1, 1, 0, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('review rework')),
+    )
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: true })
+    expect(reviewer.prompts).toHaveLength(2)
+  })
+
   it('fails on the checks when they fail on the restored commit too', async () => {
-    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1] })
-    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1, 1, 1] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('third rework')),
+    )
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
     const result = await runCase(deps(provider, builder, reviewer), evalCase)

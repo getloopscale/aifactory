@@ -48,6 +48,8 @@ const GENERIC = [
   /ELIFECYCLE/,
   /ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL/,
   /dependency did not succeed/,
+  // A package manager's warning while installing (`WARN  Failed to create bin ... ENOENT: ...`): never the failure.
+  /^WARN\b/,
   // What an aggregate (gate) job says when a job it needs failed: that one did, never which.
   /\b(one or more|some|any|at least one)\b.*\b(jobs?|checks?|dependenc(y|ies)|needs)\b.*\b(fail|did not succeed|not succeed)/i,
   /^(the )?(job|workflow|run|build|check)s? (has |have )?failed\.?$/i,
@@ -62,7 +64,7 @@ const TELLING = [
   /\bFAIL\b/,
   /\b[A-Z]\w*Error\b:/,
   /\berror TS\d+/,
-  /^[✖×]/,
+  /^[✖×✗]/,
   /^\d+:\d+\s+error\s/,
   /^ERROR: /,
   /^error [\w-]+: /,
@@ -156,15 +158,26 @@ export function stepCommands(log: string): (string | undefined)[] {
 }
 
 /**
+ * A line that reports the failure itself: a test the runner marks failed, or an annotation the runner
+ * printed (`##[error]`). A suite that passes logs many errors its tests provoke on purpose, and those come
+ * first in the log, so these are the lines kept when there are more than forty.
+ */
+const decisive = (raw: string, line: string) => raw.includes('##[error]') || /\bFAIL\b/.test(line)
+
+/**
  * The lines of a job's log that say why it failed, read without a model: assertions, failing tests,
  * type and lint errors (with the file a lint error is in), and what a tool lists under a heading. At
- * most forty, each said once.
+ * most forty, each said once, in the order of the log. When there are more, the lines that report the
+ * failure are kept first and the others fill what is left, so the failure at the end of a long log is
+ * never cut for the errors passing tests logged before it.
  */
 export function logEvidence(log: string): string[] {
-  const kept: string[] = []
-  const keep = (line: string) => {
+  const kept: { line: string; decisive: boolean }[] = []
+  const keep = (line: string, isDecisive = false) => {
     const cut = line.slice(0, MAX_LINE)
-    if (!kept.includes(cut)) kept.push(cut)
+    const seen = kept.find((entry) => entry.line === cut)
+    if (seen) seen.decisive ||= isDecisive
+    else kept.push({ line: cut, decisive: isDecisive })
   }
   let file: string | undefined
   let listing = false
@@ -180,10 +193,20 @@ export function logEvidence(log: string): string[] {
     else if (GENERIC.some((pattern) => pattern.test(line))) continue
     else if (TELLING.some((pattern) => pattern.test(line) || pattern.test(raw))) {
       if (file && LINT_ERROR.test(line)) keep(file)
-      keep(line)
+      keep(line, decisive(raw, line))
     }
   }
-  return kept.slice(0, MAX_LINES)
+  return withinLimit(kept)
+}
+
+/** At most forty lines in the log's order, the decisive ones taken before the rest. */
+function withinLimit(kept: { line: string; decisive: boolean }[]): string[] {
+  if (kept.length <= MAX_LINES) return kept.map((entry) => entry.line)
+  const first = kept.filter((entry) => entry.decisive).slice(0, MAX_LINES)
+  const room = MAX_LINES - first.length
+  const rest = kept.filter((entry) => !entry.decisive).slice(0, room)
+  const chosen = new Set([...first, ...rest])
+  return kept.filter((entry) => chosen.has(entry)).map((entry) => entry.line)
 }
 
 /** The summary lines a check that is not an Actions job gives, after its annotations. */

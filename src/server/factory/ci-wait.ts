@@ -1,6 +1,7 @@
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import type { FailedStep } from './promotion'
+import type { HandoffCause } from './run-types'
 import { AUTOMATIC_RETRIES, automaticRunsLeft } from './transitions'
 
 /**
@@ -69,7 +70,17 @@ export type WaitingStep =
    * task starts over from the integration branch.
    */
   | { kind: 'start_over'; reason: string }
-  | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
+  /**
+   * For a person. `cause` names a handoff the coordinator has a playbook for (`coordinator/exceptions.ts`): a pull
+   * request that still conflicts, a base that passes again, checks that still fail. Any other is for a person only.
+   */
+  | {
+      kind: 'person'
+      reason: string
+      stopAutoMerge: boolean
+      reports?: CheckReport[]
+      cause?: HandoffCause
+    }
   /**
    * A promotion into the pre-release branch held the integration out and the hold expired: the verified
    * commit is integrated now, as the run would have done.
@@ -165,6 +176,22 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
 }
 
 /**
+ * What the required checks of a commit say together, whatever the checks the branch does not require say:
+ * `red` naming the ones that failed, `pending` while one runs or has not reported, `green` once each passed.
+ */
+export function requiredState(input: Pick<WaitingIntegration, 'required' | 'reports'>): {
+  state: 'green' | 'red' | 'pending'
+  failing: string[]
+} {
+  const { failed, silent } = readRequired(input)
+  if (failed.length > 0) return { state: 'red', failing: failed }
+  const running = input.reports.some(
+    (r) => r.state === 'pending' && input.required.includes(r.name),
+  )
+  return { state: silent.length > 0 || running ? 'pending' : 'green', failing: [] }
+}
+
+/**
  * The next step for a pull request that waits for the repository's required checks. The factory only ever
  * lets GitHub merge the commit it verified; anything else (a new push, a closed pull request, auto-merge
  * turned off by somebody) goes to a person. A failed check and a conflict run again on their own, as many
@@ -195,6 +222,7 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
           kind: 'person',
           reason: `the pull request conflicts with its base after ${runs}`,
           stopAutoMerge: true,
+          cause: 'pull_conflict',
         }
   }
   if (input.held && !input.pull.autoMerge) {
@@ -215,7 +243,7 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
   const { failed, silent } = readRequired(input)
   // Whose failure it is needs the base, read only now: a base that cannot be read blocks no other step.
   if (failed.length > 0 && input.baseReports === undefined) return { kind: 'needs_base' }
-  const blame = blameFailures(failed, input.baseReports ?? [], input.blamedOnBase)
+  const blame = blameFailures(failed, input.baseReports ?? [], input.blamedOnBase, input.waitedMs)
   if (blame.own.length > 0) {
     const reports = blame.own.flatMap((name) => failedRuns(input.reports, name))
     if (!runsLeft) {
@@ -224,6 +252,7 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
         reason: `the required checks still fail after ${runs}: ${blame.own.join(', ')}`,
         stopAutoMerge: true,
         reports,
+        cause: 'ci_red',
       }
     }
     return { kind: 'send_back', failed: blame.own, reports }
@@ -243,27 +272,45 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
         kind: 'person',
         reason: `the integration branch passes ${blame.fixed.join(', ')} again, and the pull request still has to merge it after ${runs}`,
         stopAutoMerge: true,
+        cause: 'base_fixed',
       }
 }
 
 /**
  * Whose a failed required check is, by what the head of the integration branch says of the same check:
- * `red` when a run of it failed there too, `unsettled` while it runs there (or, once blamed, until it reports
- * again), `fixed` when the base passes a check blamed on it before, and `own` otherwise: the change's.
+ * `red` when a run of it failed there too, `unsettled` while it runs there, while the base has no run of it
+ * yet (or, once blamed, until it reports again), `fixed` when the base passes a check blamed on it before,
+ * and `own` otherwise: the change's.
+ *
+ * A base with no run of the check says nothing about whose failure it is: a repository whose CI runs on a
+ * pull request, and not on a push to the integration branch, has no run on its head until a promotion opens
+ * from it. Such a check waits, up to `CI_SILENCE_MS` of the pull request's wait; after that the base will not
+ * say, and the failure is the change's.
  */
 type Blame = Record<'own' | 'red' | 'unsettled' | 'fixed', string[]>
 
-function blameFailures(failed: string[], base: CheckReport[], blamed: string[]): Blame {
+function blameFailures(
+  failed: string[],
+  base: CheckReport[],
+  blamed: string[],
+  waitedMs: number,
+): Blame {
   const blame: Blame = { own: [], red: [], unsettled: [], fixed: [] }
-  for (const name of failed) {
-    const runs = base.filter((r) => r.name === name)
-    if (runs.some((r) => r.state === 'failure')) blame.red.push(name)
-    else if (runs.some((r) => r.state === 'pending')) blame.unsettled.push(name)
-    else if (!blamed.includes(name)) blame.own.push(name)
-    else if (runs.length > 0) blame.fixed.push(name)
-    else blame.unsettled.push(name)
-  }
+  for (const name of failed) blame[blameOf(base, blamed.includes(name), waitedMs, name)].push(name)
   return blame
+}
+
+function blameOf(
+  base: CheckReport[],
+  blamedBefore: boolean,
+  waitedMs: number,
+  name: string,
+): keyof Blame {
+  const runs = base.filter((r) => r.name === name)
+  if (runs.some((r) => r.state === 'failure')) return 'red'
+  if (runs.some((r) => r.state === 'pending')) return 'unsettled'
+  if (runs.length > 0) return blamedBefore ? 'fixed' : 'own'
+  return blamedBefore || waitedMs <= CI_SILENCE_MS ? 'unsettled' : 'own'
 }
 
 const NOT_THIS_CHANGE = "so the failure was not this change's."
