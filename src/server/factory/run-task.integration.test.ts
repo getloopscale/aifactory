@@ -39,7 +39,7 @@ import {
   readsHistory,
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
-import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
+import { FakeGithub, type FakeCheckRun, type FakePullRequest } from '../../test/fake-github'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { NewNote } from '../knowledge/store'
@@ -5748,6 +5748,79 @@ describe('release', () => {
       )
       // Nothing is promoted while the publication waits: the task is not released.
       expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+    })
+
+    describe('while a publication waits on a Version Packages pull request that is not merged', () => {
+      /**
+       * The publication of an earlier promotion, released for issue 8, still waiting for Version Packages #21,
+       * whose head `version01` reports these checks.
+       */
+      type Check = Partial<FakeCheckRun> & { name: string }
+      async function waitingOnVersionPackages(checks: Check[]) {
+        const earlier = await integrated(8, 'inside01')
+        await getDb().update(task).set({ stage: 'released' }).where(eq(task.id, earlier))
+        await getDb().insert(publication).values({
+          taskId: earlier,
+          repository: 'paulo/app',
+          releaseBranch: 'main',
+          promotedSha: 'main0000001',
+          actor: 'agent:coordinator',
+          detail: 'checks failed on Version Packages #21: dep-check',
+        })
+        repo().pullRequest({
+          number: 21,
+          headRef: 'changeset-release/main',
+          baseRef: 'main',
+          headSha: 'version01',
+        })
+        checksAre(checks)
+        return earlier
+      }
+      function checksAre(checks: Check[]) {
+        repo().clearChecks('version01')
+        for (const check of checks) repo().checkRun('version01', check)
+      }
+      const ran = (conclusion: string | null): Check => ({
+        name: 'dep-check',
+        status: conclusion ? 'completed' : 'in_progress',
+        conclusion,
+      })
+
+      it('releases when a check failed on its head, and records that publication as superseded by the promotion', async () => {
+        const id = await delivered()
+        const earlier = await waitingOnVersionPackages([ran('failure')])
+        onDevelop({ changesets: ['config.json', 'README.md', 'brave-fox.md'] })
+        repo().compare('main', 'develop', [added('.changeset/brave-fox.md')])
+
+        const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(result).toMatchObject({ mergeSha: 'merge0002', publishing: 'changesets' })
+        const rows = await getDb().select().from(publication).orderBy(publication.id)
+        expect(rows).toMatchObject([
+          { taskId: earlier, status: 'failed', versionPullRequest: null },
+          { taskId: id, status: 'waiting', promotedSha: 'merge0002' },
+        ])
+        expect(rows[0].detail).toMatch(
+          new RegExp(
+            `^superseded by the promotion merge00 of task ${id}.*checks failed on Version Packages #21: dep-check`,
+          ),
+        )
+      })
+
+      it('still refuses while its checks pass, run or have not reported', async () => {
+        const id = await delivered()
+        await waitingOnVersionPackages([])
+        for (const checks of [[ran('success')], [ran(null)], []]) {
+          checksAre(checks)
+
+          await expect(
+            release(dependencies(), id, { bump: 'patch', actor: 'human' }),
+          ).rejects.toThrow(/a publication of paulo\/app still waits for/)
+        }
+        expect(seen.merges).toHaveLength(1)
+        expect(await stageOf(id)).toBe('done')
+        expect(await getDb().select().from(publication)).toMatchObject([{ status: 'waiting' }])
+      })
     })
 
     it('refuses, and records why, when GitHub will not turn auto-merge on', async () => {

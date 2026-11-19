@@ -1,13 +1,14 @@
-import { and, eq, isNotNull, or } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, like, notExists, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { delivery, task } from '../db/schema'
+import { delivery, publication, task } from '../db/schema'
 import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
 import { errorMessage } from './error-message'
 import { closeOpenIssue, releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
+import { SUPERSEDED } from './stalled-publication'
 
 /** A release that reached the release branch: what it promoted, under which tags, and who decided. */
 export type Shipment = {
@@ -84,8 +85,36 @@ async function belongs(
 }
 
 /**
- * Releases every task whose work is in the promoted commit: the one that asked for the release, and each
- * finished task integrated before it. Each gets a delivery per tag, moves to `released`, and its issue is
+ * The tasks whose publication a later promotion superseded (`supersedeUnmerged`) and that no release carried
+ * yet: they wait in `released` for a publication that never published, so the next release that contains
+ * their merge releases them.
+ */
+const supersededUnreleased = (db: Database, repo: string) =>
+  and(
+    inArray(
+      task.id,
+      db
+        .select({ id: publication.taskId })
+        .from(publication)
+        .where(
+          and(
+            eq(publication.repository, repo),
+            eq(publication.status, 'failed'),
+            like(publication.detail, `${SUPERSEDED} %`),
+          ),
+        ),
+    ),
+    notExists(
+      db
+        .select({ id: delivery.id })
+        .from(delivery)
+        .where(and(eq(delivery.taskId, task.id), eq(delivery.kind, 'release'))),
+    ),
+  )
+
+/**
+ * Releases every task whose work is in the promoted commit: the one that asked for the release, each
+ * finished task integrated before it, and each task of a superseded publication not released yet. Each gets a delivery per tag, moves to `released`, and its issue is
  * told where the fix is and closed. A task already holding a delivery of the first tag is left alone, so a
  * pass that runs again does not comment twice. An issue that cannot be closed is recorded on its task's
  * `released` stage and returned; the release is not undone.
@@ -101,7 +130,11 @@ export async function shipContained(
       and(
         eq(task.repository, s.repository),
         isNotNull(task.mergedSha),
-        or(eq(task.stage, 'done'), eq(task.id, s.askedTaskId)),
+        or(
+          eq(task.stage, 'done'),
+          eq(task.id, s.askedTaskId),
+          supersededUnreleased(deps.db, s.repository),
+        ),
       ),
     )
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [] }

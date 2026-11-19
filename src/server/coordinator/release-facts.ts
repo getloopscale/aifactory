@@ -5,6 +5,7 @@ import { coordinatorAction, publication, releaseWait, repository, task, watch } 
 import { PRE_RELEASE_BRANCH, releaseBranchOf } from '../factory/branches'
 import type { ReleaseMode } from '../factory/deliver'
 import { readOf, unread, type Read } from '../factory/doctor'
+import { stalledPublication, type VersionChecksApi } from '../factory/stalled-publication'
 import { WORKING } from '../factory/transitions'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
@@ -23,7 +24,8 @@ import {
 
 /**
  * What the release train reads of each enabled repository, and nothing else: its release mode, its tasks
- * with integrated work, the ones still working, a release or a publication in flight, the last watch of its
+ * with integrated work, the ones still working, a release or a publication in flight (and, for a publication
+ * whose Version Packages pull request is not merged, its checks), the last watch of its
  * release branch, then, only when the train does not hold it, the head of the pre-release branch, the
  * decisions already recorded on that head, the release that waited on it and the labels of the issues. It
  * decides nothing (`release-train.ts` does). A read of GitHub that fails is handed over as not read and
@@ -33,7 +35,7 @@ import {
 export type ReleaseFactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
-  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks'>
+  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks'> & VersionChecksApi
   readIssue: ReadIssue
   /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
   releaseMode: ReleaseMode
@@ -89,12 +91,31 @@ async function inFlight(db: Database, repo: string): Promise<string | undefined>
     .select({ url: releaseWait.pullRequestUrl })
     .from(releaseWait)
     .where(and(eq(releaseWait.repository, repo), eq(releaseWait.status, 'waiting')))
-  if (waiting) return `a release waits for the checks of ${waiting.url}`
-  const [publishing] = await db
-    .select({ id: publication.id })
+  return waiting ? `a release waits for the checks of ${waiting.url}` : undefined
+}
+
+/**
+ * The publication of the repository that has not finished, with what stalls it: the checks of its Version
+ * Packages pull request, read the way `release()` reads them (`stalledPublication`). Read only for one whose
+ * Version Packages pull request is not merged.
+ */
+async function publishing(
+  deps: ReleaseFactsDeps,
+  repo: string,
+): Promise<RepositoryReleaseFacts['publication']> {
+  const [waiting] = await deps.db
+    .select()
     .from(publication)
     .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
-  return publishing ? `publication ${publishing.id} has not finished` : undefined
+  if (!waiting) return undefined
+  if (waiting.versionPullRequest !== null) return { id: waiting.id, stalled: readOf(undefined) }
+  try {
+    const { token } = await deps.github.installationToken(repo)
+    return { id: waiting.id, stalled: readOf(await stalledPublication(deps.api, waiting, token)) }
+  } catch (error) {
+    const tried = `the Version Packages pull request of publication ${waiting.id} of ${repo}`
+    return { id: waiting.id, stalled: unread(tried, message(error)) }
+  }
 }
 
 /**
@@ -275,6 +296,7 @@ export async function readReleaseFacts(deps: ReleaseFactsDeps): Promise<Reposito
       working: await working(deps.db, repo.fullName),
       waitedMinutes: await waitedMinutes(deps.db, repo.fullName, deps.now?.() ?? new Date()),
       inFlight: await inFlight(deps.db, repo.fullName),
+      publication: await publishing(deps, repo.fullName),
       branch: await branchState(deps.db, repo.fullName),
     }
     out.push(trainHolds(f) ? f : await lookFurther(deps, f, repo.releaseBranch))
