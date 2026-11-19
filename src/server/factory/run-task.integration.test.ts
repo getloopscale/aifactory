@@ -75,6 +75,7 @@ import { listTasks } from '../panel/queries'
 import { release } from './deliver'
 import { pollAnswers } from './waiting'
 import { jobBackend } from './job-backend'
+import { pauseOnRefusal, readPause } from './provider-pause-store'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
 const ANTHROPIC = 'sk-ant-key-must-not-leak'
@@ -89,7 +90,7 @@ beforeEach(async () => {
   // No worker runs here: a test takes the merge-task job its run queued, and none is left for the next.
   await getPool().query(`delete from theokit_jobs where name = 'merge-task'`)
   await getPool().query(
-    'truncate table promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table setting, promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -1307,6 +1308,65 @@ describe('runTask', () => {
       await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
     )[0]
     expect(failed.detail).toMatchObject({ failedAt: 'sandbox' })
+  })
+
+  it('pauses the sandbox provider for every process when it refuses a sandbox for credit', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    sandbox.create = async () => {
+      throw new Error('403: team is blocked: credit_exhausted')
+    }
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
+    expect(await readPause(getDb())).toMatchObject({
+      reason: '403: team is blocked: credit_exhausted',
+    })
+    const [failed] = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    expect(retryableFailure(failed.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  it('ends the pause of the sandbox provider once a run started a sandbox', async () => {
+    await pauseOnRefusal(getDb(), '403: team is blocked: credit_exhausted', new Date(0))
+    const id = await seedTask()
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result.status).toBe('done')
+    expect(await readPause(getDb())).toBeNull()
+  })
+
+  it('keeps the pause when a run failed for something else', async () => {
+    await pauseOnRefusal(getDb(), '403: team is blocked: credit_exhausted', new Date(0))
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    sandbox.create = async () => {
+      throw new Error('fetch failed')
+    }
+
+    await runTask(deps(sandbox), id)
+
+    expect(await readPause(getDb())).not.toBeNull()
+  })
+
+  it('waits in the queue while every sandbox slot of the account is up, then runs', async () => {
+    const id = await seedTask()
+    const sandbox = Object.assign(new FakeSandbox(changed()), { maxSandboxes: 1 })
+    sandbox.up.set('another-run', { id: 'another-run', startedAt: new Date(), metadata: {} })
+    const stagesWhileWaiting: string[] = []
+    const slotWait = {
+      sleep: async () => {
+        const [row] = await getDb().select().from(task).where(eq(task.id, id))
+        stagesWhileWaiting.push(row.stage)
+        sandbox.up.delete('another-run')
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { slotWait }), id)
+
+    expect(stagesWhileWaiting).toEqual(['intake'])
+    expect(result.status).toBe('done')
   })
 
   it('refuses to start a sandbox without an allowlist', async () => {
