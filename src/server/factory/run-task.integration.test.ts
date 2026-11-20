@@ -39,7 +39,7 @@ import {
   readsHistory,
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
-import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
+import { FakeGithub, type FakeCheckRun, type FakePullRequest } from '../../test/fake-github'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { NewNote } from '../knowledge/store'
@@ -503,6 +503,13 @@ class RealGit {
     return rm(this.root, { recursive: true, force: true })
   }
 }
+
+/** The `sandbox_prepared` lines a run logged, parsed. */
+const preparedLines = (log: { mock: { calls: unknown[][] } }) =>
+  log.mock.calls
+    .map(([line]) => String(line))
+    .filter((line) => line.includes('"sandbox_prepared"'))
+    .map((line) => JSON.parse(line))
 
 describe('runTask', () => {
   it('pushes factory/<issue> and records the stages in order', async () => {
@@ -1378,6 +1385,52 @@ describe('runTask', () => {
     const result = await runTask(deps(sandbox), id)
     expect(sandbox.specs[0].egress.length).toBeGreaterThan(0)
     expect(result.status).toBe('done')
+  })
+
+  it('logs how long each step of the sandbox preparation took, once, before the first agent', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await runTask(deps(sandbox), id)
+
+    const prepared = preparedLines(log)
+    expect(prepared).toHaveLength(1)
+    expect(prepared[0]).toMatchObject({ event: 'sandbox_prepared', taskId: id })
+    expect(Object.keys(prepared[0].steps)).toEqual([
+      'inputs',
+      'branches',
+      'credentials',
+      'sandbox',
+      'clone',
+      'harness',
+      'knowledge',
+      'repository_facts',
+    ])
+    expect(prepared[0].failedAt).toBeUndefined()
+    expect(prepared[0].totalMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('logs a preparation that failed with the step it failed in', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const noInstall: GithubApp = {
+      installationToken: async () => {
+        throw new Error('the GitHub App is not installed on paulo/app')
+      },
+    }
+
+    await runTask(deps(sandbox, { github: noInstall }), id)
+
+    const prepared = preparedLines(log)
+    expect(prepared).toEqual([
+      expect.objectContaining({
+        taskId: id,
+        failedAt: 'inputs',
+        steps: { inputs: expect.any(Number) },
+      }),
+    ])
   })
 
   it('fails the stage, not the process, when the app is not installed on the repository', async () => {
@@ -5748,6 +5801,79 @@ describe('release', () => {
       )
       // Nothing is promoted while the publication waits: the task is not released.
       expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+    })
+
+    describe('while a publication waits on a Version Packages pull request that is not merged', () => {
+      /**
+       * The publication of an earlier promotion, released for issue 8, still waiting for Version Packages #21,
+       * whose head `version01` reports these checks.
+       */
+      type Check = Partial<FakeCheckRun> & { name: string }
+      async function waitingOnVersionPackages(checks: Check[]) {
+        const earlier = await integrated(8, 'inside01')
+        await getDb().update(task).set({ stage: 'released' }).where(eq(task.id, earlier))
+        await getDb().insert(publication).values({
+          taskId: earlier,
+          repository: 'paulo/app',
+          releaseBranch: 'main',
+          promotedSha: 'main0000001',
+          actor: 'agent:coordinator',
+          detail: 'checks failed on Version Packages #21: dep-check',
+        })
+        repo().pullRequest({
+          number: 21,
+          headRef: 'changeset-release/main',
+          baseRef: 'main',
+          headSha: 'version01',
+        })
+        checksAre(checks)
+        return earlier
+      }
+      function checksAre(checks: Check[]) {
+        repo().clearChecks('version01')
+        for (const check of checks) repo().checkRun('version01', check)
+      }
+      const ran = (conclusion: string | null): Check => ({
+        name: 'dep-check',
+        status: conclusion ? 'completed' : 'in_progress',
+        conclusion,
+      })
+
+      it('releases when a check failed on its head, and records that publication as superseded by the promotion', async () => {
+        const id = await delivered()
+        const earlier = await waitingOnVersionPackages([ran('failure')])
+        onDevelop({ changesets: ['config.json', 'README.md', 'brave-fox.md'] })
+        repo().compare('main', 'develop', [added('.changeset/brave-fox.md')])
+
+        const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(result).toMatchObject({ mergeSha: 'merge0002', publishing: 'changesets' })
+        const rows = await getDb().select().from(publication).orderBy(publication.id)
+        expect(rows).toMatchObject([
+          { taskId: earlier, status: 'failed', versionPullRequest: null },
+          { taskId: id, status: 'waiting', promotedSha: 'merge0002' },
+        ])
+        expect(rows[0].detail).toMatch(
+          new RegExp(
+            `^superseded by the promotion merge00 of task ${id}.*checks failed on Version Packages #21: dep-check`,
+          ),
+        )
+      })
+
+      it('still refuses while its checks pass, run or have not reported', async () => {
+        const id = await delivered()
+        await waitingOnVersionPackages([])
+        for (const checks of [[ran('success')], [ran(null)], []]) {
+          checksAre(checks)
+
+          await expect(
+            release(dependencies(), id, { bump: 'patch', actor: 'human' }),
+          ).rejects.toThrow(/a publication of paulo\/app still waits for/)
+        }
+        expect(seen.merges).toHaveLength(1)
+        expect(await stageOf(id)).toBe('done')
+        expect(await getDb().select().from(publication)).toMatchObject([{ status: 'waiting' }])
+      })
     })
 
     it('refuses, and records why, when GitHub will not turn auto-merge on', async () => {

@@ -101,6 +101,8 @@ function ensureLive(signal: AbortSignal | undefined): void {
 class CaseRun {
   /** The last review that asked for changes: the next round starts from its findings. */
   private earlier: EarlierReview | undefined
+  /** What the builder said to the last review's findings, kept across a check rework. */
+  private reviewAnswer: string | undefined
   cost = 0
   attempts = 1
   reviewRounds = 0
@@ -278,6 +280,7 @@ class CaseRun {
     )
     this.settle(result, 'the agent did not finish the rework')
     this.summary = result.summary
+    if (findings.length > 0) this.reviewAnswer = result.summary
     return this.hasChange()
   }
 
@@ -387,9 +390,8 @@ class CaseRun {
         knowledgeDir: this.knowledgeDir,
         required,
         ...(this.earlier ? { earlier: this.earlier } : {}),
-        ...(this.plan
-          ? { plan: renderChangePlan(this.plan), unplanned, builderSummary: this.summary }
-          : {}),
+        builderSummary: this.reviewAnswer ?? this.summary,
+        ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
       }),
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))

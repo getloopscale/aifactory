@@ -22,6 +22,7 @@ import { usesChangesets } from './changesets'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
 import { CONFLICT_REFUSAL } from './release-wait'
 import { shipContained } from './ship'
+import { stalledPublication, supersedeUnmerged } from './stalled-publication'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
 
@@ -203,9 +204,9 @@ export async function release(
   if (checks.length === 0 || checks.some((c) => !c.passed)) {
     throw new ReleaseRefused('the checks are not green on this commit')
   }
-  await refuseWhilePublishing(deps, row.repository)
 
   const { token } = await deps.github.installationToken(row.repository)
+  await refuseWhilePublishing(deps, row.repository, token)
   const [saved] = await deps.db
     .select({ releaseBranch: repository.releaseBranch })
     .from(repository)
@@ -393,6 +394,7 @@ export async function completeRelease(
 ): Promise<ReleaseResult> {
   const { row, pre, pull, token, target, sha, mergeSha, actor } = input
   const taskId = row.id
+  await supersedeUnmerged(deps.db, { repository: row.repository, mergeSha, taskId })
   const published: Published = input.changesets
     ? await handToChangesets(deps, { row, target, mergeSha, actor })
     : await createOwnRelease(deps, { row, pre, pr: pull, token, mergeSha, bump: input.bump, actor })
@@ -501,13 +503,22 @@ async function refuseKnownConflict(
  * release branch with no changeset left on it, so a promotion that lands before the Version Packages merge brings
  * new changesets and the workflow versions again instead of publishing: theokit-sdk went from 5.23.0 to 5.25.0
  * on `main` on 2026-11-18 with neither version published (#319).
+ *
+ * A publication whose Version Packages pull request failed a check on its head is let through: its fix reaches
+ * the release branch only through a promotion, so refusing it would hold the repository until a person edits
+ * the database (#367). The promotion supersedes it once it lands (`completeRelease`).
  */
-async function refuseWhilePublishing(deps: Pick<DeliverDeps, 'db'>, repo: string) {
+async function refuseWhilePublishing(
+  deps: Pick<DeliverDeps, 'db' | 'api'>,
+  repo: string,
+  token: string,
+) {
   const [waiting] = await deps.db
-    .select({ versionPullRequest: publication.versionPullRequest })
+    .select()
     .from(publication)
     .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
   if (!waiting) return
+  if (await stalledPublication(deps.api, waiting, token)) return
   const what = waiting.versionPullRequest
     ? `Version Packages #${waiting.versionPullRequest}`
     : 'its Version Packages pull request'

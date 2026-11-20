@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { maintainHolds } from '../coordinator/queue-hold'
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -141,5 +141,52 @@ describe('a stopped line', () => {
 
     expect(await integrationHeldUntil(getDb(), REPO, now, other.id)).toBeInstanceOf(Date)
     expect(await integrationHeldUntil(getDb(), REPO, now, fix.id)).toBeUndefined()
+  })
+})
+
+describe('a stopped line whose scope is fix first', () => {
+  // A red promotion held every run of usetheokit/theokit and theokit-sdk for hours while their fixes waited for
+  // the promotion's CI, so the factory finished almost nothing (2026-11-19). The owner's flow integrates fast and
+  // fixes the promotion on its way to develop.
+  beforeEach(() => vi.stubEnv('FACTORY_LINE_STOP_SCOPE', 'fix_first'))
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('holds no run of the repository', async () => {
+    const other = await queued()
+    const fix = await queued()
+    await stop(fix.issue)
+
+    await maintainHolds(getDb())
+
+    expect(await held(other.id)).toBe(false)
+    expect(await held(fix.id)).toBe(false)
+  })
+
+  it('gives back the runs a line held before its scope became fix first', async () => {
+    const other = await queued()
+    await stop(999)
+    vi.stubEnv('FACTORY_LINE_STOP_SCOPE', 'hold')
+    await maintainHolds(getDb())
+    vi.stubEnv('FACTORY_LINE_STOP_SCOPE', 'fix_first')
+
+    await maintainHolds(getDb())
+
+    expect(await held(other.id)).toBe(false)
+  })
+
+  it('holds no run queued after the line stopped', async () => {
+    await stop(999)
+
+    const later = await queued()
+
+    expect(await held(later.id)).toBe(false)
+  })
+
+  it('holds no integration of the repository', async () => {
+    const other = await queued()
+    const fix = await queued()
+    await stop(fix.issue)
+
+    expect(await integrationHeldUntil(getDb(), REPO, new Date(), other.id)).toBeUndefined()
   })
 })

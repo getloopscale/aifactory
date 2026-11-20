@@ -23,6 +23,7 @@ import { untilSlotFree } from './sandbox-slot'
 import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
 import { parkedOf, type Parked, type RunResult, type RunTaskDeps } from './run-types'
+import { Preparation } from './sandbox-prepared'
 import { enterRunStage, TaskCancelled } from './stages'
 
 export type { RunResult, RunTaskDeps } from './run-types'
@@ -91,28 +92,39 @@ async function execute(
   if (!row) throw new Error(`task ${taskId} does not exist`)
 
   const state: RunState = { current: 'sandbox', sandbox: undefined }
+  let preparation: Preparation | undefined
   try {
     // In the queue, before any stage: a run that waits here for a slot is not one stuck in `sandbox`.
     await waitForSlot(deps, taskId, signal)
     // A job a worker took just before its task was cancelled ends here, before any sandbox exists.
     await enterRunStage(db, taskId, 'sandbox', { provider: deps.sandbox.name })
+    const prep = (preparation = new Preparation(taskId))
 
-    // One token, limited to this task's repository. It is used here and in the firewall rule,
-    // and nothing below hands it to the sandbox.
-    const { token } = await deps.github.installationToken(row.repository)
-    const readIssue = deps.fetchIssue ?? defaultFetchIssue
-    const issue = await readIssue(row.repository, row.issueNumber, token)
-    await refuseWhileBlocked(deps, row.repository, issue, readIssue)
-
-    const saved = await loadRepoConfig(db, row.repository)
+    const read = await prep.step('inputs', async () => {
+      // One token, limited to this task's repository. It is used here and in the firewall rule,
+      // and nothing below hands it to the sandbox.
+      const { token } = await deps.github.installationToken(row.repository)
+      const readIssue = deps.fetchIssue ?? defaultFetchIssue
+      const issue = await readIssue(row.repository, row.issueNumber, token)
+      await refuseWhileBlocked(deps, row.repository, issue, readIssue)
+      const saved = await loadRepoConfig(db, row.repository)
+      return {
+        token,
+        issue,
+        saved,
+        // Read from GitHub before any sandbox exists, so nothing the agent does can change it.
+        recipe: await deps.fetchRecipe?.(row.repository, token),
+        clarifications: await clarificationsOf(deps, taskId),
+      }
+    })
+    const { token, issue, saved } = read
     const timeouts = resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, saved.runLimitMs)
     const run = await Run.open({
       deps: { ...deps, timeouts },
       taskId,
       row,
       issue,
-      // Read from GitHub before any sandbox exists, so nothing the agent does can change it.
-      repo: withRecipe(saved, await deps.fetchRecipe?.(row.repository, token)),
+      repo: withRecipe(saved, read.recipe),
       token,
       api: deps.githubApi ?? createGithubApi(),
       branch: `factory/${row.issueNumber}`,
@@ -120,13 +132,17 @@ async function execute(
       signal,
       resuming,
       continuation,
-      clarifications: await clarificationsOf(deps, taskId),
+      clarifications: read.clarifications,
+      preparation: prep,
     })
     // A sandbox started: the provider accepts again, so a pause it caused ends for every process.
     await endPause(db)
+    prep.log()
     const started = await run.start()
     return 'result' in started ? started.result : await run.loop(started.sha)
   } catch (error) {
+    // A preparation that failed is logged with its step; one that ended was logged already.
+    preparation?.log()
     return fail(deps, taskId, state, error, signal)
   } finally {
     await state.sandbox?.stop().catch(() => {})

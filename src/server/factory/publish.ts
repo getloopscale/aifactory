@@ -14,11 +14,10 @@ import {
   versionBranchFor,
   type ReleasesRead,
 } from './changesets'
-import { requiredState } from './ci-wait'
 import { clearFinding, raiseFinding } from './findings'
 import { endWithoutVersionPullRequest, type Ending } from './publication-end'
 import { shipContained, unclosedNote } from './ship'
-import { classify } from './watch'
+import { checksFailedOn, checksOn } from './stalled-publication'
 
 export type PublishDeps = { db: Database; github: GithubApp; api: GithubApi; now?: () => Date }
 
@@ -83,21 +82,13 @@ type Mergeable = {
   pr: { number: number; headSha: string; draft: boolean }
   name: string
   base: string
-}
-
-/**
- * What the checks on the head of a pull request say. When its base requires status checks, only those count,
- * as GitHub counts them: a check the branch does not require, red or running, holds nothing. A base that
- * requires none has every check read, and no check at all is not green.
- */
-async function checksOn(deps: PublishDeps, m: Mergeable) {
-  const required = await deps.api.requiredChecks(m.repo, m.token, m.base)
-  if (required.length === 0)
-    return classify(await deps.api.commitChecks(m.repo, m.token, m.pr.headSha))
-  return requiredState({
-    required,
-    reports: await deps.api.checkReports(m.repo, m.token, m.pr.headSha),
-  })
+  /**
+   * A base that requires no check takes the pull request whatever its head reports. Only the back-merge asks for
+   * it: its commits are the release, verified before they reached the release branch, and an integration branch
+   * that runs no CI would never report a check on it (usetheokit/theokit-sdk#1248 waited behind a failed
+   * Dependabot run).
+   */
+  unprotectedBaseIsGreen?: boolean
 }
 
 /**
@@ -112,10 +103,12 @@ async function mergeWhenGreen(deps: PublishDeps, m: Mergeable): Promise<VersionS
   const detail = await deps.api.readPullRequest(repo, token, pr.number)
   if (detail.mergeableState === 'dirty')
     return { wait: `${name} conflicts with ${m.base}`, conflict: true }
-  const seen = await checksOn(deps, m)
-  if (seen.state === 'red') {
-    return { wait: `checks failed on ${name}: ${seen.failing.join(', ')}` }
+  const seen = await checksOn(deps.api, { repo, token, base: m.base, sha: pr.headSha })
+  if (m.unprotectedBaseIsGreen && seen.unprotected) {
+    await deps.api.mergePullRequest(repo, token, pr.number, pr.headSha, { method: 'merge' })
+    return { merged: pr.number }
   }
+  if (seen.state === 'red') return { wait: checksFailedOn(name, seen.failing) }
   if (seen.state !== 'green') return { wait: `the checks on ${name} are not green yet` }
   await deps.api.mergePullRequest(repo, token, pr.number, pr.headSha, { method: 'merge' })
   return { merged: pr.number }
@@ -311,6 +304,7 @@ async function mergeBackMerges(deps: PublishDeps, result: PublishResult) {
         pr,
         name,
         base: branches.integration,
+        unprotectedBaseIsGreen: true,
       })
       if ('wait' in step && step.conflict) {
         await raiseBackMergeConflict(deps, { ...branches, pr, why: step.wait })

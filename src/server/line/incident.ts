@@ -41,12 +41,33 @@ export async function stoppedLines(db: Db): Promise<Map<string, number | undefin
   return new Map(rows.map((r) => [r.repository, r.fixTaskId ?? undefined]))
 }
 
+const SCOPES = ['hold', 'fix_first'] as const
+/**
+ * What a stopped line holds back. `hold` (the default) holds every other run, integration and coordinator action
+ * of the repository until the line is green again. `fix_first` holds nothing: the incident and its one fix issue
+ * stay, the issue's priority label takes the fix ahead of the queue, and the rest of the repository keeps running
+ * and integrating, for an owner whose integration branch takes work fast and whose promotion is fixed on its way.
+ */
+export type LineStopScope = (typeof SCOPES)[number]
+
+export function lineStopScope(env: NodeJS.ProcessEnv = process.env): LineStopScope {
+  const scope = env.FACTORY_LINE_STOP_SCOPE || 'hold'
+  const known = SCOPES.find((s) => s === scope)
+  if (!known) throw new Error(`FACTORY_LINE_STOP_SCOPE must be hold or fix_first, got ${scope}`)
+  return known
+}
+
+/** The stopped lines that hold the rest of their repository back: none when the scope is `fix_first`. */
+export async function holdingLines(db: Db): Promise<Map<string, number | undefined>> {
+  return lineStopScope() === 'fix_first' ? new Map() : stoppedLines(db)
+}
+
 /**
  * Whether the line of the repository holds the task out: the line is stopped and the task is not its fix.
  * A fix integrates, since the line runs again only once it did.
  */
 export async function lineHolds(db: Db, repository: string, taskId: number): Promise<boolean> {
-  const lines = await stoppedLines(db)
+  const lines = await holdingLines(db)
   return lines.has(repository) && lines.get(repository) !== taskId
 }
 

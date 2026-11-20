@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { readOf, unread } from '../factory/doctor'
+import { readOf, unread, type Read } from '../factory/doctor'
 
 import {
   attemptDue,
   bumpFor,
   COORDINATOR_ACTOR,
   passingRefusal,
+  PUBLICATION_STALL_MS,
+  recognisePublicationStall,
   recogniseRelease,
   RELEASE_MAX_WAIT_MINUTES,
   releaseFixesRed,
@@ -15,6 +17,7 @@ import {
   type RedRecovery,
   trainHolds,
   type RepositoryReleaseFacts,
+  type WaitingPublication,
 } from './release-train'
 
 const HEAD = 'dev1234567890'
@@ -37,6 +40,15 @@ const facts = (over: Partial<RepositoryReleaseFacts> = {}): RepositoryReleaseFac
     { issue: 60, labels: ['factory', 'bug'] },
   ]),
   ...over,
+})
+
+/** A publication that waits, with what its Version Packages pull request says of its stall. */
+const waitingPublication = (stalled: Read<string | undefined>): WaitingPublication => ({
+  id: 52,
+  taskId: 6,
+  startedAt: '2026-11-19T02:07:00Z',
+  detail: null,
+  stalled,
 })
 
 describe('the bump of a release', () => {
@@ -140,6 +152,21 @@ describe('whether the release train holds a repository without looking further',
   it('holds a repository whose last release is still in flight or still watched', () => {
     expect(trainHolds(facts({ inFlight: 'a release waits for its checks' }))).toBe(true)
     expect(trainHolds(facts({ branch: { state: 'watching', detail: '' } }))).toBe(true)
+  })
+
+  it('holds a repository whose publication still waits and is not stalled, or could not be read', () => {
+    expect(trainHolds(facts({ publication: waitingPublication(readOf(undefined)) }))).toBe(true)
+    expect(
+      trainHolds(
+        facts({ publication: waitingPublication(unread('Version Packages', 'GitHub said 502')) }),
+      ),
+    ).toBe(true)
+  })
+
+  it('does not hold a repository whose publication waits on a Version Packages pull request with a failed check', () => {
+    const stalled = readOf('checks failed on Version Packages #583: dep-check / suite')
+
+    expect(trainHolds(facts({ publication: waitingPublication(stalled) }))).toBe(false)
   })
 
   it('looks further at a repository in auto or trial with integrated work and nothing working', () => {
@@ -429,5 +456,65 @@ describe('a red release branch that the release itself fixes', () => {
         { name: 'c', status: 'in_progress', conclusion: null },
       ]),
     ).toEqual(['a'])
+  })
+})
+
+describe('a publication that keeps the release train waiting', () => {
+  const STARTED = '2026-11-19T02:07:00Z'
+  const publication = {
+    id: 52,
+    taskId: 6,
+    startedAt: STARTED,
+    detail: 'waits for the Version Packages pull request',
+    stalled: readOf<string | undefined>(undefined),
+  }
+  const at = (ms: number) => new Date(Date.parse(STARTED) + ms)
+  const stalled = (over: Partial<RepositoryReleaseFacts> = {}) => facts({ publication, ...over })
+
+  it('holds the train silently while it is younger than the limit', () => {
+    expect(trainHolds(stalled())).toBe(true)
+    expect(recognisePublicationStall(stalled({ at: at(PUBLICATION_STALL_MS - 60_000) }))).toBe(
+      undefined,
+    )
+  })
+
+  it('is an exception once it has waited the limit, on the task that started it, once per publication', () => {
+    expect(recognisePublicationStall(stalled({ at: at(5 * 60 * 60_000) }))).toEqual({
+      kind: 'publication_stalled',
+      taskId: 6,
+      head: 'publication:52',
+      evidence:
+        'publication 52 of paulo/app has waited 5 hours since 2026-11-19T02:07:00Z, and the release train waits for it: waits for the Version Packages pull request',
+    })
+  })
+
+  it('says how long in hours, and when nothing said what it waits for', () => {
+    const limit = stalled({
+      at: at(PUBLICATION_STALL_MS),
+      publication: { ...publication, detail: null },
+    })
+    expect(PUBLICATION_STALL_MS).toBe(3 * 60 * 60_000)
+    expect(recognisePublicationStall(limit)?.evidence).toBe(
+      'publication 52 of paulo/app has waited 3 hours since 2026-11-19T02:07:00Z, and the release train waits for it: it recorded nothing it waits for',
+    )
+  })
+
+  it('says what failed on its Version Packages pull request, and that only a new promotion ends it', () => {
+    const failed = stalled({
+      at: at(4 * 60 * 60_000),
+      publication: {
+        ...publication,
+        stalled: readOf<string | undefined>('checks failed on Version Packages #583: dep-check'),
+      },
+    })
+    expect(trainHolds(failed)).toBe(false)
+    expect(recognisePublicationStall(failed)?.evidence).toBe(
+      'publication 52 of paulo/app has waited 4 hours since 2026-11-19T02:07:00Z, and only a new promotion ends it: waits for the Version Packages pull request; checks failed on Version Packages #583: dep-check',
+    )
+  })
+
+  it('is none with no publication waiting, or no time to measure it against', () => {
+    expect(recognisePublicationStall(facts({ at: at(10 * PUBLICATION_STALL_MS) }))).toBe(undefined)
+    expect(recognisePublicationStall(stalled())).toBe(undefined)
   })
 })
