@@ -2319,7 +2319,29 @@ describe('runTask review loop', () => {
     expect(prompts[0]).not.toContain('Still open?')
   })
 
-  it('hands a review rework that changes nothing to a person, with what the builder said, without reviewing the same commit again', async () => {
+  // 69 handoffs in a day were a builder that declined the review with its reasons, which no reviewer ever read (2026-11-19).
+  it('has the reviewer judge, once, the reasons of a builder that changed nothing in answer to the review', async () => {
+    const id = await seedTask()
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => ({
+        ok: true,
+        summary: 'The finding asks me to undo what the scope decision keeps.',
+        sessionId: 'sess-1',
+      }),
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]), verdictJson('approve'))
+
+    const result = await runTask(deps(new FakeSandbox(changed()), { harness: lazy, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def' })
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[1]).toContain(
+      'The finding asks me to undo what the scope decision keeps.',
+    )
+  })
+
+  it('hands a review rework that changes nothing to a person, with what the builder said, once the reviewer judged its reasons and still blocks', async () => {
     const id = await seedTask()
     const lazy: CodingHarness = {
       ...resumableBuilder(),
@@ -2334,7 +2356,7 @@ describe('runTask review loop', () => {
     const result = await runTask(deps(new FakeSandbox(changed()), { harness: lazy, reviewer }), id)
 
     expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def' })
-    expect(await reviewsOf(id)).toHaveLength(1)
+    expect(await reviewsOf(id)).toHaveLength(2)
     expect(seen.drafts).toEqual([true])
     expect(await handoffDetail(id)).toMatchObject({
       cause: 'review_plateau',

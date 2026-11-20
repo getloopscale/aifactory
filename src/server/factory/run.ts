@@ -1870,7 +1870,28 @@ export class Run {
     })
   }
 
-  /** The builder changed nothing in answer to a review and said why: a person reads both sides. */
+  /**
+   * The builder changed nothing in answer to a review and said why. The reviewer reads those reasons on the same
+   * commit, once: its earlier findings and the builder's answer are in its prompt, and it lowers a finding whose
+   * reason holds. An approval goes on like any other; a review that still blocks goes to a person, with both sides.
+   */
+  private async arbitrate(
+    sha: string,
+    attempt: number,
+    here: StoredCheck[],
+    outcome: ReviewVerdict,
+    counts: number[],
+  ): Promise<RunResult> {
+    const judged = await this.review(sha, attempt + 1)
+    if (judged.verdict === 'approve') return this.approved(sha, attempt + 1, here, judged)
+    if (judged.verdict === 'invalid') return this.disputed(sha, attempt, here, outcome, counts)
+    return this.disputed(sha, attempt + 1, here, judged, [
+      ...counts,
+      blockingCount(judged.findings),
+    ])
+  }
+
+  /** The builder changed nothing in answer to a review, and the reviewer still blocks: a person reads both sides. */
   private disputed(
     sha: string,
     attempt: number,
@@ -2056,9 +2077,8 @@ export class Run {
         reviewAllowsRework(counts.length, counts)
       if (outcome.verdict === 'changes' && mayRework) {
         const reworked = await this.rework(attempt + 1, outcome.findings, [], sha)
-        // Reviewing the same commit again would get the same verdict: the disagreement goes to a person.
         if (reworked === undefined)
-          return this.disputed(sha, attempt, checked.here, outcome, counts)
+          return this.arbitrate(sha, attempt, checked.here, outcome, counts)
         sha = reworked
         continue
       }
