@@ -75,9 +75,11 @@ const ENVIRONMENT_PATTERN =
 
 /**
  * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer
- * either. The provider lost the sandbox; nothing the agent wrote caused it.
+ * either, or the stream dropped and e2b could not tell what became of the sandbox (`its state is unknown`). The
+ * provider lost the sandbox; nothing the agent wrote caused it.
  */
-const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe failed/i
+const SANDBOX_UNREACHABLE =
+  /sandbox could not be reached and its (?:health probe failed|state is unknown)/i
 
 /**
  * E2B refusing a new sandbox because the account already runs as many as it may at once (`Rate limit exceeded,
