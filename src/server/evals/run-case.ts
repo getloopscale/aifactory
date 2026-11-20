@@ -21,7 +21,14 @@ import {
 import { BaseProbe, sameChecks } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
-import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
+import {
+  failedInstall,
+  failingChecks,
+  prepareInstall,
+  runChecks,
+  type CheckResult,
+  type PreparedInstall,
+} from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
 import { diffFacts } from '../factory/diff-facts'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
@@ -101,6 +108,8 @@ function ensureLive(signal: AbortSignal | undefined): void {
 class CaseRun {
   /** The last review that asked for changes: the next round starts from its findings. */
   private earlier: EarlierReview | undefined
+  /** What the builder said to the last review's findings, kept across a check rework. */
+  private reviewAnswer: string | undefined
   cost = 0
   attempts = 1
   reviewRounds = 0
@@ -182,8 +191,12 @@ class CaseRun {
       askQuestions: false,
       knowledgeDir: this.knowledgeDir,
       checks: c.checks,
+      installFailed: failedInstall(this.installed),
     }
   }
+
+  /** The install before the builder's first pass, as `Run.installProject` keeps it. */
+  private installed: PreparedInstall | undefined
 
   /**
    * The builder's work, as `Run.build` does it: a builder that can continue a session first writes a plan
@@ -191,8 +204,15 @@ class CaseRun {
    */
   async build(): Promise<void> {
     const { builder, planner } = this.deps
+    this.installed = await prepareInstall(
+      this.backend,
+      this.repoDir,
+      this.c.checks,
+      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    )
     const apart = planner !== undefined && planner.name !== builder.name
-    const discarded = apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
+    const discarded =
+      apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
     const result = await this.agentCall(() => {
       if (apart && this.plan) {
         const prompt = givenPlanPrompt(this.buildInput(), this.plan, planner.name)
@@ -252,7 +272,10 @@ class CaseRun {
     kept: { sha: string; end: CaseEnd },
     failed: CheckResult[],
   ): Promise<CaseEnd> {
-    await must(this.backend, `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`)
+    await must(
+      this.backend,
+      `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`,
+    )
     if (!(await this.hasChange())) return checksFailed(failed)
     await this.commitAll(`evaluation of ${this.c.id}, ${kept.sha.slice(0, 7)} restored`)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
@@ -271,13 +294,14 @@ class CaseRun {
       findings,
       failedChecks: failed,
       checks: this.c.checks,
-      ...(reviewedSha ? { reviewedSha } : {}),
+      ...(reviewedSha ? { reviewedSha, changeBase: this.c.baseSha } : {}),
     })
     const result = await this.agentCall(() =>
       this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt)),
     )
     this.settle(result, 'the agent did not finish the rework')
     this.summary = result.summary
+    if (findings.length > 0) this.reviewAnswer = result.summary
     return this.hasChange()
   }
 
@@ -387,9 +411,8 @@ class CaseRun {
         knowledgeDir: this.knowledgeDir,
         required,
         ...(this.earlier ? { earlier: this.earlier } : {}),
-        ...(this.plan
-          ? { plan: renderChangePlan(this.plan), unplanned, builderSummary: this.summary }
-          : {}),
+        builderSummary: this.reviewAnswer ?? this.summary,
+        ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
       }),
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
