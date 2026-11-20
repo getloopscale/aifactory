@@ -63,6 +63,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The board and every reader of its task list answer in about half a second instead of eight: the factory's database runs without JIT, which Postgres spent compiling the card query on every poll, and `stage_event` has an index on the task and the order of its events (#386)
 - A task whose sandbox stream dropped while e2b could not tell what became of the sandbox (`its state is unknown`) runs again on its own, like any other lost sandbox, instead of staying failed (#384)
 - The banner of a stopped line printed how long the line had been stopped with a fraction of a minute ("5h 9.406216666666694m"). Durations on the board count whole minutes now ("5h 9m") (#377)
 - A later review round no longer blames the task for what a merge of the integration branch brought in. The reviewer read `git diff <reviewed commit> HEAD`, which holds every commit that merge brought, and raised findings such as "the branch adds unrelated job-backend functionality" against work the task never wrote. It now reads the task's own commits since the reviewed one, leaving out merge commits and anything the integration branch already holds. (#375)
