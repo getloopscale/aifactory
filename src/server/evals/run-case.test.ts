@@ -807,7 +807,7 @@ describe('runCase', () => {
     )
   })
 
-  it('ends a case whose review rework changes nothing without reviewing the same commit again', async () => {
+  it('ends a case as handed over when the reviewer still blocks after judging the reasons of a rework that changed nothing', async () => {
     const builder = agent('builder', planned(built(), built('the finding is outside the issue')))
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
@@ -816,8 +816,23 @@ describe('runCase', () => {
       evalCase,
     )
 
-    expect(result).toMatchObject({ passed: false, attempts: 2, reviewRounds: 1 })
-    expect(reviewer.prompts).toHaveLength(1)
+    expect(result).toMatchObject({ passed: false, attempts: 2, reviewRounds: 2 })
+    expect(reviewer.prompts[1]).toContain('the finding is outside the issue')
+  })
+
+  it('passes a case whose reviewer approves after judging the reasons of a rework that changed nothing', async () => {
+    const builder = agent('builder', planned(built(), built('the finding is outside the issue')))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    const result = await runCase(
+      deps(sandbox({ cleanAfterCommit: true }), builder, reviewer),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: true, reviewRounds: 2 })
   })
 
   it('ends as the factory hands it over when the last rework breaks the checks of a reviewed commit, restored', async () => {
