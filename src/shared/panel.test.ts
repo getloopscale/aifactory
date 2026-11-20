@@ -203,6 +203,16 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure({ error: 'the API could not be reached by the test' })).toBeNull()
   })
 
+  // Ten theokit tasks sat in failed on this message, never retried, after e2b dropped their streams (2026-11-19).
+  it('reads a sandbox whose stream dropped with its state unknown as the environment', () => {
+    expect(
+      retryableFailure({
+        error:
+          "[unavailable] the connection to sandbox is1o7eqprocq5135s0y3f ended before the stream completed: The sandbox could not be reached and its state is unknown — it may have been killed or reached its timeout, or the connection to it was lost. Check the sandbox state with 'Sandbox.getInfo()'.",
+      }),
+    ).toBe('environment')
+  })
+
   it('leaves with a person an agent that used all its time, and still retries a command of the environment that timed out', () => {
     expect(
       retryableFailure({
