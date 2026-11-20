@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A task a person resolved from the panel no longer leaves its issue open for good when its resolving commit reaches the release branch through the `catch-up` cron rather than a tagged release. The issue is told which branch holds the commit and closed; an issue the agent already closed gets no comment (#389)
 - The board and every reader of its task list answer in about half a second instead of eight: the factory's database runs without JIT, which Postgres spent compiling the card query on every poll, and `stage_event` has an index on the task and the order of its events (#386)
 - A task whose sandbox stream dropped while e2b could not tell what became of the sandbox (`its state is unknown`) runs again on its own, like any other lost sandbox, instead of staying failed (#384)
 - The banner of a stopped line printed how long the line had been stopped with a fraction of a minute ("5h 9.406216666666694m"). Durations on the board count whole minutes now ("5h 9m") (#377)
