@@ -500,8 +500,15 @@ class CaseRun {
       const findings = [...guards, ...outside, ...read.findings]
       // The next round starts from these findings, as `Run.review` keeps them.
       this.earlier = { sha, findings }
-      // A rework that changed nothing ends the case as the factory hands it over: not reviewed again (#214).
-      if (!(await this.rework(findings, [], sha))) return handedOver
+      // A rework that changed nothing has the reviewer judge the builder's reasons on the same commit, once, as
+      // `Run.arbitrate` does; a review that still blocks ends the case as the factory hands it over.
+      if (!(await this.rework(findings, [], sha))) {
+        const judged = await this.review(sha, unplanned, required)
+        if (judged.verdict === 'approve' && blocking.length === 0) {
+          return { checksPassed: true, verdict: 'approve', blockingGuards: [] }
+        }
+        return judged.verdict === 'invalid' ? handedOver : { ...handedOver, verdict: judged.verdict }
+      }
       sha = await this.applyFixes(await this.commit())
     }
   }
