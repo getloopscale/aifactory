@@ -67,6 +67,7 @@ beforeEach(async () => {
 })
 
 const api: PromotionApi = {
+  lastMergedPullRequest: async () => undefined,
   openPullRequest: async (_repo, _token, head, base) =>
     head === 'workspace' && base === 'develop'
       ? { number: 979, url: 'https://github.com/paulo/app/pull/979', headSha: world.head }

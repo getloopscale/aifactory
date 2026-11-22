@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A line stopped by a red promotion runs again when that promotion merges green between two passes of the promotion watch. With no promotion open the watch read nothing, so the incident stayed open and held the repository until the next promotion; it now reads the promotion merged last, and resolves the incident when it merged after the incident opened with no failed check (#394)
 - A run that renews its sandbox session waits for a free slot to restore it, as a new sandbox does, instead of failing when another run took the slot its snapshot freed (#397)
 - A task a person resolved from the panel no longer leaves its issue open for good when its resolving commit reaches the release branch through the `catch-up` cron rather than a tagged release. The issue is told which branch holds the commit and closed; an issue the agent already closed gets no comment (#389)
 - The board and every reader of its task list answer in about half a second instead of eight: the factory's database runs without JIT, which Postgres spent compiling the card query on every poll, and `stage_event` has an index on the task and the order of its events (#386)
