@@ -154,15 +154,20 @@ export async function createIsolatedSandbox(
   return whenSlotFree(() => provider.create(spec), slot)
 }
 
-/** Restores a sandbox from a snapshot, after the same check as a new one. */
+/**
+ * Restores a sandbox from a snapshot, after the same check as a new one, and waits for a slot the same way. Saving
+ * the snapshot stopped the run's own sandbox, so another run can take that slot before the restore asks for it.
+ */
 export async function restoreIsolatedSandbox(
   provider: IsolatedSandboxProvider,
   snapshotId: string,
   spec: SandboxSpec,
+  slot: Parameters<typeof whenSlotFree>[1] = {},
 ): Promise<IsolatedSandbox> {
   assertIsolated(spec)
-  if (!provider.restore) {
+  const restore = provider.restore?.bind(provider)
+  if (!restore) {
     throw new IsolationRefused(`${provider.name} cannot restore a snapshot`)
   }
-  return provider.restore(snapshotId, spec)
+  return whenSlotFree(() => restore(snapshotId, spec), slot)
 }
