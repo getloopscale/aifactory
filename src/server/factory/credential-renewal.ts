@@ -26,6 +26,37 @@ export type CredentialRenewal = {
   onFailure?: (error: unknown) => void
 }
 
+const CANNOT_RENEW =
+  'this sandbox provider cannot renew the credentials of a running sandbox, so a run would outlive its GitHub token'
+
+/** The firewall rules with `token` on github.com and every other rule kept. */
+const withGithubToken = (egress: EgressRule[], token: string) =>
+  egress.map((rule) => (rule.domain === 'github.com' ? githubEgress(token) : rule))
+
+/**
+ * Gives a sandbox that just started a GitHub token minted now, the firewall first, then the run. The wait for a
+ * sandbox has no limit (#405) and the token in its firewall was minted before it, so after a long wait that
+ * token ends before the first renewal comes, and the clone or the push fails (paulohenriquevn/aifactory#424).
+ */
+export async function freshGithubCredential(
+  sandbox: IsolatedSandbox,
+  egress: EgressRule[],
+  renewal: Pick<CredentialRenewal, 'mint' | 'onToken'>,
+): Promise<void> {
+  if (!sandbox.updateEgress) throw new Error(CANNOT_RENEW)
+  let token: string
+  try {
+    token = await renewal.mint()
+  } catch (error) {
+    throw new Error(
+      `could not mint a GitHub token for the sandbox that just started: ${String(error)}`,
+      { cause: error },
+    )
+  }
+  await sandbox.updateEgress(withGithubToken(egress, token))
+  renewal.onToken(token)
+}
+
 /**
  * Renews the GitHub token of a running sandbox every `CREDENTIAL_RENEWAL_MS`: the firewall first, then the
  * run, so the run never holds a token the sandbox's git does not. This is what lets a run last longer than
@@ -39,9 +70,7 @@ export function renewGithubCredential(
 ): IsolatedSandbox {
   const update = sandbox.updateEgress?.bind(sandbox)
   if (!update) {
-    throw new Error(
-      'this sandbox provider cannot renew the credentials of a running sandbox, so a run would outlive its GitHub token',
-    )
+    throw new Error(CANNOT_RENEW)
   }
   const onFailure =
     renewal.onFailure ??
@@ -53,9 +82,7 @@ export function renewGithubCredential(
     renewing = true
     try {
       const token = await renewal.mint()
-      await update(
-        egress.map((rule) => (rule.domain === 'github.com' ? githubEgress(token) : rule)),
-      )
+      await update(withGithubToken(egress, token))
       renewal.onToken(token)
     } catch (error) {
       onFailure(error)

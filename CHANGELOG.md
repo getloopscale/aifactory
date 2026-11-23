@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A run that waited a long time for a sandbox no longer clones or pushes with a GitHub token that already ended: the sandbox gets a token minted as soon as it starts, on the first session and on a renewed one (#424)
 - A release no longer announces work it does not contain. `release()` refuses a task whose merge the head of the release pull request does not hold, the way it already refused a resolved task's commit, so an integration that has not reached `develop` is no longer marked released, nor its issue closed, on a version without it. The release train anchors on, and counts, only the integrated tasks whose merge the head of `develop` holds, comparing them only when a release is due (#427)
 - The supervisor no longer reports as stalled a run whose worker still holds its job, until the longest a run may take. A run that waited inside a step for a sandbox slot was retried while it was still alive, so two workers ran the task and one reaped the other's sandbox (#422)
 - The review guards leave tests that go with a module the issue removes to the reviewer. A deleted test file whose module of the same name the change also deletes, and cases a test file loses when it stops importing from a module, are minor when the issue names that module, so a review that agrees with the removal converges instead of ending in a handoff (#420)

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { CREDENTIAL_RENEWAL_MS, githubEgress, renewGithubCredential } from './credential-renewal'
+import {
+  CREDENTIAL_RENEWAL_MS,
+  freshGithubCredential,
+  githubEgress,
+  renewGithubCredential,
+} from './credential-renewal'
 import type { EgressRule, IsolatedSandbox } from './sandbox'
 
 beforeEach(() => vi.useFakeTimers())
@@ -144,5 +149,47 @@ describe('renewing the GitHub credential of a running sandbox', () => {
     expect(() =>
       renewGithubCredential(box, egress, { mint: async () => 'x', onToken: () => {} }),
     ).toThrow(/cannot renew the credentials of a running sandbox/)
+  })
+})
+
+describe('a GitHub token minted for a sandbox that just started', () => {
+  it('attaches a token minted now and hands it to the run, without waiting for an interval', async () => {
+    const { box, updates } = sandbox()
+    const tokens: string[] = []
+
+    await freshGithubCredential(box, egress, {
+      mint: async () => 'after-the-wait',
+      onToken: (token) => tokens.push(token),
+    })
+
+    expect(updates).toEqual([[githubEgress('after-the-wait'), { domain: 'registry.npmjs.org' }]])
+    expect(tokens).toEqual(['after-the-wait'])
+  })
+
+  it('fails, handing the run nothing, when no token can be minted', async () => {
+    const { box, updates } = sandbox()
+    const tokens: string[] = []
+
+    await expect(
+      freshGithubCredential(box, egress, {
+        mint: async () => {
+          throw new Error('github is down')
+        },
+        onToken: (token) => tokens.push(token),
+      }),
+    ).rejects.toThrow(
+      /could not mint a GitHub token for the sandbox that just started: .*github is down/,
+    )
+    expect(updates).toEqual([])
+    expect(tokens).toEqual([])
+  })
+
+  it('refuses a sandbox that cannot take a new token', async () => {
+    const { box } = sandbox()
+    delete box.updateEgress
+
+    await expect(
+      freshGithubCredential(box, egress, { mint: async () => 'x', onToken: () => {} }),
+    ).rejects.toThrow(/cannot renew the credentials of a running sandbox/)
   })
 })
