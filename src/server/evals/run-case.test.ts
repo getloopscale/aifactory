@@ -909,8 +909,9 @@ describe('runCase', () => {
       { ok: true, summary: APPROVE },
       { ok: true, summary: APPROVE },
       { ok: true, summary: APPROVE },
+      { ok: true, summary: APPROVE },
     ])
-    const builder = agent('builder', planned(built(), built('again'), built('again')))
+    const builder = agent('builder', planned(built(), built('again'), built('again'), built('again')))
 
     const result = await runCase(
       deps(sandbox({ nameStatus: 'M\t.github/workflows/ci.yml\n' }), builder, reviewer),
@@ -926,8 +927,9 @@ describe('runCase', () => {
       { ok: true, summary: APPROVE },
       { ok: true, summary: APPROVE },
       { ok: true, summary: APPROVE },
+      { ok: true, summary: APPROVE },
     ])
-    const builder = agent('builder', planned(built(), built('again'), built('again')))
+    const builder = agent('builder', planned(built(), built('again'), built('again'), built('again')))
     const testPatch = [
       'diff --git a/src/cli.test.ts b/src/cli.test.ts',
       '--- a/src/cli.test.ts',
