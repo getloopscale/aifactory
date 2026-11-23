@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The supervisor no longer reports as stalled a run whose worker still holds its job, until the longest a run may take. A run that waited inside a step for a sandbox slot was retried while it was still alive, so two workers ran the task and one reaped the other's sandbox (#422)
 - The review guards leave tests that go with a module the issue removes to the reviewer. A deleted test file whose module of the same name the change also deletes, and cases a test file loses when it stops importing from a module, are minor when the issue names that module, so a review that agrees with the removal converges instead of ending in a handoff (#420)
 - The scheduler starts a run that continues a task (sent back, resumed or merging the base) before a first run of the same priority. A run sent back for a conflict no longer waits behind every new issue and conflicts again (#418)
 - A pull request whose required checks passed while a check the branch does not require was red or pending (GitHub's `unstable` status) is merged at once, like a clean one, instead of failing the integration or refusing the release (#413)
