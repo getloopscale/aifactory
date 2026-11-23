@@ -285,13 +285,12 @@ export async function release(
       method: 'merge',
     })
   } catch (error) {
-    if (!resolvedAnchor)
-      // Given back only while nothing recorded the release: a catch-up that saw the commit on the release
-      // branch may have released the task meanwhile.
-      await deps.db
-        .update(task)
-        .set({ stage: 'done' })
-        .where(and(eq(task.id, taskId), claimedUnrecorded))
+    // Given back only while nothing recorded the release: a catch-up that saw the commit on the release
+    // branch may have released the task meanwhile.
+    await deps.db
+      .update(task)
+      .set({ stage: 'done' })
+      .where(and(eq(task.id, taskId), claimedUnrecorded))
     throw new ReleaseRefused(`GitHub did not merge it: ${errorMessage(error)}`)
   }
   return completeRelease(deps, {

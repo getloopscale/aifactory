@@ -43,6 +43,8 @@ export type ReleaseBranchView = {
   actor: string
   /** The commit a release promoted, when a release is what brought the commit there. */
   mergeSha?: string
+  /** Added to the `released` stage of every task: the tags of a release. */
+  detail?: Record<string, unknown>
   /**
    * Runs for each task as it is released, with its issue. A release that has a tag uses it to tell the
    * issue where the fix is; a catch-up has none. It runs after the stage changed. It returns what went wrong, never throws.
@@ -87,6 +89,7 @@ async function releaseEach(
         actor: view.actor,
         releaseBranch: view.releaseBranch,
         resolvedSha: sha,
+        ...view.detail,
         ...(view.mergeSha ? { mergeSha: view.mergeSha } : {}),
       })
       // The issue is told only once the task is released: a transition that failed leaves it for a retry.
