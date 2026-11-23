@@ -8,9 +8,17 @@ import { storageFromUrl } from '../db/config'
 import { delivery, finding, ingress, publication, repository, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
-import type { ChangedFile, CommitChecks, OpenPullRequest, PublishedRelease } from '../github/pulls'
+import type {
+  ChangedFile,
+  CommitChecks,
+  OpenPullRequest,
+  PublishedRelease,
+  TagWorkflowRun,
+} from '../github/pulls'
 
+import { release } from './deliver'
 import { pollPublications } from './publish'
+import { NO_RUN_MS } from './tag-publication'
 import { shipContained } from './ship'
 
 beforeAll(async () => {
@@ -605,6 +613,134 @@ describe('publishing a changesets release', () => {
 
 const issueOf = async (id: number) =>
   (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
+
+describe('publishing a tag the factory pushed', () => {
+  const TAG = 'v1.2.3'
+  const run = (over: Partial<TagWorkflowRun> = {}): TagWorkflowRun => ({
+    name: 'Release',
+    status: 'completed',
+    conclusion: 'success',
+    headSha: 'promoted1',
+    url: 'https://github.com/usetheokit/ui/actions/runs/1',
+    ...over,
+  })
+  /** The task a tag release was asked for, with the publication that waits for the workflow of its tag. */
+  async function tagPublication() {
+    const id = await seedTask('released')
+    await getDb()
+      .insert(publication)
+      .values({
+        taskId: id,
+        repository: REPO,
+        releaseBranch: 'main',
+        promotedSha: 'promoted1',
+        actor: 'human',
+        kind: 'tag',
+        tag: TAG,
+        tagUrl: `https://github.com/usetheokit/ui/releases/tag/${TAG}`,
+        startedAt: STARTED,
+      })
+    return id
+  }
+  const releasesOf = () => getDb().select().from(delivery).where(eq(delivery.kind, 'release'))
+  const stageOf = async (id: number) =>
+    (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
+
+  it('waits, and releases and closes nothing, while the workflow has not started or still runs', async () => {
+    const id = await tagPublication()
+    const contained = await seedTask('done', 'shipped1')
+
+    expect((await pollPublications(deps())).waiting).toBe(1)
+    expect((await row()).detail).toContain('to start')
+    repo().tagRuns.set(TAG, [run({ status: 'in_progress', conclusion: null })])
+    expect((await pollPublications(deps())).waiting).toBe(1)
+    expect((await row()).detail).toContain('to finish')
+
+    expect(await releasesOf()).toEqual([])
+    expect(closed()).toEqual([])
+    expect(await stageOf(contained)).toBe('done')
+    expect(await stageOf(id)).toBe('released')
+    expect((await row()).status).toBe('waiting')
+  })
+
+  it('releases every contained task once the workflow succeeded, naming the tag, and does not do it twice', async () => {
+    const id = await tagPublication()
+    const contained = await seedTask('done', 'shipped1')
+    const later = await seedTask('done', 'later1')
+    repo().unreachable.add('later1')
+    repo().tagRuns.set(TAG, [run()])
+
+    const result = await pollPublications(deps())
+    await pollPublications(deps())
+
+    expect(result.published).toHaveLength(1)
+    expect(await row()).toMatchObject({ status: 'published', tags: [TAG] })
+    expect((await releasesOf()).map((d) => [d.taskId, d.tag]).sort()).toEqual(
+      [
+        [id, TAG],
+        [contained, TAG],
+      ].sort(),
+    )
+    expect(await stageOf(contained)).toBe('released')
+    expect(await stageOf(later)).toBe('done')
+    expect(closed()).toHaveLength(2)
+    expect(comments()).toHaveLength(2)
+    expect(comments()[0].body).toContain(`Available in \`${TAG}\``)
+  })
+
+  it('fails the publication with the reason on the task, closes nothing, and lets the next release carry its tasks', async () => {
+    const id = await tagPublication()
+    repo().tagRuns.set(TAG, [run({ conclusion: 'failure' })])
+
+    const result = await pollPublications(deps())
+
+    expect(result.failed).toHaveLength(1)
+    expect(await row()).toMatchObject({ status: 'failed' })
+    expect((await row()).detail).toContain('the workflow run of v1.2.3 failed')
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    expect(events.at(-1)?.detail).toMatchObject({ published: false, tag: TAG })
+    expect(await releasesOf()).toEqual([])
+    expect(closed()).toEqual([])
+
+    // The release that follows, by another task, carries the task of the failed publication too.
+    const next = await seedTask('done', 'next1')
+    await shipContained(deps(), {
+      repository: REPO,
+      token: 't',
+      promotedSha: 'promoted2',
+      releaseBranch: 'main',
+      askedTaskId: next,
+      actor: 'human',
+      tags: [published('v1.2.4')],
+    })
+    expect((await releasesOf()).map((d) => [d.taskId, d.tag]).sort()).toEqual(
+      [
+        [id, 'v1.2.4'],
+        [next, 'v1.2.4'],
+      ].sort(),
+    )
+  })
+
+  it('fails when no workflow ran for the tag within the time it is given', async () => {
+    await tagPublication()
+
+    const result = await pollPublications(deps(new Date(STARTED.getTime() + NO_RUN_MS)))
+
+    expect(result.failed).toHaveLength(1)
+    expect((await row()).detail).toContain('no workflow ran')
+  })
+
+  it('cannot start a second publication on the task of one that failed: that task is released and asks for no release', async () => {
+    const id = await tagPublication()
+    repo().tagRuns.set(TAG, [run({ conclusion: 'failure' })])
+    await pollPublications(deps())
+
+    await expect(
+      release({ db: getDb(), github, api }, id, { bump: 'patch', actor: 'human' }),
+    ).rejects.toThrow()
+    expect(await getDb().select().from(publication)).toHaveLength(1)
+  })
+})
 
 describe('a publication whose release run finished without a Version Packages pull request', () => {
   /** An hour after the promotion: the release run on the promoted commit has long finished. */

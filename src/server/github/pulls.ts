@@ -67,6 +67,18 @@ export type BranchAhead = { sha: string; aheadBy: number; committedAt: Date }
 /** A full release a repository published, as its own release workflow names it. */
 export type PublishedRelease = { tag: string; url: string; publishedAt: Date }
 
+/** A workflow run a pushed tag started. */
+export type TagWorkflowRun = {
+  name: string
+  /** `queued`, `in_progress` or `completed`. */
+  status: string
+  /** How a completed run ended; null while it runs. */
+  conclusion: string | null
+  /** The commit the run is on: what the tag points at. */
+  headSha: string
+  url: string
+}
+
 /** The most pages of 100 reports `commitChecks` reads of one commit before it says it could not read them all. */
 const MAX_CHECK_PAGES = 20
 
@@ -240,6 +252,8 @@ export type GithubApi = {
   ): Promise<string[] | undefined>
   /** The full releases (no pre-releases, no drafts) published at or after `since`, newest first. */
   releasesSince(repo: string, token: string, since: Date): Promise<PublishedRelease[]>
+  /** The workflow runs the push of the tag `tag` started, as GitHub lists them (the latest attempt of each). */
+  workflowRunsOnTag(repo: string, token: string, tag: string): Promise<TagWorkflowRun[]>
   /** Whether `ancestor` is in the history of `descendant`. */
   contains(repo: string, token: string, descendant: string, ancestor: string): Promise<boolean>
   /** The pull request opened from `head`, open or not, if there is one. */
@@ -703,6 +717,35 @@ export function createGithubApi(
         .filter((r) => !r.prerelease && !r.draft && r.published_at !== null)
         .map((r) => ({ tag: r.tag_name, url: r.html_url, publishedAt: new Date(r.published_at!) }))
         .filter((r) => r.publishedAt.getTime() >= since.getTime())
+    },
+
+    async workflowRunsOnTag(repo, token, tag) {
+      const body = (await (
+        await ensure(
+          await call(
+            repo,
+            token,
+            `/actions/runs?event=push&head_branch=${encodeURIComponent(tag)}&per_page=100`,
+          ),
+          `listing the workflow runs of ${tag} on ${repo}`,
+          [200],
+        )
+      ).json()) as {
+        workflow_runs: {
+          name: string | null
+          status: string | null
+          conclusion: string | null
+          head_sha: string
+          html_url: string
+        }[]
+      }
+      return body.workflow_runs.map((r) => ({
+        name: r.name ?? 'workflow',
+        status: r.status ?? 'queued',
+        conclusion: r.conclusion,
+        headSha: r.head_sha,
+        url: r.html_url,
+      }))
     },
 
     async contains(repo, token, descendant, ancestor) {

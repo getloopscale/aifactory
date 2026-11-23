@@ -206,6 +206,12 @@ function describeReleased(d: Detail): string {
   if (d.publishing === 'changesets') {
     return `promoted by ${text(d.actor)}; the repository's release workflow publishes it`
   }
+  if (d.publishing === 'tag') {
+    return `promoted by ${text(d.actor)}; ${text(d.tag)} waits for its release workflow to publish it`
+  }
+  if (d.published === false) {
+    return `${text(d.tag)} was not published: ${text(d.releaseError)}`
+  }
   return d.tag
     ? `${text(d.tag)} by ${text(d.actor)}${d.releaseError ? `, but the release could not be created: ${text(d.releaseError)}` : ''}`
     : `merged by ${text(d.actor)}, but the release could not be created: ${text(d.releaseError)}`

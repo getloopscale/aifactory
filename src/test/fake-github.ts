@@ -10,6 +10,7 @@ import {
   type IssueComment,
   type PullRequestMerge,
   type ReleaseInput,
+  type TagWorkflowRun,
 } from '../server/github/pulls'
 
 /**
@@ -175,6 +176,8 @@ export class FakeRepository {
   readonly releases: FakeRelease[] = []
   /** Every tag, the ones releases made included. */
   readonly tags = new Set<string>()
+  /** The workflow runs each tag started, by tag; a test scripts them. */
+  readonly tagRuns = new Map<string, TagWorkflowRun[]>()
   /** The number the next issue or pull request gets: GitHub counts both in one sequence. */
   nextNumber = 1
 
@@ -746,6 +749,13 @@ export class FakeGithub implements GithubApi {
           .map((file) => file.slice(path.length + 1).split('/')[0])
         return names.length > 0 ? [...new Set(names)] : undefined
       },
+    )
+  }
+
+  async workflowRunsOnTag(repo: string, token: string, tag: string) {
+    return this.call(
+      { method: 'workflowRunsOnTag', repo, token, args: [tag], failed: false },
+      (r) => r.tagRuns.get(tag) ?? [],
     )
   }
 

@@ -86,7 +86,7 @@ async function belongs(
 
 /**
  * The tasks whose publication a later promotion superseded (`supersedeUnmerged`) and that no release carried
- * yet: they wait in `released` for a publication that never published, so the next release that contains
+ * yet (or whose tag's workflow failed): they wait in `released` for a publication that never published, so the next release that contains
  * their merge releases them.
  */
 const supersededUnreleased = (db: Database, repo: string) =>
@@ -100,7 +100,8 @@ const supersededUnreleased = (db: Database, repo: string) =>
           and(
             eq(publication.repository, repo),
             eq(publication.status, 'failed'),
-            like(publication.detail, `${SUPERSEDED} %`),
+            // A tag whose workflow failed published nothing, so the next release that holds its merge is its release.
+            or(eq(publication.kind, 'tag'), like(publication.detail, `${SUPERSEDED} %`)),
           ),
         ),
     ),
