@@ -114,8 +114,10 @@ export type CheckReport = {
 /** GitHub would not turn auto-merge on, so the pull request would never merge on its own. */
 export class AutoMergeRefused extends Error {
   /**
-   * GitHub refused because the pull request is already in clean status: its required checks passed before
-   * auto-merge was asked for, so there is nothing to wait for and it can be merged right away.
+   * GitHub refused because the pull request is already mergeable: in clean status (its required checks passed
+   * before auto-merge was asked for) or in unstable status (they passed and only a check the branch does not
+   * require is red or pending). There is nothing to wait for, so it can be merged right away; the merge itself
+   * still goes through the branch protection.
    */
   readonly pullRequestIsClean: boolean
   /** GitHub refused because the pull request is a draft: marked ready for review, it can be asked again. */
@@ -126,14 +128,14 @@ export class AutoMergeRefused extends Error {
       `GitHub would not turn auto-merge on for ${repo}#${number}: ${why}. The integration branch requires status checks, so the factory waits for them through auto-merge: enable "Allow auto-merge" and "Allow merge commits" in the repository settings, and let the GitHub App write pull requests.`,
     )
     this.name = 'AutoMergeRefused'
-    this.pullRequestIsClean = why.includes('clean status')
+    this.pullRequestIsClean = why.includes('clean status') || why.includes('unstable status')
     this.pullRequestIsDraft = why.toLowerCase().includes('draft')
   }
 }
 
 /**
  * Turns auto-merge on, pinned to `sha`, and says what follows. `waiting`: GitHub merges once the required
- * checks pass. `mergeable`: GitHub refused because the pull request is already clean, so the caller merges
+ * checks pass. `mergeable`: GitHub refused because the pull request is already clean or unstable, so the caller merges
  * it itself, pinned to the same commit. When GitHub refused because the pull request is a draft and the
  * caller gave a way to mark it ready, it is marked and asked once more. Any other refusal is thrown as it
  * came.

@@ -1271,7 +1271,7 @@ describe('what integrating through the repository CI needs', () => {
     )
   })
 
-  it('tells a refusal because the pull request is already clean from any other refusal', () => {
+  it('tells a refusal because the pull request is already mergeable (clean or unstable) from any other refusal', () => {
     const clean = new AutoMergeRefused('o/r', 12, 'Pull request Pull request is in clean status')
     const notAllowed = new AutoMergeRefused(
       'o/r',
@@ -1286,7 +1286,8 @@ describe('what integrating through the repository CI needs', () => {
 
     expect(clean.pullRequestIsClean).toBe(true)
     expect(notAllowed.pullRequestIsClean).toBe(false)
-    expect(unstable.pullRequestIsClean).toBe(false)
+    // Unstable: the required checks passed and only a check the branch does not require is red or pending.
+    expect(unstable.pullRequestIsClean).toBe(true)
   })
 
   it('tells a refusal because the pull request is a draft from any other refusal', () => {
@@ -1318,6 +1319,17 @@ describe('what integrating through the repository CI needs', () => {
       const clean = new AutoMergeRefused('o/r', 12, 'Pull request Pull request is in clean status')
 
       await expect(autoMergeOrMergeable(refusing(clean), pull)).resolves.toBe('mergeable')
+    })
+
+    it('says the pull request is mergeable when GitHub refuses because it is unstable', async () => {
+      // The release of usetheokit/theokit-gateways (#737) was refused this way while its required checks were green.
+      const unstable = new AutoMergeRefused(
+        'o/r',
+        12,
+        'Pull request Pull request is in unstable status',
+      )
+
+      await expect(autoMergeOrMergeable(refusing(unstable), pull)).resolves.toBe('mergeable')
     })
 
     it('throws any other refusal as it came', async () => {
