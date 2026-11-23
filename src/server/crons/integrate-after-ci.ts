@@ -1,5 +1,6 @@
 import { defineCron } from 'theokit/server/cron'
 
+import { coordinatorModeFromEnv } from '../coordinator/mode'
 import { adoptMergedHandoffs, pollAwaitingIntegrations } from '../factory/await-ci'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { releaseModeFromEnv } from '../factory/deps'
@@ -54,7 +55,11 @@ export default defineCron('integrate-after-ci', {
           ['promotion_adopted', () => adoptPromotions(github)],
           [
             'promotion_resolved',
-            () => promoteResolvedWork({ ...github, releaseMode: releaseModeFromEnv(process.env) }),
+            // The coordinator's release train writes only in `auto`; in `trial` or `off` nothing is promoted.
+            async () =>
+              coordinatorModeFromEnv(process.env) === 'auto'
+                ? promoteResolvedWork({ ...github, releaseMode: releaseModeFromEnv(process.env) })
+                : { promoted: [], errors: [] },
           ],
           [
             'integrate_after_ci',

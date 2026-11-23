@@ -388,10 +388,19 @@ describe('an integration a promotion held out', () => {
 })
 
 describe('promoteResolvedWork', () => {
-  const run = (releaseMode?: 'manual' | 'auto') =>
-    promoteResolvedWork({ db: getDb(), github, api, now: () => NOW, releaseMode })
+  const run = (releaseMode?: 'manual' | 'trial' | 'auto') =>
+    promoteResolvedWork({
+      db: getDb(),
+      github,
+      api,
+      now: () => NOW,
+      releaseMode: releaseMode ?? 'auto',
+    })
 
-  async function resolvedWork(set: Partial<typeof task.$inferInsert> = {}, mode?: 'manual') {
+  async function resolvedWork(
+    set: Partial<typeof task.$inferInsert> = {},
+    mode?: 'manual' | 'trial' | 'auto',
+  ) {
     const db = getDb()
     await db.insert(repository).values({ fullName: REPO, enabled: true, releaseMode: mode })
     const [i] = await db
@@ -423,6 +432,24 @@ describe('promoteResolvedWork', () => {
     await resolvedWork()
     expect((await run()).promoted).toEqual([REPO])
     expect(api.answered('mergeBranch')).toHaveLength(1)
+  })
+
+  it('leaves a trial repository untouched, whether trial is its own mode or the default', async () => {
+    repo().restricted.delete('develop')
+    await resolvedWork({}, 'trial')
+    expect((await run('auto')).promoted).toEqual([])
+    await getDb().update(repository).set({ releaseMode: null })
+    expect((await run('trial')).promoted).toEqual([])
+    expect(api.answered('mergeBranch')).toHaveLength(0)
+    expect(api.answered('openPullRequest')).toHaveLength(0)
+  })
+
+  it('promotes a repository whose own mode is auto, and one that takes auto by default', async () => {
+    repo().restricted.delete('develop')
+    await resolvedWork({}, 'auto')
+    expect((await run('manual')).promoted).toEqual([REPO])
+    await getDb().update(repository).set({ releaseMode: null })
+    expect((await run('auto')).promoted).toEqual([REPO])
   })
 
   it('opens and pins the promotion when develop takes only pull requests', async () => {

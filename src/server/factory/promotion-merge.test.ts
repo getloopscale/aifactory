@@ -29,6 +29,7 @@ describe('advancing the pre-release branch for resolved work', () => {
 
   it.each([
     'GitHub answered 409 merging x into develop: Merge conflict',
+    'GitHub answered 409 merging x into develop: Head branch was modified',
     'GitHub answered 502 merging x into develop: bad gateway',
     'fetch failed',
   ])('opens nothing when the merge failed with %s', async (why) => {

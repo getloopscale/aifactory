@@ -363,8 +363,9 @@ async function idleWithResolvedWork(db: Database, defaultMode: ReleaseMode | und
     .orderBy(repository.fullName)
   const idle: typeof candidates = []
   for (const repo of candidates) {
-    // A manual repository releases only when a person says so, and a stopped line takes nothing in.
-    if ((repo.releaseMode ?? defaultMode) === 'manual') continue
+    // Only the release train of an `auto` repository promotes on its own: `manual` waits for a person and
+    // `trial` records what would be done and does nothing. A stopped line takes nothing in.
+    if ((repo.releaseMode ?? defaultMode) !== 'auto') continue
     if (await lineHolds(db, repo.fullName, 0)) continue
     if (await releaseInFlight(db, repo.fullName)) continue
     const busy = await db
@@ -421,11 +422,12 @@ export async function promoteResolvedWork(
 }
 
 /**
- * 409 is included because the merges API answers it for a protected branch as well as for a conflict (the
- * fake models it so); unconfirmed against GitHub, so the owner may narrow it.
  * GitHub refusing a write to a protected branch, or one a rule guards; not a conflict, a 5xx or a network error.
+ * A 409 is the merges API's answer for a conflict, so it counts only when it says the branch is protected or
+ * wants a pull request (the fake models it so; unconfirmed against GitHub). Any other 409 is left for the next pass.
  */
-const BRANCH_PROTECTED = /^GitHub answered (403|405|409|422)\b(?![\s\S]*merge conflict)/i
+const BRANCH_PROTECTED =
+  /^GitHub answered (?:(?:403|405|422)\b(?![\s\S]*merge conflict)|409\b(?=[\s\S]*(?:protected branch|through a pull request))(?![\s\S]*merge conflict))/i
 
 export async function advance(
   deps: PromotionDeps & { api: Pick<GithubApi, 'mergeBranch' | 'openPullRequest'> },
