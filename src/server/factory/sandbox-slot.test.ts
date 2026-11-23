@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   SLOT_LIMIT_MS,
@@ -104,6 +104,26 @@ describe('whenSlotFree', () => {
 
     expect(got).toBe('sandbox')
     expect(c.slept()).toBeGreaterThan(SLOT_LIMIT_MS)
+  })
+
+  it('stops at once when abandoned while it sleeps, and asks for no sandbox after', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    let calls = 0
+    const waiting = whenSlotFree(
+      async () => {
+        calls += 1
+        throw LIMIT
+      },
+      { limitMs: Infinity, signal: controller.signal },
+    )
+    const settled = expect(waiting).rejects.toBe(LIMIT)
+    await vi.advanceTimersByTimeAsync(1000)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    await settled
+    expect(calls).toBe(1)
+    vi.useRealTimers()
   })
 
   it('stops waiting when the case is abandoned', async () => {
