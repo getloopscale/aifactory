@@ -190,6 +190,49 @@ describe('recognising that a repository is ready for a release', () => {
     })
   })
 
+  it('counts a resolved task the head holds, and anchors the release on it when nothing was integrated', () => {
+    const resolved = { taskId: 9, issueNumber: 90, resolvedSha: 'r9' }
+    const only = facts({
+      releasable: [],
+      resolvedCandidates: [resolved],
+      resolved: readOf([resolved]),
+      labels: readOf([{ issue: 90, labels: ['factory'] }]),
+    })
+    expect(trainHolds(only)).toBe(false)
+    expect(recogniseRelease(only)).toMatchObject({
+      kind: 'release_ready',
+      taskId: 9,
+      evidence: '1 issues wait for a release of paulo/app at dev1234: #90',
+    })
+    // The integrated task still anchors a release that carries both.
+    expect(
+      recogniseRelease({ ...only, releasable: [{ taskId: 4, issueNumber: 40 }] }),
+    ).toMatchObject({ taskId: 4 })
+  })
+
+  it('releases nothing for a resolved task the head does not hold', () => {
+    const resolved = { taskId: 9, issueNumber: 90, resolvedSha: 'r9' }
+    const none = facts({
+      releasable: [],
+      resolvedCandidates: [resolved],
+      resolved: readOf([]),
+    })
+    expect(trainHolds(none)).toBe(false)
+    expect(recogniseRelease(none)).toBeUndefined()
+  })
+
+  it('gives an unknown exception when the commits of the resolved tasks could not be compared', () => {
+    const resolved = { taskId: 9, issueNumber: 90, resolvedSha: 'r9' }
+    const exception = recogniseRelease(
+      facts({
+        releasable: [],
+        resolvedCandidates: [resolved],
+        resolved: unread('whether dev1234 holds the commits', 'boom'),
+      }),
+    )
+    expect(exception).toMatchObject({ kind: 'unknown', taskId: 9, head: HEAD })
+  })
+
   it('recognises nothing in a repository the train holds', () => {
     expect(recogniseRelease(facts({ mode: 'manual' }))).toBeUndefined()
     expect(recogniseRelease(facts({ working: 2 }))).toBeUndefined()

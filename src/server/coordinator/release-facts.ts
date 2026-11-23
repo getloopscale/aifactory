@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, publication, releaseWait, repository, task, watch } from '../db/schema'
@@ -14,10 +14,12 @@ import type { ReadIssue } from './draft'
 import type { ReleasedIssue } from './exceptions'
 import {
   attemptDue,
+  eligibleTasks,
   failingNames,
   needsRecovery,
   trainHolds,
   type RedRecovery,
+  type ResolvedCandidate,
   type ReleaseBranchState,
   type RepositoryReleaseFacts,
   type WaitingPublication,
@@ -36,7 +38,8 @@ import {
 export type ReleaseFactsDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
-  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks'> & VersionChecksApi
+  api: Pick<GithubApi, 'branchAhead' | 'defaultBranch' | 'commitChecks' | 'contains'> &
+    VersionChecksApi
   readIssue: ReadIssue
   /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
   releaseMode: ReleaseMode
@@ -57,6 +60,23 @@ async function releasable(db: Database, repo: string) {
     .from(task)
     .where(and(eq(task.repository, repo), eq(task.stage, 'done'), isNotNull(task.mergedSha)))
     .orderBy(asc(task.id))
+}
+
+/** The tasks resolved with no change that no release holds: released once a promotion holds their commit. */
+async function resolvedCandidates(db: Database, repo: string): Promise<ResolvedCandidate[]> {
+  const rows = await db
+    .select({ taskId: task.id, issueNumber: task.issueNumber, resolvedSha: task.resolvedSha })
+    .from(task)
+    .where(
+      and(
+        eq(task.repository, repo),
+        eq(task.stage, 'done'),
+        isNotNull(task.resolvedSha),
+        isNull(task.mergedSha),
+      ),
+    )
+    .orderBy(asc(task.id))
+  return rows.map((r) => ({ ...r, resolvedSha: r.resolvedSha! }))
 }
 
 async function working(db: Database, repo: string) {
@@ -217,6 +237,28 @@ async function readHead(
   }
 }
 
+/** The resolved tasks whose commit the head of the pre-release branch holds, each commit compared once. */
+async function readContained(
+  deps: ReleaseFactsDeps,
+  f: RepositoryReleaseFacts,
+  head: string,
+  token: string,
+): Promise<Read<ResolvedCandidate[]>> {
+  const candidates = f.resolvedCandidates ?? []
+  if (candidates.length === 0) return readOf([])
+  try {
+    const held = new Map<string, boolean>()
+    for (const sha of new Set(candidates.map((c) => c.resolvedSha))) {
+      held.set(sha, await deps.api.contains(f.repository, token, head, sha))
+    }
+    return readOf(candidates.filter((c) => held.get(c.resolvedSha)))
+  } catch (error) {
+    return unread(`whether ${short(head)} holds the commits of the resolved tasks`, message(error))
+  }
+}
+
+const short = (sha: string) => sha.slice(0, 7)
+
 async function readLabels(
   deps: ReleaseFactsDeps,
   f: RepositoryReleaseFacts,
@@ -224,7 +266,7 @@ async function readLabels(
 ): Promise<Read<ReleasedIssue[]>> {
   try {
     const issues = await Promise.all(
-      f.releasable.map((t) => deps.readIssue(f.repository, t.issueNumber, token)),
+      eligibleTasks(f).map((t) => deps.readIssue(f.repository, t.issueNumber, token)),
     )
     return readOf(issues.map((issue) => ({ issue: issue.number, labels: issue.labels })))
   } catch (error) {
@@ -279,6 +321,7 @@ async function lookFurther(
     ...f,
     head,
     ahead,
+    resolved: await readContained(deps, f, head.value, token),
     attempts: await attempts(deps.db, f.repository, head.value),
     waitRefusal: await waitRefusal(deps.db, f.repository, head.value),
   }
@@ -311,6 +354,7 @@ export async function readReleaseFacts(deps: ReleaseFactsDeps): Promise<Reposito
       repository: repo.fullName,
       mode,
       releasable: await releasable(deps.db, repo.fullName),
+      resolvedCandidates: await resolvedCandidates(deps.db, repo.fullName),
       working: await working(deps.db, repo.fullName),
       waitedMinutes: await waitedMinutes(deps.db, repo.fullName, at),
       inFlight: await inFlight(deps.db, repo.fullName),

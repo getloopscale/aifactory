@@ -196,13 +196,15 @@ export async function release(
   if (!row) throw new ReleaseRefused(`task ${taskId} does not exist`)
   const allowed = outcome(row, 'release')
   if (allowed.kind !== 'action') throw new ReleaseRefused(allowed.reason)
-  // Only integrated work with a commit is released.
-  const headSha = row.headSha!
-  const pre = await latestPreRelease(deps.db, taskId)
-  if (!pre) throw new ReleaseRefused('there is no pre-release for this work')
-  const checks = await latestChecks(deps.db, taskId, headSha)
-  if (checks.length === 0 || checks.some((c) => !c.passed)) {
-    throw new ReleaseRefused('the checks are not green on this commit')
+  // Integrated work with a commit is released; so is work resolved with no change, by its resolving commit.
+  const resolvedAnchor = isResolvedAnchor(row)
+  const pre = resolvedAnchor ? undefined : await latestPreRelease(deps.db, taskId)
+  if (!resolvedAnchor) {
+    if (!pre) throw new ReleaseRefused('there is no pre-release for this work')
+    const checks = await latestChecks(deps.db, taskId, row.headSha!)
+    if (checks.length === 0 || checks.some((c) => !c.passed)) {
+      throw new ReleaseRefused('the checks are not green on this commit')
+    }
   }
 
   const { token } = await deps.github.installationToken(row.repository)
@@ -222,7 +224,9 @@ export async function release(
       body: [
         `Promotes \`${PRE_RELEASE_BRANCH}\` to \`${target}\`, with #${row.issueNumber}: ${row.issueTitle}.`,
         '',
-        `Pre-release: \`${pre.tag}\` (${pre.url}). Everything on \`${PRE_RELEASE_BRANCH}\` is released with it.`,
+        pre
+          ? `Pre-release: \`${pre.tag}\` (${pre.url}). Everything on \`${PRE_RELEASE_BRANCH}\` is released with it.`
+          : `Resolved at \`${row.resolvedSha}\`, which \`${PRE_RELEASE_BRANCH}\` holds. Everything on it is released with it.`,
         '',
       ].join('\n'),
     })
@@ -240,6 +244,11 @@ export async function release(
   if (options.expectedHead && options.expectedHead !== sha)
     throw new ReleaseRefused(
       `the pre-release branch moved to ${sha.slice(0, 7)} after the release was asked for at ${options.expectedHead.slice(0, 7)}: its checks were read at the older commit`,
+    )
+  // A resolved anchor is released only by a promotion that holds its commit: checked at the head to be merged.
+  if (resolvedAnchor && !(await deps.api.contains(row.repository, token, sha, row.resolvedSha!)))
+    throw new ReleaseRefused(
+      `the release pull request at ${sha.slice(0, 7)} does not hold the commit that resolved this work, ${row.resolvedSha!.slice(0, 7)}`,
     )
   await refuseKnownConflict(deps, { repository: row.repository, sha, target, actor: options.actor })
   const pull = { number: pr.number, url: pr.url }
@@ -259,13 +268,17 @@ export async function release(
     if (waited !== 'mergeable') return waited
   }
 
-  // Takes the task so two clicks cannot merge twice. It is given back if the merge does not happen.
-  const claimed = await deps.db
-    .update(task)
-    .set({ stage: 'released' })
-    .where(and(eq(task.id, taskId), eq(task.stage, 'done')))
-    .returning({ id: task.id })
-  if (claimed.length === 0) throw new ReleaseRefused('this task is being released')
+  // Takes the task so two clicks cannot merge twice. It is given back if the merge does not happen. A resolved
+  // anchor is not claimed: it stays `done` so the shipment of the release finds it by its commit, and the
+  // merge pinned to the head is what happens once.
+  if (!resolvedAnchor) {
+    const claimed = await deps.db
+      .update(task)
+      .set({ stage: 'released' })
+      .where(and(eq(task.id, taskId), eq(task.stage, 'done')))
+      .returning({ id: task.id })
+    if (claimed.length === 0) throw new ReleaseRefused('this task is being released')
+  }
 
   let merged: { sha: string }
   try {
@@ -273,7 +286,8 @@ export async function release(
       method: 'merge',
     })
   } catch (error) {
-    await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
+    if (!resolvedAnchor)
+      await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
     throw new ReleaseRefused(`GitHub did not merge it: ${errorMessage(error)}`)
   }
   return completeRelease(deps, {
@@ -288,6 +302,10 @@ export async function release(
     ...options,
   })
 }
+
+/** Work that finished with no change, resolved at a commit of the integration branch: it has no pre-release. */
+export const isResolvedAnchor = (row: { resolvedSha: string | null; mergedSha: string | null }) =>
+  !!row.resolvedSha && !row.mergedSha
 
 /** The latest pre-release of a task: what a release promotes. */
 export async function latestPreRelease(db: Database, taskId: number) {
@@ -390,7 +408,7 @@ async function waitForChecks(
  */
 export async function completeRelease(
   deps: DeliverDeps,
-  input: Promotion & { pre: typeof delivery.$inferSelect; mergeSha: string },
+  input: Promotion & { pre?: typeof delivery.$inferSelect; mergeSha: string },
 ): Promise<ReleaseResult> {
   const { row, pre, pull, token, target, sha, mergeSha, actor } = input
   const taskId = row.id
@@ -428,13 +446,16 @@ export async function completeRelease(
     })
     return { tag: created.tag, url: created.url, mergeSha, issueErrors: shipped.issueErrors }
   }
-  await enterStage(deps.db, taskId, 'released', {
-    actor,
-    mergeSha,
-    sha,
-    ...(releaseError ? { releaseError } : {}),
-    publishing,
-  })
+  // A resolved anchor stays `done` until its commit's shipment (the publication's, or a catch-up) releases it
+  // and closes its issue.
+  if (!isResolvedAnchor(row))
+    await enterStage(deps.db, taskId, 'released', {
+      actor,
+      mergeSha,
+      sha,
+      ...(releaseError ? { releaseError } : {}),
+      publishing,
+    })
   return { tag: undefined, url: undefined, mergeSha, releaseError, publishing }
 }
 
@@ -556,7 +577,8 @@ export async function nextOwnTag(
 /** What the factory's own release of a promotion is made of. */
 export type OwnRelease = {
   row: typeof task.$inferSelect
-  pre: typeof delivery.$inferSelect
+  /** Absent for work resolved with no change, which has no pre-release. */
+  pre?: typeof delivery.$inferSelect
   /** What the notes link the promotion by: the release pull request, or the merge commit. */
   promotion: { label: string; url: string }
   token: string
@@ -581,7 +603,9 @@ export async function createOwnTag(
     body: [
       `Release of #${row.issueNumber}: ${row.issueTitle}.`,
       '',
-      `Promoted from the pre-release \`${pre.tag}\` (${pre.url}) by ${input.actor}.`,
+      pre
+        ? `Promoted from the pre-release \`${pre.tag}\` (${pre.url}) by ${input.actor}.`
+        : `Promoted by ${input.actor}; the work was resolved at \`${row.resolvedSha}\`, which the promotion holds.`,
       `${input.promotion.label}: ${input.promotion.url}`,
       `Pull request of the work: ${row.pullRequestUrl ?? input.promotion.url}`,
       '',

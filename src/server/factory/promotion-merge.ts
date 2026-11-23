@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { promotionWait, repository, task } from '../db/schema'
@@ -7,6 +7,7 @@ import { lineHolds } from '../line/incident'
 import { autoMergeOrMergeable, type GithubApi, type OpenPullRequest } from '../github/pulls'
 
 import { errorMessage } from './error-message'
+import { WORKING } from './transitions'
 import { integrationBranch, PRE_RELEASE_BRANCH } from './branches'
 import {
   decidePromotionWait,
@@ -320,4 +321,94 @@ async function adopt(
   const pinned = await pin(deps, repo, token, pull)
   if (pinned.developAutoMergeError) throw new Error(pinned.developAutoMergeError)
   return true
+}
+
+/** What a pass of `promoteResolvedWork` advanced, and the repositories it could not look at. */
+export type ResolvedPromotions = { promoted: string[]; errors: string[] }
+
+/** The repositories with work resolved with no change that no release holds yet, and nothing in flight. */
+async function idleWithResolvedWork(db: Database) {
+  const candidates = await db
+    .selectDistinct({ fullName: repository.fullName, baseBranch: repository.baseBranch })
+    .from(task)
+    .innerJoin(repository, eq(repository.fullName, task.repository))
+    .where(
+      and(
+        eq(repository.enabled, true),
+        eq(task.stage, 'done'),
+        isNotNull(task.resolvedSha),
+        isNull(task.mergedSha),
+      ),
+    )
+    .orderBy(repository.fullName)
+  const idle: typeof candidates = []
+  for (const repo of candidates) {
+    const busy = await db
+      .select({ id: task.id })
+      .from(task)
+      .where(
+        and(
+          eq(task.repository, repo.fullName),
+          or(inArray(task.stage, [...WORKING]), isNotNull(task.awaitingCiSha)),
+        ),
+      )
+      .limit(1)
+    if (busy.length === 0 && !(await waitingIn(db, repo.fullName))) idle.push(repo)
+  }
+  return idle
+}
+
+/**
+ * Advances the pre-release branch for work resolved with no change. People merge straight into the
+ * integration branch, and a resolved task's commit reaches the pre-release branch only when the factory next
+ * integrates something there, so with only resolved tasks waiting nothing would promote and nothing release
+ * (the release train counts them once `develop` holds their commit). A repository with such a task, nothing
+ * working, no promotion waiting and an integration branch ahead of the pre-release branch gets it merged in,
+ * or, when GitHub will not let the factory write there, the standing promotion pull request opened and
+ * pinned as at an integration (`pinPromotion`).
+ */
+export async function promoteResolvedWork(
+  deps: PromotionDeps & {
+    github: GithubApp
+    api: Pick<GithubApi, 'branchAhead' | 'mergeBranch' | 'openPullRequest'>
+  },
+): Promise<ResolvedPromotions> {
+  const result: ResolvedPromotions = { promoted: [], errors: [] }
+  for (const repo of await idleWithResolvedWork(deps.db)) {
+    try {
+      const { token } = await deps.github.installationToken(repo.fullName)
+      const integration = integrationBranch(repo)
+      const ahead = await deps.api.branchAhead(
+        repo.fullName,
+        token,
+        PRE_RELEASE_BRANCH,
+        integration,
+      )
+      if (!ahead || ahead.aheadBy === 0) continue
+      await advance(deps, { repository: repo.fullName, token, integration, sha: ahead.sha })
+      result.promoted.push(repo.fullName)
+    } catch (error) {
+      result.errors.push(`${repo.fullName}: ${message(error)}`)
+    }
+  }
+  return result
+}
+
+async function advance(
+  deps: PromotionDeps & { api: Pick<GithubApi, 'mergeBranch' | 'openPullRequest'> },
+  input: { repository: string; token: string; integration: string; sha: string },
+) {
+  const { repository, token, integration } = input
+  try {
+    await deps.api.mergeBranch(repository, token, PRE_RELEASE_BRANCH, input.sha)
+  } catch (error) {
+    await deps.api.openPullRequest(repository, token, {
+      head: integration,
+      base: PRE_RELEASE_BRANCH,
+      title: `Pre-release: ${integration} into ${PRE_RELEASE_BRANCH}`,
+      body: `${PRE_RELEASE_BRANCH} accepts changes only through a pull request, so the factory could not advance it (${message(error)}). Merging this pull request publishes what has been resolved into ${integration}.`,
+    })
+    const pinned = await pinPromotion(deps, { repository, token, integration })
+    if (pinned.developAutoMergeError) throw new Error(pinned.developAutoMergeError)
+  }
 }
