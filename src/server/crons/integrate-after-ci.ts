@@ -52,7 +52,10 @@ export default defineCron('integrate-after-ci', {
         const passes: [string, () => Promise<Record<string, unknown>>][] = [
           ['promotion_after_ci', () => pollPromotionWaits(github)],
           ['promotion_adopted', () => adoptPromotions(github)],
-          ['promotion_resolved', () => promoteResolvedWork(github)],
+          [
+            'promotion_resolved',
+            () => promoteResolvedWork({ ...github, releaseMode: releaseModeFromEnv(process.env) }),
+          ],
           [
             'integrate_after_ci',
             () =>

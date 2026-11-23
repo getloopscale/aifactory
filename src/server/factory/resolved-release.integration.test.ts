@@ -251,3 +251,27 @@ describe('catchUpResolved', () => {
     expect(gh.api.repo('paulo/app').issue(1).comments).toEqual([])
   })
 })
+
+describe('a resolved task claimed as the anchor of a release', () => {
+  it('is released by catch-up, and its issue closed once, when its commit reached the release branch', async () => {
+    const g = fakeGithub({ 'paulo/app:main': ['r1'] })
+    g.api.repo('paulo/app').issue(5).state = 'open'
+    // `release()` moved it to `released` without a stage event.
+    const id = await seed('paulo/app', 5, { stage: 'released', resolvedSha: 'r1' })
+    const first = await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })
+    expect(first.released).toEqual([id])
+    expect(g.api.repo('paulo/app').issue(5).state).toBe('closed')
+    // A second pass finds it released: nothing more is said to the issue.
+    const second = await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })
+    expect(second.released).toEqual([])
+  })
+
+  it('is left alone once its release was recorded', async () => {
+    const g = fakeGithub({ 'paulo/app:main': ['r1'] })
+    const id = await seed('paulo/app', 6, { stage: 'released', resolvedSha: 'r1' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'released', detail: null })
+    expect(
+      (await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })).released,
+    ).toEqual([])
+  })
+})

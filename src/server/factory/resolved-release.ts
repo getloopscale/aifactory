@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, eq, gt, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
@@ -17,7 +17,15 @@ import { enterStage } from './stages'
  * branch. A release closes the issue that is still open (`afterRelease`).
  */
 const resolvedNotReleased = and(
-  eq(task.stage, 'done'),
+  or(
+    eq(task.stage, 'done'),
+    // A release that claimed the task as its anchor moved it to `released` with no stage event: the
+    // shipment of its commit records the stage and closes the issue.
+    and(
+      eq(task.stage, 'released'),
+      sql`not exists (select 1 from stage_event e where e.task_id = ${task.id} and e.stage = 'released')`,
+    ),
+  ),
   isNotNull(task.resolvedSha),
   isNull(task.mergedSha),
 )

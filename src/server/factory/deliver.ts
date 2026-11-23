@@ -268,17 +268,15 @@ export async function release(
     if (waited !== 'mergeable') return waited
   }
 
-  // Takes the task so two clicks cannot merge twice. It is given back if the merge does not happen. A resolved
-  // anchor is not claimed: it stays `done` so the shipment of the release finds it by its commit, and the
-  // merge pinned to the head is what happens once.
-  if (!resolvedAnchor) {
-    const claimed = await deps.db
-      .update(task)
-      .set({ stage: 'released' })
-      .where(and(eq(task.id, taskId), eq(task.stage, 'done')))
-      .returning({ id: task.id })
-    if (claimed.length === 0) throw new ReleaseRefused('this task is being released')
-  }
+  // Takes the task so two clicks cannot merge twice. It is given back if the merge does not happen. A claimed
+  // resolved anchor has no `released` stage event yet, which is what keeps its commit's shipment (and a
+  // catch-up) able to release it and close its issue (`resolvedNotReleased`).
+  const claimed = await deps.db
+    .update(task)
+    .set({ stage: 'released' })
+    .where(and(eq(task.id, taskId), eq(task.stage, 'done')))
+    .returning({ id: task.id })
+  if (claimed.length === 0) throw new ReleaseRefused('this task is being released')
 
   let merged: { sha: string }
   try {

@@ -1,12 +1,13 @@
 import { and, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { promotionWait, repository, task } from '../db/schema'
+import { promotionWait, publication, releaseWait, repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { lineHolds } from '../line/incident'
 import { autoMergeOrMergeable, type GithubApi, type OpenPullRequest } from '../github/pulls'
 
 import { errorMessage } from './error-message'
+import type { ReleaseMode } from './deliver'
 import { WORKING } from './transitions'
 import { integrationBranch, PRE_RELEASE_BRANCH } from './branches'
 import {
@@ -326,10 +327,29 @@ async function adopt(
 /** What a pass of `promoteResolvedWork` advanced, and the repositories it could not look at. */
 export type ResolvedPromotions = { promoted: string[]; errors: string[] }
 
+/** A release waiting for its checks, or a publication that has not finished, moves with `develop`. */
+async function releaseInFlight(db: Database, repo: string): Promise<boolean> {
+  const [wait] = await db
+    .select({ id: releaseWait.id })
+    .from(releaseWait)
+    .where(and(eq(releaseWait.repository, repo), eq(releaseWait.status, 'waiting')))
+    .limit(1)
+  const [publishing] = await db
+    .select({ id: publication.id })
+    .from(publication)
+    .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
+    .limit(1)
+  return !!wait || !!publishing
+}
+
 /** The repositories with work resolved with no change that no release holds yet, and nothing in flight. */
-async function idleWithResolvedWork(db: Database) {
+async function idleWithResolvedWork(db: Database, defaultMode: ReleaseMode | undefined) {
   const candidates = await db
-    .selectDistinct({ fullName: repository.fullName, baseBranch: repository.baseBranch })
+    .selectDistinct({
+      fullName: repository.fullName,
+      baseBranch: repository.baseBranch,
+      releaseMode: repository.releaseMode,
+    })
     .from(task)
     .innerJoin(repository, eq(repository.fullName, task.repository))
     .where(
@@ -343,6 +363,10 @@ async function idleWithResolvedWork(db: Database) {
     .orderBy(repository.fullName)
   const idle: typeof candidates = []
   for (const repo of candidates) {
+    // A manual repository releases only when a person says so, and a stopped line takes nothing in.
+    if ((repo.releaseMode ?? defaultMode) === 'manual') continue
+    if (await lineHolds(db, repo.fullName, 0)) continue
+    if (await releaseInFlight(db, repo.fullName)) continue
     const busy = await db
       .select({ id: task.id })
       .from(task)
@@ -371,10 +395,12 @@ export async function promoteResolvedWork(
   deps: PromotionDeps & {
     github: GithubApp
     api: Pick<GithubApi, 'branchAhead' | 'mergeBranch' | 'openPullRequest'>
+    /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
+    releaseMode?: ReleaseMode
   },
 ): Promise<ResolvedPromotions> {
   const result: ResolvedPromotions = { promoted: [], errors: [] }
-  for (const repo of await idleWithResolvedWork(deps.db)) {
+  for (const repo of await idleWithResolvedWork(deps.db, deps.releaseMode)) {
     try {
       const { token } = await deps.github.installationToken(repo.fullName)
       const integration = integrationBranch(repo)
@@ -394,7 +420,10 @@ export async function promoteResolvedWork(
   return result
 }
 
-async function advance(
+/** GitHub refusing a write to a protected branch, or one a rule guards; not a conflict, a 5xx or a network error. */
+const BRANCH_PROTECTED = /^GitHub answered (403|405|409|422)\b(?![\s\S]*merge conflict)/i
+
+export async function advance(
   deps: PromotionDeps & { api: Pick<GithubApi, 'mergeBranch' | 'openPullRequest'> },
   input: { repository: string; token: string; integration: string; sha: string },
 ) {
@@ -402,6 +431,9 @@ async function advance(
   try {
     await deps.api.mergeBranch(repository, token, PRE_RELEASE_BRANCH, input.sha)
   } catch (error) {
+    // Only a branch GitHub will not let the factory write to is proposed as a pull request; a conflict or a
+    // failing GitHub is left for the next pass.
+    if (!BRANCH_PROTECTED.test(message(error))) throw error
     await deps.api.openPullRequest(repository, token, {
       head: integration,
       base: PRE_RELEASE_BRANCH,
