@@ -2,8 +2,10 @@ import { declaredBlockers } from '../factory/blockers'
 
 /**
  * The order of the queued runs, decided over facts `facts.ts` read, reading nothing. A run of a lower
- * `priority:N` goes first; among the same priority a bug goes first, then the task more queued issues are
- * blocked by, then the oldest. The order is applied by giving the sorted runs the `available_at` times the
+ * `priority:N` goes first; among the same priority a run that continues a task (sent back, resumed or
+ * merging the base) goes before a first run, then a bug, then the task more queued issues are blocked by,
+ * then the oldest. Work already under way finishes first: a run sent back for a conflict that waited behind
+ * every new issue would find the base moved again and conflict again. The order is applied by giving the sorted runs the `available_at` times the
  * queue already had, so no run becomes available earlier than the earliest of them and the queue's timing
  * does not change: TheoKit's worker takes the job with the earliest `available_at` that is due.
  */
@@ -20,6 +22,8 @@ export type QueuedEntry = {
   bug: boolean
   /** How many other queued issues name this one in their `Blocked by` line. */
   unblocks: number
+  /** The run continues a task: it was sent back, resumed or merges the base, so it is not a first run. */
+  continues: boolean
   /** When the job was queued. */
   queuedAt: Date
   /** When the queue serves it now. */
@@ -68,6 +72,7 @@ const rank = (e: QueuedEntry) => e.priority ?? UNLABELLED_PRIORITY
 export function compareEntries(a: QueuedEntry, b: QueuedEntry): number {
   return (
     rank(a) - rank(b) ||
+    Number(b.continues) - Number(a.continues) ||
     Number(b.bug) - Number(a.bug) ||
     b.unblocks - a.unblocks ||
     a.queuedAt.getTime() - b.queuedAt.getTime() ||
