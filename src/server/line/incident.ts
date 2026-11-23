@@ -11,7 +11,12 @@ import type { OpenIncident } from './decide'
  * The reads and writes of a stopped line (`line_incident`). What to do with one is decided in `decide.ts`.
  */
 
-export type Incident = OpenIncident & { id: number; repository: string; issueUrl: string }
+export type Incident = OpenIncident & {
+  id: number
+  repository: string
+  issueUrl: string
+  openedAt: Date
+}
 
 type Db = Pick<Database, 'select'>
 
@@ -109,7 +114,10 @@ export async function updateIncident(
 }
 
 /** The stopped lines, as the board shows them. */
-export async function listStoppedLines(db: Db): Promise<StoppedLine[]> {
+export async function listStoppedLines(
+  db: Db,
+  scope: LineStopScope = lineStopScope(),
+): Promise<StoppedLine[]> {
   const rows = await db
     .select()
     .from(lineIncident)
@@ -128,6 +136,7 @@ export async function listStoppedLines(db: Db): Promise<StoppedLine[]> {
             status: r.status,
             attempts: r.attempts,
             since: r.openedAt.toISOString(),
+            scope,
           },
         ],
   )

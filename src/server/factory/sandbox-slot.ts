@@ -20,22 +20,38 @@ export async function whenSlotFree<T>(
   create: () => Promise<T>,
   options: {
     now?: () => number
-    sleep?: (ms: number) => Promise<void>
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
     limitMs?: number
     signal?: AbortSignal
   } = {},
 ): Promise<T> {
   const now = options.now ?? Date.now
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
+  const sleep = options.sleep ?? abortableSleep
   const until = now() + (options.limitMs ?? SLOT_LIMIT_MS)
   for (;;) {
     try {
       return await create()
     } catch (error) {
       if (!isSandboxLimit(error) || options.signal?.aborted || now() >= until) throw error
-      await sleep(SLOT_WAIT_MS)
+      await sleep(SLOT_WAIT_MS, options.signal)
+      // Abandoned while it slept: no sandbox is asked for after that.
+      if (options.signal?.aborted) throw error
     }
   }
+}
+
+/** Sleeps `ms`, or until `signal` aborts, so an abandoned wait does not outlast its job by a whole pause. */
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve()
+    const done = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
 }
 
 /**

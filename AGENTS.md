@@ -101,7 +101,7 @@ reads that file, not a convention.
   `cancel` (`ingest/withdraw.ts`, in the same transaction): the `cancelled` stage event names why, and the
   task's queued jobs that no worker ever took are deleted. A run records its stages with `enterRunStage`
   (`factory/stages.ts`), which asks `transitions.ts` (`run_step`) and throws `TaskCancelled` for a cancelled task, so
-  the run stops at its next stage, records nothing more and does not fail it. Nothing acts on the other routed deliveries yet. A new event is a new entry in `ROUTES` with a
+  the run stops at its next stage, records nothing more and does not fail it. An issue that receives the label again starts its cancelled, failed or handed-over task over when `outcome()` says `start_over` (`ingest/restart.ts`, in the same transaction, with a job key of its own). Nothing acts on the other routed deliveries yet. A new event is a new entry in `ROUTES` with a
   Zod schema that produces its intent, and the setup report reads `ROUTED_EVENTS` to say which events the
   App does not subscribe to. Any other event or action keeps the code it always had.
 - **A labelled issue is not permission.** The App is installed on every repository of the account, so ingestion
@@ -172,7 +172,7 @@ reads that file, not a convention.
   from the integration branch of the same repository into `develop` (`isFactoryPromotion`: never a fork, never
   another head); a clean one is merged at once with a merge commit pinned to the same head. An open promotion that nothing waits on, in a repository whose integrated work waits for a release, is pinned the same way by the `integrate-after-ci` cron (`adoptPromotions`). While it waits in
   `promotion_wait`, new integrations are held out of the integration branch until `hold_until`
-  (`PROMOTION_HOLD_MS`), so its checks can finish: the task waits in `done` with `awaiting_ci_sha` and
+  (`PROMOTION_HOLD_MS`, or `FACTORY_PROMOTION_HOLD_MS`, where 0 turns the hold off), so its checks can finish: the task waits in `done` with `awaiting_ci_sha` and
   `integration_held`, and the `integrate-after-ci` cron integrates it on the first pass after the hold expires
   or after GitHub merged the promotion. A head that moved before the pin is not merged; the next pass pins the new
   head. Nothing else merges a pull request into `develop`. The default branch
@@ -357,7 +357,9 @@ reads that file, not a convention.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
 - **A merge of the base is not the task's change.** The review and `diffFacts` measure the change from
   `reviewBase` (`factory/diff-facts.ts`): the merge base of HEAD and the integration branch fetched before each
-  review. A run that only merges the base (`mergeBase`, or a conflict send-back) keeps the last approval when
+  review. A later round reads what the task changed since the reviewed commit through `changedSinceCommand`
+  (`factory/review.ts`): the task's own commits, with no merge commit and nothing the integration branch brought
+  in, never a plain diff between the two commits. A run that only merges the base (`mergeBase`, or a conflict send-back) keeps the last approval when
   `samePatch` finds the task's patch unchanged, and records it for the merge without asking the reviewer
   (`Run.approvalKept`). Reworks for failing checks (`MAX_CHECK_REWORKS`) and review rounds (`reviewAllowsRework`
   over the rounds) are separate budgets, and `automaticRunsSincePerson` leaves out `Blocked by` checks and, up to

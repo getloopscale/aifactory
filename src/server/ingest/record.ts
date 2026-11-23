@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import { ingress, repository, stageEvent, task } from '../db/schema'
 
 import { decideIngress, type IngressDecision, type RoutedIntent } from './decide'
+import { startOverOnLabel } from './restart'
 import { withdrawTask } from './withdraw'
 
 export type Delivery = {
@@ -21,6 +22,7 @@ export type RecordResult =
   | { status: 'routed'; code: string; reason: string; intent: RoutedIntent }
   | { status: 'task_created'; taskId: number }
   | { status: 'task_exists'; taskId: number }
+  | { status: 'task_restarted'; taskId: number }
 
 /**
  * An issue asking for work in a repository the owner has not enabled is recorded and ignored. The
@@ -66,8 +68,11 @@ function outcomeOf(decision: IngressDecision) {
 export async function recordDelivery(
   db: Database,
   delivery: Delivery,
-  /** Runs inside the transaction once a task exists, so whatever it writes commits or rolls back with it. */
-  onTaskCreated?: (taskId: number) => Promise<unknown>,
+  /**
+   * Runs inside the transaction once a task exists or starts over, so whatever it writes commits or rolls
+   * back with it. `restartedBy` names the delivery that started an existing task over.
+   */
+  onTaskCreated?: (taskId: number, restartedBy?: string) => Promise<unknown>,
 ): Promise<RecordResult> {
   const asked = decideIngress(delivery.event, delivery.payload)
 
@@ -118,6 +123,10 @@ export async function recordDelivery(
         and(eq(task.repository, decision.repository), eq(task.issueNumber, decision.issueNumber)),
       )
     await tx.update(ingress).set({ outcome: 'task_exists' }).where(eq(ingress.id, row.id))
+    if (await startOverOnLabel(tx, existing.id, decision.actorLogin)) {
+      await onTaskCreated?.(existing.id, delivery.deliveryId)
+      return { status: 'task_restarted', taskId: existing.id }
+    }
     return { status: 'task_exists', taskId: existing.id }
   })
 }

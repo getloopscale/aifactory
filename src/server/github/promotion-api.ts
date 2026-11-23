@@ -30,6 +30,13 @@ export type PromotionApi = {
     head: string,
     base: string,
   ): Promise<PromotionPull | undefined>
+  /** The promotion GitHub merged last, from `head` into `base`, and when; undefined when there is none. */
+  lastMergedPullRequest(
+    repo: string,
+    token: string,
+    head: string,
+    base: string,
+  ): Promise<(PromotionPull & { mergedAt: Date }) | undefined>
   failedChecks(repo: string, token: string, sha: string): Promise<FailedRun[]>
   /** How many check runs of the commit are still queued or running. */
   pendingChecks(repo: string, token: string, sha: string): Promise<number>
@@ -132,6 +139,36 @@ export function createPromotionApi(
       ).json()) as { number: number; html_url: string; head: { sha: string } }[]
       const pull = pulls[0]
       return pull ? { number: pull.number, url: pull.html_url, headSha: pull.head.sha } : undefined
+    },
+
+    async lastMergedPullRequest(repo, token, head, base) {
+      const owner = repo.split('/')[0]
+      const query = `state=closed&sort=updated&direction=desc&per_page=20&head=${owner}:${encodeURIComponent(head)}&base=${encodeURIComponent(base)}`
+      const pulls = (await (
+        await call(
+          repo,
+          token,
+          `/pulls?${query}`,
+          `listing closed pull requests ${head} -> ${base}`,
+          [200],
+        )
+      ).json()) as {
+        number: number
+        html_url: string
+        head: { sha: string }
+        merged_at: string | null
+      }[]
+      const merged = pulls
+        .filter((pull) => pull.merged_at !== null)
+        .sort((a, b) => Date.parse(b.merged_at ?? '') - Date.parse(a.merged_at ?? ''))[0]
+      return merged
+        ? {
+            number: merged.number,
+            url: merged.html_url,
+            headSha: merged.head.sha,
+            mergedAt: new Date(merged.merged_at ?? ''),
+          }
+        : undefined
     },
 
     async failedChecks(repo, token, sha) {

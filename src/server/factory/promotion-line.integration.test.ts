@@ -33,15 +33,31 @@ const run = (id: number, name: string): FailedRun => ({
   actions: true,
 })
 
-type World = { head: string; runs: FailedRun[]; pending: number; open: Set<number> }
+type World = {
+  head: string
+  runs: FailedRun[]
+  pending: number
+  open: Set<number>
+  /** The promotion is no longer open: GitHub merged it at this time. */
+  mergedAt?: Date
+}
 let world: World
 let created: (NewIssue & { repo: string })[]
 let github: FakeGithub
 
 const api: PromotionApi = {
   openPullRequest: async (_repo, _token, head, base) =>
-    head === 'workspace' && base === 'develop'
+    head === 'workspace' && base === 'develop' && !world.mergedAt
       ? { number: 979, url: `https://github.com/${REPO}/pull/979`, headSha: world.head }
+      : undefined,
+  lastMergedPullRequest: async (_repo, _token, head, base) =>
+    head === 'workspace' && base === 'develop' && world.mergedAt
+      ? {
+          number: 979,
+          url: `https://github.com/${REPO}/pull/979`,
+          headSha: world.head,
+          mergedAt: world.mergedAt,
+        }
       : undefined,
   failedChecks: async () => world.runs,
   pendingChecks: async () => world.pending,
@@ -182,6 +198,32 @@ describe('a red promotion of the integration branch', () => {
     await pollPromotions(deps())
     expect((await incidents())[0].status).toBe('resolved')
     expect(github.answered('commentOnIssue').map(([n]) => n)).toEqual([51])
+  })
+
+  it('runs the line again when the promotion merged green between two passes', async () => {
+    await pollPromotions(deps())
+    world.head = 'sha0002'
+    world.runs = []
+    world.mergedAt = new Date(Date.now() + 60_000)
+    await pollPromotions(deps())
+    expect((await incidents())[0].status).toBe('resolved')
+  })
+
+  it('keeps the line stopped when the promotion that merged was red', async () => {
+    await pollPromotions(deps())
+    world.head = 'sha0002'
+    world.mergedAt = new Date(Date.now() + 60_000)
+    await pollPromotions(deps())
+    expect((await incidents())[0].status).toBe('open')
+    expect(created).toHaveLength(1)
+  })
+
+  it('keeps the line stopped when the last promotion merged before the incident opened', async () => {
+    await pollPromotions(deps())
+    world.runs = []
+    world.mergedAt = new Date(Date.now() - 3_600_000)
+    await pollPromotions(deps())
+    expect((await incidents())[0].status).toBe('open')
   })
 
   it('keeps the line stopped while the checks of the head still run', async () => {
