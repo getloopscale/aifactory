@@ -503,7 +503,7 @@ describe('the other actions it applies', () => {
 describe('scoping a review that does not converge', () => {
   const ORIGINAL = 'Validate the name.\n\nDone when: an empty name is refused.'
   const ROUNDS =
-    'the reviewer still asked for changes after 3 attempts (the review is not converging; blocking findings per round: 1, 1, 1)'
+    'the reviewer still asked for changes after 4 attempts (the review is not converging; blocking findings per round: 1, 1, 1, 1)'
   const LAST_FINDINGS = [{ severity: 'major', file: 'src/mod.ts', issue: 'rename the module' }]
   const valid: ScopeDraft = {
     inScope: ['Refuse an empty name'],
@@ -521,7 +521,7 @@ describe('scoping a review that does not converge', () => {
         { stage: 'intake' },
         {
           stage: 'handoff',
-          detail: { reason: ROUNDS, cause: 'review_plateau', findings: LAST_FINDINGS, attempts: 3 },
+          detail: { reason: ROUNDS, cause: 'review_plateau', findings: LAST_FINDINGS, attempts: 4 },
         },
       ],
     )
@@ -539,7 +539,7 @@ describe('scoping a review that does not converge', () => {
         outOfScope: [],
       },
     })
-    for (const round of [1, 2, 3]) {
+    for (const round of [1, 2, 3, 4]) {
       await db.insert(review).values({
         taskId: id,
         round,
@@ -598,9 +598,11 @@ describe('scoping a review that does not converge', () => {
     const [message] = model.asked
     expect(message).toContain(ORIGINAL)
     expect(message).toContain('src/mod.ts')
-    for (const round of [1, 2, 3]) expect(message).toContain(`finding of round ${round}`)
+    for (const round of [1, 2, 3, 4]) expect(message).toContain(`finding of round ${round}`)
     expect(message).toContain('rename the module')
-    expect(message).toContain('the review is not converging; blocking findings per round: 1, 1, 1')
+    expect(message).toContain(
+      'the review is not converging; blocking findings per round: 1, 1, 1, 1',
+    )
   })
 
   it('files the follow-up without the factory label when the repository is not enabled', async () => {
