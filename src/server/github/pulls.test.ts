@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
+import { RateLimited } from './rate-limit'
 
 const noWait = async () => {}
 
@@ -696,17 +697,78 @@ describe('pull request state and merge', () => {
 })
 
 describe('commitChecks', () => {
+  const paged = (total: number, pageOf: (page: number) => unknown[], key: string) => {
+    const seen: string[] = []
+    const fetch = async (url: string) => {
+      seen.push(url)
+      const u = new URL(url)
+      const page = Number(u.searchParams.get('page'))
+      const body = u.pathname.endsWith('/check-runs')
+        ? { total_count: total, check_runs: pageOf(page) }
+        : { state: 'success', total_count: 0, statuses: [] }
+      return new Response(JSON.stringify(body), { status: 200 })
+    }
+    return { fetch, seen, key }
+  }
+  const run = (name: string) => ({ name, status: 'completed', conclusion: 'success' })
+
+  it('reads the check runs of every page, so a failure past the first is seen', async () => {
+    const { fetch } = paged(
+      101,
+      (page) => (page === 1 ? Array.from({ length: 100 }, (_, i) => run(`c${i}`)) : [run('late')]),
+      'runs',
+    )
+    const checks = await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+    expect(checks.checkRuns).toHaveLength(101)
+    expect(checks.checkRuns.at(-1)?.name).toBe('late')
+  })
+
+  it('refuses to answer when a page comes back empty before the reported total', async () => {
+    const { fetch } = paged(5, (page) => (page === 1 ? [run('a'), run('b')] : []), 'runs')
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /2 of 5 reports/,
+    )
+  })
+
+  it('refuses to answer when the statuses are fewer than the total says', async () => {
+    const fetch = async (url: string) => {
+      const checks = new URL(url).pathname.endsWith('/check-runs')
+      const body = checks
+        ? { total_count: 0, check_runs: [] }
+        : { state: 'failure', total_count: 3, statuses: [] }
+      return new Response(JSON.stringify(body), { status: 200 })
+    }
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /0 of 3 reports/,
+    )
+  })
+
+  it('refuses to answer when the reports run past what it reads', async () => {
+    const { fetch } = paged(1_000_000, () => [run('x')], 'runs')
+    await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow(
+      /not all of them read/,
+    )
+  })
+
   it('reads the check runs and the combined state of the commit statuses', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /commits/abc/check-runs': {
         status: 200,
         body: { check_runs: [{ name: 'ci', status: 'completed', conclusion: 'failure', id: 1 }] },
       },
-      'GET /commits/abc/status': { status: 200, body: { state: 'pending', total_count: 2 } },
+      'GET /commits/abc/status': {
+        status: 200,
+        body: {
+          state: 'pending',
+          total_count: 1,
+          statuses: [{ context: 'deploy', state: 'pending', id: 3 }],
+        },
+      },
     })
     expect(await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')).toEqual({
       checkRuns: [{ name: 'ci', status: 'completed', conclusion: 'failure' }],
       statuses: 'pending',
+      statusContexts: [{ context: 'deploy', state: 'pending' }],
     })
     expect(calls[0].url).toContain('per_page=100')
   })
@@ -719,6 +781,7 @@ describe('commitChecks', () => {
     expect(await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')).toEqual({
       checkRuns: [],
       statuses: 'none',
+      statusContexts: [],
     })
   })
 })
@@ -1519,5 +1582,31 @@ describe('what the doctor reads of a repository', () => {
     await expect(
       createGithubApi(fetch).recentPullRequestHeads('o/r', 't', 'workspace', 3),
     ).rejects.toThrow(/403 listing the pull requests into workspace on o\/r/)
+  })
+})
+
+describe('a call refused for the rate limit', () => {
+  const spent = async () =>
+    new Response('{"message":"API rate limit exceeded for installation ID 1."}', {
+      status: 403,
+      headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': '1795000000' },
+    })
+
+  it('is thrown as RateLimited with the reset time, not as a plain 403', async () => {
+    const error = await createGithubApi(spent, noWait)
+      .branchHead('o/r', 't', 'workspace')
+      .catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(RateLimited)
+    expect((error as RateLimited).resetAt.toISOString()).toBe(
+      new Date(1_795_000_000_000).toISOString(),
+    )
+  })
+
+  it('is thrown as RateLimited from a GraphQL change too', async () => {
+    const graphqlSpent = async (url: string) =>
+      url.endsWith('/graphql') ? spent() : Response.json({ node_id: 'PR_1' })
+    await expect(
+      createGithubApi(graphqlSpent, noWait).markReadyForReview('o/r', 't', 7, 'T'),
+    ).rejects.toBeInstanceOf(RateLimited)
   })
 })

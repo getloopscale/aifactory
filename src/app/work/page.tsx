@@ -2,10 +2,13 @@ import { Button, EmptyState, Sheet } from '@usetheo/ui'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
-import type { TaskCard } from '../../shared/panel'
+import type { StoppedLine, TaskCard } from '../../shared/panel'
 
+import { BaseAlerts } from '../components/BaseAlerts'
+import { LineAlerts } from '../components/LineAlerts'
 import { Board, TaskList } from '../components/Board'
 import { NewJob, type CreatedJob } from '../components/NewJob'
+import { Pulse } from '../components/Pulse'
 import { TaskDetailView } from '../components/TaskDetail'
 import { useCopy } from '../lib/copy'
 import { useEscape } from '../lib/keys'
@@ -18,7 +21,7 @@ import { useView } from '../lib/view'
  */
 export default function Page() {
   const { t } = useCopy()
-  const tasks = useResource<{ tasks: TaskCard[] }>('/api/panel/tasks')
+  const tasks = useResource<{ tasks: TaskCard[]; stoppedLines?: StoppedLine[] }>('/api/panel/tasks')
   const [view, setView] = useView()
   const [opened, setOpened] = useState<CreatedJob>()
   const [params, setParams] = useSearchParams()
@@ -63,6 +66,9 @@ export default function Page() {
           </div>
         </div>
       </div>
+      <LineAlerts lines={tasks.data?.stoppedLines ?? []} />
+      <BaseAlerts tasks={tasks.data?.tasks ?? []} />
+      <Pulse />
       {opened ? (
         <p role="status" className="mb-3 text-sm text-foreground">
           {t.work.opened}{' '}

@@ -3,6 +3,7 @@ import { and, desc, eq, isNotNull } from 'drizzle-orm'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
+import { passReads } from '../github/pass-reads'
 import { autoMergeOrMergeable, type CheckReport, type GithubApi } from '../github/pulls'
 import { automaticRunsSincePerson } from '../panel/queries'
 
@@ -25,10 +26,13 @@ import {
   releaseByMode,
   type Handed,
 } from './integration'
+import { lineHolds } from '../line/incident'
+
 import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
 import { outcome } from './transitions'
 import { squashTitle } from './run-support'
+import { selfCiRefusal } from './self-ci'
 
 export type AwaitCiDeps = {
   db: Database
@@ -201,6 +205,7 @@ async function toPerson(
       stage: 'handoff',
       detail: {
         reason: step.reason,
+        ...(step.cause ? { cause: step.cause } : {}),
         sha: verifiedSha,
         pullRequestUrl: row.pullRequestUrl,
         costUsd: row.costUsd,
@@ -246,6 +251,8 @@ async function readFailure(
  */
 async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]): Promise<boolean> {
   const { row, verifiedSha, token, number } = w
+  const refusal = selfCiRefusal(row.repository, required)
+  if (refusal) throw new Error(refusal)
   const pull = { repo: row.repository, token, number, sha: verifiedSha }
   if (required.length > 0 && (await autoMergeOrMergeable(deps.api, pull)) === 'waiting') {
     await deps.db
@@ -295,7 +302,7 @@ export function baseHoldOf(detail: unknown, sha: string | null): BaseHold | null
   return { sha: hold.sha, checks: hold.checks, since: hold.since }
 }
 
-/** The hold after a pass: the checks red now, keeping `since` while the same checks stay red; none when no check is. */
+/** The hold after a pass: the checks red now, keeping `since` while any check stays red; none when no check is. */
 export function nextBaseHold(
   before: BaseHold | null,
   sha: string,
@@ -304,8 +311,8 @@ export function nextBaseHold(
 ): BaseHold | null {
   if (!red || red.length === 0) return null
   const checks = [...new Set(red)].sort()
-  const since =
-    before && before.checks.join('\n') === checks.join('\n') ? before.since : now.toISOString()
+  // A base that never went green is one red, whichever of its checks fail now: the clock goes on.
+  const since = before ? before.since : now.toISOString()
   return { sha, checks, since }
 }
 
@@ -394,7 +401,12 @@ async function look(
       (deps.now?.() ?? new Date()).getTime() - new Date(done?.at ?? row.createdAt).getTime(),
     automaticRuns: Number(runs?.automatic ?? 0),
     ...(row.integrationHeld
-      ? { held: holding.has(row.repository) ? ('holding' as const) : ('released' as const) }
+      ? {
+          held:
+            holding.has(row.repository) || (await lineHolds(deps.db, row.repository, row.id))
+              ? ('holding' as const)
+              : ('released' as const),
+        }
       : {}),
   }
   let step = decideWaitingIntegration(input)
@@ -500,9 +512,12 @@ export async function pollAwaitingIntegrations(deps: AwaitCiDeps): Promise<Await
   // Read once, so the integrations held out of one promotion all go in together once its hold ends, though
   // the first of them pins the promotion again and starts a new hold.
   const holding = await heldRepositories(deps.db, deps.now?.() ?? new Date())
+  // The tasks of a repository wait on one integration branch: its head, checks and required checks are read
+  // once a pass, not once a task (#232).
+  const pass: AwaitCiDeps = { ...deps, api: passReads(deps.api) }
   for (const row of rows) {
     try {
-      await look(deps, row, result, holding)
+      await look(pass, row, result, holding)
     } catch (error) {
       result.errors.push(`task ${row.id}: ${errorMessage(error)}`)
     }

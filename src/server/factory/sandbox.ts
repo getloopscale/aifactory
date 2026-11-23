@@ -1,5 +1,7 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
+import { whenSlotFree } from './sandbox-slot'
+
 /** A destination the sandbox may reach, optionally with headers the firewall attaches to it. */
 export type EgressRule = {
   domain: string
@@ -45,6 +47,23 @@ export type StreamingBackend = SandboxBackend & {
 
 export const streams = (backend: SandboxBackend): backend is StreamingBackend =>
   typeof (backend as Partial<StreamingBackend>).executeStreaming === 'function'
+
+/** A file to write into a sandbox: its absolute path there and what it holds. */
+export type SandboxFile = { path: string; content: string | Buffer }
+
+/**
+ * A backend that can write many files at once. `SandboxBackend` writes one file per call
+ * (usetheokit/theokit-sdk#1279), and on E2B each call costs about half a second, so the knowledge base of a
+ * large project (nearly a thousand files) took most of a run's preparation. A provider that can adds this, and
+ * a caller asks `uploadsInBatch` before using it. It is for paths that do not exist yet: unlike `uploadFile`,
+ * it removes nothing first.
+ */
+export type BatchUploadBackend = SandboxBackend & {
+  uploadFiles(files: readonly SandboxFile[]): Promise<void>
+}
+
+export const uploadsInBatch = (backend: SandboxBackend): backend is BatchUploadBackend =>
+  typeof (backend as Partial<BatchUploadBackend>).uploadFiles === 'function'
 
 /**
  * A running sandbox: the TheoKit `SandboxBackend` the agent tools and the factory talk to, plus the
@@ -121,24 +140,34 @@ export function assertIsolated(spec: SandboxSpec): void {
   }
 }
 
-/** Creates a sandbox, after checking the spec. Every run goes through here. */
+/**
+ * Creates a sandbox, after checking the spec. Every run goes through here. While the provider refuses for its
+ * concurrent limit, it waits for a slot instead of failing the run: a refused run waited for a retry far longer
+ * than a slot takes to free.
+ */
 export async function createIsolatedSandbox(
   provider: IsolatedSandboxProvider,
   spec: SandboxSpec,
+  slot: Parameters<typeof whenSlotFree>[1] = {},
 ): Promise<IsolatedSandbox> {
   assertIsolated(spec)
-  return provider.create(spec)
+  return whenSlotFree(() => provider.create(spec), slot)
 }
 
-/** Restores a sandbox from a snapshot, after the same check as a new one. */
+/**
+ * Restores a sandbox from a snapshot, after the same check as a new one, and waits for a slot the same way. Saving
+ * the snapshot stopped the run's own sandbox, so another run can take that slot before the restore asks for it.
+ */
 export async function restoreIsolatedSandbox(
   provider: IsolatedSandboxProvider,
   snapshotId: string,
   spec: SandboxSpec,
+  slot: Parameters<typeof whenSlotFree>[1] = {},
 ): Promise<IsolatedSandbox> {
   assertIsolated(spec)
-  if (!provider.restore) {
+  const restore = provider.restore?.bind(provider)
+  if (!restore) {
     throw new IsolationRefused(`${provider.name} cannot restore a snapshot`)
   }
-  return provider.restore(snapshotId, spec)
+  return whenSlotFree(() => restore(snapshotId, spec), slot)
 }

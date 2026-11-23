@@ -8,7 +8,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { finding, ingress, question, stageEvent, task, watch } from '../db/schema'
+import { finding, ingress, lineIncident, question, stageEvent, task, watch } from '../db/schema'
 
 import { FakeSandbox } from './fake-sandbox'
 import type { SandboxOwner } from './sandbox'
@@ -41,7 +41,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await getPool().query(JOBS)
   await getPool().query(
-    'truncate table sandbox_lease, finding, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, theokit_jobs restart identity cascade',
+    'truncate table setting, line_incident, sandbox_lease, finding, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, theokit_jobs restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -144,6 +144,123 @@ describe('a task queued with no job to run it', () => {
     const { found, checked } = await detect({ db: getDb(), now })
     expect(found).toEqual([])
     expect(checked.has('queued_run')).toBe(false)
+  })
+})
+
+/** A queued run-task job of a task, created and due at the given times; `held` puts it at 'infinity'. */
+const queuedRun = (taskId: number, queuedMinutesAgo: number, held = false) =>
+  getPool().query(
+    `insert into theokit_jobs (id, name, input, created_at, available_at)
+     values ($1, 'run-task', $2, $3, $4)`,
+    [
+      `j-${Math.random()}`,
+      JSON.stringify(
+        held ? { taskId, heldFrom: minutesAgo(queuedMinutesAgo).toISOString() } : { taskId },
+      ),
+      minutesAgo(queuedMinutesAgo),
+      held ? 'infinity' : minutesAgo(queuedMinutesAgo),
+    ],
+  )
+
+describe('a repository whose queued runs nobody starts', () => {
+  it('flags the repository once its runs waited an hour with none started, naming the hold', async () => {
+    const first = await seed('intake', 90)
+    const second = await seed('intake', 80)
+    await queuedRun(first, 90, true)
+    await queuedRun(second, 80, true)
+
+    const { found, checked } = await detect({ db: getDb(), now })
+
+    const stalled = found.find((f) => f.key === 'stalled:queue:paulo/app')
+    expect(stalled).toMatchObject({
+      kind: 'stalled',
+      subject: 'queue',
+      taskId: first,
+      ref: 'paulo/app',
+    })
+    expect(stalled?.detail).toContain('2 queued runs of paulo/app, none started for 90 minutes')
+    expect(stalled?.detail).toContain('the coordinator holds them')
+    expect(checked.has('queue')).toBe(true)
+  })
+
+  it('names a stopped line of the repository', async () => {
+    const waiting = await seed('intake', 90)
+    await queuedRun(waiting, 90, true)
+    await getDb().insert(lineIncident).values({
+      repository: 'paulo/app',
+      cause: 'promotion_red',
+      surface: 'workspace -> develop',
+      issueNumber: 77,
+      issueUrl: 'https://github.com/paulo/app/issues/77',
+      lastSha: 'abc',
+    })
+
+    const { found } = await detect({ db: getDb(), now })
+
+    expect(found.find((f) => f.subject === 'queue')?.detail).toContain(
+      'the line is stopped (workspace -> develop, fix #77)',
+    )
+  })
+
+  it('says no worker takes due runs when nothing started anywhere', async () => {
+    const waiting = await seed('intake', 90)
+    await queuedRun(waiting, 90)
+
+    const { found } = await detect({ db: getDb(), now })
+
+    expect(found.find((f) => f.subject === 'queue')?.detail).toContain(
+      'no run started in any repository',
+    )
+  })
+
+  it('leaves alone a repository whose runs keep starting', async () => {
+    const waiting = await seed('intake', 90)
+    await queuedRun(waiting, 90)
+    await seed('sandbox', 20)
+
+    expect(await keys()).not.toContain('stalled:queue:paulo/app')
+  })
+
+  it('leaves alone runs queued for later, as a retry or a paused provider queues them', async () => {
+    const waiting = await seed('intake', 90)
+    await getPool().query(
+      `insert into theokit_jobs (id, name, input, created_at, available_at) values ('later', 'run-task', $1, $2, $3)`,
+      [JSON.stringify({ taskId: waiting }), minutesAgo(90), minutesAgo(-30)],
+    )
+
+    expect(await keys()).not.toContain('stalled:queue:paulo/app')
+  })
+})
+
+describe('approved work in merge with no job to merge it', () => {
+  it('flags it, as a queued task is, when the merge-task job is gone or failed after the pickup time', async () => {
+    const lost = await seed('merge', 15)
+    const failed = await seed('merge', 15)
+    await job('merge-task', { taskId: failed, sha: 'abc123def' }, true)
+
+    const { found } = await detect({ db: getDb(), now })
+
+    expect(found.map((f) => f.key).sort()).toEqual([
+      `orphaned:queued_run:${lost}`,
+      `orphaned:queued_run:${failed}`,
+    ])
+    expect(found.find((f) => f.taskId === lost)?.detail).toContain('no job is left to merge it')
+    expect(found.find((f) => f.taskId === failed)?.detail).toContain(
+      'the job that should merge it failed: boom',
+    )
+  })
+
+  it('leaves alone a merge whose job still waits, however long the queue keeps it', async () => {
+    const waiting = await seed('merge', 90)
+    await job('merge-task', { taskId: waiting, sha: 'abc123def' })
+    await seed('merge', 2)
+    expect(await keys()).toEqual([])
+  })
+
+  it('does not take a run-task job for the job that merges', async () => {
+    const merging = await seed('merge', 15)
+    await job('run-task', { taskId: merging })
+    expect(await keys()).toEqual([`orphaned:queued_run:${merging}`])
   })
 })
 

@@ -3,7 +3,25 @@ import { describe, expect, it } from 'vitest'
 import type { Stage, TimelineEvent } from '../../shared/panel'
 
 import { DICTIONARIES } from './copy'
-import { ago, describeEvent, metricValue, money, runsAgain, shortSha, stageLabel } from './format'
+import { en } from './copy/en'
+import { ptBR } from './copy/pt-BR'
+import {
+  agentName,
+  ago,
+  describeEvent,
+  duration,
+  inQueueOrder,
+  lastAgentLine,
+  metricValue,
+  money,
+  priorityTone,
+  runsAgain,
+  shortSha,
+  stageLabel,
+  stepLine,
+  topRank,
+  workingLine,
+} from './format'
 
 describe('money', () => {
   it('writes cents, and a sum too small to be one as zero', () => {
@@ -124,6 +142,13 @@ describe('describeEvent', () => {
   const line = (stage: Stage, detail: Record<string, unknown> | null) =>
     describeEvent({ id: 1, stage, at: '2026-11-04T10:00:00Z', detail } as TimelineEvent)
 
+  it('says which approved commit waits for its merge, and by whose review', () => {
+    expect(line('merge', { sha: 'abc1234def', reviewer: 'codex' })).toBe(
+      'abc1234, approved by codex',
+    )
+    expect(line('merge', { sha: 'abc1234def' })).toBe('abc1234')
+  })
+
   it('says what a person asked for, with the note when there is one', () => {
     expect(line('intake', { decision: 'retry' })).toBe('a person retry')
     expect(line('intake', { decision: 'request_changes', note: 'rename it' })).toBe(
@@ -233,6 +258,8 @@ describe('stageLabel with what is known of the task', () => {
     expect(stageLabel('failed', { retryable: 'quota' })).toBe('waiting for the limit')
     expect(stageLabel('failed', { retryable: 'environment' })).toBe('will retry')
     expect(stageLabel('failed', { retryable: 'blocked' })).toBe('waiting for another issue')
+    expect(stageLabel('failed', { retryable: 'base' })).toBe('waiting for the base to pass')
+    expect(stageLabel('build', { retryable: 'base' })).toBe('building')
     expect(stageLabel('failed', { retryable: null })).toBe('failed')
     expect(stageLabel('build', { integrated: true, retryable: 'quota' })).toBe('building')
   })
@@ -275,5 +302,143 @@ describe('in both languages', () => {
   it('says things differently in Portuguese', () => {
     expect(ago(before(120), now, DICTIONARIES['pt-BR'].time)).toBe('há 2min')
     expect(stageLabel('intake', {}, DICTIONARIES['pt-BR'].stages)).toBe('na fila')
+  })
+})
+
+describe('agentName', () => {
+  it('gives the two known agents their product names and keeps any other name as it is', () => {
+    expect(agentName('claude-code')).toBe('Claude Code')
+    expect(agentName('codex')).toBe('Codex')
+    expect(agentName('gemini-cli')).toBe('gemini-cli')
+  })
+})
+
+describe('stepLine', () => {
+  it('says the step, and its attempt or round past the first, without the agent', () => {
+    const at = (step: 'building' | 'reviewing', attempt: number) =>
+      stepLine({ step, agent: 'codex', model: 'gpt-6.1-terra', attempt }, en.board)
+
+    expect(at('building', 1)).toBe('building')
+    expect(at('building', 2)).toBe('building · attempt 2')
+    expect(at('reviewing', 3)).toBe('reviewing · round 3')
+  })
+})
+
+describe('workingLine', () => {
+  it('names the agent, its model and the step while it plans', () => {
+    const line = workingLine(
+      { step: 'planning', agent: 'codex', model: 'gpt-6.1-terra', attempt: 1 },
+      en.board,
+    )
+    expect(line).toBe('Codex · gpt-6.1-terra · planning')
+  })
+
+  it('says which attempt a build is past the first, and that a rework fixes findings', () => {
+    expect(
+      workingLine({ step: 'building', agent: 'claude-code', model: 'opus', attempt: 2 }, en.board),
+    ).toBe('Claude Code · opus · building · attempt 2')
+    expect(
+      workingLine({ step: 'fixing', agent: 'claude-code', model: null, attempt: 2 }, en.board),
+    ).toBe('Claude Code · fixing findings · attempt 2')
+  })
+
+  it('says which round a review is past the first', () => {
+    expect(
+      workingLine(
+        { step: 'reviewing', agent: 'codex', model: 'gpt-6.1-terra', attempt: 2 },
+        en.board,
+      ),
+    ).toBe('Codex · gpt-6.1-terra · reviewing · round 2')
+  })
+
+  it('names the checks while the factory verifies, with no agent', () => {
+    expect(workingLine({ step: 'checks', checks: ['tests', 'lint'] }, en.board)).toBe(
+      'checks · tests, lint',
+    )
+    expect(workingLine({ step: 'checks', checks: [] }, en.board)).toBe('checks')
+  })
+
+  it('speaks Portuguese with the Portuguese dictionary', () => {
+    expect(
+      workingLine({ step: 'reviewing', agent: 'codex', model: null, attempt: 3 }, ptBR.board),
+    ).toBe('Codex · revisando · rodada 3')
+  })
+})
+
+describe('lastAgentLine', () => {
+  it('names who worked last, with the model when there is one', () => {
+    expect(lastAgentLine({ agent: 'claude-code', model: 'opus' }, en.board)).toBe(
+      'last: Claude Code · opus',
+    )
+    expect(lastAgentLine({ agent: 'codex', model: null }, ptBR.board)).toBe('por último: Codex')
+  })
+})
+
+describe('the queued column', () => {
+  const at = (id: number, position: number | null) => ({
+    id,
+    queue: { position, reasons: null, readiness: null },
+  })
+
+  it('lists the queued tasks in the order the worker serves them, held ones last in the order they came', () => {
+    const tasks = [at(1, 3), at(2, null), at(3, 1), at(4, null), at(5, 2)]
+    expect(inQueueOrder(tasks).map((t) => t.id)).toEqual([3, 5, 1, 2, 4])
+  })
+
+  it('leaves a task with no place in the line after the ones that have one', () => {
+    expect(inQueueOrder([{ id: 1, queue: null }, at(2, 4)]).map((t) => t.id)).toEqual([2, 1])
+  })
+
+  it('does not reorder what it was given', () => {
+    const tasks = [at(1, 2), at(2, 1)]
+    inQueueOrder(tasks)
+    expect(tasks.map((t) => t.id)).toEqual([1, 2])
+  })
+
+  it('ranks the first ten places of the line and nothing after them', () => {
+    expect([1, 10, 11, null].map((position) => topRank(at(0, position).queue))).toEqual([
+      1,
+      10,
+      null,
+      null,
+    ])
+    expect(topRank(null)).toBeNull()
+  })
+})
+
+describe('the badge of a priority', () => {
+  it('is red for priority 1, amber for 2, violet for 3 and plain from 4 down', () => {
+    expect([1, 2, 3, 4, 5, 9].map(priorityTone)).toEqual([
+      'destructive',
+      'warning',
+      'primary',
+      'default',
+      'default',
+      'default',
+    ])
+  })
+
+  it('treats a priority under 1 as the most urgent', () => {
+    expect(priorityTone(0)).toBe('destructive')
+  })
+})
+
+describe('duration', () => {
+  it('reads minutes under an hour, hours and minutes under a day, and days and hours after', () => {
+    expect(duration(0)).toBe('0m')
+    expect(duration(45)).toBe('45m')
+    expect(duration(60)).toBe('1h')
+    expect(duration(190)).toBe('3h 10m')
+    expect(duration(1440)).toBe('1d')
+    expect(duration(1440 + 4 * 60 + 30)).toBe('1d 4h')
+  })
+})
+
+describe('duration', () => {
+  it('counts whole minutes, so a time measured to the millisecond never shows a fraction', () => {
+    expect(duration(5 * 60 + 9.406216666666694)).toBe('5h 9m')
+    expect(duration(3 * 60 + 5.019783333333322)).toBe('3h 5m')
+    expect(duration(59.99)).toBe('59m')
+    expect(duration(0.4)).toBe('0m')
   })
 })

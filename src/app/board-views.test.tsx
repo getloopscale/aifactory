@@ -21,10 +21,12 @@ const card = (id: number, over: Partial<TaskCard> = {}): TaskCard => ({
   attempts: 1,
   createdAt: '2026-11-04T10:00:00Z',
   updatedAt: '2026-11-04T10:05:00Z',
+  leadTime: { minutes: 5, status: 'on_track', running: true },
   approved: false,
   integrated: false,
   waitingForChecks: false,
   waitingOnBase: null,
+  returned: null,
   queue: null,
   resolved: false,
   retryable: null,
@@ -33,6 +35,8 @@ const card = (id: number, over: Partial<TaskCard> = {}): TaskCard => ({
   release: null,
   mainRed: false,
   releaseWait: null,
+  working: null,
+  lastAgent: null,
   ...over,
 })
 

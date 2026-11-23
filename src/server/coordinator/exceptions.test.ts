@@ -2,7 +2,21 @@ import { describe, expect, it } from 'vitest'
 
 import { readOf, unread } from '../factory/doctor'
 
-import { causeOf, failedChecksOutput, recognise, type TaskFacts } from './exceptions'
+import {
+  CHECK_OUTPUT_MAX,
+  causeOf,
+  ciFailingOutput,
+  failedChecksOutput,
+  failingOutput,
+  failureCause,
+  readsChecks,
+  quotedCiOutput,
+  readsBrokenCiOutput,
+  readsCiOutput,
+  recognise,
+  type CheckRun,
+  type TaskFacts,
+} from './exceptions'
 
 const CHECKS_REASON =
   "the repository's required checks failed and the agent changed nothing, saying why below. What the failed checks reported:\n\nCI:\n~~~~text\nERROR: lint exited with 1\n~~~~"
@@ -30,6 +44,16 @@ describe('the cause of a handoff', () => {
     expect(causeOf({ cause: 'checks_unchanged', reason: 'anything' })).toBe('checks_unchanged')
     expect(causeOf({ cause: 'review_unusable', reason: '' })).toBe('review_unusable')
     expect(causeOf({ cause: 'review_plateau', reason: '' })).toBe('review_plateau')
+  })
+
+  it('is not a review plateau when the last rework broke the checks of a reviewed commit', () => {
+    const detail = {
+      cause: 'checks_broke_after_review',
+      reason:
+        'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d',
+    }
+
+    expect(causeOf(detail)).toBe('checks_broke_after_review')
   })
 
   it('is read from the reason of a handoff recorded before causes were', () => {
@@ -196,6 +220,24 @@ describe('recognising the exceptions of a task', () => {
     ])
   })
 
+  it('leaves alone a task waiting for a red integration branch while it has automatic retries', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'abc', checks: ['quality'] },
+    }
+    expect(recognise(failedWith(detail, 2))).toEqual([])
+  })
+
+  it('recognises a task still blocked by a red integration branch past its automatic retries', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'abc', checks: ['quality'] },
+    }
+    expect(recognise(failedWith(detail, 3))).toEqual([
+      { kind: 'base_red', taskId: 9, head: 'none', evidence: '"quality" fails on workspace too' },
+    ])
+  })
+
   it('leaves alone the failures that pass by themselves', () => {
     expect(recognise(failedWith({ quota: true, error: 'usage limit' }, 9))).toEqual([])
     expect(recognise(failedWith({ blockedBy: [12], error: 'blocked' }, 9))).toEqual([])
@@ -273,7 +315,13 @@ describe('a task held by a red integration branch', () => {
   })
 
   it('is no exception before the limit', () => {
-    expect(recognise(held('2026-11-17T10:30:00Z'))).toEqual([])
+    expect(recognise(held('2026-11-17T11:45:00Z'))).toEqual([])
+  })
+
+  it('is base_red half an hour after the base went red, so a fix starts before the queue piles up', () => {
+    const [found] = recognise(held('2026-11-17T11:20:00Z'))
+    expect(found).toMatchObject({ kind: 'base_red', taskId: 5 })
+    expect(found.evidence).toContain('40 minutes')
   })
 
   it('is base_red past the limit, naming the checks and the commit they hold', () => {
@@ -314,5 +362,603 @@ describe('a task held by a red integration branch', () => {
         evidence: expect.stringContaining('connection lost'),
       }),
     ])
+  })
+})
+
+const run = (over: Partial<CheckRun> = {}): CheckRun => ({
+  name: 'quality',
+  command: 'pnpm quality',
+  sha: 'abc1234def',
+  passed: false,
+  output: 'ERROR: too long',
+  ...over,
+})
+
+describe('the cause of a failure', () => {
+  it('is checks_red for checks still red after the attempts', () => {
+    for (const error of [
+      'no pull request: "quality" failed at edea7b1 (after 3 attempts)',
+      'no pull request: "types" failed at 9a4e8c5',
+      'no pull request: "tests" failed at 55f31b9; "quality" failed at 55f31b9 (after 3 attempts)',
+      'no pull request: no evidence for "lint" at abc1234; "tests" failed at abc1234 (after 2 attempts)',
+      'no pull request: "format" failed at 1234567 (after 4 attempts, the last on 7654321 restored)',
+    ]) {
+      expect(failureCause(error)).toBe('checks_red')
+    }
+  })
+
+  it('is out_of_time for a run with no time left or an agent cut at its limit', () => {
+    for (const error of [
+      "no time left for another agent pass: 36 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
+      'the agent did not finish the rework: claude exited 1 without a JSON result: timed out after 3600000 ms',
+      'the agent did not finish: claude exited 124 without a JSON result: timed out after 10 ms\nthe work was kept in commit abc on factory/3; send the task back to continue from it',
+    ]) {
+      expect(failureCause(error)).toBe('out_of_time')
+    }
+  })
+
+  it('is no_change for an agent that left the repository as it was', () => {
+    for (const error of [
+      'the agent made no change to the repository, and the reviewer did not confirm the issue is resolved: it is not. The agent said: done',
+      'the agent made no change to the repository. The agent said: the code already does it',
+      'the agent made no change to the repository',
+    ]) {
+      expect(failureCause(error)).toBe('no_change')
+    }
+  })
+
+  it('stays a failure for any other reason, or one that only quotes those words', () => {
+    for (const error of [
+      'the tests failed',
+      'no pull request: no evidence for "lint" at abc1234',
+      'no pull request: no checks are required, so nothing was verified',
+      'push refused: no pull request: "lint" failed at abc1234',
+      'clone failed: the agent made no change to the repository',
+      'the agent did not finish: claude exited 1 without a JSON result: boom',
+      '',
+    ]) {
+      expect(failureCause(error)).toBe('failure')
+    }
+  })
+})
+
+describe('the output of the checks that fail on a head', () => {
+  it('quotes each check whose last run on the head failed, with its command', () => {
+    expect(
+      failingOutput(
+        [run(), run({ name: 'lint', command: 'pnpm lint', output: 'x' })],
+        'abc1234def',
+      ),
+    ).toBe(
+      'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~\n\nlint (`pnpm lint`):\n~~~~text\nx\n~~~~',
+    )
+  })
+
+  it('leaves out a check that passed when it ran again, and runs on other commits', () => {
+    const runs = [
+      run(),
+      run({ passed: true, output: 'ok' }),
+      run({ name: 'lint', sha: 'other', output: 'old' }),
+    ]
+    expect(failingOutput(runs, 'abc1234def')).toBe('')
+  })
+
+  it('takes the last failed run of a check on the head', () => {
+    const runs = [run({ passed: true }), run({ output: 'second' })]
+    expect(failingOutput(runs, 'abc1234def')).toContain('second')
+  })
+
+  it('keeps the end of a long output, each check within its share of the limit', () => {
+    const long = `${'a'.repeat(CHECK_OUTPUT_MAX)}END`
+    const one = failingOutput([run({ output: long })], 'abc1234def')
+    expect(one).toContain(`${'a'.repeat(CHECK_OUTPUT_MAX - 3)}END`)
+    expect(one).not.toContain('a'.repeat(CHECK_OUTPUT_MAX - 2))
+    const two = failingOutput(
+      [run({ output: long }), run({ name: 'lint', output: long })],
+      'abc1234def',
+    )
+    expect(two).toContain(`${'a'.repeat(CHECK_OUTPUT_MAX / 2 - 3)}END`)
+    expect(two).not.toContain('a'.repeat(CHECK_OUTPUT_MAX / 2 - 2))
+  })
+
+  it('keeps a fence in the output from closing the quote, and says when a check printed nothing', () => {
+    expect(failingOutput([run({ output: 'a\n~~~~\nb' })], 'abc1234def')).toContain('a\n~~\nb')
+    expect(failingOutput([run({ output: '  \n' })], 'abc1234def')).toContain('(no output)')
+  })
+})
+
+describe('whether the checks of a task are read', () => {
+  it('reads them for failed checks, checks still red and a red base', () => {
+    expect(readsChecks('handoff', { cause: 'checks_unchanged' })).toBe(true)
+    expect(readsChecks('failed', { error: 'no pull request: "lint" failed at abc1234' })).toBe(true)
+    expect(readsChecks('failed', { error: 'x', baseRed: { sha: 'b', checks: ['lint'] } })).toBe(
+      true,
+    )
+  })
+
+  it('does not read them for anything else', () => {
+    expect(readsChecks('handoff', { cause: 'review_plateau' })).toBe(false)
+    expect(readsChecks('failed', { error: 'the agent made no change to the repository' })).toBe(
+      false,
+    )
+    expect(readsChecks('failed', null)).toBe(false)
+    expect(readsChecks('done', { error: 'no pull request: "lint" failed at abc1234' })).toBe(false)
+  })
+})
+
+describe('recognising a failure the coordinator acts on', () => {
+  const failing = (error: string, over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...failedWith({ error }),
+    headSha: 'abc1234def',
+    last: readOf({ stage: 'failed', detail: { error }, id: 40 }),
+    checks: readOf([run()]),
+    ...over,
+  })
+  const RED = 'no pull request: "quality" failed at abc1234 (after 3 attempts)'
+
+  it('recognises checks still red with the output of the failing checks, once per failure event', () => {
+    expect(recognise(failing(RED))).toEqual([
+      {
+        kind: 'checks_red',
+        taskId: 9,
+        head: 'abc1234def@40',
+        evidence: RED,
+        checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~',
+      },
+    ])
+  })
+
+  it('recognises checks still red with no output when no failing run is kept', () => {
+    expect(recognise(failing(RED, { checks: readOf([]) }))[0]).toMatchObject({
+      kind: 'checks_red',
+      checkOutput: '',
+    })
+    expect(recognise(failing(RED, { checks: undefined }))[0]).toMatchObject({
+      kind: 'checks_red',
+      checkOutput: '',
+    })
+  })
+
+  it('gives an unknown exception when the checks of the failure could not be read', () => {
+    const facts = failing(RED, { checks: unread('the checks of the tasks', 'timeout') })
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'unknown',
+        taskId: 9,
+        head: 'abc1234def',
+        evidence: 'could not read the checks of the tasks: timeout',
+      },
+    ])
+  })
+
+  it('recognises a run out of time and an agent that changed nothing, on the failure event', () => {
+    const late = "no time left for another agent pass: 36 of the sandbox's 60 minutes are gone"
+    expect(recognise(failing(late))).toEqual([
+      { kind: 'out_of_time', taskId: 9, head: 'abc1234def@40', evidence: late },
+    ])
+    const same = 'the agent made no change to the repository. The agent said: it is done'
+    expect(recognise(failing(same))).toEqual([
+      { kind: 'no_change', taskId: 9, head: 'abc1234def@40', evidence: same },
+    ])
+  })
+
+  it('stays on the head alone for a task that never pushed, or an event with no id', () => {
+    const late = 'no time left for another agent pass: 50 of 60'
+    expect(recognise(failing(late, { headSha: null }))[0].head).toBe('none')
+    const noId = failing(late, { last: readOf({ stage: 'failed', detail: { error: late } }) })
+    expect(recognise(noId)[0].head).toBe('abc1234def')
+  })
+
+  it('keeps any other failure a failure on its head', () => {
+    expect(recognise(failing('the tests failed'))).toEqual([
+      { kind: 'failure', taskId: 9, head: 'abc1234def', evidence: 'the tests failed' },
+    ])
+  })
+})
+
+describe('the checks of failed checks that the handoff did not quote', () => {
+  it('are the output of the checks that fail on the head', () => {
+    const facts: TaskFacts = {
+      ...handedOver({ reason: 'the required checks failed', cause: 'checks_unchanged' }),
+      headSha: 'abc1234def',
+      checks: readOf([run()]),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc1234def',
+        evidence: '',
+        checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: too long\n~~~~',
+      },
+    ])
+  })
+
+  it('are none when they could not be read or were not', () => {
+    const base = handedOver({ reason: 'the required checks failed', cause: 'checks_unchanged' })
+    for (const checks of [undefined, unread('the checks', 'x')]) {
+      expect(recognise({ ...base, checks })[0]).toEqual({
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc',
+        evidence: '',
+      })
+    }
+  })
+})
+
+describe('the red base a fix is filed for', () => {
+  const REPO = { fullName: 'usetheokit/theokit', integrationBranch: 'workspace' }
+
+  it('names the repository, the branch, the commit and the checks of a hold', () => {
+    const facts: TaskFacts = {
+      taskId: 5,
+      stage: 'done',
+      headSha: 'abc',
+      last: readOf({ stage: 'done', detail: {} }),
+      automaticRuns: readOf(0),
+      findings: [],
+      baseHold: readOf({ sha: '1234567890', checks: ['CI'], since: '2026-11-17T09:00:00Z' }),
+      at: new Date('2026-11-17T12:00:00Z'),
+      repository: REPO,
+    }
+    expect(recognise(facts)[0].base).toEqual({
+      repository: 'usetheokit/theokit',
+      branch: 'workspace',
+      sha: '1234567890',
+      checks: ['CI'],
+      commands: [],
+    })
+  })
+
+  it('names the commands of the checks a failed run found red on the base', () => {
+    const detail = {
+      error: '"quality" fails on workspace too',
+      baseRed: { sha: 'base999', checks: ['quality'] },
+    }
+    const facts: TaskFacts = {
+      ...failedWith(detail, 3),
+      repository: REPO,
+      checks: readOf([
+        run({ command: 'old' }),
+        run({ name: 'lint', command: 'pnpm lint' }),
+        run({ command: 'pnpm quality --ci', sha: 'other' }),
+      ]),
+    }
+    expect(recognise(facts)[0]).toMatchObject({
+      kind: 'base_red',
+      base: {
+        repository: 'usetheokit/theokit',
+        branch: 'workspace',
+        sha: 'base999',
+        checks: ['quality'],
+        commands: [{ name: 'quality', command: 'pnpm quality --ci' }],
+      },
+    })
+  })
+
+  it('names no command when the checks were not read, and no base when the repository is not known', () => {
+    const detail = { error: 'red', baseRed: { sha: 'base999', checks: ['quality'] } }
+    const unreadChecks = {
+      ...failedWith(detail, 3),
+      repository: REPO,
+      checks: unread('the checks', 'x'),
+    }
+    expect(recognise(unreadChecks)[0].base?.commands).toEqual([])
+    expect(recognise(failedWith(detail, 3))[0].base).toBeUndefined()
+  })
+})
+
+describe('the output GitHub Actions logged for failed checks', () => {
+  const failure = (name: string, lines: string[]) => ({ name, url: `https://ci/${name}`, lines })
+
+  it('quotes each failed check with its link and the lines that say why it failed', () => {
+    expect(ciFailingOutput([failure('build', ['FAIL a.test.ts', 'Error: boom'])])).toBe(
+      'build (https://ci/build):\n~~~~text\nFAIL a.test.ts\nError: boom\n~~~~',
+    )
+  })
+
+  it('leaves out a failed check whose log said nothing, and is empty when none did', () => {
+    const both = [failure('gate', []), failure('test', ['FAIL b'])]
+    expect(ciFailingOutput(both)).toBe('test (https://ci/test):\n~~~~text\nFAIL b\n~~~~')
+    expect(ciFailingOutput([failure('gate', [])])).toBe('')
+    expect(ciFailingOutput([])).toBe('')
+  })
+
+  it('keeps the first lines of each check within its share of the limit', () => {
+    const long = Array.from({ length: 40 }, (_, i) => `Error: line ${i} ${'x'.repeat(200)}`)
+    const quoted = ciFailingOutput([failure('one', long), failure('two', long)])
+    const [one, two] = quoted.split('\n\ntwo')
+    expect(one).toContain('Error: line 0 ')
+    expect(two).toContain('Error: line 0 ')
+    expect(one.length).toBeLessThanOrEqual(CHECK_OUTPUT_MAX / 2 + 60)
+    expect(quoted.length).toBeLessThanOrEqual(CHECK_OUTPUT_MAX + 120)
+  })
+
+  it('keeps a fence in a log line from closing the quote', () => {
+    expect(ciFailingOutput([failure('x', ['~~~~ done'])])).toContain('~~ done')
+    expect(ciFailingOutput([failure('x', ['~~~~ done'])])).not.toContain('~~~~ done')
+  })
+})
+
+describe('whether GitHub Actions logs are read for failed checks', () => {
+  const reason = 'the required checks failed'
+
+  it('reads them when neither the handoff nor the factory kept any output', () => {
+    expect(readsCiOutput(reason, { headSha: 'abc1234def' })).toBe(true)
+    expect(readsCiOutput(reason, { headSha: 'abc1234def', checks: readOf([]) })).toBe(true)
+    const passed = readOf([run({ passed: true })])
+    expect(readsCiOutput(reason, { headSha: 'abc1234def', checks: passed })).toBe(true)
+  })
+
+  it('does not read them when the handoff quoted the checks', () => {
+    expect(readsCiOutput(CHECKS_REASON, { headSha: 'abc1234def' })).toBe(false)
+  })
+
+  it('does not read them when the factory kept what its own checks printed on the head', () => {
+    expect(readsCiOutput(reason, { headSha: 'abc1234def', checks: readOf([run()]) })).toBe(false)
+  })
+})
+
+describe('failed checks that nothing but GitHub Actions logged', () => {
+  const base = handedOver({ reason: 'the required checks failed', cause: 'checks_unchanged' })
+  const logged = readOf([{ name: 'build', url: 'https://ci/1', lines: ['FAIL a.test.ts'] }])
+
+  it('carry what the failed jobs logged', () => {
+    const facts: TaskFacts = {
+      ...base,
+      pullRequest: readOf({ conflicting: false, base: 'workspace' }),
+      ciFailures: logged,
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc',
+        evidence: '',
+        ciOutput: 'build (https://ci/1):\n~~~~text\nFAIL a.test.ts\n~~~~',
+      },
+    ])
+  })
+
+  it('are an unknown exception when the logs could not be read', () => {
+    const facts: TaskFacts = {
+      ...base,
+      ciFailures: unread('the failed checks of abc on GitHub', 'GitHub answered 502'),
+    }
+    expect(recognise(facts)).toEqual([
+      {
+        kind: 'unknown',
+        taskId: 7,
+        head: 'abc',
+        evidence: 'could not read the failed checks of abc on GitHub: GitHub answered 502',
+      },
+    ])
+  })
+
+  it('carry nothing of the logs on a pull request that conflicts with its base', () => {
+    const facts: TaskFacts = {
+      ...base,
+      pullRequest: readOf({ conflicting: true, base: 'workspace' }),
+      ciFailures: logged,
+    }
+    expect(recognise(facts)[0]).toEqual({
+      kind: 'checks_unchanged',
+      taskId: 7,
+      head: 'abc',
+      evidence: '',
+      conflictsWith: 'workspace',
+    })
+  })
+})
+
+describe('a merge of the integration branch that conflicted', () => {
+  const error =
+    'merging workspace at abc1234 into factory/12 conflicts in src/a.ts, which a person resolves'
+  const conflicted = (over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...failedWith({ error, baseConflict: { branch: 'workspace', files: ['src/a.ts'] } }),
+    headSha: 'abc1234def',
+    last: readOf({
+      stage: 'failed',
+      detail: { error, baseConflict: { branch: 'workspace', files: ['src/a.ts'] } },
+      id: 41,
+    }),
+    ...over,
+  })
+
+  it('is base_conflict on the failure event, naming the branch and the files', () => {
+    expect(recognise(conflicted())).toEqual([
+      {
+        kind: 'base_conflict',
+        taskId: 9,
+        head: 'abc1234def@41',
+        evidence: error,
+        conflictsWith: 'workspace',
+        conflictFiles: ['src/a.ts'],
+      },
+    ])
+  })
+
+  it('stays a plain failure when the conflict names no branch', () => {
+    const detail = { error, baseConflict: { files: ['src/a.ts'] } }
+    const facts = conflicted({ last: readOf({ stage: 'failed', detail, id: 41 }) })
+    expect(recognise(facts)[0].kind).toBe('failure')
+  })
+
+  it('names no files when the conflict listed none it could read', () => {
+    const detail = { error, baseConflict: { branch: 'workspace', files: 'src/a.ts' } }
+    const facts = conflicted({ last: readOf({ stage: 'failed', detail, id: 41 }) })
+    expect(recognise(facts)[0]).toMatchObject({ kind: 'base_conflict', conflictFiles: [] })
+  })
+})
+
+describe('the identity of a handoff', () => {
+  const onEvent = (detail: Record<string, unknown>, id?: number): TaskFacts => ({
+    ...handedOver(detail),
+    last: readOf({ stage: 'handoff', detail, ...(id === undefined ? {} : { id }) }),
+  })
+  const PLATEAU = { reason: 'the reviewer still asked for changes after 3 attempts' }
+
+  it('is its head and its event, so a second handoff on the same head is another exception', () => {
+    expect(recognise(onEvent({ ...PLATEAU, cause: 'review_plateau' }, 41))[0].head).toBe('abc@41')
+    expect(recognise(onEvent({ ...PLATEAU, cause: 'review_plateau' }, 52))[0].head).toBe('abc@52')
+    expect(recognise(onEvent({ reason: CHECKS_REASON, cause: 'checks_unchanged' }, 41))[0]).toEqual(
+      {
+        kind: 'checks_unchanged',
+        taskId: 7,
+        head: 'abc@41',
+        evidence: 'CI:\n~~~~text\nERROR: lint exited with 1\n~~~~',
+      },
+    )
+  })
+
+  it('stays on the head alone for an event with no id, a task that never pushed, or a fact not read', () => {
+    expect(recognise(onEvent(PLATEAU))[0].head).toBe('abc')
+    expect(recognise({ ...onEvent(PLATEAU, 41), headSha: null })[0].head).toBe('none')
+    const unreadPull = {
+      ...onEvent({ reason: CHECKS_REASON, cause: 'checks_unchanged' }, 41),
+      pullRequest: unread('the pull request of task 7', 'GitHub answered 502'),
+    }
+    expect(recognise(unreadPull)[0]).toMatchObject({ kind: 'unknown', head: 'abc' })
+  })
+})
+
+describe('the handoffs of an integration that waited for the required checks', () => {
+  const REPO = { fullName: 'o/r', integrationBranch: 'workspace' }
+  const waited = (detail: Record<string, unknown>, over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...handedOver(detail),
+    last: readOf({ stage: 'handoff', detail, id: 60 }),
+    repository: REPO,
+    ...over,
+  })
+  const RED_REASON =
+    'the required checks still fail after 3 automatic runs: CI\n\nCI:\n~~~~text\nTypeError: x is undefined\n~~~~'
+
+  it('is told by the cause the integration recorded', () => {
+    expect(causeOf({ cause: 'pull_conflict', reason: '' })).toBe('pull_conflict')
+    expect(causeOf({ cause: 'base_fixed', reason: '' })).toBe('base_fixed')
+    expect(causeOf({ cause: 'ci_red', reason: '' })).toBe('ci_red')
+  })
+
+  it('names the integration branch to merge for a pull request that still conflicts with it', () => {
+    const reason = 'the pull request conflicts with its base after 3 automatic runs'
+    expect(recognise(waited({ reason, cause: 'pull_conflict' }))).toEqual([
+      {
+        kind: 'pull_conflict',
+        taskId: 7,
+        head: 'abc@60',
+        evidence: reason,
+        conflictsWith: 'workspace',
+      },
+    ])
+  })
+
+  it('names the integration branch to merge for a base that passes the checks again', () => {
+    const reason =
+      'the integration branch passes CI again, and the pull request still has to merge it after 3 automatic runs'
+    expect(recognise(waited({ reason, cause: 'base_fixed' }))).toEqual([
+      { kind: 'base_fixed', taskId: 7, head: 'abc@60', evidence: reason, mergeFrom: 'workspace' },
+    ])
+  })
+
+  it('names no branch when the repository of the task is not known', () => {
+    const facts = waited({ reason: 'r', cause: 'pull_conflict' }, { repository: undefined })
+    expect(recognise(facts)[0]).not.toHaveProperty('conflictsWith')
+  })
+
+  it('quotes what the failed checks reported for checks that still fail', () => {
+    expect(recognise(waited({ reason: RED_REASON, cause: 'ci_red' }))).toEqual([
+      {
+        kind: 'ci_red',
+        taskId: 7,
+        head: 'abc@60',
+        evidence: 'CI:\n~~~~text\nTypeError: x is undefined\n~~~~',
+      },
+    ])
+  })
+
+  it('takes what GitHub Actions logged when the handoff quoted nothing', () => {
+    const reason = 'the required checks still fail after 3 automatic runs: CI'
+    const ciFailures = readOf([{ name: 'CI', url: 'https://ci/1', lines: ['boom'] }])
+    expect(recognise(waited({ reason, cause: 'ci_red' }, { ciFailures }))).toEqual([
+      {
+        kind: 'ci_red',
+        taskId: 7,
+        head: 'abc@60',
+        evidence: '',
+        ciOutput: 'CI (https://ci/1):\n~~~~text\nboom\n~~~~',
+      },
+    ])
+    const failed = { ciFailures: unread('the failed checks', 'GitHub answered 502') }
+    expect(recognise(waited({ reason, cause: 'ci_red' }, failed))[0]).toMatchObject({
+      kind: 'unknown',
+      head: 'abc',
+    })
+  })
+
+  it('reads the failed checks of the pull request only when the handoff quoted none', () => {
+    expect(quotedCiOutput('the required checks still fail after 3 automatic runs: CI')).toBe('')
+    expect(quotedCiOutput(RED_REASON)).toBe('CI:\n~~~~text\nTypeError: x is undefined\n~~~~')
+  })
+})
+
+describe('a rework after the review that broke the checks', () => {
+  const REASON =
+    'the last rework broke the checks ("quality" failed at bad0000), so the branch is back at abc1234, which passed them and was reviewed'
+  const restored = (over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...handedOver({ reason: REASON, cause: 'checks_broke_after_review' }),
+    headSha: 'abc1234def',
+    last: readOf({
+      stage: 'handoff',
+      detail: { reason: REASON, cause: 'checks_broke_after_review' },
+      id: 70,
+    }),
+    ...over,
+  })
+
+  it('reads the checks the factory ran, since they say what the rework broke', () => {
+    expect(readsChecks('handoff', { cause: 'checks_broke_after_review', reason: REASON })).toBe(
+      true,
+    )
+  })
+
+  it('quotes what the checks printed on the commit the branch was restored from', () => {
+    const checks = readOf([
+      run({ sha: 'old1111', output: 'an older failure' }),
+      run({ sha: 'bad0000', output: 'ERROR: broke it' }),
+      run({ name: 'lint', command: 'pnpm lint', sha: 'bad0000', passed: true, output: 'ok' }),
+      run({ sha: 'abc1234def', passed: true, output: 'fine' }),
+    ])
+    expect(recognise(restored({ checks }))).toEqual([
+      {
+        kind: 'checks_broke_after_review',
+        taskId: 7,
+        head: 'abc1234def@70',
+        evidence: REASON,
+        checkOutput: 'quality (`pnpm quality`):\n~~~~text\nERROR: broke it\n~~~~',
+      },
+    ])
+  })
+
+  it('quotes nothing of the checks when none failed, and what GitHub Actions logged when it was read', () => {
+    const ciFailures = readOf([{ name: 'CI', url: 'https://ci/1', lines: ['boom'] }])
+    const found = recognise(restored({ checks: readOf([run({ passed: true })]), ciFailures }))
+    expect(found[0]).toMatchObject({
+      kind: 'checks_broke_after_review',
+      checkOutput: '',
+      ciOutput: 'CI (https://ci/1):\n~~~~text\nboom\n~~~~',
+    })
+  })
+
+  it('is unknown when the checks or the GitHub logs could not be read', () => {
+    const unreadChecks = restored({ checks: unread('the checks', 'x') })
+    expect(recognise(unreadChecks)[0]).toMatchObject({ kind: 'unknown', head: 'abc1234def' })
+    const unreadCi = restored({ ciFailures: unread('the failed checks', 'GitHub answered 502') })
+    expect(recognise(unreadCi)[0]).toMatchObject({ kind: 'unknown', head: 'abc1234def' })
+  })
+
+  it('reads the GitHub logs only when the factory kept no output of the broken checks', () => {
+    expect(readsBrokenCiOutput({ checks: readOf([run({ sha: 'bad0000' })]) })).toBe(false)
+    expect(readsBrokenCiOutput({ checks: readOf([]) })).toBe(true)
   })
 })

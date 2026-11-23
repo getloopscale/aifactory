@@ -3,6 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { mainProcessOnly } from '../factory/worker-only'
 import { knowledgeDeps } from '../knowledge/deps'
 import { knowledgePass } from '../knowledge/pass'
+import { githubPass } from '../github/budget-pass'
 
 /**
  * Keeps the knowledge base current for every agent: once a minute it fetches the owner's knowledge
@@ -13,5 +14,9 @@ import { knowledgePass } from '../knowledge/pass'
 export default defineCron('knowledge-sync', {
   schedule: '* * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(() => knowledgePass(() => knowledgeDeps())),
+  handler: mainProcessOnly(
+    githubPass('knowledge-sync', () => knowledgePass(() => knowledgeDeps()), {
+      waitsForLimit: true,
+    }),
+  ),
 })

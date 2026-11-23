@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -17,11 +17,22 @@ import {
   task,
   watch,
 } from '../db/schema'
+import {
+  DEFAULT_LEAD_TIME,
+  leadTimeOf,
+  limitsFor,
+  type LeadTime,
+  type LeadTimeLimits,
+} from '../../shared/lead-time'
 import { retryAt } from '../factory/auto-retry'
+import { CONFLICT_NOTE_OPENING } from '../factory/merge-base'
+import { FREE_BASE_RUNS } from '../factory/transitions'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
+import { cardAgent, STEP_STAGES, type StepEvent } from './card-agent'
 import { EMPTY_QUEUE, queueViews } from './queue-view'
+import { returnedOf } from './returned'
 import {
   columnOf,
   retryableFailure,
@@ -72,6 +83,12 @@ const NETWORK_FREE_SPAN = sql.raw("interval '1 hour'")
  * dropped ("fetch failed": an outage is not the work failing, and waiting is what fixes it), but only within
  * `NETWORK_FREE_SPAN` of the first run of that streak: a failure that outlasts any outage counts, so it ends
  * in a person's hands.
+ *
+ * Runs that are not the work's fault are left out too (#350): a check of a `Blocked by` issue, which waiting
+ * fixes and which has no limit of its own, and a run that only brings the integration branch into the work (a
+ * send-back for a conflict, or a merge of the base with no agent, after CI blamed the base or the coordinator
+ * asked), up to `FREE_BASE_RUNS`. Past those, each such run counts, so a conflict that never resolves still
+ * reaches a person.
  */
 export function automaticRunsSincePerson() {
   const network = sql`coalesce(f.detail->>'error', '') ilike '%fetch failed%'`
@@ -80,7 +97,14 @@ export function automaticRunsSincePerson() {
   // last started the task. A failure counts too, so a streak with no intake of its own still has a start.
   const streakStart = sql`(select min(q.at) from stage_event q where q.task_id = ${OUTER.taskId} and q.id <= ${OUTER.id} and q.id > coalesce((select max(b.id) from stage_event b where b.task_id = ${OUTER.taskId} and b.id < ${OUTER.id} and (b.stage not in ('intake', 'sandbox', 'failed') or (b.stage = 'failed' and coalesce(b.detail->>'error', '') not ilike '%fetch failed%'))), 0) and q.id >= coalesce((select max(p.id) from stage_event p where p.task_id = ${OUTER.taskId} and p.id < ${OUTER.id} and p.stage = 'intake' and (p.detail->>'automatic') is distinct from 'true' and (p.detail->>'withdrawn') is distinct from 'true'), 0))`
   const free = sql`(${network} and ${OUTER.at} - ${streakStart} < ${NETWORK_FREE_SPAN}) or (not ${network} and (${OUTER.detail}->>'decision') is not distinct from 'request_changes')`
-  return sql<number>`count(*) filter (where ${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage = 'failed' and (${free}) from stage_event f where f.id = (select min(x.id) from stage_event x where x.task_id = ${OUTER.taskId} and x.id > s.id))))`
+  const counted = sql`${OUTER.stage} = 'intake' and ${OUTER.detail}->>'automatic' = 'true' and ${OUTER.id} > coalesce((select max(i.id) from stage_event i where i.task_id = ${OUTER.taskId} and i.stage = 'intake' and (i.detail->>'automatic') is distinct from 'true' and (i.detail->>'withdrawn') is distinct from 'true'), 0) and not exists (select 1 from stage_event s where s.task_id = ${OUTER.taskId} and s.stage = 'sandbox' and s.id = (select min(n.id) from stage_event n where n.task_id = ${OUTER.taskId} and n.id > ${OUTER.id}) and (select f.stage = 'failed' and (${free}) from stage_event f where f.id = (select min(x.id) from stage_event x where x.task_id = ${OUTER.taskId} and x.id > s.id)))`
+  // The event just before this intake: the failure a retry starts from, when it is one.
+  const before = sql`(select b.stage = 'failed' and case when jsonb_typeof(b.detail->'blockedBy') = 'array' then jsonb_array_length(b.detail->'blockedBy') > 0 else false end from stage_event b where b.id = (select max(p.id) from stage_event p where p.task_id = ${OUTER.taskId} and p.id < ${OUTER.id}))`
+  const blocked = sql`coalesce(${before}, false)`
+  const baseOnly = sql`((${OUTER.detail}->>'mergeBase') is not distinct from 'true' or left(coalesce(${OUTER.detail}->>'note', ''), ${CONFLICT_NOTE_OPENING.length}::int) = ${CONFLICT_NOTE_OPENING})`
+  const own = sql`count(*) filter (where ${counted} and not ${blocked} and not ${baseOnly})`
+  const merges = sql`count(*) filter (where ${counted} and not ${blocked} and ${baseOnly})`
+  return sql<number>`(${own} + greatest(0, ${merges} - ${FREE_BASE_RUNS}::int))`
 }
 
 const iso = (date: Date) => date.toISOString()
@@ -99,6 +123,8 @@ function nextRun(
     resumesAt: typeof detail.resumesAt === 'string' ? detail.resumesAt : undefined,
     resetsAt: typeof detail.resetsAt === 'string' ? detail.resetsAt : undefined,
     automaticRetries,
+    blockedCheckedAt:
+      typeof detail.blockedCheckedAt === 'string' ? detail.blockedCheckedAt : undefined,
   })
   return at ? { retryable, at } : null
 }
@@ -114,6 +140,8 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     .select({
       taskId: stageEvent.taskId,
       last: sql<Date>`max(${stageEvent.at})`,
+      // The last delivery: a task sent back after one is delivered again when it is done again.
+      delivered: sql<Date | null>`max(${stageEvent.at}) filter (where ${stageEvent.stage} = 'done')`,
       // Only the current run's: a retry starts again at attempt 1 with a new intake, so the checks of
       // the runs before it are not attempts of this one. An automatic retry that kept the work (`kept`) is the
       // same run again, so the checks before it still count.
@@ -151,10 +179,14 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   const lastFailure = new Map(failures.map((f) => [f.taskId, f]))
   const byTask = new Map(activity.map((a) => [a.taskId, a]))
   const holds = await baseHolds(db, rows)
+  const returns = await returnsFromDone(db, rows)
   const queues = await queueViews(
     db,
     rows.filter((r) => r.stage === 'intake').map((r) => r.id),
   )
+  const steps = await stepEvents(db, ids)
+  const limits = await leadTimeLimits(db, rows)
+  const now = new Date()
   return rows.map((r) => {
     const seen = byTask.get(r.id)
     const again =
@@ -176,10 +208,12 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       attempts: Number(seen?.verifies ?? 0),
       createdAt: iso(r.createdAt),
       updatedAt: iso(new Date(seen?.last ?? r.createdAt)),
+      leadTime: leadTimeOfCard(r, seen?.delivered ?? null, now, limits),
       approved: r.headSha !== null && kinds.some((k) => k.sha === r.headSha),
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
       waitingOnBase: holds.get(r.id) ?? null,
+      returned: returns.get(r.id) ?? null,
       queue: r.stage === 'intake' ? (queues.get(r.id) ?? EMPTY_QUEUE) : null,
       resolved: r.resolvedSha !== null,
       retryable: again?.retryable ?? null,
@@ -188,8 +222,105 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       release: lastDelivery(delivered, r, 'release'),
       mainRed: watched.some((w) => w.taskId === r.id && w.status === 'red' && !w.acknowledgedAt),
       releaseWait: lastReleaseWait(releases, r),
+      ...cardAgent(r.stage as Stage, steps.get(r.id) ?? []),
     }
   })
+}
+
+/** The stages in which a task is delivered, so its lead time stopped at its last `done`. */
+const DELIVERED: readonly string[] = ['done', 'released']
+
+/** Each repository's lead time limits, the factory's default where it set none. */
+async function leadTimeLimits(db: Database, rows: TaskRow[]): Promise<Map<string, LeadTimeLimits>> {
+  const names = [...new Set(rows.map((r) => r.repository))]
+  const set = await db
+    .select({
+      fullName: repository.fullName,
+      atRiskMinutes: repository.leadTimeAtRiskMinutes,
+      overdueMinutes: repository.leadTimeOverdueMinutes,
+    })
+    .from(repository)
+    .where(inArray(repository.fullName, names))
+  const byName = new Map(set.map((r) => [r.fullName, r]))
+  return new Map(
+    names.map((name) => {
+      const own = byName.get(name)
+      return [
+        name,
+        limitsFor({
+          atRiskMinutes: own?.atRiskMinutes ?? null,
+          overdueMinutes: own?.overdueMinutes ?? null,
+        }),
+      ]
+    }),
+  )
+}
+
+/** A card's lead time: none for a cancelled task, stopped at the last delivery for a delivered one. */
+function leadTimeOfCard(
+  r: TaskRow,
+  delivered: Date | string | null,
+  now: Date,
+  limits: Map<string, LeadTimeLimits>,
+): LeadTime | null {
+  if (r.stage === 'cancelled') return null
+  const deliveredAt = DELIVERED.includes(r.stage) && delivered ? new Date(delivered) : null
+  return leadTimeOf(
+    { startedAt: r.createdAt, deliveredAt, now },
+    limits.get(r.repository) ?? DEFAULT_LEAD_TIME,
+  )
+}
+
+/** The latest event of each step stage (plan, build, review, verify) of every task, by task. */
+async function stepEvents(db: Database, ids: number[]): Promise<Map<number, StepEvent[]>> {
+  const latest = await db
+    .selectDistinctOn([stageEvent.taskId, stageEvent.stage], {
+      taskId: stageEvent.taskId,
+      id: stageEvent.id,
+      stage: stageEvent.stage,
+      detail: stageEvent.detail,
+    })
+    .from(stageEvent)
+    .where(and(inArray(stageEvent.taskId, ids), inArray(stageEvent.stage, [...STEP_STAGES])))
+    .orderBy(stageEvent.taskId, stageEvent.stage, desc(stageEvent.id))
+  const byTask = new Map<number, StepEvent[]>()
+  for (const { taskId, ...event } of latest) {
+    byTask.set(taskId, [...(byTask.get(taskId) ?? []), event])
+  }
+  return byTask
+}
+
+/**
+ * Each task that went back from `done` and has not reached it again: the first event after its last `done`, read
+ * by `returnedOf` with that `done`'s detail. A task delivered now is not read.
+ */
+async function returnsFromDone(db: Database, rows: TaskRow[]) {
+  const back = new Map<number, NonNullable<TaskCard['returned']>>()
+  const ids = rows.filter((r) => !DELIVERED.includes(r.stage)).map((r) => r.id)
+  if (ids.length === 0) return back
+  const lastDone = db
+    .select({ taskId: stageEvent.taskId, id: sql<number>`max(${stageEvent.id})`.as('done_id') })
+    .from(stageEvent)
+    .where(and(inArray(stageEvent.taskId, ids), eq(stageEvent.stage, 'done')))
+    .groupBy(stageEvent.taskId)
+    .as('last_done')
+  const leaving = await db
+    .selectDistinctOn([stageEvent.taskId], {
+      taskId: stageEvent.taskId,
+      stage: stageEvent.stage,
+      detail: stageEvent.detail,
+      at: stageEvent.at,
+      doneDetail: sql<unknown>`(select d.detail from stage_event d where d.id = ${lastDone.id})`,
+    })
+    .from(stageEvent)
+    .innerJoin(lastDone, eq(lastDone.taskId, stageEvent.taskId))
+    .where(gt(stageEvent.id, lastDone.id))
+    .orderBy(stageEvent.taskId, asc(stageEvent.id))
+  for (const event of leaving) {
+    const returned = returnedOf(event, event.doneDetail)
+    if (returned) back.set(event.taskId, returned)
+  }
+  return back
 }
 
 /** The hold a red integration branch puts on each task that waits for its checks, on its latest `done` event. */
@@ -260,9 +391,16 @@ function lastDelivery(rows: DeliveryRow[], t: TaskRow, kind: 'prerelease' | 'rel
   return last ? { tag: last.tag, url: last.url } : null
 }
 
-/** Every task, newest activity first. */
+/**
+ * Every task on the board, newest activity first. A cancelled task is left off: its issue was closed or lost
+ * the `factory` label, so nobody has anything to do with it, and the issue keeps its story.
+ */
 export async function listTasks(db: Database): Promise<TaskCard[]> {
-  const rows = await db.select().from(task).orderBy(desc(task.id))
+  const rows = await db
+    .select()
+    .from(task)
+    .where(ne(task.stage, 'cancelled'))
+    .orderBy(desc(task.id))
   return (await cards(db, rows)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 

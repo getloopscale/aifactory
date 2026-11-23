@@ -38,6 +38,7 @@ export type ActionDeps = {
           feedback?: string
           resume?: boolean
           mergeBase?: boolean
+          fromReview?: boolean
         },
         key: string,
       ) => Promise<void>,
@@ -103,6 +104,8 @@ async function requeue(
             automatic: true,
             ...(rework?.preAgent ? { kept: true } : {}),
             ...(rework?.decisionId ? { decisionId: rework.decisionId } : {}),
+            // A run that only merges the base is left out of the allowance of automatic runs (`panel/queries.ts`).
+            ...(rework?.mergeBase ? { mergeBase: true } : {}),
           },
         })
         .returning({ id: stageEvent.id })
@@ -134,6 +137,8 @@ type Rework = {
   plain?: boolean
   /** The run merges the integration branch into the work branch itself, and no agent is given the note. */
   mergeBase?: boolean
+  /** The note is the coordinator's decision on a review, not what failed checks reported. */
+  fromReview?: boolean
   /** The run that failed never started an agent (its sandbox failed), so it was no attempt of the work. */
   preAgent: boolean
 }
@@ -143,7 +148,10 @@ function queuedInput(taskId: number, note: string, changes: boolean, rework?: Re
   if (rework?.mergeBase) return { taskId, mergeBase: true }
   if (rework?.plain) return { taskId, resume: true }
   if (!changes) return { taskId }
-  return rework?.decisionId ? { taskId, decisionId: rework.decisionId } : { taskId, feedback: note }
+  if (rework?.decisionId) return { taskId, decisionId: rework.decisionId }
+  return rework?.fromReview
+    ? { taskId, feedback: note, fromReview: true }
+    : { taskId, feedback: note }
 }
 
 /**
@@ -481,7 +489,12 @@ export async function mergeFixedBase(deps: ActionDeps, taskId: number, note: str
  * that goes through the checks and the review again. Like an automatic send-back, nothing is decided in
  * anybody's name; the coordinator's own record says why (`coordinator/apply.ts`).
  */
-export async function sendBackByCoordinator(deps: ActionDeps, taskId: number, note: string) {
+export async function sendBackByCoordinator(
+  deps: ActionDeps,
+  taskId: number,
+  note: string,
+  { fromReview = false }: { fromReview?: boolean } = {},
+) {
   const row = await load(deps.db, taskId)
   mustAllow(row, 'coordinator_send_back')
   const from = stagesWhere('coordinator_send_back', row)
@@ -494,7 +507,29 @@ export async function sendBackByCoordinator(deps: ActionDeps, taskId: number, no
     })
     return
   }
-  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha)
+  const rework = fromReview ? { note: text, fromReview, preAgent: false } : undefined
+  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha, rework)
+}
+
+/**
+ * Runs a handed-over task again only to merge the integration branch into its branch, because the coordinator
+ * decided so: its pull request conflicts with that branch. The run merges it itself, with no agent (`Run.mergeBase`),
+ * and the merge goes through the checks and the review like any work; a conflict fails the run with the files,
+ * and the coordinator sends that back to the agent. The note is the record of why; no agent is given it.
+ */
+export async function mergeBaseByCoordinator(deps: ActionDeps, taskId: number, note: string) {
+  const row = await load(deps.db, taskId)
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  const facts = { ...row, branchGone: !head }
+  mustAllow(facts, 'coordinator_merge_base')
+  const text = note.slice(0, NOTE_MAX)
+  const from = stagesWhere('coordinator_merge_base', facts)
+  await requeue(deps, taskId, from, 'automatic_changes', text, row.headSha, {
+    note: text,
+    mergeBase: true,
+    preAgent: false,
+  })
 }
 
 /**

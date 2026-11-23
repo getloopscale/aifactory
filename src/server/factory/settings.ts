@@ -6,7 +6,7 @@ import { agentSettingChange, repository, setting } from '../db/schema'
 
 import { EFFORT_ENV, engineModels, isSafeName, MODEL_ENV, tagged, untag } from './engine-models'
 import { withClaudeToken } from './claude-token'
-import { DEFAULT_HARNESS, harnessRegistry } from './harness-registry'
+import { canStart, DEFAULT_HARNESS, defaultPlannerName, harnessRegistry } from './harness-registry'
 
 /** The environment variable each role has always been read from, which is also what a setting overrides. */
 export const ROLE_ENV: Record<AgentRole, string> = {
@@ -74,12 +74,19 @@ export async function effectiveEnv(
   return { ...withClaudeToken(env), ...overlay }
 }
 
-/** The role's agent as the factory resolves it: the choice, else the environment, else the default. */
-export function effectiveOf(env: NodeJS.ProcessEnv): Record<AgentRole, string> {
+/**
+ * The role's agent as the factory resolves it: the choice, else the environment, else the default. The planner's
+ * default is `DEFAULT_PLANNER` when it can start, else the builder.
+ */
+export function effectiveOf(
+  env: NodeJS.ProcessEnv,
+  ready: (name: string) => boolean = (name) =>
+    canStart(harnessRegistry(withClaudeToken(env)), name),
+): Record<AgentRole, string> {
   const builder = env.FACTORY_HARNESS || DEFAULT_HARNESS
   return {
     builder,
-    planner: env.FACTORY_PLANNER || builder,
+    planner: env.FACTORY_PLANNER || defaultPlannerName(builder, ready),
     reviewer: env.FACTORY_REVIEWER || builder,
   }
 }

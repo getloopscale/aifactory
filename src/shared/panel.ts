@@ -1,4 +1,7 @@
 import type { DoctorSay } from './doctor-say'
+import type { LeadTime } from './lead-time'
+
+export type { LeadTime, LeadTimeStatus } from './lead-time'
 
 /** What the panel's API returns. The server builds these, the interface reads them. */
 
@@ -11,6 +14,7 @@ export type Stage =
   | 'verify'
   | 'review'
   | 'waiting'
+  | 'merge'
   | 'pr'
   | 'done'
   | 'released'
@@ -20,13 +24,22 @@ export type Stage =
 
 /** Where a stage sits on the board. */
 export type Column =
-  'queued' | 'working' | 'waiting' | 'retrying' | 'review' | 'released' | 'resolved' | 'attention'
+  | 'queued'
+  | 'working'
+  | 'waiting'
+  | 'retrying'
+  | 'merge'
+  | 'review'
+  | 'released'
+  | 'resolved'
+  | 'attention'
 
 export const COLUMNS: { id: Column; title: string }[] = [
   { id: 'queued', title: 'Queued' },
   { id: 'working', title: 'Working' },
   { id: 'waiting', title: 'Waiting for you' },
   { id: 'retrying', title: 'Will retry itself' },
+  { id: 'merge', title: 'Merge' },
   { id: 'review', title: 'Delivered' },
   { id: 'released', title: 'Released' },
   { id: 'resolved', title: 'Already resolved' },
@@ -35,11 +48,11 @@ export const COLUMNS: { id: Column; title: string }[] = [
 
 /**
  * Why a failed task is not waiting for a person: the agent's usage limit, the environment (GitHub, the
- * network, the sandbox, a restart), or an issue it is blocked by that is still open. Each passes, and the
- * factory runs the task again once it has. A failure of the work itself is none of them, and stays with a
- * person.
+ * network, the sandbox, a restart), an issue it is blocked by that is still open, or checks that fail on the
+ * integration branch too (`base`). Each passes, and the factory runs the task again once it has. A failure of
+ * the work itself is none of them, and stays with a person.
  */
-export type Retryable = 'quota' | 'environment' | 'blocked' | null
+export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
 
 /**
  * The sandbox provider has no template of the factory's (E2B answers `404: template 'aifactory-sandbox:4' not
@@ -48,20 +61,54 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | null
  */
 export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
 
+/**
+ * The sandbox provider refusing every new sandbox until someone pays: E2B answers `403: team is blocked:
+ * credit_exhausted` once the team's credit is gone and `403: team is blocked: spend_limit` past its spending
+ * limit, and Vercel `Status code 402` past its plan. Nothing in the work caused it, and no run starts until it
+ * ends, so the factory pauses its sandboxes while it lasts (`factory/provider-pause.ts`).
+ */
+export const SANDBOX_PROVIDER_BLOCKED =
+  /\bteam is blocked: (?:credit_exhausted|spend_limit)\b|Status code 402/i
+
 const ENVIRONMENT_PATTERN =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|Codex login[^:]*(was refused|could not be renewed)/i
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|API rate limit exceeded|Codex login[^:]*(was refused|could not be renewed)/i
 
 /**
  * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer
- * either. The provider lost the sandbox; nothing the agent wrote caused it.
+ * either, or the stream dropped and e2b could not tell what became of the sandbox (`its state is unknown`). The
+ * provider lost the sandbox; nothing the agent wrote caused it.
  */
-const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe failed/i
+const SANDBOX_UNREACHABLE =
+  /sandbox could not be reached and its (?:health probe failed|state is unknown)/i
+
+/**
+ * E2B refusing a new sandbox because the account already runs as many as it may at once (`Rate limit exceeded,
+ * please try again later - you have reached the maximum number of concurrent E2B sandboxes (10)`). The slots
+ * free up as other runs end; nothing in the work asked for it.
+ */
+const SANDBOX_LIMIT = /maximum number of concurrent E2B sandboxes/i
+
+/**
+ * e2b ending the stream of a command because the sandbox itself went away (`The sandbox was killed or reached
+ * its end of life while the request was in flight`). The provider stopped it; the work did not.
+ */
+const SANDBOX_ENDED = /sandbox was killed or reached its end of life/i
+
+/**
+ * The harness's own install failing (`claude did not install`, `codex did not install`): npm or its download
+ * of the native binary, before the agent wrote anything. The same install passes on the next sandbox.
+ */
+const HARNESS_INSTALL = /\b(claude|codex) did not install\b/i
 
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
+    SANDBOX_PROVIDER_BLOCKED.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
-    SANDBOX_UNREACHABLE.test(error),
+    SANDBOX_UNREACHABLE.test(error) ||
+    SANDBOX_ENDED.test(error) ||
+    HARNESS_INSTALL.test(error) ||
+    SANDBOX_LIMIT.test(error),
 }
 
 /**
@@ -70,13 +117,21 @@ const ENVIRONMENT = {
  * issue or gives the agent more time. A command of the environment that timed out (a clone, an install) is
  * not this one.
  */
-const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
+export const AGENT_OUT_OF_TIME = /^the agent did not finish\b.*\btimed out\b/is
+
+/** A run's record that the checks it failed on fail on the integration branch too (#219). */
+function failsOnBase(baseRed: unknown): boolean {
+  if (typeof baseRed !== 'object' || baseRed === null) return false
+  const checks = (baseRed as { checks?: unknown }).checks
+  return Array.isArray(checks) && checks.length > 0
+}
 
 /** From the detail the factory recorded when a task failed. */
 export function retryableFailure(detail: Record<string, unknown> | null | undefined): Retryable {
   if (!detail) return null
   if (detail.quota === true) return 'quota'
   if (Array.isArray(detail.blockedBy) && detail.blockedBy.length > 0) return 'blocked'
+  if (failsOnBase(detail.baseRed)) return 'base'
   if (typeof detail.error !== 'string' || AGENT_OUT_OF_TIME.test(detail.error)) return null
   return ENVIRONMENT.test(detail.error) ? 'environment' : null
 }
@@ -85,7 +140,9 @@ export function retryableFailure(detail: Record<string, unknown> | null | undefi
 export type DoneOutcome = { resolved?: boolean; integrated?: boolean }
 
 /**
- * Delivered means waiting for a release. A done task resolved with no change (the code already did what
+ * Delivered means integrated and waiting for a release. Approved work that is not integrated yet (its pull request
+ * waits for CI, or for a merge that has not happened) is still on its way, in Merge with the merge job and the
+ * pull request it opens. A done task resolved with no change (the code already did what
  * the issue asks, or a person resolved it another way) has nothing merged for a release to carry, so it
  * goes to its own column until its resolving commit is on the release branch, when it becomes `released`
  * (`factory/resolved-release.ts`).
@@ -97,23 +154,73 @@ export function columnOf(
 ): Column {
   if (stage === 'failed' && retryable) return 'retrying'
   if (stage === 'done' && resolved && !integrated) return 'resolved'
+  if (stage === 'done' && !integrated) return 'merge'
   switch (stage) {
     case 'intake':
       return 'queued'
     case 'waiting':
       return 'waiting'
+    // Approved work on its way to the integration branch: waiting for the merge, then at its pull request.
+    case 'merge':
+    case 'pr':
+      return 'merge'
     case 'done':
       return 'review'
     case 'released':
       return 'released'
     case 'handoff':
     case 'failed':
-    // Nothing enters it yet. Until something does and says where it belongs, a person sees it.
+    // The board leaves a cancelled task off (`listTasks`); a card read on its own lands here.
     case 'cancelled':
       return 'attention'
     default:
       return 'working'
   }
+}
+
+/**
+ * Why a delivered task went back to an earlier stage: its approved pull request conflicted with an integration
+ * branch that moved (`base_conflict`), a required check failed on it (`ci_red`), the base failed those checks
+ * too and passes them now, so the run only merges it (`base_fixed`), a person asked for changes (`review`), or
+ * anything else (`other`).
+ */
+export const RETURN_REASONS = ['base_conflict', 'ci_red', 'base_fixed', 'review', 'other'] as const
+export type ReturnReason = (typeof RETURN_REASONS)[number]
+
+/** A task that left `done` for an earlier stage and has not reached `done` again: why, when, and what it was told. */
+export type Returned = { reason: ReturnReason; at: string; note: string | null }
+
+/**
+ * What approved work in the Merge column waits for: the merge job (`merging`), its pull request (`opening_pr`), the
+ * required checks GitHub merges it after (`waiting_for_checks`), or a merge that has not happened (`awaiting_merge`).
+ * Null for a card that is not there: integrated work, or a task in another stage.
+ */
+export type MergeState = 'merging' | 'opening_pr' | 'waiting_for_checks' | 'awaiting_merge'
+
+export function mergeState(
+  card: Pick<TaskCard, 'stage' | 'integrated' | 'waitingForChecks'>,
+): MergeState | null {
+  if (card.stage === 'merge') return 'merging'
+  if (card.stage === 'pr') return 'opening_pr'
+  if (card.stage !== 'done' || card.integrated) return null
+  return card.waitingForChecks ? 'waiting_for_checks' : 'awaiting_merge'
+}
+
+/** How many cards are in each state of the Merge column, for its header. */
+export function mergeBreakdown(
+  cards: Pick<TaskCard, 'stage' | 'integrated' | 'waitingForChecks'>[],
+): Record<MergeState, number> {
+  const counts: Record<MergeState, number> = {
+    merging: 0,
+    opening_pr: 0,
+    waiting_for_checks: 0,
+    awaiting_merge: 0,
+  }
+  for (const card of cards) {
+    const state = mergeState(card)
+    if (state) counts[state] += 1
+  }
+  return counts
 }
 
 export type DeliveryView = {
@@ -161,7 +268,7 @@ export type RunView = {
 export type FindingView = {
   id: number
   kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'answer_resume' | 'snapshot' | 'revert'
+  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert' | 'back_merge'
   taskId: number | null
   taskTitle: string | null
   ref: string | null
@@ -222,6 +329,18 @@ export type MetricSignalView = {
 
 export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
 
+/** How fast the factory delivers right now, measured live rather than by the daily indicators. */
+export type PulseReport = {
+  /** Tasks delivered (their last `done`) in the last hour, and in the last 24 hours. */
+  deliveredLastHour: number
+  deliveredLast24Hours: number
+  /** The median lead time, entering to delivery, of the tasks delivered in the last 24 hours; null with none. */
+  leadTimeP50Minutes: number | null
+  /** Tasks waiting in the queue, and tasks a run is working on. */
+  queued: number
+  working: number
+}
+
 export type HealthReport = {
   cost: {
     last24HoursUsd: number
@@ -250,6 +369,11 @@ export type TaskCard = {
   createdAt: string
   /** The last time anything happened to the task. */
   updatedAt: string
+  /**
+   * From entering the factory to the delivery, or to now while it is not delivered, against the repository's
+   * limits. Null for a cancelled task, which has no delivery to count to.
+   */
+  leadTime: LeadTime | null
   /** Whether a person approved the commit the pull request is at. */
   approved: boolean
   /** The pull request was merged into the integration branch, so it is on the pre-release branch too. */
@@ -264,6 +388,11 @@ export type TaskCard = {
    * which checks, on which branch, and since when. Null when nothing holds it.
    */
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
+  /**
+   * The task went back from `done` to an earlier stage and has not reached `done` again: why, when and the note
+   * the run was given. Null for a task that never left `done`, or that reached it again.
+   */
+  returned: Returned | null
   /** Where a queued task stands in the line of runs and why the scheduler put it there; null once it left `intake`. */
   queue: QueueView | null
   /**
@@ -285,7 +414,26 @@ export type TaskCard = {
    * refused, while the task is not released. Null when none waited, or once one merged.
    */
   releaseWait: ReleaseWaitView | null
+  /** What works on the task right now, while it plans, builds, runs its checks or is reviewed; null otherwise. */
+  working: AgentStep | null
+  /** The agent that planned, built or reviewed the task last; null before any did. */
+  lastAgent: AgentSeen | null
 }
+
+/** An agent by the name the factory knows it by (`claude-code`, `codex`, ...), and the model it ran with. */
+export type AgentSeen = {
+  agent: string
+  /** Null when the stage did not record one. */
+  model: string | null
+}
+
+/**
+ * One step of a running task: an agent planning, building, fixing what a review or the checks found, or
+ * reviewing, with the attempt (the round, for a review); or the factory running the checks, with no agent.
+ */
+export type AgentStep =
+  | (AgentSeen & { step: 'planning' | 'building' | 'fixing' | 'reviewing'; attempt: number })
+  | { step: 'checks'; checks: string[] }
 
 /** A queued task's place in the line of runs, the reasons for it, and whether its issue is ready to build. */
 export type QueueView = {
@@ -379,7 +527,7 @@ export type CoordinatorActionView = {
   title: string
   exceptionKind: string
   action: string
-  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated'
+  outcome: 'applied' | 'trial' | 'refused' | 'failed' | 'escalated' | 'deferred'
   reason: string
   /** What a model drafted, as text, or null when nothing was. */
   draft: string | null
@@ -457,13 +605,34 @@ export type RepositoryView = {
   releaseMode: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; null means the factory's default. */
   runLimitMinutes: number | null
+  /** From this many minutes of lead time a task is at risk; null means the factory's default. */
+  leadTimeAtRiskMinutes: number | null
+  /** From this many minutes of lead time a task is overdue; null means the factory's default. */
+  leadTimeOverdueMinutes: number | null
   /** The commit of the integration branch the proven checks passed on; null when none was proven. */
   checksProvenSha: string | null
   /** The names of the saved checks that no proof ran: the owner typed them, and the first task tries them. */
   unprovenChecks: string[]
   /** The last proof of proposed checks, running or finished; null when none was asked for. */
   checksProof: ChecksProof | null
+  /**
+   * The checks run on the merge of the work with the integration branch, after the checks above. Empty
+   * means none: the merge is held to the development checks only.
+   */
+  integrationChecks: { name: string; command: string }[]
+  /** The commit of the integration branch the proven integration checks passed on; null when none was. */
+  integrationChecksProvenSha: string | null
+  /** The names of the saved integration checks that no proof ran. */
+  unprovenIntegrationChecks: string[]
+  /** The last proof of proposed integration checks, running or finished; null when none was asked for. */
+  integrationChecksProof: ChecksProof | null
 }
+
+/**
+ * Which list of a repository a proof is for: `checks` run on every commit of the work, `integration` on
+ * the merge of the work with the integration branch.
+ */
+export type ProofKind = 'checks' | 'integration'
 
 /**
  * How one proposed check did on the head of the integration branch. `too_slow` is a check that was still
@@ -486,6 +655,7 @@ export type ProvenCheck = {
  */
 export type ChecksProof = {
   fullName: string
+  kind: ProofKind
   status: 'proving' | 'done' | 'failed'
   /** When it was asked for. */
   at: string
@@ -498,7 +668,15 @@ export type ChecksProof = {
   results: ProvenCheck[]
   saved: string[]
   error: string | null
+  /**
+   * How the repository's own checks did, run first so the integration checks find the project installed.
+   * Only an integration proof has them; they are shown and never saved, and decide nothing.
+   */
+  setup?: ProvenCheck[]
 }
+
+/** A proof as a repository's row keeps it: one stored before proofs had a kind has none, and is of `checks`. */
+export type StoredProof = Omit<ChecksProof, 'kind'> & { kind?: ProofKind }
 
 /** What saving a repository answers with. */
 export type RepositorySaved = {
@@ -507,6 +685,8 @@ export type RepositorySaved = {
   doctor?: DoctorReport
   /** The names of the saved checks that no proof ran. */
   unprovenChecks: string[]
+  /** The names of the saved integration checks that no proof ran. */
+  unprovenIntegrationChecks: string[]
 }
 
 /** A project's `.factory/setup.json` on its default branch, and which of its domains wait for the owner. */
@@ -766,3 +946,26 @@ export type CodexConnection = {
  */
 export const MIN_RUN_MINUTES = 50
 export const MAX_RUN_MINUTES = 240
+
+/**
+ * A repository whose line is stopped (`server/line/`): nothing of it runs or integrates but one fix, shown at
+ * the top of the board.
+ */
+export type StoppedLine = {
+  repository: string
+  cause: 'promotion_red' | 'mass_failure'
+  /** What is blocked: `workspace -> develop`, or the failure signature. */
+  surface: string
+  issueNumber: number
+  issueUrl: string
+  /** `escalated` once the fixes ran out and a person has it. */
+  status: 'open' | 'escalated'
+  attempts: number
+  /** ISO time the line stopped. */
+  since: string
+  /**
+   * What the stopped line holds back (`FACTORY_LINE_STOP_SCOPE`): the rest of the repository (`hold`), or nothing,
+   * with only its fix going first (`fix_first`).
+   */
+  scope: 'hold' | 'fix_first'
+}

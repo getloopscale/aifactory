@@ -38,6 +38,24 @@ describe('agentSetup', () => {
   })
 })
 
+describe('agentSetup with a planner apart from the builder', () => {
+  it('names the planner with its own model and effort', () => {
+    const setup = agentSetup(
+      {},
+      'claude-code',
+      'codex',
+      (_env, role) => (role === 'planner' ? { model: 'gpt-6.1-terra', effort: 'high' } : {}),
+      'codex',
+    )
+
+    expect(setup).toMatchObject({
+      planner: 'codex',
+      plannerModel: 'gpt-6.1-terra',
+      plannerEffort: 'high',
+    })
+  })
+})
+
 const result = (id: string, costUsd: number, durationMs = 0, passed = true): CaseResult => ({
   id,
   passed,
@@ -397,7 +415,10 @@ describe('checkBeforeDeploy', () => {
     expect(checked).toMatchObject({
       ran: true,
       ok: false,
-      reasons: ['the pass rate fell from 100% to 0%'],
+      reasons: [
+        'the pass rate fell from 100% to 0%',
+        'no case ran to a verdict in both runs, so the cost could not be compared',
+      ],
     })
   })
 })

@@ -1,6 +1,8 @@
 [Unit]
 Description=aifactory worker %i (runs jobs only, so more tasks run at once)
-After=aifactory.service
+# Not ordered after aifactory.service: a restart of every process would then stop the workers first and start
+# them only once the main process drained its own run and came back, and the factory ran nothing meanwhile.
+# The workers need Postgres, which run-server.sh waits for, and migrations, which the deploy applies first.
 
 [Service]
 WorkingDirectory=@ROOT@

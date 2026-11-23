@@ -173,6 +173,9 @@ describe('the catalog of agents', () => {
       agent('planner', { FACTORY_HARNESS: 'codex', FACTORY_MODEL_BUILDER: 'codex:gpt-6.1-sol' })
         .engine.value,
     ).toContain('gpt-6.1-sol')
+    expect(
+      agent('planner', { FACTORY_HARNESS: 'claude-code', FACTORY_PLANNER: 'codex' }).engine.change,
+    ).toContain('label planner:<nome>')
     expect(agent('reviewer').engine.value).toContain('o mesmo agente do construtor')
     expect(agent('reviewer', { FACTORY_REVIEWER: 'codex' }).engine.value).toBe(
       'codex · modelo padrão',

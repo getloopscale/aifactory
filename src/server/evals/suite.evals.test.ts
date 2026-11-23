@@ -10,7 +10,7 @@
 //   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 
 import { getStorageManager } from 'theokit/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -41,6 +41,7 @@ import {
   runSuiteFromTestStart,
   spentOn,
   startMarginFor,
+  writeJson,
   writeRunOutcome,
 } from './suite'
 
@@ -50,8 +51,6 @@ const env = process.env
 const mode = env.EVALS_MODE ?? 'run'
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T
-const writeJson = (path: string, value: unknown) =>
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`)
 
 beforeAll(() => getStorageManager().configure(storageFromUrl(readDatabaseUrl())))
 afterAll(() => getStorageManager().dispose())
@@ -65,6 +64,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
   const labels = labelsWithRepoChoice(issueLabels, config)
   const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
   const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
+  const planner = deps.planner?.(labels, builder.name)
   const knowledge: KnowledgeSource | undefined = deps.knowledge && {
     ...deps.knowledge,
     delivered: async () => {},
@@ -73,6 +73,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
     sandbox: deps.sandbox,
     builder,
     reviewer: chosen ?? builder,
+    ...(planner ? { planner } : {}),
     author: deps.author,
     knowledge,
     // The time a task of this repository gets: the owner's limit, else the default.
@@ -84,8 +85,14 @@ async function evalDeps(repository: string, issueLabels: string[]) {
 async function currentSetup(cases: EvalCase[]) {
   const setup: Record<string, string> = {}
   for (const repository of [...new Set(cases.map((c) => c.repository))].sort()) {
-    const { builder, reviewer } = await evalDeps(repository, [])
-    const one = agentSetup(await effectiveEnv(getDb(), env), builder.name, reviewer.name, optionsFor)
+    const { builder, reviewer, planner } = await evalDeps(repository, [])
+    const one = agentSetup(
+      await effectiveEnv(getDb(), env),
+      builder.name,
+      reviewer.name,
+      optionsFor,
+      planner?.name,
+    )
     for (const [key, value] of Object.entries(one)) setup[`${repository} ${key}`] = value
   }
   return setup

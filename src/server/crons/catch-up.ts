@@ -6,6 +6,7 @@ import { githubAppFromEnv } from '../factory/deps'
 import { resolvedCatchUp } from '../factory/resolved-release'
 import { mainProcessOnly } from '../factory/worker-only'
 import { createGithubApi } from '../github/pulls'
+import { githubPass } from '../github/budget-pass'
 
 const releaseResolvedPass = resolvedCatchUp()
 
@@ -18,18 +19,20 @@ const releaseResolvedPass = resolvedCatchUp()
 export default defineCron('catch-up', {
   schedule: '*/5 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    let app
-    try {
-      app = githubAppFromEnv()
-    } catch (error) {
-      console.error(JSON.stringify({ event: 'catch_up_not_configured', error: String(error) }))
-      return
-    }
-    const result = await catchUp({ db: getDb(), app })
-    if (result.redelivered.length > 0 || result.gaveUp.length > 0 || result.errors.length > 0) {
-      console.log(JSON.stringify({ event: 'catch_up', ...result }))
-    }
-    await releaseResolvedPass({ db: getDb(), app, api: createGithubApi() })
-  }),
+  handler: mainProcessOnly(
+    githubPass('catch-up', async () => {
+      let app
+      try {
+        app = githubAppFromEnv()
+      } catch (error) {
+        console.error(JSON.stringify({ event: 'catch_up_not_configured', error: String(error) }))
+        return
+      }
+      const result = await catchUp({ db: getDb(), app })
+      if (result.redelivered.length > 0 || result.gaveUp.length > 0 || result.errors.length > 0) {
+        console.log(JSON.stringify({ event: 'catch_up', ...result }))
+      }
+      await releaseResolvedPass({ db: getDb(), app, api: createGithubApi() })
+    }),
+  ),
 })

@@ -18,6 +18,7 @@ import type {
   RepositoryView,
 } from '../../shared/panel'
 
+import { leadTimeLimitsProblem } from '../../shared/lead-time'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 import { ActionRefused } from './actions'
 
@@ -56,6 +57,8 @@ export type RepositoryPatch = {
   enabled?: boolean
   /** `null` clears the owner's checks, so the default (`npm test`) applies. */
   checks?: { name: string; command: string }[] | null
+  /** The checks run on the merge of the work with the integration branch; empty clears them. */
+  integrationChecks?: { name: string; command: string }[]
   /** The commands that rewrite files before each round of checks; empty clears them. */
   fixes?: string[]
   egress?: string[]
@@ -69,6 +72,10 @@ export type RepositoryPatch = {
   releaseMode?: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; `null` clears it, so the factory's default applies. */
   runLimitMinutes?: number | null
+  /** From this many minutes of lead time a task is at risk; `null` clears it, so the default applies. */
+  leadTimeAtRiskMinutes?: number | null
+  /** From this many minutes of lead time a task is overdue; `null` clears it, so the default applies. */
+  leadTimeOverdueMinutes?: number | null
 }
 
 const CHECK_NAME = /^[a-z0-9][a-z0-9_-]{0,30}$/
@@ -108,12 +115,18 @@ function fixesProblem(fixes: string[]): string | undefined {
 export function patchProblem(patch: RepositoryPatch, agents: string[]): string | undefined {
   const listed =
     (patch.checks ? checksProblem(patch.checks) : undefined) ??
+    (patch.integrationChecks ? checksProblem(patch.integrationChecks) : undefined) ??
     (patch.fixes ? fixesProblem(patch.fixes) : undefined)
   if (listed) return listed
   const minutes = patch.runLimitMinutes
   if (minutes != null && (minutes < MIN_RUN_MINUTES || minutes > MAX_RUN_MINUTES)) {
     return `a run may last from ${MIN_RUN_MINUTES} to ${MAX_RUN_MINUTES} minutes`
   }
+  const leadTime = leadTimeLimitsProblem({
+    atRiskMinutes: patch.leadTimeAtRiskMinutes ?? null,
+    overdueMinutes: patch.leadTimeOverdueMinutes ?? null,
+  })
+  if (leadTime) return leadTime
   for (const name of [patch.baseBranch, patch.releaseBranch]) {
     if (name && !validBranch(name)) return `"${name}" is not a branch name`
   }
@@ -173,9 +186,18 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
       runLimitMinutes: row?.runLimitMinutes ?? null,
+      leadTimeAtRiskMinutes: row?.leadTimeAtRiskMinutes ?? null,
+      leadTimeOverdueMinutes: row?.leadTimeOverdueMinutes ?? null,
       checksProvenSha: row?.checksProvenSha ?? null,
       unprovenChecks: unprovenChecks(row?.checks ?? null, row?.checksProven ?? []),
       checksProof: proofView(row?.checksProof ?? null, now),
+      integrationChecks: row?.integrationChecks ?? [],
+      integrationChecksProvenSha: row?.integrationChecksProvenSha ?? null,
+      unprovenIntegrationChecks: unprovenChecks(
+        row?.integrationChecks ?? [],
+        row?.integrationChecksProven ?? [],
+      ),
+      integrationChecksProof: proofView(row?.integrationChecksProof ?? null, now),
     }
   }
   const repositories =
@@ -217,20 +239,44 @@ async function refuseKnowledgeRepository(db: Database, fullName: string) {
   }
 }
 
+type RepositoryRow = typeof repository.$inferSelect
+type CheckList = NonNullable<RepositoryPatch['checks']>
+
+const trimmed = (checks: CheckList) => checks.map((c) => ({ ...c, command: c.command.trim() }))
+
 /**
  * The checks as a save leaves them, and which of them no proof ran. What the owner types is saved as it
  * is: a check left as it was keeps its proof, and one typed or changed is named as not proven.
  */
-function savedChecks(patch: RepositoryPatch, existing: typeof repository.$inferSelect | undefined) {
+function savedChecks(patch: RepositoryPatch, existing: RepositoryRow | undefined) {
   if (patch.checks === undefined) {
     return {
       values: {},
       unprovenChecks: provenAfter(existing, existing?.checks ?? null).unprovenChecks,
     }
   }
-  const checks = patch.checks?.map((c) => ({ ...c, command: c.command.trim() })) ?? null
+  const checks = patch.checks ? trimmed(patch.checks) : null
   const { unprovenChecks, ...proven } = provenAfter(existing, checks)
   return { values: { checks, ...proven }, unprovenChecks }
+}
+
+/** The integration checks as a save leaves them, by the same rule as the checks. */
+function savedIntegrationChecks(patch: RepositoryPatch, existing: RepositoryRow | undefined) {
+  const saved = existing && {
+    checksProven: existing.integrationChecksProven,
+    checksProvenSha: existing.integrationChecksProvenSha,
+  }
+  const integrationChecks = patch.integrationChecks && trimmed(patch.integrationChecks)
+  const after = provenAfter(saved, integrationChecks ?? existing?.integrationChecks ?? [])
+  if (integrationChecks === undefined) return { values: {}, unproven: after.unprovenChecks }
+  return {
+    values: {
+      integrationChecks,
+      integrationChecksProven: after.checksProven,
+      integrationChecksProvenSha: after.checksProvenSha,
+    },
+    unproven: after.unprovenChecks,
+  }
 }
 
 /**
@@ -282,9 +328,11 @@ export async function saveRepository(
     }
   }
   const checks = savedChecks(patch, existing)
+  const integration = savedIntegrationChecks(patch, existing)
   const values = {
     ...(patch.enabled === undefined ? {} : { enabled: patch.enabled }),
     ...checks.values,
+    ...integration.values,
     ...(patch.fixes === undefined ? {} : { fixes: patch.fixes.map((f) => f.trim()) }),
     ...(patch.egress === undefined
       ? {}
@@ -296,13 +344,23 @@ export async function saveRepository(
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),
     ...(patch.runLimitMinutes === undefined ? {} : { runLimitMinutes: patch.runLimitMinutes }),
+    ...(patch.leadTimeAtRiskMinutes === undefined
+      ? {}
+      : { leadTimeAtRiskMinutes: patch.leadTimeAtRiskMinutes }),
+    ...(patch.leadTimeOverdueMinutes === undefined
+      ? {}
+      : { leadTimeOverdueMinutes: patch.leadTimeOverdueMinutes }),
     updatedAt: new Date(),
   }
   await deps.db
     .insert(repository)
     .values({ fullName: canonical!, ...values })
     .onConflictDoUpdate({ target: repository.fullName, set: values })
-  const saved = { fullName: canonical!, unprovenChecks: checks.unprovenChecks }
+  const saved = {
+    fullName: canonical!,
+    unprovenChecks: checks.unprovenChecks,
+    unprovenIntegrationChecks: integration.unproven,
+  }
   return patch.enabled ? { ...saved, doctor: await deps.diagnose(canonical!) } : saved
 }
 

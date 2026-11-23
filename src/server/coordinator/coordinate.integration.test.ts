@@ -9,6 +9,7 @@ import {
   changePlan,
   coordinatorAction,
   decision,
+  evidence,
   finding,
   ingress,
   repository,
@@ -33,7 +34,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table theokit_jobs, coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table theokit_jobs, coordinator_action, failure_signature, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -98,6 +99,7 @@ const deps = (): CoordinatorDeps => ({
   api,
   issues: api,
   readIssue: (repo, number) => api.readIssue(repo, number),
+  listOpenIssues: (repo, label) => api.listOpenIssues(repo, label),
   drafter: async (message) => {
     model.asked.push(message)
     if (model.fails) throw new Error(model.fails)
@@ -136,7 +138,7 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
       {
         taskId: id,
         exceptionKind: 'checks_unchanged',
-        headSha: 'abc',
+        headSha: expect.stringMatching(/^abc@\d+$/),
         action: 'send_back',
         outcome: 'applied',
       },
@@ -145,38 +147,103 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
     expect(await getDb().select().from(decision)).toEqual([])
   })
 
-  it('sends a task whose pull request conflicts with its base back to merge it, not with the check output', async () => {
+  /** A handed-over task whose pull request conflicts with its base, with its branch on GitHub. */
+  async function conflicting() {
     const id = await checksUnchanged()
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    api.repo('paulo/app').heads.set(`factory/${row.issueNumber}`, 'd'.repeat(40))
     api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', mergeableState: 'dirty' })
+    return id
+  }
+
+  it('merges the base into a task whose pull request conflicts with it, with no agent and not with the check output', async () => {
+    const id = await conflicting()
 
     const result = await coordinate(deps(), 'auto')
 
     expect(result).toMatchObject({ applied: 1 })
     expect(await stageOf(id)).toBe('intake')
-    expect(queued).toHaveLength(1)
-    expect(queued[0].input.feedback).toBe(conflictNote('workspace'))
-    expect(await actions()).toMatchObject([{ action: 'send_back', outcome: 'applied' }])
+    expect(queued.map((q) => q.input)).toEqual([{ taskId: id, mergeBase: true }])
+    expect(await actions()).toMatchObject([{ action: 'merge_base', outcome: 'applied' }])
   })
 
-  it('escalates as unknown, sending nothing back, when the pull request could not be read', async () => {
+  it('sends the merge to the agent, naming the files, when the merge of the base conflicted', async () => {
+    const id = await conflicting()
+    await coordinate(deps(), 'auto')
+    // The run it queued could not merge the base on its own, and failed with the files.
+    const error =
+      'merging workspace at bbbbbbb into factory/1 conflicts in CHANGELOG.md, which a person resolves'
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+    await getDb()
+      .insert(stageEvent)
+      .values({
+        taskId: id,
+        stage: 'failed',
+        detail: { error, baseConflict: { branch: 'workspace', files: ['CHANGELOG.md'] } },
+      })
+    queued.length = 0
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(queued).toHaveLength(1)
+    expect(queued[0].input.feedback).toBe(conflictNote('workspace', ['CHANGELOG.md']))
+    expect(await actions()).toMatchObject([
+      { action: 'merge_base', outcome: 'applied' },
+      { exceptionKind: 'base_conflict', action: 'send_back', outcome: 'applied' },
+    ])
+  })
+
+  it('refuses to merge the base of a task whose branch is gone, leaving it handed over', async () => {
+    const id = await checksUnchanged()
+    api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', mergeableState: 'dirty' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ refused: 1, applied: 0 })
+    expect(await stageOf(id)).toBe('handoff')
+    expect(queued).toEqual([])
+  })
+
+  it('waits to read it again as unknown, sending nothing back, when the pull request could not be read', async () => {
     const id = await checksUnchanged()
     api.fail('readPullRequest', new Error('GitHub answered 502 reading paulo/app#3'))
 
     const result = await coordinate(deps(), 'auto')
 
-    expect(result).toMatchObject({ escalated: 1, applied: 0 })
+    expect(result).toMatchObject({ deferred: 1, escalated: 0, applied: 0 })
     expect(await stageOf(id)).toBe('handoff')
     expect(queued).toEqual([])
     const [row] = await actions()
     expect(row).toMatchObject({
       exceptionKind: 'unknown',
-      action: 'escalate',
-      outcome: 'escalated',
+      action: 'wait',
+      outcome: 'deferred',
     })
     expect(row.reason).toContain('GitHub answered 502 reading paulo/app#3')
   })
 
-  it('records nothing new and queues nothing for the same exception on the same head', async () => {
+  it('records nothing new and queues nothing for the same handoff on a second pass', async () => {
+    const id = await checksUnchanged()
+    await coordinate(deps(), 'trial')
+    queued.length = 0
+
+    const result = await coordinate(deps(), 'trial')
+
+    expect(result).toEqual({
+      applied: 0,
+      trial: 0,
+      refused: 0,
+      failed: 0,
+      escalated: 0,
+      deferred: 0,
+    })
+    expect(queued).toEqual([])
+    expect(await actions()).toHaveLength(1)
+    expect(await stageOf(id)).toBe('handoff')
+  })
+
+  it('decides again a second handoff on the same head, since it is another handoff', async () => {
     const id = await checksUnchanged()
     await coordinate(deps(), 'auto')
     // The run it queued hands the task over again, on the same head, for the same reason.
@@ -192,10 +259,12 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
 
     const result = await coordinate(deps(), 'auto')
 
-    expect(result).toEqual({ applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 })
-    expect(queued).toEqual([])
-    expect(await actions()).toHaveLength(1)
-    expect(await stageOf(id)).toBe('handoff')
+    expect(result).toMatchObject({ applied: 1 })
+    expect(queued).toHaveLength(1)
+    const rows = await actions()
+    expect(rows).toMatchObject([{ action: 'send_back' }, { action: 'send_back' }])
+    expect(rows[0].headSha).not.toBe(rows[1].headSha)
+    expect(await stageOf(id)).toBe('intake')
   })
 
   it('in trial, leaves the task handed over, queues nothing and records the decision as trial', async () => {
@@ -229,8 +298,8 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
     expect(await stageOf(id)).toBe('intake')
     expect(queued).toHaveLength(1)
     expect(await actions()).toMatchObject([
-      { headSha: 'abc', action: 'send_back', outcome: 'trial' },
-      { headSha: 'abc', action: 'send_back', outcome: 'applied' },
+      { headSha: expect.stringMatching(/^abc@\d+$/), action: 'send_back', outcome: 'trial' },
+      { headSha: expect.stringMatching(/^abc@\d+$/), action: 'send_back', outcome: 'applied' },
     ])
   })
 
@@ -255,28 +324,26 @@ describe('the coordinator on failed checks that the agent did not answer', () =>
 })
 
 describe('the limit of applied actions on a task', () => {
-  it('escalates the third exception of a task, naming the two actions tried', async () => {
-    const id = await checksUnchanged()
-    await getDb()
+  const appliedBefore = (taskId: number, rows: [string, string, string][]) =>
+    getDb()
       .insert(coordinatorAction)
-      .values([
-        {
-          taskId: id,
-          exceptionKind: 'stalled',
-          headSha: 'old1111',
-          action: 'retry_from_finding',
+      .values(
+        rows.map(([exceptionKind, headSha, action]) => ({
+          taskId,
+          exceptionKind: exceptionKind as never,
+          headSha,
+          action: action as never,
           reason: 'r',
-          outcome: 'applied',
-        },
-        {
-          taskId: id,
-          exceptionKind: 'review_unusable',
-          headSha: 'mid2222',
-          action: 'review_again',
-          reason: 'r',
-          outcome: 'applied',
-        },
-      ])
+          outcome: 'applied' as const,
+        })),
+      )
+
+  it('escalates the third rework of the checks of a task, naming the two tried', async () => {
+    const id = await checksUnchanged()
+    await appliedBefore(id, [
+      ['checks_red', 'old1111', 'send_back'],
+      ['out_of_time', 'mid2222', 'send_back'],
+    ])
 
     await coordinate(deps(), 'auto')
 
@@ -288,8 +355,21 @@ describe('the limit of applied actions on a task', () => {
       action: 'escalate',
       outcome: 'escalated',
     })
-    expect(third.reason).toContain('retry_from_finding for stalled on old1111')
-    expect(third.reason).toContain('review_again for review_unusable on mid2222')
+    expect(third.reason).toContain('send_back for checks_red on old1111')
+    expect(third.reason).toContain('send_back for out_of_time on mid2222')
+  })
+
+  it('still sends failed checks back after two actions that unblocked the review', async () => {
+    const id = await checksUnchanged()
+    await appliedBefore(id, [
+      ['stalled', 'old1111', 'retry_from_finding'],
+      ['review_plateau', 'mid2222', 'scope'],
+    ])
+
+    await coordinate(deps(), 'auto')
+
+    expect(await stageOf(id)).toBe('intake')
+    expect((await actions())[2]).toMatchObject({ action: 'send_back', outcome: 'applied' })
   })
 })
 
@@ -409,13 +489,13 @@ describe('the other actions it applies', () => {
     expect(row.reason).toContain('this work is already integrated')
   })
 
-  it('escalates a task whose last event is not the stage it is in', async () => {
+  it('waits to read again a task whose last event is not the stage it is in', async () => {
     const id = await seed('handoff', { headSha: 'abc' }, [{ stage: 'review' }])
 
     await coordinate(deps(), 'auto')
 
     expect(await actions()).toMatchObject([
-      { taskId: id, exceptionKind: 'unknown', action: 'escalate', outcome: 'escalated' },
+      { taskId: id, exceptionKind: 'unknown', action: 'wait', outcome: 'deferred' },
     ])
   })
 })
@@ -490,12 +570,16 @@ describe('scoping a review that does not converge', () => {
     expect(bodyOf(issueNumber)).toContain('- Refuse an empty name')
     const followUps = opened(issueNumber)
     expect(followUps).toHaveLength(1)
-    expect(followUps[0]).toMatchObject({ title: 'Rename the module', labels: ['factory'] })
+    expect(followUps[0]).toMatchObject({
+      title: 'Rename the module',
+      labels: ['factory', 'follow-up'],
+    })
     expect(followUps[0].body.endsWith(`Follow-up of paulo/app#${issueNumber}.`)).toBe(true)
     expect(bodyOf(issueNumber)).toContain(`filed as #${followUps[0].number}`)
     expect(await stageOf(id)).toBe('intake')
     expect(queued).toHaveLength(1)
-    expect(queued[0].input).toMatchObject({ taskId: id, feedback: valid.note })
+    // The note is the coordinator's decision on the review: the run must not call it a failure of the checks.
+    expect(queued[0].input).toEqual({ taskId: id, feedback: valid.note, fromReview: true })
     const rows = await actions()
     expect(rows).toMatchObject([
       { taskId: id, exceptionKind: 'review_plateau', action: 'scope', outcome: 'applied' },
@@ -525,7 +609,9 @@ describe('scoping a review that does not converge', () => {
 
     await coordinate(deps(), 'auto')
 
-    expect(opened(issueNumber)).toMatchObject([{ title: 'Rename the module', labels: [] }])
+    expect(opened(issueNumber)).toMatchObject([
+      { title: 'Rename the module', labels: ['follow-up'] },
+    ])
   })
 
   it('files no follow-up when the draft has none, and still sends the task back', async () => {
@@ -574,23 +660,95 @@ describe('scoping a review that does not converge', () => {
     expect(row.draft).toMatchObject({ note: 'Lower the line in stryker.config.json.' })
   })
 
-  it('records nothing new for a second review_plateau on the same head', async () => {
-    const { id, issueNumber } = await plateau()
-    model.answer = JSON.stringify(valid)
-    await coordinate(deps(), 'auto')
+  /** The run the scope sent back handed over again on the same head, as a builder that changed nothing does. */
+  async function handsOverAgain(id: number) {
     await getDb().update(task).set({ stage: 'handoff' }).where(eq(task.id, id))
     await getDb()
       .insert(stageEvent)
       .values({ taskId: id, stage: 'handoff', detail: { reason: ROUNDS, cause: 'review_plateau' } })
     queued.length = 0
+  }
+
+  it('decides a second review_plateau on the same head, and files no second follow-up for the task', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify(valid)
+    await coordinate(deps(), 'auto')
+    await handsOverAgain(id)
+    model.answer = JSON.stringify({
+      ...valid,
+      followUp: { title: 'Another name', body: 'A second idea.' },
+    })
 
     const result = await coordinate(deps(), 'auto')
 
-    expect(result).toEqual({ applied: 0, trial: 0, refused: 0, failed: 0, escalated: 0 })
-    expect(model.asked).toHaveLength(1)
-    expect(await actions()).toHaveLength(1)
-    expect(opened(issueNumber)).toHaveLength(1)
-    expect(queued).toEqual([])
+    expect(result).toMatchObject({ applied: 1 })
+    expect(model.asked).toHaveLength(2)
+    const rows = await actions()
+    expect(rows).toHaveLength(2)
+    expect(rows.map((r) => r.headSha)).toEqual([
+      expect.stringMatching(/^abc@\d+$/),
+      expect.stringMatching(/^abc@\d+$/),
+    ])
+    expect(rows[0].headSha).not.toBe(rows[1].headSha)
+    const followUps = opened(issueNumber)
+    expect(followUps).toHaveLength(1)
+    expect(rows[1].draft).toMatchObject({ followUpIssue: followUps[0].number })
+    expect(bodyOf(issueNumber)).toContain(`filed as #${followUps[0].number}`)
+  })
+
+  it('files the follow-up of a follow-up without the factory label, for a person to triage', async () => {
+    const { issueNumber } = await plateau()
+    api.repo('paulo/app').issue(issueNumber, { body: `${ORIGINAL}\n\nFollow-up of paulo/app#590.` })
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'auto')
+
+    expect(opened(issueNumber)).toMatchObject([
+      { title: 'Rename the module', labels: ['follow-up'] },
+    ])
+  })
+
+  it('names an open follow-up of the same issue, or one with the same title, instead of filing another', async () => {
+    const { issueNumber } = await plateau()
+    const repo = api.repo('paulo/app')
+    const same = repo.issue(900, {
+      title: 'rename the module.',
+      body: 'Follow-up of paulo/app#3.',
+      labels: ['factory'],
+    })
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'auto')
+
+    expect(opened(issueNumber).map((i) => i.number)).toEqual([same.number])
+    expect(bodyOf(issueNumber)).toContain(`filed as #${same.number}`)
+    expect((await actions())[0].draft).toMatchObject({ followUpIssue: same.number })
+  })
+
+  it('never names the issue of the task itself as its follow-up', async () => {
+    const { issueNumber } = await plateau()
+    api.repo('paulo/app').issue(issueNumber, { title: 'Rename the module', labels: ['factory'] })
+    model.answer = JSON.stringify(valid)
+
+    await coordinate(deps(), 'auto')
+
+    expect(opened(issueNumber)).toMatchObject([{ title: 'Rename the module' }])
+  })
+
+  it('records refused and writes nothing when the draft puts in scope a change under .github/', async () => {
+    const { id, issueNumber } = await plateau()
+    model.answer = JSON.stringify({
+      ...valid,
+      inScope: ['Run the e2e job in .github/workflows/ci.yml'],
+    })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ refused: 1 })
+    expect(bodyOf(issueNumber)).toBe(ORIGINAL)
+    expect(opened(issueNumber)).toEqual([])
+    expect(await stageOf(id)).toBe('handoff')
+    expect((await actions())[0].reason).toContain('a change under .github/')
   })
 
   it('in trial, records the draft and its cost as trial, and writes nothing to GitHub', async () => {
@@ -818,17 +976,18 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     expect(other).toBeGreaterThan(0)
   })
 
-  it('keeps the hold of a fix that is done without a merge, and ends it once merged', async () => {
+  it('ends the hold once the fix is done, while its pull request still waits for CI', async () => {
     const { fix } = await incident()
     await coordinate(deps(), 'auto')
     // A worker takes the fix's job, as it would once the fix is first.
     expect(await dequeue()).toEqual([`job-${fix}`])
-    await getDb().update(task).set({ stage: 'done' }).where(eq(task.id, fix))
-    await coordinate(deps(), 'auto')
-    expect(await dequeue()).toEqual([])
+    await getDb()
+      .update(task)
+      .set({ stage: 'done', awaitingCiSha: 'verified0001' })
+      .where(eq(task.id, fix))
 
-    await getDb().update(task).set({ mergedSha: 'abc' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
+
     expect((await dequeue())[0]).toBeDefined()
   })
 
@@ -982,42 +1141,313 @@ describe('an integration branch that stays red under a task', () => {
         detail: { baseHold: { sha: 'verified0001', checks, since: at(hours) } },
       },
     ])
-  const withClock = (): CoordinatorDeps => ({ ...deps(), now: () => NOW })
+  const withClock = (over: Partial<CoordinatorDeps> = {}): CoordinatorDeps => ({
+    ...deps(),
+    now: () => NOW,
+    ...over,
+  })
+  const enabledRepository = () =>
+    getDb().insert(repository).values({ fullName: 'paulo/app', enabled: true })
+  const filed = () => [...api.repo('paulo/app').issues.values()]
 
-  it('escalates a hold past the limit, naming the check, once', async () => {
+  it('files one issue for the factory naming the checks, the branch and the commit, and leaves the task waiting', async () => {
+    await enabledRepository()
     const id = await heldTask(['lint'], 3)
 
-    expect(await coordinate(withClock(), 'auto')).toMatchObject({ escalated: 1 })
-    expect(await coordinate(withClock(), 'auto')).toMatchObject({ escalated: 0 })
+    expect(await coordinate(withClock(), 'auto')).toMatchObject({ applied: 1 })
 
-    const rows = await actions()
-    expect(rows).toHaveLength(1)
-    expect(rows[0]).toMatchObject({ taskId: id, exceptionKind: 'base_red', outcome: 'escalated' })
-    expect(rows[0].reason).toContain('lint')
+    const [issue, ...more] = filed()
+    expect(more).toEqual([])
+    expect(issue.title).toBe('Fix "lint" failing on workspace')
+    expect(issue.body).toContain('`verified0001`')
+    expect(issue.labels).toEqual(['factory', 'bug', 'priority:1'])
+    expect([...api.repo('paulo/app').labels]).toEqual(['factory', 'bug', 'priority:1'])
+    expect(await stageOf(id)).toBe('done')
+    expect(queued).toEqual([])
+    const [row] = await actions()
+    expect(row).toMatchObject({
+      taskId: id,
+      exceptionKind: 'base_red',
+      action: 'fix_base',
+      outcome: 'applied',
+    })
+    expect(row.reason).toContain(`filed as paulo/app#${issue.number}`)
   })
 
-  it('records nothing for a hold under the limit, or one that cleared', async () => {
-    await heldTask(['lint'], 1)
-    const cleared = await heldTask(['lint'], 5)
-    await getDb()
-      .update(stageEvent)
-      .set({ detail: {} })
-      .where(and(eq(stageEvent.taskId, cleared), eq(stageEvent.stage, 'done')))
-
-    expect(await coordinate(withClock(), 'auto')).toMatchObject({ escalated: 0 })
-    expect(await actions()).toEqual([])
-  })
-
-  it('escalates again when a hold clears and the same check holds the same commit later', async () => {
+  it('files none on a second pass, for a hold that came back or for another task held by the same checks', async () => {
+    await enabledRepository()
     const id = await heldTask(['lint'], 3)
     await coordinate(withClock(), 'auto')
     await getDb()
       .update(stageEvent)
       .set({ detail: { baseHold: { sha: 'verified0001', checks: ['lint'], since: at(2.5) } } })
       .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'done')))
+    await heldTask(['lint'], 4)
+
+    await coordinate(withClock(), 'auto')
+    await coordinate(withClock(), 'auto')
+
+    expect(filed()).toHaveLength(1)
+    const rows = await actions()
+    expect(rows).toHaveLength(3)
+    expect(rows.slice(1).map((r) => r.reason)).toEqual([
+      expect.stringContaining('already filed as paulo/app#1, still open'),
+      expect.stringContaining('already filed as paulo/app#1, still open'),
+    ])
+  })
+
+  it('files another issue for another set of checks, and again once the first issue was closed', async () => {
+    await enabledRepository()
+    await heldTask(['lint'], 3)
+    await coordinate(withClock(), 'auto')
+    await heldTask(['lint', 'test'], 3)
+    await coordinate(withClock(), 'auto')
+    api.repo('paulo/app').issue(1, { state: 'closed' })
+    await heldTask(['lint'], 5)
 
     await coordinate(withClock(), 'auto')
 
-    expect(await actions()).toHaveLength(2)
+    const titles = filed().map((i) => i.title)
+    expect(titles).toEqual([
+      'Fix "lint" failing on workspace',
+      'Fix "lint" and "test" failing on workspace',
+      'Fix "lint" failing on workspace',
+    ])
+    expect(filed()[2].body).toContain('#1, was closed')
+  })
+
+  it('files nothing in trial, recording what it would do', async () => {
+    await enabledRepository()
+    await heldTask(['lint'], 3)
+
+    expect(await coordinate(withClock(), 'trial')).toMatchObject({ trial: 1 })
+
+    expect(filed()).toEqual([])
+    expect(await actions()).toMatchObject([{ action: 'fix_base', outcome: 'trial' }])
+  })
+
+  it('records a fix it could not file as failed, and files it on a later head', async () => {
+    await enabledRepository()
+    const id = await heldTask(['lint'], 3)
+    const refusing = withClock({
+      issues: {
+        ...api,
+        createIssue: async () => {
+          throw new Error('GitHub answered 502 creating an issue on paulo/app')
+        },
+      },
+    })
+
+    expect(await coordinate(refusing, 'auto')).toMatchObject({ failed: 1 })
+    expect(filed()).toEqual([])
+    await getDb()
+      .update(stageEvent)
+      .set({ detail: { baseHold: { sha: 'verified0001', checks: ['lint'], since: at(2.5) } } })
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'done')))
+
+    expect(await coordinate(withClock(), 'auto')).toMatchObject({ applied: 1 })
+    expect(filed()).toHaveLength(1)
+  })
+
+  it('records nothing for a hold under the limit, or one that cleared', async () => {
+    await heldTask(['lint'], 1 / 3)
+    const cleared = await heldTask(['lint'], 5)
+    await getDb()
+      .update(stageEvent)
+      .set({ detail: {} })
+      .where(and(eq(stageEvent.taskId, cleared), eq(stageEvent.stage, 'done')))
+
+    expect(await coordinate(withClock(), 'auto')).toMatchObject({ applied: 0, escalated: 0 })
+    expect(await actions()).toEqual([])
+  })
+})
+
+describe('a failure of the work that the coordinator acts on', () => {
+  const failedTask = (error: string, headSha: string | null = 'abc1234def') =>
+    seed('failed', { headSha }, [{ stage: 'intake' }, { stage: 'failed', detail: { error } }])
+  const checkRun = (taskId: number, over: Partial<typeof evidence.$inferInsert> = {}) =>
+    getDb()
+      .insert(evidence)
+      .values({
+        taskId,
+        name: 'quality',
+        command: 'pnpm quality',
+        sha: 'abc1234def',
+        exitCode: 1,
+        timedOut: false,
+        passed: false,
+        output: 'ERROR: quality:loc exited with 1',
+        durationMs: 10,
+        ...over,
+      })
+
+  it('sends checks still red back on the branch with what they printed on the head', async () => {
+    const id = await failedTask('no pull request: "quality" failed at abc1234 (after 3 attempts)')
+    await checkRun(id, { sha: 'older00000', output: 'an older failure' })
+    await checkRun(id)
+
+    expect(await coordinate(deps(), 'auto')).toMatchObject({ applied: 1 })
+
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued).toHaveLength(1)
+    expect(queued[0].input).toMatchObject({ taskId: id })
+    expect(queued[0].input.feedback).toContain(
+      'quality (`pnpm quality`):\n~~~~text\nERROR: quality:loc exited with 1\n~~~~',
+    )
+    expect(queued[0].input.feedback).not.toContain('an older failure')
+    const [row] = await actions()
+    expect(row).toMatchObject({
+      exceptionKind: 'checks_red',
+      action: 'send_back',
+      outcome: 'applied',
+    })
+    expect(row.headSha).toMatch(/^abc1234def@\d+$/)
+  })
+
+  it('sends a run out of time back to continue on its branch', async () => {
+    const id = await failedTask(
+      "no time left for another agent pass: 36 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
+    )
+
+    await coordinate(deps(), 'auto')
+
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued[0].input.feedback).toContain('Continue from the branch as it is now')
+    expect(await actions()).toMatchObject([{ exceptionKind: 'out_of_time', outcome: 'applied' }])
+  })
+
+  it('sends an agent that changed nothing back once, and escalates the second time', async () => {
+    const said = 'the agent made no change to the repository. The agent said: it already works'
+    const id = await failedTask(said)
+    await coordinate(deps(), 'auto')
+    expect(queued[0].input.feedback).toContain(said)
+    // The run it queued changed nothing again, on the same head.
+    await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, id))
+    await getDb()
+      .insert(stageEvent)
+      .values({ taskId: id, stage: 'failed', detail: { error: said } })
+    queued.length = 0
+
+    expect(await coordinate(deps(), 'auto')).toMatchObject({ escalated: 1 })
+
+    expect(queued).toEqual([])
+    expect(await stageOf(id)).toBe('failed')
+    expect((await actions()).map((r) => [r.exceptionKind, r.action, r.outcome])).toEqual([
+      ['no_change', 'send_back', 'applied'],
+      ['no_change', 'escalate', 'escalated'],
+    ])
+  })
+
+  it("sends back failed checks the handoff did not quote with what the factory's checks printed", async () => {
+    const id = await checksUnchanged({
+      reason:
+        "the repository's required checks failed and the agent changed nothing, saying why below",
+      cause: 'checks_unchanged',
+    })
+    await checkRun(id, { sha: 'abc' })
+
+    await coordinate(deps(), 'auto')
+
+    expect(queued[0].input.feedback).toContain('ERROR: quality:loc exited with 1')
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'checks_unchanged', action: 'send_back', outcome: 'applied' },
+    ])
+  })
+  it('sends a rework that broke the checks after the review back with what they printed on it, and scopes nothing', async () => {
+    const id = await checksUnchanged({
+      reason:
+        'the last rework broke the checks ("quality" failed at bad0000), so the branch is back at abc, which passed them and was reviewed',
+      cause: 'checks_broke_after_review',
+    })
+    await checkRun(id, { sha: 'bad0000', output: 'ERROR: the rework broke it' })
+    await checkRun(id, { sha: 'abc', passed: true, exitCode: 0, output: 'fine' })
+
+    expect(await coordinate(deps(), 'auto')).toMatchObject({ applied: 1 })
+
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued[0].input.feedback).toContain('ERROR: the rework broke it')
+    expect(queued[0].input).not.toHaveProperty('fromReview')
+    expect(model.asked).toEqual([])
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'checks_broke_after_review', action: 'send_back', outcome: 'applied' },
+    ])
+  })
+})
+
+describe('a fact the coordinator could not read', () => {
+  it('is read again for an hour, and then escalated', async () => {
+    const id = await seed('handoff', { headSha: 'abc' }, [{ stage: 'review' }])
+    let now = new Date('2026-11-18T10:00:00Z')
+    const clocked = (): CoordinatorDeps => ({ ...deps(), now: () => now })
+
+    expect(await coordinate(clocked(), 'auto')).toMatchObject({ deferred: 1 })
+    now = new Date('2026-11-18T10:30:00Z')
+    expect(await coordinate(clocked(), 'auto')).toMatchObject({ deferred: 1, escalated: 0 })
+    now = new Date('2026-11-18T11:00:00Z')
+    expect(await coordinate(clocked(), 'auto')).toMatchObject({ escalated: 1 })
+    now = new Date('2026-11-18T11:10:00Z')
+    expect(await coordinate(clocked(), 'auto')).toMatchObject({ deferred: 0, escalated: 0 })
+
+    expect((await actions()).map((r) => [r.taskId, r.action, r.outcome])).toEqual([
+      [id, 'wait', 'deferred'],
+      [id, 'escalate', 'escalated'],
+    ])
+  })
+})
+
+describe('the handoffs of an integration that waited for the required checks', () => {
+  const RED =
+    'the required checks still fail after 3 automatic runs: CI\n\nCI:\n~~~~text\nTypeError: x is undefined\n~~~~'
+
+  const handedOverAfterCi = async (detail: object) => {
+    await getDb().insert(repository).values({ fullName: 'paulo/app', enabled: true })
+    const id = await seed(
+      'handoff',
+      { headSha: 'abc', pullRequestUrl: 'https://github.com/paulo/app/pull/3' },
+      [{ stage: 'intake' }, { stage: 'handoff', detail }],
+    )
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    api.repo('paulo/app').heads.set(`factory/${row.issueNumber}`, 'd'.repeat(40))
+    api.repo('paulo/app').pullRequest({ number: 3, headRef: 'factory/3', baseRef: 'workspace' })
+    return id
+  }
+
+  it('sends checks that still fail back on the branch with what they reported', async () => {
+    const id = await handedOverAfterCi({ reason: RED, cause: 'ci_red' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(await stageOf(id)).toBe('intake')
+    expect(queued[0].input.feedback).toContain('TypeError: x is undefined')
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'ci_red', action: 'send_back', outcome: 'applied' },
+    ])
+  })
+
+  it('merges the base with no agent into a pull request that still conflicts with it', async () => {
+    const id = await handedOverAfterCi({
+      reason: 'the pull request conflicts with its base after 3 automatic runs',
+      cause: 'pull_conflict',
+    })
+
+    await coordinate(deps(), 'auto')
+
+    expect(queued.map((q) => q.input)).toEqual([{ taskId: id, mergeBase: true }])
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'pull_conflict', action: 'merge_base', outcome: 'applied' },
+    ])
+  })
+
+  it('merges the base with no agent once it passes the checks again', async () => {
+    const id = await handedOverAfterCi({
+      reason:
+        'the integration branch passes CI again, and the pull request still has to merge it after 3 automatic runs',
+      cause: 'base_fixed',
+    })
+
+    await coordinate(deps(), 'auto')
+
+    expect(queued.map((q) => q.input)).toEqual([{ taskId: id, mergeBase: true }])
   })
 })

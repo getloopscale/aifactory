@@ -40,10 +40,12 @@ const base: TaskCard = {
   attempts: 2,
   createdAt: '2026-11-04T10:00:00Z',
   updatedAt: '2026-11-04T10:05:00Z',
+  leadTime: { minutes: 5, status: 'on_track', running: true },
   approved: false,
   integrated: false,
   waitingForChecks: false,
   waitingOnBase: null,
+  returned: null,
   queue: null,
   resolved: false,
   retryable: null,
@@ -55,6 +57,8 @@ const base: TaskCard = {
   release: null,
   mainRed: false,
   releaseWait: null,
+  working: null,
+  lastAgent: null,
 }
 
 const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
@@ -854,6 +858,36 @@ describe('health', () => {
     })
   })
 
+  it('shows a conflicting back-merge with its link on GitHub and no button, since it is resolved there', async () => {
+    serve({
+      'GET /api/panel/health': report({
+        findings: [
+          found({
+            id: 6,
+            subject: 'back_merge',
+            taskId: null,
+            taskTitle: null,
+            ref: 'https://github.com/o/r/pull/9',
+            detail: 'the back-merge #9 from main into workspace conflicts with workspace',
+          }),
+        ],
+      }),
+    })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('A back-merge conflicts and nothing will merge it')).toBeDefined(),
+    )
+    expect(screen.getByRole('link', { name: 'Open it on GitHub' }).getAttribute('href')).toBe(
+      'https://github.com/o/r/pull/9',
+    )
+    expect(screen.queryByRole('button')).toBeNull()
+  })
+
   it('does not act when the person declines the confirmation', async () => {
     const calls = serve({
       'GET /api/panel/health': report({
@@ -915,6 +949,33 @@ describe('health', () => {
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toBe('this question has nothing to resume'),
     )
+  })
+
+  it('shows a stalled queue with what holds it, and no action, since it resolves once its runs start', async () => {
+    serve({
+      'GET /api/panel/health': report({
+        findings: [
+          found({
+            id: 6,
+            kind: 'stalled',
+            subject: 'queue',
+            ref: 'usetheokit/theokit',
+            detail: '58 queued runs of usetheokit/theokit, none started for 70 minutes',
+          }),
+        ],
+      }),
+    })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByText('Queued runs of a repository are not starting')).toBeDefined(),
+    )
+    expect(screen.getByText(/58 queued runs of usetheokit\/theokit/)).toBeDefined()
+    expect(screen.queryByRole('button')).toBeNull()
   })
 
   it('shows the executions of a task, and a cost that was not reported as such', async () => {

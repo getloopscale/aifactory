@@ -58,12 +58,18 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       releaseBranch: null,
       askQuestions: true,
       runLimitMinutes: null,
+      leadTimeAtRiskMinutes: null,
+      leadTimeOverdueMinutes: null,
       harness: 'codex',
       reviewer: null,
       releaseMode: 'trial',
       checksProvenSha: null,
       unprovenChecks: [],
       checksProof: null,
+      integrationChecks: [],
+      integrationChecksProvenSha: null,
+      unprovenIntegrationChecks: [],
+      integrationChecksProof: null,
     },
     {
       fullName: 'paulo/other',
@@ -81,9 +87,15 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       reviewer: null,
       releaseMode: null,
       runLimitMinutes: null,
+      leadTimeAtRiskMinutes: null,
+      leadTimeOverdueMinutes: null,
       checksProvenSha: null,
       unprovenChecks: [],
       checksProof: null,
+      integrationChecks: [],
+      integrationChecksProvenSha: null,
+      unprovenIntegrationChecks: [],
+      integrationChecksProof: null,
     },
   ],
   agents: ['claude-code', 'codex'],
@@ -371,6 +383,7 @@ describe('repositories', () => {
         { name: 'unit', command: 'pnpm test' },
         { name: 'types', command: 'pnpm typecheck' },
       ],
+      integrationChecks: [],
       fixes: ['pnpm eslint --fix .', 'pnpm prettier --write .'],
       egress: ['pypi.org', 'crates.io'],
       baseBranch: null,
@@ -380,7 +393,49 @@ describe('repositories', () => {
       reviewer: 'claude-code',
       releaseMode: null,
       runLimitMinutes: null,
+      leadTimeAtRiskMinutes: null,
+      leadTimeOverdueMinutes: null,
     })
+  })
+
+  it('has a box for the integration checks under the checks, with its own assistant and what they are for', async () => {
+    serve({ 'GET /api/panel/repositories': repos() })
+    mount()
+    await waitFor(() => expect(screen.getByText('Save settings')).toBeDefined())
+
+    const box = screen.getByLabelText(/Integration checks, one per line/) as HTMLTextAreaElement
+    const label = box.closest('label')!
+    const assist = label.previousElementSibling as HTMLElement
+
+    expect(within(assist).getByRole('button', { name: 'Set this up for me' })).toBeDefined()
+    expect(within(label).getByText(/merge of the work with the integration branch/)).toBeDefined()
+    const checks = screen.getByLabelText(/Checks, one per line/).closest('label')!
+    expect(checks.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('shows the saved integration checks and saves the ones typed as the API expects', async () => {
+    const listed = repos()
+    listed.repositories[0].integrationChecks = [{ name: 'e2e', command: 'pnpm test:e2e' }]
+    serve({
+      'GET /api/panel/repositories': listed,
+      'PUT /api/panel/repositories/paulo/app': {},
+    })
+    mount()
+    await waitFor(() => expect(screen.getByText('Save settings')).toBeDefined())
+    const box = screen.getByLabelText(/Integration checks, one per line/) as HTMLTextAreaElement
+    expect(box.value).toBe('e2e: pnpm test:e2e')
+
+    fireEvent.change(box, { target: { value: 'e2e: pnpm test:e2e\ndb: pnpm test:db' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save settings' }))
+
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(
+      (calls.find((c) => c.method === 'PUT')?.body as { integrationChecks: unknown })
+        .integrationChecks,
+    ).toEqual([
+      { name: 'e2e', command: 'pnpm test:e2e' },
+      { name: 'db', command: 'pnpm test:db' },
+    ])
   })
 
   it('shows the branch the work starts from, saves a new one trimmed, and clears it when emptied', async () => {

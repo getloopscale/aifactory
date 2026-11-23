@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { promotionFinding, repository, task } from '../db/schema'
@@ -8,7 +8,12 @@ import type { FailedRun, PromotionApi, PromotionPull, RerunAnswer } from '../git
 import type { GithubApi } from '../github/pulls'
 import { FACTORY_LABEL } from '../ingest/decide'
 
+import type { CoordinatorMode } from '../coordinator/mode'
+
+import { INTEGRATION_BRANCH } from './branches'
 import { readEvidence } from './check-evidence'
+import { openIncident } from '../line/incident'
+import { watchLine } from './promotion-line'
 import {
   findingSignature,
   issueBody,
@@ -17,21 +22,33 @@ import {
   promotionPullRequests,
   recurrenceComment,
   recurrenceIsNewIssue,
+  togetherBody,
+  togetherTitle,
   withEvidence,
   type FailedCheck,
   type FailureAt,
   type IssueLink,
   type Rerun,
+  type SeenCheck,
 } from './promotion'
+
+/** The label the scheduler sorts first. */
+const FIRST = {
+  name: 'priority:1',
+  color: 'b60205',
+  description: 'The factory takes this issue first',
+}
 
 export type PromotionWatchDeps = {
   db: Database
   app: GithubApp
   api: PromotionApi
-  github: Pick<GithubApi, 'defaultBranch' | 'commentOnIssue'>
+  github: Pick<GithubApi, 'defaultBranch' | 'commentOnIssue' | 'closeIssue'>
   issues: Pick<IssuesApi, 'createIssue' | 'ensureLabel'>
   /** New issues one pass may open in one repository, so a broken pipeline does not flood the tracker. */
   maxNewIssuesPerRepository: number
+  /** Whether a red promotion of the integration branch stops the line (`promotion-line.ts`). Off when unset. */
+  lineMode?: CoordinatorMode
 }
 
 export type PromotionWatchResult = {
@@ -41,6 +58,8 @@ export type PromotionWatchResult = {
   commented: string[]
   /** New failures left for a later pass because the cap was reached. */
   capped: number
+  /** What the stopped line did (`promotion-line.ts`). */
+  line: string[]
   errors: string[]
 }
 
@@ -57,14 +76,20 @@ export function passLog(result: PromotionWatchResult): { level: 'log' | 'error';
       line: JSON.stringify({ event: 'watch_promotions_failed', errors }),
     })
   }
-  const acted = done.reruns + done.opened.length + done.commented.length + done.capped > 0
+  const acted =
+    done.reruns + done.opened.length + done.commented.length + done.capped + done.line.length > 0
   if (acted)
     lines.push({ level: 'log', line: JSON.stringify({ event: 'watch_promotions', ...done }) })
   return lines
 }
 
 /** A failed check with its evidence, and what became of its rerun. */
-type Seen = FailedCheck & { rerun: Rerun }
+type Seen = SeenCheck
+
+/** A failure no finding knows yet, with the signature its finding will carry. */
+type Fresh = { check: Seen; signature: string }
+
+type Where = { head: string; base: string }
 
 /** One repository in one pass: where to write, and how many issues it opened so far. */
 type Pass = {
@@ -88,6 +113,7 @@ export async function pollPromotions(deps: PromotionWatchDeps): Promise<Promotio
     opened: [],
     commented: [],
     capped: 0,
+    line: [],
     errors: [],
   }
   const repositories = await deps.db
@@ -116,11 +142,66 @@ async function watchRepository(
   const pass: Pass = { deps, repo: row.fullName, token, result, opened: 0 }
   for (const promotion of promotionPullRequests(release)) {
     const pull = await deps.api.openPullRequest(row.fullName, token, promotion.head, promotion.base)
-    if (!pull) continue
-    for (const check of withEvidence(await failuresOf(pass, pull.headSha))) {
-      await report(pass, check, at(pull, promotion, check.rerun))
+    if (!pull) {
+      await settleMergedLine(pass, promotion)
+      continue
     }
+    const seen = withEvidence(await failuresOf(pass, pull.headSha))
+    const lineTook = await stopsLine(pass, seen, pull, promotion)
+    const fresh: Fresh[] = []
+    for (const check of seen) {
+      if (lineTook && !needsPerson(check.name)) continue
+      const signature = findingSignature(check.name, check.evidence)
+      const known = await knownFinding(pass, check.name, signature)
+      if (!known && !needsPerson(check.name)) fresh.push({ check, signature })
+      else await report(pass, check, at(pull, promotion, check.rerun), signature, known)
+    }
+    await fileTogether(pass, fresh, pull, promotion)
   }
+}
+
+/**
+ * The red promotion of the integration branch stops the line: its failures go to one incident instead of one
+ * issue per check. A failure only a person can fix keeps its own issue.
+ */
+async function stopsLine(pass: Pass, seen: Seen[], pull: PromotionPull, promotion: Where) {
+  if (promotion.head !== INTEGRATION_BRANCH || !pass.deps.lineMode) return false
+  return watchLine(
+    {
+      db: pass.deps.db,
+      api: pass.deps.api,
+      github: pass.deps.github,
+      issues: pass.deps.issues,
+      repo: pass.repo,
+      token: pass.token,
+      mode: pass.deps.lineMode,
+      done: pass.result.line,
+    },
+    seen.filter((check) => !needsPerson(check.name)),
+    { pull, head: promotion.head, base: promotion.base },
+  )
+}
+
+/**
+ * A line stopped by a promotion that GitHub merged green between two passes. No promotion is open, so nothing
+ * above reads its checks; the incident would stay open until the next promotion (paulohenriquevn/aifactory#394).
+ * The promotion merged after the incident opened with no failed check is read as that head, so the line decides
+ * over it as over an open one; one that merged red, or before the incident, changes nothing.
+ */
+async function settleMergedLine(pass: Pass, promotion: Where) {
+  if (promotion.head !== INTEGRATION_BRANCH || !pass.deps.lineMode) return
+  const incident = await openIncident(pass.deps.db, pass.repo)
+  if (!incident) return
+  const merged = await pass.deps.api.lastMergedPullRequest(
+    pass.repo,
+    pass.token,
+    promotion.head,
+    promotion.base,
+  )
+  if (!merged || merged.mergedAt <= incident.openedAt) return
+  const failed = await pass.deps.api.failedChecks(pass.repo, pass.token, merged.headSha)
+  if (failed.length > 0) return
+  await stopsLine(pass, [], merged, promotion)
 }
 
 const at = (
@@ -185,22 +266,33 @@ async function rerunOnce(pass: Pass, runId: number, reruns: Map<number, RerunAns
   return answer
 }
 
-/**
- * Files a failure once: a new one opens an issue, a known one on a new commit comments on its issue, or
- * opens a new one when that issue is closed or its fix is already integrated (`recurrenceIsNewIssue`).
- */
-async function report(pass: Pass, check: FailedCheck, where: FailureAt) {
-  const signature = findingSignature(check.name, check.evidence)
+async function knownFinding(pass: Pass, checkName: string, signature: string) {
   const [known] = await pass.deps.db
     .select()
     .from(promotionFinding)
     .where(
       and(
         eq(promotionFinding.repository, pass.repo),
-        eq(promotionFinding.checkName, check.name),
+        eq(promotionFinding.checkName, checkName),
         eq(promotionFinding.signature, signature),
       ),
     )
+  return known
+}
+
+type Finding = NonNullable<Awaited<ReturnType<typeof knownFinding>>>
+
+/**
+ * Files a failure once: a new one opens an issue, a known one on a new commit comments on its issue, or
+ * opens a new one when that issue is closed or its fix is already integrated (`recurrenceIsNewIssue`).
+ */
+async function report(
+  pass: Pass,
+  check: FailedCheck,
+  where: FailureAt,
+  signature: string,
+  known: Finding | undefined,
+) {
   if (!known) return fileNew(pass, check, where, signature)
   if (known.issueNumber === null || known.issueUrl === null || known.lastSha === where.sha) return
   const previous: IssueLink = { number: known.issueNumber, url: known.issueUrl }
@@ -254,6 +346,64 @@ async function fileNew(pass: Pass, check: FailedCheck, where: FailureAt, signatu
     await pass.deps.db.delete(promotionFinding).where(eq(promotionFinding.id, claim.id))
     throw error
   }
+}
+
+/**
+ * The new failures of one head that the factory can fix become one issue, since its promotion merges only
+ * once all of them pass: one task per check would fix its own and still fail on the others, which fail on
+ * the base too, so each would wait for the base and none would ever merge. Each check keeps its finding,
+ * pointing at that issue, so a recurrence is still told check by check.
+ */
+async function fileTogether(pass: Pass, fresh: Fresh[], pull: PromotionPull, promotion: Where) {
+  if (fresh.length === 1) {
+    const [{ check, signature }] = fresh
+    return fileNew(pass, check, at(pull, promotion, check.rerun), signature)
+  }
+  if (fresh.length === 0 || capReached(pass)) return
+  const claimed = await claimAll(pass, fresh, pull.headSha)
+  if (claimed.length === 0) return
+  const ids = claimed.map((c) => c.id)
+  try {
+    await createAndLink(pass, issueText(claimed, pull, promotion), true, ids)
+  } catch (error) {
+    await pass.deps.db.delete(promotionFinding).where(inArray(promotionFinding.id, ids))
+    throw error
+  }
+}
+
+/** Claims each failure before the issue is opened, so that two passes cannot open two. */
+async function claimAll(pass: Pass, fresh: Fresh[], sha: string) {
+  const claimed: { id: number; check: Seen }[] = []
+  for (const { check, signature } of fresh) {
+    const [claim] = await pass.deps.db
+      .insert(promotionFinding)
+      .values({
+        repository: pass.repo,
+        checkName: check.name,
+        signature,
+        forFactory: true,
+        lastSha: sha,
+      })
+      .onConflictDoNothing()
+      .returning({ id: promotionFinding.id })
+    if (claim) claimed.push({ id: claim.id, check })
+  }
+  return claimed
+}
+
+/** The text of the issue for the claimed failures: a single one keeps the issue of one check. */
+function issueText(claimed: { check: Seen }[], pull: PromotionPull, promotion: Where): IssueText {
+  const checks = claimed.map((c) => c.check)
+  if (checks.length === 1) {
+    const where = at(pull, promotion, checks[0].rerun)
+    return { title: issueTitle(checks[0], where), body: issueBody(checks[0], where) }
+  }
+  const where = {
+    pullRequest: { number: pull.number, url: pull.url },
+    sha: pull.headSha,
+    ...promotion,
+  }
+  return { title: togetherTitle(checks, where), body: togetherBody(checks, where) }
 }
 
 type Known = { id: number; lastSha: string }
@@ -323,7 +473,19 @@ async function openIssue(
   findingId: number,
   previous?: IssueLink,
 ) {
-  const forFactory = !needsPerson(check.name)
+  const text = { title: issueTitle(check, where), body: issueBody(check, where, previous) }
+  await createAndLink(pass, text, !needsPerson(check.name), [findingId])
+}
+
+type IssueText = { title: string; body: string }
+
+/** Opens the issue and points the findings it files at it. */
+async function createAndLink(
+  pass: Pass,
+  text: IssueText,
+  forFactory: boolean,
+  findingIds: number[],
+) {
   const { deps, repo, token } = pass
   if (forFactory) {
     await deps.issues.ensureLabel(repo, token, {
@@ -331,16 +493,17 @@ async function openIssue(
       color: '5319e7',
       description: 'The factory builds this issue',
     })
+    await deps.issues.ensureLabel(repo, token, FIRST)
   }
   const issue = await deps.issues.createIssue(repo, token, {
-    title: issueTitle(check, where),
-    body: issueBody(check, where, previous),
-    labels: forFactory ? [FACTORY_LABEL] : [],
+    ...text,
+    // A red promotion holds every release of the repository, so its fix goes ahead of the queue.
+    labels: forFactory ? [FACTORY_LABEL, FIRST.name] : [],
   })
   await deps.db
     .update(promotionFinding)
     .set({ issueNumber: issue.number, issueUrl: issue.url, updatedAt: new Date() })
-    .where(eq(promotionFinding.id, findingId))
+    .where(inArray(promotionFinding.id, findingIds))
   pass.opened++
   pass.result.opened.push(issue.url)
 }

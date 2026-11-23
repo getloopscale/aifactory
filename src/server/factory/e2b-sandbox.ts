@@ -28,6 +28,7 @@ import type {
   IsolatedSandbox,
   IsolatedSandboxProvider,
   ListedSandbox,
+  SandboxFile,
   SandboxSpec,
   StreamingOptions,
 } from './sandbox'
@@ -41,6 +42,8 @@ const TIMED_OUT = 124
 const USER = 'node'
 const WORKDIR = '/work'
 const DEFAULT_COMMAND_MS = 10 * 60_000
+/** The most files one request writes, so a large knowledge base never becomes one unbounded request. */
+export const UPLOAD_BATCH = 200
 
 /**
  * The longest a sandbox may live on E2B's free plan. A run asks for more (`DEFAULT_TIMEOUTS.sandboxMs`), so
@@ -78,6 +81,10 @@ export function networkFor(spec: SandboxSpec): SandboxNetworkOpts {
   }
   return { allowOut: spec.egress.map((rule) => rule.domain), denyOut: [ALL_TRAFFIC], rules }
 }
+
+/** What E2B writes: text as it is, bytes as an `ArrayBuffer`. */
+const uploadData = (content: string | Buffer) =>
+  typeof content === 'string' ? content : new Uint8Array(content).buffer
 
 /** Where a wrapped command keeps its output, one directory per command; the sandbox's disk goes with it. */
 const OUTPUT_ROOT = '/tmp/factory-commands'
@@ -128,8 +135,20 @@ export class E2BBackend extends SandboxBackend {
     if (removed.exitCode !== 0) {
       throw new Error(`cannot replace ${path} in the sandbox: ${removed.stderr.trim()}`)
     }
-    const data = typeof content === 'string' ? content : new Uint8Array(content).buffer
-    await this.sandbox.files.write(path, data, { user: USER })
+    await this.sandbox.files.write(path, uploadData(content), { user: USER })
+  }
+
+  /**
+   * Writes files that do not exist yet, as the image user, `UPLOAD_BATCH` at a time: each batch is one request,
+   * where `uploadFile` is a command and a request per file.
+   */
+  async uploadFiles(files: readonly SandboxFile[]) {
+    for (let at = 0; at < files.length; at += UPLOAD_BATCH) {
+      const batch = files
+        .slice(at, at + UPLOAD_BATCH)
+        .map(({ path, content }) => ({ path, data: uploadData(content) }))
+      await this.sandbox.files.write(batch, { user: USER })
+    }
   }
 
   private async run(

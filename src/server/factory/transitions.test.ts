@@ -27,15 +27,18 @@ const acting = (event: TransitionEvent, facts: Omit<Facts, 'stage'> = {}) =>
       .map(([stage, o]) => [stage, (o as Extract<Outcome, { kind: 'action' }>).action]),
   )
 
-/** What every stage outside `acting` answers, which must be one outcome. */
+/**
+ * What every stage outside `acting` answers, which must be one outcome. Approved work being merged refuses
+ * what a person asks with a reason of its own, which its own tests read, so it is left out here.
+ */
 const elsewhere = (event: TransitionEvent, facts: Omit<Facts, 'stage'> = {}) => {
-  const others = TASK_STAGES.map((stage) => outcome({ ...facts, stage }, event)).filter(
-    (o) => o.kind !== 'action',
-  )
+  const others = TASK_STAGES.filter((stage) => stage !== 'merge')
+    .map((stage) => outcome({ ...facts, stage }, event))
+    .filter((o) => o.kind !== 'action')
   return [...new Map(others.map((o) => [JSON.stringify(o), o])).values()]
 }
 
-const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
+const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'merge', 'pr'] as const
 const each = <T>(stages: readonly TaskStage[], value: T) =>
   Object.fromEntries(stages.map((stage) => [stage, value]))
 
@@ -53,10 +56,13 @@ describe('the transition table', () => {
       conflict_rerun: true,
       send_back_after_ci: true,
       coordinator_send_back: true,
+      coordinator_merge_base: true,
       hand_over: true,
       integrate: true,
       merged_by_person: true,
       needs_refinement: true,
+      merge_due: true,
+      run_step: true,
       issue_labeled: true,
       issue_comment_created: true,
       pull_request_comment_created: true,
@@ -70,7 +76,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(25 * 14)
+    expect(pairs).toHaveLength(28 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -105,15 +111,12 @@ describe('the transition table', () => {
       [
         'hand_over',
         'integrate',
-        'issue_labeled',
         'issue_comment_created',
         'pull_request_comment_created',
         'pull_request_review_submitted',
         'pull_request_review_comment_created',
         'check_suite_completed',
         'check_run_completed',
-        'issue_unlabeled',
-        'issue_closed',
         'issue_reopened',
       ].sort(),
     )
@@ -225,6 +228,7 @@ describe('what a person asks for in the panel', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
     ] as const
     expect(acting('retry_from_finding', { mergedSha: 'm' })).toEqual({
@@ -268,6 +272,48 @@ describe('what a person asks for in the panel', () => {
   })
 })
 
+describe('approved work while the factory merges it', () => {
+  const merging = refused(
+    'the reviewer approved this work and the factory is merging it now: wait until it is delivered',
+  )
+  const facts = { headSha: 'abc' }
+
+  it.each(['approve', 'request_changes', 'retry', 'resolve', 'release'] as const)(
+    'refuses %s from a person, saying the work is being merged',
+    (event) => {
+      expect(outcome({ ...facts, stage: 'merge' }, event)).toEqual(merging)
+    },
+  )
+
+  it('lets the merge-task job take it to its pull request only while it is in merge', () => {
+    expect(acting('merge_due', facts)).toEqual({ merge: 'integrate_approved' })
+    expect(elsewhere('merge_due', facts)).toEqual([
+      ignored('only approved work that waits in merge is taken to its pull request'),
+    ])
+  })
+
+  it('is started over from a supervisor finding, as a stalled run is', () => {
+    expect(outcome({ ...facts, stage: 'merge' }, 'retry_from_finding')).toEqual(act('start_over'))
+  })
+
+  it('is not run again on its own, sent back by the coordinator or integrated as a pull request', () => {
+    expect(outcome({ stage: 'merge' }, 'retry_due').kind).toBe('refused')
+    expect(outcome({ stage: 'merge' }, 'conflict_rerun').kind).toBe('refused')
+    expect(outcome({ stage: 'merge' }, 'coordinator_send_back').kind).toBe('refused')
+    expect(outcome({ stage: 'merge' }, 'integrate').kind).toBe('ignored')
+  })
+
+  it('is cancelled when its issue is closed, and ignores what is written on a pull request it has not opened', () => {
+    expect(outcome({ stage: 'merge' }, 'issue_closed')).toEqual(act('cancel'))
+    expect(outcome({ stage: 'merge', trusted: true }, 'pull_request_comment_created')).toEqual(
+      ignored('the task has no pull request waiting for a person'),
+    )
+    expect(outcome({ stage: 'merge', awaitingCiSha: 'abc' }, 'check_suite_completed').kind).toBe(
+      'ignored',
+    )
+  })
+})
+
 describe('what the factory does on its own', () => {
   const alone =
     'only a failed task, or one whose pull request was never merged, runs again on its own'
@@ -295,18 +341,40 @@ describe('what the factory does on its own', () => {
     )
   })
 
-  it('lets the coordinator send back only a handed-over task that is not integrated', () => {
-    expect(acting('coordinator_send_back')).toEqual({ handoff: 'continue_on_branch' })
-    expect(outcome({ stage: 'handoff', branchGone: true }, 'coordinator_send_back')).toEqual(
-      act('start_from_integration_branch'),
+  it('lets the coordinator send back only a handed-over or failed task that is not integrated', () => {
+    expect(acting('coordinator_send_back')).toEqual({
+      handoff: 'continue_on_branch',
+      failed: 'continue_on_branch',
+    })
+    for (const stage of ['handoff', 'failed'] as const) {
+      expect(outcome({ stage, branchGone: true }, 'coordinator_send_back')).toEqual(
+        act('start_from_integration_branch'),
+      )
+      expect(outcome({ stage, mergedSha: 'm' }, 'coordinator_send_back')).toEqual(
+        refused(
+          'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
+        ),
+      )
+    }
+    expect(elsewhere('coordinator_send_back')).toEqual([
+      refused('the coordinator sends back only a task that was handed over to a person or failed'),
+    ])
+  })
+
+  it('lets the coordinator merge the integration branch only into the branch of a handed-over task', () => {
+    expect(acting('coordinator_merge_base')).toEqual({ handoff: 'merge_base' })
+    expect(outcome({ stage: 'handoff', branchGone: true }, 'coordinator_merge_base')).toEqual(
+      refused('the task has no branch on GitHub to merge the integration branch into'),
     )
-    expect(outcome({ stage: 'handoff', mergedSha: 'm' }, 'coordinator_send_back')).toEqual(
+    expect(outcome({ stage: 'handoff', mergedSha: 'm' }, 'coordinator_merge_base')).toEqual(
       refused(
         'this work is already integrated, so there is no pull request to send back: open a new job for what should change',
       ),
     )
-    expect(elsewhere('coordinator_send_back')).toEqual([
-      refused('the coordinator sends back only a task that was handed over to a person'),
+    expect(elsewhere('coordinator_merge_base')).toEqual([
+      refused(
+        'the coordinator merges the integration branch only into the branch of a handed-over task',
+      ),
     ])
   })
 
@@ -355,6 +423,22 @@ describe('integrating approved work', () => {
       act('mark_ready_for_review'),
     )
     expect(outcome({ stage: 'done', draft: true }, 'integrate')).toEqual(ignored(none))
+  })
+})
+
+describe('what a run records as it goes', () => {
+  it('records every stage of a run but over a cancelled task', () => {
+    expect(acting('run_step')).toEqual(
+      Object.fromEntries(
+        TASK_STAGES.filter((stage) => stage !== 'cancelled').map((stage) => [
+          stage,
+          'record_stage',
+        ]),
+      ),
+    )
+    expect(outcome({ stage: 'cancelled' }, 'run_step')).toEqual(
+      refused('the task was cancelled: its issue was closed or lost the factory label'),
+    )
   })
 })
 

@@ -13,6 +13,7 @@ import {
   sendBackConflictAutomatically,
 } from '../panel/actions'
 import { actionDeps } from '../panel/deps'
+import { githubPass } from '../github/budget-pass'
 
 /**
  * Finishes the integrations that wait for a repository's required checks, every two minutes: once GitHub
@@ -29,44 +30,50 @@ import { actionDeps } from '../panel/deps'
 export default defineCron('integrate-after-ci', {
   schedule: '*/2 * * * *',
   // A worker-only process leaves the crons to the main one (see worker-only.ts).
-  handler: mainProcessOnly(async () => {
-    let deps
-    try {
-      deps = actionDeps()
-    } catch (error) {
-      console.error(
-        JSON.stringify({ event: 'integrate_after_ci_not_configured', error: String(error) }),
-      )
-      return
-    }
-    const actions = deps
-    const github = { db: deps.db, github: deps.github, api: deps.api }
-    const passes: [string, () => Promise<Record<string, unknown>>][] = [
-      ['promotion_after_ci', () => pollPromotionWaits(github)],
-      ['promotion_adopted', () => adoptPromotions(github)],
-      [
-        'integrate_after_ci',
-        () =>
-          pollAwaitingIntegrations({
-            ...github,
-            checks: createPromotionApi(),
-            releaseMode: releaseModeFromEnv(process.env),
-            sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
-            mergeBase: (taskId, note) => mergeFixedBase(actions, taskId, note),
-            sendBackConflict: (taskId, base) =>
-              sendBackConflictAutomatically(actions, taskId, base),
-          }),
-      ],
-      [
-        'handoff_merged',
-        () => adoptMergedHandoffs({ ...github, releaseMode: releaseModeFromEnv(process.env) }),
-      ],
-      ['release_after_ci', () => pollAwaitingReleases(github)],
-    ]
-    // In this order: a promotion GitHub merged ends its hold, so the integrations it held go in on this pass.
-    for (const [event, pass] of passes) {
-      const line = passLine(event, await pass())
-      if (line) console.log(line)
-    }
-  }),
+  handler: mainProcessOnly(
+    githubPass(
+      'integrate-after-ci',
+      async () => {
+        let deps
+        try {
+          deps = actionDeps()
+        } catch (error) {
+          console.error(
+            JSON.stringify({ event: 'integrate_after_ci_not_configured', error: String(error) }),
+          )
+          return
+        }
+        const actions = deps
+        const github = { db: deps.db, github: deps.github, api: deps.api }
+        const passes: [string, () => Promise<Record<string, unknown>>][] = [
+          ['promotion_after_ci', () => pollPromotionWaits(github)],
+          ['promotion_adopted', () => adoptPromotions(github)],
+          [
+            'integrate_after_ci',
+            () =>
+              pollAwaitingIntegrations({
+                ...github,
+                checks: createPromotionApi(),
+                releaseMode: releaseModeFromEnv(process.env),
+                sendBack: (taskId, note) => sendBackAutomatically(actions, taskId, note),
+                mergeBase: (taskId, note) => mergeFixedBase(actions, taskId, note),
+                sendBackConflict: (taskId, base) =>
+                  sendBackConflictAutomatically(actions, taskId, base),
+              }),
+          ],
+          [
+            'handoff_merged',
+            () => adoptMergedHandoffs({ ...github, releaseMode: releaseModeFromEnv(process.env) }),
+          ],
+          ['release_after_ci', () => pollAwaitingReleases(github)],
+        ]
+        // In this order: a promotion GitHub merged ends its hold, so the integrations it held go in on this pass.
+        for (const [event, pass] of passes) {
+          const line = passLine(event, await pass())
+          if (line) console.log(line)
+        }
+      },
+      { waitsForLimit: true },
+    ),
+  ),
 })

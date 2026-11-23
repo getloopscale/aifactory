@@ -267,6 +267,48 @@
       "when": 1794914544942,
       "tag": "0040_scheduler_decision",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794969593424,
+      "tag": "0041_repository_integration_checks",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1794975274688,
+      "tag": "0042_coordinator_deferred",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1795024865161,
+      "tag": "0043_lead_time_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1795090178100,
+      "tag": "0044_line_incident",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1795176578100,
+      "tag": "0045_handoff_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1795262978100,
+      "tag": "0046_board_query_plan",
+      "breakpoints": true
     }
   ]
 }

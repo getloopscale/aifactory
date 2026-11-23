@@ -59,6 +59,9 @@ const FROM_FAILURE: ReadonlySet<string> = new Set([
   'handoff',
   'environment',
   'failure',
+  'checks_red',
+  'out_of_time',
+  'no_change',
 ])
 
 /** Whether `text` holds the whole test name: not inside a longer word or number ("501" is not in "5010"). */

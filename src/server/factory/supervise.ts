@@ -1,21 +1,16 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { finding, question, stageEvent, task, watch } from '../db/schema'
+import { finding, lineIncident, question, stageEvent, task, watch } from '../db/schema'
 
+import { raiseFinding, type Found } from './findings'
+import { readPause } from './provider-pause-store'
+import { stalledQueues, type QueueFacts } from './queue-stall'
 import { reapSandboxes } from './reap-sandboxes'
 import type { ListedSandbox } from './sandbox'
 import { WATCH_WINDOW_MS } from './watch'
 
-/** What the supervisor reports. `key` is what makes the same problem one finding, not many. */
-export type Found = {
-  key: string
-  kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'answer_resume' | 'snapshot' | 'revert'
-  taskId: number | null
-  ref: string | null
-  detail: string
-}
+export type { Found }
 
 /** The stages in which a run is alive and should be producing events. */
 const WORKING = ['sandbox', 'plan', 'build', 'push', 'verify', 'review', 'pr'] as const
@@ -27,12 +22,20 @@ export type Limits = {
   pickupMs: number
   /** A snapshot younger than this may belong to a question still being written. */
   snapshotGraceMs: number
+  /**
+   * How long a repository's queued runs may wait with none of its runs started before the queue is said to be
+   * stalled. Past a run's own length, since a queue of runs that start as others end is not stalled.
+   */
+  queueStallMs?: number
 }
+
+const QUEUE_STALL_MS = 60 * 60_000
 
 export const LIMITS: Limits = {
   stallMs: 45 * 60_000,
   pickupMs: 10 * 60_000,
   snapshotGraceMs: 5 * 60_000,
+  queueStallMs: QUEUE_STALL_MS,
 }
 
 export type SuperviseDeps = {
@@ -62,6 +65,145 @@ async function queuedJobs(db: Database, name: string, field: string) {
   }
 }
 
+/** When each task last entered a stage, as a subquery to join. */
+const lastEventOf = (db: Database) =>
+  db
+    .select({ taskId: stageEvent.taskId, last: sql<Date>`max(${stageEvent.at})`.as('last') })
+    .from(stageEvent)
+    .groupBy(stageEvent.taskId)
+    .as('last_event')
+type LastEvent = ReturnType<typeof lastEventOf>
+
+/** The stages a task waits in for a job to take it, with the job and what a finding says when it is lost. */
+const PICKUPS = [
+  {
+    stage: 'intake',
+    job: 'run-task',
+    lost: 'it is queued, and no job is left to run it',
+    failed: 'the job that should run it failed',
+  },
+  {
+    stage: 'merge',
+    job: 'merge-task',
+    lost: 'the review approved it and it waits in merge, and no job is left to merge it',
+    failed: 'the job that should merge it failed',
+  },
+] as const
+
+/**
+ * The tasks that waited past `before` for a job that is gone or failed, or nothing when there is no queue
+ * table to read: without it, nothing can be said to be missing from the queue.
+ */
+async function joblessTasks(
+  db: Database,
+  lastEvent: LastEvent,
+  before: number,
+): Promise<Found[] | null> {
+  const found: Found[] = []
+  for (const pickup of PICKUPS) {
+    const jobs = await queuedJobs(db, pickup.job, 'taskId')
+    if (!jobs) return null
+    const waiting = await db
+      .select({ id: task.id, last: lastEvent.last })
+      .from(task)
+      .innerJoin(lastEvent, eq(lastEvent.taskId, task.id))
+      .where(eq(task.stage, pickup.stage))
+    for (const t of waiting) {
+      if (new Date(t.last).getTime() >= before) continue
+      const job = jobs.find((j) => Number(j.id) === t.id)
+      if (job && !job.failed) continue
+      found.push({
+        key: `orphaned:queued_run:${t.id}`,
+        kind: 'orphaned',
+        subject: 'queued_run',
+        taskId: t.id,
+        ref: null,
+        detail: job ? `${pickup.failed}: ${job.error ?? 'no reason given'}` : pickup.lost,
+      })
+    }
+  }
+  return found
+}
+
+/**
+ * The queued runs of each repository that are due or held with no end, of tasks in `intake`, with when a run of
+ * the repository last started; or nothing when there is no queue table. A job a worker holds is not waiting.
+ */
+async function waitingQueues(db: Database, now: Date): Promise<QueueFacts[] | null> {
+  try {
+    const rows = await db.execute<{
+      repository: string
+      waiting: number
+      held: number
+      oldest_task_id: number
+      waiting_since: Date | string
+      last_started_at: Date | string | null
+    }>(
+      sql`with waiting as (
+            select t.repository, t.id as task_id, j.available_at,
+              greatest(j.created_at, coalesce((j.input->>'heldFrom')::timestamptz, j.available_at)) as since
+            from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
+            where j.name = 'run-task' and j.failed_at is null
+              and (j.locked_until is null or j.locked_until < ${now})
+              and t.stage = 'intake'
+              and (j.available_at <= ${now} or j.available_at = 'infinity'::timestamptz)
+          )
+          select w.repository, count(*)::int as waiting,
+            (count(*) filter (where w.available_at = 'infinity'::timestamptz))::int as held,
+            (array_agg(w.task_id order by w.since, w.task_id))[1] as oldest_task_id,
+            min(w.since) as waiting_since,
+            (select max(e.at) from stage_event e join task s on s.id = e.task_id
+              where s.repository = w.repository and e.stage = 'sandbox') as last_started_at
+          from waiting w group by w.repository`,
+    )
+    return rows.rows.map((r) => ({
+      repository: r.repository,
+      waiting: r.waiting,
+      held: r.held,
+      oldestTaskId: r.oldest_task_id,
+      waitingSince: new Date(r.waiting_since),
+      lastStartedAt: r.last_started_at === null ? null : new Date(r.last_started_at),
+    }))
+  } catch (error) {
+    // The table is made when the worker first starts. Without it there is no queue to be stalled.
+    if (String(error).includes('theokit_jobs')) return null
+    throw error
+  }
+}
+
+/** The repositories whose queued runs nobody starts, with the cause when the facts tell it. */
+async function stalledQueueFindings(
+  db: Database,
+  now: Date,
+  stallMs: number,
+): Promise<Found[] | null> {
+  const queues = await waitingQueues(db, now)
+  if (!queues) return null
+  if (queues.length === 0) return []
+  const [started] = await db
+    .select({ at: sql<Date | string | null>`max(${stageEvent.at})` })
+    .from(stageEvent)
+    .where(eq(stageEvent.stage, 'sandbox'))
+  const lines = await db
+    .select({
+      repository: lineIncident.repository,
+      surface: lineIncident.surface,
+      issueNumber: lineIncident.issueNumber,
+    })
+    .from(lineIncident)
+    .where(sql`${lineIncident.status} <> 'resolved'`)
+  return stalledQueues(
+    queues,
+    {
+      lastStartedAnywhere: started?.at ? new Date(started.at) : null,
+      stoppedLines: new Map(lines.map((l) => [l.repository, l])),
+      providerPause: await readPause(db),
+    },
+    now,
+    stallMs,
+  )
+}
+
 export type Detected = {
   found: Found[]
   /** The checks that actually ran. A check that could not run says nothing about its findings. */
@@ -78,11 +220,7 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
   const ago = (ms: number) => new Date(now.getTime() - ms)
 
   // Work that stopped moving.
-  const lastEvent = db
-    .select({ taskId: stageEvent.taskId, last: sql<Date>`max(${stageEvent.at})`.as('last') })
-    .from(stageEvent)
-    .groupBy(stageEvent.taskId)
-    .as('last_event')
+  const lastEvent = lastEventOf(db)
   const quiet = await db
     .select({ id: task.id, stage: task.stage, last: lastEvent.last })
     .from(task)
@@ -102,31 +240,18 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
     }
   }
 
-  // A task queued with no job to run it.
-  const waiting = await db
-    .select({ id: task.id, last: lastEvent.last })
-    .from(task)
-    .innerJoin(lastEvent, eq(lastEvent.taskId, task.id))
-    .where(eq(task.stage, 'intake'))
-  const runJobs = await queuedJobs(db, 'run-task', 'taskId')
-  if (runJobs) {
+  // A task queued with no job to run it, or approved work in merge with no job to merge it.
+  const jobless = await joblessTasks(db, lastEvent, now.getTime() - limits.pickupMs)
+  if (jobless) {
     checked.add('queued_run')
-    for (const t of waiting) {
-      if (now.getTime() - new Date(t.last).getTime() <= limits.pickupMs) continue
-      const job = runJobs.find((j) => Number(j.id) === t.id)
-      if (!job || job.failed) {
-        found.push({
-          key: `orphaned:queued_run:${t.id}`,
-          kind: 'orphaned',
-          subject: 'queued_run',
-          taskId: t.id,
-          ref: null,
-          detail: job
-            ? `the job that should run it failed: ${job.error ?? 'no reason given'}`
-            : 'it is queued, and no job is left to run it',
-        })
-      }
-    }
+    found.push(...jobless)
+  }
+
+  // A repository whose queued runs nobody starts: held, or due with no worker taking them.
+  const stalledQueue = await stalledQueueFindings(db, now, limits.queueStallMs ?? QUEUE_STALL_MS)
+  if (stalledQueue) {
+    checked.add('queue')
+    found.push(...stalledQueue)
   }
 
   // An answer nobody resumed.
@@ -222,26 +347,10 @@ export async function supervise(deps: SuperviseDeps): Promise<SuperviseResult> {
   const { found, checked } = await detect(deps)
   const keys = new Set(found.map((f) => f.key))
   const existing = await db.select().from(finding)
-  const byKey = new Map(existing.map((f) => [f.key, f]))
   const result: SuperviseResult = { opened: [], resolved: [], open: found.length }
 
   for (const f of found) {
-    const known = byKey.get(f.key)
-    if (!known) {
-      await db.insert(finding).values({ ...f, firstSeenAt: now, lastSeenAt: now })
-      result.opened.push(f.key)
-    } else if (known.resolvedAt) {
-      await db
-        .update(finding)
-        .set({ detail: f.detail, firstSeenAt: now, lastSeenAt: now, resolvedAt: null })
-        .where(eq(finding.id, known.id))
-      result.opened.push(f.key)
-    } else {
-      await db
-        .update(finding)
-        .set({ detail: f.detail, lastSeenAt: now })
-        .where(eq(finding.id, known.id))
-    }
+    if ((await raiseFinding(db, f, now)) === 'opened') result.opened.push(f.key)
   }
   const gone = existing.filter((f) => !f.resolvedAt && !keys.has(f.key) && checked.has(f.subject))
   if (gone.length > 0) {

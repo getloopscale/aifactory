@@ -156,7 +156,7 @@ describe('the deploy script', () => {
     expect(code).toBe(0)
     // try-restart left a stopped worker stopped, and the factory ran fewer tasks at once without saying so.
     expect(systemctl).toContain(
-      'systemctl --user restart aifactory-worker@1.service aifactory-worker@2.service',
+      'systemctl --user restart --no-block aifactory-worker@1.service aifactory-worker@2.service',
     )
   })
 
@@ -167,12 +167,22 @@ describe('the deploy script', () => {
     expect(systemctl.filter((l) => l.includes('aifactory-worker@'))).toEqual([])
   })
 
-  it('restarts while a task is working, and says the restart waits for it', () => {
+  it('restarts while a task is working, and says each worker comes back once its run ends', () => {
     const { code, systemctl, output } = deploy({ busy: '2' })
 
     expect(code).toBe(0)
     expect(systemctl).toContain('systemctl --user restart aifactory.service')
-    expect(output).toMatch(/2 task\(s\) are working; the restart waits for them to finish/)
+    expect(output).toMatch(
+      /2 task\(s\) are working; each worker restarts once its run finishes \(up to four hours\)/,
+    )
+  })
+
+  it('does not wait for a worker to drain its run, so the next deploy is not held behind it', () => {
+    const { systemctl } = deploy({ busy: '1', enabledWorkers: ['aifactory-worker@1.service'] })
+
+    expect(systemctl.filter((l) => l.includes('aifactory-worker@'))).toEqual([
+      'systemctl --user restart --no-block aifactory-worker@1.service',
+    ])
   })
 
   it('checks the agent configuration against the baseline before it builds', () => {

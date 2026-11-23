@@ -1,4 +1,5 @@
 import type { FetchLike } from './app'
+import { gated } from './rate-limit'
 import { retryRead } from './retry-read'
 
 export type CheckRun = {
@@ -66,10 +67,15 @@ export type BranchAhead = { sha: string; aheadBy: number; committedAt: Date }
 /** A full release a repository published, as its own release workflow names it. */
 export type PublishedRelease = { tag: string; url: string; publishedAt: Date }
 
+/** The most pages of 100 reports `commitChecks` reads of one commit before it says it could not read them all. */
+const MAX_CHECK_PAGES = 20
+
 export type CommitChecks = {
   checkRuns: { name: string; status: string; conclusion: string | null }[]
   /** The combined state of the older commit statuses. `none` when there are no statuses at all. */
   statuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
+  /** Each commit status by its context, the latest state of each. */
+  statusContexts?: { context: string; state: string }[]
 }
 
 /**
@@ -368,9 +374,11 @@ type GraphqlAnswer<T> = { data?: T; errors?: { message: string }[] }
 const MAX_COMPARE_FILES = 3000
 
 export function createGithubApi(
-  fetchImpl: FetchLike = (url, init) => fetch(url, init),
+  plainFetch: FetchLike = (url, init) => fetch(url, init),
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): GithubApi {
+  // Every call goes through the rate gate: counted, its budget recorded, a refusal for the limit typed.
+  const fetchImpl = gated(plainFetch)
   const call = async (repo: string, token: string, path: string, init: RequestInit = {}) => {
     const isRead = (init.method ?? 'GET') === 'GET'
     return retryRead(
@@ -844,29 +852,50 @@ export function createGithubApi(
     },
 
     async commitChecks(repo, token, sha) {
-      const runs = (await (
-        await ensure(
-          await call(repo, token, `/commits/${sha}/check-runs?per_page=100`),
-          `reading the check runs of ${sha.slice(0, 7)} on ${repo}`,
-          [200],
-        )
-      ).json()) as {
-        check_runs: { name: string; status: string; conclusion: string | null }[]
+      // Every page is read: a failure left on a later page would make the evidence look complete when it is not.
+      const pages = async <T>(path: string, what: string, take: (body: any) => T[]) => {
+        const items: T[] = []
+        for (let page = 1; page <= MAX_CHECK_PAGES; page++) {
+          const response = await ensure(
+            await call(
+              repo,
+              token,
+              `${path}${path.includes('?') ? '&' : '?'}per_page=100&page=${page}`,
+            ),
+            what,
+            [200],
+          )
+          const body = await response.json()
+          const got = take(body)
+          items.push(...got)
+          const total = body.total_count ?? 0
+          if (items.length >= total) return { items, body }
+          if (got.length === 0)
+            throw new Error(
+              `${what}: GitHub listed ${items.length} of ${total} reports, not all of them read`,
+            )
+        }
+        throw new Error(`${what}: more than ${MAX_CHECK_PAGES * 100} reports, not all of them read`)
       }
-      const combined = (await (
-        await ensure(
-          await call(repo, token, `/commits/${sha}/status`),
-          `reading the statuses of ${sha.slice(0, 7)} on ${repo}`,
-          [200],
-        )
-      ).json()) as { state: 'success' | 'failure' | 'error' | 'pending'; total_count: number }
+      const runs = await pages<{ name: string; status: string; conclusion: string | null }>(
+        `/commits/${sha}/check-runs`,
+        `reading the check runs of ${sha.slice(0, 7)} on ${repo}`,
+        (b) => b.check_runs ?? [],
+      )
+      const combined = await pages<{ context: string; state: string }>(
+        `/commits/${sha}/status`,
+        `reading the statuses of ${sha.slice(0, 7)} on ${repo}`,
+        (b) => b.statuses ?? [],
+      )
+      const state = combined.body.state as 'success' | 'failure' | 'error' | 'pending'
       return {
-        checkRuns: runs.check_runs.map((r) => ({
+        checkRuns: runs.items.map((r) => ({
           name: r.name,
           status: r.status,
           conclusion: r.conclusion,
         })),
-        statuses: combined.total_count === 0 ? 'none' : combined.state,
+        statuses: combined.body.total_count === 0 ? ('none' as const) : state,
+        statusContexts: combined.items.map((s) => ({ context: s.context, state: s.state })),
       }
     },
 

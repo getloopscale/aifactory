@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-import type { ChecksProof, DoctorReport, ProvenCheck } from '../../shared/panel'
+import type { DoctorReport, ProvenCheck, StoredProof } from '../../shared/panel'
 
 /**
  * The stages of a task, in the order a successful run passes through them, then the ways a run ends
@@ -29,6 +29,7 @@ export const TASK_STAGES = [
   'verify',
   'review',
   'waiting',
+  'merge',
   'pr',
   'done',
   'released',
@@ -114,8 +115,12 @@ export const stageEvent = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   // The board reads each task's history through subqueries keyed on the task, a stage and the order of its
-  // events; without this index each one scans the whole table, and the panel's poll took 20 seconds.
-  (table) => [index('stage_event_task_stage_id').on(table.taskId, table.stage, table.id)],
+  // events; without this index each one scans the whole table, and the panel's poll took 20 seconds. Some of
+  // them look for the event just before or after another of any stage, which the second index answers.
+  (table) => [
+    index('stage_event_task_stage_id').on(table.taskId, table.stage, table.id),
+    index('stage_event_task_id_id').on(table.taskId, table.id),
+  ],
 )
 
 /**
@@ -484,10 +489,13 @@ export const finding = pgTable('finding', {
   key: text('key').notNull().unique(),
   kind: text('kind', { enum: ['stalled', 'orphaned'] }).notNull(),
   subject: text('subject', {
-    enum: ['run', 'queued_run', 'answer_resume', 'snapshot', 'revert'],
+    enum: ['run', 'queued_run', 'queue', 'answer_resume', 'snapshot', 'revert', 'back_merge'],
   }).notNull(),
   taskId: integer('task_id').references(() => task.id),
-  /** What the finding points at when it is not a task: a snapshot id, a question or a watch. */
+  /**
+   * What the finding points at when it is not a task: a snapshot id, a question, a watch, or the link of a
+   * back-merge that conflicts with the integration branch.
+   */
   ref: text('ref'),
   detail: text('detail').notNull(),
   firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull().defaultNow(),
@@ -535,6 +543,10 @@ export const repository = pgTable('repository', {
   releaseMode: text('release_mode', { enum: ['manual', 'trial', 'auto'] }),
   /** How long a run may last in this repository, in minutes; absent means the factory's default. */
   runLimitMinutes: integer('run_limit_minutes'),
+  /** From this many minutes of lead time a task is at risk; absent means the factory's default. */
+  leadTimeAtRiskMinutes: integer('lead_time_at_risk_minutes'),
+  /** From this many minutes of lead time a task is overdue; absent means the factory's default. */
+  leadTimeOverdueMinutes: integer('lead_time_overdue_minutes'),
   /** The doctor's last report on the repository, with its time. */
   doctor: jsonb('doctor').$type<DoctorReport>(),
   /** How the repository publishes a release, as the doctor last read it. */
@@ -544,7 +556,24 @@ export const repository = pgTable('repository', {
   /** The saved checks a proof ran and saw pass, each with its result; one the owner typed is not here. */
   checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
   /** The last proof of proposed checks, running or finished. */
-  checksProof: jsonb('checks_proof').$type<ChecksProof>(),
+  checksProof: jsonb('checks_proof').$type<StoredProof>(),
+  /**
+   * The checks run on the merge of the work with the integration branch, after the checks above:
+   * `[{ name, command }]`. Empty means none.
+   */
+  integrationChecks: jsonb('integration_checks')
+    .$type<{ name: string; command: string }[]>()
+    .notNull()
+    .default([]),
+  /** The commit of the integration branch the checks in `integrationChecksProven` passed on. */
+  integrationChecksProvenSha: text('integration_checks_proven_sha'),
+  /** The saved integration checks a proof ran and saw pass, each with its result. */
+  integrationChecksProven: jsonb('integration_checks_proven')
+    .$type<ProvenCheck[]>()
+    .notNull()
+    .default([]),
+  /** The last proof of proposed integration checks, running or finished. */
+  integrationChecksProof: jsonb('integration_checks_proof').$type<StoredProof>(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
@@ -712,6 +741,39 @@ export const promotionFinding = pgTable(
 )
 
 /**
+ * A stopped line (`line/`): something that blocks every task of a repository at once, such as a red
+ * promotion. While it is open no new run of the repository starts and nothing of it integrates but its fix,
+ * which is one issue for all the failures. It ends only when the blocked surface is green again.
+ */
+export const lineIncident = pgTable(
+  'line_incident',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    cause: text('cause', { enum: ['promotion_red', 'mass_failure'] }).notNull(),
+    /** What is blocked, as a person reads it: `workspace -> develop`, or the failure signature. */
+    surface: text('surface').notNull(),
+    /** The issue of the fix now on its way. */
+    issueNumber: integer('issue_number').notNull(),
+    issueUrl: text('issue_url').notNull(),
+    /** The head the failures were last read on. */
+    lastSha: text('last_sha').notNull(),
+    /** How many fix issues the incident has had: one more each time a fix integrated and the line stayed red. */
+    attempts: integer('attempts').notNull().default(1),
+    status: text('status', { enum: ['open', 'escalated', 'resolved'] })
+      .notNull()
+      .default('open'),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+    endedAt: timestamp('ended_at', { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex('line_incident_one_per_repository')
+      .on(table.repository)
+      .where(sql`${table.status} <> 'resolved'`),
+  ],
+)
+
+/**
  * One day of one indicator the factory keeps about itself (`metrics/config.ts`), for one repository or for
  * all of them (`*`): the mean of what was observed that day and how many observations made it. The
  * `measure` cron writes it again on every pass for the days it still covers.
@@ -757,7 +819,12 @@ export const metricSignal = pgTable(
  * What the coordinator recognises as an exception of a task (`coordinator/exceptions.ts`), and the three of
  * a repository's release train (`coordinator/release-train.ts`): work ready for a release, the one retry of a
  * refused release on the same head, a red release branch that holds the train, and an integration branch
- * red for too long while it holds tasks (`base_red`).
+ * red for too long while it holds tasks (`base_red`). A failure whose reason the coordinator acts on is its own
+ * kind: checks still red after the attempts (`checks_red`), a run out of time (`out_of_time`) and an agent that
+ * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
+ * (`base_conflict`); any other is a `failure`. A handoff of integrated work after its automatic runs is its own kind
+ * too: a pull request that still conflicts with its base (`pull_conflict`), a base that passes the checks blamed on
+ * it again (`base_fixed`) and required checks that still fail (`ci_red`).
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -768,15 +835,28 @@ export const EXCEPTION_KINDS = [
   'orphaned',
   'environment',
   'failure',
+  'checks_red',
+  'out_of_time',
+  'no_change',
   'unknown',
   'release_ready',
   'release_retry',
   'release_blocked',
   'queue_blocked',
   'base_red',
+  'base_conflict',
+  'pull_conflict',
+  'base_fixed',
+  'ci_red',
+  'checks_broke_after_review',
+  'publication_stalled',
 ] as const
 
-/** The closed set of actions the coordinator decides between (`coordinator/decide.ts`). */
+/**
+ * The closed set of actions the coordinator decides between (`coordinator/decide.ts`). `fix_base` files the
+ * fix of a red integration branch as an issue of its repository; `merge_base` queues the run that merges the
+ * integration branch into the task's branch with no agent; `wait` reads a fact again on the next passes.
+ */
 export const COORDINATOR_ACTIONS = [
   'send_back',
   'review_again',
@@ -784,15 +864,26 @@ export const COORDINATOR_ACTIONS = [
   'scope',
   'release',
   'prioritise',
+  'fix_base',
+  'merge_base',
+  'wait',
   'escalate',
 ] as const
 
 /**
  * What became of a decision: `applied` went through the panel's own action, `trial` was only recorded
  * because the coordinator runs in trial mode, `refused` was refused by the transition table, `failed` threw,
- * and `escalated` left the task with a person.
+ * `escalated` left the task with a person, and `deferred` is a `wait`: the first pass that could not read a fact,
+ * kept so a later pass knows how long it has been unreadable.
  */
-export const COORDINATOR_OUTCOMES = ['applied', 'trial', 'refused', 'failed', 'escalated'] as const
+export const COORDINATOR_OUTCOMES = [
+  'applied',
+  'trial',
+  'refused',
+  'failed',
+  'escalated',
+  'deferred',
+] as const
 
 /**
  * One decision of the coordinator, applied or not, so every action taken with nobody watching can be read
@@ -819,17 +910,19 @@ export const coordinatorAction = pgTable(
     costUsd: real('cost_usd').notNull().default(0),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
-  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies.
+  // A trial decision applied nothing, so it leaves the head free for the one `auto` applies, and a deferred one
+  // leaves it free for the escalation that follows it.
   (t) => [
     uniqueIndex('coordinator_action_once_per_head')
       .on(t.taskId, t.exceptionKind, t.headSha)
-      .where(sql`${t.outcome} <> 'trial'`),
+      .where(sql`${t.outcome} not in ('trial', 'deferred')`),
   ],
 )
 
 /**
  * A failure that repeated across tasks and the issue the coordinator filed for it on the factory's own
- * repository (`coordinator/evolve.ts`): one row per signature, so it is filed once. The row is written
+ * repository (`coordinator/evolve.ts`), or a red integration branch and the issue that fixes it on its repository
+ * (`coordinator/base-fix.ts`, a signature that starts with `base_red:`): one row per signature, so it is filed once. The row is written
  * before the issue is opened and removed when opening fails, so two passes never file the same signature.
  * When the issue has been closed for a week, both counts and `measured_at` are recorded.
  */

@@ -1,4 +1,5 @@
 import type { FetchLike, GithubApp } from './app'
+import { gated } from './rate-limit'
 
 export type NewIssue = {
   title: string
@@ -29,7 +30,10 @@ export type IssuesApi = {
 }
 
 /** Runs on the factory host with an installation token for one repository. */
-export function createIssuesApi(fetchImpl: FetchLike = (url, init) => fetch(url, init)): IssuesApi {
+export function createIssuesApi(
+  plainFetch: FetchLike = (url, init) => fetch(url, init),
+): IssuesApi {
+  const fetchImpl = gated(plainFetch)
   const call = (repo: string, token: string, path: string, body: unknown, method = 'POST') =>
     fetchImpl(`https://api.github.com/repos/${repo}${path}`, {
       method,

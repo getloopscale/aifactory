@@ -7,6 +7,7 @@ import { getDb } from '../db'
 import { decision } from '../db/schema'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
+import { deferJobWhilePaused } from '../factory/provider-pause-store'
 import { sendBackWithdrawn } from '../factory/send-back'
 import { runTask } from '../factory/run-task'
 import { runContinuation } from '../factory/run-support'
@@ -22,6 +23,8 @@ export default defineJob('run-task', {
     resume: z.boolean().optional(),
     /** Merge the integration branch into the work branch, which now passes the checks it had failed. */
     mergeBase: z.boolean().optional(),
+    /** The feedback is the coordinator's decision on a review that did not converge, not a failure of the checks. */
+    fromReview: z.boolean().optional(),
   }),
   // A run that fails is recorded as the `failed` stage and goes to a person. Retrying it on its
   // own would spend the agent's budget again on the same issue.
@@ -32,6 +35,8 @@ export default defineJob('run-task', {
       console.log(JSON.stringify({ event: 'task_skipped', taskId: input.taskId, why: 'withdrawn' }))
       return
     }
+    // While the sandbox provider refuses for credit, the run waits in the queue instead of failing.
+    if (await deferJobWhilePaused({ name: 'run-task', input, taskId: input.taskId })) return
     const deps = await jobDeps(input.taskId)
 
     // The lease is two minutes and a run up to half an hour: renew it while the run is alive.
@@ -39,7 +44,13 @@ export default defineJob('run-task', {
       const [decided] = input.decisionId
         ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
         : []
-      const continuation = runContinuation(decided, input.feedback, input.resume, input.mergeBase)
+      const continuation = runContinuation(
+        decided,
+        input.feedback,
+        input.resume,
+        input.mergeBase,
+        input.fromReview,
+      )
       const result = await runTask(deps, input.taskId, signal, continuation)
       console.log(JSON.stringify({ event: 'task_finished', taskId: input.taskId, ...result }))
     })

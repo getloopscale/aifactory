@@ -1,6 +1,7 @@
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import type { FailedStep } from './promotion'
+import type { HandoffCause } from './run-types'
 import { AUTOMATIC_RETRIES, automaticRunsLeft } from './transitions'
 
 /**
@@ -69,7 +70,17 @@ export type WaitingStep =
    * task starts over from the integration branch.
    */
   | { kind: 'start_over'; reason: string }
-  | { kind: 'person'; reason: string; stopAutoMerge: boolean; reports?: CheckReport[] }
+  /**
+   * For a person. `cause` names a handoff the coordinator has a playbook for (`coordinator/exceptions.ts`): a pull
+   * request that still conflicts, a base that passes again, checks that still fail. Any other is for a person only.
+   */
+  | {
+      kind: 'person'
+      reason: string
+      stopAutoMerge: boolean
+      reports?: CheckReport[]
+      cause?: HandoffCause
+    }
   /**
    * A promotion into the pre-release branch held the integration out and the hold expired: the verified
    * commit is integrated now, as the run would have done.
@@ -165,6 +176,22 @@ export function readRequired(input: Pick<WaitingIntegration, 'required' | 'repor
 }
 
 /**
+ * What the required checks of a commit say together, whatever the checks the branch does not require say:
+ * `red` naming the ones that failed, `pending` while one runs or has not reported, `green` once each passed.
+ */
+export function requiredState(input: Pick<WaitingIntegration, 'required' | 'reports'>): {
+  state: 'green' | 'red' | 'pending'
+  failing: string[]
+} {
+  const { failed, silent } = readRequired(input)
+  if (failed.length > 0) return { state: 'red', failing: failed }
+  const running = input.reports.some(
+    (r) => r.state === 'pending' && input.required.includes(r.name),
+  )
+  return { state: silent.length > 0 || running ? 'pending' : 'green', failing: [] }
+}
+
+/**
  * The next step for a pull request that waits for the repository's required checks. The factory only ever
  * lets GitHub merge the commit it verified; anything else (a new push, a closed pull request, auto-merge
  * turned off by somebody) goes to a person. A failed check and a conflict run again on their own, as many
@@ -190,11 +217,12 @@ export function decideWaitingIntegration(input: WaitingIntegration): WaitingStep
   const runs = `${AUTOMATIC_RETRIES} automatic runs`
   if (input.pull.mergeableState === 'dirty') {
     return runsLeft
-      ? { kind: 'send_back_conflict', reason: 'the pull request conflicts with its base' }
+      ? { kind: 'send_back_conflict', reason: CONFLICTS_WITH_BASE }
       : {
           kind: 'person',
-          reason: `the pull request conflicts with its base after ${runs}`,
+          reason: `${CONFLICTS_WITH_BASE} after ${runs}`,
           stopAutoMerge: true,
+          cause: 'pull_conflict',
         }
   }
   if (input.held && !input.pull.autoMerge) {
@@ -215,15 +243,16 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
   const { failed, silent } = readRequired(input)
   // Whose failure it is needs the base, read only now: a base that cannot be read blocks no other step.
   if (failed.length > 0 && input.baseReports === undefined) return { kind: 'needs_base' }
-  const blame = blameFailures(failed, input.baseReports ?? [], input.blamedOnBase)
+  const blame = blameFailures(failed, input.baseReports ?? [], input.blamedOnBase, input.waitedMs)
   if (blame.own.length > 0) {
     const reports = blame.own.flatMap((name) => failedRuns(input.reports, name))
     if (!runsLeft) {
       return {
         kind: 'person',
-        reason: `the required checks still fail after ${runs}: ${blame.own.join(', ')}`,
+        reason: `${CHECKS_STILL_FAIL} ${runs}: ${blame.own.join(', ')}`,
         stopAutoMerge: true,
         reports,
+        cause: 'ci_red',
       }
     }
     return { kind: 'send_back', failed: blame.own, reports }
@@ -241,29 +270,63 @@ function decideOnChecks(input: WaitingIntegration, runsLeft: boolean, runs: stri
     ? { kind: 'merge_base', checks: blame.fixed }
     : {
         kind: 'person',
-        reason: `the integration branch passes ${blame.fixed.join(', ')} again, and the pull request still has to merge it after ${runs}`,
+        reason: `${BASE_PASSES_AGAIN}${blame.fixed.join(', ')} again, and the pull request still has to merge it after ${runs}`,
         stopAutoMerge: true,
+        cause: 'base_fixed',
       }
 }
 
 /**
  * Whose a failed required check is, by what the head of the integration branch says of the same check:
- * `red` when a run of it failed there too, `unsettled` while it runs there (or, once blamed, until it reports
- * again), `fixed` when the base passes a check blamed on it before, and `own` otherwise: the change's.
+ * `red` when a run of it failed there too, `unsettled` while it runs there, while the base has no run of it
+ * yet (or, once blamed, until it reports again), `fixed` when the base passes a check blamed on it before,
+ * and `own` otherwise: the change's.
+ *
+ * A base with no run of the check says nothing about whose failure it is: a repository whose CI runs on a
+ * pull request, and not on a push to the integration branch, has no run on its head until a promotion opens
+ * from it. Such a check waits, up to `CI_SILENCE_MS` of the pull request's wait; after that the base will not
+ * say, and the failure is the change's.
  */
 type Blame = Record<'own' | 'red' | 'unsettled' | 'fixed', string[]>
 
-function blameFailures(failed: string[], base: CheckReport[], blamed: string[]): Blame {
+function blameFailures(
+  failed: string[],
+  base: CheckReport[],
+  blamed: string[],
+  waitedMs: number,
+): Blame {
   const blame: Blame = { own: [], red: [], unsettled: [], fixed: [] }
-  for (const name of failed) {
-    const runs = base.filter((r) => r.name === name)
-    if (runs.some((r) => r.state === 'failure')) blame.red.push(name)
-    else if (runs.some((r) => r.state === 'pending')) blame.unsettled.push(name)
-    else if (!blamed.includes(name)) blame.own.push(name)
-    else if (runs.length > 0) blame.fixed.push(name)
-    else blame.unsettled.push(name)
-  }
+  for (const name of failed) blame[blameOf(base, blamed.includes(name), waitedMs, name)].push(name)
   return blame
+}
+
+function blameOf(
+  base: CheckReport[],
+  blamedBefore: boolean,
+  waitedMs: number,
+  name: string,
+): keyof Blame {
+  const runs = base.filter((r) => r.name === name)
+  if (runs.some((r) => r.state === 'failure')) return 'red'
+  if (runs.some((r) => r.state === 'pending')) return 'unsettled'
+  if (runs.length > 0) return blamedBefore ? 'fixed' : 'own'
+  return blamedBefore || waitedMs <= CI_SILENCE_MS ? 'unsettled' : 'own'
+}
+
+/**
+ * How the reasons and notes this module writes start, so a reader of the record (the panel's `returned` mark)
+ * can tell them apart from the text alone, as for a handoff recorded before it carried a `cause`.
+ */
+export const CONFLICTS_WITH_BASE = 'the pull request conflicts with its base'
+export const CHECKS_STILL_FAIL = 'the required checks still fail after'
+export const BASE_PASSES_AGAIN = 'the integration branch passes '
+export const CHECKS_FEEDBACK_OPENING = "The repository's required checks failed on "
+
+const NOT_THIS_CHANGE = "so the failure was not this change's."
+
+/** Whether a run was opened by `fixedBaseNote`: it only merges the base, so the work it carries did not fail. */
+export function isFixedBaseNote(note: unknown): boolean {
+  return typeof note === 'string' && note.includes(NOT_THIS_CHANGE)
 }
 
 /**
@@ -274,7 +337,7 @@ function blameFailures(failed: string[], base: CheckReport[], blamed: string[]):
 export function fixedBaseNote(base: string, checks: string[]): string {
   const one = checks.length === 1
   return [
-    `The required check${one ? '' : 's'} ${checks.join(', ')} failed on this pull request while ${one ? 'it' : 'they'} failed on ${base} too, so the failure was not this change's.`,
+    `The required check${one ? '' : 's'} ${checks.join(', ')} failed on this pull request while ${one ? 'it' : 'they'} failed on ${base} too, ${NOT_THIS_CHANGE}`,
     `${base} passes ${one ? 'it' : 'them'} now, and a check runs again only on a new commit.`,
     `The factory merges ${base} into this branch and checks and reviews the merge.`,
   ].join(' ')
@@ -332,7 +395,7 @@ const said = (r: FailedReport) =>
  */
 export function checksFeedback(sha: string, failed: FailedReport[]): string {
   const head = [
-    `The repository's required checks failed on ${short(sha)}, so the pull request was not merged. Fix what they report:`,
+    `${CHECKS_FEEDBACK_OPENING}${short(sha)}, so the pull request was not merged. Fix what they report:`,
     ...failed.map((r) => `- ${r.name}: ${r.url}${remarks(r)}`),
   ].join('\n')
   // The reports that say something, in order; when they do not all fit, the last ones are left out (their

@@ -1,3 +1,4 @@
+import type { untilSlotFree } from './sandbox-slot'
 import type { Recipe } from './recipe'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { Database } from '../db'
@@ -13,11 +14,23 @@ import type { IsolatedSandboxProvider } from './sandbox'
 
 /**
  * Why a run handed its work to a person, as the handoff event records it next to its `reason`: the review
- * did not converge in the attempts, the review gave no verdict, or the required checks failed and the agent
- * changed nothing. The coordinator reads it (`coordinator/exceptions.ts`).
+ * did not converge in the attempts, the review gave no verdict, the required checks failed and the agent
+ * changed nothing, or the last rework broke the checks and the branch went back to the last reviewed commit
+ * that passed them (`checks_broke_after_review`, a problem of the checks, not of the review). The coordinator
+ * reads it (`coordinator/exceptions.ts`).
  */
 export type HandoffCause =
-  'review_plateau' | 'review_unusable' | 'checks_unchanged' | 'agent_configuration'
+  | 'review_plateau'
+  | 'review_unusable'
+  | 'checks_unchanged'
+  | 'checks_broke_after_review'
+  | 'agent_configuration'
+  /** Integrated work whose pull request still conflicts with its base after the automatic runs (`ci-wait.ts`). */
+  | 'pull_conflict'
+  /** The base passes the checks blamed on it again, and the pull request still has to merge it (`ci-wait.ts`). */
+  | 'base_fixed'
+  /** The required checks of the pull request still fail after the automatic runs (`ci-wait.ts`). */
+  | 'ci_red'
 
 export type HarnessChoice = CodingHarness | ((labels: string[]) => CodingHarness)
 
@@ -32,6 +45,11 @@ export type RunTaskDeps = {
    * work in a fresh session, which is weaker: set a different agent for a real second opinion.
    */
   reviewer?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
+  /**
+   * The agent that writes the change plan, apart from the builder, chosen from the issue's labels and the
+   * builder's name. Nothing (or no function) means the builder plans in the session it then builds in.
+   */
+  planner?: (labels: string[], builder: string) => CodingHarness | undefined
   /** The commit author, so the pull request shows who wrote it. */
   author: { name: string; email: string }
   fetchIssue?: (repo: string, number: number, token: string, fetch?: FetchLike) => Promise<Issue>
@@ -57,6 +75,8 @@ export type RunTaskDeps = {
   timeouts?: { sandboxMs: number; agentMs: number; checkMs?: number; reviewMs?: number }
   /** Wait between push attempts. */
   pushRetryDelayMs?: number
+  /** How the run waits for a free sandbox slot before it starts (`untilSlotFree`); the tests pass a clock. */
+  slotWait?: Parameters<typeof untilSlotFree>[1]
   /**
    * Where the knowledge base comes from. Every agent the run starts reads it at `/tmp/knowledge`, kept
    * current while it works; without a source (the tests) the agents work without one.
@@ -87,10 +107,17 @@ export type RunResult =
       reason: string
       preRelease?: string
     }
+  /**
+   * The review approved the work and the task waits in `merge` for its `merge-task` job, which opens the pull
+   * request and integrates it (`factory/merge-task.ts`). The run's part succeeded.
+   */
+  | { status: 'merging'; branch: string; sha: string; summary: string }
   /** The code already did what the issue asks: the checks passed there, the reviewer agreed, the issue is closed. */
   | { status: 'resolved'; sha: string; summary: string }
   | { status: 'waiting'; question: string }
   | { status: 'failed'; stage: string; error: string }
+  /** The task was cancelled while the run went on: it stopped at `stage` and recorded nothing more. */
+  | { status: 'cancelled'; stage: string; reason: string }
 
 type QuestionRow = typeof questionTable.$inferSelect
 

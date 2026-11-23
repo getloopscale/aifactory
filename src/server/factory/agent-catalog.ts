@@ -18,6 +18,7 @@ import { guideCodexModel, guideModel, guideSpec } from './guides'
 import { assistModel, chatCodexModel, chatModel } from './models'
 import { planPrompt } from './plan'
 import { reviewPrompt, reworkPrompt } from './review'
+import { effectiveOf } from './settings'
 import { answerPrompt } from './waiting'
 
 /** The marks that stand where a task's own data goes in a prompt written as a template. */
@@ -77,6 +78,7 @@ function engineValue(env: NodeJS.ProcessEnv, role: AgentRole, engine: string): s
 /** The agents that build, review and plan. They run in a sandbox the factory makes for each run. */
 function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
   const builder = env.FACTORY_HARNESS || DEFAULT_HARNESS
+  const planner = effectiveOf(env).planner
   const choose =
     'Aqui mesmo, na página Agentes, vale para as próximas execuções sem reiniciar. A configuração de um repositório ou a label harness:<nome> numa issue mudam para uma só.'
   // The prompts as an agent gets them once a knowledge base is set; without one the part about it is left out.
@@ -177,16 +179,17 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
       id: 'planner',
       group: 'factory',
       name: 'Planejador',
-      role: 'Lê o repositório e divide um objetivo seu em issues pequenas e independentes, para você revisar. Não altera nada.',
+      role: 'Antes do construtor, lê o código e escreve o plano de mudança de cada tarefa: arquivos, ordem, riscos e a prova. Também divide um objetivo seu em issues pequenas e independentes. Não altera nada.',
       runsIn: 'sandbox',
       engine: {
-        value: `${engineValue(env, 'planner', env.FACTORY_PLANNER || builder)}${env.FACTORY_PLANNER ? '' : ' (o mesmo agente do construtor)'}`,
-        change: 'Aqui mesmo, na página Agentes. Sem escolha, usa o agente do Construtor.',
+        value: `${engineValue(env, 'planner', planner)}${plannerNote(env, planner, builder)}`,
+        change:
+          'Aqui mesmo, na página Agentes, ou a label planner:<nome> numa issue. Sem escolha, usa o Codex quando ele pode rodar, senão o agente do Construtor. Com um planejador diferente do construtor, o construtor recebe o plano numa sessão própria.',
       },
-      when: 'Quando você cria um plano na página Planos. Termina com um JSON que a fábrica transforma na lista de issues.',
+      when: 'No começo de cada tarefa, antes do construtor, e quando você cria um plano na página Planos. Termina com um JSON: o plano da tarefa, ou a lista de issues.',
       tools: [SANDBOX_TOOL, KNOWLEDGE_TOOL],
       shared: [],
-      source: ['src/server/factory/plan.ts'],
+      source: ['src/server/factory/plan.ts', 'src/server/factory/change-plan.ts'],
       prompts: [
         template(
           'plan',
@@ -340,4 +343,10 @@ export function agentCatalog(
   read: (path: string) => string = (path) => readFileSync(resolve(process.cwd(), path), 'utf8'),
 ): Omit<AgentsView, 'settings'> {
   return { agents: [...factoryAgents(env), ...panelAgents(env)], shared: sharedContext(read) }
+}
+
+/** What the panel adds after the planner's agent when the owner chose none: where that agent came from. */
+function plannerNote(env: NodeJS.ProcessEnv, planner: string, builder: string): string {
+  if (env.FACTORY_PLANNER) return ''
+  return planner === builder ? ' (o mesmo agente do construtor)' : ' (o padrão)'
 }

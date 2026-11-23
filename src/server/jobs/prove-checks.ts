@@ -8,7 +8,12 @@ import { proofDeps } from '../panel/deps'
 import { runProof } from '../panel/prove'
 
 export default defineJob('prove-checks', {
-  input: z.object({ repository: z.string().max(201), at: z.string().max(40) }),
+  // A job queued before proofs had a kind has none, and is for the repository's checks.
+  input: z.object({
+    repository: z.string().max(201),
+    at: z.string().max(40),
+    kind: z.enum(['checks', 'integration']).optional(),
+  }),
   // A proof that could not run says so on the repository, and the owner asks for it again. Running it a
   // second time on its own would start another sandbox for a proposal that may have been replaced.
   maxAttempts: 1,

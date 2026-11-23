@@ -12,8 +12,14 @@ import { createGithubApp } from '../github/app'
 import { deletePreReleases, resetIntegrationBranches } from '../../test/playground'
 
 import type { CodingHarness } from './harness'
-import { runTask } from './run-task'
+import { runTask as runOnly } from './run-task'
+import { jobBackend } from './job-backend'
+import { thenMerge } from '../../test/merge-job'
 import { vercelSandboxProvider } from './vercel-sandbox'
+
+/** A run, and the merge-task job it queued when the review approved its work, as a worker runs it. */
+const runTask = async (...args: Parameters<typeof runOnly>) =>
+  thenMerge(args[0], args[1], await runOnly(...args))
 
 // Runs the whole pipeline against the real services, with a scripted agent in place of Claude:
 // the GitHub App token, the Vercel Sandbox and its firewall, a clone and a push of a private
@@ -87,6 +93,8 @@ async function deleteBranch(branch: string) {
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  // The run queues its merge-task job in TheoKit's table, which its own migration creates.
+  await jobBackend().migrate()
   await getPool().query('truncate table stage_event, task, ingress restart identity cascade')
   await deleteBranch(`factory/${ISSUE}`)
 })
@@ -146,6 +154,7 @@ describe('the factory against the real services', () => {
       'push',
       'verify',
       'review',
+      'merge',
       'pr',
       'done',
     ])

@@ -1,12 +1,33 @@
+import { eq } from 'drizzle-orm'
+
 import type { Database } from '../db'
-import { decision } from '../db/schema'
+import { decision, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import type { GithubApi } from '../github/pulls'
+import {
+  autoMergeOrMergeable,
+  titleToRestore,
+  type GithubApi,
+  type PullRequest,
+} from '../github/pulls'
 
 import { PRE_RELEASE_BRANCH } from './branches'
-import { release } from './deliver'
+import { createPreRelease, release, ReleaseAlreadyRefused } from './deliver'
 import type { ReleaseMode } from './deliver'
-import { pinPromotion, type Pinned, type PromotionDeps } from './promotion-merge'
+import {
+  integrationHeldUntil,
+  pinPromotion,
+  type Pinned,
+  type PromotionDeps,
+} from './promotion-merge'
+import { selfCiRefusal } from './self-ci'
+
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
+
+/** GitHub failing: not a refusal of the work, so whatever was doing it fails and repeats. */
+export const GITHUB_SERVER_ERROR = /^GitHub answered 5\d\d\b/
+
+/** Whether an error is GitHub failing, which surfaces instead of being taken for a refusal. */
+const isGithubFailing = (error: unknown) => GITHUB_SERVER_ERROR.test(message(error))
 
 /** What the factory handed over, or why it could not. A failure to hand over never fails the task. */
 export type Handed = { tag: string; url: string } | { error: string }
@@ -60,8 +81,6 @@ export const describeDelivery = (handed: Handed) =>
   'tag' in handed
     ? { preRelease: handed.tag, preReleaseUrl: handed.url }
     : { preReleaseError: handed.error }
-
-const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /**
  * A protected pre-release branch only takes a pull request, so the factory opens one from the integration
@@ -123,8 +142,8 @@ export async function advancePreRelease(
 
 /**
  * What the release mode says to do once a commit is delivered and approved. `trial` records what an agent
- * would have released; `auto` releases it, and records why when that is refused. It returns the tag of a
- * release that was made.
+ * would have released; `auto` releases it, and records why when that is refused, unless the same head was
+ * already refused for the same cause (`ReleaseAlreadyRefused`). It returns the tag of a release that was made.
  */
 export async function releaseByMode(
   deps: { db: Database; github: GithubApp; api: GithubApi },
@@ -141,7 +160,114 @@ export async function releaseByMode(
   try {
     return (await release(deps, taskId, { bump: 'patch', actor })).tag
   } catch (error) {
+    // The same refusal of the same head is on record already: logged, not recorded twice.
+    if (error instanceof ReleaseAlreadyRefused) {
+      console.log(
+        JSON.stringify({ event: 'release_already_refused', taskId, reason: error.message }),
+      )
+      return undefined
+    }
     await record(`an automatic release was refused: ${message(error)}`)
     return undefined
+  }
+}
+
+/** What integrating approved work needs, given explicitly: none of it lives in a sandbox. */
+export type ApprovedWork = {
+  db: Database
+  api: GithubApi
+  taskId: number
+  repository: string
+  token: string
+  /** The task's branch, `factory/<issue>`, deleted once its pull request is merged. */
+  branch: string
+  /** Where the pull request goes: the repository's integration branch. */
+  integration: string
+  /** The squash title, which a draft also gets back when it is marked ready. */
+  title: string
+}
+
+/**
+ * Integrates the approved work: the pull request is merged into the integration branch, pinned to the
+ * commit that was verified and reviewed, and the pre-release branch then advances to include it. Nobody
+ * is asked, because the checks and the review are the decision. A merge GitHub refuses (a conflict, a
+ * protected branch) leaves the pull request open for a person and does not fail the task.
+ *
+ * An integration branch that requires status checks gets the repository's own CI first: GitHub merges
+ * the pull request through auto-merge once they pass, pinned to the same commit, and the
+ * `integrate-after-ci` cron does the rest. When GitHub refuses auto-merge because the checks already
+ * passed (the pull request is clean), it is merged at once like one with no required checks. When it
+ * refuses because the pull request is a draft, the pull request is marked ready and asked once more. Any
+ * other refusal fails the merge, with what to set.
+ *
+ * The pull request may be the draft a handoff left, when a person asked for changes and the new run was
+ * approved. A draft is marked ready for review first, with its title restored, on either path: GitHub
+ * merges no draft. One that is not a draft gets no call.
+ */
+export async function integrate(
+  work: ApprovedWork,
+  sha: string,
+  opened: PullRequest,
+): Promise<Integrated> {
+  const { db, api, repository, token, title } = work
+  const markReady = (to: string) => api.markReadyForReview(repository, token, opened.number, to)
+  const restored = titleToRestore(opened, title)
+  if (restored !== undefined) await markReady(restored)
+  const heldUntil = await integrationHeldUntil(db, repository, new Date(), work.taskId)
+  if (heldUntil) return { heldUntil }
+  const required = await api.requiredChecks(repository, token, work.integration)
+  const refusal = selfCiRefusal(repository, required)
+  if (refusal) return { error: refusal }
+  const pull = { repo: repository, token, number: opened.number, sha }
+  if (
+    required.length > 0 &&
+    (await autoMergeOrMergeable(api, pull, () => markReady(title))) === 'waiting'
+  ) {
+    return { awaitingChecks: required }
+  }
+  let merged: { sha: string }
+  try {
+    merged = await api.mergePullRequest(repository, token, opened.number, sha, {
+      method: 'squash',
+      title,
+    })
+  } catch (error) {
+    // GitHub failing is the environment's: the merge fails and repeats, it is not an integration refusal.
+    if (isGithubFailing(error)) throw error
+    return { error: message(error) }
+  }
+  await db.update(task).set({ mergedSha: merged.sha }).where(eq(task.id, work.taskId))
+  await api.deleteBranch(repository, token, work.branch).catch((error: unknown) => {
+    // GitHub failing is the environment's and surfaces; any other cleanup failure is left alone.
+    if (isGithubFailing(error)) throw error
+  })
+  const advanced = await advancePreRelease(
+    { api, db },
+    { repository, token, integration: work.integration, mergedSha: merged.sha },
+  )
+  return { mergedSha: merged.sha, ...advanced }
+}
+
+/**
+ * The pre-release of delivered work (`createPreRelease`), tagged on the pre-release branch once the work is
+ * integrated. A refusal is what was handed, never a failure; GitHub failing surfaces, so the work repeats.
+ */
+export async function deliverPreRelease(
+  deps: { db: Database; api: GithubApi },
+  input: Omit<Parameters<typeof createPreRelease>[1], 'tagSha'>,
+  integrated?: Integrated,
+): Promise<Handed> {
+  try {
+    return await createPreRelease(deps, {
+      ...input,
+      tagSha:
+        integrated && 'mergedSha' in integrated
+          ? (integrated.developSha ?? integrated.mergedSha)
+          : undefined,
+    })
+  } catch (error) {
+    // GitHub failing is the environment's: the work fails and repeats, it is not a delivery refusal.
+    if (isGithubFailing(error)) throw error
+    return { error: message(error) }
   }
 }

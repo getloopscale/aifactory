@@ -8,7 +8,13 @@ import { botAuthor } from '../github/bot-author'
 
 import type { ReleaseMode } from './deliver'
 import { optionsFor } from './engine-models'
-import { DEFAULT_HARNESS, harnessRegistry, pickHarness } from './harness-registry'
+import {
+  canStart,
+  DEFAULT_HARNESS,
+  harnessRegistry,
+  pickHarness,
+  plannerFor,
+} from './harness-registry'
 import type { RunTaskDeps } from './run-task'
 import { sandboxProviderFromEnv } from './sandbox-provider'
 
@@ -64,6 +70,14 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
           optionsFor(env, 'reviewer', engine),
         )
       : undefined
+  const pickPlanner = (labels: string[], builder: string) =>
+    plannerFor(registry, {
+      configured: env.FACTORY_PLANNER,
+      builder,
+      labels,
+      ready: (name) => canStart(registry, name),
+      optionsFor: (engine) => optionsFor(env, 'planner', engine),
+    })
   return {
     db: getDb(),
     github: githubAppFromEnv(env),
@@ -71,6 +85,7 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
     harness: pick,
     releaseMode: releaseModeFromEnv(env),
     reviewer: pickReviewer,
+    planner: pickPlanner,
     author,
     knowledge: knowledgeSource(getDb(), knowledgeRoot(env)),
     fetchRecipe: (repo, token) => readRecipe(repo, token),

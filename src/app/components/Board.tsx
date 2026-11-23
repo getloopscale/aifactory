@@ -1,17 +1,42 @@
 import { Card as Surface, Table } from '@usetheo/ui'
+import type { ReactNode } from 'react'
 import { Link } from 'react-router'
 
-import { COLUMNS, type QueueView, type TaskCard } from '../../shared/panel'
+import {
+  COLUMNS,
+  mergeBreakdown,
+  type MergeState,
+  type AgentSeen,
+  type Column as ColumnId,
+  type LeadTime,
+  type LeadTimeStatus,
+  type QueueView,
+  type TaskCard,
+} from '../../shared/panel'
 import { useCopy } from '../lib/copy'
 import type { Copy } from '../lib/copy/en'
-import { ago, money, runsAgain } from '../lib/format'
+import {
+  agentName,
+  ago,
+  duration,
+  inQueueOrder,
+  lastAgentLine,
+  money,
+  runsAgain,
+  stepLine,
+  topRank,
+  workingLine,
+} from '../lib/format'
 
-import { StageBadge } from './Badges'
+import { PriorityBadge, ReturnedBadge, StageBadge } from './Badges'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
 
-/** Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. */
+/**
+ * Where a queued task stands, why, and what the scheduler made of its issue, in the words of the copy. The
+ * priority is not in the words: the card shows it as a badge (`PriorityBadge`).
+ */
 export function queueWords(
   queue: QueueView,
   board: Copy['board'],
@@ -19,7 +44,6 @@ export function queueWords(
   const place = queue.position === null ? board.queueHeld : board.queuePlace(queue.position)
   const why = queue.reasons
     ? [
-        queue.reasons.priority === null ? null : board.priority(queue.reasons.priority),
         queue.reasons.bug ? board.bug : null,
         queue.reasons.unblocks > 0 ? board.unblocks(queue.reasons.unblocks) : null,
       ].filter((w): w is string => w !== null)
@@ -37,11 +61,16 @@ function QueueLines({ queue }: { queue: QueueView }) {
   const { place, verdict } = queueWords(queue, t.board)
   return (
     <>
-      <div className="mt-1 truncate text-xs text-muted-foreground" title={place}>
-        {place}
+      <div className="mt-1 flex items-start gap-1.5">
+        {queue.reasons?.priority != null ? (
+          <PriorityBadge priority={queue.reasons.priority} />
+        ) : null}
+        <span className="line-clamp-2 text-xs text-muted-foreground" title={place}>
+          {place}
+        </span>
       </div>
       {verdict ? (
-        <div className="mt-1 truncate text-xs text-muted-foreground" title={verdict}>
+        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={verdict}>
           {verdict}
         </div>
       ) : null}
@@ -49,29 +78,198 @@ function QueueLines({ queue }: { queue: QueueView }) {
   )
 }
 
-/** Every card on the board is this tall and as wide as its column, so the columns read as even stacks. */
+/**
+ * The color of each agent the factory ships with, from the theme's tokens: the harness is the first thing an owner
+ * looks for on a card. It marks the panel (a stripe on its side, and its fill while the agent runs) and never the
+ * text, since no brand color reads at 4.5 in both modes (see palette.test.ts). Any other agent is neutral.
+ */
+const AGENT_TONE: Record<string, { stripe: string; lit: string }> = {
+  'claude-code': { stripe: 'bg-primary', lit: 'border-primary/40 bg-primary/10' },
+  codex: { stripe: 'bg-info', lit: 'border-info/40 bg-info/10' },
+}
+const NEUTRAL_TONE = { stripe: 'bg-muted-foreground', lit: 'border-border bg-muted/40' }
+
+/**
+ * A panel on the card with a stripe of color on its side, which pulses while what it shows is at work. `label` is the
+ * whole of it in one line, for a reader that does not see the layout.
+ */
+function Panel({
+  label,
+  stripe,
+  surface,
+  live,
+  children,
+}: {
+  label: string
+  stripe: string
+  surface: string
+  live: boolean
+  children: ReactNode
+}) {
+  return (
+    <div
+      aria-label={label}
+      title={label}
+      className={`mt-2 flex gap-2 rounded-md border px-2 py-1.5 text-xs ${surface}`}
+    >
+      <span
+        aria-hidden
+        className={`w-1 shrink-0 self-stretch rounded-full ${stripe} ${live ? 'animate-pulse' : ''}`}
+      />
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
+/** The agent's name, larger than the rest of the card, and its model. */
+function AgentName({ seen }: { seen: AgentSeen }) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-1.5">
+      <span className="shrink-0 text-[13px] font-semibold text-foreground">
+        {agentName(seen.agent)}
+      </span>
+      {seen.model ? (
+        <span className="min-w-0 truncate text-muted-foreground">{seen.model}</span>
+      ) : null}
+    </div>
+  )
+}
+
+/**
+ * Who works on the task: lit in the agent's color while it runs, with what it does; outlined, with its stripe still
+ * in color, once it is done, with who worked on it last. The checks have no agent, and a panel of their own.
+ */
+function AgentPanel({ task }: { task: TaskCard }) {
+  const { t } = useCopy()
+  const step = task.working
+  if (step?.step === 'checks') {
+    return (
+      <Panel
+        label={workingLine(step, t.board)}
+        stripe="bg-warning"
+        surface="border-warning/40 bg-warning/10"
+        live
+      >
+        <div className="text-[13px] font-semibold text-foreground">{t.board.steps.checks}</div>
+        <div className="mt-0.5 line-clamp-2 text-muted-foreground">{step.checks.join(', ')}</div>
+      </Panel>
+    )
+  }
+  const seen = step ?? task.lastAgent
+  if (!seen) return null
+  const tone = AGENT_TONE[seen.agent] ?? NEUTRAL_TONE
+  return (
+    <Panel
+      label={step ? workingLine(step, t.board) : lastAgentLine(seen, t.board)}
+      stripe={tone.stripe}
+      surface={step ? tone.lit : 'border-border'}
+      live={step !== null}
+    >
+      <AgentName seen={seen} />
+      <div className={`mt-0.5 ${step ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
+        {step ? stepLine(step, t.board) : t.board.lastWorked}
+      </div>
+    </Panel>
+  )
+}
+
+/** The place of a task among the first ten of the queue, as a number on the card; nothing past them. */
+function Rank({ queue }: { queue: TaskCard['queue'] }) {
+  const { t } = useCopy()
+  const rank = topRank(queue)
+  if (rank === null) return null
+  return (
+    <span
+      aria-label={t.board.topRank(rank)}
+      title={t.board.topRank(rank)}
+      className="inline-flex h-5 min-w-5 shrink-0 items-center justify-center self-center rounded-full bg-primary px-1.5 text-[11px] font-semibold tabular-nums text-primary-foreground"
+    >
+      {rank}
+    </span>
+  )
+}
+
+/** The border of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
+const LEAD_BORDER: Record<LeadTimeStatus, string> = {
+  on_track: '',
+  at_risk: 'border-warning ring-1 ring-warning/40',
+  overdue: 'border-destructive ring-1 ring-destructive/40',
+}
+
+const LEAD_TEXT: Record<LeadTimeStatus, string> = {
+  on_track: 'text-muted-foreground',
+  at_risk: 'font-medium text-foreground',
+  overdue: 'font-medium text-destructive',
+}
+
+/** Colour that is not text: amber and red read on a dot where amber text would not. */
+const LEAD_DOT: Record<LeadTimeStatus, string> = {
+  on_track: '',
+  at_risk: 'bg-warning',
+  overdue: 'bg-destructive',
+}
+
+/** The lead time line: how long the task has taken, and whether that is on track, at risk or overdue. */
+function LeadTimeLine({ lead }: { lead: LeadTime }) {
+  const { t } = useCopy()
+  const copy = t.board.leadTime
+  const say = lead.running ? copy.running : copy.delivered
+  return (
+    <div
+      data-lead-time={lead.status}
+      className={`mt-1 text-xs tabular-nums ${lead.running ? LEAD_TEXT[lead.status] : 'text-muted-foreground'}`}
+    >
+      {lead.running && lead.status !== 'on_track' ? (
+        <span
+          aria-hidden
+          className={`mr-1.5 inline-block size-2 rounded-full ${LEAD_DOT[lead.status]}`}
+        />
+      ) : null}
+      {say(duration(lead.minutes), copy[lead.status])}
+    </div>
+  )
+}
+
+/**
+ * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
+ * takes up to three lines, the agent its own panel, and the stage closes the card.
+ */
 export function Card({ task }: { task: TaskCard }) {
   const { t } = useCopy()
   return (
-    <Link to={openTask(task.id)} className="block">
-      <Surface size="sm" className="flex h-[152px] flex-col p-3 hover:border-primary/60">
+    <Link to={openTask(task.id)} className="group block">
+      <Surface
+        size="sm"
+        data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
+        className={`flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
+      >
         <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+          <Rank queue={task.queue} />
           <span
             className="min-w-0 flex-1 truncate"
             title={`${task.repository} #${task.issueNumber}`}
           >
             {task.repository.split('/').pop()} #{task.issueNumber}
           </span>
-          <span className="shrink-0">
+          <span className="shrink-0 tabular-nums">
             {task.costUsd >= 0.005 ? `${money(task.costUsd)} · ` : ''}
             {ago(task.updatedAt, Date.now(), t.time)}
           </span>
         </div>
-        <div title={task.title} className="mt-1 line-clamp-2 text-sm font-medium text-foreground">
+        <div
+          title={task.title}
+          className="mt-1.5 line-clamp-3 text-sm font-semibold leading-snug text-foreground"
+        >
           {task.title}
         </div>
+        {task.leadTime ? <LeadTimeLine lead={task.leadTime} /> : null}
+        {task.returned ? (
+          <div className="mt-1.5">
+            <ReturnedBadge returned={task.returned} />
+          </div>
+        ) : null}
         {task.mainRed ? (
-          <div className="mt-1 truncate text-xs font-medium text-destructive">
+          <div className="mt-1 text-xs font-medium text-destructive">
             {t.board.mainRedAfterRelease}
           </div>
         ) : null}
@@ -82,16 +280,15 @@ export function Card({ task }: { task: TaskCard }) {
         ) : null}
         {task.queue ? <QueueLines queue={task.queue} /> : null}
         {task.retryAt ? (
-          <div className="mt-1 truncate text-xs text-muted-foreground">
+          <div className="mt-1 text-xs text-muted-foreground">
             {runsAgain(task.retryAt, Date.now(), t.time)}
           </div>
         ) : null}
         {task.attempts > 1 ? (
-          <div className="mt-1 truncate text-xs text-muted-foreground">
-            {t.board.attempt(task.attempts)}
-          </div>
+          <div className="mt-1 text-xs text-muted-foreground">{t.board.attempt(task.attempts)}</div>
         ) : null}
-        <div className="mt-auto">
+        <AgentPanel task={task} />
+        <div className="mt-auto pt-2">
           <StageBadge
             stage={task.stage}
             integrated={task.integrated}
@@ -110,18 +307,56 @@ export function Card({ task }: { task: TaskCard }) {
  * Every column is the same width, full or empty, and they share the room equally, so the board looks the
  * same however many tasks there are. None goes below this: under it the board scrolls instead.
  */
-const COLUMN = 'minmax(150px, 1fr)'
+const COLUMN = 'minmax(176px, 1fr)'
 
-function Column({ title, tasks }: { title: string; tasks: TaskCard[] }) {
+/**
+ * The queued column in the order the worker serves it, with a line under the first ten so the head of the
+ * queue reads at a glance. Every other column keeps the order it was given.
+ */
+function ordered(id: ColumnId, tasks: TaskCard[]): TaskCard[] {
+  return id === 'queued' ? inQueueOrder(tasks) : tasks
+}
+
+const MERGE_STATES: MergeState[] = ['merging', 'opening_pr', 'waiting_for_checks', 'awaiting_merge']
+
+/** What the Merge column's cards wait for, counted, in one line under its title; the states with none are left out. */
+function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
   const { t } = useCopy()
+  const counts = mergeBreakdown(tasks)
+  const line = MERGE_STATES.filter((state) => counts[state] > 0)
+    .map((state) => t.board.merge[state](counts[state]))
+    .join(' · ')
+  if (line === '') return null
+  return (
+    <span className="mt-0.5 block text-[11px] font-normal leading-snug text-muted-foreground">
+      {line}
+    </span>
+  )
+}
+
+function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: TaskCard[] }) {
+  const { t } = useCopy()
+  const head = tasks.filter((task) => topRank(task.queue) !== null).length
   return (
     <section aria-label={title} className="min-w-0">
-      <h2 className="sticky top-0 z-10 mb-2 truncate bg-background pb-1 text-sm font-semibold text-foreground">
-        {title} <span className="font-normal text-muted-foreground">{tasks.length}</span>
+      <h2 className="sticky top-0 z-10 mb-2 bg-background pb-1 text-sm font-semibold text-foreground">
+        <span className="block truncate">
+          {title} <span className="font-normal text-muted-foreground">{tasks.length}</span>
+        </span>
+        {id === 'merge' ? <MergeCounts tasks={tasks} /> : null}
       </h2>
       <div className="space-y-2">
-        {tasks.map((task) => (
-          <Card key={task.id} task={task} />
+        {tasks.map((task, i) => (
+          <div key={task.id}>
+            {i === head && head > 0 ? (
+              <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                {t.board.restOfQueue}
+                <span className="h-px flex-1 bg-border" />
+              </div>
+            ) : null}
+            <Card task={task} />
+          </div>
         ))}
         {tasks.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t.board.nothingHere}</p>
@@ -148,8 +383,12 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
         {COLUMNS.map((column) => (
           <Column
             key={column.id}
+            id={column.id}
             title={t.columns[column.id]}
-            tasks={tasks.filter((t) => t.column === column.id)}
+            tasks={ordered(
+              column.id,
+              tasks.filter((t) => t.column === column.id),
+            )}
           />
         ))}
       </div>

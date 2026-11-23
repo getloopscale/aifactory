@@ -18,3 +18,11 @@ export function jobBackend(): PostgresJobBackend {
     createPool,
   ))
 }
+
+/**
+ * The delay a short job is queued with so that it goes ahead of every queued run. Workers take the job whose
+ * `available_at` is earliest, so a merge or a resume, which take seconds and deliver or continue work, waited
+ * behind every older `run-task`, each up to an hour: on 2026-11-18 four approved tasks waited over an hour to merge.
+ * TheoKit has no job priority (usetheokit/theokit#2117); its insert takes a negative delay as a time in the past.
+ */
+export const AHEAD_OF_RUNS = { delaySeconds: -10 * 365 * 86_400 } as const

@@ -3,7 +3,7 @@ import type { QueueClient } from 'theokit/server/jobs'
 
 import { getDb, getPool } from '../db'
 import * as schema from '../db/schema'
-import { jobBackend } from '../factory/job-backend'
+import { AHEAD_OF_RUNS, jobBackend } from '../factory/job-backend'
 import { githubAppFromEnv } from '../factory/deps'
 import { harnessRegistry } from '../factory/harness-registry'
 import { readRecipe } from '../factory/recipe'
@@ -35,7 +35,12 @@ export function actionDeps(env: NodeJS.ProcessEnv = process.env): ActionDeps {
     api: createGithubApi(),
     inTransaction: inTransactionForRun,
     enqueueResume: async (input, key) => {
-      await jobBackend().enqueue({ name: 'resume-task', input, idempotencyKey: key })
+      await jobBackend().enqueue({
+        name: 'resume-task',
+        input,
+        idempotencyKey: key,
+        ...AHEAD_OF_RUNS,
+      })
     },
     deleteSnapshot: async (snapshotId) => {
       await sandboxProviderFromEnv(env).deleteSnapshot?.(snapshotId)
@@ -89,6 +94,7 @@ export function proofStartDeps(queue: QueueClient): StartProofDeps {
           work(tx as never, async (job) => {
             await queue.enqueueInTransaction(client, 'prove-checks', job, {
               idempotencyKey: `prove-checks-${job.repository.toLowerCase()}-${job.at}`,
+              ...AHEAD_OF_RUNS,
             })
           }),
         )

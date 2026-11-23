@@ -2,6 +2,7 @@ import { parseDocument } from 'yaml'
 
 import {
   retryableFailure,
+  SANDBOX_PROVIDER_BLOCKED,
   SANDBOX_TEMPLATE_MISSING,
   type DoctorItem,
   type DoctorItemId,
@@ -505,7 +506,8 @@ export function recipeItem(recipe: Read<RecipeFacts>): DoctorItem {
   )
 }
 
-const NO_CREDIT = /Status code 402|spend_limit|usage limit exceeded/i
+/** A provider's plan used up (Vercel: `Hobby plan usage limit exceeded`). */
+const USAGE_LIMIT = /usage limit exceeded/i
 const BAD_KEY = /Status code 401|invalid api key/i
 
 /**
@@ -516,7 +518,11 @@ export function providerRefusal(detail: Record<string, unknown> | null | undefin
   const error = String(detail?.error ?? '')
   if (BAD_KEY.test(error)) return true
   if (retryableFailure(detail) !== 'environment') return false
-  return NO_CREDIT.test(error) || SANDBOX_TEMPLATE_MISSING.test(error)
+  return (
+    SANDBOX_PROVIDER_BLOCKED.test(error) ||
+    USAGE_LIMIT.test(error) ||
+    SANDBOX_TEMPLATE_MISSING.test(error)
+  )
 }
 
 export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
