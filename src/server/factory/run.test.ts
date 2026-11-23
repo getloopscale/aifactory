@@ -421,3 +421,92 @@ describe('the install before the builder', () => {
     expect(calls.length).toBeGreaterThan(0)
   })
 })
+
+describe('a run waits for a sandbox slot (#405)', () => {
+  const LIMIT = new Error('you have reached the maximum number of concurrent E2B sandboxes (10)')
+  const spec = { timeoutMs: 1000, cacheKey: 'o/r', egress: [{ domain: 'github.com' }] }
+  const sandbox = { backend: {}, stop: async () => {} }
+  type Start = (c: unknown, s: unknown, p: Preparation) => Promise<{ startedAt: number }>
+  const start = Run.startSandbox as unknown as Start
+  afterEach(() => vi.useRealTimers())
+
+  /** A provider that refuses for `refusals` calls, then hands out a sandbox. */
+  function provider(refusals: { n: number }) {
+    const answer = async () => {
+      if (refusals.n-- > 0) throw LIMIT
+      return sandbox
+    }
+    return { name: 'fake', create: vi.fn(answer), restore: vi.fn(answer) }
+  }
+
+  it('creates a sandbox refused for longer than the default limit, and starts its clock after', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(NOW)
+    const p = provider({ n: 60 })
+    const run = start({ deps: { sandbox: p }, taskId: 1 }, spec, new Preparation(1))
+    await vi.advanceTimersByTimeAsync(60 * 30_000)
+    const { startedAt } = await run
+    expect(p.create).toHaveBeenCalledTimes(61)
+    expect(startedAt).toBe(NOW + 60 * 30_000)
+  })
+
+  it('restores a resumed run the same way', async () => {
+    vi.useFakeTimers()
+    const p = provider({ n: 60 })
+    const run = start(
+      { deps: { sandbox: p }, taskId: 1, resuming: { snapshotId: 's1' } },
+      spec,
+      new Preparation(1),
+    )
+    await vi.advanceTimersByTimeAsync(60 * 30_000)
+    await run
+    expect(p.restore).toHaveBeenCalledTimes(61)
+  })
+
+  it('stops waiting when the job is aborted, without asking again', async () => {
+    vi.useFakeTimers()
+    const p = provider({ n: Infinity })
+    const controller = new AbortController()
+    const run = start(
+      { deps: { sandbox: p }, taskId: 1, signal: controller.signal },
+      spec,
+      new Preparation(1),
+    )
+    const settled = expect(run).rejects.toBe(LIMIT)
+    await vi.advanceTimersByTimeAsync(1000)
+    controller.abort()
+    await vi.advanceTimersByTimeAsync(0)
+    await settled
+    expect(p.create).toHaveBeenCalledTimes(1)
+  })
+
+  it('renews a session after a long refusal and deletes the snapshot only once restored', async () => {
+    vi.useFakeTimers()
+    const p = provider({ n: 60 })
+    const deleteSnapshot = vi.fn(async () => {})
+    const restored = { ...sandbox, updateEgress: async () => {} }
+    p.restore = vi.fn(async () =>
+      p.restore.mock.calls.length > 60 ? restored : Promise.reject(LIMIT),
+    )
+    const run = Object.create(Run.prototype) as Record<string, unknown>
+    run.c = {
+      deps: { sandbox: { ...p, deleteSnapshot }, knowledge: undefined },
+      taskId: 1,
+      state: { current: 'review' },
+      token: 't',
+      row: { repository: 'o/r' },
+    }
+    run.spec = spec
+    run.sessionStartedAt = 0
+    run.sandbox = { snapshot: async () => 'snap' }
+    const renew = (run as unknown as { renewSession: () => Promise<void> }).renewSession()
+    const settled = renew.catch(() => {})
+    await vi.advanceTimersByTimeAsync(59 * 30_000)
+    expect(p.restore.mock.calls.length).toBeGreaterThan(50)
+    expect(deleteSnapshot).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(2 * 30_000)
+    await settled
+    expect(p.restore).toHaveBeenCalledTimes(61)
+    expect(deleteSnapshot).toHaveBeenCalledWith('snap')
+  })
+})
