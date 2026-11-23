@@ -12,6 +12,7 @@ import type { CoordinatorMode } from '../coordinator/mode'
 
 import { INTEGRATION_BRANCH } from './branches'
 import { readEvidence } from './check-evidence'
+import { openIncident } from '../line/incident'
 import { watchLine } from './promotion-line'
 import {
   findingSignature,
@@ -141,7 +142,10 @@ async function watchRepository(
   const pass: Pass = { deps, repo: row.fullName, token, result, opened: 0 }
   for (const promotion of promotionPullRequests(release)) {
     const pull = await deps.api.openPullRequest(row.fullName, token, promotion.head, promotion.base)
-    if (!pull) continue
+    if (!pull) {
+      await settleMergedLine(pass, promotion)
+      continue
+    }
     const seen = withEvidence(await failuresOf(pass, pull.headSha))
     const lineTook = await stopsLine(pass, seen, pull, promotion)
     const fresh: Fresh[] = []
@@ -176,6 +180,28 @@ async function stopsLine(pass: Pass, seen: Seen[], pull: PromotionPull, promotio
     seen.filter((check) => !needsPerson(check.name)),
     { pull, head: promotion.head, base: promotion.base },
   )
+}
+
+/**
+ * A line stopped by a promotion that GitHub merged green between two passes. No promotion is open, so nothing
+ * above reads its checks; the incident would stay open until the next promotion (paulohenriquevn/aifactory#394).
+ * The promotion merged after the incident opened with no failed check is read as that head, so the line decides
+ * over it as over an open one; one that merged red, or before the incident, changes nothing.
+ */
+async function settleMergedLine(pass: Pass, promotion: Where) {
+  if (promotion.head !== INTEGRATION_BRANCH || !pass.deps.lineMode) return
+  const incident = await openIncident(pass.deps.db, pass.repo)
+  if (!incident) return
+  const merged = await pass.deps.api.lastMergedPullRequest(
+    pass.repo,
+    pass.token,
+    promotion.head,
+    promotion.base,
+  )
+  if (!merged || merged.mergedAt <= incident.openedAt) return
+  const failed = await pass.deps.api.failedChecks(pass.repo, pass.token, merged.headSha)
+  if (failed.length > 0) return
+  await stopsLine(pass, [], merged, promotion)
 }
 
 const at = (

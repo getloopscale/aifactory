@@ -272,4 +272,42 @@ describe('an issue that no longer asks for the work', () => {
       .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'cancelled')))
     expect(cancelled).toHaveLength(1)
   })
+
+  it('starts a cancelled task over when the factory label is added again, and queues its run', async () => {
+    const id = await taskIn('intake')
+    await recordAndQueue(delivery('unlabel', unlabeled()), queue)
+
+    const result = await recordAndQueue(delivery('relabel', changed('labeled')), queue)
+
+    expect(result).toEqual({ status: 'task_restarted', taskId: id })
+    expect(await stageOf(id)).toBe('intake')
+    expect(await lastEvent(id)).toMatchObject({
+      stage: 'intake',
+      detail: { reason: 'the factory label was added again', by: 'alice' },
+    })
+    expect(await jobs()).toEqual([{ name: 'run-task', input: { taskId: id } }])
+  })
+
+  it('starts a failed task over when the factory label is added again, even with its failed job on file', async () => {
+    const id = await taskIn('failed')
+    await getPool().query(`update theokit_jobs set failed_at = now(), attempts = 1`)
+
+    const result = await recordAndQueue(delivery('relabel', changed('labeled')), queue)
+
+    expect(result).toEqual({ status: 'task_restarted', taskId: id })
+    expect(await stageOf(id)).toBe('intake')
+    const pending = await getPool().query('select input from theokit_jobs where failed_at is null')
+    expect(pending.rows).toEqual([{ input: { taskId: id } }])
+  })
+
+  it('starts a task over once when the same label delivery arrives twice', async () => {
+    await taskIn('intake')
+    await recordAndQueue(delivery('unlabel', unlabeled()), queue)
+    await recordAndQueue(delivery('relabel', changed('labeled')), queue)
+
+    const again = await recordAndQueue(delivery('relabel', changed('labeled')), queue)
+
+    expect(again).toEqual({ status: 'duplicate' })
+    expect(await jobs()).toHaveLength(1)
+  })
 })
