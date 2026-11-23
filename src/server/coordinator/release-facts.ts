@@ -55,11 +55,12 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 const WORKING_STAGES = WORKING
 
 async function releasable(db: Database, repo: string) {
-  return db
-    .select({ taskId: task.id, issueNumber: task.issueNumber })
+  const rows = await db
+    .select({ taskId: task.id, issueNumber: task.issueNumber, mergedSha: task.mergedSha })
     .from(task)
     .where(and(eq(task.repository, repo), eq(task.stage, 'done'), isNotNull(task.mergedSha)))
     .orderBy(asc(task.id))
+  return rows.map((r) => ({ ...r, mergedSha: r.mergedSha! }))
 }
 
 /** The tasks resolved with no change that no release holds: released once a promotion holds their commit. */
@@ -257,6 +258,25 @@ async function readContained(
   }
 }
 
+/** The integrated tasks whose merge the head of the pre-release branch holds, each merge compared once. */
+async function readIntegrated(
+  deps: ReleaseFactsDeps,
+  f: RepositoryReleaseFacts,
+  head: string,
+  token: string,
+): Promise<Read<{ taskId: number; issueNumber: number }[]>> {
+  try {
+    const held: { taskId: number; issueNumber: number }[] = []
+    for (const t of f.releasable) {
+      if (await deps.api.contains(f.repository, token, head, t.mergedSha!))
+        held.push({ taskId: t.taskId, issueNumber: t.issueNumber })
+    }
+    return readOf(held)
+  } catch (error) {
+    return unread(`whether ${short(head)} holds the merges of the integrated tasks`, message(error))
+  }
+}
+
 const short = (sha: string) => sha.slice(0, 7)
 
 async function readLabels(
@@ -328,9 +348,10 @@ async function lookFurther(
   const checked = needsRecovery(seen)
     ? { ...seen, recovery: await readRecovery(deps, seen, head.value, token) }
     : seen
-  return attemptDue(checked)
-    ? { ...checked, labels: await readLabels(deps, checked, token) }
-    : checked
+  if (!attemptDue(checked)) return checked
+  // The merges are compared only when a release is due, so a head the train already released costs no call.
+  const held = { ...checked, integrated: await readIntegrated(deps, checked, head.value, token) }
+  return attemptDue(held) ? { ...held, labels: await readLabels(deps, held, token) } : held
 }
 
 /** The release facts of every enabled repository whose release mode is not `manual`. */
