@@ -16,16 +16,15 @@ import { enterStage } from './stages'
  * panel, and no tag carries it, so what makes it released is its resolving commit reaching the release
  * branch. A release closes the issue that is still open (`afterRelease`).
  */
+export const claimedUnrecorded = and(
+  eq(task.stage, 'released'),
+  sql`not exists (select 1 from stage_event e where e.task_id = ${task.id} and e.stage = 'released')`,
+)
+
 const resolvedNotReleased = and(
-  or(
-    eq(task.stage, 'done'),
-    // A release that claimed the task as its anchor moved it to `released` with no stage event: the
-    // shipment of its commit records the stage and closes the issue.
-    and(
-      eq(task.stage, 'released'),
-      sql`not exists (select 1 from stage_event e where e.task_id = ${task.id} and e.stage = 'released')`,
-    ),
-  ),
+  // A release that claimed the task as its anchor moved it to `released` with no stage event: the
+  // shipment of its commit records the stage and closes the issue.
+  or(eq(task.stage, 'done'), claimedUnrecorded),
   isNotNull(task.resolvedSha),
   isNull(task.mergedSha),
 )

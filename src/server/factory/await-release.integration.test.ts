@@ -84,7 +84,7 @@ const deps = (over: Partial<AwaitReleaseDeps> = {}): AwaitReleaseDeps => ({
 let seeded = 0
 /** A delivered task whose release waits, since `at`, for the release branch's required checks. */
 async function waitingRelease(
-  options: { at?: Date; changesets?: boolean; actor?: string } = {},
+  options: { at?: Date; changesets?: boolean; actor?: string; resolved?: boolean } = {},
 ): Promise<number> {
   const db = getDb()
   const [i] = await db
@@ -106,19 +106,25 @@ async function waitingRelease(
       issueNumber: 7,
       issueTitle: 'Add truncate',
       stage: 'done',
-      headSha: 'abc123def',
-      pullRequestUrl: 'https://github.com/paulo/app/pull/12',
-      mergedSha: 'merged0001',
+      ...(options.resolved
+        ? { resolvedSha: 'res0001' }
+        : {
+            headSha: 'abc123def',
+            pullRequestUrl: 'https://github.com/paulo/app/pull/12',
+            mergedSha: 'merged0001',
+          }),
     })
     .returning({ id: task.id })
-  await db.insert(delivery).values({
-    taskId: t.id,
-    kind: 'prerelease',
-    tag: 'pre/7-develop',
-    url: 'https://github.com/paulo/app/releases/pre/7-develop',
-    sha: PINNED,
-    actor: 'factory',
-  })
+  if (!options.resolved) {
+    await db.insert(delivery).values({
+      taskId: t.id,
+      kind: 'prerelease',
+      tag: 'pre/7-develop',
+      url: 'https://github.com/paulo/app/releases/pre/7-develop',
+      sha: PINNED,
+      actor: 'factory',
+    })
+  }
   await db.insert(releaseWait).values({
     taskId: t.id,
     repository: 'paulo/app',
@@ -180,6 +186,28 @@ describe('pollAwaitingReleases', () => {
       .from(stageEvent)
       .where(eq(stageEvent.stage, 'released'))
     expect(released.detail).toMatchObject({ actor: 'human', mergeSha: 'main0001', tag: 'v1.3.0' })
+    expect(closed()).toEqual([7])
+  })
+
+  it('finishes the release of a resolved anchor with no pre-release, and closes its issue', async () => {
+    mergedPull()
+    const id = await waitingRelease({ resolved: true })
+    const withIssues = {
+      ...deps(),
+      fetchIssue: async (_repo: string, n: number) => ({
+        number: n,
+        title: '',
+        body: '',
+        labels: [],
+        state: 'open' as const,
+      }),
+    }
+
+    expect(await pollAwaitingReleases(withIssues)).toMatchObject({ released: [id], errors: [] })
+
+    expect(releases()).toMatchObject([{ tag: 'v1.3.0', sha: 'main0001', prerelease: false }])
+    expect(await taskRow(id)).toMatchObject({ stage: 'released' })
+    expect(await waits()).toMatchObject([{ status: 'merged' }])
     expect(closed()).toEqual([7])
   })
 

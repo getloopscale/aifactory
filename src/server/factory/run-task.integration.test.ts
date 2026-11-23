@@ -5277,6 +5277,68 @@ describe('release', () => {
       (e) => e.stage === 'released',
     )?.detail
 
+  /** A task resolved with no change at a commit of the integration branch: it has no pull request. */
+  async function resolvedWork(issueNumber: number, resolvedSha: string) {
+    const id = await seedTask(issueNumber)
+    await getDb().update(task).set({ stage: 'done', resolvedSha }).where(eq(task.id, id))
+    return id
+  }
+  const openIssue = async (_repo: string, n: number) => ({
+    number: n,
+    title: '',
+    body: '',
+    labels: [],
+    state: 'open' as const,
+  })
+
+  it('releases work resolved with no change by its commit, with no pre-release, and closes its issue', async () => {
+    const id = await resolvedWork(10, 'res0001')
+    repo().tags.add('v1.2.3')
+    const withIssues = { ...dependencies(), fetchIssue: openIssue }
+
+    const result = await release(withIssues, id, { bump: 'minor', actor: 'agent:coordinator' })
+
+    expect(result).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0002' })
+    expect(seen.merges).toEqual([{ number: 13, sha: 'develop0001' }])
+    expect(seen.releases.at(-1)!.body).toContain('resolved at `res0001`')
+    expect(await stageOf(id)).toBe('released')
+    expect(await releasedDetail(id)).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0002' })
+    expect(seen.closed).toEqual([10])
+  })
+
+  it('refuses a resolved task when the release pull request head lacks its commit, and merges nothing', async () => {
+    const id = await resolvedWork(10, 'res0001')
+    repo().unreachable.add('res0001')
+
+    await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+      /does not hold the commit that resolved this work, res0001/,
+    )
+
+    expect(seen.merges).toEqual([])
+    expect(await stageOf(id)).toBe('done')
+  })
+
+  it('gives the claim of a resolved task back when GitHub does not merge the promotion', async () => {
+    const id = await resolvedWork(10, 'res0001')
+    githubApi.fail('mergePullRequest', new Error('GitHub answered 405 merging'), {
+      when: (number) => number === 13,
+    })
+
+    await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+      /GitHub did not merge it/,
+    )
+
+    expect(await stageOf(id)).toBe('done')
+  })
+
+  it('does not release unintegrated work that was not resolved either', async () => {
+    const id = await seedTask(11)
+    await getDb().update(task).set({ stage: 'done', headSha: 'abc' }).where(eq(task.id, id))
+    await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+      /not integrated/,
+    )
+  })
+
   it('releases every integrated task the promotion contains, and leaves out one it does not', async () => {
     const asked = await delivered()
     const contained = await integrated(8, 'inside01')

@@ -591,6 +591,9 @@ describe('publishing a changesets release', () => {
   })
 })
 
+const issueOf = async (id: number) =>
+  (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
+
 describe('a publication whose release run finished without a Version Packages pull request', () => {
   /** An hour after the promotion: the release run on the promoted commit has long finished. */
   const LATER = new Date(STARTED.getTime() + 60 * 60_000)
@@ -643,6 +646,38 @@ describe('a publication whose release run finished without a Version Packages pu
     expect(closed()).toHaveLength(2)
     expect(comments()[0].body).toContain('Available in `v0.3.1`')
     expect(merges()).toEqual([])
+  })
+
+  it('releases a resolved anchor with no pre-release, and closes its issue, when the factory ends the publication', async () => {
+    // `release()` claimed it: `released`, with no stage event yet.
+    const anchor = await seedTask('released', null)
+    await getDb().update(task).set({ resolvedSha: 'res0001' }).where(eq(task.id, anchor))
+    await getDb().insert(publication).values({
+      taskId: anchor,
+      repository: 'usetheokit/ui',
+      releaseBranch: 'main',
+      promotedSha: 'promoted1',
+      actor: 'human',
+      startedAt: STARTED,
+    })
+    promotionOutsidePackages()
+    const withIssues = {
+      ...deps(LATER),
+      fetchIssue: async (_repo: string, n: number) => ({
+        number: n,
+        title: '',
+        body: '',
+        labels: [],
+        state: 'open' as const,
+      }),
+    }
+
+    const result = await pollPublications(withIssues)
+
+    expect(result).toMatchObject({ published: [expect.any(Number)], errors: [] })
+    expect(created().map((r) => r.tag)).toEqual(['v0.3.1'])
+    expect((await lastEvent(anchor))?.detail).toMatchObject({ tag: 'v0.3.1', actor: 'human' })
+    expect(closed()).toEqual([await issueOf(anchor)])
   })
 
   it('makes one tag: a pass that runs again after the tag was made takes the same version', async () => {

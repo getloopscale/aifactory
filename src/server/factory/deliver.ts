@@ -23,6 +23,7 @@ import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump 
 import { CONFLICT_REFUSAL } from './release-wait'
 import { shipContained } from './ship'
 import { stalledPublication, supersedeUnmerged } from './stalled-publication'
+import { claimedUnrecorded } from './resolved-release'
 import { enterStage } from './stages'
 import { outcome } from './transitions'
 
@@ -285,7 +286,12 @@ export async function release(
     })
   } catch (error) {
     if (!resolvedAnchor)
-      await deps.db.update(task).set({ stage: 'done' }).where(eq(task.id, taskId))
+      // Given back only while nothing recorded the release: a catch-up that saw the commit on the release
+      // branch may have released the task meanwhile.
+      await deps.db
+        .update(task)
+        .set({ stage: 'done' })
+        .where(and(eq(task.id, taskId), claimedUnrecorded))
     throw new ReleaseRefused(`GitHub did not merge it: ${errorMessage(error)}`)
   }
   return completeRelease(deps, {

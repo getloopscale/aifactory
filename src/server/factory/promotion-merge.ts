@@ -420,7 +420,11 @@ export async function promoteResolvedWork(
   return result
 }
 
-/** GitHub refusing a write to a protected branch, or one a rule guards; not a conflict, a 5xx or a network error. */
+/**
+ * 409 is included because the merges API answers it for a protected branch as well as for a conflict (the
+ * fake models it so); unconfirmed against GitHub, so the owner may narrow it.
+ * GitHub refusing a write to a protected branch, or one a rule guards; not a conflict, a 5xx or a network error.
+ */
 const BRANCH_PROTECTED = /^GitHub answered (403|405|409|422)\b(?![\s\S]*merge conflict)/i
 
 export async function advance(
