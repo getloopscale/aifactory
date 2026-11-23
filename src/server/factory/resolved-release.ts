@@ -16,9 +16,11 @@ import { enterStage } from './stages'
  * panel, and no tag carries it, so what makes it released is its resolving commit reaching the release
  * branch. A release closes the issue that is still open (`afterRelease`).
  */
+// The column is written out: drizzle drops the table qualifier in an UPDATE, and a bare "id" would bind to
+// `stage_event.id` inside the subquery.
 export const claimedUnrecorded = and(
   eq(task.stage, 'released'),
-  sql`not exists (select 1 from stage_event e where e.task_id = ${task.id} and e.stage = 'released')`,
+  sql`not exists (select 1 from stage_event e where e.task_id = "task"."id" and e.stage = 'released')`,
 )
 
 const resolvedNotReleased = and(

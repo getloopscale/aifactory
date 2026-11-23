@@ -9,7 +9,7 @@ import { ingress, repository, stageEvent, task } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { FakeGithub } from '../../test/fake-github'
 
-import { catchUpResolved, resolvedCatchUp } from './resolved-release'
+import { catchUpResolved, claimedUnrecorded, resolvedCatchUp } from './resolved-release'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -273,5 +273,17 @@ describe('a resolved task claimed as the anchor of a release', () => {
     expect(
       (await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })).released,
     ).toEqual([])
+  })
+
+  it('is given back by an UPDATE only while no released event exists (the guard binds to the task row)', async () => {
+    const unrecorded = await seed('paulo/app', 7, { stage: 'released', resolvedSha: 'r1' })
+    const recorded = await seed('paulo/app', 8, { stage: 'released', resolvedSha: 'r1' })
+    await getDb().insert(stageEvent).values({ taskId: recorded, stage: 'released', detail: null })
+    const given = await getDb()
+      .update(task)
+      .set({ stage: 'done' })
+      .where(claimedUnrecorded)
+      .returning({ id: task.id })
+    expect(given.map((r) => r.id)).toEqual([unrecorded])
   })
 })
