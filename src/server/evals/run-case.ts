@@ -111,6 +111,8 @@ class CaseRun {
   /** What the builder said to the last review's findings, kept across a check rework. */
   private reviewAnswer: string | undefined
   cost = 0
+  /** A review gave a valid verdict at some point of the case. */
+  private verdictSeen = false
   attempts = 1
   reviewRounds = 0
   /** The verdict of each review round that completed, as it came back. */
@@ -472,6 +474,8 @@ class CaseRun {
       })
       const blocking = guards.filter((g) => g.severity !== 'minor')
       const read = await this.review(sha, unplanned, required)
+      // Any valid verdict counts, even when the case ends later without one.
+      if (read.verdict !== 'invalid') this.verdictSeen = true
       // A file outside the plan is on record; whether it was needed is the reviewer's call.
       const outside: Finding[] = unplanned.map((file) => ({
         severity: 'minor',
@@ -521,6 +525,7 @@ class CaseRun {
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
+      reachedVerdict: this.verdictSeen,
       reviews: this.reviews,
     }
   }
@@ -593,6 +598,7 @@ export async function runCase(
     durationMs: Date.now() - started,
     attempts: 0,
     reviewRounds: 0,
+    reachedVerdict: false,
     reviews: held.run ? [...held.run.reviews] : [],
   })
   // The hash reaches a shell, so only a full commit hash gets that far.
