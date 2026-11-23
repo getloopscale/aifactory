@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A run that waited a long time for a sandbox no longer clones or pushes with a GitHub token that already ended: the sandbox gets a token minted as soon as it starts, on the first session and on a renewed one (#424)
 - The review guards leave tests that go with a module the issue removes to the reviewer. A deleted test file whose module of the same name the change also deletes, and cases a test file loses when it stops importing from a module, are minor when the issue names that module, so a review that agrees with the removal converges instead of ending in a handoff (#420)
 - The scheduler starts a run that continues a task (sent back, resumed or merging the base) before a first run of the same priority. A run sent back for a conflict no longer waits behind every new issue and conflicts again (#418)
 - A pull request whose required checks passed while a check the branch does not require was red or pending (GitHub's `unstable` status) is merged at once, like a clean one, instead of failing the integration or refusing the release (#413)
