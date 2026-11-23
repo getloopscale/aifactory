@@ -1029,6 +1029,36 @@ describe('what a release with changesets needs to read', () => {
     expect(calls[0].url).toContain('per_page=100')
   })
 
+  it('lists the workflow runs a tag started, by the tag as the branch of the run', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /actions/runs': {
+        status: 200,
+        body: {
+          workflow_runs: [
+            {
+              name: 'Release',
+              status: 'completed',
+              conclusion: 'failure',
+              head_sha: 'abc',
+              html_url: 'https://github.com/o/r/actions/runs/9',
+            },
+          ],
+        },
+      },
+    })
+    expect(await createGithubApi(fetch).workflowRunsOnTag('o/r', 't', 'v1.0.0')).toEqual([
+      {
+        name: 'Release',
+        status: 'completed',
+        conclusion: 'failure',
+        headSha: 'abc',
+        url: 'https://github.com/o/r/actions/runs/9',
+      },
+    ])
+    expect(calls[0].url).toContain('head_branch=v1.0.0')
+    expect(calls[0].url).toContain('event=push')
+  })
+
   it('says whether a commit is in the history of another', async () => {
     const answer = (status: string) =>
       fakeFetch({ 'GET /compare/old...new': { status: 200, body: { status } } }).fetch

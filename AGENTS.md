@@ -190,6 +190,13 @@ reads that file, not a convention.
   whose merge is in the promoted commit and closes its issue through `shipContained` in `factory/ship.ts`; an
   issue that will not close is recorded, never thrown. `ensureBranches` creates the two missing
   branches, never touches one that exists, and refuses the default branch as the integration branch.
+- **A tag a workflow publishes is not a release until the workflow succeeded.** In a repository whose
+  `publish_mode` is `tag`, `completeRelease` pushes the tag and records a `publication` of `kind` `tag` instead
+  of releasing the tasks. The `publish-changesets` cron reads the workflow runs of the tag
+  (`workflowRunsOnTag`, `decideTagPublication` in `factory/tag-publication.ts`): when all passed it releases the
+  contained tasks and closes their issues (`shipContained`); a failed run, or none within `NO_RUN_MS`, fails the
+  publication with the reason on the task's `released` stage. The tasks of a failed one are released by the next
+  release that holds their merge, and the resolved-task catch-up skips the repository until then.
 - **A repository that publishes with changesets tags its own releases.** When `.changeset/config.json` is on
   `develop` and a changeset waits, `release()` makes no tag: it promotes and records a `publication`. A changeset
   waits only when the comparison of `develop` with the release branch lists it as added since their merge base

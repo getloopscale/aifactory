@@ -1,7 +1,7 @@
 import { and, asc, eq, gt, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { repository, task } from '../db/schema'
+import { publication, repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { fetchIssue, type Issue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
@@ -22,6 +22,20 @@ export const claimedUnrecorded = and(
   eq(task.stage, 'released'),
   sql`not exists (select 1 from stage_event e where e.task_id = "task"."id" and e.stage = 'released')`,
 )
+
+/**
+ * A repository whose tag the factory pushed waits for its workflow, or whose workflow failed and no later
+ * publication succeeded: the commit is on the release branch but nothing published it, so a catch-up must
+ * not release the tasks resolved there. The release that succeeds does (`shipContained`, which does not ask).
+ */
+const unpublishedTag = sql`exists (
+  select 1 from ${publication} p
+  where lower(p.repository) = lower(${task.repository})
+    and p.kind = 'tag'
+    and (p.status = 'waiting' or (p.status = 'failed' and not exists (
+      select 1 from ${publication} later
+      where later.repository = p.repository and later.id > p.id and later.status = 'published')))
+)`
 
 const resolvedNotReleased = and(
   // A release that claimed the task as its anchor moved it to `released` with no stage event: the
@@ -182,7 +196,7 @@ export async function catchUpResolved(
     .select({ ...columns, releaseBranch: repository.releaseBranch })
     .from(task)
     .leftJoin(repository, eq(repository.fullName, task.repository))
-    .where(and(resolvedNotReleased, gt(task.id, page.after)))
+    .where(and(resolvedNotReleased, sql`not ${unpublishedTag}`, gt(task.id, page.after)))
     .orderBy(asc(task.id))
     .limit(page.limit)
   const result: ResolvedReleased = { released: [], errors: [] }

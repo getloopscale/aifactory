@@ -148,8 +148,11 @@ export type ReleaseResult = {
   mergeSha: string | undefined
   /** The merge happened but the release object could not be created. */
   releaseError?: string
-  /** The repository publishes with changesets: its own workflow tags the release, and a publication waits. */
-  publishing?: 'changesets'
+  /**
+   * The repository publishes with changesets, or from the tag the factory pushed: a publication waits, and the
+   * tasks are released when it succeeded.
+   */
+  publishing?: 'changesets' | 'tag'
   /**
    * The release branch requires these checks, so nothing merged yet: GitHub merges the release pull request
    * through auto-merge once they pass, and the `integrate-after-ci` cron finishes the release then.
@@ -168,7 +171,7 @@ export type ReleaseResult = {
 type Published = {
   created?: { tag: string; url: string }
   releaseError?: string
-  publishing?: 'changesets'
+  publishing?: 'changesets' | 'tag'
 }
 
 /**
@@ -419,7 +422,11 @@ export async function completeRelease(
   const published: Published = input.changesets
     ? await handToChangesets(deps, { row, target, mergeSha, actor })
     : await createOwnRelease(deps, { row, pre, pr: pull, token, mergeSha, bump: input.bump, actor })
-  const { created, releaseError, publishing } = published
+  const { created, releaseError } = published
+  // A tag a workflow publishes is a release only once that workflow succeeded (`publish.ts`).
+  const tagged = created && (await publishesFromTag(deps.db, row.repository)) ? created : undefined
+  const publishing = tagged ? ('tag' as const) : published.publishing
+  if (tagged) await waitForTagWorkflow(deps, { row, target, mergeSha, actor, tag: tagged })
 
   // The merge is on the default branch now, so its checks are watched from here on.
   await deps.db.insert(watch).values({
@@ -435,7 +442,7 @@ export async function completeRelease(
     sha,
     note: [actor, created?.tag, publishing].filter(Boolean).join(' -> '),
   })
-  if (created) {
+  if (created && !tagged) {
     // Every task whose work the promotion carries is released with this one, and its issue closed.
     const shipped = await shipContained(deps, {
       repository: row.repository,
@@ -458,6 +465,7 @@ export async function completeRelease(
       sha,
       ...(releaseError ? { releaseError } : {}),
       publishing,
+      ...(tagged ? { tag: tagged.tag } : {}),
     })
   return { tag: undefined, url: undefined, mergeSha, releaseError, publishing }
 }
@@ -543,10 +551,51 @@ async function refuseWhilePublishing(
     .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
   if (!waiting) return
   if (await stalledPublication(deps.api, waiting, token)) return
+  if (waiting.kind === 'tag') {
+    throw new ReleaseRefused(
+      `a publication of ${repo} still waits for the workflow run of ${waiting.tag} to succeed`,
+    )
+  }
   const what = waiting.versionPullRequest
     ? `Version Packages #${waiting.versionPullRequest}`
     : 'its Version Packages pull request'
   throw new ReleaseRefused(`a publication of ${repo} still waits for ${what} to publish`)
+}
+
+/** Whether the workflow a pushed tag starts is what publishes the repository (`repository.publish_mode`). */
+async function publishesFromTag(db: Database, repo: string): Promise<boolean> {
+  const [saved] = await db
+    .select({ publishMode: repository.publishMode })
+    .from(repository)
+    .where(sql`lower(${repository.fullName}) = lower(${repo})`)
+  return saved?.publishMode === 'tag'
+}
+
+/**
+ * Records the publication a tag the factory pushed waits for: the `publish-changesets` cron releases the tasks
+ * and closes their issues once the workflow the tag started succeeded, or fails it with the reason.
+ */
+async function waitForTagWorkflow(
+  deps: Pick<DeliverDeps, 'db'>,
+  input: {
+    row: typeof task.$inferSelect
+    target: string
+    mergeSha: string
+    actor: string
+    tag: { tag: string; url: string }
+  },
+) {
+  await deps.db.insert(publication).values({
+    taskId: input.row.id,
+    repository: input.row.repository,
+    releaseBranch: input.target,
+    promotedSha: input.mergeSha,
+    actor: input.actor,
+    kind: 'tag',
+    tag: input.tag.tag,
+    tagUrl: input.tag.url,
+    detail: `waiting for the workflow run of ${input.tag.tag} to start`,
+  })
 }
 
 /**

@@ -18,6 +18,8 @@ import { clearFinding, raiseFinding } from './findings'
 import { endWithoutVersionPullRequest, type Ending } from './publication-end'
 import { shipContained, unclosedNote } from './ship'
 import { checksFailedOn, checksOn } from './stalled-publication'
+import { enterStage } from './stages'
+import { decideTagPublication } from './tag-publication'
 
 export type PublishDeps = { db: Database; github: GithubApp; api: GithubApi; now?: () => Date }
 
@@ -155,8 +157,68 @@ async function readReleases(
   )
 }
 
+/**
+ * A publication of a tag the factory pushed: the tasks are released, and their issues closed, only once the
+ * workflow the tag started succeeded. A failed run fails the publication with the reason on the task, and the
+ * next release that holds the tasks' merges releases them.
+ */
+async function advanceTag(deps: PublishDeps, p: Publication, result: PublishResult) {
+  const tag = p.tag
+  if (!tag) throw new Error(`publication ${p.id} is of a tag, and names none`)
+  const { token } = await deps.github.installationToken(p.repository)
+  const step = decideTagPublication({
+    tag,
+    sha: p.promotedSha,
+    runs: await deps.api.workflowRunsOnTag(p.repository, token, tag),
+    startedAt: p.startedAt,
+    now: clock(deps),
+  })
+  if (step.kind === 'wait') {
+    await note(deps.db, p.id, step.detail)
+    result.waiting += 1
+    return
+  }
+  if (step.kind === 'failed') {
+    await deps.db
+      .update(publication)
+      .set({ status: 'failed', detail: step.detail })
+      .where(eq(publication.id, p.id))
+    await enterStage(deps.db, p.taskId, 'released', {
+      actor: p.actor,
+      mergeSha: p.promotedSha,
+      tag,
+      published: false,
+      releaseError: step.detail,
+    })
+    result.failed.push(p.id)
+    return
+  }
+  const shipped = await shipContained(deps, {
+    repository: p.repository,
+    token,
+    promotedSha: p.promotedSha,
+    releaseBranch: p.releaseBranch,
+    askedTaskId: p.taskId,
+    actor: p.actor,
+    tags: [{ tag, url: p.tagUrl ?? '' }],
+    publishedBy: `the workflow of ${tag}`,
+    detail: { published: 'tag' },
+  })
+  await deps.db
+    .update(publication)
+    .set({
+      status: 'published',
+      tags: [tag],
+      publishedAt: new Date(),
+      detail: `${step.detail}${unclosedNote(shipped)}`,
+    })
+    .where(eq(publication.id, p.id))
+  result.published.push(p.id)
+}
+
 /** One publication, one step further: the Version Packages merge, then the published versions. */
 async function advance(deps: PublishDeps, p: Publication, result: PublishResult) {
+  if (p.kind === 'tag') return advanceTag(deps, p, result)
   const { token } = await deps.github.installationToken(p.repository)
   let merged = ''
   let versionPullRequest = p.versionPullRequest

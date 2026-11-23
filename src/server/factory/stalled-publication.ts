@@ -90,6 +90,7 @@ export async function supersedeUnmerged(
       and(
         eq(publication.repository, input.repository),
         eq(publication.status, 'waiting'),
+        eq(publication.kind, 'changesets'),
         isNull(publication.versionPullRequest),
       ),
     )

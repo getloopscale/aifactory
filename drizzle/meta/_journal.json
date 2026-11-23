@@ -309,6 +309,13 @@
       "when": 1795262978100,
       "tag": "0046_board_query_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1795349378100,
+      "tag": "0047_tag_publication",
+      "breakpoints": true
     }
   ]
 }
