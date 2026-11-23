@@ -600,7 +600,9 @@ describe('scoping a review that does not converge', () => {
     expect(message).toContain('src/mod.ts')
     for (const round of [1, 2, 3, 4]) expect(message).toContain(`finding of round ${round}`)
     expect(message).toContain('rename the module')
-    expect(message).toContain('the review is not converging; blocking findings per round: 1, 1, 1, 1')
+    expect(message).toContain(
+      'the review is not converging; blocking findings per round: 1, 1, 1, 1',
+    )
   })
 
   it('files the follow-up without the factory label when the repository is not enabled', async () => {
