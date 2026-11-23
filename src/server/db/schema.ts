@@ -296,6 +296,16 @@ export const publication = pgTable('publication', {
   tags: jsonb('tags').$type<string[]>(),
   /** What the last look found: what it waits for, or why it cannot go on. */
   detail: text('detail'),
+  /**
+   * `changesets`: the repository's workflow versions and publishes. `tag`: the factory pushed `tag` and
+   * the workflow that tag starts publishes it; the tasks are released once that workflow succeeded.
+   */
+  kind: text('kind', { enum: ['changesets', 'tag'] })
+    .notNull()
+    .default('changesets'),
+  /** The tag a `tag` publication waits for, and the page of its release. */
+  tag: text('tag'),
+  tagUrl: text('tag_url'),
   startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
   publishedAt: timestamp('published_at', { withTimezone: true }),
 })
