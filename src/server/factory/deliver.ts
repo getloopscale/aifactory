@@ -254,6 +254,16 @@ export async function release(
     throw new ReleaseRefused(
       `the release pull request at ${sha.slice(0, 7)} does not hold the commit that resolved this work, ${row.resolvedSha!.slice(0, 7)}`,
     )
+  // Integrated work is released only by a promotion that holds its merge: an integration that has not reached
+  // the pre-release branch yet would be announced, and its issue closed, on a version without it.
+  if (
+    !resolvedAnchor &&
+    row.mergedSha &&
+    !(await deps.api.contains(row.repository, token, sha, row.mergedSha))
+  )
+    throw new ReleaseRefused(
+      `the release pull request at ${sha.slice(0, 7)} does not hold the merge of this work, ${row.mergedSha.slice(0, 7)}`,
+    )
   await refuseKnownConflict(deps, { repository: row.repository, sha, target, actor: options.actor })
   const pull = { number: pr.number, url: pr.url }
   const required = await deps.api.requiredChecks(row.repository, token, target)

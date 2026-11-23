@@ -233,6 +233,26 @@ describe('recognising that a repository is ready for a release', () => {
     expect(exception).toMatchObject({ kind: 'unknown', taskId: 9, head: HEAD })
   })
 
+  it('anchors the release on the oldest integrated task the head holds, and counts only those', () => {
+    const held = facts({ integrated: readOf([{ taskId: 6, issueNumber: 60 }]) })
+    expect(recogniseRelease(held)).toMatchObject({
+      kind: 'release_ready',
+      taskId: 6,
+      evidence: '1 integrated issues wait for a release of paulo/app at dev1234: #60',
+    })
+  })
+
+  it('releases nothing when the head holds none of the integrated work', () => {
+    expect(recogniseRelease(facts({ integrated: readOf([]) }))).toBeUndefined()
+  })
+
+  it('gives an unknown exception when the merges of the integrated tasks could not be compared', () => {
+    const exception = recogniseRelease(
+      facts({ integrated: unread('whether dev1234 holds the merges', 'boom') }),
+    )
+    expect(exception).toMatchObject({ kind: 'unknown', taskId: 4, head: HEAD })
+  })
+
   it('recognises nothing in a repository the train holds', () => {
     expect(recogniseRelease(facts({ mode: 'manual' }))).toBeUndefined()
     expect(recogniseRelease(facts({ working: 2 }))).toBeUndefined()

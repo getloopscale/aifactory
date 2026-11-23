@@ -5304,6 +5304,20 @@ describe('release', () => {
     expect(seen.closed).toEqual([10])
   })
 
+  it('refuses a task whose merge the release pull request head does not hold, and merges nothing', async () => {
+    const id = await delivered()
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    repo().unreachable.add(row.mergedSha!)
+
+    await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+      `does not hold the merge of this work, ${row.mergedSha!.slice(0, 7)}`,
+    )
+
+    // Its merge has not reached develop yet: releasing it now would close its issue on a version without it.
+    expect(seen.merges.filter((m) => m.sha === 'develop0001')).toEqual([])
+    expect(await stageOf(id)).toBe('done')
+  })
+
   it('refuses a resolved task when the release pull request head lacks its commit, and merges nothing', async () => {
     const id = await resolvedWork(10, 'res0001')
     repo().unreachable.add('res0001')
