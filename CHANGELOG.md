@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Adding the `factory` label back to an issue whose task was cancelled, failed or handed over starts the task over: it returns to the queue with a stage event that says who labelled it, and its run is queued. Before, the delivery was recorded as `task_exists` and the issue stayed open with the label and no work (#400)
 - A line stopped by a red promotion runs again when that promotion merges green between two passes of the promotion watch. With no promotion open the watch read nothing, so the incident stayed open and held the repository until the next promotion; it now reads the promotion merged last, and resolves the incident when it merged after the incident opened with no failed check (#394)
 - A run that renews its sandbox session waits for a free slot to restore it, as a new sandbox does, instead of failing when another run took the slot its snapshot freed (#397)
 - A task a person resolved from the panel no longer leaves its issue open for good when its resolving commit reaches the release branch through the `catch-up` cron rather than a tagged release. The issue is told which branch holds the commit and closed; an issue the agent already closed gets no comment (#389)

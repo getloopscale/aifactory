@@ -432,7 +432,6 @@ export const EVENTS = Object.keys(TRANSITIONS) as TransitionEvent[]
 export const NOT_WIRED: readonly TransitionEvent[] = [
   'hand_over',
   'integrate',
-  'issue_labeled',
   'issue_comment_created',
   'pull_request_comment_created',
   'pull_request_review_submitted',
