@@ -14,7 +14,10 @@ USER node
 # A child started with only PATH and HOME does not see COREPACK_HOME, so corepack looks in the user's own cache:
 # pnpm is prepared there, at the version this repository declares, and the Node headers node-gyp needs are the
 # ones the image already holds (nodedir), so neither reaches the network. sandbox-toolchain.ts names the versions.
+# pnpm 12 fetches its native binary on its first run, into the same cache: run it once here so that happens now.
 RUN env -u COREPACK_HOME corepack prepare pnpm@12.8.1 --activate \
+ && mkdir -p /tmp/pnpm-warm && echo '{"packageManager":"pnpm@12.8.1"}' > /tmp/pnpm-warm/package.json \
+ && (cd /tmp/pnpm-warm && env -u COREPACK_HOME pnpm --version) && rm -rf /tmp/pnpm-warm \
  && printf 'store-dir=/cache/pnpm\nnodedir=/usr/local\n' > /home/node/.npmrc
 WORKDIR /work
 CMD ["sleep", "infinity"]

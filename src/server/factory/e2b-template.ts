@@ -3,11 +3,6 @@
  * scripts/build-e2b-template.mts. The tag moves with the Dockerfile, so a sandbox never starts from an
  * image older than the code that expects it.
  */
-import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
-
-/** What the template carries: the same toolchain as the Docker image, both built from ops/sandbox/Dockerfile. */
-export const E2B_TOOLCHAIN = SANDBOX_TOOLCHAIN
-
 export const E2B_TEMPLATE = 'aifactory-sandbox:5'
 
 /**
