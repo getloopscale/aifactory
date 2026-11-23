@@ -5,13 +5,14 @@ After=network-online.target
 [Service]
 WorkingDirectory=@ROOT@
 Environment=PATH=@NODE_BIN@:/usr/local/bin:/usr/bin:/bin
+# The main process takes no job, so a restart never waits for a run and the crons stop only for seconds.
+Environment=FACTORY_SERVER_ONLY=1
 ExecStart=@ROOT@/scripts/run-server.sh
 Restart=always
 RestartSec=5
-# A stop signals only theokit, which stops taking jobs and waits for the run in progress (up to four hours,
-# see src/server/factory/drain.ts); the agent's commands keep running meanwhile. Past this, systemd kills all.
+# A stop signals only theokit, which closes storage and exits. It holds no run, so two minutes is plenty.
 KillMode=mixed
-TimeoutStopSec=243min
+TimeoutStopSec=2min
 
 [Install]
 WantedBy=default.target

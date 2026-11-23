@@ -50,8 +50,31 @@ export type Decision = {
   quiet?: true
 }
 
-/** A task gets at most this many applied actions; the next exception stays with a person. */
+/**
+ * A task gets at most this many applied actions of one family; the next exception of that family stays with a
+ * person. A rework of the checks and an unblocking of the review answer different things, so neither uses up the
+ * other's budget.
+ */
 export const MAX_APPLIED = 2
+
+/** What an action on the task answers: its checks (and its base), or its review (and a run that stalled). */
+type Family = 'checks' | 'review'
+
+const FAMILY: Partial<Record<ExceptionKind, Family>> = {
+  checks_unchanged: 'checks',
+  checks_red: 'checks',
+  out_of_time: 'checks',
+  no_change: 'checks',
+  base_conflict: 'checks',
+  pull_conflict: 'checks',
+  base_fixed: 'checks',
+  ci_red: 'checks',
+  checks_broke_after_review: 'checks',
+  review_plateau: 'review',
+  review_unusable: 'review',
+  stalled: 'review',
+  orphaned: 'review',
+}
 
 /** A fact unreadable this long is for a person; until then each pass reads it again. */
 export const UNKNOWN_LIMIT_MS = 60 * 60_000
@@ -92,9 +115,9 @@ const mergedBefore = (recorded: RecordedAction[]) =>
  * was applied, the agent is sent back to merge it, since a merge that conflicts needs one.
  */
 function mergeConflictingBase(
-  { head }: TaskException,
   base: string,
   what: string,
+  why: string,
   { recorded }: Context,
 ): Decision {
   if (mergedBefore(recorded)) {
@@ -107,15 +130,17 @@ function mergeConflictingBase(
   return {
     action: 'merge_base',
     reason: `${what}, and its pull request conflicts with ${base}: the factory merges ${base} into its branch with no agent, and the checks and the review read the merge`,
-    note: `The coordinator merges ${base} into this branch: its pull request conflicts with ${base}, and the last run changed nothing after the required checks failed on ${short(head)}. No agent runs; the checks and the review read the merge.`,
+    note: `The coordinator merges ${base} into this branch: its pull request conflicts with ${base}, and ${why}. No agent runs; the checks and the review read the merge.`,
   }
 }
 
 function sendBack(exception: TaskException, context: Context): Decision {
   const { head, evidence, conflictsWith, checkOutput, ciOutput } = exception
   const what = `the required checks failed on ${short(head)} and the last run changed nothing`
-  if (conflictsWith !== undefined)
-    return mergeConflictingBase(exception, conflictsWith, what, context)
+  if (conflictsWith !== undefined) {
+    const why = `the last run changed nothing after the required checks failed on ${short(head)}`
+    return mergeConflictingBase(conflictsWith, what, why, context)
+  }
   // The handoff may have kept no output; what the factory's own checks printed on the head stands in for it,
   // and what the failed GitHub Actions jobs logged when the factory kept nothing either.
   const kept = evidence || checkOutput || ''
@@ -128,6 +153,63 @@ function sendBack(exception: TaskException, context: Context): Decision {
     action: 'send_back',
     reason: `${what}: sent back on its branch with what ${source}`,
     note: `The coordinator sent this back: the repository's required checks failed on ${short(head)} and the last run changed nothing. Fix what they report.\n\n${output}`,
+  }
+}
+
+/** Integrated work whose pull request still conflicts with its base: the factory merges the base first, with no agent. */
+function pullConflict(exception: TaskException, context: Context): Decision {
+  const { evidence, conflictsWith } = exception
+  const what = `the pull request still conflicted after the automatic runs (${evidence})`
+  if (conflictsWith === undefined) {
+    return escalate(`${what}, but the integration branch of its repository is not known`)
+  }
+  return mergeConflictingBase(conflictsWith, what, 'the automatic runs did not resolve it', context)
+}
+
+/** The base passes the checks blamed on it again: a merge of it, with no agent, gives the checks a new commit. */
+function baseFixed({ evidence, mergeFrom }: TaskException): Decision {
+  const what = `the integration branch passes the checks again and the pull request still has to merge it (${evidence})`
+  if (mergeFrom === undefined) {
+    return escalate(`${what}, but the integration branch of its repository is not known`)
+  }
+  return {
+    action: 'merge_base',
+    reason: `${what}: the factory merges ${mergeFrom} into its branch with no agent, and the checks and the review read the merge`,
+    note: `The coordinator merges ${mergeFrom} into this branch: the required checks failed on its pull request while they failed on ${mergeFrom} too, ${mergeFrom} passes them now, and a check runs again only on a new commit. No agent runs; the checks and the review read the merge.`,
+  }
+}
+
+/** Required checks that still fail after the automatic runs go back to the agent, with what they reported. */
+function ciRed({ head, evidence, ciOutput }: TaskException): Decision {
+  const what = `the required checks of the pull request still failed on ${short(head)} after the automatic runs`
+  const output = evidence || ciOutput || ''
+  if (output === '') {
+    return escalate(`${what}, but nothing said what they reported to send back`)
+  }
+  const source = evidence === '' ? 'the failed GitHub Actions jobs logged' : 'the checks reported'
+  return {
+    action: 'send_back',
+    reason: `${what}: sent back on its branch with what ${source}`,
+    note: `The coordinator sent this back: the repository's required checks still failed on ${short(head)} after the automatic runs. Start from the branch as it is and fix what they report.\n\n${output}`,
+  }
+}
+
+/**
+ * The rework after a review broke the checks, and the branch went back to the reviewed commit that passed them. The
+ * review was not the problem, so nothing is scoped: the agent gets the branch back with what the checks printed on
+ * the commit that broke them, to make the change the review asked for without breaking them.
+ */
+function checksBroke({ head, evidence, checkOutput, ciOutput }: TaskException): Decision {
+  const what = `the rework after the review broke the checks, and the branch went back to ${short(head)} (${evidence})`
+  const output = checkOutput || ciOutput || ''
+  if (output === '') {
+    return escalate(`${what}, but no output of the checks it broke was found to send back`)
+  }
+  const source = checkOutput ? 'the checks reported' : 'the failed GitHub Actions jobs logged'
+  return {
+    action: 'send_back',
+    reason: `${what}: sent back on its branch with what ${source}`,
+    note: `The coordinator sent this back: the last rework after the review broke the repository's required checks, so the branch was restored to ${short(head)}, which passed them and was reviewed. Start from the branch as it is, make the change the review asked for (its findings are on the draft pull request), and keep these checks passing. What they reported on the rework that broke them:\n\n${output}`,
   }
 }
 
@@ -264,6 +346,10 @@ const BY_KIND: Partial<
   checks_red: onBranch(checksRed),
   out_of_time: onBranch(outOfTime),
   no_change: onBranch(noChange),
+  pull_conflict: pullConflict,
+  base_fixed: baseFixed,
+  ci_red: onBranch(ciRed),
+  checks_broke_after_review: onBranch(checksBroke),
   review_plateau: ({ head, evidence }) => ({
     action: 'scope',
     reason: `the reviewer still asked for changes on ${short(head)} (${evidence}): the requests are scoped, the rest filed as a follow-up, and the task sent back on its branch`,
@@ -290,30 +376,27 @@ const BY_KIND: Partial<
       `the release branch is red (${evidence}): the release train waits on ${short(head)} until it is green again, and a person looks at it`,
     ),
   base_red: fixBase,
+  publication_stalled: ({ evidence }) =>
+    escalate(
+      `${evidence}. The release train holds the repository until it ends, so a person looks at the release workflow and its Version Packages pull request`,
+    ),
 }
 
-/** The actions on the repository rather than on the task, which the limit of applied actions does not count. */
-const REPOSITORY_ACTIONS: readonly CoordinatorActionKind[] = ['release', 'prioritise', 'fix_base']
-
-/** A release or a reordering is the repository's, not a rework of the task it is recorded on, so the limit does not count it. */
-const RELEASE_KINDS: readonly ExceptionKind[] = [
-  'release_ready',
-  'release_retry',
-  'release_blocked',
-  'queue_blocked',
-  'base_red',
-]
-
-/** The one action for this exception, given what was already recorded for its task and the time. */
+/**
+ * The one action for this exception, given what was already recorded for its task and the time. Only the kinds of a
+ * family are limited: a release, a reordering or a fix of the base is the repository's, not a rework of the task it
+ * is recorded on, and the others only escalate or wait.
+ */
 export function decide(
   exception: TaskException,
   recorded: RecordedAction[],
   now: Date = new Date(),
 ): Decision {
+  const family = FAMILY[exception.kind]
   const applied = recorded.filter(
-    (r) => r.outcome === 'applied' && !REPOSITORY_ACTIONS.includes(r.action),
+    (r) => r.outcome === 'applied' && FAMILY[r.exceptionKind] === family,
   )
-  if (!RELEASE_KINDS.includes(exception.kind) && applied.length >= MAX_APPLIED) {
+  if (family !== undefined && applied.length >= MAX_APPLIED) {
     const tried = applied.map((r) => `${r.action} for ${r.exceptionKind} on ${short(r.headSha)}`)
     return escalate(
       `the coordinator already applied ${tried.join(', ')} on this task: a person decides what comes next`,

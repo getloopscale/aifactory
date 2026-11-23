@@ -98,17 +98,19 @@ export function divergedRepository(options: { behind: boolean; branch?: Files })
 
 /**
  * Answers the commands that read history (`merge-base`, `rev-list`, `diff`, `show`) addressed to `repoDir` from the real
- * repository in `dir`, and leaves every other command to the caller.
+ * repository in `dir`, and leaves every other command to the caller. A fetch of a branch from `origin` fetches it from
+ * `dir` itself, where the branches GitHub has are local, so `FETCH_HEAD` is that branch.
  */
 export function readsHistory(dir: string, repoDir: string): (command: string) => Reply | undefined {
   const prefix = `git -C ${repoDir} `
   return (command) => {
     if (
-      !/^git -C \S+ (merge-base|rev-list|diff|show) /.test(command) ||
+      !/^git -C \S+ (merge-base|rev-list|diff|show|fetch -q origin) /.test(command) ||
       !command.startsWith(prefix)
     )
       return undefined
-    const run = spawnSync('sh', ['-c', `git -C ${dir} ${command.slice(prefix.length)}`], {
+    const args = command.slice(prefix.length).replace(/^fetch -q origin /, 'fetch -q . ')
+    const run = spawnSync('sh', ['-c', `git -C ${dir} ${args}`], {
       encoding: 'utf8',
     })
     return { stdout: run.stdout, stderr: run.stderr, exitCode: run.status ?? 1 }

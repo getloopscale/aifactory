@@ -1,49 +1,49 @@
 {
-  "commit": "aee5efef741a92f1d11c9a7cb8761761843e1229",
-  "ranAt": "2026-11-18T04:26:18.424Z",
+  "commit": "ed2886380c8d9ec6671b66f2e43a6d0ac6e21283",
+  "ranAt": "2026-11-19T22:53:28.897Z",
   "setup": {
     "paulohenriquevn/aifactory-playground builder": "claude-code",
     "paulohenriquevn/aifactory-playground builderModel": "default",
     "paulohenriquevn/aifactory-playground builderEffort": "default",
-    "paulohenriquevn/aifactory-playground reviewer": "codex",
-    "paulohenriquevn/aifactory-playground reviewerModel": "gpt-6.1-terra",
-    "paulohenriquevn/aifactory-playground reviewerEffort": "medium",
+    "paulohenriquevn/aifactory-playground reviewer": "claude-code",
+    "paulohenriquevn/aifactory-playground reviewerModel": "default",
+    "paulohenriquevn/aifactory-playground reviewerEffort": "default",
     "paulohenriquevn/aifactory-playground planner": "codex",
     "paulohenriquevn/aifactory-playground plannerModel": "gpt-6.1-terra",
     "paulohenriquevn/aifactory-playground plannerEffort": "medium",
     "usetheokit/theokit builder": "claude-code",
     "usetheokit/theokit builderModel": "default",
     "usetheokit/theokit builderEffort": "default",
-    "usetheokit/theokit reviewer": "codex",
-    "usetheokit/theokit reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit reviewerEffort": "medium",
+    "usetheokit/theokit reviewer": "claude-code",
+    "usetheokit/theokit reviewerModel": "default",
+    "usetheokit/theokit reviewerEffort": "default",
     "usetheokit/theokit planner": "codex",
     "usetheokit/theokit plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit plannerEffort": "medium",
     "usetheokit/theokit-gateways builder": "claude-code",
     "usetheokit/theokit-gateways builderModel": "default",
     "usetheokit/theokit-gateways builderEffort": "default",
-    "usetheokit/theokit-gateways reviewer": "codex",
-    "usetheokit/theokit-gateways reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-gateways reviewerEffort": "medium",
+    "usetheokit/theokit-gateways reviewer": "claude-code",
+    "usetheokit/theokit-gateways reviewerModel": "default",
+    "usetheokit/theokit-gateways reviewerEffort": "default",
     "usetheokit/theokit-gateways planner": "codex",
     "usetheokit/theokit-gateways plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit-gateways plannerEffort": "medium",
     "usetheokit/theokit-plugins builder": "claude-code",
     "usetheokit/theokit-plugins builderModel": "default",
     "usetheokit/theokit-plugins builderEffort": "default",
-    "usetheokit/theokit-plugins reviewer": "codex",
-    "usetheokit/theokit-plugins reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-plugins reviewerEffort": "medium",
+    "usetheokit/theokit-plugins reviewer": "claude-code",
+    "usetheokit/theokit-plugins reviewerModel": "default",
+    "usetheokit/theokit-plugins reviewerEffort": "default",
     "usetheokit/theokit-plugins planner": "codex",
     "usetheokit/theokit-plugins plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit-plugins plannerEffort": "medium",
     "usetheokit/theokit-sdk builder": "claude-code",
     "usetheokit/theokit-sdk builderModel": "default",
     "usetheokit/theokit-sdk builderEffort": "default",
-    "usetheokit/theokit-sdk reviewer": "codex",
-    "usetheokit/theokit-sdk reviewerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-sdk reviewerEffort": "medium",
+    "usetheokit/theokit-sdk reviewer": "claude-code",
+    "usetheokit/theokit-sdk reviewerModel": "default",
+    "usetheokit/theokit-sdk reviewerEffort": "default",
     "usetheokit/theokit-sdk planner": "codex",
     "usetheokit/theokit-sdk plannerModel": "gpt-6.1-terra",
     "usetheokit/theokit-sdk plannerEffort": "medium"
@@ -53,54 +53,123 @@
       "id": "usetheokit/theokit-plugins#235",
       "passed": true,
       "reason": "approved",
-      "costUsd": 1.5664943,
-      "durationMs": 695435,
-      "attempts": 2,
-      "reviewRounds": 2
+      "costUsd": 0.6373044999999999,
+      "durationMs": 470052,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The change adds an on-device enrollment-based wake-word detector in `@theokit/plugin-voice`. Its headless-Chromium e2e test uses real speech WAV fixtures and the real helper, with no stub. I ran the unit and e2e tests and all 10 passed. The e2e test checks that a held-out \"theo\" fires the wake event and puts the recorder in `recording`, and that the other sentence fires nothing, starts no recording and makes no STT request. Every changed file is in the plan, and nothing is under `.github/`. I did not run the lint, doc-coverage or `pnpm quality:doc-api` gates.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/src/wake-word.ts",
+              "issue": "`stop()` called while `fire()` is awaiting `recorder.start()` does not cancel the recording start. After a wake, `state` is `triggered` and `teardown()` has already run, so the recorder can still end up recording after the caller stopped. A `generation` check before `recorder.start()` would close this gap."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/tests/wake-word.e2e.test.ts",
+              "issue": "The fixtures are one synthetic eSpeak voice at different pitch and speed, so the e2e test cannot show speaker independence or a false-positive rate. The README already states this limit. The negative case is a single sentence."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "paulohenriquevn/aifactory-playground#61",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.0509342,
-      "durationMs": 50141,
+      "costUsd": 0.090259,
+      "durationMs": 40191,
       "attempts": 1,
-      "reviewRounds": 1
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "`truncate` meets every 'done when' case: 'hello world' with max 5 gives 'hell…', 'hi' is unchanged, and a max of 0, a negative or a non-integer throws RangeError. The tests are meaningful, the diff touches only the two planned files, and no owner rule is broken. I ran `src/truncate.test.js` (5 pass) but not the full `npm test`.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "src/truncate.js",
+              "issue": "A non-string `text` is silently converted with `String()`. The issue doesn't specify this, and the builder said so. It is harmless, but it is untested."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "usetheokit/theokit-gateways#348",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.6717182000000002,
-      "durationMs": 1166876,
-      "attempts": 2,
-      "reviewRounds": 2
+      "costUsd": 0.4945232,
+      "durationMs": 883567,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "First connect now baselines at UIDNEXT-1, connect() no longer awaits any drain, and the cursor resets on a UIDVALIDITY change. Drains are serialized, the cursor can be persisted through an optional store, and the 153 package tests pass.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway-email/src/adapter.ts",
+              "issue": "If a cursor save fails, the message is already flagged \\Seen and the cursor does not advance. The message is not redelivered, and it can be lost if the process restarts before a later save succeeds. This is documented and acceptable, but a host that needs at-least-once delivery has no way to ask for it."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "usetheokit/theokit-sdk#975",
-      "passed": false,
-      "reason": "checks failed: generated-docs, tests",
-      "costUsd": 0.9707335000000001,
-      "durationMs": 1692280,
-      "attempts": 3,
-      "reviewRounds": 0
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.7814715000000001,
+      "durationMs": 1696502,
+      "attempts": 2,
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The change adds an `@theokit/sdk/mcp-events` sub-entry. It sends `events/subscribe` over HTTP with protocol 2026-07-28 and verifies Standard Webhooks signatures. It answers the signed challenge before the subscribe reply returns, delivers the payload with its subscription id, and rejects a wrong signature with 401. All four sub-entry places and a changeset are present, and the `error-codes.md` edit was required by the factory's check. I read the code but did not run the tests or the build.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/sdk/src/mcp-events.ts",
+              "issue": "A delivery that arrives before `events/subscribe` returns is passed to `onEvent` with `subscriptionId: \"\"`, because the route's id is still undefined. Either hold such events until the id is known or document the gap."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/sdk/tests/mcp/events.test.ts",
+              "issue": "The only server in the test is one the builder wrote, and the request shape (`events` plus `delivery{mode,url,secret}`, `result.id`) is not checked against a real events-profile server. The shape is documented as experimental, so the risk is mismatch with real servers. Also, the `HttpMcpEventsClient` created in `subscribe` is never closed, and the `notifications/initialized` step is not sent."
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "usetheokit/theokit#1685",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.0603135,
-      "durationMs": 291535,
+      "costUsd": 0.1004977,
+      "durationMs": 315653,
       "attempts": 1,
-      "reviewRounds": 1
+      "reviewRounds": 1,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "mammoth and unpdf are pinned to exact versions in package.json and the lockfile importer specifiers, with resolved versions unchanged. The exact-versions test passes (28 of 28), and the changelog entry is in place.",
+          "findings": []
+        }
+      ]
     }
   ],
-  "spentUsd": 3.678650264,
+  "spentUsd": 2.41740468,
   "summary": {
     "cases": 5,
-    "passed": 4,
-    "passRate": 0.8,
-    "meanCostUsd": 0.66403874,
-    "meanDurationMs": 779253.4
+    "passed": 5,
+    "passRate": 1,
+    "meanCostUsd": 0.42081118,
+    "meanDurationMs": 681193
   }
 }

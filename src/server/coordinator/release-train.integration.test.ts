@@ -11,6 +11,7 @@ import {
   delivery,
   evidence,
   ingress,
+  publication,
   releaseWait,
   repository,
   task,
@@ -18,10 +19,11 @@ import {
 } from '../db/schema'
 import { pollAwaitingReleases } from '../factory/await-release'
 import { CI_SILENCE_MS } from '../factory/ci-wait'
-import type { ReleaseMode } from '../factory/deliver'
+import { type ReleaseMode } from '../factory/deliver'
 import { FakeGithub, githubAnswered } from '../../test/fake-github'
 
 import { coordinate, type CoordinatorDeps } from './coordinate'
+import { PUBLICATION_STALL_MS, RELEASE_MAX_WAIT_MINUTES } from './release-train'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -51,6 +53,7 @@ const deps = (releaseMode: ReleaseMode = 'manual'): CoordinatorDeps => ({
   api,
   issues: api,
   readIssue: (r, number) => api.readIssue(r, number),
+  listOpenIssues: (r, label) => api.listOpenIssues(r, label),
   drafter: async () => ({ response: '', cost: 0 }),
   releaseMode,
   enqueueResume: async () => undefined,
@@ -208,6 +211,79 @@ describe('the release train in a repository in auto', () => {
   })
 })
 
+describe('the release train while a publication of the repository waits', () => {
+  /**
+   * The publication of an earlier promotion, still waiting for Version Packages #21, whose head reports this
+   * conclusion of its one check.
+   */
+  async function waitingOnVersionPackages(conclusion: 'failure' | 'success') {
+    const earlier = await integrated(['factory'], 'released')
+    await getDb().insert(publication).values({
+      taskId: earlier,
+      repository: REPO,
+      releaseBranch: 'main',
+      promotedSha: 'main0000001',
+      actor: 'agent:coordinator',
+    })
+    repo().pullRequest({
+      number: 21,
+      headRef: 'changeset-release/main',
+      baseRef: 'main',
+      headSha: 'version01',
+    })
+    repo().report('version01', { name: 'dep-check', state: conclusion })
+  }
+  const publications = () => getDb().select().from(publication).orderBy(publication.id)
+
+  it('promotes when a check failed on the head of its Version Packages pull request, superseding it', async () => {
+    await enable('auto')
+    await waitingOnVersionPackages('failure')
+    await integrated()
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1, refused: 0, failed: 0 })
+    expect(promotions()).toHaveLength(1)
+    expect(await publications()).toMatchObject([{ status: 'failed' }])
+    expect((await publications())[0].detail).toMatch(/^superseded by the promotion /)
+  })
+
+  it('holds while the checks of its Version Packages pull request pass', async () => {
+    await enable('auto')
+    await waitingOnVersionPackages('success')
+    await integrated()
+
+    await coordinate(deps(), 'auto')
+
+    expect(promotions()).toEqual([])
+    expect(await actions()).toEqual([])
+    expect(await publications()).toMatchObject([{ status: 'waiting' }])
+  })
+})
+
+describe('the release train while the repository keeps working', () => {
+  it('releases while a task of the repository only waits in the queue', async () => {
+    await enable('auto')
+    await integrated()
+    await integrated(['factory'], 'intake')
+
+    await coordinate(deps(), 'auto')
+
+    expect(promotions()).toHaveLength(1)
+  })
+
+  it('releases once the oldest integrated work waited an hour, while a task still works', async () => {
+    await enable('auto')
+    await integrated()
+    await integrated(['factory'], 'build')
+    const later = new Date(Date.now() + (RELEASE_MAX_WAIT_MINUTES + 1) * 60_000)
+
+    await coordinate({ ...deps(), now: () => later }, 'auto')
+
+    expect(promotions()).toHaveLength(1)
+  })
+})
+
 describe('the bump the train asks for', () => {
   it('is major when an issue carries the breaking label', async () => {
     await enable('auto')
@@ -310,6 +386,75 @@ describe('the release train on a red release branch', () => {
       outcome: 'escalated',
     })
     expect(row.reason).toContain('the checks of mmmmmmm failed: CI')
+  })
+})
+
+describe('a red release branch that develop already fixed', () => {
+  const RED = 'm'.repeat(40)
+  const seedRed = async () => {
+    await enable('auto')
+    const id = await integrated()
+    await getDb().insert(watch).values({
+      taskId: id,
+      repository: REPO,
+      sha: RED,
+      pullRequestNumber: 9,
+      status: 'red',
+      detail: 'failing: CI',
+    })
+    repo().checkRun(RED, { name: 'CI', conclusion: 'failure' })
+  }
+
+  it('releases when the failing check passes on the head of develop', async () => {
+    await seedRed()
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'success' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1 })
+    expect(promotions()).toHaveLength(1)
+  })
+
+  it('stays blocked when the check does not pass on develop', async () => {
+    await seedRed()
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'failure' })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ escalated: 1, applied: 0 })
+    expect(promotions()).toEqual([])
+  })
+})
+
+describe('a release the train decided at a develop head that has since moved', () => {
+  it('is refused without merging or turning on auto-merge', async () => {
+    await enable('auto')
+    const id = await integrated()
+    await getDb()
+      .insert(watch)
+      .values({
+        taskId: id,
+        repository: REPO,
+        sha: 'm'.repeat(40),
+        pullRequestNumber: 9,
+        status: 'red',
+        detail: 'failing: CI',
+      })
+    repo().checkRun('m'.repeat(40), { name: 'CI', conclusion: 'failure' })
+    repo().checkRun(DEVELOP, { name: 'CI', conclusion: 'success' })
+    // develop moves once its checks were read and the release goes to open its pull request.
+    api.before('openPullRequest', (_call, r) => void r.heads.set('develop', 'e'.repeat(40)), {
+      once: true,
+    })
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 0 })
+    expect(merges()).toEqual([])
+    expect(api.callsTo('enableAutoMerge')).toEqual([])
+    expect(await actions()).toMatchObject([
+      { exceptionKind: 'release_ready', headSha: DEVELOP, outcome: 'refused' },
+    ])
   })
 })
 
@@ -416,6 +561,74 @@ describe('a release that waited for the release branch checks and was refused', 
     expect(await actions()).toMatchObject([
       { exceptionKind: 'release_ready', outcome: 'applied' },
       { exceptionKind: 'release_retry', outcome: 'applied' },
+    ])
+  })
+})
+
+describe('a publication that keeps the release train waiting', () => {
+  const STARTED = new Date('2026-11-19T02:07:00Z')
+  const clocked = (now: Date): CoordinatorDeps => ({ ...deps(), now: () => now })
+
+  async function publishing() {
+    await enable('auto')
+    const released = await integrated(['factory'], 'released')
+    const waiting = await integrated()
+    const [row] = await getDb()
+      .insert(publication)
+      .values({
+        taskId: released,
+        repository: REPO,
+        releaseBranch: 'main',
+        promotedSha: 'promoted1',
+        actor: 'agent:coordinator',
+        startedAt: STARTED,
+        detail: 'waits for the Version Packages pull request',
+      })
+      .returning({ id: publication.id })
+    return { released, waiting, id: row.id }
+  }
+
+  it('holds the train silently under the limit, and records nothing', async () => {
+    await publishing()
+
+    await coordinate(clocked(new Date(STARTED.getTime() + PUBLICATION_STALL_MS - 60_000)), 'auto')
+
+    expect(promotions()).toEqual([])
+    expect(await actions()).toEqual([])
+  })
+
+  it('escalates it once past the limit, on the task that started it, and still releases nothing', async () => {
+    const { released, id } = await publishing()
+    const later = new Date(STARTED.getTime() + 5 * 60 * 60_000)
+
+    expect(await coordinate(clocked(later), 'auto')).toMatchObject({ escalated: 1 })
+    expect(await coordinate(clocked(new Date(later.getTime() + 60_000)), 'auto')).toMatchObject({
+      escalated: 0,
+    })
+
+    expect(promotions()).toEqual([])
+    const rows = await actions()
+    expect(rows).toMatchObject([
+      {
+        taskId: released,
+        exceptionKind: 'publication_stalled',
+        headSha: `publication:${id}`,
+        action: 'escalate',
+        outcome: 'escalated',
+      },
+    ])
+    expect(rows[0].reason).toContain('waits for the Version Packages pull request')
+  })
+
+  it('escalates it in trial too, once', async () => {
+    await publishing()
+    const later = new Date(STARTED.getTime() + 4 * 60 * 60_000)
+
+    await coordinate(clocked(later), 'trial')
+    await coordinate(clocked(later), 'trial')
+
+    expect((await actions()).map((r) => [r.exceptionKind, r.outcome])).toEqual([
+      ['publication_stalled', 'escalated'],
     ])
   })
 })

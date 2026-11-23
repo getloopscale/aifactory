@@ -30,7 +30,16 @@ export type PromotionApi = {
     head: string,
     base: string,
   ): Promise<PromotionPull | undefined>
+  /** The promotion GitHub merged last, from `head` into `base`, and when; undefined when there is none. */
+  lastMergedPullRequest(
+    repo: string,
+    token: string,
+    head: string,
+    base: string,
+  ): Promise<(PromotionPull & { mergedAt: Date }) | undefined>
   failedChecks(repo: string, token: string, sha: string): Promise<FailedRun[]>
+  /** How many check runs of the commit are still queued or running. */
+  pendingChecks(repo: string, token: string, sha: string): Promise<number>
   jobAttempt(
     repo: string,
     token: string,
@@ -86,6 +95,35 @@ export function createPromotionApi(
     return response
   }
 
+  const checkRuns = async (repo: string, token: string, sha: string) => {
+    type CheckRun = {
+      id: number
+      name: string
+      status: string
+      conclusion: string | null
+      html_url?: string | null
+      app?: { slug?: string } | null
+      output?: { summary?: string | null } | null
+    }
+    // A commit of a large repository has more than a hundred check runs, and the one that failed may be
+    // on any page. The pages are bounded so a wrong `total_count` cannot make this read for ever.
+    const runs: CheckRun[] = []
+    for (let page = 1; page <= CHECK_RUN_PAGES; page++) {
+      const answer = (await (
+        await call(
+          repo,
+          token,
+          `/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
+          `reading the check runs of ${sha.slice(0, 7)}`,
+          [200],
+        )
+      ).json()) as { total_count?: number; check_runs: CheckRun[] }
+      runs.push(...answer.check_runs)
+      if (answer.check_runs.length < 100 || runs.length >= (answer.total_count ?? 0)) break
+    }
+    return runs
+  }
+
   return {
     async openPullRequest(repo, token, head, base) {
       const owner = repo.split('/')[0]
@@ -103,32 +141,38 @@ export function createPromotionApi(
       return pull ? { number: pull.number, url: pull.html_url, headSha: pull.head.sha } : undefined
     },
 
+    async lastMergedPullRequest(repo, token, head, base) {
+      const owner = repo.split('/')[0]
+      const query = `state=closed&sort=updated&direction=desc&per_page=20&head=${owner}:${encodeURIComponent(head)}&base=${encodeURIComponent(base)}`
+      const pulls = (await (
+        await call(
+          repo,
+          token,
+          `/pulls?${query}`,
+          `listing closed pull requests ${head} -> ${base}`,
+          [200],
+        )
+      ).json()) as {
+        number: number
+        html_url: string
+        head: { sha: string }
+        merged_at: string | null
+      }[]
+      const merged = pulls
+        .filter((pull) => pull.merged_at !== null)
+        .sort((a, b) => Date.parse(b.merged_at ?? '') - Date.parse(a.merged_at ?? ''))[0]
+      return merged
+        ? {
+            number: merged.number,
+            url: merged.html_url,
+            headSha: merged.head.sha,
+            mergedAt: new Date(merged.merged_at ?? ''),
+          }
+        : undefined
+    },
+
     async failedChecks(repo, token, sha) {
-      type CheckRun = {
-        id: number
-        name: string
-        status: string
-        conclusion: string | null
-        html_url?: string | null
-        app?: { slug?: string } | null
-        output?: { summary?: string | null } | null
-      }
-      // A commit of a large repository has more than a hundred check runs, and the one that failed may be
-      // on any page. The pages are bounded so a wrong `total_count` cannot make this read for ever.
-      const runs: CheckRun[] = []
-      for (let page = 1; page <= CHECK_RUN_PAGES; page++) {
-        const answer = (await (
-          await call(
-            repo,
-            token,
-            `/commits/${sha}/check-runs?filter=latest&per_page=100&page=${page}`,
-            `reading the check runs of ${sha.slice(0, 7)}`,
-            [200],
-          )
-        ).json()) as { total_count?: number; check_runs: CheckRun[] }
-        runs.push(...answer.check_runs)
-        if (answer.check_runs.length < 100 || runs.length >= (answer.total_count ?? 0)) break
-      }
+      const runs = await checkRuns(repo, token, sha)
       return runs
         .filter((run) => run.status === 'completed' && FAILED.has(run.conclusion ?? ''))
         .map((run) => ({
@@ -138,6 +182,10 @@ export function createPromotionApi(
           summary: run.output?.summary ?? '',
           actions: run.app?.slug === 'github-actions',
         }))
+    },
+
+    async pendingChecks(repo, token, sha) {
+      return (await checkRuns(repo, token, sha)).filter((run) => run.status !== 'completed').length
     },
 
     async jobAttempt(repo, token, jobId) {

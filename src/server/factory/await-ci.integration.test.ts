@@ -100,6 +100,9 @@ beforeEach(async () => {
   )
   api = new FakeGithub()
   repo().prepare().required.set('workspace', ['CI'])
+  // The head of the integration branch passes the checks the tests require unless a test says otherwise, so
+  // a check that fails on the pull request is the change's.
+  for (const name of ['CI', 'Lint', 'CodeQL']) repo().report('b'.repeat(40), { name })
   pull()
   reports({ name: 'CI', state: 'pending', detail: '', url: 'u' })
   Object.assign(gh, { failedRuns: [], logs: {}, annotations: {}, jobs: {}, logFails: false })
@@ -160,6 +163,8 @@ async function waitingTask(
     awaiting?: string | null
     stage?: string
     issueNumber?: number
+    repository?: string
+    held?: boolean
   } = {},
 ) {
   const db = getDb()
@@ -178,8 +183,9 @@ async function waitingTask(
     .insert(task)
     .values({
       ingressId: i.id,
-      repository: 'paulo/app',
+      repository: options.repository ?? 'paulo/app',
       issueNumber: options.issueNumber ?? 7,
+      integrationHeld: options.held ?? false,
       issueTitle: 'Add truncate',
       stage: (options.stage ?? 'done') as never,
       headSha: VERIFIED,
@@ -302,6 +308,18 @@ describe('pollAwaitingIntegrations', () => {
   const blameOf = async (id: number) =>
     ((await events(id)).filter((e) => e.stage === 'done').at(-1)?.detail as { baseBlame?: unknown })
       .baseBlame
+
+  it('waits, and sends nothing back, while the integration branch has no run of the failed check yet', async () => {
+    reports(failure('CI'))
+    baseIs()
+    const id = await waitingTask()
+
+    expect(await pollAwaitingIntegrations(deps())).toMatchObject({ sentBack: [] })
+
+    expect(sentBack).toEqual([])
+    expect(autoMergeOff()).toEqual([])
+    expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+  })
 
   it('waits, and sends nothing back, when the failed check also fails on the integration branch', async () => {
     reports(failure('CI'))
@@ -600,6 +618,7 @@ describe('pollAwaitingIntegrations', () => {
       reason: expect.stringMatching(/still fail after 3 automatic runs: CI/),
       pullRequestUrl: PR_URL,
       sha: VERIFIED,
+      cause: 'ci_red',
     })
     expect(comments()).toEqual([
       {
@@ -747,6 +766,33 @@ describe('pollAwaitingIntegrations', () => {
   })
 })
 
+describe('a held integration of the factory repository', () => {
+  const OWN = 'paulohenriquevn/aifactory'
+
+  it('is not merged when the CI check stopped being required during the hold', async () => {
+    api.repo(OWN).prepare()
+    api.repo(OWN).pullRequest({
+      number: 12,
+      url: 'https://github.com/paulohenriquevn/aifactory/pull/12',
+      headRef: 'factory/7',
+      baseRef: 'workspace',
+      headSha: VERIFIED,
+      mergeableState: 'clean',
+    })
+    const id = await waitingTask({ repository: OWN, held: true })
+    await getDb()
+      .update(task)
+      .set({ pullRequestUrl: 'https://github.com/paulohenriquevn/aifactory/pull/12' })
+      .where(eq(task.id, id))
+
+    const result = await pollAwaitingIntegrations(deps())
+
+    expect(result.errors.length).toBeGreaterThan(0)
+    expect(api.callsTo('mergePullRequest')).toEqual([])
+    expect(await row(id)).toMatchObject({ mergedSha: null, awaitingCiSha: VERIFIED })
+  })
+})
+
 describe('adoptMergedHandoffs', () => {
   /** A task the factory handed over with its draft pull request, as it holds work for the owner (#139). */
   async function handedOver(issueNumber = 7) {
@@ -849,12 +895,17 @@ describe('the hold of a red integration branch', () => {
     expect(baseHoldOf(null, 'a')).toBeNull()
   })
 
-  it('starts when a check is red, keeps its start while the same checks stay red and restarts for others', () => {
+  it('starts when a check is red and keeps its start while the base stays red, whichever checks are', () => {
     const first = nextBaseHold(null, 'a', ['test', 'lint'], now)
     expect(first).toEqual({ sha: 'a', checks: ['lint', 'test'], since: now.toISOString() })
     const later = new Date('2026-11-17T15:00:00Z')
     expect(nextBaseHold(first, 'a', ['lint', 'test'], later)).toEqual(first)
-    expect(nextBaseHold(first, 'a', ['build'], later)?.since).toBe(later.toISOString())
+    // Another check going red on a base that never went green is the same red: the clock goes on (#282).
+    expect(nextBaseHold(first, 'a', ['build'], later)).toEqual({
+      sha: 'a',
+      checks: ['build'],
+      since: now.toISOString(),
+    })
   })
 
   it('ends when no check is red', () => {

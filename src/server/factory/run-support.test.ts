@@ -1,7 +1,15 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { pullRequestBody, pushWithRetry, resolvedComment, runContinuation } from './run-support'
+import {
+  checkSummary,
+  feedbackSource,
+  unestablishedGates,
+  pullRequestBody,
+  pushWithRetry,
+  resolvedComment,
+  runContinuation,
+} from './run-support'
 
 const failing = (times: number) => {
   let calls = 0
@@ -109,9 +117,32 @@ describe('runContinuation', () => {
     })
   })
 
+  it("marks the coordinator's decision on a review apart from the checks' feedback", () => {
+    expect(runContinuation(undefined, 'scope note', undefined, undefined, true)).toEqual({
+      feedback: 'scope note',
+      fromChecks: true,
+      fromReview: true,
+    })
+  })
+
   it('starts from the beginning for any other decision, or none', () => {
     expect(runContinuation({ kind: 'retry', note: '' }, undefined)).toBeUndefined()
     expect(runContinuation(undefined, undefined)).toBeUndefined()
+  })
+})
+
+describe('who the builder is told sent the work back', () => {
+  it('is the checks for the feedback of the required checks', () => {
+    expect(feedbackSource({ feedback: 'CI failed', fromChecks: true })).toBe('checks')
+  })
+
+  it("is never the checks for the coordinator's decision on a review", () => {
+    expect(feedbackSource({ feedback: 'n', fromChecks: true, fromReview: true })).toBe('person')
+  })
+
+  it('is a person for a request for changes, or no continuation', () => {
+    expect(feedbackSource({ feedback: 'rename it' })).toBe('person')
+    expect(feedbackSource(undefined)).toBe('person')
   })
 })
 
@@ -132,7 +163,67 @@ describe('pullRequestBody', () => {
   it('names the issue without a keyword that makes GitHub close it on merge', () => {
     // Where the integration branch is the default one, a closing keyword closes the issue at integration,
     // before any release has shipped it; the factory closes it on release, naming the version.
-    expect(body()).toContain('#114')
+    expect(body().startsWith('For #114.')).toBe(true)
     expect(body()).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:?\s+#114\b/i)
+  })
+})
+
+describe('unestablishedGates', () => {
+  const row = (command: string, passed = true) => ({
+    name: command,
+    command,
+    passed,
+    durationMs: 1000,
+    output: '',
+  })
+  const own = 'paulohenriquevn/aifactory'
+
+  it('names every CI quality gate when the checks run none of them', () => {
+    expect(unestablishedGates(own, [row('pnpm test')])).toEqual([
+      'coverage',
+      'crap',
+      'dup',
+      'mutation',
+    ])
+  })
+
+  it('counts a gate only when its check passed', () => {
+    expect(unestablishedGates(own, [row('pnpm dup'), row('pnpm crap', false)])).toEqual([
+      'coverage',
+      'crap',
+      'mutation',
+    ])
+  })
+
+  it('takes pnpm quality as all of them', () => {
+    expect(unestablishedGates(own, [row('pnpm quality')])).toEqual([])
+  })
+
+  it.each([
+    'echo pnpm quality',
+    'pnpm crap || true',
+    'pnpm coverage --help',
+    'pnpm crap; pnpm test',
+    'pnpm dup | cat',
+    'pnpm quality --help',
+  ])('does not take `%s` as a gate that passed', (command) => {
+    expect(unestablishedGates(own, [row(command)]).length).toBeGreaterThan(0)
+    expect(unestablishedGates(own, [row(command)])).toContain('mutation')
+  })
+
+  it('takes the whole command, spaces around it aside', () => {
+    expect(unestablishedGates(own, [row(' pnpm run crap ')])).not.toContain('crap')
+  })
+
+  it('says nothing for another repository', () => {
+    expect(unestablishedGates('someone/else', [row('npm test')])).toEqual([])
+  })
+
+  it('puts the disclosure in the summary and the delivery text', () => {
+    const rows = [row('pnpm test')]
+    expect(checkSummary(rows, own)).toContain('Not run by the factory: `pnpm coverage`')
+    expect(checkSummary(rows)).not.toContain('Not run')
+    const input = { sha: 'abc1234def', claim: 'x', reviewer: 'r', review: 'ok', rows }
+    expect(resolvedComment({ ...input, repository: own })).toContain('Not run by the factory')
   })
 })

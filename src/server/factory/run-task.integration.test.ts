@@ -39,7 +39,7 @@ import {
   readsHistory,
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
-import { FakeGithub, type FakePullRequest } from '../../test/fake-github'
+import { FakeGithub, type FakeCheckRun, type FakePullRequest } from '../../test/fake-github'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { NewNote } from '../knowledge/store'
@@ -63,6 +63,7 @@ import { queuedMerges, thenMerge } from '../../test/merge-job'
 import { runContinuation } from './run-support'
 import { fixedBaseNote } from './ci-wait'
 import {
+  conflictNote,
   mergeBaseByCoordinator,
   mergeFixedBase,
   requestChanges,
@@ -72,8 +73,10 @@ import {
 import { runDueRetries } from '../panel/retry-waiting'
 import { listTasks } from '../panel/queries'
 import { release } from './deliver'
+import { releaseByMode } from './integration'
 import { pollAnswers } from './waiting'
 import { jobBackend } from './job-backend'
+import { pauseOnRefusal, readPause } from './provider-pause-store'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
 const ANTHROPIC = 'sk-ant-key-must-not-leak'
@@ -88,7 +91,7 @@ beforeEach(async () => {
   // No worker runs here: a test takes the merge-task job its run queued, and none is left for the next.
   await getPool().query(`delete from theokit_jobs where name = 'merge-task'`)
   await getPool().query(
-    'truncate table promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table setting, promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -501,6 +504,13 @@ class RealGit {
   }
 }
 
+/** The `sandbox_prepared` lines a run logged, parsed. */
+const preparedLines = (log: { mock: { calls: unknown[][] } }) =>
+  log.mock.calls
+    .map(([line]) => String(line))
+    .filter((line) => line.includes('"sandbox_prepared"'))
+    .map((line) => JSON.parse(line))
+
 describe('runTask', () => {
   it('pushes factory/<issue> and records the stages in order', async () => {
     const id = await seedTask()
@@ -794,6 +804,30 @@ describe('runTask', () => {
     expect(seen.pulls).toEqual(['factory/7'])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ headSha: 'abc123def', pullRequestUrl: PR_URL })
+  })
+
+  it("discloses the CI quality gates the checks left out on the factory's own repository", async () => {
+    const id = await seedTask()
+    await getDb()
+      .update(task)
+      .set({ repository: 'paulohenriquevn/aifactory' })
+      .where(eq(task.id, id))
+    githubApi.repo('paulohenriquevn/aifactory').prepare()
+    githubApi.repo('paulohenriquevn/aifactory').nextNumber = 12
+    await runTask(deps(new FakeSandbox(changed())), id)
+
+    const check = seen.checkRuns[0] as { summary: string }
+    expect(check.summary).toContain('passed: `')
+    expect(check.summary).toContain('Not run by the factory: `pnpm coverage`, `pnpm crap`')
+    expect(seen.bodies[0]).toContain('Not run by the factory: `pnpm coverage`')
+  })
+
+  it('discloses nothing on another repository', async () => {
+    const id = await seedTask()
+    await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect((seen.checkRuns[0] as { summary: string }).summary).not.toContain('Not run')
+    expect(seen.bodies[0]).not.toContain('Not run')
   })
 
   it('opens no pull request when the agent says the tests pass and they do not', async () => {
@@ -1284,6 +1318,65 @@ describe('runTask', () => {
     expect(failed.detail).toMatchObject({ failedAt: 'sandbox' })
   })
 
+  it('pauses the sandbox provider for every process when it refuses a sandbox for credit', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    sandbox.create = async () => {
+      throw new Error('403: team is blocked: credit_exhausted')
+    }
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
+    expect(await readPause(getDb())).toMatchObject({
+      reason: '403: team is blocked: credit_exhausted',
+    })
+    const [failed] = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+    expect(retryableFailure(failed.detail as Record<string, unknown>)).toBe('environment')
+  })
+
+  it('ends the pause of the sandbox provider once a run started a sandbox', async () => {
+    await pauseOnRefusal(getDb(), '403: team is blocked: credit_exhausted', new Date(0))
+    const id = await seedTask()
+
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
+
+    expect(result.status).toBe('done')
+    expect(await readPause(getDb())).toBeNull()
+  })
+
+  it('keeps the pause when a run failed for something else', async () => {
+    await pauseOnRefusal(getDb(), '403: team is blocked: credit_exhausted', new Date(0))
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    sandbox.create = async () => {
+      throw new Error('fetch failed')
+    }
+
+    await runTask(deps(sandbox), id)
+
+    expect(await readPause(getDb())).not.toBeNull()
+  })
+
+  it('waits in the queue while every sandbox slot of the account is up, then runs', async () => {
+    const id = await seedTask()
+    const sandbox = Object.assign(new FakeSandbox(changed()), { maxSandboxes: 1 })
+    sandbox.up.set('another-run', { id: 'another-run', startedAt: new Date(), metadata: {} })
+    const stagesWhileWaiting: string[] = []
+    const slotWait = {
+      sleep: async () => {
+        const [row] = await getDb().select().from(task).where(eq(task.id, id))
+        stagesWhileWaiting.push(row.stage)
+        sandbox.up.delete('another-run')
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { slotWait }), id)
+
+    expect(stagesWhileWaiting).toEqual(['intake'])
+    expect(result.status).toBe('done')
+  })
+
   it('refuses to start a sandbox without an allowlist', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())
@@ -1292,6 +1385,53 @@ describe('runTask', () => {
     const result = await runTask(deps(sandbox), id)
     expect(sandbox.specs[0].egress.length).toBeGreaterThan(0)
     expect(result.status).toBe('done')
+  })
+
+  it('logs how long each step of the sandbox preparation took, once, before the first agent', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    await runTask(deps(sandbox), id)
+
+    const prepared = preparedLines(log)
+    expect(prepared).toHaveLength(1)
+    expect(prepared[0]).toMatchObject({ event: 'sandbox_prepared', taskId: id })
+    expect(Object.keys(prepared[0].steps)).toEqual([
+      'inputs',
+      'branches',
+      'credentials',
+      'sandbox',
+      'clone',
+      'harness',
+      'knowledge',
+      'repository_facts',
+      'install',
+    ])
+    expect(prepared[0].failedAt).toBeUndefined()
+    expect(prepared[0].totalMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('logs a preparation that failed with the step it failed in', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    const noInstall: GithubApp = {
+      installationToken: async () => {
+        throw new Error('the GitHub App is not installed on paulo/app')
+      },
+    }
+
+    await runTask(deps(sandbox, { github: noInstall }), id)
+
+    const prepared = preparedLines(log)
+    expect(prepared).toEqual([
+      expect.objectContaining({
+        taskId: id,
+        failedAt: 'inputs',
+        steps: { inputs: expect.any(Number) },
+      }),
+    ])
   })
 
   it('fails the stage, not the process, when the app is not installed on the repository', async () => {
@@ -1355,10 +1495,13 @@ describe('runTask', () => {
     expect(sandbox.specs).toHaveLength(1)
   })
 
-  it('runs when an open blocker in the same repository is already integrated', async () => {
+  it.each([
+    ['is already integrated', { mergedSha: 'abc123' }],
+    ['was found already resolved on the integration branch', { resolvedSha: 'abc123' }],
+  ])('runs when an open blocker in the same repository %s', async (_name, settled) => {
     const id = await seedTask()
     const blocker = await seedTask(5)
-    await getDb().update(task).set({ mergedSha: 'abc123' }).where(eq(task.id, blocker))
+    await getDb().update(task).set(settled).where(eq(task.id, blocker))
     const sandbox = new FakeSandbox(changed())
     const fetchIssue: RunTaskDeps['fetchIssue'] = async (_repo, number) =>
       number === 7
@@ -1770,6 +1913,8 @@ describe('runTask review loop', () => {
     expect(builder.resumed).toHaveLength(1)
     expect(builder.resumed[0]).toContain('sess-1:')
     expect(builder.resumed[0]).toContain('max=0 is not rejected')
+    // The rework reads its whole change from where the review measured it.
+    expect(builder.resumed[0]).toMatch(/read your whole change again with `git diff \w+`/)
     expect(await stagesOf(id)).toEqual([
       'sandbox',
       'build',
@@ -1961,6 +2106,30 @@ describe('runTask review loop', () => {
     expect(await stagesOf(id)).not.toContain('failed')
   })
 
+  it('still gives the review its own rounds after two reworks for failing checks', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]), verdictJson('approve'))
+    let runs = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (!c.endsWith('npm test') || onBase(c)) return undefined
+        runs += 1
+        // The first two commits fail the tests, each run twice; the third passes them.
+        return runs <= 4 ? { exitCode: 1, stdout: 'not ok 1 - rejects max below 1' } : undefined
+      }),
+    )
+
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def4' })
+    expect(reviewer.prompts).toHaveLength(2)
+    expect((await reviewsOf(id)).map((r) => [r.sha, r.verdict])).toEqual([
+      ['abc123def3', 'changes'],
+      ['abc123def4', 'approve'],
+    ])
+  })
+
   it('opens the pull request without a rework when a check fails once and passes when run again', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
@@ -2150,7 +2319,29 @@ describe('runTask review loop', () => {
     expect(prompts[0]).not.toContain('Still open?')
   })
 
-  it('hands a review rework that changes nothing to a person, with what the builder said, without reviewing the same commit again', async () => {
+  // 69 handoffs in a day were a builder that declined the review with its reasons, which no reviewer ever read (2026-11-19).
+  it('has the reviewer judge, once, the reasons of a builder that changed nothing in answer to the review', async () => {
+    const id = await seedTask()
+    const lazy: CodingHarness = {
+      ...resumableBuilder(),
+      resume: async () => ({
+        ok: true,
+        summary: 'The finding asks me to undo what the scope decision keeps.',
+        sessionId: 'sess-1',
+      }),
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]), verdictJson('approve'))
+
+    const result = await runTask(deps(new FakeSandbox(changed()), { harness: lazy, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def' })
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[1]).toContain(
+      'The finding asks me to undo what the scope decision keeps.',
+    )
+  })
+
+  it('hands a review rework that changes nothing to a person, with what the builder said, once the reviewer judged its reasons and still blocks', async () => {
     const id = await seedTask()
     const lazy: CodingHarness = {
       ...resumableBuilder(),
@@ -2165,7 +2356,7 @@ describe('runTask review loop', () => {
     const result = await runTask(deps(new FakeSandbox(changed()), { harness: lazy, reviewer }), id)
 
     expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def' })
-    expect(await reviewsOf(id)).toHaveLength(1)
+    expect(await reviewsOf(id)).toHaveLength(2)
     expect(seen.drafts).toEqual([true])
     expect(await handoffDetail(id)).toMatchObject({
       cause: 'review_plateau',
@@ -2190,24 +2381,25 @@ describe('runTask review loop', () => {
         }
         if (!c.endsWith('npm test') || onBase(c)) return undefined
         tests += 1
-        // The first commit passes and is reviewed; every rework after it breaks the tests; the restored one passes.
+        // The first commit passes and is reviewed; the review's rework and the two reworks for the checks after it
+        // break the tests; the restored one passes.
         return tests === 1 || restored ? undefined : { exitCode: 1, stdout: 'not ok 1 - truncates' }
       }),
     )
 
     const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id)
 
-    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def4' })
+    expect(result).toMatchObject({ status: 'handoff', sha: 'abc123def5' })
     expect(await reviewsOf(id)).toHaveLength(1)
     expect(seen.drafts).toEqual([true])
     expect(await handoffDetail(id)).toMatchObject({
-      cause: 'review_plateau',
-      sha: 'abc123def4',
+      cause: 'checks_broke_after_review',
+      sha: 'abc123def5',
       reason:
         'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d, which passed them and was reviewed',
     })
     const evidenceOfRestored = (await getDb().select().from(evidence)).filter(
-      (e) => e.sha === 'abc123def4',
+      (e) => e.sha === 'abc123def5',
     )
     expect(evidenceOfRestored.map((e) => e.passed)).toEqual([true])
   })
@@ -3056,6 +3248,54 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(stages).not.toContain('failed')
   })
 
+  it('keeps the approval of work the agent only merged the base into, when the patch of the work is the same', async () => {
+    const approved = 'a'.repeat(40)
+    const merge = 'b'.repeat(40)
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'intake', headSha: approved, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    await getDb().insert(review).values({
+      taskId: id,
+      round: 1,
+      sha: approved,
+      reviewer: 'fake-reviewer',
+      verdict: 'approve',
+      summary: 'looks right',
+      findings: [],
+    })
+    let merged = false
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('ls-remote')) return { stdout: `${approved}\trefs/heads/factory/7\n` }
+        if (command.includes('rev-list --count')) return { stdout: merged ? '1\n' : '0\n' }
+        if (command.endsWith('rev-parse HEAD')) return { stdout: `${merged ? merge : approved}\n` }
+        if (command.includes('merge-base FETCH_HEAD')) return { stdout: `${'d'.repeat(40)}\n` }
+        if (command.includes('patch-id --stable')) return { stdout: `p1 ${'0'.repeat(40)}\n` }
+        return undefined
+      }),
+    )
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        merged = true
+        dirty = false
+        return { ok: true, summary: 'Merged the integration branch; nothing conflicted.' }
+      },
+    }
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+
+    const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id, undefined, {
+      feedback: conflictNote('workspace'),
+    })
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toEqual([])
+  })
+
   it('tells the agent which files git finds in conflict, and no other path', async () => {
     const id = await seedTask()
     branchPushed()
@@ -3417,6 +3657,18 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(intake!.detail.note).not.toMatch(/\bgit\b/)
   })
 
+  it('marks its intake as a merge of the base, which the allowance of automatic runs leaves out', async () => {
+    const { id } = await sentToMergeTheBase()
+
+    const [intake] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'intake')))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    expect(intake!.detail).toMatchObject({ automatic: true, mergeBase: true })
+  })
+
   it('merges the base it cloned, pushes the merge with no agent asked anything, and checks and reviews it', async () => {
     const { id, queued } = await sentToMergeTheBase()
     const sandbox = mergingSandbox()
@@ -3452,6 +3704,90 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(stages).toContain('verify')
     expect(stages).toContain('review')
     expect(stages).not.toContain('build')
+  })
+
+  /** The review that approved `verified`, before the task went to wait for its checks. */
+  const approvedEarlier = (id: number) =>
+    getDb().insert(review).values({
+      taskId: id,
+      round: 1,
+      sha: verified,
+      reviewer: 'fake-reviewer',
+      verdict: 'approve',
+      summary: 'looks right',
+      findings: [],
+    })
+
+  /** `mergingSandbox`, whose patch of the task is `before` at the approved commit and `after` at the merge. */
+  function patchedSandbox(before: string, after: string) {
+    const inner = mergingSandbox()
+    const answer = inner.backend
+    const original = answer.execute.bind(answer)
+    answer.execute = async (command: string) => {
+      if (command.includes('merge-base FETCH_HEAD')) {
+        await original(command)
+        return { stdout: `${'d'.repeat(40)}\n`, stderr: '', exitCode: 0, timedOut: false }
+      }
+      if (command.includes('patch-id --stable')) {
+        await original(command)
+        const at = command.includes(` ${verified} |`) ? before : after
+        return { stdout: `${at} ${'0'.repeat(40)}\n`, stderr: '', exitCode: 0, timedOut: false }
+      }
+      return original(command)
+    }
+    return inner
+  }
+
+  it('keeps the approval of the work when merging the base left its patch as it was, with no reviewer asked', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    await approvedEarlier(id)
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]))
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(patchedSandbox('p1', 'p1'), { reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toEqual([])
+    const reviews = await reviewsOf(id)
+    expect(reviews.at(-1)).toMatchObject({ sha: merge, verdict: 'approve' })
+    expect(reviews.at(-1)!.summary).toContain(verified.slice(0, 7))
+  })
+
+  it('reviews the merge again when merging the base changed the patch of the work', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    await approvedEarlier(id)
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(patchedSandbox('p1', 'p2'), { reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toHaveLength(1)
+  })
+
+  it('reviews the merge when no review approved the work before it', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const input = queued[0]!
+
+    await runTask(
+      deps(patchedSandbox('p1', 'p1'), { reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(reviewer.prompts).toHaveLength(1)
   })
 
   it('fails for a person, naming the files, when the base conflicts with the branch', async () => {
@@ -4256,9 +4592,10 @@ describe('runTask waiting for an answer', () => {
     await poll(sandbox)
     const result = await resumeTask(deps(sandbox, { harness: builder, reviewer }), id)
 
-    expect(result.status).toBe('handoff')
-    expect(reviewer.prompts).toHaveLength(2)
-    expect(result.status === 'handoff' && result.reason).toContain('4, 5')
+    // Two review rounds, 4 then 5: the review still has a round left, which approves. The old round 2 of six
+    // filled in would have made it three rounds that do not converge, and a handoff.
+    expect(result.status).toBe('done')
+    expect(reviewer.prompts).toHaveLength(3)
   })
 
   it('lets a question that nobody answered fail its task and frees the snapshot', async () => {
@@ -5411,6 +5748,159 @@ describe('release', () => {
       expect(await waits()).toHaveLength(1)
     })
 
+    describe('of a head whose release pull request already conflicted with the release branch', () => {
+      /** The release of develop0001 an earlier pass refused because its pull request conflicted with main. */
+      const conflicted = (taskId: number) =>
+        getDb()
+          .insert(releaseWait)
+          .values({
+            taskId,
+            repository: 'paulo/app',
+            pullRequestNumber: 13,
+            pullRequestUrl: RELEASE_PR_URL,
+            sha: 'develop0001',
+            releaseBranch: 'main',
+            bump: 'patch',
+            actor: 'agent:coordinator',
+            changesets: false,
+            checks: ['CI'],
+            status: 'refused',
+            detail: 'the release pull request conflicts with main',
+            endedAt: new Date(),
+          })
+
+      it("refuses an agent's release up front, and opens no second wait", async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await expect(
+          release(dependencies(), id, { bump: 'patch', actor: 'agent:codex' }),
+        ).rejects.toThrow(/already conflicted with main at .*: merge main into develop/)
+        expect(seen.autoMerges).toEqual([])
+        expect(await waits()).toHaveLength(1)
+      })
+
+      it('records no second refusal of an automatic release for it', async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await releaseByMode(dependencies(), {
+          taskId: id,
+          sha: 'abc123def',
+          mode: 'auto',
+          actor: 'agent:codex',
+        })
+
+        // No second wait, whose refusal would be recorded again, and no refusal recorded now either.
+        expect(await waits()).toHaveLength(1)
+        expect(await getDb().select().from(decision).where(eq(decision.taskId, id))).toEqual([])
+      })
+
+      it('still tries when a person asks, since only a person may have fixed the release branch', async () => {
+        const id = await delivered()
+        repo().required.set('main', ['CI'])
+        await conflicted(id)
+
+        await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(seen.autoMerges).toEqual([{ number: 13, sha: 'develop0001' }])
+        expect((await waits()).map((w) => w.status)).toEqual(['refused', 'waiting'])
+      })
+    })
+
+    it('refuses a release while a changesets publication of the repository is still waiting', async () => {
+      const id = await delivered()
+      await getDb().insert(publication).values({
+        taskId: id,
+        repository: 'paulo/app',
+        releaseBranch: 'main',
+        promotedSha: 'main0000001',
+        actor: 'agent:codex',
+        versionPullRequest: 21,
+      })
+
+      await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
+        /a publication of paulo\/app still waits for Version Packages #21 to publish/,
+      )
+      // Nothing is promoted while the publication waits: the task is not released.
+      expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('done')
+    })
+
+    describe('while a publication waits on a Version Packages pull request that is not merged', () => {
+      /**
+       * The publication of an earlier promotion, released for issue 8, still waiting for Version Packages #21,
+       * whose head `version01` reports these checks.
+       */
+      type Check = Partial<FakeCheckRun> & { name: string }
+      async function waitingOnVersionPackages(checks: Check[]) {
+        const earlier = await integrated(8, 'inside01')
+        await getDb().update(task).set({ stage: 'released' }).where(eq(task.id, earlier))
+        await getDb().insert(publication).values({
+          taskId: earlier,
+          repository: 'paulo/app',
+          releaseBranch: 'main',
+          promotedSha: 'main0000001',
+          actor: 'agent:coordinator',
+          detail: 'checks failed on Version Packages #21: dep-check',
+        })
+        repo().pullRequest({
+          number: 21,
+          headRef: 'changeset-release/main',
+          baseRef: 'main',
+          headSha: 'version01',
+        })
+        checksAre(checks)
+        return earlier
+      }
+      function checksAre(checks: Check[]) {
+        repo().clearChecks('version01')
+        for (const check of checks) repo().checkRun('version01', check)
+      }
+      const ran = (conclusion: string | null): Check => ({
+        name: 'dep-check',
+        status: conclusion ? 'completed' : 'in_progress',
+        conclusion,
+      })
+
+      it('releases when a check failed on its head, and records that publication as superseded by the promotion', async () => {
+        const id = await delivered()
+        const earlier = await waitingOnVersionPackages([ran('failure')])
+        onDevelop({ changesets: ['config.json', 'README.md', 'brave-fox.md'] })
+        repo().compare('main', 'develop', [added('.changeset/brave-fox.md')])
+
+        const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+        expect(result).toMatchObject({ mergeSha: 'merge0002', publishing: 'changesets' })
+        const rows = await getDb().select().from(publication).orderBy(publication.id)
+        expect(rows).toMatchObject([
+          { taskId: earlier, status: 'failed', versionPullRequest: null },
+          { taskId: id, status: 'waiting', promotedSha: 'merge0002' },
+        ])
+        expect(rows[0].detail).toMatch(
+          new RegExp(
+            `^superseded by the promotion merge00 of task ${id}.*checks failed on Version Packages #21: dep-check`,
+          ),
+        )
+      })
+
+      it('still refuses while its checks pass, run or have not reported', async () => {
+        const id = await delivered()
+        await waitingOnVersionPackages([])
+        for (const checks of [[ran('success')], [ran(null)], []]) {
+          checksAre(checks)
+
+          await expect(
+            release(dependencies(), id, { bump: 'patch', actor: 'human' }),
+          ).rejects.toThrow(/a publication of paulo\/app still waits for/)
+        }
+        expect(seen.merges).toHaveLength(1)
+        expect(await stageOf(id)).toBe('done')
+        expect(await getDb().select().from(publication)).toMatchObject([{ status: 'waiting' }])
+      })
+    })
+
     it('refuses, and records why, when GitHub will not turn auto-merge on', async () => {
       const id = await delivered()
       repo().required.set('main', ['CI'])
@@ -6098,6 +6588,29 @@ describe("a project's recipe", () => {
     const after = new FakeSandbox(changed())
     await runTask(deps(after, { fetchRecipe }), await seedTask(8))
     expect(domainsOf(after)).toContain('files.example.org')
+  })
+
+  it('records the install before the builder on the build stage, with its last lines', async () => {
+    let installs = 0
+    // Only the install before the builder fails; the one the checks run passes.
+    const sandbox = new FakeSandbox(
+      changed((command) =>
+        command.endsWith('&& pnpm install') && installs++ === 0
+          ? { exitCode: 1, stderr: 'tarball missing\n' }
+          : undefined,
+      ),
+    )
+    const id = await seedTask()
+    await runTask(deps(sandbox, { fetchRecipe: async () => recipe }), id)
+    const [build] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'build')))
+      .orderBy(stageEvent.id)
+      .limit(1)
+    expect(build.detail).toMatchObject({
+      install: { ok: false, seconds: expect.any(Number), tail: 'tarball missing' },
+    })
   })
 
   it("runs the recipe's install and checks when the panel sets none", async () => {

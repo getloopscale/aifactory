@@ -1,6 +1,6 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
-import type { IsolatedSandbox } from '../factory/sandbox'
+import { uploadsInBatch, type IsolatedSandbox, type SandboxFile } from '../factory/sandbox'
 
 import { SANDBOX_KNOWLEDGE_DIR, sliceIndex } from './format'
 import type { KnowledgeSource } from './source'
@@ -97,17 +97,17 @@ export class KnowledgeFeed {
     const source = this.source!
     const { files, left } = await source.slice(pin, this.project)
     await this.must(`rm -rf ${NEXT}`)
-    await this.backend.uploadFile(
-      `${NEXT}/index.md`,
-      sliceIndex({
-        knowledgeRepository: pin.repository,
-        knowledgeSha: pin.knowledgeSha,
-        memorySha: pin.memorySha,
-        files,
-        left,
-      }),
-    )
-    for (const file of files) await this.backend.uploadFile(`${NEXT}/${file.path}`, file.content)
+    const index = sliceIndex({
+      knowledgeRepository: pin.repository,
+      knowledgeSha: pin.knowledgeSha,
+      memorySha: pin.memorySha,
+      files,
+      left,
+    })
+    await this.upload([
+      { path: `${NEXT}/index.md`, content: index },
+      ...files.map((file) => ({ path: `${NEXT}/${file.path}`, content: file.content })),
+    ])
     await this.must(SWAP)
     this.delivered = pin
     await source.delivered({
@@ -116,6 +116,16 @@ export class KnowledgeFeed {
       pin,
       files: files.length,
     })
+  }
+
+  /**
+   * In one batch where the sandbox can: a file at a time cost about half a second each on E2B, eight minutes
+   * for a project of nearly a thousand files, before every run's first agent.
+   */
+  private async upload(files: SandboxFile[]) {
+    const backend = this.backend
+    if (uploadsInBatch(backend)) return backend.uploadFiles(files)
+    for (const file of files) await backend.uploadFile(file.path, file.content)
   }
 
   private async must(command: string) {

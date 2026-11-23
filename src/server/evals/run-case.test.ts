@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { CHANGESET_CHECK_SCRIPT } from '../factory/changeset-check'
 import { CHANGESET_CHECK_PATH, withChangesetCheck } from '../factory/changesets'
@@ -8,6 +11,7 @@ import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harn
 import type { EvalCase } from './cases'
 import { failedForEnvironment } from './compare'
 import { runCase } from './run-case'
+import { writeJson } from './suite'
 
 const BASE = 'a'.repeat(40)
 
@@ -87,6 +91,10 @@ type World = {
   fix?: { exitCode?: number; timedOut?: boolean }
   /** Whether a fix command leaves a change in the checkout. */
   fixChanges?: boolean
+  /** What the install check answers (the command ends with `&& pnpm install`). */
+  install?: Reply[]
+  /** What `git status --porcelain` says right after an install: what it changed in the checkout. */
+  installChanges?: string
 }
 
 function sandbox(world: World = {}) {
@@ -95,9 +103,15 @@ function sandbox(world: World = {}) {
   let statuses = 0
   let commits = 0
   let fixed = false
+  let installedLast = false
   return new FakeSandbox((command): Reply | undefined => {
+    const afterInstall = installedLast
+    installedLast = command.endsWith('&& pnpm install')
     if (command.includes('commit -F')) commits += 1
     if (command.endsWith('&& fix-it') && world.fixChanges) fixed = true
+    if (command.endsWith('&& pnpm install') && world.install?.length) return world.install.shift()
+    if (afterInstall && command.includes('status --porcelain'))
+      return { stdout: world.installChanges ?? '' }
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
@@ -544,6 +558,30 @@ describe('runCase', () => {
     ])
   })
 
+  it('lets a planner apart from the builder and the reviewer reach its service and prepares it in the sandbox', async () => {
+    const provider = sandbox()
+    const planner = agent('planner', [])
+    let prepared = false
+    planner.prepare = async () => {
+      prepared = true
+    }
+
+    await runCase(
+      {
+        ...deps(
+          provider,
+          agent('builder', planned(built())),
+          agent('reviewer', [{ ok: true, summary: APPROVE }]),
+        ),
+        planner,
+      },
+      evalCase,
+    )
+
+    expect(provider.specs[0].egress.map((r) => r.domain)).toContain('planner.example.com')
+    expect(prepared).toBe(true)
+  })
+
   it('sends failed checks back to the builder and passes when the rework fixes them', async () => {
     const provider = sandbox({ checkExits: [1, 1, 0] })
     const builder = agent('builder', planned(built('done', 0.2), built('fixed', 0.1)))
@@ -699,6 +737,18 @@ describe('runCase', () => {
     expect(builder.prompts[2]).toContain('add a test')
   })
 
+  it('tells the builder of a review rework where its whole change starts, as the factory does', async () => {
+    const builder = agent('builder', planned(built(), built('added the test')))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(sandbox(), builder, reviewer), evalCase)
+
+    expect(builder.prompts[2]).toContain(`read your whole change again with \`git diff ${BASE}\``)
+  })
+
   it('gives the second review round the findings of the first, as the factory does', async () => {
     const builder = agent('builder', planned(built(), built('added the test')))
     const reviewer = agent('reviewer', [
@@ -711,6 +761,23 @@ describe('runCase', () => {
     expect(reviewer.prompts[0]).not.toContain('# Your earlier review')
     expect(reviewer.prompts[1]).toContain('# Your earlier review')
     expect(reviewer.prompts[1]).toContain('add a test')
+  })
+
+  it('keeps the builder\'s answer to a review for the next review, past a rework for failing checks', async () => {
+    const provider = sandbox({ checkExits: [0, 1, 1, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('declined: out of scope'), built('fixed the check')),
+    )
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(reviewer.prompts[1]).toContain('declined: out of scope')
+    expect(reviewer.prompts[1]).not.toContain('fixed the check')
   })
 
   it('runs the checks again on the same commit when the rework after them changes nothing, as the factory does', async () => {
@@ -740,7 +807,7 @@ describe('runCase', () => {
     )
   })
 
-  it('ends a case whose review rework changes nothing without reviewing the same commit again', async () => {
+  it('ends a case as handed over when the reviewer still blocks after judging the reasons of a rework that changed nothing', async () => {
     const builder = agent('builder', planned(built(), built('the finding is outside the issue')))
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
@@ -749,13 +816,32 @@ describe('runCase', () => {
       evalCase,
     )
 
-    expect(result).toMatchObject({ passed: false, attempts: 2, reviewRounds: 1 })
-    expect(reviewer.prompts).toHaveLength(1)
+    expect(result).toMatchObject({ passed: false, attempts: 2, reviewRounds: 2 })
+    expect(reviewer.prompts[1]).toContain('the finding is outside the issue')
+  })
+
+  it('passes a case whose reviewer approves after judging the reasons of a rework that changed nothing', async () => {
+    const builder = agent('builder', planned(built(), built('the finding is outside the issue')))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    const result = await runCase(
+      deps(sandbox({ cleanAfterCommit: true }), builder, reviewer),
+      evalCase,
+    )
+
+    expect(result).toMatchObject({ passed: true, reviewRounds: 2 })
   })
 
   it('ends as the factory hands it over when the last rework breaks the checks of a reviewed commit, restored', async () => {
-    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 0] })
-    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    // The review's rework breaks the checks, and so do both reworks the checks get after it.
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('third rework')),
+    )
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
     const result = await runCase(deps(provider, builder, reviewer), evalCase)
@@ -767,9 +853,29 @@ describe('runCase', () => {
     )
   })
 
+  it('still gives the review its own rounds after two reworks for failing checks', async () => {
+    const provider = sandbox({ checkExits: [1, 1, 1, 1, 0, 0] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('review rework')),
+    )
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: true })
+    expect(reviewer.prompts).toHaveLength(2)
+  })
+
   it('fails on the checks when they fail on the restored commit too', async () => {
-    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1] })
-    const builder = agent('builder', planned(built(), built('first rework'), built('second rework')))
+    const provider = sandbox({ checkExits: [0, 1, 1, 1, 1, 1, 1, 1, 1] })
+    const builder = agent(
+      'builder',
+      planned(built(), built('first rework'), built('second rework'), built('third rework')),
+    )
     const reviewer = agent('reviewer', [{ ok: true, summary: CHANGES }])
 
     const result = await runCase(deps(provider, builder, reviewer), evalCase)
@@ -1010,5 +1116,153 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false })
     expect(result.reason).toContain('is not a commit hash')
     expect(provider.specs).toEqual([])
+  })
+})
+
+describe('runCase install', () => {
+  const withInstall = {
+    ...evalCase,
+    checks: [{ name: 'install', command: 'pnpm install' }, ...evalCase.checks],
+  }
+  const installs = (provider: FakeSandbox) =>
+    provider.backend.commands.filter((c) => c.endsWith('&& pnpm install'))
+
+  it('installs the project before the builder runs, and again for the checks', async () => {
+    const provider = sandbox()
+    const inner = agent('builder', planned(built()))
+    const seen: number[] = []
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        seen.push(installs(provider).length)
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])), withInstall)
+
+    expect(seen[0]).toBe(1)
+    // The checks clean and install on their own: one for the builder, one for the commit.
+    expect(installs(provider)).toHaveLength(2)
+    expect(builder.prompts[0]).not.toContain('before your pass to install')
+  })
+
+  it('tells the builder a failed install and goes on', async () => {
+    const provider = sandbox({ install: [{ exitCode: 1, stderr: 'tarball missing' }] })
+    const builder = agent('builder', planned(built()))
+
+    const result = await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      withInstall,
+    )
+
+    expect(builder.prompts[0]).toContain('before your pass to install')
+    expect(builder.prompts[0]).toContain('tarball missing')
+    // Only the preparatory install failed: the work went on, in the same session, and the checks installed again.
+    expect(builder.prompts).toHaveLength(2)
+    expect(installs(provider)).toHaveLength(2)
+    expect(result).toMatchObject({ passed: true, reason: 'approved' })
+  })
+
+  it('gives the failure to the builder call that does the work, when another agent planned', async () => {
+    const provider = sandbox({ install: [{ exitCode: 1, stderr: 'tarball missing' }] })
+    const planner = agent('codex', [{ ok: true, summary: PLAN, sessionId: 'p1' }])
+    const builder = agent('builder', [built()])
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+
+    const result = await runCase({ ...deps(provider, builder, reviewer), planner }, withInstall)
+
+    expect(result).toMatchObject({ passed: true, reason: 'approved' })
+    expect(builder.prompts).toHaveLength(1)
+    expect(builder.prompts[0]).toContain('tarball missing')
+    expect(installs(provider)).toHaveLength(2)
+  })
+
+  it('puts back what the install changed in the checkout before the builder runs', async () => {
+    const provider = sandbox({ installChanges: ' M pnpm-lock.yaml\n' })
+    const inner = agent('builder', planned(built()))
+    const restoredBefore: boolean[] = []
+    const builder = {
+      ...inner,
+      run: (b: Parameters<typeof inner.run>[0], input: Parameters<typeof inner.run>[1]) => {
+        restoredBefore.push(
+          provider.backend.commands.some((c) => c.endsWith(' clean -fdq')) &&
+            provider.backend.commands.some((c) => c.includes('restore --staged --worktree :/')),
+        )
+        return inner.run(b, input)
+      },
+    }
+
+    await runCase(
+      deps(provider, builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      withInstall,
+    )
+
+    expect(restoredBefore[0]).toBe(true)
+  })
+
+  it('runs no install for a case with no install check', async () => {
+    const provider = sandbox()
+    await runCase(
+      deps(provider, agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    expect(installs(provider)).toEqual([])
+  })
+})
+
+describe('runCase review record', () => {
+  const round = (n: number) => ({
+    verdict: 'changes',
+    summary: `round ${n}`,
+    findings: [{ severity: n === 2 ? 'minor' : 'major', file: `src/f${n}.ts`, issue: `problem ${n}` }],
+  })
+  const answer = (n: number): HarnessResult => ({ ok: true, summary: JSON.stringify(round(n)) })
+
+  it('keeps the distinct verdict of every review round in the run file', async () => {
+    const builder = agent('builder', planned(built(), built(), built()))
+    const reviewer = agent('reviewer', [answer(1), answer(2), answer(3)])
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(result.passed).toBe(false)
+
+    const dir = mkdtempSync(join(tmpdir(), 'evals-'))
+    const path = join(dir, 'run.json')
+    writeJson(path, { results: [result] })
+    const written = JSON.parse(readFileSync(path, 'utf8'))
+
+    expect(written.results[0].reviews).toEqual([round(1), round(2), round(3)])
+    rmSync(dir, { recursive: true })
+  })
+
+  it('keeps the completed reviews of a case that is abandoned during a later review', async () => {
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [answer(1)])
+    const first = reviewer.run
+    const controller = new AbortController()
+    reviewer.run = (backend, input) => {
+      reviewer.run = () => new Promise(() => {})
+      return first(backend, input)
+    }
+    const pending = runCase(deps(sandbox(), builder, reviewer), evalCase, controller.signal)
+    await vi.waitFor(() => expect(builder.prompts.length).toBeGreaterThanOrEqual(3))
+    await new Promise((r) => setTimeout(r, 50))
+    controller.abort()
+
+    const result = await pending
+    expect(result.reason).toContain('abandoned')
+    expect(result.reviews).toEqual([round(1)])
+  })
+
+  it('keeps the completed reviews of a case that fails with an error after a review', async () => {
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [answer(1)])
+    const first = reviewer.run
+    reviewer.run = (backend, input) => {
+      reviewer.run = () => Promise.reject(new Error('boom'))
+      return first(backend, input)
+    }
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(result.reason).toContain('boom')
+    expect(result.reviews).toEqual([round(1)])
   })
 })

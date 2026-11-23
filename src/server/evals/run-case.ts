@@ -21,7 +21,14 @@ import {
 import { BaseProbe, sameChecks } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { uploadChangesetCheck } from '../factory/changeset-check'
-import { failingChecks, runChecks, type CheckResult } from '../factory/evidence'
+import {
+  failedInstall,
+  failingChecks,
+  prepareInstall,
+  runChecks,
+  type CheckResult,
+  type PreparedInstall,
+} from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
 import { diffFacts } from '../factory/diff-facts'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
@@ -33,7 +40,6 @@ import {
 } from '../factory/harness'
 import {
   blockingCount,
-  MAX_ATTEMPTS,
   OUTSIDE_THE_PLAN,
   parseVerdict,
   reviewAllowsRework,
@@ -48,6 +54,7 @@ import {
   COMMIT_MESSAGE,
   GITCONFIG,
   INSTANCE,
+  MAX_CHECK_REWORKS,
   gitConfig,
   must,
   oneLine,
@@ -93,7 +100,7 @@ function ensureLive(signal: AbortSignal | undefined): void {
 
 /**
  * One case run the way the factory runs a task (`factory/run.ts`): the same prompts, agents, plan, checks,
- * facts about the diff and review, and up to `MAX_ATTEMPTS` passes. A step added to `Run` is added here too,
+ * facts about the diff and review, and the same budgets: `MAX_CHECK_REWORKS` for failing checks and the review's own rounds. A step added to `Run` is added here too,
  * or the suite measures a factory that no longer exists. It writes nowhere but the sandbox: GitHub is
  * reachable without a credential, so the clone works and a push cannot, and nothing here pushes, opens a
  * pull request or records a stage.
@@ -101,13 +108,19 @@ function ensureLive(signal: AbortSignal | undefined): void {
 class CaseRun {
   /** The last review that asked for changes: the next round starts from its findings. */
   private earlier: EarlierReview | undefined
+  /** What the builder said to the last review's findings, kept across a check rework. */
+  private reviewAnswer: string | undefined
   cost = 0
   /** A review gave a valid verdict at some point of the case. */
   private verdictSeen = false
   attempts = 1
   reviewRounds = 0
+  /** The verdict of each review round that completed, as it came back. */
+  readonly reviews: ReviewVerdict[] = []
   /** The findings that block, in each review round so far. */
   private readonly blockingCounts: number[] = []
+  /** The reworks failing checks asked for, apart from the review's rounds, as `Run.loop` counts them. */
+  private checkReworks = 0
   /** The last commit this case made or found, from which the next round counts what the builder committed. */
   private committed: string | undefined
   /** The last commit the fixes ran on or made, so they never run twice on the same commit, as in `Run`. */
@@ -180,8 +193,12 @@ class CaseRun {
       askQuestions: false,
       knowledgeDir: this.knowledgeDir,
       checks: c.checks,
+      installFailed: failedInstall(this.installed),
     }
   }
+
+  /** The install before the builder's first pass, as `Run.installProject` keeps it. */
+  private installed: PreparedInstall | undefined
 
   /**
    * The builder's work, as `Run.build` does it: a builder that can continue a session first writes a plan
@@ -189,8 +206,15 @@ class CaseRun {
    */
   async build(): Promise<void> {
     const { builder, planner } = this.deps
+    this.installed = await prepareInstall(
+      this.backend,
+      this.repoDir,
+      this.c.checks,
+      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    )
     const apart = planner !== undefined && planner.name !== builder.name
-    const discarded = apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
+    const discarded =
+      apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
     const result = await this.agentCall(() => {
       if (apart && this.plan) {
         const prompt = givenPlanPrompt(this.buildInput(), this.plan, planner.name)
@@ -250,7 +274,10 @@ class CaseRun {
     kept: { sha: string; end: CaseEnd },
     failed: CheckResult[],
   ): Promise<CaseEnd> {
-    await must(this.backend, `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`)
+    await must(
+      this.backend,
+      `git -C ${this.repoDir} restore --source=${kept.sha} --staged --worktree :/`,
+    )
     if (!(await this.hasChange())) return checksFailed(failed)
     await this.commitAll(`evaluation of ${this.c.id}, ${kept.sha.slice(0, 7)} restored`)
     this.committed = (await must(this.backend, `${this.git} rev-parse HEAD`)).stdout.trim()
@@ -269,13 +296,14 @@ class CaseRun {
       findings,
       failedChecks: failed,
       checks: this.c.checks,
-      ...(reviewedSha ? { reviewedSha } : {}),
+      ...(reviewedSha ? { reviewedSha, changeBase: this.c.baseSha } : {}),
     })
     const result = await this.agentCall(() =>
       this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt)),
     )
     this.settle(result, 'the agent did not finish the rework')
     this.summary = result.summary
+    if (findings.length > 0) this.reviewAnswer = result.summary
     return this.hasChange()
   }
 
@@ -385,9 +413,8 @@ class CaseRun {
         knowledgeDir: this.knowledgeDir,
         required,
         ...(this.earlier ? { earlier: this.earlier } : {}),
-        ...(this.plan
-          ? { plan: renderChangePlan(this.plan), unplanned, builderSummary: this.summary }
-          : {}),
+        builderSummary: this.reviewAnswer ?? this.summary,
+        ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
       }),
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
@@ -395,18 +422,20 @@ class CaseRun {
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
     await must(this.backend, `${this.git} reset --hard ${sha}`)
     await must(this.backend, `${this.git} clean -fd`)
-    return result.ok
+    const verdict: ReviewVerdict = result.ok
       ? parseVerdict(result.summary)
       : { verdict: 'invalid', summary: result.summary, findings: [] }
+    this.reviews.push(verdict)
+    return verdict
   }
 
   private canResume(): boolean {
     return this.deps.builder.resume !== undefined && !!this.sessionId
   }
 
-  /** Failing checks send the builder back up to `MAX_ATTEMPTS`; a review has its own rule. */
+  /** Failing checks send the builder back up to `MAX_CHECK_REWORKS` times, as `Run.loop`; a review has its own rule. */
   private canRework(): boolean {
-    return this.attempts < MAX_ATTEMPTS && this.canResume()
+    return this.checkReworks < MAX_CHECK_REWORKS && this.canResume()
   }
 
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
@@ -428,6 +457,7 @@ class CaseRun {
         }
         // A rework that changed nothing has the checks run again on the same commit (#214), unless they fail on
         // the case's base too, as `Run.refuseRedBase` asks (#219).
+        this.checkReworks++
         if (await this.rework([], failed)) sha = await this.applyFixes(await this.commit())
         else {
           const red = await this.failingOnBase(failed)
@@ -467,15 +497,22 @@ class CaseRun {
       if (
         read.verdict === 'invalid' ||
         !this.canResume() ||
-        !reviewAllowsRework(this.attempts, this.blockingCounts)
+        !reviewAllowsRework(this.blockingCounts.length, this.blockingCounts)
       ) {
         return handedOver
       }
       const findings = [...guards, ...outside, ...read.findings]
       // The next round starts from these findings, as `Run.review` keeps them.
       this.earlier = { sha, findings }
-      // A rework that changed nothing ends the case as the factory hands it over: not reviewed again (#214).
-      if (!(await this.rework(findings, [], sha))) return handedOver
+      // A rework that changed nothing has the reviewer judge the builder's reasons on the same commit, once, as
+      // `Run.arbitrate` does; a review that still blocks ends the case as the factory hands it over.
+      if (!(await this.rework(findings, [], sha))) {
+        const judged = await this.review(sha, unplanned, required)
+        if (judged.verdict === 'approve' && blocking.length === 0) {
+          return { checksPassed: true, verdict: 'approve', blockingGuards: [] }
+        }
+        return judged.verdict === 'invalid' ? handedOver : { ...handedOver, verdict: judged.verdict }
+      }
       sha = await this.applyFixes(await this.commit())
     }
   }
@@ -489,6 +526,7 @@ class CaseRun {
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
       reachedVerdict: this.verdictSeen,
+      reviews: this.reviews,
     }
   }
 }
@@ -506,10 +544,18 @@ const checksFailed = (failed: CheckResult[]): CaseEnd => ({
 /** Names this process's evaluation runs; the sandbox's metadata also carries the process, which says whether it lives. */
 const PROCESS_RUN = randomUUID()
 
+/** The agents a case runs, each once by name: the builder, the reviewer and a planner apart from them (run.ts). */
+function caseAgents(deps: EvalDeps): CodingHarness[] {
+  const byName = new Map<string, CodingHarness>()
+  for (const agent of [deps.builder, deps.reviewer, deps.planner]) {
+    if (agent && !byName.has(agent.name)) byName.set(agent.name, agent)
+  }
+  return [...byName.values()]
+}
+
 /** What the sandbox of a case may reach: GitHub without a credential, the agents, the registry. */
 async function specFor(deps: EvalDeps, c: EvalCase): Promise<SandboxSpec> {
-  const agents =
-    deps.reviewer.name === deps.builder.name ? [deps.builder] : [deps.builder, deps.reviewer]
+  const agents = caseAgents(deps)
   const agentEgress = (await Promise.all(agents.map((a) => a.egress()))).flat()
   return {
     owner: { owner: 'eval', caseId: c.id, runId: PROCESS_RUN },
@@ -543,6 +589,8 @@ export async function runCase(
   signal?: AbortSignal,
 ): Promise<CaseResult> {
   const started = Date.now()
+  // The case's run once it exists, so a case stopped later still reports the reviews it completed.
+  const held: { sandbox?: IsolatedSandbox; run?: CaseRun } = {}
   const stoppedAs = (reason: string): CaseResult => ({
     id: c.id,
     ...caseOutcome({ stopped: reason }),
@@ -551,6 +599,7 @@ export async function runCase(
     attempts: 0,
     reviewRounds: 0,
     reachedVerdict: false,
+    reviews: held.run ? [...held.run.reviews] : [],
   })
   // The hash reaches a shell, so only a full commit hash gets that far.
   if (!COMMIT.test(c.baseSha))
@@ -560,7 +609,6 @@ export async function runCase(
   const live = () => ensureLive(signal)
   if (signal?.aborted) return stoppedAs(ABANDONED)
 
-  const held: { sandbox?: IsolatedSandbox } = {}
   let stopped = false
   const stopSandbox = async () => {
     if (stopped || !held.sandbox) return
@@ -587,7 +635,7 @@ export async function runCase(
     live()
     const repoDir = await checkout(sandbox.backend, c)
     live()
-    for (const agent of new Set([deps.builder, deps.reviewer])) {
+    for (const agent of caseAgents(deps)) {
       await agent.prepare?.(sandbox.backend)
       live()
     }
@@ -596,6 +644,7 @@ export async function runCase(
     held.sandbox = sandbox
     live()
     const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir, signal)
+    held.run = run
     // Before the builder's first pass, so it can run the check it is told to run.
     await uploadChangesetCheck(sandbox.backend, c.checks)
     live()

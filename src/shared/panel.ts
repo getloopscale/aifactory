@@ -61,14 +61,25 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
  */
 export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
 
+/**
+ * The sandbox provider refusing every new sandbox until someone pays: E2B answers `403: team is blocked:
+ * credit_exhausted` once the team's credit is gone and `403: team is blocked: spend_limit` past its spending
+ * limit, and Vercel `Status code 402` past its plan. Nothing in the work caused it, and no run starts until it
+ * ends, so the factory pauses its sandboxes while it lasts (`factory/provider-pause.ts`).
+ */
+export const SANDBOX_PROVIDER_BLOCKED =
+  /\bteam is blocked: (?:credit_exhausted|spend_limit)\b|Status code 402/i
+
 const ENVIRONMENT_PATTERN =
-  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|Status code 402|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|API rate limit exceeded|Codex login[^:]*(was refused|could not be renewed)/i
+  /Internal Server Error|remote rejected|GitHub answered 5\d\d|\b50[234]\b|\b429\b|ECONN|ETIMEDOUT|ENOTFOUND|socket|fetch failed|out of memory|OOM|heap|is not running|killed \(most likely out of memory|was restarted|usage limit exceeded|spend_limit|timed out after \d+ ms|clone failed|GitHub rate limit spent|API rate limit exceeded|Codex login[^:]*(was refused|could not be renewed)/i
 
 /**
  * e2b's `SandboxUnreachableError`: the stream to a command dropped and the probe that followed got no answer
- * either. The provider lost the sandbox; nothing the agent wrote caused it.
+ * either, or the stream dropped and e2b could not tell what became of the sandbox (`its state is unknown`). The
+ * provider lost the sandbox; nothing the agent wrote caused it.
  */
-const SANDBOX_UNREACHABLE = /sandbox could not be reached and its health probe failed/i
+const SANDBOX_UNREACHABLE =
+  /sandbox could not be reached and its (?:health probe failed|state is unknown)/i
 
 /**
  * E2B refusing a new sandbox because the account already runs as many as it may at once (`Rate limit exceeded,
@@ -92,6 +103,7 @@ const HARNESS_INSTALL = /\b(claude|codex) did not install\b/i
 const ENVIRONMENT = {
   test: (error: string) =>
     ENVIRONMENT_PATTERN.test(error) ||
+    SANDBOX_PROVIDER_BLOCKED.test(error) ||
     SANDBOX_TEMPLATE_MISSING.test(error) ||
     SANDBOX_UNREACHABLE.test(error) ||
     SANDBOX_ENDED.test(error) ||
@@ -128,7 +140,9 @@ export function retryableFailure(detail: Record<string, unknown> | null | undefi
 export type DoneOutcome = { resolved?: boolean; integrated?: boolean }
 
 /**
- * Delivered means waiting for a release. A done task resolved with no change (the code already did what
+ * Delivered means integrated and waiting for a release. Approved work that is not integrated yet (its pull request
+ * waits for CI, or for a merge that has not happened) is still on its way, in Merge with the merge job and the
+ * pull request it opens. A done task resolved with no change (the code already did what
  * the issue asks, or a person resolved it another way) has nothing merged for a release to carry, so it
  * goes to its own column until its resolving commit is on the release branch, when it becomes `released`
  * (`factory/resolved-release.ts`).
@@ -140,6 +154,7 @@ export function columnOf(
 ): Column {
   if (stage === 'failed' && retryable) return 'retrying'
   if (stage === 'done' && resolved && !integrated) return 'resolved'
+  if (stage === 'done' && !integrated) return 'merge'
   switch (stage) {
     case 'intake':
       return 'queued'
@@ -161,6 +176,51 @@ export function columnOf(
     default:
       return 'working'
   }
+}
+
+/**
+ * Why a delivered task went back to an earlier stage: its approved pull request conflicted with an integration
+ * branch that moved (`base_conflict`), a required check failed on it (`ci_red`), the base failed those checks
+ * too and passes them now, so the run only merges it (`base_fixed`), a person asked for changes (`review`), or
+ * anything else (`other`).
+ */
+export const RETURN_REASONS = ['base_conflict', 'ci_red', 'base_fixed', 'review', 'other'] as const
+export type ReturnReason = (typeof RETURN_REASONS)[number]
+
+/** A task that left `done` for an earlier stage and has not reached `done` again: why, when, and what it was told. */
+export type Returned = { reason: ReturnReason; at: string; note: string | null }
+
+/**
+ * What approved work in the Merge column waits for: the merge job (`merging`), its pull request (`opening_pr`), the
+ * required checks GitHub merges it after (`waiting_for_checks`), or a merge that has not happened (`awaiting_merge`).
+ * Null for a card that is not there: integrated work, or a task in another stage.
+ */
+export type MergeState = 'merging' | 'opening_pr' | 'waiting_for_checks' | 'awaiting_merge'
+
+export function mergeState(
+  card: Pick<TaskCard, 'stage' | 'integrated' | 'waitingForChecks'>,
+): MergeState | null {
+  if (card.stage === 'merge') return 'merging'
+  if (card.stage === 'pr') return 'opening_pr'
+  if (card.stage !== 'done' || card.integrated) return null
+  return card.waitingForChecks ? 'waiting_for_checks' : 'awaiting_merge'
+}
+
+/** How many cards are in each state of the Merge column, for its header. */
+export function mergeBreakdown(
+  cards: Pick<TaskCard, 'stage' | 'integrated' | 'waitingForChecks'>[],
+): Record<MergeState, number> {
+  const counts: Record<MergeState, number> = {
+    merging: 0,
+    opening_pr: 0,
+    waiting_for_checks: 0,
+    awaiting_merge: 0,
+  }
+  for (const card of cards) {
+    const state = mergeState(card)
+    if (state) counts[state] += 1
+  }
+  return counts
 }
 
 export type DeliveryView = {
@@ -208,7 +268,7 @@ export type RunView = {
 export type FindingView = {
   id: number
   kind: 'stalled' | 'orphaned'
-  subject: 'run' | 'queued_run' | 'answer_resume' | 'snapshot' | 'revert'
+  subject: 'run' | 'queued_run' | 'queue' | 'answer_resume' | 'snapshot' | 'revert' | 'back_merge'
   taskId: number | null
   taskTitle: string | null
   ref: string | null
@@ -328,6 +388,11 @@ export type TaskCard = {
    * which checks, on which branch, and since when. Null when nothing holds it.
    */
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
+  /**
+   * The task went back from `done` to an earlier stage and has not reached `done` again: why, when and the note
+   * the run was given. Null for a task that never left `done`, or that reached it again.
+   */
+  returned: Returned | null
   /** Where a queued task stands in the line of runs and why the scheduler put it there; null once it left `intake`. */
   queue: QueueView | null
   /**
@@ -881,3 +946,26 @@ export type CodexConnection = {
  */
 export const MIN_RUN_MINUTES = 50
 export const MAX_RUN_MINUTES = 240
+
+/**
+ * A repository whose line is stopped (`server/line/`): nothing of it runs or integrates but one fix, shown at
+ * the top of the board.
+ */
+export type StoppedLine = {
+  repository: string
+  cause: 'promotion_red' | 'mass_failure'
+  /** What is blocked: `workspace -> develop`, or the failure signature. */
+  surface: string
+  issueNumber: number
+  issueUrl: string
+  /** `escalated` once the fixes ran out and a person has it. */
+  status: 'open' | 'escalated'
+  attempts: number
+  /** ISO time the line stopped. */
+  since: string
+  /**
+   * What the stopped line holds back (`FACTORY_LINE_STOP_SCOPE`): the rest of the repository (`hold`), or nothing,
+   * with only its fix going first (`fix_first`).
+   */
+  scope: 'hold' | 'fix_first'
+}

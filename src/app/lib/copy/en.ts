@@ -77,6 +77,20 @@ export const en = {
     mainRedAfterRelease: 'main is red after the release',
     mainRed: 'main is red',
     waitingOnBase: (checks: string, branch: string) => `waits for ${checks} to pass on ${branch}`,
+    returned: {
+      base_conflict: 'Returned: conflicts with base',
+      ci_red: 'Returned: CI failed',
+      base_fixed: 'Returned: merging the fixed base',
+      review: 'Returned: changes requested',
+      other: 'Returned from Delivered',
+    },
+    returnedWhen: (label: string, when: string) => `${label} · ${when}`,
+    merge: {
+      merging: (n: number) => `${n} merging`,
+      opening_pr: (n: number) => `${n} opening the pull request`,
+      waiting_for_checks: (n: number) => `${n} waiting for CI`,
+      awaiting_merge: (n: number) => `${n} awaiting merge`,
+    },
     queuePlace: (n: number) => `#${n} in the queue`,
     queueHeld: 'held in the queue',
     topRank: (n: number) => `position ${n} in the top 10`,
@@ -144,6 +158,7 @@ export const en = {
     alreadyResolved: 'already resolved',
     integrated: 'integrated',
     waitingForChecks: 'waiting for CI',
+    awaitingMerge: 'approved, awaiting merge',
     waitingForLimit: 'waiting for the limit',
     willRetry: 'will retry',
     waitingForIssue: 'waiting for another issue',
@@ -322,6 +337,21 @@ export const en = {
     changePlaceholder: 'Something different? Say what, in your words',
     change: 'Change it',
   },
+  lineAlert: {
+    region: 'Stopped lines',
+    line: (repository: string, surface: string, forHow: string) =>
+      `${repository}: the line has been stopped for ${forHow}, ${surface} is red. Nothing else runs or integrates there until it is green.`,
+    lineFixFirst: (repository: string, surface: string, forHow: string) =>
+      `${repository}: the line has been stopped for ${forHow}, ${surface} is red. Its fix goes first; everything else keeps running.`,
+    fix: (issue: number, attempt: number) =>
+      attempt > 1 ? `Fix #${issue}, attempt ${attempt}` : `Fix #${issue}`,
+    person: (issue: number) => `#${issue} needs a person`,
+  },
+  baseAlert: {
+    region: 'Red integration branches',
+    line: (repository: string, branch: string, checks: string, held: number, forHow: string) =>
+      `${repository}: ${branch} has been red for ${forHow} on ${checks}, holding ${held} delivered ${held === 1 ? 'task' : 'tasks'}.`,
+  },
   pulse: {
     region: 'Factory metrics',
     show: 'Show metrics',
@@ -494,10 +524,13 @@ export const en = {
     kind: {
       run: 'A run stopped moving',
       queued_run: 'A task is queued and nothing will run it',
+      queue: 'Queued runs of a repository are not starting',
       answer_resume: 'An answer was never resumed',
       snapshot: 'A snapshot nothing needs',
       revert: 'A revert was never confirmed',
+      back_merge: 'A back-merge conflicts and nothing will merge it',
     },
+    openOnGithub: 'Open it on GitHub',
     actions: {
       run: {
         label: 'Start again',

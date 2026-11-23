@@ -1,3 +1,4 @@
+import type { untilSlotFree } from './sandbox-slot'
 import type { Recipe } from './recipe'
 import type { KnowledgeSource } from '../knowledge/source'
 import type { Database } from '../db'
@@ -13,11 +14,23 @@ import type { IsolatedSandboxProvider } from './sandbox'
 
 /**
  * Why a run handed its work to a person, as the handoff event records it next to its `reason`: the review
- * did not converge in the attempts, the review gave no verdict, or the required checks failed and the agent
- * changed nothing. The coordinator reads it (`coordinator/exceptions.ts`).
+ * did not converge in the attempts, the review gave no verdict, the required checks failed and the agent
+ * changed nothing, or the last rework broke the checks and the branch went back to the last reviewed commit
+ * that passed them (`checks_broke_after_review`, a problem of the checks, not of the review). The coordinator
+ * reads it (`coordinator/exceptions.ts`).
  */
 export type HandoffCause =
-  'review_plateau' | 'review_unusable' | 'checks_unchanged' | 'agent_configuration'
+  | 'review_plateau'
+  | 'review_unusable'
+  | 'checks_unchanged'
+  | 'checks_broke_after_review'
+  | 'agent_configuration'
+  /** Integrated work whose pull request still conflicts with its base after the automatic runs (`ci-wait.ts`). */
+  | 'pull_conflict'
+  /** The base passes the checks blamed on it again, and the pull request still has to merge it (`ci-wait.ts`). */
+  | 'base_fixed'
+  /** The required checks of the pull request still fail after the automatic runs (`ci-wait.ts`). */
+  | 'ci_red'
 
 export type HarnessChoice = CodingHarness | ((labels: string[]) => CodingHarness)
 
@@ -62,6 +75,8 @@ export type RunTaskDeps = {
   timeouts?: { sandboxMs: number; agentMs: number; checkMs?: number; reviewMs?: number }
   /** Wait between push attempts. */
   pushRetryDelayMs?: number
+  /** How the run waits for a free sandbox slot before it starts (`untilSlotFree`); the tests pass a clock. */
+  slotWait?: Parameters<typeof untilSlotFree>[1]
   /**
    * Where the knowledge base comes from. Every agent the run starts reads it at `/tmp/knowledge`, kept
    * current while it works; without a source (the tests) the agents work without one.

@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest'
 import {
   QUALITY_CONFIGURATION,
   followUpIssue,
+  followUpOrigin,
+  infeasibleNamed,
   parseScopeDraft,
+  sameFollowUp,
   qualityConfigurationNamed,
   roundsOfRun,
   scopeMessage,
@@ -251,5 +254,74 @@ describe('what the drafter is given', () => {
     expect(message).not.toContain('f'.repeat(2_500))
     expect(message).toContain('r'.repeat(2_000))
     expect(message).toContain('f'.repeat(2_000))
+  })
+})
+
+describe('the issue a follow-up was filed for', () => {
+  it('is the one its body names on the line the factory writes', () => {
+    const { body } = followUpIssue(draft(), 'o/r', 590)!
+    expect(followUpOrigin(body)).toEqual({ repo: 'o/r', issue: 590 })
+    expect(followUpOrigin(`${body}\n\n## Scope decision (2026-11-19)\n\nIn scope:`)).toEqual({
+      repo: 'o/r',
+      issue: 590,
+    })
+  })
+
+  it('is none for an issue a person wrote, or one that only mentions a follow-up', () => {
+    expect(followUpOrigin('Validate the name.')).toBeUndefined()
+    expect(followUpOrigin('This is a follow-up of o/r#590, see there.')).toBeUndefined()
+  })
+})
+
+describe('an open issue that is already the follow-up', () => {
+  const filed = { title: 'Rename the module', body: 'x\n\nFollow-up of o/r#7.' }
+
+  it('is one filed for the same issue, whatever its title', () => {
+    expect(sameFollowUp({ ...filed, title: 'Other' }, 'o/r', 7, 'Rename the module')).toBe(true)
+  })
+
+  it('is one with the same title once case, spaces and punctuation are set aside', () => {
+    const other = { title: '  rename the Module.', body: 'Follow-up of o/r#3.' }
+    expect(sameFollowUp(other, 'o/r', 7, 'Rename the module')).toBe(true)
+  })
+
+  it('is not one of another issue with another title', () => {
+    const other = { title: 'Rename the class', body: 'Follow-up of o/r#3.' }
+    expect(sameFollowUp(other, 'o/r', 7, 'Rename the module')).toBe(false)
+    expect(sameFollowUp({ ...filed, body: 'Follow-up of o/other#7.' }, 'o/r', 7, 'X')).toBe(false)
+  })
+})
+
+describe('a draft that puts in scope what the factory cannot do', () => {
+  it.each([
+    ['Update .github/workflows/ci.yml to run the e2e job', 'a change under .github/'],
+    ['Run npm publish for the new version', 'publishing a package'],
+    ['Publish the @theokit/ui package to npm', 'publishing a package'],
+    [
+      'Edit the body of issue #1781 to drop the old criterion',
+      'editing an issue or a pull request on GitHub',
+    ],
+    [
+      'Update the pull request description with the new plan',
+      'editing an issue or a pull request on GitHub',
+    ],
+    ['Close #2350 on GitHub once this lands', 'editing an issue or a pull request on GitHub'],
+  ])('refuses %s', (item, named) => {
+    expect(infeasibleNamed(draft({ inScope: ['Validate the name', item] }))).toBe(named)
+  })
+
+  it('lets through work in the repository that only mentions those words', () => {
+    const fine = [
+      'Add a comment explaining why the issue number is parsed',
+      'Rename the publish() helper in src/release.ts',
+      'Update the CHANGELOG entry with the pull request number',
+    ]
+    expect(infeasibleNamed(draft({ inScope: fine }))).toBeUndefined()
+  })
+
+  it('reads only the requests in scope, not the ones left out', () => {
+    expect(
+      infeasibleNamed(draft({ outOfScope: ['Change .github/workflows/ci.yml'] })),
+    ).toBeUndefined()
   })
 })

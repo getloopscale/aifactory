@@ -94,6 +94,7 @@ export function proofStartDeps(queue: QueueClient): StartProofDeps {
           work(tx as never, async (job) => {
             await queue.enqueueInTransaction(client, 'prove-checks', job, {
               idempotencyKey: `prove-checks-${job.repository.toLowerCase()}-${job.at}`,
+              ...AHEAD_OF_RUNS,
             })
           }),
         )
