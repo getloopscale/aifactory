@@ -1323,7 +1323,11 @@ describe('what integrating through the repository CI needs', () => {
 
     it('says the pull request is mergeable when GitHub refuses because it is unstable', async () => {
       // The release of usetheokit/theokit-gateways (#737) was refused this way while its required checks were green.
-      const unstable = new AutoMergeRefused('o/r', 12, 'Pull request Pull request is in unstable status')
+      const unstable = new AutoMergeRefused(
+        'o/r',
+        12,
+        'Pull request Pull request is in unstable status',
+      )
 
       await expect(autoMergeOrMergeable(refusing(unstable), pull)).resolves.toBe('mergeable')
     })
