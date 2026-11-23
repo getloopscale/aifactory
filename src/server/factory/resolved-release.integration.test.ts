@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, repository, stageEvent, task } from '../db/schema'
+import { ingress, publication, repository, stageEvent, task } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { FakeGithub } from '../../test/fake-github'
 
@@ -83,6 +83,42 @@ const releasedDetail = async (id: number) =>
   )?.detail
 
 describe('catchUpResolved', () => {
+  describe('in a repository whose tag a workflow publishes', () => {
+    const tagPublication = async (status: 'waiting' | 'failed' | 'published', anchor: number) =>
+      getDb().insert(publication).values({
+        taskId: anchor,
+        repository: 'o/r',
+        releaseBranch: 'main',
+        promotedSha: 'p1',
+        actor: 'human',
+        kind: 'tag',
+        tag: 'v1.0.0',
+        status,
+      })
+
+    it('releases nothing while the workflow of the tag waits, or after it failed, and releases once a publication succeeded', async () => {
+      const gh = fakeGithub({ 'o/r:main': ['abc'] })
+      const anchor = await seed('o/r', 1, { stage: 'released', mergedSha: 'm1' })
+      const id = await resolved('o/r', 2, 'abc')
+      const other = await resolved('o/other', 3, 'abc')
+      gh.api.repo('o/other').holds('main', ['abc'])
+      await tagPublication('waiting', anchor)
+
+      await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+      expect(await stageOf(id)).toBe('done')
+      expect(await stageOf(other)).toBe('released')
+
+      await getDb().update(publication).set({ status: 'failed' })
+      await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+      expect(await stageOf(id)).toBe('done')
+
+      const later = await seed('o/r', 4, { stage: 'released', mergedSha: 'm2' })
+      await tagPublication('published', later)
+      await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
+      expect(await stageOf(id)).toBe('released')
+    })
+  })
+
   it('moves a resolved task whose commit the release branch contains to released, naming the branch and the commit', async () => {
     const id = await resolved('paulo/app', 1, 'aaa111')
     const gh = fakeGithub({ 'paulo/app:main': ['aaa111'] })

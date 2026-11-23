@@ -196,7 +196,9 @@ reads that file, not a convention.
   (`workflowRunsOnTag`, `decideTagPublication` in `factory/tag-publication.ts`): when all passed it releases the
   contained tasks and closes their issues (`shipContained`); a failed run, or none within `NO_RUN_MS`, fails the
   publication with the reason on the task's `released` stage. The tasks of a failed one are released by the next
-  release that holds their merge, and the resolved-task catch-up skips the repository until then.
+  release that holds their merge, and the resolved-task catch-up skips the repository until a later
+  publication of it succeeded (so the repository's resolved work stays unreleased until someone releases
+  another task). A task whose publication failed is `released` and asks for no release itself.
 - **A repository that publishes with changesets tags its own releases.** When `.changeset/config.json` is on
   `develop` and a changeset waits, `release()` makes no tag: it promotes and records a `publication`. A changeset
   waits only when the comparison of `develop` with the release branch lists it as added since their merge base

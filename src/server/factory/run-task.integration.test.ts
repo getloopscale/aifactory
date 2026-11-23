@@ -5478,6 +5478,54 @@ describe('release', () => {
     ])
   })
 
+  it('in a repository that publishes from the tag, pushes it and releases nothing: a tag publication waits for the workflow', async () => {
+    const id = await delivered()
+    const contained = await integrated(8, 'inside01')
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, publishMode: 'tag' })
+    repo().tags.add('v1.2.3')
+
+    const result = await release(dependencies(), id, { bump: 'minor', actor: 'human' })
+
+    expect(result).toMatchObject({ tag: undefined, mergeSha: 'merge0002', publishing: 'tag' })
+    expect(seen.releases.at(-1)).toMatchObject({ tag: 'v1.3.0', prerelease: false })
+    expect(await getDb().select().from(publication)).toMatchObject([
+      {
+        taskId: id,
+        kind: 'tag',
+        tag: 'v1.3.0',
+        promotedSha: 'merge0002',
+        status: 'waiting',
+      },
+    ])
+    expect((await deliveries(id)).filter((d) => d.kind === 'release')).toEqual([])
+    expect(await stageOf(contained)).toBe('done')
+    expect(seen.closed).toEqual([])
+    const released = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'released'))
+    )[0]
+    expect(released.detail).toMatchObject({ publishing: 'tag', tag: 'v1.3.0' })
+    // A second release is refused while the workflow of the tag has not succeeded.
+    const anchor = await resolvedWork(10, 'res0001')
+    await expect(
+      release(dependencies(), anchor, { bump: 'patch', actor: 'human' }),
+    ).rejects.toThrow(/still waits for the workflow run of v1.3.0/)
+  })
+
+  it('does not take a repository whose publish mode is not the tag for a tag publication', async () => {
+    const id = await delivered()
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, publishMode: 'none' })
+
+    const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+    expect(result.tag).toBeDefined()
+    expect(await getDb().select().from(publication)).toEqual([])
+    expect(seen.closed).toEqual([7])
+  })
+
   /** A changesets repository like theokit: a private root, one published package and one ignored app. */
   function changesetsMonorepo(changed: string[]) {
     onDevelop({ changesets: ['config.json', 'README.md'] })

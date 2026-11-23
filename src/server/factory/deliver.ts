@@ -574,6 +574,9 @@ async function publishesFromTag(db: Database, repo: string): Promise<boolean> {
 /**
  * Records the publication a tag the factory pushed waits for: the `publish-changesets` cron releases the tasks
  * and closes their issues once the workflow the tag started succeeded, or fails it with the reason.
+ *
+ * `publication.task_id` is unique, and cannot collide: a task with a publication, waiting or failed, is in
+ * `released`, which `outcome(row, 'release')` refuses, so a release is never asked for it again.
  */
 async function waitForTagWorkflow(
   deps: Pick<DeliverDeps, 'db'>,
