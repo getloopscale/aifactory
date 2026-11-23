@@ -213,10 +213,7 @@ describe('catchUpResolved', () => {
       if (repo === 'paulo/gone') throw new Error('404 comparing aaa111 with main on paulo/gone')
     })
 
-    const result = await catchUpResolved(
-      { db: getDb(), app: gh.app, api: gh.api },
-      { after: 0, limit: 10 },
-    )
+    const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
 
     expect(result.released).toEqual([fine])
     expect(result.errors).toEqual([

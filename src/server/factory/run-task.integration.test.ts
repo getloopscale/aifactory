@@ -5298,11 +5298,11 @@ describe('release', () => {
 
     const result = await release(withIssues, id, { bump: 'minor', actor: 'agent:coordinator' })
 
-    expect(result).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0002' })
-    expect(seen.merges).toEqual([{ number: 13, sha: 'develop0001' }])
+    expect(result).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0001' })
+    expect(seen.merges).toEqual([{ number: 12, sha: 'c'.repeat(40) }])
     expect(seen.releases.at(-1)!.body).toContain('resolved at `res0001`')
     expect(await stageOf(id)).toBe('released')
-    expect(await releasedDetail(id)).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0002' })
+    expect(await releasedDetail(id)).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0001' })
     expect(seen.closed).toEqual([10])
   })
 
@@ -5320,9 +5320,7 @@ describe('release', () => {
 
   it('gives the claim of a resolved task back when GitHub does not merge the promotion', async () => {
     const id = await resolvedWork(10, 'res0001')
-    githubApi.fail('mergePullRequest', new Error('GitHub answered 405 merging'), {
-      when: (number) => number === 13,
-    })
+    githubApi.fail('mergePullRequest', new Error('GitHub answered 405 merging'))
 
     await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
       /GitHub did not merge it/,
@@ -5369,8 +5367,13 @@ describe('release', () => {
     const asked = await delivered()
     const resolved = await resolvedAt(8, 'resolved01')
     repo().tags.add('v1.2.3')
+    const closedIssue = async (_repo: string, n: number) => ({
+      ...(await openIssue(_repo, n)),
+      state: 'closed' as const,
+    })
 
-    await release(dependencies(), asked, { bump: 'minor', actor: 'human' })
+    const withIssues = { ...dependencies(), fetchIssue: closedIssue }
+    await release(withIssues, asked, { bump: 'minor', actor: 'human' })
 
     expect(await stageOf(resolved)).toBe('released')
     expect(await releasedDetail(resolved)).toEqual({
@@ -5378,6 +5381,8 @@ describe('release', () => {
       releaseBranch: 'main',
       resolvedSha: 'resolved01',
       mergeSha: 'merge0002',
+      tag: 'v1.3.0',
+      url: 'https://github.com/paulo/app/releases/tag/v1.3.0',
     })
     // Its issue was closed when it was resolved, and no tag carries it.
     expect(seen.closed).not.toContain(8)

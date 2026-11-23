@@ -416,6 +416,8 @@ describe('promoteResolvedWork', () => {
     })
   }
 
+  beforeEach(() => void repo().ahead('develop', 'workspace', 2))
+
   it('merges the integration branch into develop when only resolved work waits', async () => {
     repo().restricted.delete('develop')
     await resolvedWork()

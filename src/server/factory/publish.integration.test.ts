@@ -412,7 +412,17 @@ describe('publishing a changesets release', () => {
     versionPr()
     releasesAre(published('@theokit/ui@1.13.0'))
 
-    await pollPublications(deps())
+    const withIssues = {
+      ...deps(),
+      fetchIssue: async (_repo: string, n: number) => ({
+        number: n,
+        title: '',
+        body: '',
+        labels: [],
+        state: 'closed' as const,
+      }),
+    }
+    await pollPublications(withIssues)
 
     const stageOf = async (id: number) =>
       (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
@@ -424,6 +434,8 @@ describe('publishing a changesets release', () => {
       releaseBranch: 'main',
       resolvedSha: 'resolved1',
       mergeSha: 'promoted1',
+      tag: '@theokit/ui@1.13.0',
+      url: 'https://github.com/usetheokit/ui/releases/tag/%40theokit%2Fui%401.13.0',
     })
     expect(await getDb().select().from(delivery).where(eq(delivery.taskId, carried))).toEqual([])
   })
