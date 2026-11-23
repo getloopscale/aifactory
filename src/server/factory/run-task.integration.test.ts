@@ -1939,7 +1939,8 @@ describe('runTask review loop', () => {
     expect(row.headSha).toBe('abc123def2')
   })
 
-  it('hands the work to a person after three reviews that all ask for changes', async () => {
+  // Blocking findings that never fall get one round past MAX_ATTEMPTS (MAX_STALLED_ATTEMPTS), then a person.
+  it('hands the work to a person after four reviews that all ask for changes', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
     const reviewer = reviewerSaying(verdictJson('changes', [finding], 'still wrong'))
@@ -1950,9 +1951,9 @@ describe('runTask review loop', () => {
     )
 
     expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
-    expect(result.status === 'handoff' && result.reason).toContain('after 3 attempts')
-    expect(builder.resumed).toHaveLength(2)
-    expect(reviewer.prompts).toHaveLength(3)
+    expect(result.status === 'handoff' && result.reason).toContain('after 4 attempts')
+    expect(builder.resumed).toHaveLength(3)
+    expect(reviewer.prompts).toHaveLength(4)
     expect(seen.drafts).toEqual([true])
     expect(seen.comments).toHaveLength(1)
     expect(seen.comments[0]).toContain('draft pull request')
