@@ -1029,6 +1029,36 @@ describe('what a release with changesets needs to read', () => {
     expect(calls[0].url).toContain('per_page=100')
   })
 
+  it('lists the workflow runs a tag started, by the tag as the branch of the run', async () => {
+    const { fetch, calls } = fakeFetch({
+      'GET /actions/runs': {
+        status: 200,
+        body: {
+          workflow_runs: [
+            {
+              name: 'Release',
+              status: 'completed',
+              conclusion: 'failure',
+              head_sha: 'abc',
+              html_url: 'https://github.com/o/r/actions/runs/9',
+            },
+          ],
+        },
+      },
+    })
+    expect(await createGithubApi(fetch).workflowRunsOnTag('o/r', 't', 'v1.0.0')).toEqual([
+      {
+        name: 'Release',
+        status: 'completed',
+        conclusion: 'failure',
+        headSha: 'abc',
+        url: 'https://github.com/o/r/actions/runs/9',
+      },
+    ])
+    expect(calls[0].url).toContain('head_branch=v1.0.0')
+    expect(calls[0].url).toContain('event=push')
+  })
+
   it('says whether a commit is in the history of another', async () => {
     const answer = (status: string) =>
       fakeFetch({ 'GET /compare/old...new': { status: 200, body: { status } } }).fetch
@@ -1271,7 +1301,7 @@ describe('what integrating through the repository CI needs', () => {
     )
   })
 
-  it('tells a refusal because the pull request is already clean from any other refusal', () => {
+  it('tells a refusal because the pull request is already mergeable (clean or unstable) from any other refusal', () => {
     const clean = new AutoMergeRefused('o/r', 12, 'Pull request Pull request is in clean status')
     const notAllowed = new AutoMergeRefused(
       'o/r',
@@ -1286,7 +1316,8 @@ describe('what integrating through the repository CI needs', () => {
 
     expect(clean.pullRequestIsClean).toBe(true)
     expect(notAllowed.pullRequestIsClean).toBe(false)
-    expect(unstable.pullRequestIsClean).toBe(false)
+    // Unstable: the required checks passed and only a check the branch does not require is red or pending.
+    expect(unstable.pullRequestIsClean).toBe(true)
   })
 
   it('tells a refusal because the pull request is a draft from any other refusal', () => {
@@ -1318,6 +1349,17 @@ describe('what integrating through the repository CI needs', () => {
       const clean = new AutoMergeRefused('o/r', 12, 'Pull request Pull request is in clean status')
 
       await expect(autoMergeOrMergeable(refusing(clean), pull)).resolves.toBe('mergeable')
+    })
+
+    it('says the pull request is mergeable when GitHub refuses because it is unstable', async () => {
+      // The release of usetheokit/theokit-gateways (#737) was refused this way while its required checks were green.
+      const unstable = new AutoMergeRefused(
+        'o/r',
+        12,
+        'Pull request Pull request is in unstable status',
+      )
+
+      await expect(autoMergeOrMergeable(refusing(unstable), pull)).resolves.toBe('mergeable')
     })
 
     it('throws any other refusal as it came', async () => {

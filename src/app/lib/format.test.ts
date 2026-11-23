@@ -246,6 +246,20 @@ describe('describeEvent', () => {
     )
   })
 
+  it('says a tag waits for its workflow, and when the workflow failed', () => {
+    expect(line('released', { actor: 'human', publishing: 'tag', tag: 'v1.2.3' })).toBe(
+      'promoted by human; v1.2.3 waits for its release workflow to publish it',
+    )
+    expect(
+      line('released', {
+        actor: 'human',
+        tag: 'v1.2.3',
+        published: false,
+        releaseError: 'the run failed',
+      }),
+    ).toBe('v1.2.3 was not published: the run failed')
+  })
+
   it('has nothing to say for stages that carry nothing', () => {
     expect(line('pr', {})).toBe('')
   })

@@ -688,22 +688,25 @@ describe('the rounds a review gets', () => {
 
   it('allows more only while the findings fall, up to six', () => {
     expect(reviewAllowsRework(3, [4, 3, 2])).toBe(true)
-    expect(reviewAllowsRework(3, [5, 6, 7])).toBe(false)
-    expect(reviewAllowsRework(3, [3, 3, 4])).toBe(false)
-    expect(reviewAllowsRework(3, [3, 3, 3])).toBe(false)
-    expect(reviewAllowsRework(3, [3, 1, 1])).toBe(true)
+    expect(reviewAllowsRework(3, [5, 6, 7])).toBe(true)
+    expect(reviewAllowsRework(3, [3, 3, 3])).toBe(true)
+    expect(reviewAllowsRework(4, [5, 6, 7, 8])).toBe(false)
+    expect(reviewAllowsRework(4, [3, 3, 4, 4])).toBe(false)
+    expect(reviewAllowsRework(4, [3, 3, 3, 3])).toBe(false)
+    expect(reviewAllowsRework(4, [5, 6, 7, 6])).toBe(true)
+    expect(reviewAllowsRework(4, [4, 2, 1, 1])).toBe(true)
     expect(reviewAllowsRework(4, [3, 1, 1, 1])).toBe(false)
-    expect(reviewAllowsRework(3, [2, 2, 2])).toBe(false)
     expect(reviewAllowsRework(6, [3, 2, 2, 2, 2, 2])).toBe(false)
-    expect(roundsNote(3, [3, 1, 1])).toContain('stayed level')
+    expect(roundsNote(4, [4, 2, 1, 1])).toContain('stayed level')
     expect(reviewAllowsRework(5, [9, 8, 7, 6, 5])).toBe(true)
     expect(reviewAllowsRework(6, [9, 8, 7, 6, 5, 4])).toBe(false)
   })
 
   it('says in the handoff what the rounds were', () => {
     expect(roundsNote(2, [3, 4])).toBe('')
-    expect(roundsNote(3, [5, 6, 7])).toBe(
-      ' (the review is not converging; blocking findings per round: 5, 6, 7)',
+    expect(roundsNote(3, [5, 6, 7])).toBe('')
+    expect(roundsNote(4, [5, 6, 7, 8])).toBe(
+      ' (the review is not converging; blocking findings per round: 5, 6, 7, 8)',
     )
     expect(roundsNote(6, [9, 8, 7, 6, 5, 4])).toContain('still converging')
   })

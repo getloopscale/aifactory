@@ -67,6 +67,18 @@ export type BranchAhead = { sha: string; aheadBy: number; committedAt: Date }
 /** A full release a repository published, as its own release workflow names it. */
 export type PublishedRelease = { tag: string; url: string; publishedAt: Date }
 
+/** A workflow run a pushed tag started. */
+export type TagWorkflowRun = {
+  name: string
+  /** `queued`, `in_progress` or `completed`. */
+  status: string
+  /** How a completed run ended; null while it runs. */
+  conclusion: string | null
+  /** The commit the run is on: what the tag points at. */
+  headSha: string
+  url: string
+}
+
 /** The most pages of 100 reports `commitChecks` reads of one commit before it says it could not read them all. */
 const MAX_CHECK_PAGES = 20
 
@@ -114,8 +126,10 @@ export type CheckReport = {
 /** GitHub would not turn auto-merge on, so the pull request would never merge on its own. */
 export class AutoMergeRefused extends Error {
   /**
-   * GitHub refused because the pull request is already in clean status: its required checks passed before
-   * auto-merge was asked for, so there is nothing to wait for and it can be merged right away.
+   * GitHub refused because the pull request is already mergeable: in clean status (its required checks passed
+   * before auto-merge was asked for) or in unstable status (they passed and only a check the branch does not
+   * require is red or pending). There is nothing to wait for, so it can be merged right away; the merge itself
+   * still goes through the branch protection.
    */
   readonly pullRequestIsClean: boolean
   /** GitHub refused because the pull request is a draft: marked ready for review, it can be asked again. */
@@ -126,14 +140,14 @@ export class AutoMergeRefused extends Error {
       `GitHub would not turn auto-merge on for ${repo}#${number}: ${why}. The integration branch requires status checks, so the factory waits for them through auto-merge: enable "Allow auto-merge" and "Allow merge commits" in the repository settings, and let the GitHub App write pull requests.`,
     )
     this.name = 'AutoMergeRefused'
-    this.pullRequestIsClean = why.includes('clean status')
+    this.pullRequestIsClean = why.includes('clean status') || why.includes('unstable status')
     this.pullRequestIsDraft = why.toLowerCase().includes('draft')
   }
 }
 
 /**
  * Turns auto-merge on, pinned to `sha`, and says what follows. `waiting`: GitHub merges once the required
- * checks pass. `mergeable`: GitHub refused because the pull request is already clean, so the caller merges
+ * checks pass. `mergeable`: GitHub refused because the pull request is already clean or unstable, so the caller merges
  * it itself, pinned to the same commit. When GitHub refused because the pull request is a draft and the
  * caller gave a way to mark it ready, it is marked and asked once more. Any other refusal is thrown as it
  * came.
@@ -238,6 +252,8 @@ export type GithubApi = {
   ): Promise<string[] | undefined>
   /** The full releases (no pre-releases, no drafts) published at or after `since`, newest first. */
   releasesSince(repo: string, token: string, since: Date): Promise<PublishedRelease[]>
+  /** The workflow runs the push of the tag `tag` started, as GitHub lists them (the latest attempt of each). */
+  workflowRunsOnTag(repo: string, token: string, tag: string): Promise<TagWorkflowRun[]>
   /** Whether `ancestor` is in the history of `descendant`. */
   contains(repo: string, token: string, descendant: string, ancestor: string): Promise<boolean>
   /** The pull request opened from `head`, open or not, if there is one. */
@@ -701,6 +717,35 @@ export function createGithubApi(
         .filter((r) => !r.prerelease && !r.draft && r.published_at !== null)
         .map((r) => ({ tag: r.tag_name, url: r.html_url, publishedAt: new Date(r.published_at!) }))
         .filter((r) => r.publishedAt.getTime() >= since.getTime())
+    },
+
+    async workflowRunsOnTag(repo, token, tag) {
+      const body = (await (
+        await ensure(
+          await call(
+            repo,
+            token,
+            `/actions/runs?event=push&head_branch=${encodeURIComponent(tag)}&per_page=100`,
+          ),
+          `listing the workflow runs of ${tag} on ${repo}`,
+          [200],
+        )
+      ).json()) as {
+        workflow_runs: {
+          name: string | null
+          status: string | null
+          conclusion: string | null
+          head_sha: string
+          html_url: string
+        }[]
+      }
+      return body.workflow_runs.map((r) => ({
+        name: r.name ?? 'workflow',
+        status: r.status ?? 'queued',
+        conclusion: r.conclusion,
+        headSha: r.head_sha,
+        url: r.html_url,
+      }))
     },
 
     async contains(repo, token, descendant, ancestor) {

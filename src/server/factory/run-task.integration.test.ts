@@ -247,7 +247,8 @@ function replies(...list: IssueComment[]) {
 }
 /**
  * GitHub holds the pull request in this state by the time auto-merge is asked for: `clean` when its
- * required checks already passed, `unstable` when another check failed. It refuses both.
+ * required checks already passed, `unstable` when another check failed. It refuses both, and the factory
+ * merges either at once.
  */
 const mergeableBy = (state: 'clean' | 'unstable') =>
   githubApi.before('enableAutoMerge', (call, on) => {
@@ -1939,7 +1940,8 @@ describe('runTask review loop', () => {
     expect(row.headSha).toBe('abc123def2')
   })
 
-  it('hands the work to a person after three reviews that all ask for changes', async () => {
+  // Blocking findings that never fall get one round past MAX_ATTEMPTS (MAX_STALLED_ATTEMPTS), then a person.
+  it('hands the work to a person after four reviews that all ask for changes', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
     const reviewer = reviewerSaying(verdictJson('changes', [finding], 'still wrong'))
@@ -1950,9 +1952,9 @@ describe('runTask review loop', () => {
     )
 
     expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
-    expect(result.status === 'handoff' && result.reason).toContain('after 3 attempts')
-    expect(builder.resumed).toHaveLength(2)
-    expect(reviewer.prompts).toHaveLength(3)
+    expect(result.status === 'handoff' && result.reason).toContain('after 4 attempts')
+    expect(builder.resumed).toHaveLength(3)
+    expect(reviewer.prompts).toHaveLength(4)
     expect(seen.drafts).toEqual([true])
     expect(seen.comments).toHaveLength(1)
     expect(seen.comments[0]).toContain('draft pull request')
@@ -2002,10 +2004,10 @@ describe('runTask review loop', () => {
     expect(reviewer.prompts[1]).toContain('problem 0')
   })
 
-  it('hands over a review that is not converging: 5, 6, 7', async () => {
+  it('hands over a review that is not converging: 5, 6, 7, 8', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
-    const reviewer = reviewerSaying(...roundsOf(5, 6, 7))
+    const reviewer = reviewerSaying(...roundsOf(5, 6, 7, 8))
 
     const result = await runTask(
       deps(new FakeSandbox(changed()), { harness: builder, reviewer }),
@@ -2015,8 +2017,8 @@ describe('runTask review loop', () => {
     expect(result.status).toBe('handoff')
     const reason = result.status === 'handoff' ? result.reason : ''
     expect(reason).toContain('the review is not converging')
-    expect(reason).toContain('5, 6, 7')
-    expect(reviewer.prompts).toHaveLength(3)
+    expect(reason).toContain('5, 6, 7, 8')
+    expect(reviewer.prompts).toHaveLength(4)
   })
 
   it('hands over at the higher limit while the findings still fall, with the counts', async () => {
@@ -4815,22 +4817,18 @@ describe('the factory always makes a pre-release', () => {
     expect((done.detail as Record<string, unknown>).awaitingChecks).toBeUndefined()
   })
 
-  it('still fails the task with what to configure when the refusal is not about a clean pull request', async () => {
+  // Unstable: the required checks passed and only a check the branch does not require failed (#413).
+  it('merges at once, pinned to the verified commit, when GitHub refuses auto-merge because the pull request is unstable', async () => {
     repo().required.set('workspace', ['CI'])
     mergeableBy('unstable')
     const id = await seedTask()
 
-    await runTask(deps(new FakeSandbox(changed())), id)
+    const result = await runTask(deps(new FakeSandbox(changed())), id)
 
-    expect(seen.merges).toEqual([])
+    expect(result).toMatchObject({ status: 'done', preRelease: 'pre/7-develop' })
+    expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
-    expect(row).toMatchObject({ stage: 'failed', mergedSha: null })
-    const failed = (
-      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
-    )[0]
-    expect(String((failed.detail as Record<string, unknown>).error)).toMatch(
-      /unstable status.*Allow auto-merge/,
-    )
+    expect(row).toMatchObject({ stage: 'done', mergedSha: 'merge0001', awaitingCiSha: null })
   })
 
   describe('when the pull request is the draft a handoff left', () => {
@@ -5477,6 +5475,54 @@ describe('release', () => {
     ])
   })
 
+  it('in a repository that publishes from the tag, pushes it and releases nothing: a tag publication waits for the workflow', async () => {
+    const id = await delivered()
+    const contained = await integrated(8, 'inside01')
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, publishMode: 'tag' })
+    repo().tags.add('v1.2.3')
+
+    const result = await release(dependencies(), id, { bump: 'minor', actor: 'human' })
+
+    expect(result).toMatchObject({ tag: undefined, mergeSha: 'merge0002', publishing: 'tag' })
+    expect(seen.releases.at(-1)).toMatchObject({ tag: 'v1.3.0', prerelease: false })
+    expect(await getDb().select().from(publication)).toMatchObject([
+      {
+        taskId: id,
+        kind: 'tag',
+        tag: 'v1.3.0',
+        promotedSha: 'merge0002',
+        status: 'waiting',
+      },
+    ])
+    expect((await deliveries(id)).filter((d) => d.kind === 'release')).toEqual([])
+    expect(await stageOf(contained)).toBe('done')
+    expect(seen.closed).toEqual([])
+    const released = (
+      await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'released'))
+    )[0]
+    expect(released.detail).toMatchObject({ publishing: 'tag', tag: 'v1.3.0' })
+    // A second release is refused while the workflow of the tag has not succeeded.
+    const anchor = await resolvedWork(10, 'res0001')
+    await expect(
+      release(dependencies(), anchor, { bump: 'patch', actor: 'human' }),
+    ).rejects.toThrow(/still waits for the workflow run of v1.3.0/)
+  })
+
+  it('does not take a repository whose publish mode is not the tag for a tag publication', async () => {
+    const id = await delivered()
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, publishMode: 'none' })
+
+    const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+    expect(result.tag).toBeDefined()
+    expect(await getDb().select().from(publication)).toEqual([])
+    expect(seen.closed).toEqual([7])
+  })
+
   /** A changesets repository like theokit: a private root, one published package and one ignored app. */
   function changesetsMonorepo(changed: string[]) {
     onDevelop({ changesets: ['config.json', 'README.md'] })
@@ -6004,16 +6050,21 @@ describe('release', () => {
       expect(await waits()).toEqual([])
     })
 
-    it('still refuses the release when the refusal is not about a clean pull request', async () => {
+    it('merges the promotion at once, pinned to the head it saw, when GitHub refuses auto-merge because the pull request is unstable', async () => {
       const id = await delivered()
+      repo().tags.add('v1.2.3')
       repo().required.set('main', ['CI'])
       mergeableBy('unstable')
 
-      await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
-        /GitHub would not turn auto-merge on.*unstable status/,
-      )
-      expect(seen.merges).toHaveLength(1)
-      expect(await waits()).toMatchObject([{ status: 'refused' }])
+      const result = await release(dependencies(), id, { bump: 'minor', actor: 'human' })
+
+      expect(result).toMatchObject({ tag: 'v1.3.0', mergeSha: 'merge0002' })
+      expect(seen.merges).toEqual([
+        { number: 12, sha: 'abc123def' },
+        { number: 13, sha: 'develop0001' },
+      ])
+      expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('released')
+      expect(await waits()).toEqual([])
     })
   })
 })
