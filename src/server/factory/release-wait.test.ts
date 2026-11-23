@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { CheckReport, PullRequestDetail } from '../github/pulls'
 
 import { CI_SILENCE_MS } from './ci-wait'
-import { decideWaitingRelease } from './release-wait'
+import { AUTO_MERGE_SETTLE_MS, decideWaitingRelease } from './release-wait'
 
 const PINNED = 'dev1234beef'
 const open: PullRequestDetail = {
@@ -92,12 +92,21 @@ describe('decideWaitingRelease', () => {
     })
   })
 
-  it('refuses when somebody turned auto-merge off, because nothing would merge it', () => {
-    expect(decide({ pull: { ...open, autoMerge: false } })).toEqual({
-      kind: 'refuse',
-      reason: 'auto-merge was turned off on the release pull request, so nothing will merge it',
-      stopAutoMerge: false,
+  it('waits while auto-merge it just turned on has not shown on the pull request yet', () => {
+    // #429: GitHub reports `auto_merge` a moment after it is enabled; the first pass read it as off.
+    expect(decide({ pull: { ...open, autoMerge: false }, waitedMs: 4_000 })).toEqual({
+      kind: 'wait',
     })
+  })
+
+  it('refuses when somebody turned auto-merge off, because nothing would merge it', () => {
+    expect(decide({ pull: { ...open, autoMerge: false }, waitedMs: AUTO_MERGE_SETTLE_MS })).toEqual(
+      {
+        kind: 'refuse',
+        reason: 'auto-merge was turned off on the release pull request, so nothing will merge it',
+        stopAutoMerge: false,
+      },
+    )
   })
 
   it('refuses at once, naming them, when required checks fail: a release is never retried on its own', () => {
