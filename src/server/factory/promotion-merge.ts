@@ -1,12 +1,14 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { promotionWait, repository, task } from '../db/schema'
+import { promotionWait, publication, releaseWait, repository, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { lineHolds } from '../line/incident'
 import { autoMergeOrMergeable, type GithubApi, type OpenPullRequest } from '../github/pulls'
 
 import { errorMessage } from './error-message'
+import type { ReleaseMode } from './deliver'
+import { WORKING } from './transitions'
 import { integrationBranch, PRE_RELEASE_BRANCH } from './branches'
 import {
   decidePromotionWait,
@@ -320,4 +322,131 @@ async function adopt(
   const pinned = await pin(deps, repo, token, pull)
   if (pinned.developAutoMergeError) throw new Error(pinned.developAutoMergeError)
   return true
+}
+
+/** What a pass of `promoteResolvedWork` advanced, and the repositories it could not look at. */
+export type ResolvedPromotions = { promoted: string[]; errors: string[] }
+
+/** A release waiting for its checks, or a publication that has not finished, moves with `develop`. */
+async function releaseInFlight(db: Database, repo: string): Promise<boolean> {
+  const [wait] = await db
+    .select({ id: releaseWait.id })
+    .from(releaseWait)
+    .where(and(eq(releaseWait.repository, repo), eq(releaseWait.status, 'waiting')))
+    .limit(1)
+  const [publishing] = await db
+    .select({ id: publication.id })
+    .from(publication)
+    .where(and(eq(publication.repository, repo), eq(publication.status, 'waiting')))
+    .limit(1)
+  return !!wait || !!publishing
+}
+
+/** The repositories with work resolved with no change that no release holds yet, and nothing in flight. */
+async function idleWithResolvedWork(db: Database, defaultMode: ReleaseMode | undefined) {
+  const candidates = await db
+    .selectDistinct({
+      fullName: repository.fullName,
+      baseBranch: repository.baseBranch,
+      releaseMode: repository.releaseMode,
+    })
+    .from(task)
+    .innerJoin(repository, eq(repository.fullName, task.repository))
+    .where(
+      and(
+        eq(repository.enabled, true),
+        eq(task.stage, 'done'),
+        isNotNull(task.resolvedSha),
+        isNull(task.mergedSha),
+      ),
+    )
+    .orderBy(repository.fullName)
+  const idle: typeof candidates = []
+  for (const repo of candidates) {
+    // Only the release train of an `auto` repository promotes on its own: `manual` waits for a person and
+    // `trial` records what would be done and does nothing. A stopped line takes nothing in.
+    if ((repo.releaseMode ?? defaultMode) !== 'auto') continue
+    if (await lineHolds(db, repo.fullName, 0)) continue
+    if (await releaseInFlight(db, repo.fullName)) continue
+    const busy = await db
+      .select({ id: task.id })
+      .from(task)
+      .where(
+        and(
+          eq(task.repository, repo.fullName),
+          or(inArray(task.stage, [...WORKING]), isNotNull(task.awaitingCiSha)),
+        ),
+      )
+      .limit(1)
+    if (busy.length === 0 && !(await waitingIn(db, repo.fullName))) idle.push(repo)
+  }
+  return idle
+}
+
+/**
+ * Advances the pre-release branch for work resolved with no change. People merge straight into the
+ * integration branch, and a resolved task's commit reaches the pre-release branch only when the factory next
+ * integrates something there, so with only resolved tasks waiting nothing would promote and nothing release
+ * (the release train counts them once `develop` holds their commit). A repository with such a task, nothing
+ * working, no promotion waiting and an integration branch ahead of the pre-release branch gets it merged in,
+ * or, when GitHub will not let the factory write there, the standing promotion pull request opened and
+ * pinned as at an integration (`pinPromotion`).
+ */
+export async function promoteResolvedWork(
+  deps: PromotionDeps & {
+    github: GithubApp
+    api: Pick<GithubApi, 'branchAhead' | 'mergeBranch' | 'openPullRequest'>
+    /** The release mode of a repository that has none of its own (`FACTORY_RELEASE_MODE`). */
+    releaseMode?: ReleaseMode
+  },
+): Promise<ResolvedPromotions> {
+  const result: ResolvedPromotions = { promoted: [], errors: [] }
+  for (const repo of await idleWithResolvedWork(deps.db, deps.releaseMode)) {
+    try {
+      const { token } = await deps.github.installationToken(repo.fullName)
+      const integration = integrationBranch(repo)
+      const ahead = await deps.api.branchAhead(
+        repo.fullName,
+        token,
+        PRE_RELEASE_BRANCH,
+        integration,
+      )
+      if (!ahead || ahead.aheadBy === 0) continue
+      await advance(deps, { repository: repo.fullName, token, integration, sha: ahead.sha })
+      result.promoted.push(repo.fullName)
+    } catch (error) {
+      result.errors.push(`${repo.fullName}: ${message(error)}`)
+    }
+  }
+  return result
+}
+
+/**
+ * GitHub refusing a write to a protected branch, or one a rule guards; not a conflict, a 5xx or a network error.
+ * A 409 is the merges API's answer for a conflict, so it counts only when it says the branch is protected or
+ * wants a pull request (the fake models it so; unconfirmed against GitHub). Any other 409 is left for the next pass.
+ */
+const BRANCH_PROTECTED =
+  /^GitHub answered (?:(?:403|405|422)\b(?![\s\S]*merge conflict)|409\b(?=[\s\S]*(?:protected branch|through a pull request))(?![\s\S]*merge conflict))/i
+
+export async function advance(
+  deps: PromotionDeps & { api: Pick<GithubApi, 'mergeBranch' | 'openPullRequest'> },
+  input: { repository: string; token: string; integration: string; sha: string },
+) {
+  const { repository, token, integration } = input
+  try {
+    await deps.api.mergeBranch(repository, token, PRE_RELEASE_BRANCH, input.sha)
+  } catch (error) {
+    // Only a branch GitHub will not let the factory write to is proposed as a pull request; a conflict or a
+    // failing GitHub is left for the next pass.
+    if (!BRANCH_PROTECTED.test(message(error))) throw error
+    await deps.api.openPullRequest(repository, token, {
+      head: integration,
+      base: PRE_RELEASE_BRANCH,
+      title: `Pre-release: ${integration} into ${PRE_RELEASE_BRANCH}`,
+      body: `${PRE_RELEASE_BRANCH} accepts changes only through a pull request, so the factory could not advance it (${message(error)}). Merging this pull request publishes what has been resolved into ${integration}.`,
+    })
+    const pinned = await pinPromotion(deps, { repository, token, integration })
+    if (pinned.developAutoMergeError) throw new Error(pinned.developAutoMergeError)
+  }
 }

@@ -12,7 +12,7 @@ import { FakeGithub } from '../../test/fake-github'
 import { pollAwaitingIntegrations, type AwaitCiDeps } from './await-ci'
 import { advancePreRelease } from './integration'
 import { PROMOTION_HOLD_MS } from './promotion-hold'
-import { adoptPromotions, pollPromotionWaits } from './promotion-merge'
+import { adoptPromotions, pollPromotionWaits, promoteResolvedWork } from './promotion-merge'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -384,5 +384,96 @@ describe('an integration a promotion held out', () => {
     expect(pass.merged).toEqual([])
     expect(pinned()).toEqual([{ number: 12, sha: VERIFIED }])
     expect(await row(id)).toMatchObject({ awaitingCiSha: VERIFIED, integrationHeld: false })
+  })
+})
+
+describe('promoteResolvedWork', () => {
+  const run = (releaseMode?: 'manual' | 'trial' | 'auto') =>
+    promoteResolvedWork({
+      db: getDb(),
+      github,
+      api,
+      now: () => NOW,
+      releaseMode: releaseMode ?? 'auto',
+    })
+
+  async function resolvedWork(
+    set: Partial<typeof task.$inferInsert> = {},
+    mode?: 'manual' | 'trial' | 'auto',
+  ) {
+    const db = getDb()
+    await db.insert(repository).values({ fullName: REPO, enabled: true, releaseMode: mode })
+    const [i] = await db
+      .insert(ingress)
+      .values({
+        deliveryId: 'd-resolved',
+        event: 'issues',
+        payload: {},
+        outcome: 'task_created',
+        code: 'issue_labeled',
+        reason: 'r',
+      })
+      .returning({ id: ingress.id })
+    await db.insert(task).values({
+      ingressId: i.id,
+      repository: REPO,
+      issueNumber: 7,
+      issueTitle: 'Already fixed',
+      stage: 'done',
+      resolvedSha: INTEGRATED,
+      ...set,
+    })
+  }
+
+  beforeEach(() => void repo().ahead('develop', 'workspace', 2))
+
+  it('merges the integration branch into develop when only resolved work waits', async () => {
+    repo().restricted.delete('develop')
+    await resolvedWork()
+    expect((await run()).promoted).toEqual([REPO])
+    expect(api.answered('mergeBranch')).toHaveLength(1)
+  })
+
+  it('leaves a trial repository untouched, whether trial is its own mode or the default', async () => {
+    repo().restricted.delete('develop')
+    await resolvedWork({}, 'trial')
+    expect((await run('auto')).promoted).toEqual([])
+    await getDb().update(repository).set({ releaseMode: null })
+    expect((await run('trial')).promoted).toEqual([])
+    expect(api.answered('mergeBranch')).toHaveLength(0)
+    expect(api.answered('openPullRequest')).toHaveLength(0)
+  })
+
+  it('promotes a repository whose own mode is auto, and one that takes auto by default', async () => {
+    repo().restricted.delete('develop')
+    await resolvedWork({}, 'auto')
+    expect((await run('manual')).promoted).toEqual([REPO])
+    await getDb().update(repository).set({ releaseMode: null })
+    expect((await run('auto')).promoted).toEqual([REPO])
+  })
+
+  it('opens and pins the promotion when develop takes only pull requests', async () => {
+    await resolvedWork()
+    expect((await run()).promoted).toEqual([REPO])
+    expect(pinned()).toHaveLength(1)
+    expect(await waits()).toHaveLength(1)
+  })
+
+  it('leaves a manual repository, a repository with a task working and one with a promotion waiting', async () => {
+    await resolvedWork({}, 'manual')
+    expect((await run()).promoted).toEqual([])
+    await getDb().update(repository).set({ releaseMode: 'auto' })
+    await getDb().update(task).set({ awaitingCiSha: INTEGRATED })
+    expect((await run()).promoted).toEqual([])
+    await getDb().update(task).set({ awaitingCiSha: null })
+    await getDb().insert(promotionWait).values({
+      repository: REPO,
+      pullRequestNumber: 1,
+      pullRequestUrl: 'u',
+      sha: INTEGRATED,
+      holdUntil: NOW,
+    })
+    expect((await run()).promoted).toEqual([])
+    expect(api.answered('mergeBranch')).toHaveLength(0)
   })
 })

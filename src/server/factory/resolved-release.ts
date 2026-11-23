@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, eq, gt, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
@@ -16,8 +16,17 @@ import { enterStage } from './stages'
  * panel, and no tag carries it, so what makes it released is its resolving commit reaching the release
  * branch. A release closes the issue that is still open (`afterRelease`).
  */
+// The column is written out: drizzle drops the table qualifier in an UPDATE, and a bare "id" would bind to
+// `stage_event.id` inside the subquery.
+export const claimedUnrecorded = and(
+  eq(task.stage, 'released'),
+  sql`not exists (select 1 from stage_event e where e.task_id = "task"."id" and e.stage = 'released')`,
+)
+
 const resolvedNotReleased = and(
-  eq(task.stage, 'done'),
+  // A release that claimed the task as its anchor moved it to `released` with no stage event: the
+  // shipment of its commit records the stage and closes the issue.
+  or(eq(task.stage, 'done'), claimedUnrecorded),
   isNotNull(task.resolvedSha),
   isNull(task.mergedSha),
 )
@@ -36,6 +45,8 @@ export type ReleaseBranchView = {
   actor: string
   /** The commit a release promoted, when a release is what brought the commit there. */
   mergeSha?: string
+  /** Added to the `released` stage of every task: the tags of a release. */
+  detail?: Record<string, unknown>
   /**
    * Runs for each task as it is released, with its issue. A release that has a tag uses it to tell the
    * issue where the fix is; a catch-up has none. It runs after the stage changed. It returns what went wrong, never throws.
@@ -80,6 +91,7 @@ async function releaseEach(
         actor: view.actor,
         releaseBranch: view.releaseBranch,
         resolvedSha: sha,
+        ...view.detail,
         ...(view.mergeSha ? { mergeSha: view.mergeSha } : {}),
       })
       // The issue is told only once the task is released: a transition that failed leaves it for a retry.
