@@ -5,7 +5,7 @@ import { decision, releaseWait, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
 
-import { completeRelease, latestPreRelease } from './deliver'
+import { completeRelease, isResolvedAnchor, latestPreRelease } from './deliver'
 import { decideWaitingRelease, type ReleaseStep } from './release-wait'
 
 export type AwaitReleaseDeps = {
@@ -46,7 +46,7 @@ async function finish(
   try {
     const [row] = await deps.db.select().from(task).where(eq(task.id, wait.taskId))
     const pre = await latestPreRelease(deps.db, wait.taskId)
-    if (!pre) throw new Error('there is no pre-release for this work')
+    if (!pre && !isResolvedAnchor(row)) throw new Error('there is no pre-release for this work')
     await completeRelease(deps, {
       row,
       pre,

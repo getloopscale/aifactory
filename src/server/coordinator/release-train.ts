@@ -28,6 +28,9 @@ export type ReleaseAttempt = {
   reason: string
 }
 
+/** A task resolved with no change: it is released when a promotion holds its resolving commit. */
+export type ResolvedCandidate = { taskId: number; issueNumber: number; resolvedSha: string }
+
 /** What is known of one repository when the train looks at it. */
 export type RepositoryReleaseFacts = {
   repository: string
@@ -35,6 +38,8 @@ export type RepositoryReleaseFacts = {
   mode: ReleaseMode
   /** Its tasks with integrated work that no release holds (`done` with a merge), oldest first. */
   releasable: { taskId: number; issueNumber: number }[]
+  /** Its tasks resolved with no change that no release holds, whether or not `develop` holds their commit. */
+  resolvedCandidates?: ResolvedCandidate[]
   /** Its tasks running or waiting for the integration branch's checks. */
   working: number
   /** Minutes since the oldest of `releasable` was delivered. */
@@ -57,6 +62,8 @@ export type RepositoryReleaseFacts = {
    * means integrated work has not been promoted into it yet, so there is nothing to release.
    */
   ahead?: number
+  /** Which of `resolvedCandidates` the head of the pre-release branch holds; read with `head`. */
+  resolved?: Read<ResolvedCandidate[]>
   attempts?: ReleaseAttempt[]
   /** Why the release that waited for the release branch's checks on this head was refused, if it was. */
   waitRefusal?: string
@@ -205,11 +212,22 @@ const publicationHolds = (p: WaitingPublication | undefined) =>
  */
 export const trainHolds = (f: RepositoryReleaseFacts): boolean =>
   f.mode === 'manual' ||
-  f.releasable.length === 0 ||
+  (f.releasable.length === 0 && (f.resolvedCandidates ?? []).length === 0) ||
   (f.working > 0 && (f.waitedMinutes ?? 0) < RELEASE_MAX_WAIT_MINUTES) ||
   f.inFlight !== undefined ||
   publicationHolds(f.publication) ||
   f.branch.state === 'watching'
+
+/**
+ * What a release of the repository would carry: its integrated tasks, then the resolved ones the head of the
+ * pre-release branch holds. The first anchors the release, so integrated work comes first.
+ */
+export const eligibleTasks = (
+  f: RepositoryReleaseFacts,
+): { taskId: number; issueNumber: number }[] => [
+  ...f.releasable,
+  ...(f.resolved?.read ? f.resolved.value : []),
+]
 
 const short = (sha: string) => sha.slice(0, 7)
 
@@ -244,18 +262,25 @@ const unknown = (taskId: number, head: string, evidence: string) => ({
 export function attemptDue(f: RepositoryReleaseFacts) {
   if (trainHolds(f) || !f.head?.read || f.ahead === 0) return undefined
   if (f.branch.state === 'red' && !redIsFixed(f)) return undefined
+  if (eligibleTasks(f).length === 0) return undefined
   return nextAttempt(f.attempts ?? [], f.waitRefusal)
 }
 
 /** The repository's release exception, on its oldest task with integrated work, or none. */
 export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | undefined {
   if (trainHolds(f)) return undefined
-  const taskId = f.releasable[0].taskId
+  const taskId = (f.releasable[0] ?? f.resolvedCandidates?.[0])!.taskId
   if (!f.head?.read)
     return unknown(taskId, 'none', notRead(f.head, 'the head of the pre-release branch'))
   if (f.ahead === 0) return undefined
+  if (f.releasable.length === 0 && f.resolved?.read === false)
+    return unknown(taskId, f.head.value, notRead(f.resolved, 'the commits of the resolved tasks'))
   const head = f.head.value
-  const at = { taskId, head, ...(f.mode === 'trial' ? { trialOnly: true as const } : {}) }
+  const at = {
+    taskId: eligibleTasks(f)[0]?.taskId ?? taskId,
+    head,
+    ...(f.mode === 'trial' ? { trialOnly: true as const } : {}),
+  }
   if (f.branch.state === 'red' && !redIsFixed(f)) {
     if (f.recovery?.read === false)
       return unknown(taskId, head, notRead(f.recovery, 'the checks of the red release branch'))
@@ -264,12 +289,14 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   const kind = attemptDue(f)
   if (!kind) return undefined
   if (!f.labels?.read) return unknown(taskId, head, notRead(f.labels, 'the labels of the issues'))
-  const issues = f.releasable.map((t) => `#${t.issueNumber}`).join(', ')
+  const tasks = eligibleTasks(f)
+  const issues = tasks.map((t) => `#${t.issueNumber}`).join(', ')
+  const kinds = f.releasable.length === tasks.length ? 'integrated issues' : 'issues'
   return {
     kind,
     ...at,
     ...(f.branch.state === 'red' ? { verifiedHead: head } : {}),
-    evidence: `${f.releasable.length} integrated issues wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
+    evidence: `${tasks.length} ${kinds} wait for a release of ${f.repository} at ${short(head)}: ${issues}`,
     released: f.labels.value,
   }
 }

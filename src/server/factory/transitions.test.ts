@@ -278,6 +278,14 @@ describe('approved work while the factory merges it', () => {
   )
   const facts = { headSha: 'abc' }
 
+  it('releases work resolved with no change, by its resolving commit, but not unintegrated work', () => {
+    expect(acting('release', { resolvedSha: 'r1' })).toEqual({ done: 'release' })
+    expect(outcome({ stage: 'done', headSha: 'abc' }, 'release').kind).toBe('refused')
+    expect(outcome({ stage: 'released', resolvedSha: 'r1' }, 'release')).toEqual(
+      refused('this task was already released'),
+    )
+  })
+
   it.each(['approve', 'request_changes', 'retry', 'resolve', 'release'] as const)(
     'refuses %s from a person, saying the work is being merged',
     (event) => {

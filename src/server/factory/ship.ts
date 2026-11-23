@@ -195,6 +195,7 @@ async function shipResolved(
     releaseBranch: s.releaseBranch,
     actor: s.actor,
     mergeSha: s.promotedSha,
+    detail: { tag: s.tags.map((tag) => tag.tag).join(', '), url: s.tags[0].url },
   })
   shipped.resolved = resolved.released
   shipped.issueErrors.push(...(resolved.issueErrors ?? []))
