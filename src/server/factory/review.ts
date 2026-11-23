@@ -33,20 +33,28 @@ export function converging(counts: number[]): boolean {
   return before !== undefined && last !== undefined && last < before
 }
 
+/** Did the blocking findings stay level in the last round, after only falling before (one flat round is allowed)? */
+export function levelOnce(counts: number[]): boolean {
+  const last = counts.length - 1
+  if (last < 1 || counts[last] !== counts[last - 1]) return false
+  return counts.slice(0, last).every((n, i, all) => i === 0 || n < all[i - 1])
+}
+
 /**
  * May a review that asked for changes at `attempt` send the work back for another round? The first
- * `MAX_ATTEMPTS` always may; after that only while the blocking findings fell in the last round, up to
+ * `MAX_ATTEMPTS` always may; after that only while the blocking findings fell in the last round, or stayed level for the first time, up to
  * `MAX_CONVERGING_ATTEMPTS`. `counts` has the blocking findings of each review round so far.
  */
 export function reviewAllowsRework(attempt: number, counts: number[]): boolean {
   if (attempt < MAX_ATTEMPTS) return true
-  return attempt < MAX_CONVERGING_ATTEMPTS && converging(counts)
+  return attempt < MAX_CONVERGING_ATTEMPTS && (converging(counts) || levelOnce(counts))
 }
 
 /** What a handoff says about the rounds, once the first limit is passed; empty before that. */
 export function roundsNote(attempt: number, counts: number[]): string {
   if (attempt < MAX_ATTEMPTS || counts.length === 0) return ''
   const per = `blocking findings per round: ${counts.join(', ')}`
+  if (levelOnce(counts)) return ` (the blocking findings stayed level; this is the limit; ${per})`
   return converging(counts)
     ? ` (still converging, but this is the limit; ${per})`
     : ` (the review is not converging; ${per})`

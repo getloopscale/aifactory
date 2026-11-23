@@ -27,6 +27,7 @@ import {
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
+import { prepareDeclaredPackageManager } from './package-manager'
 import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
 import { githubEgress, renewGithubCredential } from './credential-renewal'
@@ -507,6 +508,7 @@ export class Run {
     })
 
     const { repoDir, baseSha } = await prep.step('clone', () => Run.checkout(c, sandbox.backend))
+    await prepareDeclaredPackageManager(sandbox.backend, repoDir)
     await prep.step('harness', async () => {
       for (const agent of agents) await agent.prepare?.(sandbox.backend)
     })
