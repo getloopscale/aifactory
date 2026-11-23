@@ -19,6 +19,9 @@ export const MAX_ATTEMPTS = 3
 /** The reviews a task gets while its blocking findings keep going down from one round to the next. */
 export const MAX_CONVERGING_ATTEMPTS = 6
 
+/** The reviews a task gets when its blocking findings did not fall: one more round than `MAX_ATTEMPTS`. */
+export const MAX_STALLED_ATTEMPTS = MAX_ATTEMPTS + 1
+
 /** The finding the factory adds itself for a file the plan does not cover. */
 export const OUTSIDE_THE_PLAN = 'changed outside the plan'
 
@@ -42,17 +45,18 @@ export function levelOnce(counts: number[]): boolean {
 
 /**
  * May a review that asked for changes at `attempt` send the work back for another round? The first
- * `MAX_ATTEMPTS` always may; after that only while the blocking findings fell in the last round, or stayed level for the first time, up to
- * `MAX_CONVERGING_ATTEMPTS`. `counts` has the blocking findings of each review round so far.
+ * `MAX_ATTEMPTS` always may, and so does one more (`MAX_STALLED_ATTEMPTS`) when the findings did not fall;
+ * after that only while they fell in the last round, or stayed level for the first time after only falling, up
+ * to `MAX_CONVERGING_ATTEMPTS`. `counts` has the blocking findings of each review round so far.
  */
 export function reviewAllowsRework(attempt: number, counts: number[]): boolean {
-  if (attempt < MAX_ATTEMPTS) return true
+  if (attempt < MAX_STALLED_ATTEMPTS) return true
   return attempt < MAX_CONVERGING_ATTEMPTS && (converging(counts) || levelOnce(counts))
 }
 
 /** What a handoff says about the rounds, once the first limit is passed; empty before that. */
 export function roundsNote(attempt: number, counts: number[]): string {
-  if (attempt < MAX_ATTEMPTS || counts.length === 0) return ''
+  if (attempt < MAX_STALLED_ATTEMPTS || counts.length === 0) return ''
   const per = `blocking findings per round: ${counts.join(', ')}`
   if (levelOnce(counts)) return ` (the blocking findings stayed level; this is the limit; ${per})`
   return converging(counts)
