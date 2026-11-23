@@ -88,6 +88,24 @@ describe('whenSlotFree', () => {
     expect(c.slept()).toBe(3 * SLOT_WAIT_MS)
   })
 
+  it('waits past the default limit when told to wait without one', async () => {
+    const c = clock()
+    let calls = 0
+    const attempts = SLOT_LIMIT_MS / SLOT_WAIT_MS + 5
+
+    const got = await whenSlotFree(
+      async () => {
+        calls += 1
+        if (calls <= attempts) throw LIMIT
+        return 'sandbox'
+      },
+      { now: c.now, sleep: c.sleep, limitMs: Infinity },
+    )
+
+    expect(got).toBe('sandbox')
+    expect(c.slept()).toBeGreaterThan(SLOT_LIMIT_MS)
+  })
+
   it('stops waiting when the case is abandoned', async () => {
     const c = clock()
     const controller = new AbortController()
