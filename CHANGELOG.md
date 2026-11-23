@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A release is no longer refused because the first pass after `release()` read its auto-merge as off before GitHub showed it: the release waits up to two minutes for it, and only then refuses. A refused release that GitHub merged anyway left no publication behind, so its Version Packages pull request never opened (#429).
 - A run that waited a long time for a sandbox no longer clones or pushes with a GitHub token that already ended: the sandbox gets a token minted as soon as it starts, on the first session and on a renewed one (#424)
 - A release no longer announces work it does not contain. `release()` refuses a task whose merge the head of the release pull request does not hold, the way it already refused a resolved task's commit, so an integration that has not reached `develop` is no longer marked released, nor its issue closed, on a version without it. The release train anchors on, and counts, only the integrated tasks whose merge the head of `develop` holds, comparing them only when a release is due (#427)
 - The supervisor no longer reports as stalled a run whose worker still holds its job, until the longest a run may take. A run that waited inside a step for a sandbox slot was retried while it was still alive, so two workers ran the task and one reaped the other's sandbox (#422)
