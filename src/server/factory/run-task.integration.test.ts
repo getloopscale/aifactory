@@ -2002,10 +2002,10 @@ describe('runTask review loop', () => {
     expect(reviewer.prompts[1]).toContain('problem 0')
   })
 
-  it('hands over a review that is not converging: 5, 6, 7', async () => {
+  it('hands over a review that is not converging: 5, 6, 7, 8', async () => {
     const id = await seedTask()
     const builder = resumableBuilder()
-    const reviewer = reviewerSaying(...roundsOf(5, 6, 7))
+    const reviewer = reviewerSaying(...roundsOf(5, 6, 7, 8))
 
     const result = await runTask(
       deps(new FakeSandbox(changed()), { harness: builder, reviewer }),
@@ -2015,8 +2015,8 @@ describe('runTask review loop', () => {
     expect(result.status).toBe('handoff')
     const reason = result.status === 'handoff' ? result.reason : ''
     expect(reason).toContain('the review is not converging')
-    expect(reason).toContain('5, 6, 7')
-    expect(reviewer.prompts).toHaveLength(3)
+    expect(reason).toContain('5, 6, 7, 8')
+    expect(reviewer.prompts).toHaveLength(4)
   })
 
   it('hands over at the higher limit while the findings still fall, with the counts', async () => {
