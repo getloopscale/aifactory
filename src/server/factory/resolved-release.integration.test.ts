@@ -9,7 +9,7 @@ import { ingress, repository, stageEvent, task } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { FakeGithub } from '../../test/fake-github'
 
-import { catchUpResolved, resolvedCatchUp } from './resolved-release'
+import { catchUpResolved, claimedUnrecorded, resolvedCatchUp } from './resolved-release'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -213,10 +213,7 @@ describe('catchUpResolved', () => {
       if (repo === 'paulo/gone') throw new Error('404 comparing aaa111 with main on paulo/gone')
     })
 
-    const result = await catchUpResolved(
-      { db: getDb(), app: gh.app, api: gh.api },
-      { after: 0, limit: 10 },
-    )
+    const result = await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
 
     expect(result.released).toEqual([fine])
     expect(result.errors).toEqual([
@@ -249,5 +246,41 @@ describe('catchUpResolved', () => {
     await catchUpResolved({ db: getDb(), ...gh }, { after: 0, limit: 10 })
 
     expect(gh.api.repo('paulo/app').issue(1).comments).toEqual([])
+  })
+})
+
+describe('a resolved task claimed as the anchor of a release', () => {
+  it('is released by catch-up, and its issue closed once, when its commit reached the release branch', async () => {
+    const g = fakeGithub({ 'paulo/app:main': ['r1'] })
+    g.api.repo('paulo/app').issue(5).state = 'open'
+    // `release()` moved it to `released` without a stage event.
+    const id = await seed('paulo/app', 5, { stage: 'released', resolvedSha: 'r1' })
+    const first = await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })
+    expect(first.released).toEqual([id])
+    expect(g.api.repo('paulo/app').issue(5).state).toBe('closed')
+    // A second pass finds it released: nothing more is said to the issue.
+    const second = await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })
+    expect(second.released).toEqual([])
+  })
+
+  it('is left alone once its release was recorded', async () => {
+    const g = fakeGithub({ 'paulo/app:main': ['r1'] })
+    const id = await seed('paulo/app', 6, { stage: 'released', resolvedSha: 'r1' })
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'released', detail: null })
+    expect(
+      (await catchUpResolved({ db: getDb(), ...g }, { after: 0, limit: 10 })).released,
+    ).toEqual([])
+  })
+
+  it('is given back by an UPDATE only while no released event exists (the guard binds to the task row)', async () => {
+    const unrecorded = await seed('paulo/app', 7, { stage: 'released', resolvedSha: 'r1' })
+    const recorded = await seed('paulo/app', 8, { stage: 'released', resolvedSha: 'r1' })
+    await getDb().insert(stageEvent).values({ taskId: recorded, stage: 'released', detail: null })
+    const given = await getDb()
+      .update(task)
+      .set({ stage: 'done' })
+      .where(claimedUnrecorded)
+      .returning({ id: task.id })
+    expect(given.map((r) => r.id)).toEqual([unrecorded])
   })
 })
