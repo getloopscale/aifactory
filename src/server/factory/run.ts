@@ -27,6 +27,7 @@ import {
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
+import { prepareDeclaredPackageManager } from './package-manager'
 import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
 import { githubEgress, renewGithubCredential } from './credential-renewal'
@@ -330,7 +331,10 @@ export class Run {
     const snapshotId = await this.sandbox.snapshot!()
     let restored: IsolatedSandbox
     try {
-      restored = await restoreIsolatedSandbox(deps.sandbox, snapshotId, spec)
+      restored = await restoreIsolatedSandbox(deps.sandbox, snapshotId, spec, {
+        limitMs: Infinity,
+        signal: this.c.signal,
+      })
     } catch (error) {
       await deps.sandbox.deleteSnapshot?.(snapshotId).catch(() => {})
       throw error
@@ -431,6 +435,25 @@ export class Run {
    * prepares the agents. The agents come from the issue's labels, and each signs its own calls: its
    * secret is read here, on the host, and becomes a firewall rule, so the sandbox never holds one.
    */
+  /**
+   * Creates the run's sandbox, or restores it when the run resumes. A run waits for a slot as long as it holds its
+   * job (#405): only an abort ends the wait. The run's time starts when it has a sandbox, not while it waited.
+   */
+  static async startSandbox(
+    c: RunContext,
+    spec: SandboxSpec,
+    prep: Preparation,
+  ): Promise<{ started: IsolatedSandbox; startedAt: number }> {
+    const { deps, resuming } = c
+    const slot = { limitMs: Infinity, signal: c.signal }
+    const started = await prep.step('sandbox', () =>
+      resuming
+        ? restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec, slot)
+        : createIsolatedSandbox(deps.sandbox, spec, slot),
+    )
+    return { started, startedAt: Date.now() }
+  }
+
   static async open(given: RunContext): Promise<Run> {
     const prep = given.preparation ?? new Preparation(given.taskId)
     const c = await prep.step('branches', async () => {
@@ -473,12 +496,7 @@ export class Run {
     const sandboxRun = randomUUID()
     await deps.db.update(task).set({ sandboxRun }).where(eq(task.id, c.taskId))
     spec.owner = { owner: 'task', taskId: c.taskId, run: sandboxRun }
-    const startedAt = Date.now()
-    const started = await prep.step('sandbox', () =>
-      resuming
-        ? restoreIsolatedSandbox(deps.sandbox, resuming.snapshotId, spec)
-        : createIsolatedSandbox(deps.sandbox, spec),
-    )
+    const { started, startedAt } = await Run.startSandbox(c, spec, prep)
     c.state.sandbox = started
     const sandbox = Run.withCredentials(c, started, spec.egress)
     c.state.sandbox = sandbox
@@ -490,6 +508,7 @@ export class Run {
     })
 
     const { repoDir, baseSha } = await prep.step('clone', () => Run.checkout(c, sandbox.backend))
+    await prepareDeclaredPackageManager(sandbox.backend, repoDir)
     await prep.step('harness', async () => {
       for (const agent of agents) await agent.prepare?.(sandbox.backend)
     })
