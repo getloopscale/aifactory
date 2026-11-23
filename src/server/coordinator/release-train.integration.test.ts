@@ -161,6 +161,21 @@ describe('the release train in a repository in auto', () => {
     expect(await stageOf(newer)).toBe('released')
   })
 
+  it('anchors the release on the oldest task develop holds, and leaves one whose merge has not reached it', async () => {
+    await enable('auto')
+    const notYet = await integrated()
+    const held = await integrated()
+    const [late] = await getDb().select().from(task).where(eq(task.id, notYet))
+    repo().unreachable.add(late.mergedSha!)
+
+    const result = await coordinate(deps(), 'auto')
+
+    expect(result).toMatchObject({ applied: 1, refused: 0, failed: 0 })
+    expect(await actions()).toMatchObject([{ taskId: held, action: 'release', outcome: 'applied' }])
+    expect(await stageOf(held)).toBe('released')
+    expect(await stageOf(notYet)).toBe('done')
+  })
+
   it('records the release as the coordinator, never as a person', async () => {
     await enable('auto')
     const id = await integrated()
