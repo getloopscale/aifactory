@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The review guards leave tests that go with a module the issue removes to the reviewer. A deleted test file whose module of the same name the change also deletes, and cases a test file loses when it stops importing from a module, are minor when the issue names that module, so a review that agrees with the removal converges instead of ending in a handoff (#420)
 - The scheduler starts a run that continues a task (sent back, resumed or merging the base) before a first run of the same priority. A run sent back for a conflict no longer waits behind every new issue and conflicts again (#418)
 - A pull request whose required checks passed while a check the branch does not require was red or pending (GitHub's `unstable` status) is merged at once, like a clean one, instead of failing the integration or refusing the release (#413)
 - Adding the `factory` label back to an issue whose task was cancelled, failed or handed over starts the task over: it returns to the queue with a stage event that says who labelled it, and its run is queued. Before, the delivery was recorded as `task_exists` and the issue stayed open with the label and no work (#400)

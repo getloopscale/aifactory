@@ -136,7 +136,7 @@ function caseFacts(r: Retitles): { removes: string[]; retitle: string | undefine
   return { removes, retitle }
 }
 
-type Issue = { labels: string[]; title: string; body: string }
+export type Issue = { labels: string[]; title: string; body: string }
 
 /** The issue asks for it: its text names the file, or one of the tests the change removes. */
 function issueNames(issue: Issue, path: string, removedCases: string[]): boolean {
@@ -147,6 +147,35 @@ function issueNames(issue: Issue, path: string, removedCases: string[]): boolean
     text.includes(base) ||
     removedCases.some((name) => name.length >= 6 && text.includes(name))
   )
+}
+
+const IMPORT_FROM = /\bfrom\s+['"]([^'"]+)['"]/
+
+/** A module's file name without its extension: `../src/tui/frames.js` is `frames`. */
+export function moduleStem(path: string): string {
+  return path.slice(path.lastIndexOf('/') + 1).split('.')[0]
+}
+
+/** The issue names the module by its file name (`frames.ts`), and the name is long enough to mean it. */
+export function issueNamesModule(issue: Issue, stem: string): boolean {
+  return (
+    stem.length >= 4 &&
+    new RegExp(`(^|[^\\w-])${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.[a-z]+\\b`).test(
+      `${issue.title}\n${issue.body}`,
+    )
+  )
+}
+
+/**
+ * A module the file stopped importing something from, when the issue names it: the cases that went
+ * tested what the issue moves out of the code, so they may have gone with it.
+ */
+function droppedNamedImport(file: FilePatch, issue: Issue): string | undefined {
+  return file.removed
+    .map((line) => IMPORT_FROM.exec(line)?.[1])
+    .filter((module): module is string => module !== undefined)
+    .map(moduleStem)
+    .find((stem) => issueNamesModule(issue, stem))
 }
 
 /**
@@ -193,11 +222,16 @@ export function testWeakening(input: { patch: string; issue: Issue }): Finding[]
       continue
     }
     const named = issueNames(input.issue, file.path, removedCases)
+    const module = named ? undefined : droppedNamedImport(file, input.issue)
     findings.push({
-      severity: named ? 'minor' : isBugFix ? 'blocker' : 'major',
+      severity: named || module ? 'minor' : isBugFix ? 'blocker' : 'major',
       file: file.path,
       issue: `the change weakens a test that was there before it: it ${[...facts, ...(retitle ? [retitle] : [])].join('; ')}${
-        named ? '; the issue names it, so judge whether the issue asks for this' : ''
+        named
+          ? '; the issue names it, so judge whether the issue asks for this'
+          : module
+            ? `; the file stops importing from ${module}, and the issue names the module, so judge whether these tests went with the code the issue removes`
+            : ''
       }`,
     })
   }
