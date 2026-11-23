@@ -111,7 +111,6 @@ describe('the transition table', () => {
       [
         'hand_over',
         'integrate',
-        'issue_labeled',
         'issue_comment_created',
         'pull_request_comment_created',
         'pull_request_review_submitted',

@@ -101,7 +101,7 @@ reads that file, not a convention.
   `cancel` (`ingest/withdraw.ts`, in the same transaction): the `cancelled` stage event names why, and the
   task's queued jobs that no worker ever took are deleted. A run records its stages with `enterRunStage`
   (`factory/stages.ts`), which asks `transitions.ts` (`run_step`) and throws `TaskCancelled` for a cancelled task, so
-  the run stops at its next stage, records nothing more and does not fail it. Nothing acts on the other routed deliveries yet. A new event is a new entry in `ROUTES` with a
+  the run stops at its next stage, records nothing more and does not fail it. An issue that receives the label again starts its cancelled, failed or handed-over task over when `outcome()` says `start_over` (`ingest/restart.ts`, in the same transaction, with a job key of its own). Nothing acts on the other routed deliveries yet. A new event is a new entry in `ROUTES` with a
   Zod schema that produces its intent, and the setup report reads `ROUTED_EVENTS` to say which events the
   App does not subscribe to. Any other event or action keeps the code it always had.
 - **A labelled issue is not permission.** The App is installed on every repository of the account, so ingestion

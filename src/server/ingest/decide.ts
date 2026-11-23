@@ -235,6 +235,8 @@ export type IngressDecision =
       repository: string
       issueNumber: number
       issueTitle: string
+      /** Who added the label or opened the issue, when the delivery names a sender. */
+      actorLogin: string | null
     }
   | { accept: false; code: RoutedCode; reason: string; repository: string; intent: RoutedIntent }
   | { accept: false; code: IgnoreCode; reason: string; repository: string | null }
@@ -280,6 +282,7 @@ function decideIssues(payload: unknown): IngressDecision {
     repository: repository.full_name,
     issueNumber: issue.number,
     issueTitle: issue.title,
+    actorLogin: senderPayload.safeParse(payload).data?.sender.login ?? null,
   } as const
 
   if (action === 'labeled') {

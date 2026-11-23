@@ -26,6 +26,27 @@ describe('decideIngress', () => {
     })
   })
 
+  it('names who added the label, so a task started over says who started it', () => {
+    const decision = decideIngress('issues', {
+      action: 'labeled',
+      label: { name: 'factory' },
+      issue: issue(['factory']),
+      repository,
+      sender: { login: 'alice' },
+    })
+    expect(decision).toMatchObject({ accept: true, actorLogin: 'alice' })
+  })
+
+  it('takes a label delivery that names no sender, with nobody as who added it', () => {
+    const decision = decideIngress('issues', {
+      action: 'labeled',
+      label: { name: 'factory' },
+      issue: issue(['factory']),
+      repository,
+    })
+    expect(decision).toMatchObject({ accept: true, actorLogin: null })
+  })
+
   it('takes an issue opened already carrying the factory label', () => {
     const decision = decideIngress('issues', {
       action: 'opened',
