@@ -140,6 +140,7 @@ export function entriesOf(runs: ReadRun[]): QueuedEntry[] {
       priority: priorityOf(r.issue.value.labels),
       bug: isBug(r.issue.value.labels),
       unblocks: unblocks.get(r.taskId) ?? 0,
+      continues: !r.firstRun,
       queuedAt: r.queuedAt,
       availableAt: r.availableAt,
     }))
