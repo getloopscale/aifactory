@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { conflictNote } from '../panel/actions'
 
-import { decide, MAX_APPLIED, seen, UNKNOWN_LIMIT_MS, type RecordedAction } from './decide'
+import {
+  decide,
+  MAX_APPLIED,
+  rerunDone,
+  seen,
+  UNKNOWN_LIMIT_MS,
+  type RecordedAction,
+} from './decide'
 import type { TaskException } from './exceptions'
 
 const exception = (over: Partial<TaskException> = {}): TaskException => ({
@@ -709,5 +716,35 @@ describe('a publication that keeps the release train waiting', () => {
       recorded({ exceptionKind: 'checks_red', action: 'send_back', headSha: 'c2' }),
     ]
     expect(decide(stalled, two).reason).toContain('publication 52')
+  })
+})
+
+describe('rerunning the checks that passed on the own run of the factory', () => {
+  const rerunnable = exception({ rerunnable: true, head: 'abc1234def@9' })
+  const rerun = (over: Partial<RecordedAction> = {}) =>
+    recorded({ action: 'rerun_checks', exceptionKind: 'checks_unchanged', ...over })
+
+  it('reruns the failed jobs of a commit GitHub failed and the factory passed', () => {
+    expect(decide(rerunnable, [])).toMatchObject({ action: 'rerun_checks' })
+  })
+
+  it('reruns once per commit, whatever the identity of the exception', () => {
+    const before = rerun({ headSha: 'abc1234def@3' })
+    expect(rerunDone([before], 'abc1234def@9')).toBe(true)
+    expect(rerunDone([before], 'other00@9')).toBe(false)
+    expect(rerunDone([rerun({ outcome: 'refused' })], 'old0000')).toBe(false)
+    expect(decide(rerunnable, [before]).action).not.toBe('rerun_checks')
+  })
+
+  it('a conflicting pull request is merged first, and a plain exception is not rerun', () => {
+    expect(decide({ ...rerunnable, conflictsWith: 'workspace' }, [])).toMatchObject({
+      action: 'merge_base',
+    })
+    expect(decide(exception({ ciOutput: 'x' }), []).action).toBe('send_back')
+  })
+
+  it('a question of the builder that waited is escalated, for the unblocker to answer', () => {
+    const asked = exception({ kind: 'builder_question', head: 'question:4', evidence: 'A or B?' })
+    expect(decide(asked, [])).toMatchObject({ action: 'escalate' })
   })
 })

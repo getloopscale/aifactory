@@ -132,3 +132,27 @@ count did not fall.
   their own idea of what was already tried on a task. One coordinator keeps one record and one cap.
 - **Reorder the queue.** The factory runs one task at a time and the order has not been the bottleneck in
   the data above. It waits until it is.
+
+## Amendment: the unblocker (#251)
+
+What the closed set has no action for, and what reached `MAX_APPLIED`, goes to an unblocker agent before a
+person. `coordinator/unblock.ts` holds the closed set of its answers, how an answer is read and what each one
+decides (pure, tested without a model); `coordinator/unblocker.ts` calls the model (built by
+`buildAssistant`, read-only tools, `onlyTools`) and hands the answer to that module. The split is the one
+`scope.ts` and `draft.ts` already make. An answer that does not parse, or an `escalate` with no owner
+category, is an `escalate`; the unblocker has a cap of its own (three applied actions per task and head).
+
+Phase 1 needs no model: `checks_unchanged` without kept output is sent back with the failing job logs of the
+pull request head, one on a conflicting pull request is a `merge_base`, and a check that failed on the pull
+request but passed on the factory's run of the same commit is rerun once per commit (`rerun_checks`).
+
+`resolve_elsewhere` takes a commit the integration branch holds. The issue also names "a passing run", but a
+run proves nothing the factory can read about where the work landed, so a run alone is refused. The agent
+configuration is held for `pnpm evals:check` and merged by the owner, as the rules require.
+
+The cap of three unblocker actions is counted per task and head, but a decision is already unique per task,
+exception kind and head, so it binds only across different kinds on one head; the head of an exception is not a
+durable identity across reruns, so a new head starts a new count. `security` and `unknown` never reach the
+unblocker: only a person adds a security exception, and a failed read is waited out. A `blocked_by` on a task that
+stopped queues its run again (which waits on the blocker); on a task waiting for an answer it is refused, since
+nothing reads the line there.

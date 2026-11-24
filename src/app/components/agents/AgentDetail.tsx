@@ -54,6 +54,25 @@ export function AgentDetail({
         <p className="mt-2 text-sm text-foreground/90">{agent.role}</p>
       </header>
 
+      {agent.persona ? (
+        <section
+          aria-label={t.agents.persona}
+          className="space-y-2 rounded-xl border border-border bg-card p-4 text-sm"
+        >
+          <h3 className="text-sm font-semibold">
+            {t.agents.persona}: {agent.persona.name}
+          </h3>
+          <p>{agent.persona.job}</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">{t.agents.never}</p>
+          <ul className="list-disc pl-5">
+            {agent.persona.never.map((n) => (
+              <li key={n}>{n}</li>
+            ))}
+          </ul>
+          <p className="text-muted-foreground">{agent.persona.voice}</p>
+        </section>
+      ) : null}
+
       <dl className="grid gap-5 rounded-xl border border-border bg-card p-4 md:grid-cols-2">
         <Fact label={t.agents.when}>{agent.when}</Fact>
         <Fact label={t.agents.engine}>

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { GUIDE_IDS } from '../../shared/guides'
+import { PERSONAS } from '../../shared/personas'
 import { SANDBOX_KNOWLEDGE_DIR } from '../knowledge/format'
 import { ASSISTANT_KNOWLEDGE_NOTE } from '../knowledge/prompt'
 
@@ -21,6 +22,12 @@ const agent = (id: string, env: NodeJS.ProcessEnv = {}) =>
   catalog(env).agents.find((a) => a.id === id)!
 
 describe('the catalog of agents', () => {
+  it('gives the agents that build a persona', () => {
+    for (const id of ['builder', 'reviewer', 'planner'] as const) {
+      expect(agent(id).persona).toEqual(PERSONAS[id])
+    }
+  })
+
   it('lists the ones that build first and the ones that talk to the owner after, each once', () => {
     const { agents } = catalog()
     expect(agents.map((a) => a.id)).toEqual([
