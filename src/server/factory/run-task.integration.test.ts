@@ -3265,11 +3265,13 @@ describe('runTask continuing from a branch a person sent back', () => {
       .update(task)
       .set({ stage: 'handoff', headSha: 'oldsha1', pullRequestUrl: PR_URL })
       .where(eq(task.id, id))
-    await getDb().insert(stageEvent).values({
-      taskId: id,
-      stage: 'handoff',
-      detail: { reason: 'held for evaluation', cause: 'agent_configuration' },
-    })
+    await getDb()
+      .insert(stageEvent)
+      .values({
+        taskId: id,
+        stage: 'handoff',
+        detail: { reason: 'held for evaluation', cause: 'agent_configuration' },
+      })
     await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, id))
     const sandbox = new FakeSandbox(changed())
     const builder: CodingHarness = {

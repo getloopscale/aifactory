@@ -1377,7 +1377,9 @@ export class Run {
    * The handoff this run was sent back from, when the work was never integrated: `done` means integrated or
    * waiting for CI, so a rework that changes nothing returns to the handoff it left, with its cause.
    */
-  private async unintegratedHandoff(): Promise<{ cause?: HandoffCause; reason: string } | undefined> {
+  private async unintegratedHandoff(): Promise<
+    { cause?: HandoffCause; reason: string } | undefined
+  > {
     const { deps, taskId, row } = this.c
     if (row.mergedSha || row.resolvedSha || row.awaitingCiSha) return undefined
     const [ended] = await deps.db
