@@ -341,6 +341,64 @@ describe('the readiness of a newly queued issue', () => {
     ])
   })
 
+  describe('a blocked verdict in auto', () => {
+    const blockedBy = (n: number) =>
+      `{"verdict":"blocked","missing":"gateways#${n} is open","question":"","blockedBy":["${REPO}#${n}"]}`
+    const withIssues = (state: 'open' | 'closed') => ({
+      ...deps(),
+      fetchIssue: async (_repo: string, number: number) => ({
+        number,
+        title: 't',
+        body: '',
+        labels: [],
+        state,
+      }),
+    })
+
+    it('fails the task blocked by the open issue and withdraws its run, asking nobody', async () => {
+      const t = await seed()
+      judge.answers.set(t.issue, blockedBy(9000))
+      await enqueue(t.id, 10)
+
+      await schedule(withIssues('open'), AUTO)
+
+      expect(await stageOf(t.id)).toBe('failed')
+      expect(await jobs()).toEqual([])
+      expect(api.callsTo('commentOnIssue')).toEqual([])
+      const [failed] = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+      expect(failed.detail).toMatchObject({ blockedBy: [`${REPO}#9000`], readiness: true })
+    })
+
+    it('lets the run go when the blocker it names is closed, or is the task itself', async () => {
+      const own = await seed()
+      judge.answers.set(own.issue, blockedBy(own.issue))
+      await enqueue(own.id, 20)
+
+      await schedule(withIssues('open'), { ...AUTO })
+      expect(await stageOf(own.id)).toBe('intake')
+      // Queued after the first pass: while 9001 was open it would hold this task back, as it should.
+      const closed = await seed()
+      judge.answers.set(closed.issue, blockedBy(9001))
+      await enqueue(closed.id, 10)
+      await schedule(withIssues('closed'), AUTO)
+      expect(await stageOf(closed.id)).toBe('intake')
+      expect((await jobs()).map((j) => j.id).sort()).toEqual(
+        [`job-${closed.id}`, `job-${own.id}`].sort(),
+      )
+    })
+
+    it('records the verdict only in trial', async () => {
+      const t = await seed()
+      judge.answers.set(t.issue, blockedBy(9002))
+      await enqueue(t.id, 10)
+
+      await schedule(withIssues('open'), TRIAL)
+
+      expect(await stageOf(t.id)).toBe('intake')
+      expect((await decisions())[0].detail).toMatchObject({ verdict: 'blocked' })
+    })
+  })
+
   it('asks in auto what a trial pass judged, without judging the issue again', async () => {
     const vague = await seed({ body: 'Make it better.' })
     judge.answers.set(vague.issue, NOT_READY)
