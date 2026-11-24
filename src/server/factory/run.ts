@@ -933,9 +933,11 @@ export class Run {
     try {
       // The lease makes the push fail, instead of overwriting, when someone else pushed during the run.
       const lease = `--force-with-lease=refs/heads/${branch}:${this.remoteHead}`
+      // HEAD, not the local branch: an agent that ran `git checkout <sha> --` left HEAD detached, and pushing
+      // the branch name then sent nothing, exited 0 and let the run verify a commit GitHub never had.
       await pushWithRetry(
         backend,
-        `${git} push origin ${branch} ${lease}`,
+        `${git} push origin HEAD:refs/heads/${branch} ${lease}`,
         deps.pushRetryDelayMs ?? 5_000,
       )
     } catch (error) {
