@@ -759,4 +759,47 @@ describe('the curator', () => {
     const rows = await getDb().select().from(knowledgeCuration)
     expect(rows.map((r) => r.status)).toEqual(['closed'])
   })
+
+  it('asks the assistant once per commit of the memory branch, also when it repeats a decision already on record', async () => {
+    const made = await withNotes(2, 2)
+    let asked = 0
+    const counting = {
+      ...curator(made, merge),
+      assistant: async () => {
+        asked += 1
+        return { response: JSON.stringify({ groups: merge }), cost: 0 }
+      },
+    }
+
+    await curate(counting, 'trial')
+    await curate(counting, 'trial')
+    expect(asked).toBe(1)
+
+    const t = await aTask()
+    await keep([note(t.id, 'Another note, on something else.')])
+    await syncKnowledge(made.d)
+    await curate(counting, 'trial')
+    await curate(counting, 'trial')
+
+    expect(asked).toBe(2)
+  })
+
+  it('keeps recording notes when a proposal fails, and proposes it on a later pass', async () => {
+    const made = await withNotes(3, 3)
+    const promote = [
+      { action: 'promote', notes: ['n1', 'n2', 'n3'], title: 'Build first', text: 'Run it.' },
+    ]
+    await curate(curator(made, promote), 'auto')
+    ;(made.d.api as FakeGithub).fail('openPullRequest', new Error('GitHub is down'), { times: 1 })
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    const t = await aTask()
+    await keep([note(t.id, 'A note kept while GitHub is down.')])
+
+    const state = await syncKnowledge(made.d)
+
+    expect(state?.error).toBeUndefined()
+    expect((await getDb().select().from(knowledgeCuration))[0].status).toBe('pending')
+    await syncKnowledge(made.d)
+    expect((await getDb().select().from(knowledgeCuration))[0].status).toBe('proposed')
+  })
 })

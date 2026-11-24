@@ -256,7 +256,10 @@ async function applyMerges(c: Context, start: string | undefined): Promise<strin
       memorySha = commit
     } catch (error) {
       if (error instanceof PushRejected) break
-      throw error
+      // A merge that fails must not stop the pass that records the notes: it stays pending.
+      console.error(
+        JSON.stringify({ event: 'knowledge_merge_failed', id: row.id, error: message(error) }),
+      )
     }
   }
   return memorySha
@@ -277,60 +280,83 @@ async function applyPromotions(
   const repository = c.config.repository
   for (const row of await curationsIn(db, repository, 'proposed', 50)) {
     if (row.pullNumber === null) continue
-    const pull = await api.readPullRequest(repository, c.token, row.pullNumber)
-    if (pull.state === 'closed') {
-      await updateCuration(db, row.id, { status: pull.merged ? 'merged' : 'closed' })
+    try {
+      const pull = await api.readPullRequest(repository, c.token, row.pullNumber)
+      if (pull.state === 'closed') {
+        await updateCuration(db, row.id, { status: pull.merged ? 'merged' : 'closed' })
+      }
+    } catch (error) {
+      console.error(
+        JSON.stringify({ event: 'knowledge_proposal_unread', id: row.id, error: message(error) }),
+      )
     }
   }
   if (!memorySha) return
   const queued = await curationsIn(db, repository, 'pending', 50)
   for (const row of queued.filter((r) => r.action === 'promote')) {
-    const notes = await groupNotes(c, memorySha, row.detail.paths)
-    if (!notes || notes.length < PROMOTE_MIN_TASKS || taskCount(notes) < PROMOTE_MIN_TASKS) {
-      await updateCuration(db, row.id, { status: 'stale' })
-      continue
-    }
-    const title = detailText(row, 'title')
-    const names = proposalNames(
-      row.repository,
-      title,
-      notes.map((n) => n.path),
-    )
-    const rule = renderProposedRule({
-      repository: row.repository,
-      title,
-      text: detailText(row, 'text'),
-      notes,
-      now: c.now,
-    })
-    const commit = await c.mirror.commit({
-      parent: knowledgeSha,
-      files: [{ path: names.path, content: rule }],
-      message: `Propose a rule for ${row.repository}: ${title}\n\nFrom the notes of ${taskCount(notes)} tasks.\n`,
-      author: c.deps.author,
-      date: c.now,
-    })
-    await c.mirror.push(c.url, commit, names.branch, { token: c.token, force: true })
-    const pull = await api.openPullRequest(repository, c.token, {
-      head: names.branch,
-      base,
-      title: `Rule proposed for ${row.repository}: ${title}`.slice(0, 200),
-      body: [
-        `The factory's notes about ${row.repository} agree on this, from ${taskCount(notes)} different tasks. It adds \`${names.path}\` and changes nothing else.`,
-        '',
-        'The notes are observations, not verified facts: read the rule against the code before you merge it.',
-        'The factory never merges this pull request. Closing it without merging means the factory does not propose the same notes again.',
-        '',
-        ...notes.map((n) => `- \`${n.path}\``),
-      ].join('\n'),
-    })
-    await updateCuration(db, row.id, {
-      status: 'proposed',
-      commitSha: commit,
-      pullNumber: pull.number,
-      pullUrl: pull.url,
+    // One proposal that fails must not stop the notes of the pass from being recorded: it stays pending.
+    await proposeRule(c, memorySha, knowledgeSha, base, row).catch((error: unknown) => {
+      console.error(
+        JSON.stringify({ event: 'knowledge_proposal_failed', id: row.id, error: message(error) }),
+      )
     })
   }
+}
+
+async function proposeRule(
+  c: Context,
+  memorySha: string,
+  knowledgeSha: string,
+  base: string,
+  row: StoredCuration,
+): Promise<void> {
+  const { db, api } = c.deps
+  const repository = c.config.repository
+  const notes = await groupNotes(c, memorySha, row.detail.paths)
+  if (!notes || notes.length < PROMOTE_MIN_TASKS || taskCount(notes) < PROMOTE_MIN_TASKS) {
+    await updateCuration(db, row.id, { status: 'stale' })
+    return
+  }
+  const title = detailText(row, 'title')
+  const names = proposalNames(
+    row.repository,
+    title,
+    notes.map((n) => n.path),
+  )
+  const rule = renderProposedRule({
+    repository: row.repository,
+    title,
+    text: detailText(row, 'text'),
+    notes,
+    now: c.now,
+  })
+  const commit = await c.mirror.commit({
+    parent: knowledgeSha,
+    files: [{ path: names.path, content: rule }],
+    message: `Propose a rule for ${row.repository}: ${title}\n\nFrom the notes of ${taskCount(notes)} tasks.\n`,
+    author: c.deps.author,
+    date: c.now,
+  })
+  await c.mirror.push(c.url, commit, names.branch, { token: c.token, force: true })
+  const pull = await api.openPullRequest(repository, c.token, {
+    head: names.branch,
+    base,
+    title: `Rule proposed for ${row.repository}: ${title}`.slice(0, 200),
+    body: [
+      `The factory's notes about ${row.repository} agree on this, from ${taskCount(notes)} different tasks. It adds \`${names.path}\` and changes nothing else.`,
+      '',
+      'The notes are observations, not verified facts: read the rule against the code before you merge it.',
+      'The factory never merges this pull request. Closing it without merging means the factory does not propose the same notes again.',
+      '',
+      ...notes.map((n) => `- \`${n.path}\``),
+    ].join('\n'),
+  })
+  await updateCuration(db, row.id, {
+    status: 'proposed',
+    commitSha: commit,
+    pullNumber: pull.number,
+    pullUrl: pull.url,
+  })
 }
 
 /** The markdown files of the rules at a commit, as text, up to the most a check reads. */

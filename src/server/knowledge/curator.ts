@@ -8,6 +8,7 @@ import { Mirror, mirrorDir } from './mirror'
 import { isReserved } from './okf'
 import {
   curatedAt,
+  markCurated,
   loadKnowledgeConfig,
   loadSyncState,
   recordCurations,
@@ -82,6 +83,7 @@ export async function curate(deps: CuratorDeps, mode: CurationMode): Promise<Cur
     const rows = await decide(deps, project, notes, { ...at, status: 'recorded' })
     result.errors += rows.filter((r) => r.action === 'error').length
     result.decisions += await recordCurations(deps.db, withStatus(rows, mode))
+    await markCurated(deps.db, at)
   }
   return result
 }

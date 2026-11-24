@@ -184,24 +184,29 @@ export async function recordCurations(db: Database, rows: NewCuration[]): Promis
   return kept.length
 }
 
-/** Whether the project's notes at this commit were already read in this mode. */
+const curatedKey = (input: {
+  knowledgeRepository: string
+  repository: string
+  mode: CurationMode
+}) => `knowledge.curated.${input.mode}.${input.knowledgeRepository}.${input.repository}`
+
+/**
+ * Whether the project's notes at this commit were already read in this mode. It is kept apart from the
+ * decisions, since a decision already on record is not inserted again and would leave the commit unmarked.
+ */
 export async function curatedAt(
   db: Database,
   input: { knowledgeRepository: string; repository: string; mode: CurationMode; memorySha: string },
 ): Promise<boolean> {
-  const [row] = await db
-    .select({ id: knowledgeCuration.id })
-    .from(knowledgeCuration)
-    .where(
-      and(
-        eq(knowledgeCuration.knowledgeRepository, input.knowledgeRepository),
-        eq(knowledgeCuration.repository, input.repository),
-        eq(knowledgeCuration.mode, input.mode),
-        eq(knowledgeCuration.memorySha, input.memorySha),
-      ),
-    )
-    .limit(1)
-  return row !== undefined
+  return (await readSetting(db, curatedKey(input))) === input.memorySha
+}
+
+/** Says the project's notes at this commit were read in this mode. */
+export async function markCurated(
+  db: Database,
+  input: { knowledgeRepository: string; repository: string; mode: CurationMode; memorySha: string },
+): Promise<void> {
+  await writeSetting(db, curatedKey(input), input.memorySha)
 }
 
 export type StoredCuration = NewCuration & {
