@@ -1,0 +1,162 @@
+import { createHmac } from 'node:crypto'
+
+import { describe, expect, it, vi } from 'vitest'
+
+import { createLinearQuery } from './client'
+import { decideLinearIngress, handleLinearDelivery, type LinearSettings } from './ingress'
+import { createLinearGate, gatedLinear, LinearRateLimited } from './rate-limit'
+import { linearWorkSource } from './source'
+
+const settings: LinearSettings = {
+  label: 'factory',
+  teams: { t1: { repository: 'o/r', enabled: true }, t2: { repository: 'o/off', enabled: false } },
+}
+const body = (teamId: string, labels = ['factory']) => ({
+  type: 'Issue',
+  action: 'create',
+  data: {
+    id: 'i1',
+    identifier: 'ENG-1',
+    title: 'T',
+    teamId,
+    labels: labels.map((name) => ({ name })),
+  },
+})
+const sign = (raw: string) => createHmac('sha256', 's').update(raw).digest('hex')
+const request = (raw: string, signature: string) =>
+  new Request('http://x/', {
+    method: 'POST',
+    body: raw,
+    headers: { 'linear-signature': signature, 'linear-delivery': 'd1' },
+  })
+
+describe('decideLinearIngress', () => {
+  it('takes a labelled item of a team mapped to an enabled repository', () => {
+    expect(decideLinearIngress(body('t1'), settings)).toMatchObject({
+      accept: true,
+      repository: 'o/r',
+    })
+  })
+  it('refuses a disabled repository, an unmapped team and a missing label', () => {
+    expect(decideLinearIngress(body('t2'), settings)).toMatchObject({ code: 'repository_disabled' })
+    expect(decideLinearIngress(body('t9'), settings)).toMatchObject({ code: 'team_not_mapped' })
+    expect(decideLinearIngress(body('t1', []), settings)).toMatchObject({
+      code: 'label_not_factory',
+    })
+    expect(decideLinearIngress({}, settings)).toMatchObject({ code: 'payload_invalid' })
+  })
+})
+
+describe('handleLinearDelivery', () => {
+  const raw = JSON.stringify(body('t1'))
+  it('answers 401 and records nothing for a bad signature', async () => {
+    const record = vi.fn()
+    const res = await handleLinearDelivery(request(raw, sign('other')), {
+      secret: 's',
+      settings: async () => settings,
+      record,
+    })
+    expect(res.status).toBe(401)
+    expect(record).not.toHaveBeenCalled()
+  })
+  it('records a signed delivery under a source-scoped id', async () => {
+    const record = vi.fn(async () => ({ ok: true }))
+    const res = await handleLinearDelivery(request(raw, sign(raw)), {
+      secret: 's',
+      settings: async () => settings,
+      record,
+    })
+    expect(res.status).toBe(200)
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({ deliveryId: 'linear:d1' }))
+  })
+  it('refuses everything without a secret', async () => {
+    const res = await handleLinearDelivery(request(raw, sign(raw)), {
+      secret: undefined,
+      settings: async () => settings,
+      record: vi.fn(),
+    })
+    expect(res.status).toBe(503)
+  })
+})
+
+describe('gatedLinear', () => {
+  it('turns a RATELIMITED answer into LinearRateLimited and closes the gate', async () => {
+    const gate = createLinearGate(() => 0)
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('{"errors":[{"extensions":{"code":"RATELIMITED"}}]}', { status: 400 }),
+    )
+    const call = gatedLinear(fetchImpl, gate, () => 0)
+    await expect(call('u')).rejects.toBeInstanceOf(LinearRateLimited)
+    await expect(call('u')).rejects.toBeInstanceOf(LinearRateLimited)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('linearWorkSource', () => {
+  const answer = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 })
+  it('never treats the factory’s own comment as an answer, and reads every page', async () => {
+    const pages = [
+      {
+        nodes: [
+          { id: 'c1', body: 'b', createdAt: '2026-01-02T00:00:00Z', user: { id: 'me', name: 'F' } },
+        ],
+        pageInfo: { hasNextPage: true, endCursor: 'x' },
+      },
+      {
+        nodes: [
+          { id: 'c2', body: 'a', createdAt: '2026-01-01T00:00:00Z', user: { id: 'u', name: 'P' } },
+        ],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    ]
+    const fetchImpl = vi.fn(async () => answer({ issue: { comments: pages.shift() } }))
+    const source = linearWorkSource({
+      query: createLinearQuery('key', fetchImpl),
+      factoryUserId: 'me',
+    })
+    const comments = await source.listComments('i1', new Date(0))
+    expect(comments.map((c) => [c.id, c.trusted])).toEqual([
+      ['c2', true],
+      ['c1', false],
+    ])
+  })
+  it('fails on a GraphQL error instead of returning nothing', async () => {
+    const fetchImpl = async () =>
+      new Response(JSON.stringify({ errors: [{ message: 'no' }] }), { status: 200 })
+    const source = linearWorkSource({
+      query: createLinearQuery('key', fetchImpl),
+      factoryUserId: 'me',
+    })
+    await expect(source.read('i1')).rejects.toThrow('no')
+  })
+  it('moves the item to the first completed state', async () => {
+    const calls: Record<string, unknown>[] = []
+    const fetchImpl = vi.fn(async (_u: string, init?: RequestInit) => {
+      const { query, variables } = JSON.parse(String(init?.body))
+      calls.push(variables)
+      return answer(
+        query.includes('mutation')
+          ? { issueUpdate: { success: true } }
+          : {
+              issue: {
+                team: {
+                  states: {
+                    nodes: [
+                      { id: 's2', position: 2 },
+                      { id: 's1', position: 1 },
+                    ],
+                  },
+                },
+              },
+            },
+      )
+    })
+    const source = linearWorkSource({
+      query: createLinearQuery('key', fetchImpl),
+      factoryUserId: 'me',
+    })
+    await source.close('i1')
+    expect(calls[1]).toEqual({ id: 'i1', state: 's1' })
+  })
+})
