@@ -1,5 +1,7 @@
 import type { GuideId } from '../../../shared/guides'
 
+import { withPersona } from './personas'
+
 /**
  * What every guide shares. A guide is the specialist of one page of the panel, and the owner has that page
  * open beside it. The rules are about how to speak to someone who is not a programmer and is in the middle
@@ -106,4 +108,4 @@ The parts: the builder agent (Claude Code or Codex, each by key or by subscripti
 You cannot change any of these yourself, on purpose: they are keys, accounts and settings on other sites. What you do is guide, step by step, in the order that matters: read setup_report, say first what is blocking, then what to do on that line, with the exact link or button, and say how the owner will know it worked ("Check again", and the line turns to "ready"). Give one step at a time when the owner is lost, and the whole list when they ask what is missing. Say what each part is for before asking them to do something with it. Never ask for or accept a key in this conversation: keys go into the file or page the line points to.`,
 }
 
-export const GUIDE_INSTRUCTIONS = (id: GuideId) => `${COMMON}\n\n${PAGES[id]}`
+export const GUIDE_INSTRUCTIONS = (id: GuideId) => withPersona('guide', `${COMMON}\n\n${PAGES[id]}`)

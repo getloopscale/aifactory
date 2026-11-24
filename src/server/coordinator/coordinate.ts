@@ -5,6 +5,7 @@ import { task } from '../db/schema'
 
 import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
+import { unblock, type UnblockDeps } from './unblocker'
 import { draftScope, type DraftDeps } from './draft'
 import { readExceptionFacts, readRecordedActions, type FactsDeps } from './exception-facts'
 import { readCurrentReasons, readQueueFacts } from './queue-facts'
@@ -22,6 +23,7 @@ export type PassResult = Record<CoordinatorOutcome, number>
 /** What a pass needs: the panel's actions, the two GitHub writes of a scope, the drafter and the release mode. */
 export type CoordinatorDeps = ApplyDeps &
   DraftDeps &
+  Pick<UnblockDeps, 'unblocker'> &
   Pick<ReleaseFactsDeps, 'releaseMode'> &
   Pick<FactsDeps, 'ciChecks'> & { now?: () => Date }
 
@@ -102,7 +104,8 @@ export async function coordinate(
     const applying = exception.trialOnly ? 'trial' : mode
     if (seen(exception, forTask, applying)) continue
     const now = deps.now?.() ?? new Date()
-    const decision = await draftScope(deps, exception, decide(exception, forTask, now))
+    const decided = await unblock(deps, exception, decide(exception, forTask, now), forTask)
+    const decision = await draftScope(deps, exception, decided)
     const outcome = await applyDecision(deps, exception, decision, applying)
     forTask.push({
       exceptionKind: exception.kind,

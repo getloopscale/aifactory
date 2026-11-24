@@ -18,6 +18,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from '../factory/change-plan'
+import type { CodingRole } from '../factory/agent-plugin'
 import { BaseProbe, sameChecks } from '../factory/base-checks'
 import { cloneRepository } from '../factory/clone'
 import { prepareDeclaredPackageManager } from '../factory/package-manager'
@@ -175,8 +176,9 @@ class CaseRun {
     return result
   }
 
-  private agentInput(prompt: string, longest = Infinity): HarnessInput {
+  private agentInput(prompt: string, longest = Infinity, role?: CodingRole): HarnessInput {
     return {
+      ...(role ? { role } : {}),
       cwd: this.repoDir,
       prompt,
       timeoutMs: Math.min(agentTimeLeft(this.limits, Date.now() - this.started), longest),
@@ -219,14 +221,14 @@ class CaseRun {
     const result = await this.agentCall(() => {
       if (apart && this.plan) {
         const prompt = givenPlanPrompt(this.buildInput(), this.plan, planner.name)
-        return builder.run(this.backend, this.agentInput(prompt))
+        return builder.run(this.backend, this.agentInput(prompt, Infinity, 'builder'))
       }
       return discarded === undefined
-        ? builder.run(this.backend, this.agentInput(buildPrompt(this.buildInput())))
+        ? builder.run(this.backend, this.agentInput(buildPrompt(this.buildInput()), Infinity, 'builder'))
         : builder.resume!(
             this.backend,
             this.sessionId!,
-            this.agentInput(implementPlanPrompt({ discarded })),
+            this.agentInput(implementPlanPrompt({ discarded }), Infinity, 'builder'),
           )
     })
     this.settle(result, 'the agent did not finish')
@@ -236,7 +238,7 @@ class CaseRun {
 
   /** Writes the plan and answers whether the planning turn left edits, which are thrown away. */
   private async planChange(planner: CodingHarness): Promise<boolean> {
-    const input = this.agentInput(changePlanPrompt(this.buildInput()), PLAN_MS)
+    const input = this.agentInput(changePlanPrompt(this.buildInput()), PLAN_MS, 'planner')
     const first = this.settle(
       await this.agentCall(() => planner.run(this.backend, input)),
       'the agent did not finish the plan',
@@ -257,6 +259,7 @@ class CaseRun {
         cwd: this.repoDir,
         timeoutMs,
         prompt: planAgainPrompt(),
+        role: 'planner',
       }),
     )
     this.cost += again.costUsd ?? 0
@@ -300,7 +303,7 @@ class CaseRun {
       ...(reviewedSha ? { reviewedSha, changeBase: this.c.baseSha } : {}),
     })
     const result = await this.agentCall(() =>
-      this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt)),
+      this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt, Infinity, 'builder')),
     )
     this.settle(result, 'the agent did not finish the rework')
     this.summary = result.summary
@@ -404,6 +407,7 @@ class CaseRun {
     const input: HarnessInput = {
       cwd: this.repoDir,
       timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
+      role: 'reviewer',
       prompt: reviewPrompt({
         repo: c.repository,
         issueNumber: c.issueNumber,

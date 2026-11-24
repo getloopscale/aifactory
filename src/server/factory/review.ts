@@ -1,3 +1,4 @@
+import { personaPreamble } from '../agents/prompts/personas'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { CheckSpec } from './evidence'
 import { checksRule, forbiddenPathsRule, FORBIDDEN_PATHS, isForbiddenPath } from './harness'
@@ -85,7 +86,8 @@ export function reviewPrompt(input: {
   earlier?: EarlierReview
 }): string {
   const required = input.required ?? []
-  return `You are an independent code reviewer for the repository ${input.repo}. Another agent implemented the issue below on the branch ${input.branch}. You did not write this code and you must not change it.
+  return `${personaPreamble('reviewer')}
+You are an independent code reviewer for the repository ${input.repo}. Another agent implemented the issue below on the branch ${input.branch}. You did not write this code and you must not change it.
 
 # ${input.title} (#${input.issueNumber})
 
@@ -226,7 +228,8 @@ export function resolvedPrompt(input: {
   claim: string
   knowledgeDir?: string
 }): string {
-  return `You are an independent code reviewer for the repository ${input.repo}. Another agent was given the issue below, changed nothing, and said the code at ${input.baseSha} already does what the issue asks. You did not write that answer and you must not change the code.
+  return `${personaPreamble('reviewer')}
+You are an independent code reviewer for the repository ${input.repo}. Another agent was given the issue below, changed nothing, and said the code at ${input.baseSha} already does what the issue asks. You did not write that answer and you must not change the code.
 
 # ${input.title} (#${input.issueNumber})
 

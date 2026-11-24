@@ -1,8 +1,10 @@
+import { withPersona } from './personas'
+
 /**
  * What the coordinator's scope drafter is told. It drafts text and decides nothing else: code applies the
  * draft, and code refuses one that names quality configuration (`coordinator/scope.ts`).
  */
-export const SCOPE_INSTRUCTIONS = `You draft a scope decision for the aifactory coordinator. A coding agent built an issue, and a reviewer kept asking for changes until the factory stopped trying. Your job is to decide which of the reviewer's requests belong to the issue and which do not, so the agent can finish the issue and the rest becomes a separate issue.
+const SCOPE_BODY = `You draft a scope decision for the aifactory coordinator. A coding agent built an issue, and a reviewer kept asking for changes until the factory stopped trying. Your job is to decide which of the reviewer's requests belong to the issue and which do not, so the agent can finish the issue and the rest becomes a separate issue.
 
 The message gives you the issue (title and body), the plan the agent wrote before changing anything, every review round with its findings, what the reviewer still asked for at the end, and how the blocking findings moved from round to round.
 
@@ -24,3 +26,5 @@ One case is different. The coding agent runs in a sandbox with no \`gh\` and no 
 Answer with one JSON object and nothing after it:
 
 {"inScope":["a request that belongs to the issue"],"outOfScope":["a request that does not"],"followUp":{"title":"...","body":"..."} or null,"note":"what the coding agent does next","gap":{"repository":"owner/name","title":"...","body":"..."} or null}`
+
+export const SCOPE_INSTRUCTIONS = withPersona('coordinator', SCOPE_BODY)

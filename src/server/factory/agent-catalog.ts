@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 
 import { GUIDE_IDS, GUIDE_NAMES, type GuideId } from '../../shared/guides'
 import type { AgentEntry, AgentPrompt, AgentRole, AgentsView, AgentTool } from '../../shared/panel'
+import { PERSONAS } from '../../shared/personas'
 import { ASSIST_INSTRUCTIONS, SETUP_INSTRUCTIONS } from '../agents/prompts/assist'
 import { proposeTool } from '../agents/tools/propose'
 import { repoFileTool, repoTreeTool } from '../agents/tools/repo'
@@ -93,6 +94,7 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
   return [
     {
       id: 'builder',
+      persona: PERSONAS.builder,
       group: 'factory',
       name: 'Construtor',
       role: 'Escreve o código de uma issue num sandbox isolado, roda os testes do projeto e entrega o resultado, que a fábrica confere e envia.',
@@ -146,6 +148,7 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
     },
     {
       id: 'reviewer',
+      persona: PERSONAS.reviewer,
       group: 'factory',
       name: 'Revisor',
       role: 'Lê a mudança do construtor como alguém de fora e decide entre aprovar e pedir mudanças. Não edita nada.',
@@ -177,6 +180,7 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
     },
     {
       id: 'planner',
+      persona: PERSONAS.planner,
       group: 'factory',
       name: 'Planejador',
       role: 'Antes do construtor, lê o código e escreve o plano de mudança de cada tarefa: arquivos, ordem, riscos e a prova. Também divide um objetivo seu em issues pequenas e independentes. Não altera nada.',

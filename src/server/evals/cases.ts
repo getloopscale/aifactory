@@ -112,6 +112,8 @@ export const AGENT_CONFIGURATION = [
   'src/server/factory/harness-claude.ts',
   'src/server/factory/harness-codex.ts',
   'src/server/factory/harness-registry.ts',
+  'src/server/factory/agent-plugin.ts',
+  'src/shared/personas.ts',
   'src/server/factory/review.ts',
   'src/server/factory/change-plan.ts',
   'src/server/factory/plan.ts',

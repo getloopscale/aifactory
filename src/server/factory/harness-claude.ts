@@ -14,6 +14,7 @@ import {
   type HarnessResult,
   watched,
 } from './harness'
+import { pluginDir, type CodingRole, pluginFiles } from './agent-plugin'
 import { claudeEvents } from './transcript'
 
 /**
@@ -88,12 +89,13 @@ export function claudeCodeHarness(
 
   async function invoke(backend: SandboxBackend, input: HarnessInput, flags: string) {
     await backend.uploadFile(PROMPT_FILE, input.prompt)
+    const plugin = input.role ? await installPlugin(backend, input.role) : ''
     // A watched run prints one event per line, and its last line is the same result `json` prints.
     const format = watched(backend, input) ? 'stream-json --verbose' : 'json'
     // `cwd` is a path the factory built (see run-task), never text from the issue.
     const result = await executeAgent(
       backend,
-      `cd ${input.cwd} && ${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p --output-format ${format} --dangerously-skip-permissions${model}${effort}${flags} < ${PROMPT_FILE}`,
+      `cd ${input.cwd} && ${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p --output-format ${format} --dangerously-skip-permissions${model}${effort}${plugin}${flags} < ${PROMPT_FILE}`,
       input,
       claudeEvents,
     )
@@ -122,6 +124,19 @@ export function claudeCodeHarness(
     resume: async (backend, sessionId, input) =>
       invoke(backend, input, ` --resume ${assertSessionId(sessionId)}`),
   }
+}
+
+/** Puts the role's plugin in the sandbox and answers the flag that loads it. */
+async function installPlugin(backend: SandboxBackend, role: CodingRole): Promise<string> {
+  const dir = pluginDir(role)
+  const files = pluginFiles(role)
+  const folders = [
+    ...new Set(Object.keys(files).map((f) => `${dir}/${f.split('/').slice(0, -1).join('/')}`)),
+  ]
+  await backend.execute(`mkdir -p ${folders.join(' ')}`)
+  for (const [path, content] of Object.entries(files))
+    await backend.uploadFile(`${dir}/${path}`, content)
+  return ` --plugin-dir ${dir}`
 }
 
 /**
