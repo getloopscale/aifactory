@@ -354,6 +354,17 @@ describe('what is written on the factory pull request', () => {
     expect(await jobs()).toEqual([])
   })
 
+  it('queues nothing and files nothing once the owner disabled the repository', async () => {
+    await taskIn('done')
+    await getPool().query('update repository set enabled = false')
+    await send(written(), 'r-1')
+    await getPool().query("update task set merged_sha = 'm'")
+    await send(written({ id: 78 }), 'r-2')
+
+    expect(await jobs()).toEqual([])
+    expect(followUps).toEqual([])
+  })
+
   it('queues nothing for a review written by the App bot', async () => {
     await taskIn('done')
     await send(

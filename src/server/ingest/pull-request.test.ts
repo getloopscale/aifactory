@@ -8,9 +8,17 @@ import { ActionRefused } from '../panel/actions'
 import { actOnWriting, type Reactions } from './pull-request'
 
 /** A transaction that answers the task lookup with `row` and nothing else. */
-const database = (row: Record<string, unknown> | undefined) =>
+const database = (row: Record<string, unknown> | undefined, enabled = true) =>
   ({
-    select: () => ({ from: () => ({ where: () => ({ for: async () => (row ? [row] : []) }) }) }),
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          for: async () => (row ? [row] : []),
+          // The repository lookup is awaited without a lock.
+          then: (resolve: (rows: unknown[]) => void) => resolve(enabled ? [{ id: 1 }] : []),
+        }),
+      }),
+    }),
   }) as unknown as Database
 
 const review = (over: Record<string, unknown> = {}): RoutedIntent =>
@@ -52,6 +60,21 @@ describe('what is written on a pull request', () => {
     const result = await actOnWriting(database(open), review(over), reactions({ sendBack }))
     expect(result?.done).toBe('ignored')
     expect(sendBack).not.toHaveBeenCalled()
+  })
+
+  it('starts nothing and files nothing in a repository the owner disabled', async () => {
+    const sendBack = vi.fn()
+    const followUp = vi.fn()
+    for (const mergedSha of [null, 'm']) {
+      const result = await actOnWriting(
+        database({ ...open, mergedSha }, false),
+        review(),
+        reactions({ sendBack, followUp }),
+      )
+      expect(result?.done).toBe('ignored')
+    }
+    expect(sendBack).not.toHaveBeenCalled()
+    expect(followUp).not.toHaveBeenCalled()
   })
 
   it('files a follow-up, named by the review, when the work is already merged', async () => {

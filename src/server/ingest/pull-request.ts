@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { task } from '../db/schema'
+import { repository, task } from '../db/schema'
 import { TRUSTED } from '../factory/waiting'
 import { outcome } from '../factory/transitions'
 import { ActionRefused, type FollowUpRequest } from '../panel/actions'
@@ -64,6 +64,13 @@ export async function actOnWriting(
     )
     .for('update')
   if (!row) return ignored('no task has this pull request')
+
+  // A repository the owner disabled takes no work and no issue, whoever writes (as `withRepositoryPermission` does for an issue).
+  const [allowed] = await tx
+    .select({ id: repository.id })
+    .from(repository)
+    .where(sql`lower(${repository.fullName}) = lower(${row.repository}) and ${repository.enabled}`)
+  if (!allowed) return ignored(`${row.repository} is not enabled for the factory`, row.id)
 
   const decided = outcome({ ...row, trusted: TRUSTED.has(intent.actorAssociation) }, intent.kind)
   const log = { taskId: row.id, stage: row.stage, on: intent.kind, by: intent.actorLogin }
