@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { describe, expect, it } from 'vitest'
 
 import {
+  securityEffort,
   assertSafeName,
   codexModels,
   engineModels,
@@ -182,5 +183,16 @@ describe('what a role tells the agent it ends up running', () => {
         'codex',
       ),
     ).toEqual({})
+  })
+})
+
+describe('securityEffort', () => {
+  it('is the highest level the engine lists', () => {
+    expect(securityEffort(['low', 'high', 'xhigh', 'medium'])).toBe('xhigh')
+    expect(securityEffort(['low', 'medium', 'high', 'xhigh', 'max'])).toBe('max')
+  })
+  it('is nothing when no level is known, so the review never runs on a default', () => {
+    expect(securityEffort([])).toBeUndefined()
+    expect(securityEffort(['turbo'])).toBeUndefined()
   })
 })
