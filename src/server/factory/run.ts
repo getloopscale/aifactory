@@ -1978,6 +1978,8 @@ export class Run {
    */
   private async approvalKept(sha: string, attempt: number): Promise<ReviewVerdict | undefined> {
     if (!this.mergesOnly()) return undefined
+    // A conflict the merge agent resolved is reviewed, whatever the patch says: the resolution is new work (#227).
+    if (this.resolvedMerge === sha) return undefined
     const { deps, taskId } = this.c
     const [last] = await deps.db
       .select()

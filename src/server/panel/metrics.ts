@@ -3,6 +3,7 @@ import { and, desc, gte, inArray } from 'drizzle-orm'
 import type { Database } from '../db'
 import { metricPoint, metricSignal } from '../db/schema'
 import { evaluate, strongest, type Point } from '../metrics/bands'
+import { conflictBuilderSessions } from '../metrics/conflict-sessions'
 import {
   BANDS,
   isMetricName as isMetric,
@@ -93,5 +94,16 @@ export async function metricsReport(
     issueUrl: s.issueUrl,
     error: s.error,
   }))
-  return { rows, signals }
+  const day = 86_400_000
+  const conflictSessions = {
+    last14Days: await conflictBuilderSessions(db, {
+      from: new Date(now.getTime() - 14 * day),
+      to: now,
+    }),
+    previous14Days: await conflictBuilderSessions(db, {
+      from: new Date(now.getTime() - 28 * day),
+      to: new Date(now.getTime() - 14 * day),
+    }),
+  }
+  return { rows, signals, conflictSessions }
 }

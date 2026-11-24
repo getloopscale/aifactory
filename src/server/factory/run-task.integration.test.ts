@@ -3865,6 +3865,8 @@ describe('runTask merging an integration branch that passes the checks again', (
           if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
           if (command.includes('--diff-filter=U'))
             return { stdout: agentRan ? left : 'CHANGELOG.md\n' }
+          if (command.includes('merge-base FETCH_HEAD')) return { stdout: `${'d'.repeat(40)}\n` }
+          if (command.includes('patch-id --stable')) return { stdout: `p1 ${'0'.repeat(40)}\n` }
           if (command.includes('commit --no-edit')) committed = true
           if (command.includes('rev-list --parents')) {
             return { stdout: `${merge} ${verified} ${base}\n` }
@@ -3928,6 +3930,32 @@ describe('runTask merging an integration branch that passes the checks again', (
         c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
       ),
     ).toBe(true)
+  })
+
+  it('reviews a resolved conflict even when the task patch is the one an earlier review approved', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    await approvedEarlier(id)
+    const world = conflictingSandbox('')
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async () => {
+        world.ran()
+        return { ok: true, summary: 'Kept both.' }
+      },
+    }
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const input = queued[0]!
+
+    await runTask(
+      deps(world.sandbox, { merger, reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(reviewer.prompts[0]).toContain('--remerge-diff')
   })
 
   it('asks no agent when the second attempt at the merge finds no conflict', async () => {

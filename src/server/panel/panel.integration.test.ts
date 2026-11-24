@@ -1756,6 +1756,10 @@ describe('actions', () => {
     })
     // A merge-only run (#227): the merge agent resolves the conflict, and no builder session starts.
     expect(queued).toEqual([{ input: { taskId: id, mergeBase: true }, key: expect.any(String) }])
+    // The note stays on record as the reason, though no agent is given it.
+    const note = (intake.at(-1)?.detail as { note: string }).note
+    expect(note).toContain('git merge origin/workspace')
+    expect(note).toMatch(/generated file/)
   })
 
   it('sends back on its own branch a waiting integration that conflicts with its base, and starts over only without the branch', async () => {
@@ -1769,6 +1773,14 @@ describe('actions', () => {
     expect(deleted()).toEqual([])
     const input = queued.at(-1)?.input as { taskId: number; feedback?: string }
     expect(input).toEqual({ taskId: kept, mergeBase: true })
+    const [sent] = (await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, kept))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)) as { detail: { note: string; mergeBase?: boolean } }[]
+    expect(sent.detail).toMatchObject({ mergeBase: true, automatic: true })
+    expect(sent.detail.note).toContain('git merge origin/workspace')
 
     const gone = await seed('done', {
       issueNumber: 87,

@@ -327,7 +327,15 @@ export type MetricSignalView = {
   error: string | null
 }
 
-export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
+export type MetricsReport = {
+  rows: MetricRow[]
+  signals: MetricSignalView[]
+  /**
+   * Tasks that ran a builder session because of a conflict with the integration branch (#227), in the last 14
+   * days and in the 14 before: the comparison the issue asks for once merge-only retries are live.
+   */
+  conflictSessions?: { last14Days: number; previous14Days: number }
+}
 
 /** How fast the factory delivers right now, measured live rather than by the daily indicators. */
 export type PulseReport = {

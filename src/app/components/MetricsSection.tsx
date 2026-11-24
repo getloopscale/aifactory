@@ -59,6 +59,13 @@ export function MetricsSection() {
           </tbody>
         </table>
       )}
+      {data?.conflictSessions ? (
+        <p className="mt-3 text-sm" data-metric="conflict_sessions">
+          Builder sessions started by a conflict with the integration branch:{' '}
+          {data.conflictSessions.last14Days} in the last 14 days,{' '}
+          {data.conflictSessions.previous14Days} in the 14 before.
+        </p>
+      ) : null}
       {data && data.signals.length > 0 ? (
         <ul className="mt-3 space-y-1 text-sm">
           {data.signals.map((s) => (
