@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 
 import { z } from 'zod'
 
+import { refOf } from '../factory/blockers'
 import { jsonObjects } from '../factory/review'
 
 /**
@@ -11,18 +12,21 @@ import { jsonObjects } from '../factory/review'
  * back by an answer nobody could read.
  */
 
-export type ReadinessVerdict = 'ready' | 'needs_refinement'
+export type ReadinessVerdict = 'ready' | 'needs_refinement' | 'blocked'
 
 export const readinessSchema = z.object({
-  verdict: z.enum(['ready', 'needs_refinement']),
+  verdict: z.enum(['ready', 'needs_refinement', 'blocked']),
   missing: z.string(),
   question: z.string(),
+  blockedBy: z.array(z.string()).optional(),
 })
 
 export type Readiness = {
   verdict: ReadinessVerdict
   missing: string
   question: string
+  /** With `blocked`: the open issues it waits for, as `owner/repo#number`, which a pass can read again. */
+  blockedBy?: string[]
   /** Why the answer could not be read, when it could not: the verdict is then `ready`. */
   error?: string
 }
@@ -46,6 +50,20 @@ function readCandidate(candidate: string): Readiness {
   const { verdict, missing, question } = parsed.data
   if (verdict === 'needs_refinement' && question.trim() === '') {
     return unreadable('a needs_refinement answer must carry a question for the owner')
+  }
+  if (verdict === 'blocked') {
+    const named = missing.trim()
+    if (named === '') return unreadable('a blocked answer must name what is missing')
+    const blockedBy = [
+      ...new Set((parsed.data.blockedBy ?? []).filter((n) => refOf(n.trim())).map((n) => n.trim())),
+    ]
+    const asked = question.trim() || 'Can what is missing be provided, or should the issue change?'
+    return {
+      verdict,
+      missing: named,
+      question: asked,
+      ...(blockedBy.length > 0 ? { blockedBy } : {}),
+    }
   }
   return { verdict, missing: missing.trim(), question: question.trim() }
 }
@@ -78,19 +96,25 @@ export function readinessMessage(issue: {
 }
 
 /** The verdict recorded for an issue's current body, and the question asked on it, if one was. */
-export type RecordedReadiness = { verdict: ReadinessVerdict; questionId?: number }
+export type RecordedReadiness = {
+  verdict: ReadinessVerdict
+  questionId?: number
+  blockedBy?: string[]
+}
 
 /**
- * What a pass does with a queued issue: judge it when no verdict is recorded for its current body, ask the
- * owner in `auto` when the verdict needs refinement and no question was asked for it yet (it may have been
- * judged in `trial`), and nothing otherwise.
+ * What a pass does with a queued issue: judge it when no verdict is recorded for its current body; in `auto`,
+ * hold back a blocked one that waits for issues a pass can read again (`block`: it goes where a blocked task
+ * goes, and `retry-due` runs it once they close), and ask the owner when the verdict needs refinement or the
+ * blocker cannot be read again and no question was asked yet; nothing otherwise, and nothing in `trial`.
  */
 export function readinessStep(
   recorded: RecordedReadiness | undefined,
   mode: 'trial' | 'auto',
-): 'judge' | 'ask' | 'none' {
+): 'judge' | 'ask' | 'block' | 'none' {
   if (!recorded) return 'judge'
-  const asks =
-    mode === 'auto' && recorded.verdict === 'needs_refinement' && recorded.questionId === undefined
-  return asks ? 'ask' : 'none'
+  if (mode !== 'auto' || recorded.verdict === 'ready' || recorded.questionId !== undefined) {
+    return 'none'
+  }
+  return recorded.verdict === 'blocked' && (recorded.blockedBy?.length ?? 0) > 0 ? 'block' : 'ask'
 }

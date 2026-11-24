@@ -45,6 +45,12 @@ describe('what a queued card says of its place', () => {
       'needs refinement',
     )
     expect(
+      queueWords(
+        view({ readiness: { verdict: 'blocked', missing: 'a file under .github/' } }),
+        en.board,
+      ).verdict,
+    ).toBe('blocked: a file under .github/')
+    expect(
       queueWords(view({ readiness: { verdict: 'ready', missing: '' } }), en.board).verdict,
     ).toBe('ready to build')
   })

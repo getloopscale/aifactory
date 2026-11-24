@@ -25,7 +25,15 @@ export async function openBlockersOf(
   repository: string,
   body: string,
 ): Promise<IssueRef[]> {
-  const blockers = declaredBlockers(body, repository)
+  return openAmong(deps, repository, declaredBlockers(body, repository))
+}
+
+/** The issues of `blockers` that are still open, by the rule of `openBlockersOf`. Reads only. */
+export async function openAmong(
+  deps: BlockerReads,
+  repository: string,
+  blockers: IssueRef[],
+): Promise<IssueRef[]> {
   if (blockers.length === 0) return []
   const readIssue = deps.fetchIssue ?? defaultFetchIssue
   return openBlockers(blockers, async (ref) => {

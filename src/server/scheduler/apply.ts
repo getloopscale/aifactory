@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm'
 import { HOLD_LOCK } from '../coordinator/queue-apply'
 import type { Database } from '../db'
 import { question, schedulerDecision, task } from '../db/schema'
+import { BlockedByOpenIssues, refOf } from '../factory/blockers'
 import { enterStage } from '../factory/stages'
 import { outcome } from '../factory/transitions'
 import { questionComment } from '../factory/waiting'
@@ -139,5 +140,46 @@ export async function askOwner(
       })
       .where(eq(schedulerDecision.id, decisionId))
     return { asked: true, questionId: asked.id } as const
+  })
+}
+
+/**
+ * Holds back a task whose issue waits for open issues: its queued run is withdrawn and the task fails at
+ * `intake` blocked by them, which is where a blocked task is read again (`runDueRetries`). Both commit together,
+ * and a run taken first leaves everything as it was.
+ */
+export async function blockTask(
+  deps: Pick<AskDeps, 'db'>,
+  run: AskedRun,
+  blockedBy: string[],
+): Promise<{ blocked: true } | { blocked: false; reason: string }> {
+  const [row] = await deps.db
+    .select({ stage: task.stage })
+    .from(task)
+    .where(eq(task.id, run.taskId))
+  const allowed = outcome({ stage: row?.stage ?? 'cancelled' }, 'needs_refinement')
+  if (allowed.kind !== 'action') return { blocked: false, reason: allowed.reason }
+  const refs = blockedBy.flatMap((n) => {
+    const ref = refOf(n)
+    return ref ? [ref] : []
+  })
+  const reason = new BlockedByOpenIssues(refs)
+  return deps.db.transaction(async (tx) => {
+    const withdrawn = await tx.execute(
+      sql`delete from theokit_jobs where theokit_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
+    )
+    if ((withdrawn.rowCount ?? 0) === 0) {
+      return {
+        blocked: false,
+        reason: 'its queued run was taken, held or withdrawn first',
+      } as const
+    }
+    await enterStage(tx as never, run.taskId, 'failed', {
+      failedAt: 'intake',
+      error: reason.message,
+      blockedBy: reason.blockedBy,
+      readiness: true,
+    })
+    return { blocked: true } as const
   })
 }
