@@ -94,6 +94,8 @@ export const REVIEW_MARKER = '<!-- aifactory-external-review -->'
 export const DESCRIPTION_FILE = '/tmp/pull-request/description.md'
 
 const INSTANCE = 'external-review'
+/** Where the reviewer works: an empty directory, so no setting, hook or instruction file of the pull request is loaded. */
+export const REVIEWER_DIR = '/tmp/reviewer'
 const REGISTRY = { domain: 'registry.npmjs.org' }
 const SANDBOX_MS = 60 * 60_000
 
@@ -208,11 +210,12 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     await reviewer.prepare?.(backend)
     feed = await KnowledgeFeed.open(deps.knowledge, backend, repo, {})
     await backend.uploadFile(DESCRIPTION_FILE, `# ${row.title}\n\n${row.body}\n`)
+    await must(backend, `mkdir -p ${REVIEWER_DIR}`)
     const started = Date.now()
     let result
     try {
       result = await reviewer.run(backend, {
-        cwd: repoDir,
+        cwd: REVIEWER_DIR,
         timeoutMs: deps.reviewMs ?? DEFAULT_REVIEW_MS,
         role: 'reviewer',
         prompt: pullRequestReviewPrompt({
@@ -220,6 +223,7 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
           number: row.pullNumber,
           headSha: row.headSha,
           baseSha,
+          repoDir,
           descriptionFile: DESCRIPTION_FILE,
           knowledgeDir: feed.dir,
         }),
