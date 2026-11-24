@@ -16,8 +16,6 @@ type PanelEvent =
   | 'retry_from_finding'
   | 'resolve'
   | 'release'
-  | 'message_ask'
-  | 'message_steer'
 
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
@@ -88,8 +86,6 @@ export type Action =
   | 'answer'
   /** A `Blocked by` line goes on the issue, naming the open issue the work waits for. */
   | 'block'
-  /** The owner's message to an agent is stored, to be delivered in order (M13). */
-  | 'queue_message'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -288,11 +284,6 @@ const ISSUE_WITHDRAWN = {
   cancelled: ignore('the task is already cancelled'),
 }
 
-const NO_SESSION_YET = refuse('no agent has worked on this task yet: there is nobody to write to')
-const STEER_INTEGRATED = refuse(
-  'this work is already integrated, so a steer has no pull request to update: ask, or open a new job for what should change',
-)
-
 const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
   approve: {
     ...each(['intake', ...WORKING, 'waiting', 'released', 'failed', 'cancelled'], NOT_APPROVED),
@@ -341,19 +332,6 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     merge: MERGING,
     done: release,
     released: refuse('this task was already released'),
-  },
-
-  message_ask: {
-    ...each(['intake', 'cancelled'], NO_SESSION_YET),
-    ...each([...WORKING, 'waiting', 'done', 'released', 'handoff', 'failed'], act('queue_message')),
-  },
-  message_steer: {
-    ...each(['intake', 'cancelled'], NO_SESSION_YET),
-    ...each([...WORKING, 'waiting'], act('queue_message')),
-    ...each(['done', 'handoff', 'failed'], (task) =>
-      task.mergedSha ? STEER_INTEGRATED : act('queue_message'),
-    ),
-    released: STEER_INTEGRATED,
   },
 
   retry_due: {
@@ -504,9 +482,6 @@ export const NOT_WIRED: readonly TransitionEvent[] = [
   'check_suite_completed',
   'check_run_completed',
   'issue_reopened',
-  // The owner's messages (M13) have no delivery yet: the table says what they will do.
-  'message_ask',
-  'message_steer',
 ]
 
 /** What `event` does to a task in this state. */

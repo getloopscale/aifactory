@@ -1,16 +1,7 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import {
-  agentMessage,
-  decision,
-  finding,
-  question,
-  repository,
-  stageEvent,
-  task,
-  watch,
-} from '../db/schema'
+import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { integrationBranch } from '../factory/branches'
 import { CONFLICT_NOTE_OPENING, withConflictFiles } from '../factory/merge-base'
