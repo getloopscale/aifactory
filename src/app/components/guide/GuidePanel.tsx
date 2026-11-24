@@ -4,7 +4,7 @@ import { useLocation } from 'react-router'
 
 import type { GuideId } from '../../../shared/guides'
 import { useCopy } from '../../lib/copy'
-import { guideFor, GUIDES } from '../../lib/guides'
+import { guideIdFor, guideIn } from '../../lib/guides'
 import { useGuideState } from '../../lib/guide-state'
 import { useEscape } from '../../lib/keys'
 import { useMinWidth } from '../../lib/media'
@@ -20,17 +20,18 @@ export function GuidePanel() {
   const { pathname, search } = useLocation()
   const { t } = useCopy()
   const { open, setOpen, markSeen } = useGuideState()
-  const guide = guideFor(pathname)
+  const guideId = guideIdFor(pathname)
+  const guide = guideId ? guideIn(guideId, t) : undefined
   const [started, setStarted] = useState<GuideId[]>([])
   const shown = open && guide !== undefined
   // Beside the page when there is room, over it when there is not.
   const wide = useMinWidth(1100)
 
   useEffect(() => {
-    if (!shown || !guide) return
-    markSeen(guide.id)
-    setStarted((current) => (current.includes(guide.id) ? current : [...current, guide.id]))
-  }, [shown, guide, markSeen])
+    if (!shown || !guideId) return
+    markSeen(guideId)
+    setStarted((current) => (current.includes(guideId) ? current : [...current, guideId]))
+  }, [shown, guideId, markSeen])
 
   useEscape(() => {
     if (shown) setOpen(false)
@@ -62,7 +63,7 @@ export function GuidePanel() {
       {started.map((id) => (
         <GuideThread
           key={id}
-          guide={GUIDES[id]}
+          guide={guideIn(id, t)}
           active={id === guide.id}
           pathname={pathname}
           search={search}

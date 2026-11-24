@@ -5,14 +5,25 @@ import { eq, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
-import { COLUMNS, type Column } from '../../shared/panel'
+import { type Column } from '../../shared/panel'
 import { listTasks, taskDetail } from '../panel/queries'
 
 /** What the assistant may read of the factory. It reads rows and a state file, and nothing it could run. */
 
 const TEXT_MAX = 300
-/** What the board calls a column, which is what the owner says. */
-const columnTitle = (column: Column) => COLUMNS.find((c) => c.id === column)?.title ?? column
+/** What the assistant calls a column: the board's English titles, since the assistant's tools speak English. */
+const COLUMN_TITLES: Record<Column, string> = {
+  queued: 'Queued',
+  working: 'Working',
+  waiting: 'Waiting for you',
+  retrying: 'Will retry itself',
+  merge: 'Merge',
+  review: 'Delivered',
+  released: 'Released',
+  resolved: 'Already resolved',
+  attention: 'Needs a person',
+}
+const columnTitle = (column: Column) => COLUMN_TITLES[column] ?? column
 
 const cut = (value: unknown, max = TEXT_MAX) =>
   typeof value === 'string' ? value.replace(/\s+/g, ' ').slice(0, max) : value

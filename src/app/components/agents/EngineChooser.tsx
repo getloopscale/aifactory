@@ -4,20 +4,9 @@ import { Link } from 'react-router'
 
 import type { AgentRole, AgentSettings } from '../../../shared/panel'
 import { put } from '../../lib/api'
+import { useCopy } from '../../lib/copy'
 
 const SAME = ''
-
-const ROLE_LABEL: Record<AgentRole, string> = {
-  builder: 'Agente de código do Construtor',
-  planner: 'Agente de código do Planejador',
-  reviewer: 'Agente de código do Revisor',
-}
-
-const ROLE_NAME: Record<AgentRole, string> = {
-  builder: 'Construtor',
-  planner: 'Planejador',
-  reviewer: 'Revisor',
-}
 
 const select = 'h-9 min-w-52 rounded-lg border border-border bg-card px-2 text-sm text-foreground'
 const caption = 'mb-1 block text-xs font-medium uppercase tracking-wide text-muted-foreground'
@@ -38,6 +27,9 @@ export function EngineChooser({
   settings: AgentSettings
   onSaved: () => void
 }) {
+  const { t } = useCopy()
+  const ROLE_LABEL = t.engine.roleLabel
+  const ROLE_NAME = t.engine.roleName
   const stored = settings.chosen[role]
   const current = role === 'builder' ? settings.effective.builder : (stored ?? SAME)
   const currentModel = settings.chosenModel[role] ?? SAME
@@ -83,7 +75,7 @@ export function EngineChooser({
       })
       setMessage({
         ok: true,
-        text: 'Salvo. Vale para as próximas execuções, sem reiniciar. As que estão rodando terminam como começaram.',
+        text: t.engine.saved,
       })
       onSaved()
     } catch (error) {
@@ -95,7 +87,7 @@ export function EngineChooser({
 
   return (
     <section
-      aria-label={`Escolha: ${ROLE_LABEL[role]}`}
+      aria-label={t.engine.choice(ROLE_LABEL[role])}
       className="space-y-3 rounded-xl border border-border bg-card p-4"
     >
       <div className="flex flex-wrap items-end gap-3">
@@ -108,25 +100,25 @@ export function EngineChooser({
             onChange={(e) => chooseEngine(e.target.value)}
           >
             {role === 'builder' ? null : (
-              <option value={SAME}>O mesmo do Construtor ({settings.effective.builder})</option>
+              <option value={SAME}>{t.engine.sameAsBuilder(settings.effective.builder)}</option>
             )}
             {settings.options.map((o) => (
               <option key={o.id} value={o.id} disabled={!o.ready}>
                 {o.id}
-                {o.ready ? '' : ' (indisponível)'}
+                {o.ready ? '' : t.engine.unavailable}
               </option>
             ))}
           </select>
         </label>
         <label className="block">
-          <span className={caption}>Modelo</span>
+          <span className={caption}>{t.engine.model}</span>
           <select
-            aria-label={`Modelo do ${ROLE_NAME[role]}`}
+            aria-label={t.engine.modelOf(ROLE_NAME[role])}
             className={select}
             value={model}
             onChange={(e) => chooseModel(e.target.value)}
           >
-            <option value={SAME}>Padrão do agente</option>
+            <option value={SAME}>{t.engine.agentDefault}</option>
             {offered.models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
@@ -135,14 +127,14 @@ export function EngineChooser({
           </select>
         </label>
         <label className="block">
-          <span className={caption}>Esforço</span>
+          <span className={caption}>{t.engine.effort}</span>
           <select
-            aria-label={`Esforço do ${ROLE_NAME[role]}`}
+            aria-label={t.engine.effortOf(ROLE_NAME[role])}
             className={`${select} min-w-36`}
             value={effort}
             onChange={(e) => setEffort(e.target.value)}
           >
-            <option value={SAME}>Padrão</option>
+            <option value={SAME}>{t.engine.default}</option>
             {levels.map((level) => (
               <option key={level} value={level}>
                 {level}
@@ -151,22 +143,22 @@ export function EngineChooser({
           </select>
         </label>
         <Button size="sm" disabled={!changed || busy} onClick={() => void save()}>
-          Salvar
+          {t.engine.save}
         </Button>
       </div>
 
       {picked?.note ? <p className="text-xs text-muted-foreground">{picked.note}</p> : null}
       {offered.models.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          A lista de modelos de {engine} não está disponível aqui: ele usa o próprio padrão.
-        </p>
+        <p className="text-xs text-muted-foreground">{t.engine.noModelList(engine)}</p>
       ) : null}
 
       {unavailable.length > 0 ? (
         <ul className="space-y-1 text-xs text-muted-foreground">
           {unavailable.map((o) => (
             <li key={o.id}>
-              <span className="font-mono">{o.id}</span> não pode ser escolhido: {o.problem}
+              <span className="font-mono">{o.id}</span>
+              {t.engine.cannotChoose}
+              {o.problem}
             </li>
           ))}
         </ul>
@@ -174,10 +166,9 @@ export function EngineChooser({
 
       {own.length > 0 ? (
         <p className="text-xs text-muted-foreground">
-          Estes repositórios têm um agente próprio, que vale mais do que esta escolha:{' '}
-          {own.map((r) => r.repository).join(', ')}.{' '}
+          {t.engine.ownAgent} {own.map((r) => r.repository).join(', ')}.{' '}
           <Link to="/repositories" className="underline underline-offset-2">
-            Mudar em Repositórios
+            {t.engine.changeInRepositories}
           </Link>
         </p>
       ) : null}

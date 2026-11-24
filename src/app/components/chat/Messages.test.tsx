@@ -2,6 +2,8 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { en } from '../../lib/copy/en'
+
 import { Messages } from './Messages'
 
 afterEach(cleanup)
@@ -35,8 +37,8 @@ describe('a conversation as the owner reads it', () => {
         ]}
       />,
     )
-    expect(screen.getByText('Consultou: as tarefas')).toBeDefined()
-    expect(screen.getByText('Fez: começou uma tarefa de novo')).toBeDefined()
+    expect(screen.getByText(`${en.chat.looked}: as tarefas`)).toBeDefined()
+    expect(screen.getByText(`${en.chat.did}: começou uma tarefa de novo`)).toBeDefined()
     expect(await screen.findByText(/Pronto/)).toBeDefined()
     expect(screen.queryByText(/RAW/)).toBeNull()
     expect(screen.queryByText('list_tasks')).toBeNull()
@@ -50,8 +52,8 @@ describe('a conversation as the owner reads it', () => {
         messages={[{ id: 'a', role: 'assistant', parts: [call('approve_task', 'output-denied')] }]}
       />,
     )
-    expect(screen.getByText('Você recusou: aprovou um pull request')).toBeDefined()
-    expect(container.textContent).toBe('Você recusou: aprovou um pull request')
+    expect(screen.getByText(`${en.chat.refused}: aprovou um pull request`)).toBeDefined()
+    expect(container.textContent).toBe(`${en.chat.refused}: aprovou um pull request`)
   })
 
   it('shows that an answer is coming', () => {

@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { GUIDE_IDS } from '../../shared/guides'
+
+import { en } from './copy/en'
+import { ptBR } from './copy/pt-BR'
 import type { RepositoryView } from '../../shared/panel'
 
 import {
   finishedChanges,
   focusOf,
-  GUIDES,
+  guideIn,
   guideFor,
   repoChanges,
   startersFor,
@@ -16,7 +19,7 @@ import {
 
 describe('the guide of a page', () => {
   it('is picked by where the owner is, for every page of the menu but the chat', () => {
-    const at = (path: string) => guideFor(path)?.id
+    const at = (path: string) => guideFor(path, en)?.id
     expect(at('/work')).toBe('board')
     expect(at('/tasks/12')).toBe('board')
     expect(at('/plans')).toBe('plans')
@@ -32,15 +35,18 @@ describe('the guide of a page', () => {
 
   it('has a name, a sentence about the page and suggestions for each one, and warns where keys are at risk', () => {
     for (const id of GUIDE_IDS) {
-      const guide = GUIDES[id]
+      const guide = guideIn(id, ptBR)
       expect(guide.id).toBe(id)
       expect(guide.name).toMatch(/^Guia d/)
+      expect(guideIn(id, en).name).toMatch(/^Guide of/)
+      expect(guideIn(id, en).about).not.toBe(guide.about)
       expect(guide.about.length).toBeGreaterThan(20)
       expect(guide.understand.length).toBeGreaterThan(0)
       expect(guide.act.length).toBeGreaterThan(0)
     }
-    expect(GUIDES.setup.note).toContain('chaves')
-    expect(GUIDES.board.note).toBeUndefined()
+    expect(guideIn('setup', ptBR).note).toContain('chaves')
+    expect(guideIn('setup', en).note).toContain('keys')
+    expect(guideIn('board', ptBR).note).toBeUndefined()
   })
 })
 
@@ -55,22 +61,31 @@ describe('what the owner has open', () => {
   })
 
   it('is told to the guide in a line, so that "this task" means something', () => {
-    expect(whereIs(GUIDES.board, '/work', '')).toBe('Onde o dono está: página "Quadro" (/work).')
-    expect(whereIs(GUIDES.board, '/work', '?task=9')).toContain('a tarefa 9 aberta')
-    expect(whereIs(GUIDES.plans, '/plans/3', '')).toContain('o plano 3 aberto')
+    expect(whereIs(guideIn('board', ptBR), '/work', '')).toBe(
+      'Onde o dono está: página "Quadro" (/work).',
+    )
+    expect(whereIs(guideIn('board', ptBR), '/work', '?task=9')).toContain('a tarefa 9 aberta')
+    expect(whereIs(guideIn('plans', ptBR), '/plans/3', '')).toContain('o plano 3 aberto')
   })
 
-  it('puts the questions about the open item first', () => {
-    const none = startersFor(GUIDES.board, undefined)
-    expect(none.understand).toEqual(GUIDES.board.understand)
-    expect(none.act).toEqual(GUIDES.board.act)
-    const task = startersFor(GUIDES.board, { kind: 'task', id: 9 })
-    expect(task.understand[0].text).toBe('Explique a tarefa 9')
-    expect(task.act[0].text).toBe('O que devo fazer com a tarefa 9?')
-    expect(task.understand.slice(1)).toEqual(GUIDES.board.understand)
-    const plan = startersFor(GUIDES.plans, { kind: 'plan', id: 3 })
-    expect(plan.understand[0].text).toBe('Explique o plano 3')
-    expect(plan.act[0].text).toBe('Crie as issues do plano 3')
+  it('puts the questions about the open item first, in the language of the owner', () => {
+    for (const t of [en, ptBR]) {
+      const board = guideIn('board', t)
+      const plans = guideIn('plans', t)
+      const none = startersFor(board, undefined, t)
+      expect(none.understand).toEqual(board.understand)
+      expect(none.act).toEqual(board.act)
+      const task = startersFor(board, { kind: 'task', id: 9 }, t)
+      expect(task.understand[0].text).toBe(t.guides.open.task(9).explain)
+      expect(task.act[0].text).toBe(t.guides.open.task(9).act)
+      expect(task.understand.slice(1)).toEqual(board.understand)
+      const plan = startersFor(plans, { kind: 'plan', id: 3 }, t)
+      expect(plan.understand[0].text).toBe(t.guides.open.plan(3).explain)
+      expect(plan.act[0].text).toBe(t.guides.open.plan(3).act)
+    }
+    expect(startersFor(guideIn('board', ptBR), { kind: 'task', id: 9 }, ptBR).act[0].text).toBe(
+      'O que devo fazer com a tarefa 9?',
+    )
   })
 })
 

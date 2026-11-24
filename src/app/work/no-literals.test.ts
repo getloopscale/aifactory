@@ -1,68 +1,83 @@
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
-const FILES = [
-  'src/app/work/page.tsx',
-  'src/app/components/Board.tsx',
-  'src/app/components/Badges.tsx',
-  'src/app/components/NewJob.tsx',
-  'src/app/lib/format.ts',
-  'src/app/repositories/page.tsx',
-  'src/app/setup/page.tsx',
-  'src/app/login/page.tsx',
-  'src/app/health/page.tsx',
-  'src/app/error.tsx',
-  'src/app/components/KnowledgeRepository.tsx',
-  'src/app/components/ClaudeAccount.tsx',
-  'src/app/components/CodexAccount.tsx',
-  'src/app/components/RecipeCard.tsx',
-  'src/app/components/WatchPanel.tsx',
-  'src/app/plans/page.tsx',
-  'src/app/plans/[planId]/page.tsx',
-  'src/app/agents/page.tsx',
-  'src/app/components/PlanSection.tsx',
-  'src/app/components/agents/AgentDetail.tsx',
-  'src/app/components/guide/GuideThread.tsx',
-  'src/app/components/guide/GuidePanel.tsx',
-  'src/app/components/chat/PillComposer.tsx',
-  'src/app/components/chat/ChatgptConnect.tsx',
-  'src/app/components/chat/ChatView.tsx',
-  'src/app/components/CoordinatorActions.tsx',
-  'src/app/coordinator/page.tsx',
-  'src/app/inbox/page.tsx',
-]
+/** Names and identifiers that are not a word of either language: the label of GitHub, the product, a code. */
+const ALLOWED = new Set(['factory', 'aifactory', 'GitHub', 'Claude', 'Codex', 'OpenRouter'])
 
-// The name of the GitHub label, not a word of either language.
-const NAMES = new Set(['factory'])
+/** The attributes whose string a person reads; every other attribute is an identifier, a class or a test id. */
+const VISIBLE = new Set(['aria-label', 'title', 'placeholder', 'alt', 'label', 'description'])
 
 const WORDS = /[A-Za-zÀ-ÿ]{2,}/
 
-/** Visible literals: JSX text, and string values of the attributes a person reads. */
+const visible = (text: string) => WORDS.test(text) && !ALLOWED.has(text.trim())
+
+/** Visible literals of a `.tsx` source: JSX text, string values of the attributes a person reads, and `{'text'}`. */
 export function literals(source: string): string[] {
+  const file = ts.createSourceFile('x.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const found: string[] = []
-  for (const m of source.matchAll(/(?<![=-])>([^<>{}]+)</g)) {
-    // Code between two generics or comparisons has these; visible text does not.
-    if (WORDS.test(m[1]) && !/[();=]/.test(m[1]) && !NAMES.has(m[1].trim())) found.push(m[1].trim())
+  const add = (text: string) => {
+    if (visible(text)) found.push(text.trim())
   }
-  for (const m of source.matchAll(/\b(?:aria-label|title|placeholder|alt|label)="([^"]+)"/g)) {
-    found.push(m[1])
+  const stringOf = (node: ts.Node | undefined) =>
+    node && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))
+      ? node.text
+      : undefined
+  const walk = (node: ts.Node) => {
+    if (ts.isJsxText(node)) add(node.text)
+    if (ts.isJsxAttribute(node) && VISIBLE.has(node.name.getText(file)) && node.initializer) {
+      const init = node.initializer
+      const text =
+        stringOf(init) ?? (ts.isJsxExpression(init) ? stringOf(init.expression) : undefined)
+      if (text !== undefined) add(text)
+    }
+    if (ts.isJsxExpression(node) && !ts.isJsxAttribute(node.parent)) {
+      const text = stringOf(node.expression)
+      if (text !== undefined) add(text)
+    }
+    ts.forEachChild(node, walk)
   }
+  walk(file)
   return found
 }
 
-describe('the work page has no visible string of its own', () => {
+/** Every `.tsx` under a folder that is not a test and not the dictionary. */
+function sources(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return path === join('src', 'app', 'lib', 'copy') ? [] : sources(path)
+    return path.endsWith('.tsx') && !/\.test\.tsx$/.test(path) ? [path] : []
+  })
+}
+
+describe('no .tsx under src/app has a visible string of its own', () => {
   it('finds a literal when there is one, so the check cannot pass by finding none', () => {
-    expect(literals('<p>Nothing here.</p>')).toEqual(['Nothing here.'])
-    expect(literals('<div aria-label="Tasks" />')).toEqual(['Tasks'])
-    expect(literals('<p>{t.board.nothingHere}</p>')).toEqual([])
+    expect(literals('const a = <p>Nothing here.</p>')).toEqual(['Nothing here.'])
+    expect(literals('const a = <div aria-label="Tasks" />')).toEqual(['Tasks'])
+    expect(literals("const a = <input placeholder={'Type here'} />")).toEqual(['Type here'])
+    expect(literals("const a = <p>{'Hello there'}</p>")).toEqual(['Hello there'])
+    expect(literals('const a = <p>{t.board.nothingHere}</p>')).toEqual([])
   })
 
-  for (const file of FILES) {
+  it('lets identifiers, class names, test ids and product names through', () => {
+    expect(
+      literals('const a = <p className="text-sm" data-testid="board-card">factory</p>'),
+    ).toEqual([])
+    expect(literals('const a = <a href="/work" key="x" role="tab" />')).toEqual([])
+    expect(literals('const a = <p>{count} / {total}</p>')).toEqual([])
+  })
+
+  const files = sources(join('src', 'app'))
+
+  it('looks at the pages and the components', () => {
+    expect(files.length).toBeGreaterThan(40)
+  })
+
+  for (const file of files) {
     it(`${file} takes its text from the dictionary`, () => {
-      const source = readFileSync(file, 'utf8')
-      // format.ts also holds `describeEvent`, which belongs to the task page and moves with it.
-      expect(literals(source.split('const text =')[0])).toEqual([])
+      expect(literals(readFileSync(file, 'utf8'))).toEqual([])
     })
   }
 })

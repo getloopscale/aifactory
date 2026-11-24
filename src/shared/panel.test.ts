@@ -52,20 +52,6 @@ describe('columnOf', () => {
     const known = new Set(COLUMNS.map((c) => c.id))
     for (const column of Object.values(expected)) expect(known.has(column)).toBe(true)
   })
-
-  it('gives every column a title', () => {
-    expect(COLUMNS.map((c) => c.title)).toEqual([
-      'Queued',
-      'Working',
-      'Waiting for you',
-      'Will retry itself',
-      'Merge',
-      'Delivered',
-      'Released',
-      'Already resolved',
-      'Needs a person',
-    ])
-  })
 })
 
 describe('a task that finished with no change', () => {

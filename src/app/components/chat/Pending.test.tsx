@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { en } from '../../lib/copy/en'
+
 import { Pending, type Conversation } from './Pending'
 
 afterEach(() => {
@@ -17,16 +19,15 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
 })
 
 describe('what waits for the owner', () => {
-  it('shows a change in words, with the buttons in Portuguese, and passes the decision on', () => {
+  it('shows a change in words, with the buttons from the dictionary, and passes the decision on', () => {
     const c = conversation({
       pendingApprovals: [{ approvalId: 'a1', toolName: 'retry_task', input: { id: 49 } }],
     })
     render(<Pending conversation={c} />)
     expect(screen.getByText('Repetir uma tarefa')).toBeDefined()
-    expect(screen.queryByText('Approve')).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Aprovar' }))
+    fireEvent.click(screen.getByRole('button', { name: en.chat.approve }))
     expect(c.approve).toHaveBeenCalledWith('a1', { approved: true })
-    fireEvent.click(screen.getByRole('button', { name: 'Recusar' }))
+    fireEvent.click(screen.getByRole('button', { name: en.chat.reject }))
     expect(c.approve).toHaveBeenCalledWith('a1', { approved: false })
   })
 
@@ -80,7 +81,7 @@ describe('what waits for the owner', () => {
         conversation={conversation({ status: 'error', error: new Error('An error occurred.') })}
       />,
     )
-    expect(screen.getByText(/sem crédito/)).toBeDefined()
+    expect(screen.getByText(/out of credit/)).toBeDefined()
   })
 
   it('shows a reason the server did give, and a fallback when there is no error at all', () => {
@@ -90,7 +91,7 @@ describe('what waits for the owner', () => {
     expect(screen.getByText('sem chave')).toBeDefined()
     cleanup()
     render(<Pending conversation={conversation({ status: 'error' })} />)
-    expect(screen.getByText(/sem crédito/)).toBeDefined()
+    expect(screen.getByText(/out of credit/)).toBeDefined()
   })
 
   it('shows nothing when nothing waits', () => {

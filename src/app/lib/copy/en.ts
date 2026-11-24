@@ -678,7 +678,78 @@ export const en = {
     loading: 'Loading…',
     ready: 'Ready when you are.',
     askFactory: 'Ask the factory',
+    metaDescription: 'Talk to the factory.',
+    failedTitle: "I couldn't answer",
+    failedHint:
+      'The model did not answer. The most common cause is the OpenRouter key being out of credit or without permission for this model. The "Setup" page shows what is ready. Try again in a moment.',
+    approve: 'Approve',
+    reject: 'Reject',
+    looked: 'Looked at',
+    did: 'Did',
+    refused: 'You refused',
+    model: 'Model',
   },
+  engine: {
+    roleLabel: {
+      builder: 'Coding agent of the Builder',
+      planner: 'Coding agent of the Planner',
+      reviewer: 'Coding agent of the Reviewer',
+    },
+    roleName: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer' },
+    choice: (label: string) => `Choice: ${label}`,
+    sameAsBuilder: (builder: string) => `Same as the Builder (${builder})`,
+    unavailable: ' (unavailable)',
+    model: 'Model',
+    modelOf: (role: string) => `Model of the ${role}`,
+    agentDefault: "Agent's default",
+    effort: 'Effort',
+    effortOf: (role: string) => `Effort of the ${role}`,
+    default: 'Default',
+    save: 'Save',
+    saved:
+      'Saved. It applies to the next runs, with no restart. The ones running finish as they started.',
+    noModelList: (engine: string) =>
+      `The list of models of ${engine} is not available here: it uses its own default.`,
+    cannotChoose: ' cannot be chosen: ',
+    ownAgent:
+      'These repositories have an agent of their own, which counts for more than this choice:',
+    changeInRepositories: 'Change in Repositories',
+  },
+  promptBlock: {
+    copy: 'Copy',
+    copied: 'Copied',
+    copyTitle: (title: string) => `Copy: ${title}`,
+    templatePrefix: 'Template: what is in ',
+    blue: '‹blue›',
+    templateMiddle: ' changes with each task (',
+    place: 'place',
+    places: 'places',
+    templateSuffix: '); the rest is always the same.',
+  },
+  metrics: {
+    heading: 'Metrics',
+    empty: 'Not enough finished work to measure yet.',
+    indicator: 'Indicator',
+    repository: 'Repository',
+    day: 'Day',
+    value: 'Value',
+    baseline: 'Baseline',
+    band: 'Band',
+    allRepositories: 'All repositories',
+    bands: {
+      no_baseline: 'no baseline yet',
+      in_band: 'in band',
+      log: 'drifting',
+      show: 'out of band',
+      act: 'issue opened',
+    },
+    brokeIn: ' in ',
+    broke: ' broke ',
+    on: ' on ',
+    issue: 'issue',
+    notOpened: (error: string) => ` (issue not opened: ${error})`,
+  },
+  notFound: { title: 'Page not found', home: 'Go back home' },
   guide: {
     close: 'Close the guide',
     subtitle: 'Explains and adjusts this page',
@@ -686,6 +757,113 @@ export const en = {
     understand: 'Understand',
     act: 'Do',
     placeholder: 'Ask the guide',
+  },
+  guides: {
+    names: {
+      board: 'Guide of the Board',
+      plans: 'Guide of Plans',
+      repositories: 'Guide of Repositories',
+      inbox: 'Guide of the Inbox',
+      health: 'Guide of Health',
+      agents: 'Guide of Agents',
+      setup: 'Guide of Setup',
+    },
+    board: {
+      about: 'Here you follow every task of the factory, from the queue to delivery.',
+      understand: [
+        'What does each column mean?',
+        'Why are there tasks in "Will retry itself"?',
+        'How does a task get to the board?',
+      ],
+      act: [
+        { text: 'Does any task need me now?' },
+        { text: 'I want to open a job for ', fill: true },
+      ],
+    },
+    plans: {
+      about:
+        'Here a goal of yours becomes a list of small issues, for you to review before the factory starts.',
+      understand: ['How does a plan work?', 'How do I write a good goal?'],
+      act: [
+        { text: 'I want to plan this goal: ', fill: true },
+        { text: 'Which plans are ready to review?' },
+      ],
+    },
+    repositories: {
+      about:
+        'Here you choose which repositories the factory may work in and how it works in each one.',
+      understand: ['What does each setting do?', 'What are the checks?'],
+      act: [
+        { text: 'Which repositories are active and how are they set up?' },
+        { text: 'Set up the checks of ', fill: true },
+      ],
+    },
+    inbox: {
+      about:
+        'Only what is waiting for a person is here: a question, a PR to review, work that got stuck.',
+      understand: ['What is each kind of item?', 'Does approving a PR publish anything yet?'],
+      act: [{ text: 'Where do I start?' }, { text: 'What should I do with the oldest item?' }],
+    },
+    health: {
+      about: 'Here you see how much the factory spent and the problems it found by itself.',
+      understand: ['Am I spending too much?', 'What are these findings?'],
+      act: [{ text: 'Is there anything I need to solve?' }],
+    },
+    agents: {
+      about:
+        'Here you see who works in the factory, the instructions each agent receives and what each can do.',
+      understand: [
+        'What is the difference between the builder and the reviewer?',
+        'What is a prompt, and where is it here?',
+      ],
+      act: [{ text: 'Which agent is doing what now?' }, { text: "Explain the builder's prompt." }],
+    },
+    setup: {
+      about: 'Here you see what the factory still needs to work and how to solve each part.',
+      understand: ['What is each item for?', 'What is missing for the factory to work?'],
+      act: [{ text: 'Guide me through the next step.' }],
+      note: 'Never paste keys or passwords here.',
+    },
+    open: {
+      task: (id: number) => ({
+        explain: `Explain task ${id}`,
+        act: `What should I do with task ${id}?`,
+      }),
+      plan: (id: number) => ({
+        explain: `Explain plan ${id}`,
+        act: `Create the issues of plan ${id}`,
+      }),
+    },
+  },
+  events: {
+    resolved: (sha: string) => `already resolved at ${sha}, issue closed`,
+    preRelease: (name: string) => `pre-release ${name}`,
+    noPreRelease: (error: string) => `no pre-release: ${error}`,
+    nothingToChange: 'nothing to change',
+    awaitingChecks: (checks: string) => `waiting for the repository checks: ${checks}`,
+    mergedBy: (by: string, sha: string) => `merged by ${by} at ${sha}`,
+    byFactory: 'the factory',
+    byPerson: 'a person',
+    decided: (who: string, decision: string, note: string) =>
+      `${who} ${decision}${note ? `: ${note}` : ''}`,
+    newSession: (provider: string, minutes: string) =>
+      `${provider}, new session: the last one had run ${minutes} minutes, the disk moved over`,
+    attempt: (n: string) => `attempt ${n}`,
+    resumed: 'resumed after an answer',
+    rework: 'rework',
+    planned: 'following its plan',
+    approvedBy: (reviewer: string) => `approved by ${reviewer}`,
+    resolvedNow: (sha: string, branch: string) => `already resolved at ${sha}, now on ${branch}`,
+    promotedChangesets: (actor: string) =>
+      `promoted by ${actor}; the repository's release workflow publishes it`,
+    promotedTag: (actor: string, tag: string) =>
+      `promoted by ${actor}; ${tag} waits for its release workflow to publish it`,
+    notPublished: (tag: string, error: string) => `${tag} was not published: ${error}`,
+    taggedBy: (tag: string, actor: string, error: string) =>
+      `${tag} by ${actor}${error ? `, but the release could not be created: ${error}` : ''}`,
+    mergedNoRelease: (actor: string, error: string) =>
+      `merged by ${actor}, but the release could not be created: ${error}`,
+    outOfQuota: (resetsAt: string) => `out of quota${resetsAt ? `, resets ${resetsAt}` : ''}`,
   },
   planSection: {
     title: 'Plan',

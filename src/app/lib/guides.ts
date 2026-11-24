@@ -1,5 +1,7 @@
-import { GUIDE_NAMES, type GuideId } from '../../shared/guides'
+import type { GuideId } from '../../shared/guides'
 import type { RepositoryView } from '../../shared/panel'
+
+import type { Copy } from './copy/en'
 
 export type Starter = {
   text: string
@@ -8,9 +10,9 @@ export type Starter = {
 
 export type Guide = {
   id: GuideId
-  /** What the specialist is called. */
+  /** What the specialist is called, in the owner's language. */
   name: string
-  /** What the menu calls the place. */
+  /** What the menu calls the place, in the language the guide's agent is told (it is context for the agent). */
   place: string
   /** One sentence on what the page is for, shown before the owner has asked anything. */
   about: string
@@ -20,96 +22,34 @@ export type Guide = {
   note?: string
 }
 
-export const GUIDES: Record<GuideId, Guide> = {
-  board: {
-    id: 'board',
-    name: GUIDE_NAMES.board,
-    place: 'Quadro',
-    about: 'Aqui você acompanha cada tarefa da fábrica, da fila até a entrega.',
-    understand: [
-      { text: 'O que significa cada coluna?' },
-      { text: 'Por que há tarefas em "Will retry itself"?' },
-      { text: 'Como uma tarefa chega ao quadro?' },
-    ],
-    act: [
-      { text: 'Alguma tarefa precisa de mim agora?' },
-      { text: 'Quero abrir um job para ', fill: true },
-    ],
-  },
-  plans: {
-    id: 'plans',
-    name: GUIDE_NAMES.plans,
-    place: 'Planos',
-    about:
-      'Aqui um objetivo seu vira uma lista de issues pequenas, para você revisar antes de a fábrica começar.',
-    understand: [{ text: 'Como funciona um plano?' }, { text: 'Como escrevo um bom objetivo?' }],
-    act: [
-      { text: 'Quero planejar este objetivo: ', fill: true },
-      { text: 'Quais planos estão prontos para revisar?' },
-    ],
-  },
-  repositories: {
-    id: 'repositories',
-    name: GUIDE_NAMES.repositories,
-    place: 'Repositórios',
-    about:
-      'Aqui você escolhe em quais repositórios a fábrica pode trabalhar e como ela trabalha em cada um.',
-    understand: [
-      { text: 'O que cada configuração faz?' },
-      { text: 'O que são as verificações (checks)?' },
-    ],
-    act: [
-      { text: 'Quais repositórios estão ativos e como estão configurados?' },
-      { text: 'Configure as verificações de ', fill: true },
-    ],
-  },
-  inbox: {
-    id: 'inbox',
-    name: GUIDE_NAMES.inbox,
-    place: 'Caixa de entrada',
-    about:
-      'Aqui fica só o que está esperando por uma pessoa: uma pergunta, um PR para revisar, um trabalho que travou.',
-    understand: [
-      { text: 'O que é cada tipo de item?' },
-      { text: 'Aprovar um PR já publica algo?' },
-    ],
-    act: [{ text: 'Por onde eu começo?' }, { text: 'O que devo fazer com o item mais antigo?' }],
-  },
-  health: {
-    id: 'health',
-    name: GUIDE_NAMES.health,
-    place: 'Saúde',
-    about: 'Aqui você vê quanto a fábrica gastou e os problemas que ela mesma encontrou.',
-    understand: [{ text: 'Estou gastando muito?' }, { text: 'O que são esses achados?' }],
-    act: [{ text: 'Há algo que eu precise resolver?' }],
-  },
-  agents: {
-    id: 'agents',
-    name: GUIDE_NAMES.agents,
-    place: 'Agentes',
-    about:
-      'Aqui você vê quem trabalha na fábrica, as instruções que cada agente recebe e o que cada um pode fazer.',
-    understand: [
-      { text: 'Qual a diferença entre o construtor e o revisor?' },
-      { text: 'O que é um prompt, e onde ele está aqui?' },
-    ],
-    act: [
-      { text: 'Qual agente está fazendo o quê agora?' },
-      { text: 'Explique o prompt do construtor.' },
-    ],
-  },
-  setup: {
-    id: 'setup',
-    name: GUIDE_NAMES.setup,
-    place: 'Configuração',
-    about: 'Aqui você vê o que falta para a fábrica funcionar e como resolver cada parte.',
-    understand: [
-      { text: 'Para que serve cada item?' },
-      { text: 'O que falta para a fábrica funcionar?' },
-    ],
-    act: [{ text: 'Me guie no próximo passo.' }],
-    note: 'Nunca cole chaves ou senhas aqui.',
-  },
+/** The place as the agent of the guide is told it: part of the context it gets, not of what the owner reads. */
+const AGENT_PLACE: Record<GuideId, string> = {
+  board: 'Quadro',
+  plans: 'Planos',
+  repositories: 'Repositórios',
+  inbox: 'Caixa de entrada',
+  health: 'Saúde',
+  agents: 'Agentes',
+  setup: 'Configuração',
+}
+
+/** The guide of a place, with what the owner reads of it taken from the dictionary of their language. */
+export function guideIn(id: GuideId, t: Copy): Guide {
+  const content = t.guides[id] as {
+    about: string
+    understand: string[]
+    act: Starter[]
+    note?: string
+  }
+  return {
+    id,
+    name: t.guides.names[id],
+    place: AGENT_PLACE[id],
+    about: content.about,
+    understand: content.understand.map((text) => ({ text })),
+    act: content.act,
+    ...(content.note ? { note: content.note } : {}),
+  }
 }
 
 const PLACES: [RegExp, GuideId][] = [
@@ -122,10 +62,15 @@ const PLACES: [RegExp, GuideId][] = [
   [/^\/setup(\/|$)/, 'setup'],
 ]
 
-/** The guide of the page the owner is on, or none: the chat is the general assistant and has no guide. */
-export function guideFor(pathname: string): Guide | undefined {
-  const found = PLACES.find(([pattern]) => pattern.test(pathname))
-  return found ? GUIDES[found[1]] : undefined
+/** Which guide the page the owner is on has, or none: the chat is the general assistant and has no guide. */
+export function guideIdFor(pathname: string): GuideId | undefined {
+  return PLACES.find(([pattern]) => pattern.test(pathname))?.[1]
+}
+
+/** The guide of the page the owner is on, in their language, or none. */
+export function guideFor(pathname: string, t: Copy): Guide | undefined {
+  const id = guideIdFor(pathname)
+  return id ? guideIn(id, t) : undefined
 }
 
 /** The item the owner has open on the page, from the address: a task or a plan. */
@@ -151,15 +96,9 @@ export function whereIs(guide: Guide, pathname: string, search: string): string 
 }
 
 /** The suggestions of a guide, with the ones about the open item first. */
-export function startersFor(guide: Guide, focus: ReturnType<typeof focusOf>) {
-  const about: Starter[] = !focus
-    ? []
-    : focus.kind === 'task'
-      ? [
-          { text: `Explique a tarefa ${focus.id}` },
-          { text: `O que devo fazer com a tarefa ${focus.id}?` },
-        ]
-      : [{ text: `Explique o plano ${focus.id}` }, { text: `Crie as issues do plano ${focus.id}` }]
+export function startersFor(guide: Guide, focus: ReturnType<typeof focusOf>, t: Copy) {
+  const asked = !focus ? undefined : t.guides.open[focus.kind](focus.id)
+  const about: Starter[] = asked ? [{ text: asked.explain }, { text: asked.act }] : []
   return {
     understand: [...about.slice(0, 1), ...guide.understand],
     act: [...about.slice(1), ...guide.act],
