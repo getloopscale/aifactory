@@ -746,7 +746,7 @@ export const ptBR: Copy = {
       ask: 'Deixar o agente me fazer perguntas na issue quando algo não estiver claro',
       reviewOthers: 'Revisar pull requests que a fábrica não abriu',
       reviewOthersHelp:
-        'O revisor lê e comenta, nunca aprova nem faz merge. Pull requests do dono, de membros e de colaboradores são lidos de imediato; de qualquer outra pessoa, só depois que um mantenedor adicionar o rótulo factory-review.',
+        'O revisor lê e comenta, nunca aprova nem faz merge. Pull requests do dono, de membros e de colaboradores são lidos de imediato; de qualquer outra pessoa, só depois que um mantenedor adicionar o rótulo factory-review, que libera um commit: um novo push pede o rótulo de novo.',
       builder: 'Construtor',
       reviewer: 'Revisor',
       release: 'Versão final',

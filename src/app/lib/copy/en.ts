@@ -491,7 +491,7 @@ export const en = {
       ask: 'Let the agent ask me questions on the issue when something is unclear',
       reviewOthers: 'Review pull requests the factory did not open',
       reviewOthersHelp:
-        'The reviewer reads them and comments, never approves or merges. Pull requests by the owner, members and collaborators are read at once; anyone else only after a maintainer adds the factory-review label.',
+        'The reviewer reads them and comments, never approves or merges. Pull requests by the owner, members and collaborators are read at once; anyone else only after a maintainer adds the factory-review label, which lets one commit be read: a later push needs the label again.',
       builder: 'Builder',
       reviewer: 'Reviewer',
       release: 'Release',

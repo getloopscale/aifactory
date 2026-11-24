@@ -201,7 +201,7 @@ async function openAt(
   try {
     if (rules.after && !sandbox.updateEgress) {
       return skip(
-        'the sandbox provider cannot change its network rules while it runs, and a fork runs only without a GitHub credential',
+        'the sandbox provider cannot change its network rules while it runs, and the code of the commit runs only without a GitHub credential',
       )
     }
     const { repoDir } = await cloneRepository(sandbox.backend, {
@@ -286,7 +286,7 @@ async function read(deps: PullReviewDeps, row: PullReviewRow): Promise<PullRevie
 async function checked(deps: PullReviewDeps, at: Reading, config: RepoConfig) {
   const { sandbox, repoDir, baseSha } = await openAt(deps, at, {
     start: [githubEgress(at.token), ...at.base],
-    after: at.fork ? [rule('github.com'), ...at.base] : undefined,
+    after: [rule('github.com'), ...at.base],
   })
   try {
     await prepareDeclaredPackageManager(sandbox.backend, repoDir)
@@ -323,9 +323,7 @@ async function reviewed(
   } = await openAt(
     deps,
     at,
-    at.fork
-      ? { start: [githubEgress(at.token), ...at.base], after: [...at.base, ...agentEgress] }
-      : { start: [githubEgress(at.token), ...at.base, ...agentEgress] },
+    { start: [githubEgress(at.token), ...at.base], after: [...at.base, ...agentEgress] },
   )
   let feed: KnowledgeFeed | undefined
   try {

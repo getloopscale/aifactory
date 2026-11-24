@@ -215,6 +215,13 @@ describe('reviewPullRequest', () => {
     expect(t.sandbox.stopped).toBe(2)
   })
 
+  it('drops the token before a same-repository head runs, too', async () => {
+    const t = arrange({})
+    await reviewPullRequest(t.deps, 1)
+    expect(t.sandbox.egressUpdates).toHaveLength(2)
+    for (const update of t.sandbox.egressUpdates) expect(update.some((e) => e.headers)).toBe(false)
+  })
+
   it('skips a fork when the provider cannot drop the credential, and stops its sandbox', async () => {
     const t = arrange({ fork: true, updateEgress: false })
     const out = await reviewPullRequest(t.deps, 1)
