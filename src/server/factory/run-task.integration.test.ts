@@ -4234,6 +4234,69 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(row!.stage).toBe('intake')
   })
 
+  it('has the merge agent resolve the conflict of a handed-over task the owner asked to merge, with no builder session', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+    await mergeBaseByOwner(
+      {
+        db: getDb(),
+        github,
+        api: githubApi,
+        enqueueResume: async () => {},
+        deleteSnapshot: async () => {},
+        inTransaction: (work) =>
+          getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+      },
+      id,
+    )
+    expect(queued).toEqual([{ taskId: id, mergeBase: true }])
+
+    const world = conflictingSandbox('')
+    const builds: string[] = []
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        builds.push(input.prompt)
+        return { ok: true, summary: 'built' }
+      },
+    }
+    const merges: string[] = []
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        merges.push(input.prompt)
+        world.ran()
+        return { ok: true, summary: 'Kept both changelog entries.' }
+      },
+    }
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(world.sandbox, {
+        harness: builder,
+        merger,
+        reviewer: reviewerSaying(verdictJson('approve')),
+      }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(builds).toEqual([])
+    expect(merges).toHaveLength(1)
+    expect(merges[0]).toContain('CHANGELOG.md')
+    const roles = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(roles.map((r) => r.role)).toEqual(['merger', 'reviewer'])
+  })
+
   it('queues the merge-only run when the owner asks, and refuses a task that integrated meanwhile', async () => {
     const id = await seedTask()
     branchPushed()
