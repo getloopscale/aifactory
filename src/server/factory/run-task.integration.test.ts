@@ -3865,7 +3865,7 @@ describe('runTask merging an integration branch that passes the checks again', (
       changed((command) => {
         if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
         if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
-        if (command.includes('--diff-filter=U')) return { stdout: 'CHANGELOG.md\n' }
+        if (command.includes('--diff-filter=U')) return { stdout: 'src/a.ts\n' }
         return undefined
       }),
     )
@@ -3880,7 +3880,7 @@ describe('runTask merging an integration branch that passes the checks again', (
 
     expect(result).toMatchObject({
       status: 'failed',
-      error: expect.stringContaining('CHANGELOG.md'),
+      error: expect.stringContaining('src/a.ts'),
     })
     expect(pushesOf(sandbox)).toEqual([])
     expect(retryableFailure({ error: (result as { error: string }).error })).toBeNull()
