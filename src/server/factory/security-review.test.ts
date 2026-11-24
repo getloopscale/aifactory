@@ -33,6 +33,19 @@ describe('securityPrompt', () => {
     expect(prompt).toContain('Never ask to ignore an advisory')
   })
 
+  it('hands the agent the patch and tells it not to explore', () => {
+    const prompt = securityPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      baseSha: 'abc1234',
+      diff: '+const x = 1',
+    })
+    expect(prompt).toContain('<change>\n+const x = 1\n</change>')
+    expect(prompt).toContain('do not explore the rest of the repository')
+  })
+
   it('carries the blocking findings of an earlier round to check first', () => {
     const prompt = securityPrompt({
       repo: 'o/r',

@@ -7,7 +7,7 @@ describe('security role', () => {
   it('always runs at the highest effort the engine lists', () => {
     const efforts = ['low', 'medium', 'high', 'xhigh', 'max']
     expect(securityOptions(efforts)?.effort).toBe(securityEffort(efforts))
-    expect(securityOptions(efforts, { model: 'opus' })).toEqual({ model: 'opus', effort: 'max' })
+    expect(securityOptions(efforts, { model: 'opus' })).toEqual({ model: 'opus', effort: 'high' })
     expect(securityOptions(['low', 'high'])?.effort).toBe('high')
   })
   it('does not run when the highest effort cannot be established', () => {

@@ -53,7 +53,7 @@ import { openAmong } from './blocker-check'
 import { errorMessage } from './error-message'
 import { BlockedByOpenIssues, blockersNamed, unavailableNamed } from './blockers'
 import { BLOCKED_NO_CHANGE, NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
-import { diffFacts, reviewBase, samePatch, securityFloor } from './diff-facts'
+import { diffFacts, reviewBase, samePatch, securityDiff, securityFloor } from './diff-facts'
 import { decideSecurity, findingKey, parseSecurityVerdict, securityPrompt } from './security-review'
 import {
   changePlanPrompt,
@@ -2226,6 +2226,7 @@ export class Run {
     } else if (!agent) {
       verdict = stopped('no security agent could start: its highest effort is not known')
     } else {
+      const diff = await securityDiff(this.backend, this.repoDir, base)
       const result = await this.settle(agent, 'security', attempt, (onEvent) =>
         agent.run(this.backend, {
           onEvent,
@@ -2237,6 +2238,7 @@ export class Run {
             title: issue.title,
             body: issue.body,
             baseSha: base,
+            diff,
             knowledgeDir: this.feed?.dir,
             earlier: this.securityEarlier,
           }),

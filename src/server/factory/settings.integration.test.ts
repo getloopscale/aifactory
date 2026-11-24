@@ -192,7 +192,7 @@ describe("the security role's effort", () => {
   })
 
   it('takes the highest effort as it is, without storing a choice for it', async () => {
-    await saveChosen(getDb(), { efforts: { security: 'max' } }, ready, read)
+    await saveChosen(getDb(), { efforts: { security: 'high' } }, ready, read)
     const settings = await agentSettings(getDb(), ready, read)
     expect(settings.chosenEffort.security).toBeNull()
     expect(settings.effective.security).toBe(settings.effective.builder)

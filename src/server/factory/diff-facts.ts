@@ -105,6 +105,27 @@ export async function securityFloor(
   return [...secretsAdded(added.stdout), ...(await auditBlockers(backend, repoDir, base, touched))]
 }
 
+/** The most of the patch the security prompt carries; the rest is left to a read of the file. */
+const SECURITY_DIFF_MAX = 60_000
+
+/**
+ * What the security agent is handed (#457): the files the change touches and its patch, cut at a limit, so it
+ * judges the change instead of exploring the repository.
+ */
+export async function securityDiff(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+): Promise<string> {
+  const git = `git -C ${repoDir}`
+  const stat = await must(backend, `${git} diff --stat --no-color ${base} HEAD`)
+  const patch = await must(backend, `${git} diff -U3 --no-color --no-renames ${base} HEAD`)
+  const cut = patch.stdout.length > SECURITY_DIFF_MAX
+  return `${stat.stdout.trim()}\n\n${patch.stdout.slice(0, SECURITY_DIFF_MAX)}${
+    cut ? '\n[the patch is cut here: read the remaining files with read_file]' : ''
+  }`
+}
+
 /** A branch name with nothing a shell reads as more than a name. */
 const PLAIN_BRANCH = /^[\w.][\w./-]*$/
 

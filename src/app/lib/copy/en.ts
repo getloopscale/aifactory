@@ -717,7 +717,7 @@ export const en = {
       security: 'Security reviewer',
     },
     pinnedEffort: (level: string) =>
-      `Always ${level}, the highest this model offers; it cannot be lowered`,
+      `Always ${level}, the highest that keeps a review inside its time and cost; it cannot be lowered`,
     pinnedUnknown:
       'The highest effort of this model is not known, so the security review will not run',
     choice: (label: string) => `Choice: ${label}`,

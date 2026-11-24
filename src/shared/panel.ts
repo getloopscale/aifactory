@@ -923,11 +923,22 @@ export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'securit
 const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
- * The effort the security role always runs at: the highest its engine offers for the model (#241). `undefined`
- * when the engine lists no level it knows: the security review then does not run, it never falls to a default.
+ * The most effort the security role is pinned to. The review of a small change at `xhigh` or `max` ran past its
+ * limit and cost several times the build (#457), so the pin is the highest level at or under `high`.
+ */
+export const SECURITY_EFFORT_CEILING = 'high'
+
+/**
+ * The effort the security role always runs at: the highest its engine offers for the model, up to
+ * `SECURITY_EFFORT_CEILING` (#241, #457). `undefined` when the engine lists no level it knows: the security
+ * review then does not run, it never falls to a default.
  */
 export function securityEffort(efforts: string[]): string | undefined {
-  const known = efforts.filter((e) => EFFORT_RANK.includes(e))
+  const ceiling = EFFORT_RANK.indexOf(SECURITY_EFFORT_CEILING)
+  const known = efforts.filter((e) => {
+    const rank = EFFORT_RANK.indexOf(e)
+    return rank >= 0 && rank <= ceiling
+  })
   return known.sort((a, b) => EFFORT_RANK.indexOf(b) - EFFORT_RANK.indexOf(a))[0]
 }
 

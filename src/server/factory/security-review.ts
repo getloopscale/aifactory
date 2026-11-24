@@ -17,6 +17,8 @@ export function securityPrompt(input: {
   title: string
   body: string
   baseSha: string
+  /** The files and the patch of the change, so the agent reads it instead of exploring (`securityDiff`). */
+  diff?: string
   knowledgeDir?: string
   /** What an earlier security round found on this task, which this one checks first. */
   earlier?: Finding[]
@@ -28,7 +30,11 @@ export function securityPrompt(input: {
 
 ${input.body || '(the issue has no description)'}
 
-Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches, for security only:
+${
+    input.diff
+      ? `The change is below (the same as \`git diff ${input.baseSha}...HEAD\`). Judge it from this text; open a file only to see context a finding needs, and do not explore the rest of the repository. Finish quickly.\n\n<change>\n${input.diff}\n</change>\n\n`
+      : `Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches. `
+  }Review it for security only:
 - Secrets and credentials the change adds (keys, tokens, passwords, private keys), in any file, including tests and examples.
 - Dependencies it adds or upgrades: a version with a known advisory, an unpinned or unusual source, a lifecycle script.
 - Injection: SQL, shell, path, template or prompt built from input that an outsider controls; unsafe deserialization; unvalidated redirects.

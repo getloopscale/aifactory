@@ -32,7 +32,7 @@ import {
   type PreparedInstall,
 } from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
-import { diffFacts, securityFloor } from '../factory/diff-facts'
+import { diffFacts, securityDiff, securityFloor } from '../factory/diff-facts'
 import {
   decideSecurity,
   findingKey,
@@ -468,6 +468,7 @@ class CaseRun {
         findings: [],
       }
     } else {
+      const diff = await securityDiff(this.backend, this.repoDir, this.c.baseSha)
       const result = await this.agentCall(() =>
         security.run(this.backend, {
           cwd: this.repoDir,
@@ -478,6 +479,7 @@ class CaseRun {
             title: this.c.title,
             body: this.c.body,
             baseSha: this.c.baseSha,
+            diff,
             knowledgeDir: this.knowledgeDir,
             earlier: this.securityEarlier,
           }),
