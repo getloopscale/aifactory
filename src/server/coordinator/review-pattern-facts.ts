@@ -44,7 +44,15 @@ export function classedFindings(
   )
 }
 
-export async function readClassedFindings(db: Database, now: Date): Promise<ClassedFinding[]> {
+/**
+ * The findings from `from` on; by default `READ_BACK_MS` back. A pass reads further back for a note that is
+ * not measured yet, so the window before it is always read whole.
+ */
+export async function readClassedFindings(
+  db: Database,
+  now: Date,
+  from: Date = new Date(now.getTime() - READ_BACK_MS),
+): Promise<ClassedFinding[]> {
   const rows = await db
     .select({
       taskId: review.taskId,
@@ -55,7 +63,7 @@ export async function readClassedFindings(db: Database, now: Date): Promise<Clas
     })
     .from(review)
     .innerJoin(task, eq(task.id, review.taskId))
-    .where(gte(review.at, new Date(now.getTime() - READ_BACK_MS)))
+    .where(gte(review.at, from))
   return classedFindings(rows)
 }
 

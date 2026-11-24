@@ -7,13 +7,14 @@ import { noteHash } from '../knowledge/format'
 import type { CoordinatorMode } from './mode'
 import {
   measure,
+  measureMs,
   patternKey,
   plan,
   qualifying,
   type KnownPattern,
   type PatternGroup,
 } from './review-pattern'
-import { readClassedFindings, readPatterns } from './review-pattern-facts'
+import { READ_BACK_MS, readClassedFindings, readPatterns } from './review-pattern-facts'
 
 /**
  * The side effects of the review patterns, one pass: a qualifying group is recorded in `review_pattern`
@@ -88,7 +89,22 @@ export async function reviewPatterns(
 ): Promise<ReviewPatternResult> {
   const result = { recorded: 0, noted: 0, measured: 0 }
   if (mode === 'off') return result
-  const findings = await readClassedFindings(db, now)
+  const waiting = await db
+    .select({
+      id: reviewPattern.id,
+      classKey: reviewPattern.classKey,
+      repository: reviewPattern.repository,
+      committedAt: knowledgeNote.committedAt,
+    })
+    .from(reviewPattern)
+    .innerJoin(knowledgeNote, eq(knowledgeNote.id, reviewPattern.noteId))
+    .where(isNull(reviewPattern.measuredAt))
+  // Read back to the window before the oldest note not measured yet, or its `countBefore` would be too low.
+  const oldest = Math.min(
+    now.getTime() - READ_BACK_MS,
+    ...waiting.flatMap((p) => (p.committedAt ? [p.committedAt.getTime() - measureMs] : [])),
+  )
+  const findings = await readClassedFindings(db, now, new Date(oldest))
   const patterns = await readPatterns(db)
   const known = new Map<string, KnownPattern>(
     patterns.map((p) => [
@@ -101,16 +117,6 @@ export async function reviewPatterns(
     if (!known.has(patternKey(group.repository, group.classKey))) result.recorded++
     if (wanted && row.noteId === null && (await writeNote(db, row.id, group))) result.noted++
   }
-  const waiting = await db
-    .select({
-      id: reviewPattern.id,
-      classKey: reviewPattern.classKey,
-      repository: reviewPattern.repository,
-      committedAt: knowledgeNote.committedAt,
-    })
-    .from(reviewPattern)
-    .innerJoin(knowledgeNote, eq(knowledgeNote.id, reviewPattern.noteId))
-    .where(isNull(reviewPattern.measuredAt))
   for (const p of waiting) {
     if (!p.committedAt) continue
     const counts = measure(
