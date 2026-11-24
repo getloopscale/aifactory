@@ -746,6 +746,8 @@ export const ptBR: Copy = {
       releaseBranchHelp:
         'Só é preciso quando a branch padrão é develop, onde fica a pré-versão: informe main, ou a branch que suas versões finais usam.',
       ask: 'Deixar o agente me fazer perguntas na issue quando algo não estiver claro',
+      reviewPulls:
+        'Revisar pull requests que a fábrica não abriu, quando o autor pode escrever no repositório (um comentário, nunca uma aprovação)',
       builder: 'Construtor',
       reviewer: 'Revisor',
       release: 'Versão final',

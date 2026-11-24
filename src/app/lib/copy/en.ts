@@ -491,6 +491,8 @@ export const en = {
       releaseBranchHelp:
         'Only needed when the default branch is develop, which is where the pre-release goes: name main, or the branch your releases use.',
       ask: 'Let the agent ask me questions on the issue when something is unclear',
+      reviewPulls:
+        'Review pull requests the factory did not open, when their author can write to the repository (a comment, never an approval)',
       builder: 'Builder',
       reviewer: 'Reviewer',
       release: 'Release',

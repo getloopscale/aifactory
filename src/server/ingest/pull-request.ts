@@ -9,9 +9,10 @@ import { ActionRefused, type FollowUpRequest } from '../panel/actions'
 import type { RoutedIntent } from './decide'
 
 /** The routed intents that are somebody writing on a pull request. */
-type Written = Extract<RoutedIntent, { pullRequestNumber: number }>
+type Written = Extract<RoutedIntent, { pullRequestNumber: number; actorLogin: string }>
 
-const isWritten = (intent: RoutedIntent): intent is Written => 'pullRequestNumber' in intent
+const isWritten = (intent: RoutedIntent): intent is Written =>
+  'actorLogin' in intent && 'pullRequestNumber' in intent
 
 /** What the consumer does for an action, in the delivery's transaction. */
 export type Reactions = {

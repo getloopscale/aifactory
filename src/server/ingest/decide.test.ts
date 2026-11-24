@@ -381,6 +381,7 @@ describe('deliveries the factory routes without taking work', () => {
       'pull_request_review_comment',
       'check_suite',
       'check_run',
+      'pull_request',
     ])
   })
   it('names the events it reads that the App does not subscribe to, in its own order', () => {
@@ -389,6 +390,7 @@ describe('deliveries the factory routes without taking work', () => {
       'pull_request_review',
       'pull_request_review_comment',
       'check_suite',
+      'pull_request',
     ])
     expect(missingRoutedEvents([...ROUTED_EVENTS])).toEqual([])
   })

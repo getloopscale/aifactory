@@ -98,6 +98,7 @@ function Settings({
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
   const [ask, setAsk] = useState(repo.askQuestions)
+  const [reviewPulls, setReviewPulls] = useState(repo.reviewExternalPulls)
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
@@ -136,6 +137,7 @@ function Settings({
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,
         askQuestions: ask,
+        reviewExternalPulls: reviewPulls,
         harness: harness || null,
         reviewer: reviewer || null,
         releaseMode: release || null,
@@ -259,6 +261,14 @@ function Settings({
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />
         <span className="text-foreground">{s.ask}</span>
+      </label>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={reviewPulls}
+          onChange={(e) => setReviewPulls(e.target.checked)}
+        />
+        <span className="text-foreground">{s.reviewPulls}</span>
       </label>
       <div className="grid grid-cols-3 gap-3">
         <label className="block">

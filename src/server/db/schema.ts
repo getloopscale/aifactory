@@ -425,9 +425,10 @@ export const watch = pgTable('watch', {
  */
 export const agentRun = pgTable('agent_run', {
   id: serial('id').primaryKey(),
-  taskId: integer('task_id')
-    .notNull()
-    .references(() => task.id),
+  /** The task the pass belongs to; null for the review of a pull request the factory did not open. */
+  taskId: integer('task_id').references(() => task.id),
+  /** The review of a pull request the pass was for, when it was not for a task. */
+  externalReviewId: integer('external_review_id'),
   role: text('role', { enum: ['builder', 'planner', 'reviewer', 'merger', 'security'] }).notNull(),
   harness: text('harness').notNull(),
   /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
@@ -551,6 +552,8 @@ export const repository = pgTable('repository', {
   harness: text('harness'),
   reviewer: text('reviewer'),
   releaseMode: text('release_mode', { enum: ['manual', 'trial', 'auto'] }),
+  /** Whether the reviewer reads pull requests the factory did not open, by authors with write access. */
+  reviewExternalPulls: boolean('review_external_pulls').notNull().default(false),
   /** How long a run may last in this repository, in minutes; absent means the factory's default. */
   runLimitMinutes: integer('run_limit_minutes'),
   /** From this many minutes of lead time a task is at risk; absent means the factory's default. */
@@ -990,4 +993,35 @@ export const schedulerDecision = pgTable(
       .where(sql`${t.kind} = 'readiness'`),
     index('scheduler_decision_task_kind').on(t.taskId, t.kind, t.id),
   ],
+)
+
+/**
+ * The review of one pull request the factory did not open, at one head commit. The row is the claim: a
+ * redelivery or a second `synchronize` for the same commit finds it and queues nothing.
+ */
+export const externalReview = pgTable(
+  'external_review',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    pullNumber: integer('pull_number').notNull(),
+    headSha: text('head_sha').notNull(),
+    /** The branch the pull request targets, which the diff is read against. */
+    baseRef: text('base_ref').notNull(),
+    /** The fork the head is in, or the repository itself. */
+    headRepository: text('head_repository').notNull(),
+    author: text('author').notNull(),
+    authorAssociation: text('author_association').notNull(),
+    /** Written by the pull request's author: it reaches the reviewer by file, as data. */
+    title: text('title').notNull(),
+    body: text('body').notNull().default(''),
+    status: text('status', { enum: ['queued', 'running', 'posted', 'skipped', 'failed'] })
+      .notNull()
+      .default('queued'),
+    detail: text('detail'),
+    costUsd: real('cost_usd'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('external_review_pull_sha').on(t.repository, t.pullNumber, t.headSha)],
 )

@@ -43,6 +43,14 @@ export async function recordAndQueue(
           ),
         followUp,
       },
+      // A pull request the factory did not open, claimed for review, is queued in the same transaction.
+      (reviewId) =>
+        queue.enqueueInTransaction(
+          client,
+          'review-pull-request',
+          { reviewId },
+          { idempotencyKey: `external-review-${reviewId}` },
+        ),
     )
     return result
   } finally {

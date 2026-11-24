@@ -45,7 +45,8 @@ type AutomaticEvent =
   | 'run_step'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
-type WebhookEvent = 'issue_labeled' | RoutedCode
+/** A pull request to review is not about a task, so no stage has an outcome for it. */
+type WebhookEvent = 'issue_labeled' | Exclude<RoutedCode, 'pull_request_to_review'>
 
 export type TransitionEvent = PanelEvent | AutomaticEvent | WebhookEvent
 

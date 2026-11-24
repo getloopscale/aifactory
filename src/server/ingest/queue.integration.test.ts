@@ -311,3 +311,60 @@ describe('an issue that no longer asks for the work', () => {
     expect(await jobs()).toHaveLength(1)
   })
 })
+
+describe('a pull request the factory did not open', () => {
+  const SHA = 'a'.repeat(40)
+  const pull = (
+    over: { sha?: string; association?: string; ref?: string; repo?: string } = {},
+  ) => ({
+    action: 'opened',
+    number: 12,
+    pull_request: {
+      title: 'Add a retry',
+      body: 'Fixes the flake',
+      draft: false,
+      user: { login: 'ana', type: 'User' },
+      author_association: over.association ?? 'COLLABORATOR',
+      head: {
+        sha: over.sha ?? SHA,
+        ref: over.ref ?? 'ana/retry',
+        repo: { full_name: over.repo ?? 'ana/app' },
+      },
+      base: { ref: 'main' },
+    },
+    repository: { full_name: 'paulo/app' },
+  })
+  const send = (id: string, payload: unknown) =>
+    recordAndQueue(delivery(id, payload, 'pull_request'), queue)
+  const reviewJobs = async () => (await jobs()).filter((j) => j.name === 'review-pull-request')
+  const on = () =>
+    getPool().query(
+      "update repository set review_external_pulls = true where full_name = 'paulo/app'",
+    )
+
+  it('queues nothing while the setting is off', async () => {
+    await send('d-1', pull())
+    expect(await reviewJobs()).toEqual([])
+  })
+
+  it('queues one review job for a commit, however many times it is delivered', async () => {
+    await on()
+    await send('d-1', pull())
+    await send('d-2', pull())
+    expect(await reviewJobs()).toHaveLength(1)
+  })
+
+  it('queues another for a new head commit', async () => {
+    await on()
+    await send('d-1', pull())
+    await send('d-2', { ...pull({ sha: 'b'.repeat(40) }), action: 'synchronize' })
+    expect(await reviewJobs()).toHaveLength(2)
+  })
+
+  it('queues nothing for the factory own branch or an author without write access', async () => {
+    await on()
+    await send('d-1', pull({ ref: 'factory/467', repo: 'paulo/app' }))
+    await send('d-2', pull({ association: 'NONE' }))
+    expect(await reviewJobs()).toEqual([])
+  })
+})

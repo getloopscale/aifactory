@@ -3,6 +3,7 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { ingress, repository, stageEvent, task } from '../db/schema'
 
+import { claimExternalReview } from './external-review'
 import { decideIngress, type IngressDecision, type RoutedIntent } from './decide'
 import { actOnWriting, type Reactions, type WrittenResult } from './pull-request'
 import { startOverOnLabel } from './restart'
@@ -89,6 +90,8 @@ export async function recordDelivery(
     sendBack: (tx: Database, taskId: number, note: string) => Promise<unknown>
     followUp: Reactions['followUp']
   },
+  /** Runs inside the transaction for a pull request the factory did not open that is claimed for review. */
+  onReviewDue?: (reviewId: number) => Promise<unknown>,
 ): Promise<RecordResult> {
   const asked = decideIngress(delivery.event, delivery.payload)
 
@@ -112,6 +115,10 @@ export async function recordDelivery(
     if ('intent' in decision) {
       const { code, reason, intent } = decision
       await withdrawTask(tx, intent)
+      if (onReviewDue) {
+        const review = await claimExternalReview(tx, intent)
+        if (review !== undefined) await onReviewDue(review)
+      }
       const written = reactions
         ? await actOnWriting(tx, intent, {
             sendBack: (taskId, note) => reactions.sendBack(tx, taskId, note),
