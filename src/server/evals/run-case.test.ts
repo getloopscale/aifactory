@@ -1337,7 +1337,7 @@ describe('a case the security floor blocks', () => {
 
 describe('the security agent in a case', () => {
   it('has what it wrote thrown away, ignored files included', async () => {
-    const provider = sandbox()
+    const provider = sandbox({ testPatch: '+++ b/src/cli.ts\n@@ -0,0 +1 @@\n+execSync(command)\n' })
     const security = agent('security', [{ ok: true, summary: APPROVE }])
     const result = await runCase(
       {
@@ -1348,7 +1348,22 @@ describe('the security agent in a case', () => {
     )
     expect(result.passed).toBe(true)
     expect(security.prompts).toHaveLength(1)
+    expect(result.costByRole?.security).toBeGreaterThanOrEqual(0)
     expect(provider.backend.commands.some((c) => c.endsWith('clean -fdx -e node_modules'))).toBe(true)
+  })
+
+  it('is not asked about a change that touches no security surface', async () => {
+    const security = agent('security', [{ ok: true, summary: APPROVE }])
+    const result = await runCase(
+      {
+        ...deps(sandbox(), agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+        security,
+      },
+      evalCase,
+    )
+    expect(result.passed).toBe(true)
+    expect(security.prompts).toHaveLength(0)
+    expect(result.costByRole?.security).toBe(0)
   })
 })
 

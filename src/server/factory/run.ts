@@ -53,8 +53,21 @@ import { openAmong } from './blocker-check'
 import { errorMessage } from './error-message'
 import { BlockedByOpenIssues, blockersNamed, unavailableNamed } from './blockers'
 import { BLOCKED_NO_CHANGE, NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
-import { diffFacts, reviewBase, samePatch, securityDiff, securityFloor } from './diff-facts'
-import { decideSecurity, findingKey, parseSecurityVerdict, securityPrompt } from './security-review'
+import {
+  diffFacts,
+  reviewBase,
+  samePatch,
+  securityDiff,
+  securityFloor,
+  securitySurfacesOf,
+} from './diff-facts'
+import {
+  skippedBecause,
+  decideSecurity,
+  findingKey,
+  parseSecurityVerdict,
+  securityPrompt,
+} from './security-review'
 import {
   changePlanPrompt,
   givenPlanPrompt,
@@ -2221,8 +2234,13 @@ export class Run {
       findings: [],
     })
     let verdict: ReviewVerdict
+    let skipped: string | undefined
     if (floor.some((f) => f.severity !== 'minor')) {
       verdict = { verdict: 'changes', summary: 'the deterministic floor blocks it', findings: [] }
+    } else if (
+      (skipped = skippedBecause(await securitySurfacesOf(this.backend, this.repoDir, base)))
+    ) {
+      verdict = { verdict: 'approve', summary: skipped, findings: [] }
     } else if (!agent) {
       verdict = stopped('no security agent could start: its highest effort is not known')
     } else {
@@ -2267,6 +2285,7 @@ export class Run {
       outcome: decision.kind,
       summary: verdict.summary,
       findings,
+      ...(skipped ? { agentSkipped: true, skippedBecause: skipped } : {}),
       ...(agent ? agentFacts(agent) : {}),
     })
     if (decision.kind === 'pass') return undefined

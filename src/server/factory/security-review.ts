@@ -130,3 +130,80 @@ export function decideSecurity(input: {
   }
   return { kind: 'rework', findings: verdict.findings }
 }
+
+const MANIFESTS =
+  /(^|\/)(package\.json|pnpm-lock\.yaml|package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|bun\.lockb?|pnpm-workspace\.yaml|\.npmrc|requirements[^/]*\.txt|Pipfile(\.lock)?|poetry\.lock|pyproject\.toml|go\.(mod|sum)|Cargo\.(toml|lock)|Gemfile(\.lock)?|composer\.(json|lock)|pom\.xml|build\.gradle(\.kts)?|Dockerfile[^/]*|\.env[^/]*)$/
+const CI_FILES =
+  /(^|\/)(\.github\/|\.gitlab-ci\.yml$|\.circleci\/|azure-pipelines\.yml$|Jenkinsfile$)/
+const DOCS = /\.(md|mdx|txt|rst)$|(^|\/)docs\//i
+const TESTS =
+  /\.(test|spec|evals\.test)\.[cm]?[jt]sx?$|(^|\/)(__tests__|__mocks__|fixtures|tests?)\//
+
+/** What the added lines of a source file say about the surface they touch, each with the name the stage records. */
+const CODE_SURFACES: [string, RegExp][] = [
+  [
+    'secrets, tokens, auth, crypto or signatures',
+    /secret|token|passw(or)?d|credential|api[_-]?key|private[_-]?key|\bauth\w*|\bjwt\b|bearer|cookie|session|\bcrypto\b|createHash|createHmac|\bhmac\b|signature|\bsign(ed)?\(|\bverify\(|\bcipher|\bencrypt|\bdecrypt|\bbcrypt|\bpbkdf|\bscrypt|randomBytes|timingSafeEqual|rejectUnauthorized|\bcors\b|policy\(/i,
+  ],
+  [
+    'a process or a shell',
+    /child_process|\bexec(Sync|File|FileSync)?\(|\bspawn(Sync)?\(|\bfork\(|\bshell\b|\bbackend\.execute\(|\bsh -c\b|\beval\(|new Function\(/,
+  ],
+  [
+    'SQL',
+    /\b(select\s.+\sfrom|insert\s+into|update\s+\w+\s+set|delete\s+from|drop\s+table|alter\s+table)\b|\bsql`|\.query\(|\bsql\.raw\(/i,
+  ],
+  [
+    'input from the network',
+    /req(uest)?\.(body|query|params|headers|json|text|formData)\b|\bsearchParams\b|\bformData\(|JSON\.parse\(|\bfetch\(|\bwebhook\b|\bdeserializ|\byaml\.load|\bunserialize|\bredirect\(|\.parse\(\s*(await\s+)?(req|body|input)/i,
+  ],
+  [
+    'paths from input',
+    /\b(writeFile|writeFileSync|appendFile|createWriteStream|mkdir|mkdirSync|unlink|unlinkSync|rmSync|rm|rename|copyFile|createReadStream|readFile|readFileSync)\(|path\.(join|resolve)\(|\.\.\//,
+  ],
+]
+
+/** The files an added line belongs to, from a patch with no context (`git diff -U0`). */
+function addedByFile(patch: string): Map<string, string[]> {
+  const files = new Map<string, string[]>()
+  let current: string[] | undefined
+  for (const line of patch.split('\n')) {
+    const header = /^\+\+\+ (?:b\/)?(.+)$/.exec(line)
+    if (header) {
+      current = files.get(header[1]!) ?? []
+      files.set(header[1]!, current)
+    } else if (line.startsWith('+') && !line.startsWith('+++')) current?.push(line.slice(1))
+  }
+  return files
+}
+
+/**
+ * The security surfaces a change touches (#457): dependency manifests and lockfiles, CI and workflow files, and the
+ * added lines of source that handle secrets, tokens, auth, crypto or signatures, spawn a process or a shell, build
+ * SQL, parse input from the network or write paths that come from input. Documents and tests count only by their
+ * path. Reads nothing: `touched` is every path of the change and `patch` its diff with no context.
+ */
+export function securitySurfaces(facts: { touched: string[]; patch: string }): string[] {
+  const found = new Set<string>()
+  for (const path of facts.touched) {
+    if (MANIFESTS.test(path)) found.add('dependency manifests, lockfiles or build files')
+    if (CI_FILES.test(path)) found.add('CI or workflow files')
+  }
+  for (const [path, lines] of addedByFile(facts.patch)) {
+    if (DOCS.test(path) || TESTS.test(path)) continue
+    if (MANIFESTS.test(path) || CI_FILES.test(path)) continue
+    const text = lines.join('\n')
+    for (const [name, pattern] of CODE_SURFACES) if (pattern.test(text)) found.add(name)
+  }
+  return [...found]
+}
+
+/** Whether an agent's security pass can find something in the change; when not, the floor alone decides. */
+export const needsSecurityReview = (facts: { touched: string[]; patch: string }): boolean =>
+  securitySurfaces(facts).length > 0
+
+/** The words a stage records when the agent pass was left out: the floor alone decided. */
+export const skippedBecause = (surfaces: string[]): string | undefined =>
+  surfaces.length > 0
+    ? undefined
+    : 'the agent security review was skipped: the change touches no security surface (dependencies, CI, secrets, auth, crypto, processes, SQL, network input, paths), so the deterministic floor alone decided'

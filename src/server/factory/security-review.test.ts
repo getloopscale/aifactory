@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { ReviewVerdict } from './review'
 import {
+  needsSecurityReview,
+  skippedBecause,
   decideSecurity,
   findingKey,
   MAX_SECURITY_REWORKS,
@@ -134,5 +136,54 @@ describe('decideSecurity', () => {
   it('treats an approval that still carries a blocking finding as a block', () => {
     const verdict: ReviewVerdict = { verdict: 'approve', summary: 's', findings: [sql] }
     expect(decideSecurity({ ...base, verdict }).kind).toBe('rework')
+  })
+})
+
+describe('needsSecurityReview', () => {
+  const patch = (file: string, line: string) => `+++ b/${file}\n@@ -0,0 +1 @@\n+${line}\n`
+  const change = (file: string, line: string) => ({
+    touched: [file],
+    patch: patch(file, line),
+  })
+
+  it.each([
+    ['a manifest', 'package.json', '"left-pad": "1.0.0"'],
+    ['a lockfile', 'pnpm-lock.yaml', 'x: 1'],
+    ['a workflow', '.github/workflows/ci.yml', 'run: pnpm test'],
+    ['a secret handler', 'src/a.ts', 'const token = process.env.TOKEN'],
+    ['crypto', 'src/a.ts', 'createHmac("sha256", key)'],
+    ['a shell', 'src/a.ts', 'execSync(cmd)'],
+    ['SQL', 'src/a.ts', 'db.query(`SELECT * FROM t WHERE id = ${id}`)'],
+    ['network input', 'src/a.ts', 'const body = req.body'],
+    ['a path from input', 'src/a.ts', 'writeFileSync(join(dir, name), data)'],
+  ])('is true for %s', (_name, file, line) => {
+    expect(needsSecurityReview(change(file, line))).toBe(true)
+  })
+
+  it('is false for docs, a pure function and tests only', () => {
+    expect(needsSecurityReview(change('README.md', 'the token is read from env'))).toBe(false)
+    expect(
+      needsSecurityReview(
+        change('src/sum.ts', 'export const sum = (a: number, b: number) => a + b'),
+      ),
+    ).toBe(false)
+    expect(needsSecurityReview(change('src/a.test.ts', 'execSync("x"); const token = 1'))).toBe(
+      false,
+    )
+  })
+
+  it('reads only added lines', () => {
+    const removed = {
+      touched: ['src/a.ts'],
+      patch: '+++ b/src/a.ts\n@@ -1 +0,0 @@\n-execSync(x)\n',
+    }
+    expect(needsSecurityReview(removed)).toBe(false)
+  })
+})
+
+describe('skippedBecause', () => {
+  it('says why only when no surface was touched', () => {
+    expect(skippedBecause([])).toMatch(/skipped/)
+    expect(skippedBecause(['SQL'])).toBeUndefined()
   })
 })

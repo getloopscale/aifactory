@@ -32,9 +32,10 @@ import {
   type PreparedInstall,
 } from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
-import { diffFacts, securityDiff, securityFloor } from '../factory/diff-facts'
+import { diffFacts, securityDiff, securityFloor, securitySurfacesOf } from '../factory/diff-facts'
 import {
   decideSecurity,
+  skippedBecause,
   findingKey,
   parseSecurityVerdict,
   securityPrompt,
@@ -124,6 +125,8 @@ class CaseRun {
   /** What the builder said to the last review's findings, kept across a check rework. */
   private reviewAnswer: string | undefined
   cost = 0
+  private reviewerCost = 0
+  private securityCost = 0
   /** A review gave a valid verdict at some point of the case. */
   private verdictSeen = false
   attempts = 1
@@ -440,6 +443,7 @@ class CaseRun {
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
     this.cost += result.costUsd ?? 0
+    this.reviewerCost += result.costUsd ?? 0
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
     await must(this.backend, `${this.git} reset --hard ${sha}`)
     await must(this.backend, `${this.git} clean -fd`)
@@ -459,8 +463,15 @@ class CaseRun {
     if (security === undefined) return 'pass'
     const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
     let verdict: ReviewVerdict
+    let skipped: string | undefined
     if (floor.some((f) => f.severity !== 'minor')) {
       verdict = { verdict: 'changes', summary: 'the deterministic floor blocks it', findings: [] }
+    } else if (
+      (skipped = skippedBecause(
+        await securitySurfacesOf(this.backend, this.repoDir, this.c.baseSha),
+      ))
+    ) {
+      verdict = { verdict: 'approve', summary: skipped, findings: [] }
     } else if (security === null) {
       verdict = {
         verdict: 'invalid',
@@ -486,6 +497,7 @@ class CaseRun {
         }),
       )
       this.cost += result.costUsd ?? 0
+      this.securityCost += result.costUsd ?? 0
       // The security agent reads and does not write; whatever it wrote anyway is thrown away.
       await must(this.backend, `${this.git} reset --hard ${sha}`)
       await must(this.backend, `${this.git} clean -fdx -e node_modules`)
@@ -665,6 +677,11 @@ class CaseRun {
       id: this.c.id,
       ...caseOutcome(this.withFloor(end), this.c.expectSecurity),
       costUsd: this.cost,
+      costByRole: {
+        builder: Math.max(0, this.cost - this.reviewerCost - this.securityCost),
+        reviewer: this.reviewerCost,
+        security: this.securityCost,
+      },
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,

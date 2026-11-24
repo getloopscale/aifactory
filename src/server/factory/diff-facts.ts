@@ -11,6 +11,7 @@ import {
   type RequiredByCheck,
 } from './required-files'
 import { must } from './run-support'
+import { securitySurfaces } from './security-review'
 import { auditBlockers, secretsAdded } from './security-scan'
 import { TEST_PATHSPECS } from './test-weakening'
 
@@ -103,6 +104,21 @@ export async function securityFloor(
       (change) => change.path,
     )
   return [...secretsAdded(added.stdout), ...(await auditBlockers(backend, repoDir, base, touched))]
+}
+
+/** The security surfaces the change from `base` to HEAD touches; none means the floor alone decides (#457). */
+export async function securitySurfacesOf(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+): Promise<string[]> {
+  const git = `git -C ${repoDir}`
+  const names = await must(backend, `${git} diff --name-only --no-renames ${base} HEAD`)
+  const patch = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
+  return securitySurfaces({
+    touched: names.stdout.split('\n').filter((p) => p !== ''),
+    patch: patch.stdout,
+  })
 }
 
 /** The most of the patch the security prompt carries; the rest is left to a read of the file. */
