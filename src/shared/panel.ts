@@ -923,8 +923,10 @@ export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'securit
 const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
 
 /**
- * The most effort the security role is pinned to. The review of a small change at `xhigh` or `max` ran past its
- * limit and cost several times the build (#457), so the pin is the highest level at or under `high`.
+ * The most effort the security role is pinned to. The review of #457 reported the review at the engine's maximum
+ * timing out and costing several times the build, and asked for the highest level that keeps the cases inside
+ * their limit. `high` is that level by judgment, not yet by measurement: `pnpm evals:check` with real models
+ * decides it, and this constant is the only place to change if it does not hold.
  */
 export const SECURITY_EFFORT_CEILING = 'high'
 
