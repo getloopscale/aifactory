@@ -482,7 +482,9 @@ export const en = {
       fixesPlaceholder: 'Empty runs none. For example: pnpm prettier --write .',
       riskPatterns: 'Risky paths, one per line, as high: or medium: and a glob',
       riskPatternsAssistContext:
-        'Only path patterns: one per line as high: <glob> or medium: <glob>, for the files whose change is riskier than most (migrations, authentication, payment, public API, infrastructure). No commands.',
+        'Only path patterns: one per line as high: <glob> or medium: <glob>, for the files whose change is riskier than most (migrations, authentication, payment, public API, infrastructure). No commands. A Markdown file is never rated by its path, so a pattern for one has no effect.',
+      riskPatternsHelp:
+        'A Markdown file is never rated by its path, so a pattern for one has no effect.',
       riskPatternsPlaceholder: 'Empty uses the defaults. For example: high: src/server/auth/**',
       domains: 'Extra domains the sandbox may reach',
       domainsPlaceholder:

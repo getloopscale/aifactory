@@ -195,6 +195,7 @@ function Settings({
         rows={3}
         placeholder={s.riskPatternsPlaceholder}
         context={s.riskPatternsAssistContext}
+        hint={s.riskPatternsHelp}
       />
       <label className="block">
         <span className="text-foreground">{s.domains}</span>

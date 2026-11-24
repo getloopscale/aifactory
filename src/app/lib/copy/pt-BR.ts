@@ -737,7 +737,9 @@ export const ptBR: Copy = {
       fixesPlaceholder: 'Vazio não roda nenhuma. Por exemplo: pnpm prettier --write .',
       riskPatterns: 'Caminhos de risco, um por linha, como high: ou medium: e um glob',
       riskPatternsAssistContext:
-        'Só padrões de caminho: um por linha como high: <glob> ou medium: <glob>, para os arquivos cuja mudança é mais arriscada que a maioria (migrações, autenticação, pagamento, API pública, infraestrutura). Sem comandos.',
+        'Só padrões de caminho: um por linha como high: <glob> ou medium: <glob>, para os arquivos cuja mudança é mais arriscada que a maioria (migrações, autenticação, pagamento, API pública, infraestrutura). Sem comandos. Um arquivo Markdown nunca é avaliado pelo caminho, então um padrão para ele não tem efeito.',
+      riskPatternsHelp:
+        'Um arquivo Markdown nunca é avaliado pelo caminho, então um padrão para ele não tem efeito.',
       riskPatternsPlaceholder: 'Vazio usa os padrões. Por exemplo: high: src/server/auth/**',
       domains: 'Domínios extras que o sandbox pode acessar',
       domainsPlaceholder:
