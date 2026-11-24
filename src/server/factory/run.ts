@@ -1341,6 +1341,8 @@ export class Run {
     const { deps, taskId, row, api, continuation, state } = this.c
     if (continuation || (await this.startedFromBranch())) return undefined
     if (!(await this.hasNothingToCommit())) return undefined
+    // A builder that waits for something that does not exist yet claims nothing is resolved.
+    await this.refuseWhenBlocked()
     // Fixes that change the start commit make this a change after all: it goes on to be committed, checked
     // and reviewed like any other, instead of a claim the checks backed only after the fix.
     const fixed = await this.applyFixes(this.baseSha, {

@@ -370,15 +370,16 @@ describe('the readiness of a newly queued issue', () => {
     })
 
     it('lets the run go when the blocker it names is closed, or is the task itself', async () => {
-      const closed = await seed()
-      judge.answers.set(closed.issue, blockedBy(9001))
-      await enqueue(closed.id, 10)
       const own = await seed()
       judge.answers.set(own.issue, blockedBy(own.issue))
       await enqueue(own.id, 20)
 
       await schedule(withIssues('open'), { ...AUTO })
       expect(await stageOf(own.id)).toBe('intake')
+      // Queued after the first pass: while 9001 was open it would hold this task back, as it should.
+      const closed = await seed()
+      judge.answers.set(closed.issue, blockedBy(9001))
+      await enqueue(closed.id, 10)
       await schedule(withIssues('closed'), AUTO)
       expect(await stageOf(closed.id)).toBe('intake')
       expect((await jobs()).map((j) => j.id).sort()).toEqual(
