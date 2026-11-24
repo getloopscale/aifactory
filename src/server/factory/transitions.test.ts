@@ -57,6 +57,9 @@ describe('the transition table', () => {
       send_back_after_ci: true,
       coordinator_send_back: true,
       coordinator_merge_base: true,
+      coordinator_rerun_checks: true,
+      coordinator_answer: true,
+      coordinator_blocked_by: true,
       hand_over: true,
       integrate: true,
       merged_by_person: true,
@@ -76,7 +79,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(28 * 15)
+    expect(pairs).toHaveLength(31 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -382,6 +385,47 @@ describe('what the factory does on its own', () => {
     expect(elsewhere('coordinator_merge_base')).toEqual([
       refused(
         'the coordinator merges the integration branch only into the branch of a handed-over task',
+      ),
+    ])
+  })
+
+  it('lets the coordinator rerun the checks of a handed-over or failed task, or one waiting for them', () => {
+    expect(acting('coordinator_rerun_checks', { headSha: 'abc' })).toEqual({
+      handoff: 'rerun_checks',
+      failed: 'rerun_checks',
+    })
+    expect(acting('coordinator_rerun_checks', { headSha: 'abc', awaitingCiSha: 'abc' })).toEqual({
+      handoff: 'rerun_checks',
+      failed: 'rerun_checks',
+      done: 'rerun_checks',
+    })
+    expect(outcome({ stage: 'handoff' }, 'coordinator_rerun_checks')).toEqual(
+      refused('this task has no pull request whose checks could be rerun'),
+    )
+    expect(
+      outcome({ stage: 'handoff', headSha: 'a', mergedSha: 'm' }, 'coordinator_rerun_checks'),
+    ).toMatchObject({ kind: 'refused' })
+    expect(elsewhere('coordinator_rerun_checks', { headSha: 'abc' })).toEqual([
+      refused(
+        'the coordinator reruns the checks only of a task that was handed over, failed, or waits for the repository checks',
+      ),
+    ])
+  })
+
+  it('lets the coordinator answer only a waiting question, and record a blocker on a task that is not running', () => {
+    expect(acting('coordinator_answer')).toEqual({ waiting: 'answer' })
+    expect(elsewhere('coordinator_answer')).toEqual([
+      refused('only a task that waits for an answer to its question can be answered'),
+    ])
+    expect(acting('coordinator_blocked_by')).toEqual({
+      intake: 'block',
+      waiting: 'block',
+      handoff: 'block',
+      failed: 'block',
+    })
+    expect(elsewhere('coordinator_blocked_by')).toEqual([
+      refused(
+        'a blocker is recorded only on a task that is queued, waiting, handed over or failed',
       ),
     ])
   })

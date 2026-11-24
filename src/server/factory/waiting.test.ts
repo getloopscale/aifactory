@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import type { IssueComment } from '../github/pulls'
 
 import {
+  answerMarker,
   answerPrompt,
   parseQuestion,
   pickAnswer,
@@ -132,5 +133,31 @@ describe('the answer, at its edges', () => {
     expect(
       pickAnswer([c({ body: 'x'.repeat(5_000) })], { commentId: '10', at })?.text,
     ).toHaveLength(4_000)
+  })
+})
+
+describe('the answer of the factory', () => {
+  const asked = { commentId: 'q', at: new Date('2026-11-01T00:00:00Z'), questionId: 5 }
+  const bot = (over: Partial<IssueComment> = {}): IssueComment => ({
+    id: 'c9',
+    body: `${answerMarker(5)}\nUse A.`,
+    author: 'aifactory[bot]',
+    authorType: 'Bot',
+    association: 'NONE',
+    createdAt: new Date('2026-11-02T00:00:00Z'),
+    ...over,
+  })
+
+  it('is taken when the coordinator recorded its comment and it names the question', () => {
+    expect(pickAnswer([bot()], asked, new Set(['c9']))?.text).toContain('Use A.')
+  })
+
+  it('is not taken from a bot comment the coordinator did not record, or for another question', () => {
+    expect(pickAnswer([bot()], asked)).toBeUndefined()
+    expect(pickAnswer([bot()], asked, new Set(['other']))).toBeUndefined()
+    expect(
+      pickAnswer([bot({ body: `${answerMarker(6)}\nUse A.` })], asked, new Set(['c9'])),
+    ).toBeUndefined()
+    expect(pickAnswer([bot({ body: 'Use A.' })], asked, new Set(['c9']))).toBeUndefined()
   })
 })

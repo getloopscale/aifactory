@@ -1,7 +1,15 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { coordinatorAction, evidence, finding, repository, stageEvent, task } from '../db/schema'
+import {
+  coordinatorAction,
+  evidence,
+  finding,
+  question,
+  repository,
+  stageEvent,
+  task,
+} from '../db/schema'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf, type BaseHold } from '../factory/await-ci'
 import { readEvidence } from '../factory/check-evidence'
@@ -230,11 +238,42 @@ async function withPullRequest(
   return { ...read, ciFailures: await ciFailuresOf(deps, deps.ciChecks, row.repository, pull.head) }
 }
 
+type Asked = { taskId: number; id: number; body: string; askedAt: Date }
+
+/** The questions of the builder nobody answered yet, oldest first. */
+async function unansweredQuestions(db: Database, at: Date): Promise<Asked[]> {
+  return db
+    .select({
+      taskId: question.taskId,
+      id: question.id,
+      body: question.body,
+      askedAt: question.askedAt,
+    })
+    .from(question)
+    .innerJoin(task, eq(task.id, question.taskId))
+    .where(
+      and(
+        isNull(question.answer),
+        eq(question.origin, 'agent'),
+        lt(question.askedAt, at),
+        eq(task.stage, 'waiting'),
+      ),
+    )
+    .orderBy(question.id)
+}
+
+const questionOf = (asked: Asked[], taskId: number, at: Date) => {
+  const mine = asked.filter((q) => q.taskId === taskId && q.askedAt <= at).at(-1)
+  return mine ? { at, question: { id: mine.id, body: mine.body, askedAt: mine.askedAt } } : {}
+}
+
 /** The facts of every task in `handoff` or `failed`, and of every task with an open finding about its run. */
 export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> {
   const { db } = deps
   const found = await openFindings(db)
   const flagged = found.map((f) => f.taskId!)
+  const at = deps.now?.() ?? new Date()
+  const asked = await unansweredQuestions(db, at)
   const rows = await db
     .select({
       id: task.id,
@@ -251,6 +290,13 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
       or(
         inArray(task.stage, ['handoff', 'failed']),
         inArray(task.id, flagged),
+        and(
+          eq(task.stage, 'waiting'),
+          inArray(
+            task.id,
+            asked.map((q) => q.taskId),
+          ),
+        ),
         and(eq(task.stage, 'done'), isNotNull(task.awaitingCiSha)),
       ),
     )
@@ -271,7 +317,6 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
     })
     .map((r) => r.id)
   const checks = await readEach('the checks of the tasks', () => checkRuns(db, checked))
-  const at = deps.now?.() ?? new Date()
   return Promise.all(
     rows.map(async (r): Promise<TaskFacts> => {
       const lastEvent = last(r.id, null)
@@ -286,6 +331,7 @@ export async function readExceptionFacts(deps: FactsDeps): Promise<TaskFacts[]> 
           .map((f): OpenFinding => ({ id: f.id, kind: f.kind, detail: f.detail })),
         repository: { fullName: r.repository, integrationBranch: integrationBranch(r) },
         ...(checked.includes(r.id) ? { checks: checks(r.id, []) } : {}),
+        ...(r.stage === 'waiting' ? questionOf(asked, r.id, at) : {}),
       }
       if (r.stage === 'done' && r.awaitingCiSha !== null) {
         return { ...facts, baseHold: holds(r.id, null), at }
@@ -312,10 +358,13 @@ export async function readRecordedActions(
       action: coordinatorAction.action,
       outcome: coordinatorAction.outcome,
       at: coordinatorAction.at,
+      by: sql<string | null>`${coordinatorAction.draft}->>'by'`,
     })
     .from(coordinatorAction)
     .where(inArray(coordinatorAction.taskId, taskIds))
     .orderBy(coordinatorAction.id)
-  for (const { taskId, ...row } of rows) byTask.get(taskId)?.push(row)
+  for (const { taskId, by, ...row } of rows) {
+    byTask.get(taskId)?.push(by === 'unblocker' ? { ...row, by } : row)
+  }
   return byTask
 }
