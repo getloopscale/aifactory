@@ -65,6 +65,7 @@ import { fixedBaseNote } from './ci-wait'
 import {
   conflictNote,
   mergeBaseByCoordinator,
+  mergeBaseByOwner,
   mergeFixedBase,
   requestChanges,
   retryAutomatically,
@@ -4231,6 +4232,32 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(queued).toEqual([{ taskId: id, mergeBase: true }])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row!.stage).toBe('intake')
+  })
+
+  it('queues the merge-only run when the owner asks, and refuses a task that integrated meanwhile', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: verified, pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    const queued: Queued[] = []
+    const ownerDeps: ActionDeps = {
+      db: getDb(),
+      github,
+      api: githubApi,
+      enqueueResume: async () => {},
+      deleteSnapshot: async () => {},
+      inTransaction: (work) =>
+        getDb().transaction((tx) => work(tx as never, async (input) => void queued.push(input))),
+    }
+
+    await mergeBaseByOwner(ownerDeps, id)
+
+    expect(queued).toEqual([{ taskId: id, mergeBase: true }])
+    await getDb().update(task).set({ stage: 'done', mergedSha: 'm' }).where(eq(task.id, id))
+    await expect(mergeBaseByOwner(ownerDeps, id)).rejects.toThrow()
+    expect(queued).toHaveLength(1)
   })
 
   it('refuses to merge the base for a handed-over task whose branch is gone', async () => {
