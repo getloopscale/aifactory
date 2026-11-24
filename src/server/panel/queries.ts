@@ -8,6 +8,7 @@ import {
   decision,
   delivery,
   evidence,
+  evidenceArtifact,
   finding,
   question,
   releaseWait,
@@ -488,6 +489,17 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
   const [row] = await db.select().from(task).where(eq(task.id, id))
   if (!row) return undefined
   const [card] = await cards(db, [row])
+  const files = await db
+    .select({
+      id: evidenceArtifact.id,
+      evidenceId: evidenceArtifact.evidenceId,
+      path: evidenceArtifact.path,
+      contentType: evidenceArtifact.contentType,
+      sizeBytes: evidenceArtifact.sizeBytes,
+    })
+    .from(evidenceArtifact)
+    .where(eq(evidenceArtifact.taskId, id))
+    .orderBy(asc(evidenceArtifact.id))
   const [events, checks, reviews, questions, decisions, deliveries, watches, runs, plans, actions] =
     await Promise.all([
       db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
@@ -516,6 +528,8 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       detail: (e.detail ?? null) as Record<string, unknown> | null,
     })),
     evidence: checks.map((e): EvidenceView => ({
+      omitted: e.omitted,
+      artifacts: files.filter((f) => f.evidenceId === e.id).map(({ evidenceId: _, ...f }) => f),
       id: e.id,
       name: e.name,
       command: e.command,

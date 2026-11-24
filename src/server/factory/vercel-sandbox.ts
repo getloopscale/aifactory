@@ -2,7 +2,7 @@ import { SandboxBackend } from '@theokit/agents/sandbox'
 import { Sandbox, Snapshot, type NetworkPolicy } from '@vercel/sandbox'
 
 import type { IsolatedSandbox, IsolatedSandboxProvider, SandboxSpec } from './sandbox'
-import { assertIsolated } from './sandbox'
+import { assertIsolated, ImageRefused } from './sandbox'
 
 /** The exit code the TheoKit backends report for a command that hit its timeout. */
 const TIMED_OUT = 124
@@ -89,6 +89,8 @@ export function vercelSandboxProvider(): IsolatedSandboxProvider {
   return {
     name: 'vercel-sandbox',
     async create(spec): Promise<IsolatedSandbox> {
+      // Vercel Sandbox starts from its own image: a browser cannot be preinstalled, so refuse instead of using the default.
+      if (spec.image === 'browser') throw new ImageRefused('vercel-sandbox', 'browser')
       return wrap(
         await Sandbox.create({
           ...vercelCredentials(),

@@ -230,6 +230,32 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
                     )}
                   </span>
                 </div>
+                {e.artifacts.length > 0 || e.omitted.length > 0 ? (
+                  <div className="mt-2 text-xs">
+                    <span className="text-muted-foreground">{t.task.artifacts}</span>
+                    <ul>
+                      {e.artifacts.map((a) => (
+                        <li key={a.id}>
+                          <a
+                            href={`/api/panel/tasks/${detail.task.id}/artifacts/${a.id}`}
+                            download={a.path.split('/').pop()}
+                            className="underline"
+                          >
+                            {a.path}
+                          </a>{' '}
+                          <span className="text-muted-foreground">
+                            {t.task.artifactSize(Math.ceil(a.sizeBytes / 1024))}
+                          </span>
+                        </li>
+                      ))}
+                      {e.omitted.map((reason) => (
+                        <li key={reason} className="text-muted-foreground">
+                          {t.task.artifactOmitted(reason)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {e.output ? (
                   <details className="mt-2">
                     <summary className="cursor-pointer text-xs text-muted-foreground">

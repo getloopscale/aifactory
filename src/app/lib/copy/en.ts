@@ -223,6 +223,9 @@ export const en = {
     outOfQuota: 'out of quota',
     finished: 'finished',
     failed: 'failed',
+    artifacts: 'Files the check wrote (kept as long as the transcripts)',
+    artifactSize: (kib: number) => `${kib} KiB`,
+    artifactOmitted: (reason: string) => `Not kept: ${reason}`,
     evidence: 'Evidence',
     noChecks: 'No checks have run yet.',
     evidenceMeta: (sha: string, exit: number, secs: string) =>
@@ -465,6 +468,11 @@ export const en = {
     settings: {
       saved: 'Saved.',
       checks: 'Checks, one per line as name: command',
+      sandboxImage: 'Sandbox image',
+      imageDefault: 'Default',
+      imageBrowser: 'With a headless browser',
+      sandboxImageHelp:
+        'The browser image has Chromium at /usr/bin/chromium for checks that drive one. Add ` @artifacts dir/` at the end of a check line to keep the files it writes there.',
       checksPlaceholder: 'Empty runs npm test. For example: unit: pnpm test',
       integrationChecks: 'Integration checks, one per line as name: command',
       integrationChecksPlaceholder: 'Empty runs none. For example: e2e: pnpm test:e2e',

@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import { agentEvent } from '../db/schema'
 import type { TranscriptEvent } from '../../shared/panel'
 
+import { pruneArtifacts } from './artifacts'
 import { toStored, type AgentEvent } from './transcript'
 
 export type Role = 'builder' | 'reviewer' | 'merger'
@@ -108,5 +109,7 @@ export async function pruneTranscripts(db: Database, now = new Date()): Promise<
     .delete(agentEvent)
     .where(lt(agentEvent.at, before))
     .returning({ id: agentEvent.id })
+  // The files checks wrote are kept as long as the steps are.
+  await pruneArtifacts(db, before)
   return gone.length
 }

@@ -5,6 +5,7 @@ import { repository } from '../db/schema'
 
 import type { CheckSpec } from './evidence'
 import type { ReleaseMode } from './deliver'
+import type { SandboxImage } from './sandbox'
 
 /** What the owner set for one repository. Every field is optional: absent means the factory's default. */
 export type RepoConfig = {
@@ -26,6 +27,8 @@ export type RepoConfig = {
   harness?: string
   reviewer?: string
   releaseMode?: ReleaseMode
+  /** The sandbox image; absent means the default one. */
+  sandboxImage?: SandboxImage
   /** How long a run may last, in ms; absent means the factory's default. */
   runLimitMs?: number
 }
@@ -69,6 +72,7 @@ export async function loadRepoConfig(db: Database, fullName: string): Promise<Re
     harness: row.harness ?? undefined,
     reviewer: row.reviewer ?? undefined,
     releaseMode: row.releaseMode ?? undefined,
+    sandboxImage: row.sandboxImage === 'browser' ? 'browser' : undefined,
     runLimitMs: row.runLimitMinutes ? row.runLimitMinutes * 60_000 : undefined,
   }
 }

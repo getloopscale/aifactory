@@ -26,6 +26,7 @@ import {
   resolutionProblems,
   withConflictFiles,
 } from './merge-base'
+import { storeEvidence } from './artifacts'
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
@@ -543,6 +544,7 @@ export class Run {
       timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs)
         .sandboxMs,
       cacheKey: c.row.repository,
+      ...(c.repo.sandboxImage ? { image: c.repo.sandboxImage } : {}),
       egress: [
         githubEgress(c.token),
         ...agentEgress,
@@ -1752,7 +1754,7 @@ export class Run {
       this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
     )
     for (const check of results) {
-      await this.c.deps.db.insert(evidence).values({ taskId: this.c.taskId, sha: target, ...check })
+      await storeEvidence(this.c.deps.db, this.c.taskId, target, check)
     }
     const failed = failingChecks(results)
     if (failed.length > 0) await this.refuseMerged(failed, head, target)
@@ -1958,7 +1960,7 @@ export class Run {
       this.checks,
       this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
     )
-    for (const check of results) await db.insert(evidence).values({ taskId, sha, ...check })
+    for (const check of results) await storeEvidence(db, taskId, sha, check)
     const rows = await this.checkRuns()
     const verdict = gate({ headSha: sha, required: this.checks.map((c) => c.name), evidence: rows })
     const here = rows.filter((r) => r.sha === sha)

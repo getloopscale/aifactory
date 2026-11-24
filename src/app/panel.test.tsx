@@ -88,6 +88,10 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
       timedOut: false,
       durationMs: 1500,
       output: '# pass 6',
+      omitted: [],
+      artifacts: [
+        { id: 9, path: 'screenshots/home.png', contentType: 'image/png', sizeBytes: 2048 },
+      ],
       at: '2026-11-04T10:03:00Z',
     },
   ],

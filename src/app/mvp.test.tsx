@@ -58,6 +58,7 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       releaseBranch: null,
       askQuestions: true,
       runLimitMinutes: null,
+      sandboxImage: 'default',
       leadTimeAtRiskMinutes: null,
       leadTimeOverdueMinutes: null,
       harness: 'codex',
@@ -87,6 +88,7 @@ const repos = (over: Partial<RepositoriesView> = {}): RepositoriesView => ({
       reviewer: null,
       releaseMode: null,
       runLimitMinutes: null,
+      sandboxImage: 'default',
       leadTimeAtRiskMinutes: null,
       leadTimeOverdueMinutes: null,
       checksProvenSha: null,
@@ -393,6 +395,7 @@ describe('repositories', () => {
       reviewer: 'claude-code',
       releaseMode: null,
       runLimitMinutes: null,
+      sandboxImage: 'default',
       leadTimeAtRiskMinutes: null,
       leadTimeOverdueMinutes: null,
     })
