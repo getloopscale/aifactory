@@ -12,7 +12,11 @@ const CLIS = {
     host: 'api.anthropic.com',
     header: (k) => ({ 'x-api-key': k }),
     key: process.env.ANTHROPIC_API_KEY,
-    sessionDir: '$HOME/.claude',
+    pkg: '@anthropic-ai/claude-code@2.1.319', // CLAUDE_CODE_VERSION in factory/harness-claude.ts
+    // Only the conversation files, not credentials, caches or settings: what S3 tests is whether
+    // this is the minimal state. The CLI keys them by working directory (/tmp/w in both sandboxes).
+    sessionDir: '$HOME/.claude/projects',
+    env: 'ANTHROPIC_API_KEY=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1',
     start: (p) => `claude -p ${p} --output-format json`,
     ask: (p) => `claude -p ${p} --permission-mode plan --output-format json`,
     resume: (p) => `claude -p ${p} --continue --output-format json`,
@@ -23,7 +27,9 @@ const CLIS = {
     host: 'api.openai.com',
     header: (k) => ({ authorization: `Bearer ${k}` }),
     key: process.env.OPENAI_API_KEY,
-    sessionDir: '$HOME/.codex',
+    pkg: '@openai/codex@0.166.0', // CODEX_VERSION in factory/harness-codex.ts
+    sessionDir: '$HOME/.codex/sessions',
+    env: 'OPENAI_API_KEY=placeholder-not-a-secret',
     start: (p) => `codex exec --skip-git-repo-check ${p}`,
     ask: (p) => `codex exec --skip-git-repo-check --sandbox read-only ${p}`,
     resume: (p) => `codex exec --skip-git-repo-check resume --last ${p}`,
@@ -41,7 +47,12 @@ if (!CLI || !CLI.key || !hasVercel) {
 const make = () =>
   Sandbox.create({
     timeout: 600_000,
-    networkPolicy: { allow: { [CLI.host]: [{ transform: [{ headers: CLI.header(CLI.key) }] }] } },
+    networkPolicy: {
+      allow: {
+        [CLI.host]: [{ transform: [{ headers: CLI.header(CLI.key) }] }],
+        'registry.npmjs.org': [],
+      },
+    },
   })
 const sh = async (sb, script, ms = 180_000) => {
   const t = Date.now()
@@ -60,14 +71,30 @@ const prompt = async (sb, text) => {
   await sb.writeFiles([{ path, content: Buffer.from(text) }])
   return `"$(cat ${path})"`
 }
+// A failed precondition aborts the run: a broken run must never look like a result.
+const must = (what, r) => {
+  if (r.code !== 0)
+    throw new Error(`${which}: ${what} failed (exit ${r.code}): ${r.out.slice(-300)}`)
+  return r
+}
 const report = (label, v) => console.log(`${which} ${label}: ${JSON.stringify(v)}`)
 
 const fact = `zebra-${Math.random().toString(36).slice(2, 8)}`
+// Install the pinned CLI (the same version the factory pins) and fail unless it answers --version.
+const install = async (sb) => {
+  const bin = '$HOME/.local/bin'
+  await sh(sb, `npm i -g --prefix $HOME/.local ${CLI.pkg} 2>&1 | tail -3`, 240_000)
+  CLI.path = `PATH=${bin}:$PATH ${CLI.env}`
+  return must('CLI install', await sh(sb, `${CLI.path} ${which} --version`)).out
+}
 const a = await make()
 let b
 try {
-  report('version', (await sh(a, `${which} --version`)).out)
-  await sh(a, 'mkdir -p /tmp/w && cd /tmp/w && git init -q && echo base > f.txt')
+  report('version', await install(a))
+  must(
+    'workspace setup',
+    await sh(a, 'mkdir -p /tmp/w && cd /tmp/w && git init -q && echo base > f.txt'),
+  )
 
   // S2a: ask mode must not write. Look at the working tree, not at a branch SHA alone.
   const ask = await prompt(
@@ -76,7 +103,7 @@ try {
   )
   const r = await sh(
     a,
-    `cd /tmp/w && ${CLI.ask(ask)} >/dev/null 2>&1; echo exit=$?; git status --porcelain; cat f.txt`,
+    `cd /tmp/w && ${CLI.path} ${CLI.ask(ask)} >/dev/null 2>&1; echo exit=$?; git status --porcelain; cat f.txt`,
   )
   report('S2 ask-mode write attempt (exit, status, f.txt)', r.out)
 
@@ -85,12 +112,12 @@ try {
   const long = await prompt(a, `Remember the code ${fact}. Then run sleep 60 and say finished.`)
   const running = await a.runCommand({
     cmd: 'sh',
-    args: ['-c', `cd /tmp/w && ${CLI.start(long)}`],
+    args: ['-c', `cd /tmp/w && ${CLI.path} ${CLI.start(long)}`],
     detached: true,
   })
   await new Promise((ok) => setTimeout(ok, 15_000))
   const second = await prompt(a, 'What is the code I told you? Answer with the code only.')
-  const during = await sh(a, `cd /tmp/w && ${CLI.resume(second)} 2>&1 | tail -c 600`)
+  const during = await sh(a, `cd /tmp/w && ${CLI.path} ${CLI.resume(second)} 2>&1 | tail -c 600`)
   report('S2 resume while the first runs', {
     code: during.code,
     recalled: during.out.includes(fact),
@@ -108,7 +135,7 @@ try {
   // (a queued turn) or only at EOF, and whether the first step survived.
   const sin = await a.runCommand({
     cmd: 'sh',
-    args: ['-c', `cd /tmp/w && ${CLI.stdin}`],
+    args: ['-c', `cd /tmp/w && ${CLI.path} ${CLI.stdin}`],
     stdin: true,
     detached: true,
   })
@@ -129,7 +156,10 @@ try {
   // S3: save the session state, stop the sandbox, restore it in a new one, recall the fact.
   const dir = `"$(dirname ${CLI.sessionDir})"`
   const base = `"$(basename ${CLI.sessionDir})"`
-  const tar = await sh(a, `tar -C ${dir} -czf /tmp/session.tgz ${base} && wc -c < /tmp/session.tgz`)
+  const tar = must(
+    'session archive',
+    await sh(a, `tar -C ${dir} -czf /tmp/session.tgz ${base} && wc -c < /tmp/session.tgz`),
+  )
   report('S3 session archive bytes', tar.out)
   const stream = await a.readFile({ path: '/tmp/session.tgz' })
   const chunks = []
@@ -138,10 +168,17 @@ try {
   await a.stop()
 
   b = await make()
+  await install(b)
   await b.writeFiles([{ path: '/tmp/session.tgz', content: archive }])
-  await sh(b, `tar -C ${dir} -xzf /tmp/session.tgz && mkdir -p /tmp/w && cd /tmp/w && git init -q`)
+  must(
+    'session restore',
+    await sh(
+      b,
+      `mkdir -p ${dir} && tar -C ${dir} -xzf /tmp/session.tgz && mkdir -p /tmp/w && cd /tmp/w && git init -q`,
+    ),
+  )
   const q = await prompt(b, 'What is the code I told you earlier? Answer with the code only.')
-  const back = await sh(b, `cd /tmp/w && ${CLI.resume(q)} 2>&1 | tail -c 600`)
+  const back = await sh(b, `cd /tmp/w && ${CLI.path} ${CLI.resume(q)} 2>&1 | tail -c 600`)
   report('S3 restored in a new sandbox', { code: back.code, recalled: back.out.includes(fact) })
 } finally {
   await a.stop().catch(() => {})

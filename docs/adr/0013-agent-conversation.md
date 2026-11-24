@@ -18,6 +18,9 @@ O roteiro é `spikes/vercel-sandbox/04-agent-conversation.mjs`, um CLI por vez
 provedor é anexada pelo firewall e nunca entra no sandbox; o texto chega ao CLI por arquivo. Ele imprime
 só versão, código de saída, duração, se o fato único voltou e o `git status` depois do modo Perguntar.
 
+O roteiro instala os CLIs nas versões que a fábrica fixa (`CLAUDE_CODE_VERSION`, `CODEX_VERSION`) e aborta
+se `--version` ou um passo de preparo falhar, para que uma execução quebrada não pareça resultado.
+
 O ambiente do builder não tem credenciais do Vercel Sandbox, da Anthropic nem da OpenAI (e não deve
 tê-las). Nada foi rodado, e nenhum resultado abaixo é evidência.
 
@@ -41,7 +44,8 @@ Nenhum mecanismo está escolhido. O desenho do M13 permanece o do plano, **como 
   caminhos: `runCommand({ stdin: true })` com `writeStdin` (Claude `stream-json`, Codex `exec -`) e
   retomar com `--continue`/`resume --last`. A fábrica hoje não expõe stdin; o SDK sim. Ainda não rodado;
 - isolamento do Perguntar: confirmar pela árvore de trabalho e pelo `git status`, não só pelo SHA da branch;
-- sessão: arquivos da pasta de sessões do CLI guardados em `agent_session`.
+- sessão: só a pasta de conversas do CLI (`~/.claude/projects`, `~/.codex/sessions`), sem credenciais nem
+  caches, guardada em `agent_session`; o roteiro testa se isso basta.
 
 ## Pendente (bloqueado por credenciais, precisa de uma pessoa)
 
