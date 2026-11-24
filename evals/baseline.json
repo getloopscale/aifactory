@@ -1,6 +1,6 @@
 {
-  "commit": "ed2886380c8d9ec6671b66f2e43a6d0ac6e21283",
-  "ranAt": "2026-11-19T22:53:28.897Z",
+  "commit": "14cab5c788510ae73e6f61fdadaa27b902c3acd3",
+  "ranAt": "2026-11-24T06:24:16.465Z",
   "setup": {
     "paulohenriquevn/aifactory-playground builder": "claude-code",
     "paulohenriquevn/aifactory-playground builderModel": "default",
@@ -46,33 +46,166 @@
     "usetheokit/theokit-sdk reviewerEffort": "default",
     "usetheokit/theokit-sdk planner": "codex",
     "usetheokit/theokit-sdk plannerModel": "gpt-6.1-terra",
-    "usetheokit/theokit-sdk plannerEffort": "medium"
+    "usetheokit/theokit-sdk plannerEffort": "medium",
+    "usetheokit/theokit-ui builder": "claude-code",
+    "usetheokit/theokit-ui builderModel": "default",
+    "usetheokit/theokit-ui builderEffort": "default",
+    "usetheokit/theokit-ui reviewer": "claude-code",
+    "usetheokit/theokit-ui reviewerModel": "default",
+    "usetheokit/theokit-ui reviewerEffort": "default",
+    "usetheokit/theokit-ui planner": "codex",
+    "usetheokit/theokit-ui plannerModel": "gpt-6.1-terra",
+    "usetheokit/theokit-ui plannerEffort": "medium"
   },
   "results": [
+    {
+      "id": "paulohenriquevn/aifactory-playground#63",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.0840491,
+      "durationMs": 38376,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "`capitalize` is a named export that changes only the first character and throws a `TypeError` for non-strings. Its tests cover each case in the issue, and the README now lists it with the other helpers. `npm test` passes (12 tests), and the diff touches no files outside the plan or under `.github/`.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "src/capitalize.js",
+              "issue": "`toUpperCase` on the first character turns `'ß'` into `'SS'`. A first character outside the BMP is split by `charAt`. The issue doesn't define these cases, so no change is required."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1731",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.2054746,
+      "durationMs": 380717,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The live test failed because Telegram and LINE senders were not named as owners, so their facts sit in separate scopes. The fix names both as owners and adds a model-free test that a fresh session prompt holds the fact, the standing order and SOUL.md; production code is unchanged.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/memory-wiring.test.ts",
+              "issue": "The issue's acceptance asks for a test that fails on 1f0af6a. This one passes on current code and was not run against 1f0af6a, because the cause is the live test's scoping setup. Confirm with the next Live model workflow run that the live test now passes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#364",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 1.6945819,
+      "durationMs": 2065583,
+      "attempts": 3,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The shared `renderText` and `refuseUnsendable` helpers are fine, but four adapters lost their one-time `format=\"html\"` warning, which the issue forbids. The yuanbao/zalo `onInbound`/`deliver` duplication is also still there. I did not run the tests.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "packages/gateway-feishu-lark/src/adapter.ts",
+              "issue": "Behavior regression. The one-time stderr warning for `format=\"html\"` was dropped in feishu-lark (`textFor` removed around line 126), nostr (~149), tlon-urbit (~139) and twitch (~172). The new `BasePlatformAdapter.renderText` only translates markdown and never warns. `warnedAboutHtml` is still declared and never read: feishu-lark:45, nostr:63, tlon-urbit:49, twitch:63. The issue and the plan both say behavior stays the same and the HTML warnings are kept. A fix must keep each adapter's warning text and its log-once behavior. For example, give `renderText` an optional html-warning argument, or k"
+            },
+            {
+              "severity": "major",
+              "file": "packages/gateway-nostr/src/adapter.ts",
+              "issue": "Removing `textFor` left its docblock, `/** The text to send: markdown loses its markers, html goes as is with one warning. */`, attached to the wrong method. It now sits above `openSession` in nostr (~line 149), above `onFact` in tlon-urbit (~139) and above `openSession` in twitch (~172). This is the same orphaned-docblock class the factory's doc-orphans check flagged on feishu-lark. Remove or move the comment in all three files."
+            },
+            {
+              "severity": "major",
+              "file": "packages/gateway-yuanbao/src/adapter.ts",
+              "issue": "The issue names `yuanbao:132+24` = `zalo:115+24` (`onInbound` and `deliver`) as a block to remove, and the plan promised shared inbound helpers. No inbound or handler-wiring helper was added to `base.ts`. The `onInbound` and `deliver` blocks in yuanbao and zalo are unchanged apart from `seen.add`, so Sonar will likely still flag them, and the 3% gate may still fail. Extract the shared subscribe/deliver wiring, or show with a duplication check that the block is gone."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The HTML warning is restored through an optional `renderText` argument, and the orphaned docblocks are removed. The shared `onInbound`/`deliver` helper is still missing, but the builder's reason for declining it holds, so I lowered that finding to minor.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway-yuanbao/src/adapter.ts",
+              "issue": "The `onInbound`/`deliver` block (`yuanbao:132+24` = `zalo:115+24`) is still duplicated, so Sonar's 3% gate may still fail. The builder says `tests/lint/adapter-contract.test.ts` requires a local identity-guarded `this.handler === handler` and a fixed `onInbound` count, and the issue allows no test changes except imports. I didn't re-run that test. The reason is plausible, so this is no longer blocking. The owner should check Sonar's new-code percentage and, if it is still over 3%, relax that lint test so the wiring can move into `base.ts`."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-zalo/package.json",
+              "issue": "The `@theokit/gateway` floor was raised in six adapter `package.json` files (feishu-lark, nostr, raft, tlon-urbit, twitch, zalo), which were outside the plan. The adapters now call `renderText` and `refuseUnsendable`, which only exist from 0.15.0, and the wechat/wecom precedent from #353 did the same, so the bump is justified. The builder did not re-run `tsc` for three adapters after the last edit. The factory's checks should catch a type error there."
+            }
+          ]
+        }
+      ]
+    },
     {
       "id": "usetheokit/theokit-plugins#235",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.6373044999999999,
-      "durationMs": 470052,
+      "costUsd": 0.8240597,
+      "durationMs": 613697,
       "attempts": 1,
       "reviewRounds": 1,
+      "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "The change adds an on-device enrollment-based wake-word detector in `@theokit/plugin-voice`. Its headless-Chromium e2e test uses real speech WAV fixtures and the real helper, with no stub. I ran the unit and e2e tests and all 10 passed. The e2e test checks that a held-out \"theo\" fires the wake event and puts the recorder in `recording`, and that the other sentence fires nothing, starts no recording and makes no STT request. Every changed file is in the plan, and nothing is under `.github/`. I did not run the lint, doc-coverage or `pnpm quality:doc-api` gates.",
+          "summary": "`createWakeWordDetector` is an on-device detector that matches enrolled \"theo\" clips against the microphone stream. The headless-Chromium end-to-end test with real speech WAVs passes. A held-out \"theo\" fires the wake event and starts recording. The no-wake sentence fires nothing and sends no STT request. I ran both wake-word test files and all 9 tests passed.",
           "findings": [
             {
               "severity": "minor",
               "file": "packages/plugin-voice/src/wake-word.ts",
-              "issue": "`stop()` called while `fire()` is awaiting `recorder.start()` does not cancel the recording start. After a wake, `state` is `triggered` and `teardown()` has already run, so the recorder can still end up recording after the caller stopped. A `generation` check before `recorder.start()` would close this gap."
+              "issue": "After a wake, `state()` stays `triggered` even if the app calls `stop()`, and a later `start()` is allowed from that state. This is a small lifecycle ambiguity. The README should say that `start()` re-arms the detector, or `stop()` should reset the state to `idle`."
             },
             {
               "severity": "minor",
               "file": "packages/plugin-voice/tests/wake-word.e2e.test.ts",
-              "issue": "The fixtures are one synthetic eSpeak voice at different pitch and speed, so the e2e test cannot show speaker independence or a false-positive rate. The README already states this limit. The negative case is a single sentence."
+              "issue": "The negative case always waits a fixed 14 seconds, which makes the test slow. It also pulls `@sparticuz/chromium` and `puppeteer-core` into the normal test run. The Chromium unpack works only because of the `AWS_EXECUTION_ENV` workaround. This is acceptable, but it could be flaky in other environments."
             }
           ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#985",
+      "passed": false,
+      "reason": "checks failed: tests",
+      "costUsd": 0.7736400000000001,
+      "durationMs": 1416089,
+      "attempts": 3,
+      "reviewRounds": 0,
+      "reachedVerdict": false,
+      "reviews": []
+    },
+    {
+      "id": "usetheokit/theokit-ui#178",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.1129931,
+      "durationMs": 256283,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "Adds a single valid minor changeset for @theokit/ui, with a consumer-facing summary that matches the exports. No source files, tests or .github files changed.",
+          "findings": []
         }
       ]
     },
@@ -80,19 +213,171 @@
       "id": "paulohenriquevn/aifactory-playground#61",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.090259,
-      "durationMs": 40191,
+      "costUsd": 0.0887114,
+      "durationMs": 41962,
       "attempts": 1,
       "reviewRounds": 1,
+      "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "`truncate` meets every 'done when' case: 'hello world' with max 5 gives 'hell…', 'hi' is unchanged, and a max of 0, a negative or a non-integer throws RangeError. The tests are meaningful, the diff touches only the two planned files, and no owner rule is broken. I ran `src/truncate.test.js` (5 pass) but not the full `npm test`.",
+          "summary": "`truncate` meets every point in the issue. It lives in `src/truncate.js` with a named export, and the diff touches only the two planned files. The full `npm test` run passes with 11 tests, and the README has no helper list to update.",
           "findings": [
             {
               "severity": "minor",
               "file": "src/truncate.js",
-              "issue": "A non-string `text` is silently converted with `String()`. The issue doesn't specify this, and the builder said so. It is harmless, but it is untested."
+              "issue": "`truncate` doesn't validate that `text` is a string. A non-string such as `null` throws a `TypeError` from `Array.from`, and a number or array gives odd results. The issue doesn't require validation, so this is optional."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1726",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.9473342,
+      "durationMs": 756994,
+      "attempts": 3,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "Most alerts are handled sensibly: the URL checks, the intentional-flow comments and the anchored regex. But `writeSnapshot` still calls `existsSync(file)` and then opens the same path, which is the check-then-use pattern the alert at `sessions-command.ts:160` flags. The new size bound on bytes read has no test.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "apps/theoclaw/src/sessions/sessions-command.ts",
+              "issue": "Class: check-then-use on a path. Invariant: the code opens the path once, with no prior existence check, and does every later step on that descriptor. `writeSnapshot` still runs `existsSync(file)` and then `openSync(file, ...)` on the same path. CodeQL's js/file-system-race will probably keep flagging it, and the acceptance asks for no new alert on the fixed lines. The code also opens the file twice (O_RDONLY, then O_WRONLY|O_CREAT). Fix: drop `existsSync`. Try `openSync(file, O_WRONLY|O_NOFOLLOW)` first. It fails with EACCES on a 0o444 file, so for that case open O_RDONLY|O_NOFOLLOW, `fchmod`"
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/skills-publish.test.ts",
+              "issue": "The plan and the issue asked for a test of the new size bound on the bytes actually read (`total.n += data.length - stat.size` in `publish.ts`). No test covers it. Add one, for example by mocking `readFileSync` or growing the file past 1 MiB between the stat and the read."
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/CHANGELOG.md",
+              "issue": "The new entry sits at the top of the existing \"Changed\" list and is followed by a blank line that splits the list. Put it in the list without the blank line."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "writeSnapshot now opens the path once with O_NOFOLLOW and does the permission change, truncation and write on the descriptor. The size-bound test and the changelog fix are fine.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/src/sessions/sessions-command.ts",
+              "issue": "The `open` verb still does existsSync then readdirSync on the same path. It is not one of the issue's listed alerts, but it may be worth a follow-up."
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/sessions-command.test.ts",
+              "issue": "There is no dedicated test for the EACCES fallback path of writeSnapshot, which only the repeat-share case exercises. Consider adding one."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#354",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.1664462,
+      "durationMs": 843245,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "Both sorts now use an explicit code-unit comparator. NOSONAR comments sit on the exact lines Sonar flagged (wechat signature.ts:10, wecom crypto.ts:18 and :76). The mixed-case tests pin independently verified SHA-1 digests that differ from locale ordering, and both adapter test files pass (13 and 14 tests).",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway-wecom/src/crypto.ts",
+              "issue": "The builder also annotated the createDecipheriv call, which Sonar did not report. This is harmless and consistent with the cipher, but it is outside the issue's list. The ratings can only be confirmed once SonarCloud reruns on the PR."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#981",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.1515704,
+      "durationMs": 686160,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The change adds a scoped `mongoose` override next to the existing `smol-toml` one and refreshes the lockfile, so `natural` now resolves `mongoose` 9.13.0. It adds a regression-guard test and a changeset for the published memory-mem0 package, and every changed file is in the plan. I read the diff and did not run the tests or the audit, so the builder's reported results (audit exit 0, tests passing) are unverified by me.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "pnpm-lock.yaml",
+              "issue": "The lockfile refresh also changed an unrelated `deprecated:` message for an `@aws-sdk` package, and moved `mongodb` from 7.6.0 to 7.9.1, `kareem`, `mquery` and `sift` to newer patch versions. These come from the `mongoose` bump and the registry metadata refresh, and none of them is a high-severity risk, so they can stay."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/memory-mem0/tests/wire-contract.test.ts",
+              "issue": "The new test only checks the resolved `mongoose` version. It never imports `mongoose`, so it does not show that `natural` and `mem0ai` still load with the patched version. The issue asked for that check, and the builder said so. It is acceptable as a guard for the override."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-ui#175",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.1558234,
+      "durationMs": 263996,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The change bumps @playwright/test to ^1.65.0 and refreshes the lockfile, which resolves 1.65.1. The issue's fix 1 asks for exactly that. The diff stays within the plan, and nothing under .github/ changed. I did not run the tests or the browser checks, and the builder could not install 1.65.1 locally. Install, a11y, visual and ladle:build are therefore unverified until CI runs.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/ui/tests/playwright-ubuntu-support.test.ts",
+              "issue": "The test only checks the lockfile's playwright-core version against a hardcoded 1.65 floor. It does not check that Chromium installs on Ubuntu 26.04. That is acceptable, because the Browser + stories job is the real check. Be aware the test would also fail on any intended future downgrade."
+            },
+            {
+              "severity": "minor",
+              "file": "pnpm-lock.yaml",
+              "issue": "The lockfile also gained an unrelated `deprecated:` line on `@theokit/http@0.5.4`. It came from registry metadata when the lockfile was refreshed and is harmless. Still, quality:visual may fail on the new Chromium. If it does, review each snapshot diff before updating any baseline."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1725",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.1661144,
+      "durationMs": 392211,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The 8 lint errors are fixed with real types, an unused import removed, a direct date check that keeps its NaN behavior, and line-level disables with reasons. eslint is clean on the touched files.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tools/parity/parity.test.mjs",
+              "issue": "The planned equal-date and invalid-date cases for the rewritten gate check were not added. Add them as follow-up so the NaN behavior is pinned by a test."
             }
           ]
         }
@@ -102,19 +387,30 @@
       "id": "usetheokit/theokit-gateways#348",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.4945232,
-      "durationMs": 883567,
+      "costUsd": 0.3550948,
+      "durationMs": 834825,
       "attempts": 1,
       "reviewRounds": 1,
+      "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "First connect now baselines at UIDNEXT-1, connect() no longer awaits any drain, and the cursor resets on a UIDVALIDITY change. Drains are serialized, the cursor can be persisted through an optional store, and the 153 package tests pass.",
+          "summary": "A first connect now takes UIDNEXT-1 as the baseline and dispatches only newer mail. `connect()` resolves before any dispatch, the fetch is UID-restricted, and the cursor resets when UIDVALIDITY changes. There is a restart/persistence test and a store seam. I read the diff and did not run the tests. The remaining gaps are minor.",
           "findings": [
             {
               "severity": "minor",
               "file": "packages/gateway-email/src/adapter.ts",
-              "issue": "If a cursor save fails, the message is already flagged \\Seen and the cursor does not advance. The message is not redelivered, and it can be lost if the process restarts before a later save succeeds. This is documented and acceptable, but a host that needs at-least-once delivery has no way to ask for it."
+              "issue": "`seenUids` and `pendingSeen` are not cleared when the cursor resets for a UIDVALIDITY change. They are only cleared in `disconnect()`. If the reset happens on a reconnect without a disconnect, reused UIDs would be skipped as already seen, and stale pending `\\Seen` flags could land on new mail. Clear both sets in `_establishCursor` when the baseline is reset."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-email/tests/adapter.test.ts",
+              "issue": "No test covers overlapping drains, which the plan listed. The builder said so. Add one for the IDLE event plus the initial drain running together, checking the cursor stays monotonic and nothing is dispatched twice."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-email/src/imap-client.ts",
+              "issue": "`mailboxState()` and the UID-range fetch against real imapflow are untested. The `uidValidity` cast to `Number` could lose precision on a bigint above 2^53. UIDVALIDITY is a 32-bit value, so this is unlikely to matter."
             }
           ]
         }
@@ -122,28 +418,260 @@
     },
     {
       "id": "usetheokit/theokit-sdk#975",
+      "passed": false,
+      "reason": "no time left for another agent pass: 38 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
+      "costUsd": 0.4554885000000001,
+      "durationMs": 2296588,
+      "attempts": 3,
+      "reviewRounds": 0,
+      "reachedVerdict": false,
+      "reviews": []
+    },
+    {
+      "id": "usetheokit/theokit-ui#172",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.7814715000000001,
-      "durationMs": 1696502,
+      "costUsd": 0.5272314,
+      "durationMs": 540603,
       "attempts": 2,
-      "reviewRounds": 1,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
       "reviews": [
         {
-          "verdict": "approve",
-          "summary": "The change adds an `@theokit/sdk/mcp-events` sub-entry. It sends `events/subscribe` over HTTP with protocol 2026-07-28 and verifies Standard Webhooks signatures. It answers the signed challenge before the subscribe reply returns, delivers the payload with its subscription id, and rejects a wrong signature with 401. All four sub-entry places and a changeset are present, and the `error-codes.md` edit was required by the factory's check. I read the code but did not run the tests or the build.",
+          "verdict": "changes",
+          "summary": "The i18n layer is sound and its unit tests and typecheck pass. The issue's acceptance check against the real served page was never run, and the browser spec that is meant to do it would break the existing `quality:visual` gate.",
           "findings": [
             {
-              "severity": "minor",
-              "file": "packages/sdk/src/mcp-events.ts",
-              "issue": "A delivery that arrives before `events/subscribe` returns is passed to `onEvent` with `subscriptionId: \"\"`, because the route's id is still undefined. Either hold such events until the id is known or document the gap."
+              "severity": "major",
+              "file": "packages/ui/tests/visual/i18n.spec.ts",
+              "issue": "The spec needs a running Ladle server on port 61000. `playwright.config.ts` has no `webServer`, and the other specs in `tests/visual` need no server (theme-smoke is self-contained). `pnpm quality:visual` is part of `quality:gates`, so it will now try to load `localhost:61000` and fail. Either add a `webServer` entry to the Playwright config that starts `ladle serve`, or move this check out of the default `playwright test` run. Also use a real `baseURL` instead of a hardcoded default."
+            },
+            {
+              "severity": "major",
+              "file": "packages/ui/tests/visual/i18n.spec.ts",
+              "issue": "The issue requires the Settings → Inställningar → Settings switch to be checked in a browser against the real service. The builder says this never ran, because Chromium isn't installed, and never confirmed the story id. The unit tests alone don't satisfy the issue. I read the id `providers--i18n--default` as matching the story title, but I did not run it. Get the spec running against the served Ladle page, or have the person who owns the environment do it, before merging."
             },
             {
               "severity": "minor",
-              "file": "packages/sdk/tests/mcp/events.test.ts",
-              "issue": "The only server in the test is one the builder wrote, and the request shape (`events` plus `delivery{mode,url,secret}`, `result.id`) is not checked against a real events-profile server. The shape is documented as experimental, so the risk is mismatch with real servers. Also, the `HttpMcpEventsClient` created in `subscribe` is never closed, and the `notifications/initialized` step is not sent."
+              "file": "packages/ui/src/i18n/i18n.tsx",
+              "issue": "`LocaleSwitch` shows raw locale codes (`en`, `sv`) as option text. Native names (Svenska, English) would be friendlier. Also, `setLocale` accepts any string, including a locale with no catalogue, and that case isn't tested."
             }
           ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The server-wiring finding is fixed: Playwright now starts Ladle itself and the spec uses a relative URL. The browser check could not run here (Chromium is missing), so someone with a browser must run it once before merge.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/ui/tests/visual/i18n.spec.ts",
+              "issue": "The Settings → Inställningar → Settings check has never run in a browser. Someone with Chromium should run `pnpm exec playwright test tests/visual/i18n.spec.ts` once, which also confirms the story id `providers-i18n--default`."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/ui/src/i18n/i18n.tsx",
+              "issue": "`defaultLocale` is not validated against the catalogues. A tag with no catalogue, or an invalid one, can still make the `Intl` formatters throw. Validate it, or fall back to `fallbackLocale`, like `setLocale` does."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1690",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.1244096,
+      "durationMs": 279565,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The local worker send now spreads untrustedContentSendOptions(), matching the other sends in src. The guard test and a strengthened worker test pass, and no files outside the plan changed.",
+          "findings": []
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#347",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.8381528999999999,
+      "durationMs": 1788136,
+      "attempts": 3,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The invite handling looks sound: it is opt-in through `acceptInvite`, the listener is attached before sync starts, joins are deduplicated, and the listener is detached on disconnect. But the planned live Synapse test is missing, so the real SDK behavior the fix depends on is untested.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "integration/tests/matrix/live.test.ts",
+              "issue": "The plan and the issue both call for live Synapse coverage of an approved pending invite, an approved live invite and a denied invite, but the diff does not touch this file. The fix relies on matrix-js-sdk emitting `RoomMember.membership` for stripped invite state, with `events.member.getSender()` set. Only a stubbed client checks that. Add the live test, or run it and say what blocked it."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-matrix/src/adapter.ts",
+              "issue": "`attachInvites()` runs before `startClient`. If `startClient` throws, the listener stays registered on a client that is not torn down in that path. Detach it in the connect failure path."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "Both earlier findings are addressed. The live Synapse invite test covers an approved pending invite, an approved live invite and a denied invite. The invite listener is now detached when connect fails, and a test covers it. The 8 invite unit tests pass; I did not run the live test.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "integration/tests/matrix/live.test.ts",
+              "issue": "The live invite test has not been run against Synapse (the builder had no Docker). Run `matrix:up` and this test before relying on it. It confirms that the real SDK emits `RoomMember.membership` for pending invites with the inviter set."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#966",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 1.0706811999999999,
+      "durationMs": 1956155,
+      "attempts": 4,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The 30 s headers bound is implemented and wired correctly into the OpenAI, Anthropic, Responses and Ollama transports. There is no test that a never-resolving fetch is retried through the retry client, which the issue asks for.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "packages/sdk/tests/internal/llm/response-headers-timeout.test.ts",
+              "issue": "The issue's acceptance test (and the plan's step 1) is a never-resolving fetch that yields the typed error after the bound and then one retry, through the OpenAI client wrapped by retrying-client. The tests only call the wrapper directly and check `isTransientError`. Nothing proves the transports are wired or that the retry happens. Add that test with fake timers, and check that the OpenAI client really applies the wrapper."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/sdk/src/internal/llm/bedrock-anthropic.ts",
+              "issue": "The plan listed bedrock-anthropic.ts and vertex-anthropic.ts, but neither is wired. That is defensible, because they are non-streaming and 30 s could cut off generation. State it in the changeset or the code, so the omission reads as deliberate."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The earlier major finding is fixed. The tests now cover a never-resolving fetch through OpenAIClient wrapped in RetryingLlmClient: the typed error appears after 30 s and the retry succeeds. They also cover wiring for the Anthropic, Responses and Ollama clients. All 10 tests pass when I run them.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/sdk/src/internal/llm/response-headers-timeout.ts",
+              "issue": "Bedrock and Vertex Anthropic are left unbounded, which departs from the plan. The reason is sound: they are non-streaming, so a 30 s headers bound would cut off slow but healthy responses. The header comment and the changeset both say this. The owner may still want a separate, longer bound for them as follow-up work."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1686",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.8681304000000001,
+      "durationMs": 1217926,
+      "attempts": 2,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The custodian skills no longer reach workers, but the fix also strips every skill from workers, including the bundled and workspace skills they had before #1657. That goes beyond what the issue asks. It also edits `create-agent.ts` and other files outside the plan.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "apps/theoclaw/src/control-plane/agent-factory.ts",
+              "issue": "The new `skills` parameter defaults to `'none'`, which sets `noSkills: true`. That discards bundled, workspace and user skills for every default-built factory, not only the custodian ones. Those factories are the import-free `delegate_all` worker factory (`main.ts:117`) and the paired worker (`worker/worker.ts:131`). The issue says only the custodian skills must go to the system agent, and the plan's out-of-scope list says not to change discovery of ordinary skills. Workers lose skills they had before #1657. A fix has to hold one rule: the factory withholds the custodian skills unless the call"
+            },
+            {
+              "severity": "major",
+              "file": "apps/theoclaw/src/agent/create-agent.ts",
+              "issue": "This file was outside the plan. The `noSkills` input it adds is not needed, because leaving `custodian` unset already keeps the custodian skills out. It is a new API surface that exists only to strip ordinary skills, which is the regression in the finding above. Remove it."
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/src/main-acp.ts",
+              "issue": "The call now passes `undefined, 'ordinary'` positionally. Once the default is `'ordinary'`, this edit is redundant and can be reverted. The same applies to the `'ordinary'` argument added in `tests/workspace-skills.test.ts:56`."
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/workspace-skills.test.ts",
+              "issue": "The new regression test only asserts that `skills` is absent in an environment with no ordinary skills. It does not check that a worker still gets workspace skills, so it would not catch the regression above. Add a case where a workspace skill exists, and assert that the worker factory offers it and omits the custodian four."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The custodian skills now go only to the `/control` agent's factory (`main.ts:116`). The import-free worker factory and ACP no longer get them, and ordinary skills are untouched. Both earlier major findings (the `'none'` default and the `noSkills` input in `create-agent.ts`) are gone. `import-isolation.test.ts` still fails at line 189, but only because the workers now get the bundled skills `git-helper` and `summarize-text`, which is a separate regression.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/import-isolation.test.ts",
+              "issue": "I ran this test and it fails at line 189: the worker has `skills` holding `git-helper` and `summarize-text`. The issue's acceptance asks for this test to pass unchanged, so it is not met. The bundled skills from #1692/#1537 cause it, not the custodian four. Follow-up for the owner: decide whether workers should receive bundled skills, then change either the bundled-skill wiring or the test's expectation. Don't strip ordinary skills inside this fix."
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/composition.test.ts",
+              "issue": "This file is outside the plan, but the edit is justified. The test pins the literal text of the `main.ts` factory call, which now ends in `, true`, so the pattern had to change. A boolean positional argument is brittle, though. An options object would read better in future."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#343",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 1.1804405000000002,
+      "durationMs": 1065238,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The X adapter does what the issue describes. It polls mentions with a cursor that only advances past handled ones, builds bounded thread and quote context, enforces the allowlist on inbound and on outbound replies, supports a guest daily cap, and posts public replies. The out-of-plan files are each needed to register a new platform. I read only `adapter.ts` and `policy.ts` closely and did not run the tests.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "integration/tests/x/live.test.ts",
+              "issue": "The acceptance check against the real X service has not been run. The builder had no X app or test accounts. A person with credentials must run this test before the issue is treated as accepted and before the TheoClaw wiring issue is unblocked."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-x/src/adapter.ts",
+              "issue": "When a poll hits `MAX_PAGES` with mentions still left, it processes the newest ones and moves `sinceId` past them. The skipped older mentions are lost for good, and the only trace is a log line. This is a rare edge case. Consider resuming from the pagination token or oldest-first paging."
+            },
+            {
+              "severity": "minor",
+              "file": "pnpm-lock.yaml",
+              "issue": "The builder ran `pnpm install --no-frozen-lockfile`, which the owner's rule says never to do. The lockfile change is only 18 added lines for the new package, so it looks legitimate. Confirm that the CI frozen install passes."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#960",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.23327600000000004,
+      "durationMs": 1060452,
+      "attempts": 2,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "`removeNodeProtocol: false` keeps `node:readline/promises` in the rebuilt `dist` for both ESM and CJS. The new regression test passes on that build, the bundle budget still passes, and the diff stays within the plan.",
+          "findings": []
         }
       ]
     },
@@ -151,25 +679,318 @@
       "id": "usetheokit/theokit#1685",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.1004977,
-      "durationMs": 315653,
+      "costUsd": 0.1275064,
+      "durationMs": 328594,
       "attempts": 1,
       "reviewRounds": 1,
+      "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "mammoth and unpdf are pinned to exact versions in package.json and the lockfile importer specifiers, with resolved versions unchanged. The exact-versions test passes (28 of 28), and the changelog entry is in place.",
+          "summary": "Both dependencies are pinned exactly in the manifest and the lockfile specifiers match. The focused test passes, and there are no unrelated changes or exception-list entries.",
           "findings": []
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#341",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 1.7802414999999998,
+      "durationMs": 2036276,
+      "attempts": 3,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The runner lifecycle and the Discord, Matrix and Teams `startTyping` implementations look correct. The change leaves out the live GatewayRunner checks the issue requires, and the builder's plan had listed them.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "integration/tests/discord/live.test.ts",
+              "issue": "The issue says unit tests with fakes do not satisfy it and the check must run against the real service. The plan listed live GatewayRunner tests for Discord (`integration/tests/discord/live.test.ts`) and Matrix (`integration/tests/matrix/live.test.ts`), but neither file is in the diff. All the new tests use stubs. Add live tests that run a turn longer than 4 s through a real `GatewayRunner`. They should observe typing start, renewal and clearing or expiry through an independent observer. If the credentials are unavailable, say so explicitly and keep the live tests skipped when the env vars are"
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway/src/runner/gateway-runner.ts",
+              "issue": "A slow `startTyping` that resolves after `stopTyping` can re-show the indicator on Matrix, where it can last up to 10 s. The in-flight ping is not tracked or sequenced against stop. Consider chaining stop after any pending ping."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The live GatewayRunner typing tests for Discord and Matrix are added and skip without credentials. The runner now waits for in-flight typing starts before it clears. The live tests remain unrun for lack of credentials, so the live acceptance check is unverified.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway/src/runner/gateway-runner.ts",
+              "issue": "If an adapter's startTyping never settles, the clear's `await Promise.all(entry.pings)` never finishes and stopTyping is never sent. Consider a timeout on the wait. This only affects the cosmetic clear."
+            },
+            {
+              "severity": "minor",
+              "file": "integration/tests/discord/live.test.ts",
+              "issue": "The Discord and Matrix live typing tests have never run against the real services, so the issue's acceptance check is still unverified. A person with credentials should run them with INTEGRATION_LIVE=1 before relying on them."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#953",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.5878119,
+      "durationMs": 1243215,
+      "attempts": 2,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The change holds back Gemini `<ctrl42>call` text in the stream only while it can still become a call to a declared tool. It releases other text unchanged and in order, and recovers the calls at finish with a literal-only parser that never runs model code. The tests cover the three outcomes the issue asks for, and all 349 tests under `tests/internal/llm` pass.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/sdk/tests/internal/llm/gemini-tool-extract.test.ts",
+              "issue": "The parser tests are thin. They have no case for a malformed or unterminated call, multiple calls in one response, or text after a call. Consider adding them as follow-up."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/sdk/src/internal/llm/hermes-tool-extract.ts",
+              "issue": "After a complete call, any trailing prose stays held until the buffer cap or `finish()`. It is not lost, but it is delayed. This is acceptable."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1684",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.16852119999999998,
+      "durationMs": 514122,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The invented tools re-exports are removed and TheoClaw imports the adapters from the SDK subpath. Snapshot, changeset and changelog are consistent, and nothing is outside the plan except the skipped Tavily test.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/agents/tests/unit/subpath-surface.test.ts",
+              "issue": "The regression test is a text grep for the subpath string. The surface checks already cover the real invariant, so this is acceptable, but it is weak."
+            },
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tests/tool-search.test.ts",
+              "issue": "The planned Tavily coverage through the registry was not added. Consider adding it as follow-up."
+            },
+            {
+              "severity": "minor",
+              "file": ".changeset/agents-tools-surface-fix.md",
+              "issue": "Removing public exports is breaking for consumers of these four symbols. A patch bump is defensible only because the exports were accidental."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#340",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 2.4226801,
+      "durationMs": 2174024,
+      "attempts": 3,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The adapter is mostly sound: it verifies the Ed25519 signature, answers the op-13 validation, and the tests are real. The acceptance round trip against a real QQ Bot account is not shown to have run. There is also one real bug in the reply sequence handling, and a few smaller gaps.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "packages/gateway-qq/src/adapter.ts",
+              "issue": "`toMessageEvent` calls `remember()` before the duplicate check in `dispatchOnce`. When QQ redelivers a message, the reply context for that user is reset to `seq: 0`. A reply already sent with `msg_seq` 1 is then followed by a second reply that reuses `msg_seq` 1 for the same `msg_id`, and QQ rejects the duplicate sequence. A fix must hold this invariant: the same inbound `msg_id` never restarts `msg_seq`. Call `remember()` only when the context is missing or the stored `msgId` differs, or only after the dedupe check. Add a test where the same callback is delivered twice and the replies then us"
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-qq/src/signature.ts",
+              "issue": "A callback timestamp more than 300 seconds from the current time is rejected with 401. QQ redeliveries can carry the original, older timestamp. After a 503 for no handler, a redelivered message can be dropped permanently. Consider a wider window or document the limit."
+            },
+            {
+              "severity": "minor",
+              "file": "integration/.env.example",
+              "issue": "The plan said to regenerate this file, and the builder says it was not updated for QQ. It also has no X entries, so the drift predates this change. Run `pnpm --filter @theokit/gateway-integration env:example` after building the packages it needs."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway/src/security/credential-patterns.ts",
+              "issue": "This file is outside the plan. The change only adds an `uncovered` entry for the QQ `appSecret`, in the same style as the existing gateway-x entry, so it is probably what the repository's credential-coverage test requires. I did not confirm that. The edit is acceptable."
+            },
+            {
+              "severity": "minor",
+              "file": "integration/tests/qq/live.test.ts",
+              "issue": "The issue requires a real round trip, and the live test is opt-in, so nothing here shows it ran against a real QQ Bot account. The result must stay reported as unverified."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The earlier major finding is fixed. `handleWebhook` now calls `remember()` only for an unseen event id, so a redelivery can no longer restart `msg_seq`. A new test covers the m1, m2, m1 redelivery order. The adapter is still unverified against the real QQ service.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway/src/security/credential-patterns.ts",
+              "issue": "This file is outside the plan. The builder gave a reason: it adds the `uncovered` entry for the QQ appSecret, in the same style as the gateway-x entry. The reason is plausible, but I did not confirm that a test requires the entry, so the owner should."
+            },
+            {
+              "severity": "minor",
+              "file": "integration/tests/qq/live.test.ts",
+              "issue": "The live round trip has never run against a real QQ Bot account. The issue's acceptance can only be met by that run, so the adapter stays unverified until someone does it with a bot, a public HTTPS callback and a DM."
+            },
+            {
+              "severity": "minor",
+              "file": "integration/.env.example",
+              "issue": "The regenerated file shows a large diff, +366/−15, because the committed file was already stale. The builder says the repo's generator produced it, as the plan said. I did not re-run the generator to check."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#939",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 1.0062697,
+      "durationMs": 1493137,
+      "attempts": 2,
+      "reviewRounds": 2,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "changes",
+          "summary": "The extractor, the opt-in-free Gemini recovery and the sequential dispatch look correct, and the touched tests pass (86 of 86). However, the planned loop-level golden test was dropped, so two 'done when' points have no end-to-end test.",
+          "findings": [
+            {
+              "severity": "major",
+              "file": "packages/sdk/tests/golden/agent-loop/gemini-text-calls.golden.test.ts",
+              "issue": "The planned golden test was not written. The issue requires that the four `computer` calls run in order and that the turn continues with their results, and that an undeclared tool is not run and stays text. No test drives the real agent loop with the exact response to check that tool results reach the next model request. No test checks the undeclared-tool case through the client or loop. The extractor unit test only covers the undeclared case at the parser level. Add the loop-level golden test as planned: the exact OC-62 text, an async `computer` tool, the results in the next request, and a ru"
+            },
+            {
+              "severity": "minor",
+              "file": "packages/sdk/tests/internal/agent-loop-sequential.test.ts",
+              "issue": "This test file is outside the plan. The builder gave a reason, which is the ordering check replacing the dropped golden test, and it is a valid test. It does not make up for the missing loop-level coverage, so keep it and add the golden test as well."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/sdk/src/internal/llm/hermes-tool-extract.ts",
+              "issue": "The `CTRL_CALL` regex ends each call at the first `)` followed by optional whitespace, another `)` and then `print(` or the end of the text. An argument string containing `) )` before a later `print(` could be cut short. A call that does not match is left as text, so this is not unsafe. Consider adding one test for a quoted `)` in an argument."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The earlier blocking finding is fixed. A loop-level golden test now covers the exact OC-62 text, ordered execution, results reaching the next request, and the undeclared-tool case, and all 61 tests in the three touched files pass.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/sdk/tests/golden/agent-loop/gemini-text-calls.golden.test.ts",
+              "issue": "The builder did not confirm that the golden test fails without the fix. This is not blocking, because the test asserts specific order and result behaviour."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit#1683",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.2067478,
+      "durationMs": 390136,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The gate now accepts duck (scoped to that package only), pako and qrcode-terminal. Each entry has a comment recording the terms checked, and `pnpm check:licenses` passes. The new tests spawn the script with a fake `pnpm` and cover the accepted packages, an unrelated BSD package that is still refused, and an unknown licence that is still refused.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "scripts/check-licenses.mjs",
+              "issue": "The qrcode-terminal comment says it bundles an MIT QR encoder under vendor/. The builder did not open vendor/ to check. The vendor files carry Kazuhiko Arase's 2009 copyright header, which is consistent with MIT, but the comment still asserts something nobody confirmed. Check the bundled licence text, or reword the comment."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-gateways#339",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 3.0760940000000003,
+      "durationMs": 1711006,
+      "attempts": 2,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "The Yuanbao adapter has its own package, a text-DM path through GatewayRunner, a live test and every registry, contract and changeset entry the repo requires. I read the diff but did not run the tests. The acceptance check, a real DM and reply on a live Yuanbao bot, has not been run, and the changeset and live test both say so. The files changed outside the plan are justified: adding `yuanbao` to `PlatformName` forces entries in the shared types, rendering table, credential patterns and guard tests.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/gateway-yuanbao/src/adapter.ts",
+              "issue": "The heartbeat ping is registered in `pending` with no timeout. If one ping response is lost, `scheduleHeartbeat` is never called again and the socket goes without heartbeats until it closes. Add a timeout, or reschedule the heartbeat regardless of whether a response arrives."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-yuanbao/src/adapter.ts",
+              "issue": "A close during the first `connect()` can schedule a reconnect while `connect()` is returning false, because `stale()` is false at that point. An adapter that failed its initial bind may then reconnect in the background. Decide whether that is intended and, if not, suppress it until the first bind has succeeded."
+            },
+            {
+              "severity": "minor",
+              "file": "packages/gateway-yuanbao/src/adapter.ts",
+              "issue": "`scheduleHeartbeat` is called with a hard-coded 5000 instead of `DEFAULT_HEARTBEAT_S`, so the constant and the literal can drift apart."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usetheokit/theokit-sdk#938",
+      "passed": true,
+      "reason": "approved",
+      "costUsd": 0.19283260000000002,
+      "durationMs": 633538,
+      "attempts": 1,
+      "reviewRounds": 1,
+      "reachedVerdict": true,
+      "reviews": [
+        {
+          "verdict": "approve",
+          "summary": "postRun is now accepted in hooks.json through a separate SDK-only event table. The Claude Code event map is unchanged, a consumer-level test shows the command running once on a 401 run, and the README, changeset and error-codes index are updated. The affected and hook-related tests pass.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/sdk/tests/runtime/failed-run-typed-error.test.ts",
+              "issue": "agent.dispose() is called twice, once in the try block and again in finally. It is harmless; the finally call could be dropped."
+            }
+          ]
         }
       ]
     }
   ],
-  "spentUsd": 2.41740468,
+  "spentUsd": 23.289743007999995,
   "summary": {
-    "cases": 5,
-    "passed": 5,
-    "passRate": 1,
-    "meanCostUsd": 0.42081118,
-    "meanDurationMs": 681193
+    "cases": 30,
+    "passed": 28,
+    "passRate": 0.9333333333333333,
+    "meanCostUsd": 0.68641363,
+    "meanDurationMs": 977294.9666666667
   }
 }

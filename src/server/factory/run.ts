@@ -1474,6 +1474,13 @@ export class Run {
       prep?.log()
       return { sha: await this.mergeBase() }
     }
+    // A send-back for a conflict with the integration branch is first the factory's own merge, which keeps
+    // both sides of what only appended; the agent is asked only when a conflict needs judgement.
+    const mergedByFactory = await this.mergeWithoutAgent()
+    if (mergedByFactory) {
+      prep?.log()
+      return { sha: mergedByFactory }
+    }
     await (prep ? prep.step('install', () => this.installProject()) : this.installProject())
     // The install is the last step of the preparation, so the line is logged once it ends.
     prep?.log()
@@ -1531,6 +1538,21 @@ export class Run {
         `${branch} already holds ${base}, so merging it makes no commit for the required checks to run on again`,
       )
     }
+    return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
+  }
+
+  /**
+   * The merge of the integration branch a conflict send-back asks for, made with no agent when git can make
+   * it (or every conflict only kept both sides' additions). Answers the pushed commit, or nothing when the
+   * agent has to do it: a conflict that needs judgement leaves the branch as it was.
+   */
+  private async mergeWithoutAgent(): Promise<string | undefined> {
+    const { deps, branch } = this.c
+    if (!this.c.continuation?.feedback?.startsWith(CONFLICT_NOTE_OPENING)) return undefined
+    await this.backend.uploadFile(GITCONFIG, gitConfig(deps.author))
+    const merged = await mergeIntegration(this.backend, this.git, this.baseSha)
+    if (!('merged' in merged)) return undefined
+    const base = `${integrationBranch(this.c.repo)} at ${this.baseSha.slice(0, 7)}`
     return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
   }
 

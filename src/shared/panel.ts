@@ -36,16 +36,17 @@ export type Column =
   | 'resolved'
   | 'attention'
 
-export const COLUMNS: { id: Column; title: string }[] = [
-  { id: 'queued', title: 'Queued' },
-  { id: 'working', title: 'Working' },
-  { id: 'waiting', title: 'Waiting for you' },
-  { id: 'retrying', title: 'Will retry itself' },
-  { id: 'merge', title: 'Merge' },
-  { id: 'review', title: 'Delivered' },
-  { id: 'released', title: 'Released' },
-  { id: 'resolved', title: 'Already resolved' },
-  { id: 'attention', title: 'Needs a person' },
+/** The columns of the board, in order. What each is called is the panel's dictionary, in the owner's language. */
+export const COLUMNS: { id: Column }[] = [
+  { id: 'queued' },
+  { id: 'working' },
+  { id: 'waiting' },
+  { id: 'retrying' },
+  { id: 'merge' },
+  { id: 'review' },
+  { id: 'released' },
+  { id: 'resolved' },
+  { id: 'attention' },
 ]
 
 /**
@@ -677,6 +678,19 @@ export type ChecksProof = {
   setup?: ProvenCheck[]
 }
 
+/** The sandbox providers the factory can run on. */
+export const SANDBOX_PROVIDERS = ['vercel', 'docker', 'e2b'] as const
+export type SandboxProviderName = (typeof SANDBOX_PROVIDERS)[number]
+
+/**
+ * What the last completed proof of a repository's checks found on one sandbox provider: the commit, and the
+ * names of the checks that passed and of those that did not (failed or too slow).
+ */
+export type ProviderProof = { at: string; sha: string | null; passed: string[]; failed: string[] }
+
+/** The last completed proof of the checks on each provider; a provider with no entry was never tried. */
+export type ProviderProofs = Partial<Record<SandboxProviderName, ProviderProof>>
+
 /** A proof as a repository's row keeps it: one stored before proofs had a kind has none, and is of `checks`. */
 export type StoredProof = Omit<ChecksProof, 'kind'> & { kind?: ProofKind }
 
@@ -719,6 +733,7 @@ export type DoctorItemId =
   | 'publish_mode'
   | 'recipe'
   | 'sandbox'
+  | 'provider_checks'
 
 /**
  * What the doctor found about one thing a repository needs. `blocked` stops work, `warn` does not, and

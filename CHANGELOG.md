@@ -64,6 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The sandbox image installs the American English and Brazilian Portuguese word lists (`wamerican`, `wbrazilian`), so a repository check that reads `/usr/share/dict`, such as the TheoCode english-only lint of usetheokit/theokit, can pass and be proven in the sandbox. The E2B template is `aifactory-sandbox:6` and the Docker image `aifactory-sandbox:5` (#168)
 - A task released by a changesets publication that failed for itself (its release run published nothing) is now released by the next release that publishes every package its merge changed, and its issue is closed with the version. Before, only the tasks of a superseded publication or a failed tag were carried, so such an issue stayed open after its fix was on npm. When a person already closed the issue, the release records the task as released and leaves no comment (#431)
 - A release is no longer refused because the first pass after `release()` read its auto-merge as off before GitHub showed it: the release waits up to two minutes for it, and only then refuses. A refused release that GitHub merged anyway left no publication behind, so its Version Packages pull request never opened (#429).
 - A run that waited a long time for a sandbox no longer clones or pushes with a GitHub token that already ended: the sandbox gets a token minted as soon as it starts, on the first session and on a renewed one (#424)

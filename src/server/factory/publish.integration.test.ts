@@ -331,6 +331,9 @@ describe('publishing a changesets release', () => {
     const notYet = await seedTask('done', 'later1')
     const notIntegrated = await seedTask('done', null)
     repo().unreachable.add('later1')
+    const [first] = await getDb().select().from(task).where(eq(task.id, released))
+    mergeChanges(first.mergedSha!, 'packages/ui', '@theokit/ui')
+    mergeChanges('shipped1', 'packages/ui', '@theokit/ui')
     versionPr()
     releasesAre(published('@theokit/ui@1.13.0'), published('pre/7-abc'), published('v9.9.9'))
 
@@ -591,7 +594,32 @@ describe('publishing a changesets release', () => {
     })
 
     it('publishes with every tag once each versioned package has its release', async () => {
-      await waitingPublication()
+      const waiting = await waitingPublication()
+      const [t] = await getDb().select().from(task).where(eq(task.id, waiting))
+      const sha = t.mergedSha!
+      const dirs = {
+        'packages/gateway': '@theokit/gateway',
+        'packages/slack': '@theokit/gateway-slack',
+        'packages/yuanbao': '@theokit/gateway-yuanbao',
+      }
+      repo()
+        .compare(
+          `${sha}^`,
+          sha,
+          Object.keys(dirs).map((d) => ({
+            path: `${d}/src/index.ts`,
+            status: 'modified' as const,
+          })),
+        )
+        .files(sha, {
+          ...Object.fromEntries(
+            Object.entries(dirs).map(([d, name]) => [
+              `${d}/package.json`,
+              JSON.stringify({ name, version: '1.0.0' }),
+            ]),
+          ),
+          '.changeset/config.json': '{}',
+        })
       releasesAre(...ALL.map(published))
 
       const result = await pollPublications(deps(STILL_RUNNING))
@@ -1013,6 +1041,7 @@ describe('a version branch the release workflow pushed without a pull request', 
     await waitingPublication()
     promotionOfAPackage()
     pushed(afterPromotion)
+    repo().holds('version1', ['promoted1'])
     // Version Packages #250 merged before this promotion: it belongs to the earlier release.
     versionPr({
       number: 250,
@@ -1044,6 +1073,7 @@ describe('a version branch the release workflow pushed without a pull request', 
   it('opens it as soon as the branch is there, before the grace window ends', async () => {
     await waitingPublication()
     pushed(afterPromotion)
+    repo().holds('version1', ['promoted1'])
 
     const result = await pollPublications(deps())
 
@@ -1063,10 +1093,22 @@ describe('a version branch the release workflow pushed without a pull request', 
     expect((await row()).detail).toMatch(/changes @theokit\/ui/)
   })
 
-  it('ignores a version branch committed before the promotion', async () => {
+  it('opens it for a branch committed before the publication was recorded, since it holds the promoted commit', async () => {
+    await waitingPublication()
+    pushed(new Date(STARTED.getTime() - 60_000))
+    repo().holds('version1', ['promoted1'])
+
+    const result = await pollPublications(deps())
+
+    expect(result.waiting).toBe(1)
+    expect(opened()).toHaveLength(1)
+  })
+
+  it('ignores a version branch committed before the promotion that does not hold the promoted commit', async () => {
     await waitingPublication()
     promotionOfAPackage()
     pushed(new Date(STARTED.getTime() - 60_000))
+    repo().holds('version1', ['older'])
 
     const result = await pollPublications(deps(LATER))
 

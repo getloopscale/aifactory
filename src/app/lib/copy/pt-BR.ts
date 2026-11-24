@@ -18,6 +18,7 @@ const TRIED: DoctorTriedSentences = {
   sandboxes: () => 'listar os sandboxes que a conta tem ativos',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
+  proofs: (v) => `ler as provas dos checks de ${v.repo}`,
 }
 
 /** What was tried, in Portuguese when the code is one this panel knows, and as the server said it otherwise. */
@@ -485,6 +486,23 @@ export const ptBR: Copy = {
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
             : 'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
       },
+      provider_checks_failed: {
+        cause: (v) =>
+          `Os checks passaram em ${v.passedOn} e falharam em ${v.provider}: ${v.checks}. Uma execução em ${v.provider} falhará do mesmo jeito.`,
+        repair: (v) =>
+          `Faça a receita passar em ${v.provider} (o toolchain, ou um check que depende do provedor), ou rode a fábrica em ${v.passedOn}; depois prove os checks de novo.`,
+      },
+      provider_checks_untried: {
+        cause: (v) =>
+          v.passedOn
+            ? `Os checks passaram em ${v.passedOn} e nunca foram provados em ${v.providers}; não se sabe se uma execução lá passa.`
+            : `Os checks não passaram em nenhum provedor de sandbox (não provados em ${v.providers}).`,
+        repair: (v) => `Prove os checks do repositório com a fábrica rodando em ${v.providers}.`,
+      },
+      ok_provider_checks: {
+        cause: (v) => `Os checks passaram em todos os provedores de sandbox: ${v.providers}.`,
+        repair: () => '',
+      },
       ok_issues: { cause: () => 'As Issues estão ligadas.', repair: () => '' },
       ok_app_access: {
         cause: (v) => `O GitHub App alcança ${v.repo} com todas as permissões de que precisa.`,
@@ -917,7 +935,82 @@ export const ptBR: Copy = {
     loading: 'Carregando…',
     ready: 'Pronto quando você quiser.',
     askFactory: 'Pergunte à fábrica',
+    metaDescription: 'Converse com a fábrica.',
+    failedTitle: 'Não consegui responder',
+    failedHint:
+      'O modelo não respondeu. O mais comum é a chave do OpenRouter estar sem crédito ou sem permissão para este modelo. A página "Configuração" mostra o que está pronto. Tente de novo em instantes.',
+    blurbs: {
+      openrouter: 'Uma chave da OpenRouter, pago por uso',
+      codex: 'A sua assinatura do ChatGPT (Codex)',
+    },
+    suggestions: ['Como está a fábrica agora?', 'O que precisa de mim?', 'Como anda o backlog?'],
+    approve: 'Aprovar',
+    reject: 'Recusar',
+    looked: 'Consultou',
+    did: 'Fez',
+    refused: 'Você recusou',
+    model: 'Modelo',
   },
+  engine: {
+    roleLabel: {
+      builder: 'Agente de código do Construtor',
+      planner: 'Agente de código do Planejador',
+      reviewer: 'Agente de código do Revisor',
+    },
+    roleName: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+    choice: (label: string) => `Escolha: ${label}`,
+    sameAsBuilder: (builder: string) => `O mesmo do Construtor (${builder})`,
+    unavailable: ' (indisponível)',
+    model: 'Modelo',
+    modelOf: (role: string) => `Modelo do ${role}`,
+    agentDefault: 'Padrão do agente',
+    effort: 'Esforço',
+    effortOf: (role: string) => `Esforço do ${role}`,
+    default: 'Padrão',
+    save: 'Salvar',
+    saved:
+      'Salvo. Vale para as próximas execuções, sem reiniciar. As que estão rodando terminam como começaram.',
+    noModelList: (engine: string) =>
+      `A lista de modelos de ${engine} não está disponível aqui: ele usa o próprio padrão.`,
+    cannotChoose: ' não pode ser escolhido: ',
+    ownAgent: 'Estes repositórios têm um agente próprio, que vale mais do que esta escolha:',
+    changeInRepositories: 'Mudar em Repositórios',
+  },
+  promptBlock: {
+    copy: 'Copiar',
+    copied: 'Copiado',
+    copyTitle: (title: string) => `Copiar: ${title}`,
+    templatePrefix: 'Modelo: o que está em ',
+    blue: '‹azul›',
+    templateMiddle: ' muda a cada tarefa (',
+    place: 'lugar',
+    places: 'lugares',
+    templateSuffix: '); o resto é igual sempre.',
+  },
+  metrics: {
+    heading: 'Métricas',
+    empty: 'Ainda não há trabalho concluído o bastante para medir.',
+    indicator: 'Indicador',
+    repository: 'Repositório',
+    day: 'Dia',
+    value: 'Valor',
+    baseline: 'Linha de base',
+    band: 'Faixa',
+    allRepositories: 'Todos os repositórios',
+    bands: {
+      no_baseline: 'sem linha de base ainda',
+      in_band: 'dentro da faixa',
+      log: 'saindo da faixa',
+      show: 'fora da faixa',
+      act: 'issue aberta',
+    },
+    brokeIn: ' em ',
+    broke: ' rompeu ',
+    on: ' em ',
+    issue: 'issue',
+    notOpened: (error: string) => ` (issue não aberta: ${error})`,
+  },
+  notFound: { title: 'Página não encontrada', home: 'Voltar ao início' },
   guide: {
     close: 'Fechar o guia',
     subtitle: 'Explica e ajusta esta página',
@@ -925,6 +1018,241 @@ export const ptBR: Copy = {
     understand: 'Entender',
     act: 'Fazer',
     placeholder: 'Pergunte ao guia',
+  },
+  guides: {
+    names: {
+      board: 'Guia do Quadro',
+      plans: 'Guia de Planos',
+      repositories: 'Guia de Repositórios',
+      inbox: 'Guia da Caixa de entrada',
+      health: 'Guia da Saúde',
+      agents: 'Guia dos Agentes',
+      setup: 'Guia da Configuração',
+    },
+    board: {
+      about: 'Aqui você acompanha cada tarefa da fábrica, da fila até a entrega.',
+      understand: [
+        'O que significa cada coluna?',
+        'Por que há tarefas em "Will retry itself"?',
+        'Como uma tarefa chega ao quadro?',
+      ],
+      act: [
+        { text: 'Alguma tarefa precisa de mim agora?' },
+        { text: 'Quero abrir um job para ', fill: true },
+      ],
+    },
+    plans: {
+      about:
+        'Aqui um objetivo seu vira uma lista de issues pequenas, para você revisar antes de a fábrica começar.',
+      understand: ['Como funciona um plano?', 'Como escrevo um bom objetivo?'],
+      act: [
+        { text: 'Quero planejar este objetivo: ', fill: true },
+        { text: 'Quais planos estão prontos para revisar?' },
+      ],
+    },
+    repositories: {
+      about:
+        'Aqui você escolhe em quais repositórios a fábrica pode trabalhar e como ela trabalha em cada um.',
+      understand: ['O que cada configuração faz?', 'O que são as verificações (checks)?'],
+      act: [
+        { text: 'Quais repositórios estão ativos e como estão configurados?' },
+        { text: 'Configure as verificações de ', fill: true },
+      ],
+    },
+    inbox: {
+      about:
+        'Aqui fica só o que está esperando por uma pessoa: uma pergunta, um PR para revisar, um trabalho que travou.',
+      understand: ['O que é cada tipo de item?', 'Aprovar um PR já publica algo?'],
+      act: [{ text: 'Por onde eu começo?' }, { text: 'O que devo fazer com o item mais antigo?' }],
+    },
+    health: {
+      about: 'Aqui você vê quanto a fábrica gastou e os problemas que ela mesma encontrou.',
+      understand: ['Estou gastando muito?', 'O que são esses achados?'],
+      act: [{ text: 'Há algo que eu precise resolver?' }],
+    },
+    agents: {
+      about:
+        'Aqui você vê quem trabalha na fábrica, as instruções que cada agente recebe e o que cada um pode fazer.',
+      understand: [
+        'Qual a diferença entre o construtor e o revisor?',
+        'O que é um prompt, e onde ele está aqui?',
+      ],
+      act: [
+        { text: 'Qual agente está fazendo o quê agora?' },
+        { text: 'Explique o prompt do construtor.' },
+      ],
+    },
+    setup: {
+      about: 'Aqui você vê o que falta para a fábrica funcionar e como resolver cada parte.',
+      understand: ['Para que serve cada item?', 'O que falta para a fábrica funcionar?'],
+      act: [{ text: 'Me guie no próximo passo.' }],
+      note: 'Nunca cole chaves ou senhas aqui.',
+    },
+    open: {
+      task: (id: number) => ({
+        explain: `Explique a tarefa ${id}`,
+        act: `O que devo fazer com a tarefa ${id}?`,
+      }),
+      plan: (id: number) => ({
+        explain: `Explique o plano ${id}`,
+        act: `Crie as issues do plano ${id}`,
+      }),
+    },
+  },
+  events: {
+    resolved: (sha: string) => `já resolvida em ${sha}, issue fechada`,
+    preRelease: (name: string) => `pré-release ${name}`,
+    noPreRelease: (error: string) => `sem pré-release: ${error}`,
+    nothingToChange: 'nada a mudar',
+    awaitingChecks: (checks: string) => `esperando as verificações do repositório: ${checks}`,
+    mergedBy: (by: string, sha: string) => `integrada por ${by} em ${sha}`,
+    byFactory: 'a fábrica',
+    byPerson: 'uma pessoa',
+    decided: (who: string, decision: string, note: string) =>
+      `${who} ${decision}${note ? `: ${note}` : ''}`,
+    newSession: (provider: string, minutes: string) =>
+      `${provider}, sessão nova: a última durou ${minutes} minutos, o disco foi levado junto`,
+    attempt: (n: string) => `tentativa ${n}`,
+    resumed: 'retomada depois de uma resposta',
+    rework: 'retrabalho',
+    planned: 'seguindo o plano',
+    approvedBy: (reviewer: string) => `aprovada por ${reviewer}`,
+    resolvedNow: (sha: string, branch: string) => `já resolvida em ${sha}, agora em ${branch}`,
+    promotedChangesets: (actor: string) =>
+      `promovida por ${actor}; o workflow de release do repositório a publica`,
+    promotedTag: (actor: string, tag: string) =>
+      `promovida por ${actor}; ${tag} espera o workflow de release publicar`,
+    notPublished: (tag: string, error: string) => `${tag} não foi publicada: ${error}`,
+    taggedBy: (tag: string, actor: string, error: string) =>
+      `${tag} por ${actor}${error ? `, mas o release não pôde ser criado: ${error}` : ''}`,
+    mergedNoRelease: (actor: string, error: string) =>
+      `integrada por ${actor}, mas o release não pôde ser criado: ${error}`,
+    outOfQuota: (resetsAt: string) => `sem cota${resetsAt ? `, renova ${resetsAt}` : ''}`,
+  },
+  approvals: {
+    fallbackTitle: 'Ação',
+    nothingChanges: '- nada muda',
+    retryTask: {
+      title: 'Repetir uma tarefa',
+      request: (id: string) =>
+        `Começar de novo a tarefa ${id}. A branch e o PR dela são apagados antes.`,
+    },
+    requestChanges: {
+      title: 'Pedir mudanças',
+      request: (id: string, note: string) =>
+        `Devolver a tarefa ${id} ao agente com esta nota:\n${note}`,
+    },
+    startJob: {
+      title: 'Abrir uma issue e começar',
+      request: (repository: string, title: string, body: string) =>
+        `Em ${repository}: ${title}\n\n${body}`,
+    },
+    approveTask: {
+      title: 'Aprovar o pull request',
+      request: (id: string) =>
+        `Aprovar o PR da tarefa ${id}, no commit em que ele está agora. Isso não faz merge nem release.`,
+    },
+    updateRepository: {
+      title: 'Salvar configurações',
+      request: (repository: string, lines: string) => `Em ${repository}:\n${lines}`,
+    },
+    createPlan: {
+      title: 'Começar um plano',
+      request: (repository: string, goal: string) =>
+        `Em ${repository}, com este objetivo:\n${goal}\nNenhuma issue é criada ainda: você revisa o plano antes.`,
+    },
+    createPlanIssues: {
+      title: 'Criar as issues do plano',
+      request: (planId: string, start: boolean) =>
+        `Criar no GitHub as issues selecionadas do plano ${planId}, ${start ? 'e já começar o trabalho nelas' : 'deixando-as esperando para você começar depois'}.`,
+    },
+    resolveFinding: {
+      title: 'Resolver um achado',
+      actions: {
+        retry: 'Começar de novo a tarefa travada (a branch e o PR dela são apagados antes).',
+        resume: 'Retomar a tarefa, cuja pergunta já foi respondida.',
+        delete_snapshot: 'Apagar o snapshot que nenhuma tarefa usa.',
+        mark_revert_unknown:
+          'Mostrar a main como vermelha, para alguém conferir o revert no repositório.',
+      } as Record<string, string>,
+      other: (action: string, id: string) => `Fazer "${action}" sobre o achado ${id}.`,
+    },
+    updateAgentSettings: {
+      title: 'Trocar o agente de código',
+      roles: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+      backToDefault: (role: string) => `- ${role}: volta ao padrão (o mesmo agente do Construtor)`,
+      chosen: (role: string, value: string) => `- ${role}: ${value}`,
+      model: 'modelo',
+      effort: 'esforço',
+      detail: (role: string, what: string, value: string | null) =>
+        `- ${role}, ${what}: ${value === null ? 'o padrão do agente' : value}`,
+      request: (lines: string) =>
+        `${lines}\nVale para as próximas execuções, sem reiniciar. As que estão rodando terminam com o agente antigo.`,
+    },
+    acknowledgeWatch: {
+      title: 'Marcar como visto',
+      request: (id: string) => `Marcar a main vermelha ${id} como vista por uma pessoa.`,
+    },
+    fields: {
+      enabled: 'Fábrica ativa neste repositório',
+      checks: 'Verificações',
+      egress: 'Domínios extras do sandbox',
+      baseBranch: 'Branch de integração',
+      releaseBranch: 'Branch de release',
+      askQuestions: 'O agente pode perguntar na issue',
+      harness: 'Agente construtor',
+      reviewer: 'Revisor',
+      releaseMode: 'Release',
+      yes: 'sim',
+      no: 'não',
+      theDefault: 'o padrão',
+      defaultChecks: 'o padrão (npm test)',
+      none: 'nenhum',
+      factoryDefault: 'o padrão da fábrica',
+      release: {
+        manual: 'só uma pessoa libera',
+        trial: 'só registra o que faria',
+        auto: 'um agente pode liberar',
+      } as Record<string, string>,
+    },
+  },
+  activity: {
+    reads: {
+      factory_status: 'o estado da fábrica',
+      list_tasks: 'as tarefas',
+      task_detail: 'os detalhes de uma tarefa',
+      backlog_progress: 'o andamento do backlog',
+      inbox_items: 'a caixa de entrada',
+      health_report: 'a saúde da fábrica',
+      setup_report: 'a configuração',
+      list_plans: 'os planos',
+      plan_detail: 'um plano',
+      list_repositories: 'os repositórios',
+      repo_files: 'os arquivos do projeto',
+      repo_file: 'um arquivo do projeto',
+    } as Record<string, string>,
+    changes: {
+      retry_task: 'começou uma tarefa de novo',
+      request_changes: 'devolveu um trabalho com uma nota',
+      start_job: 'abriu uma issue e começou',
+      approve_task: 'aprovou um pull request',
+      update_repository: 'salvou as configurações de um repositório',
+      create_plan: 'começou um plano',
+      create_plan_issues: 'criou as issues de um plano',
+      resolve_finding: 'resolveu um achado',
+      acknowledge_watch: 'marcou a main vermelha como vista',
+      update_agent_settings: 'trocou o agente que constrói, planeja ou revisa',
+    } as Record<string, string>,
+  },
+  assistProblems: {
+    signIn: 'Entre de novo no painel e tente outra vez.',
+    noCredit:
+      'O assistente está sem crédito de modelo: defina ANTHROPIC_API_KEY no servidor (veja Configuração).',
+    couldNot: (message: string) => `O assistente não conseguiu responder: ${message}`,
+  },
+  agentGroups: {
+    factory: { title: 'Constroem o código', about: 'Rodam num sandbox isolado' },
+    panel: { title: 'Conversam com você', about: 'Rodam no servidor, com ferramentas limitadas' },
   },
   planSection: {
     title: 'Plano',

@@ -3,6 +3,7 @@ import { Check, Search, X } from 'lucide-react'
 import { Fragment, type ComponentType } from 'react'
 
 import type { ChatMessageView } from '../../../shared/panel'
+import { useCopy } from '../../lib/copy'
 import { activityOf, withoutTools } from '../../lib/activity'
 import { toRenderable } from '../../lib/renderable'
 
@@ -37,16 +38,17 @@ export function Messages({
   running: boolean
   model: string
 }) {
+  const { t } = useCopy()
   return (
     <ChatThread>
       {messages.map((m) => {
         const said = withoutTools(m)
-        const { looked, did, refused } = activityOf(m)
+        const { looked, did, refused } = activityOf(m, t.activity)
         return (
           <Fragment key={m.id}>
-            <Line icon={Search} label="Consultou" items={looked} />
-            <Line icon={Check} label="Fez" items={did} />
-            <Line icon={X} label="Você recusou" items={refused} />
+            <Line icon={Search} label={t.chat.looked} items={looked} />
+            <Line icon={Check} label={t.chat.did} items={did} />
+            <Line icon={X} label={t.chat.refused} items={refused} />
             {said.parts.length > 0 ? <ChatMessage message={toRenderable(said as never)} /> : null}
           </Fragment>
         )
