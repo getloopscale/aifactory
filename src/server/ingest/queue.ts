@@ -14,16 +14,26 @@ import { recordDelivery, type Delivery } from './record'
 export async function recordAndQueue(delivery: Delivery, queue: QueueClient) {
   const client = await getPool().connect()
   try {
-    return await recordDelivery(drizzle(client, { schema }), delivery, (taskId, restartedBy) =>
-      queue
-        .enqueueInTransaction(
+    return await recordDelivery(
+      drizzle(client, { schema }),
+      delivery,
+      (taskId, restartedBy) =>
+        queue
+          .enqueueInTransaction(
+            client,
+            'run-task',
+            { taskId },
+            // A task that starts over already used its first key, and the queue would take the run as a duplicate.
+            { idempotencyKey: restartedBy ? `task-${taskId}-${restartedBy}` : `task-${taskId}` },
+          )
+          .then(() => holdNewJob(drizzle(client, { schema }), taskId)),
+      (reviewId) =>
+        queue.enqueueInTransaction(
           client,
-          'run-task',
-          { taskId },
-          // A task that starts over already used its first key, and the queue would take the run as a duplicate.
-          { idempotencyKey: restartedBy ? `task-${taskId}-${restartedBy}` : `task-${taskId}` },
-        )
-        .then(() => holdNewJob(drizzle(client, { schema }), taskId)),
+          'review-pull-request',
+          { reviewId },
+          { idempotencyKey: `review-pull-request-${reviewId}` },
+        ),
     )
   } finally {
     client.release()

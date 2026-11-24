@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { TASK_STAGES, type TaskStage } from '../db/schema'
-import type { RoutedCode } from '../ingest/decide'
+import type { TaskRoutedCode } from '../ingest/decide'
 
 import {
   AUTOMATIC_RETRIES,
@@ -95,7 +95,7 @@ describe('the transition table', () => {
   })
 
   it('has an event for every intent the event router gives', () => {
-    const routed: Record<RoutedCode, true> = {
+    const routed: Record<TaskRoutedCode, true> = {
       issue_comment_created: true,
       pull_request_comment_created: true,
       pull_request_review_submitted: true,

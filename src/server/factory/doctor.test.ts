@@ -155,6 +155,7 @@ describe('app_events', () => {
   const every = [
     'issues',
     'issue_comment',
+    'pull_request',
     'pull_request_review',
     'pull_request_review_comment',
     'check_suite',
@@ -794,6 +795,7 @@ describe('the report', () => {
       events: [
         'issues',
         'issue_comment',
+        'pull_request',
         'pull_request_review',
         'pull_request_review_comment',
         'check_suite',

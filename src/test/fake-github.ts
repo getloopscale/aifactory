@@ -7,6 +7,8 @@ import {
   type CheckReport,
   type CheckRun,
   type GithubApi,
+  type PostedReview,
+  type PullRequestFacts,
   type IssueComment,
   type PullRequestMerge,
   type ReleaseInput,
@@ -97,6 +99,10 @@ export type FakePullRequest = {
   autoMergeSha?: string
   /** GitHub's word for whether it can merge. Left out, it follows from the draft flag, conflicts and checks. */
   mergeableState?: string
+  /** The login that opened it; the bot's when left out. */
+  author?: string
+  /** The reviews posted on it. */
+  reviews?: PostedReview[]
 }
 
 /** A check run on a commit, as GitHub lists it. */
@@ -784,6 +790,56 @@ export class FakeGithub implements GithubApi {
     return this.call(
       { method: 'contains', repo, token, args: [descendant, ancestor], failed: false },
       (r) => r.reaches(descendant, ancestor),
+    )
+  }
+
+  async pullRequestFacts(repo: string, token: string, number: number): Promise<PullRequestFacts> {
+    return this.call(
+      { method: 'pullRequestFacts', repo, token, args: [number], failed: false },
+      (r) => {
+        const pull = r.pull(number)
+        if (!pull) throw githubAnswered(404, `reading ${repo}#${number}`)
+        return {
+          state: pull.state,
+          draft: pull.draft,
+          headSha: r.headOf(pull),
+          headRepo: pull.headRepo ?? null,
+          baseRef: pull.baseRef,
+          title: pull.title,
+          body: pull.body,
+          authorLogin: pull.author ?? 'aifactory[bot]',
+        }
+      },
+    )
+  }
+
+  async listReviews(repo: string, token: string, number: number) {
+    return this.call({ method: 'listReviews', repo, token, args: [number], failed: false }, (r) => [
+      ...(r.pull(number)?.reviews ?? []),
+    ])
+  }
+
+  async createReview(
+    repo: string,
+    token: string,
+    number: number,
+    review: { commitSha: string; body: string },
+  ) {
+    return this.call(
+      { method: 'createReview', repo, token, args: [number, review], failed: false },
+      (r) => {
+        const pull = r.pull(number)
+        if (!pull) throw githubAnswered(404, `reviewing ${repo}#${number}`)
+        const reviews = (pull.reviews ??= [])
+        const id = reviews.length + 1
+        reviews.push({
+          id,
+          body: review.body,
+          commitSha: review.commitSha,
+          authorLogin: 'aifactory[bot]',
+        })
+        return id
+      },
     )
   }
 

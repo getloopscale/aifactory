@@ -310,4 +310,48 @@ describe('an issue that no longer asks for the work', () => {
     expect(again).toEqual({ status: 'duplicate' })
     expect(await jobs()).toHaveLength(1)
   })
+
+  describe('a pull request the factory did not open', () => {
+    const pull = (sha: string, over: { assoc?: string; ref?: string } = {}) => ({
+      action: 'opened',
+      pull_request: {
+        number: 12,
+        draft: false,
+        user: { login: 'carol' },
+        author_association: over.assoc ?? 'COLLABORATOR',
+        labels: [],
+        head: { sha, ref: over.ref ?? 'patch-1', repo: { full_name: 'carol/app' } },
+      },
+      repository: { full_name: 'paulo/app' },
+    })
+    const review = (id: string, payload: unknown) =>
+      recordAndQueue(delivery(id, payload, 'pull_request'), queue)
+    const reviewJobs = async () => (await jobs()).filter((j) => j.name === 'review-pull-request')
+
+    it('queues nothing while the repository has the setting off', async () => {
+      await review('p-1', pull('a'.repeat(40)))
+      expect(await reviewJobs()).toEqual([])
+    })
+
+    describe('with the setting on', () => {
+      beforeEach(async () => {
+        await getPool().query('update repository set review_external_pulls = true')
+      })
+
+      it('queues one review per head, and none for a redelivery or a repeated head', async () => {
+        await review('p-1', pull('a'.repeat(40)))
+        await review('p-1', pull('a'.repeat(40)))
+        await review('p-2', pull('a'.repeat(40)))
+        expect(await reviewJobs()).toHaveLength(1)
+        await review('p-3', { ...pull('b'.repeat(40)), action: 'synchronize' })
+        expect(await reviewJobs()).toHaveLength(2)
+      })
+
+      it('queues nothing for a stranger, nor for a factory branch', async () => {
+        await review('p-1', pull('a'.repeat(40), { assoc: 'NONE' }))
+        await review('p-2', pull('c'.repeat(40), { ref: 'factory/467' }))
+        expect(await reviewJobs()).toEqual([])
+      })
+    })
+  })
 })

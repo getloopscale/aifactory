@@ -484,7 +484,7 @@ describe('the events the App subscribes to', () => {
       label: 'Webhook events',
       status: 'warn',
       detail:
-        'The App does not subscribe to issue_comment, pull_request_review, pull_request_review_comment, check_suite, check_run, so GitHub never tells the factory about them. Turn them on under "Subscribe to events".',
+        'The App does not subscribe to issue_comment, pull_request, pull_request_review, pull_request_review_comment, check_suite, check_run, so GitHub never tells the factory about them. Turn them on under "Subscribe to events".',
       link: { label: 'Open the App settings', href: SETTINGS },
     })
   })
@@ -492,7 +492,14 @@ describe('the events the App subscribes to', () => {
   it('names only what is missing', async () => {
     const most = app({
       subscriptions: async () => ({
-        events: ['issues', 'issue_comment', 'pull_request_review', 'check_suite', 'check_run'],
+        events: [
+          'issues',
+          'issue_comment',
+          'pull_request',
+          'pull_request_review',
+          'check_suite',
+          'check_run',
+        ],
         settingsUrl: SETTINGS,
       }),
     })

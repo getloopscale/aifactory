@@ -744,6 +744,9 @@ export const ptBR: Copy = {
       releaseBranchHelp:
         'Só é preciso quando a branch padrão é develop, onde fica a pré-versão: informe main, ou a branch que suas versões finais usam.',
       ask: 'Deixar o agente me fazer perguntas na issue quando algo não estiver claro',
+      reviewOthers: 'Revisar pull requests que a fábrica não abriu',
+      reviewOthersHelp:
+        'O revisor lê e comenta, nunca aprova nem faz merge. Pull requests do dono, de membros e de colaboradores são lidos de imediato; de qualquer outra pessoa, só depois que um mantenedor adicionar o rótulo factory-review.',
       builder: 'Construtor',
       reviewer: 'Revisor',
       release: 'Versão final',

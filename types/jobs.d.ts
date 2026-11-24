@@ -29,6 +29,11 @@ declare module 'theokit/server/jobs' {
      * Runs the checks proposed for a repository in a sandbox and saves the ones that pass, as its checks
      * or its integration checks.
      */
+    /**
+     * Reads a pull request the factory did not open, at one head commit, in a sandbox, and posts a review that
+     * only comments.
+     */
+    'review-pull-request': { reviewId: number }
     'prove-checks': { repository: string; at: string; kind?: 'checks' | 'integration' }
   }
 }

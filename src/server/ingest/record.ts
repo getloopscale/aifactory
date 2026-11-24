@@ -5,6 +5,7 @@ import { ingress, repository, stageEvent, task } from '../db/schema'
 
 import { decideIngress, type IngressDecision, type RoutedIntent } from './decide'
 import { startOverOnLabel } from './restart'
+import { claimReview } from './review-pull'
 import { withdrawTask } from './withdraw'
 
 export type Delivery = {
@@ -19,7 +20,14 @@ export type RecordResult =
   | { status: 'duplicate' }
   | { status: 'ignored'; code: string; reason: string }
   /** Understood and stored: no task and no job, but an issue that was closed or lost the label cancels its task. */
-  | { status: 'routed'; code: string; reason: string; intent: RoutedIntent }
+  | {
+      status: 'routed'
+      code: string
+      reason: string
+      intent: RoutedIntent
+      /** The review of a pull request the factory did not open that this delivery owes, when it does. */
+      reviewId?: number
+    }
   | { status: 'task_created'; taskId: number }
   | { status: 'task_exists'; taskId: number }
   | { status: 'task_restarted'; taskId: number }
@@ -73,6 +81,8 @@ export async function recordDelivery(
    * back with it. `restartedBy` names the delivery that started an existing task over.
    */
   onTaskCreated?: (taskId: number, restartedBy?: string) => Promise<unknown>,
+  /** Runs inside the transaction once a review is claimed, so its job commits with the claim. */
+  onReviewClaimed?: (reviewId: number) => Promise<unknown>,
 ): Promise<RecordResult> {
   const asked = decideIngress(delivery.event, delivery.payload)
 
@@ -96,7 +106,11 @@ export async function recordDelivery(
     if ('intent' in decision) {
       const { code, reason, intent } = decision
       await withdrawTask(tx, intent)
-      return { status: 'routed', code, reason, intent }
+      if (intent.kind !== 'pull_request_changed') return { status: 'routed', code, reason, intent }
+      const reviewId = await claimReview(tx, intent)
+      if (reviewId === null) return { status: 'routed', code, reason, intent }
+      await onReviewClaimed?.(reviewId)
+      return { status: 'routed', code, reason, intent, reviewId }
     }
     if (!decision.accept) return { status: 'ignored', code: decision.code, reason: decision.reason }
 

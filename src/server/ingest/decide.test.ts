@@ -328,10 +328,64 @@ describe('deliveries the factory routes without taking work', () => {
     })
   })
 
+  describe('a pull request', () => {
+    const pull = (action: string, extra: object = {}) => ({
+      action,
+      pull_request: {
+        number: 12,
+        draft: false,
+        user: { login: 'carol' },
+        author_association: 'NONE',
+        labels: [],
+        head: { sha: 'abc1234', ref: 'patch-1', repo: { full_name: 'carol/app' } },
+      },
+      repository,
+      ...extra,
+    })
+
+    it.each(['opened', 'synchronize', 'ready_for_review'])(
+      'routes %s with who and what',
+      (action) => {
+        expect(decideIngress('pull_request', pull(action))).toMatchObject({
+          accept: false,
+          code: 'pull_request_changed',
+          intent: {
+            kind: 'pull_request_changed',
+            repository: 'paulo/app',
+            pullRequestNumber: 12,
+            action,
+            headSha: 'abc1234',
+            headRepository: 'carol/app',
+            headRef: 'patch-1',
+            authorLogin: 'carol',
+            authorAssociation: 'NONE',
+            addedLabel: null,
+          },
+        })
+      },
+    )
+
+    it('names the label a labeled delivery added', () => {
+      expect(
+        decideIngress('pull_request', pull('labeled', { label: { name: 'factory-review' } })),
+      ).toMatchObject({ intent: { addedLabel: 'factory-review' } })
+    })
+
+    it('ignores another action, and a payload without a head', () => {
+      expect(decideIngress('pull_request', pull('closed'))).toMatchObject({
+        code: 'event_not_issues',
+      })
+      expect(decideIngress('pull_request', { action: 'opened', repository })).toMatchObject({
+        code: 'payload_invalid',
+      })
+    })
+  })
+
   it('lists the events the App must subscribe to', () => {
     expect(ROUTED_EVENTS).toEqual([
       'issues',
       'issue_comment',
+      'pull_request',
       'pull_request_review',
       'pull_request_review_comment',
       'check_suite',
@@ -341,6 +395,7 @@ describe('deliveries the factory routes without taking work', () => {
   it('names the events it reads that the App does not subscribe to, in its own order', () => {
     expect(missingRoutedEvents(['check_run', 'issues', 'push'])).toEqual([
       'issue_comment',
+      'pull_request',
       'pull_request_review',
       'pull_request_review_comment',
       'check_suite',

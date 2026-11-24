@@ -21,6 +21,7 @@ export const repositoryPatchSchema = z.object({
   baseBranch: z.string().max(100).nullable().optional(),
   releaseBranch: z.string().max(100).nullable().optional(),
   askQuestions: z.boolean().optional(),
+  reviewExternalPulls: z.boolean().optional(),
   harness: z.string().max(40).nullable().optional(),
   reviewer: z.string().max(40).nullable().optional(),
   releaseMode: z.enum(['manual', 'trial', 'auto']).nullable().optional(),

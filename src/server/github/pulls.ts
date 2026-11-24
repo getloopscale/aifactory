@@ -200,6 +200,21 @@ export type RepositorySettings = {
   allowMergeCommit: boolean | undefined
 }
 
+/** A pull request as a review of it reads it. `headRepo` is null when the fork was deleted. */
+export type PullRequestFacts = {
+  state: 'open' | 'closed'
+  draft: boolean
+  headSha: string
+  headRepo: string | null
+  baseRef: string
+  title: string
+  body: string
+  authorLogin: string
+}
+
+/** A review on a pull request. */
+export type PostedReview = { id: number; body: string; commitSha: string; authorLogin: string }
+
 export type GithubApi = {
   /** The settings of the repository the factory depends on. */
   repositorySettings(repo: string, token: string): Promise<RepositorySettings>
@@ -258,6 +273,17 @@ export type GithubApi = {
   contains(repo: string, token: string, descendant: string, ancestor: string): Promise<boolean>
   /** The pull request opened from `head`, open or not, if there is one. */
   findPullRequest(repo: string, token: string, head: string): Promise<PullRequestState | undefined>
+  /** What a review of pull request `number` reads: its state, head, base and text, as GitHub has them now. */
+  pullRequestFacts(repo: string, token: string, number: number): Promise<PullRequestFacts>
+  /** The reviews already on a pull request, for the factory to tell its own from the others. */
+  listReviews(repo: string, token: string, number: number): Promise<PostedReview[]>
+  /** Posts a review that only comments, on commit `commitSha`. Never an approval, never a request for changes. */
+  createReview(
+    repo: string,
+    token: string,
+    number: number,
+    review: { commitSha: string; body: string },
+  ): Promise<number>
   /** The open pull requests from the branch `head` of the repository's owner into `base`. */
   openPullRequestsBetween(
     repo: string,
@@ -1167,6 +1193,72 @@ export function createGithubApi(
         `closing ${repo}#${issueNumber}`,
         [200],
       )
+    },
+
+    async pullRequestFacts(repo, token, number) {
+      const pull = (await (
+        await ensure(
+          await call(repo, token, `/pulls/${number}`),
+          `reading ${repo}#${number}`,
+          [200],
+        )
+      ).json()) as {
+        state: 'open' | 'closed'
+        draft?: boolean
+        title: string
+        body: string | null
+        head: { sha: string; repo: { full_name: string } | null }
+        base: { ref: string }
+        user: { login: string } | null
+      }
+      return {
+        state: pull.state,
+        draft: pull.draft ?? false,
+        headSha: pull.head.sha,
+        headRepo: pull.head.repo?.full_name ?? null,
+        baseRef: pull.base.ref,
+        title: pull.title,
+        body: pull.body ?? '',
+        authorLogin: pull.user?.login ?? '',
+      }
+    },
+
+    async listReviews(repo, token, number) {
+      const reviews = (await (
+        await ensure(
+          await call(repo, token, `/pulls/${number}/reviews?per_page=100`),
+          `listing reviews of ${repo}#${number}`,
+          [200],
+        )
+      ).json()) as {
+        id: number
+        body: string | null
+        commit_id: string
+        user: { login: string } | null
+      }[]
+      return reviews.map((r) => ({
+        id: r.id,
+        body: r.body ?? '',
+        commitSha: r.commit_id,
+        authorLogin: r.user?.login ?? '',
+      }))
+    },
+
+    async createReview(repo, token, number, review) {
+      // The event is fixed: this client has no way to approve or to ask for changes.
+      const response = await ensure(
+        await call(repo, token, `/pulls/${number}/reviews`, {
+          method: 'POST',
+          body: JSON.stringify({
+            commit_id: review.commitSha,
+            body: review.body,
+            event: 'COMMENT',
+          }),
+        }),
+        `reviewing ${repo}#${number}`,
+        [200],
+      )
+      return ((await response.json()) as { id: number }).id
     },
 
     async listIssueComments(repo, token, issueNumber, since) {

@@ -98,6 +98,7 @@ function Settings({
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
   const [ask, setAsk] = useState(repo.askQuestions)
+  const [reviewOthers, setReviewOthers] = useState(repo.reviewExternalPulls)
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
@@ -136,6 +137,7 @@ function Settings({
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,
         askQuestions: ask,
+        reviewExternalPulls: reviewOthers,
         harness: harness || null,
         reviewer: reviewer || null,
         releaseMode: release || null,
@@ -260,6 +262,15 @@ function Settings({
         <input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />
         <span className="text-foreground">{s.ask}</span>
       </label>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={reviewOthers}
+          onChange={(e) => setReviewOthers(e.target.checked)}
+        />
+        <span className="text-foreground">{s.reviewOthers}</span>
+      </label>
+      <span className="text-muted-foreground">{s.reviewOthersHelp}</span>
       <div className="grid grid-cols-3 gap-3">
         <label className="block">
           <span className="text-foreground">{s.builder}</span>

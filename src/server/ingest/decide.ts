@@ -65,6 +65,23 @@ export type RoutedIntent =
       commentId: number
       headSha: string
     } & Written)
+  | {
+      kind: 'pull_request_changed'
+      repository: string
+      pullRequestNumber: number
+      action: string
+      headSha: string
+      /** `owner/name` of the repository the head branch lives in; null when that fork was deleted. */
+      headRepository: string | null
+      headRef: string
+      draft: boolean
+      authorLogin: string
+      authorAssociation: string
+      /** The labels the pull request carries now. */
+      labels: string[]
+      /** The label this delivery added, for a `labeled` one. */
+      addedLabel: string | null
+    }
   | { kind: 'check_suite_completed'; repository: string; headSha: string; conclusion: string }
   | {
       kind: 'check_run_completed'
@@ -79,6 +96,9 @@ type IssueChange = 'issue_unlabeled' | 'issue_closed' | 'issue_reopened'
 
 export type RoutedCode = RoutedIntent['kind']
 
+/** The routed intents about a task's issue or pull request; a pull request of somebody else's is about no task. */
+export type TaskRoutedCode = Exclude<RoutedCode, 'pull_request_changed'>
+
 type Routed = { intent: RoutedIntent; reason: string }
 
 const written = (by: { user: { login: string }; author_association: string }): Written => ({
@@ -86,11 +106,14 @@ const written = (by: { user: { login: string }; author_association: string }): W
   actorAssociation: by.author_association,
 })
 
+/** The actions of a pull request that can ask for a review of it; `labeled` is how a maintainer lets a stranger's in. */
+const PULL_REQUEST_ACTIONS = ['opened', 'synchronize', 'ready_for_review', 'labeled'] as const
+
 /**
  * The deliveries that are not `issues` and still mean something: the action that counts, and the
  * schema that turns its payload into the intent. Any other action of the same event is ignored.
  */
-const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
+const ROUTES = new Map<string, { action: string | readonly string[]; payload: z.ZodType<Routed> }>([
   [
     'issue_comment',
     {
@@ -122,6 +145,47 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
                 reason: `${comment.user.login} commented on pull request #${issue.number}`,
               }
         }),
+    },
+  ],
+  [
+    'pull_request',
+    {
+      action: PULL_REQUEST_ACTIONS,
+      payload: z
+        .object({
+          action: z.string(),
+          label: z.object({ name: z.string() }).optional(),
+          pull_request: z.object({
+            number: z.number().int(),
+            draft: z.boolean().default(false),
+            user: actorPayload,
+            author_association: z.string(),
+            labels: z.array(z.object({ name: z.string() })).default([]),
+            head: z.object({
+              sha: z.string(),
+              ref: z.string(),
+              repo: z.object({ full_name: z.string() }).nullable(),
+            }),
+          }),
+          repository: repositoryPayload,
+        })
+        .transform(({ action, label, pull_request: pull, repository }): Routed => ({
+          intent: {
+            kind: 'pull_request_changed',
+            repository: repository.full_name,
+            pullRequestNumber: pull.number,
+            action,
+            headSha: pull.head.sha,
+            headRepository: pull.head.repo?.full_name ?? null,
+            headRef: pull.head.ref,
+            draft: pull.draft,
+            authorLogin: pull.user.login,
+            authorAssociation: pull.author_association,
+            labels: pull.labels.map((l) => l.name),
+            addedLabel: label?.name ?? null,
+          },
+          reason: `pull request #${pull.number} by ${pull.user.login} was ${action}`,
+        })),
     },
   ],
   [
@@ -259,7 +323,7 @@ export function decideIngress(event: string, payload: unknown): IngressDecision 
   if (event === 'issues') return decideIssues(payload)
 
   const route = ROUTES.get(event)
-  if (!route || route.action !== actionOf(payload)) {
+  if (!route || ![route.action].flat().includes(actionOf(payload) ?? '')) {
     return {
       accept: false,
       code: 'event_not_issues',

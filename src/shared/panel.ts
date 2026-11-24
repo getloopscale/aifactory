@@ -634,6 +634,8 @@ export type RepositoryView = {
   releaseBranch: string | null
   /** False when the agent decides what is unclear instead of asking on the issue. */
   askQuestions: boolean
+  /** True when the reviewer also reads pull requests the factory did not open; off by default. */
+  reviewExternalPulls: boolean
   harness: string | null
   reviewer: string | null
   releaseMode: 'manual' | 'trial' | 'auto' | null

@@ -67,6 +67,8 @@ export type RepositoryPatch = {
   /** `null` clears it, so the default branch is the release branch. */
   releaseBranch?: string | null
   askQuestions?: boolean
+  /** Whether the reviewer reads pull requests the factory did not open. */
+  reviewExternalPulls?: boolean
   harness?: string | null
   reviewer?: string | null
   releaseMode?: 'manual' | 'trial' | 'auto' | null
@@ -182,6 +184,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       baseBranch: row?.baseBranch ?? null,
       releaseBranch: row?.releaseBranch ?? null,
       askQuestions: row?.askQuestions ?? true,
+      reviewExternalPulls: row?.reviewExternalPulls ?? false,
       harness: row?.harness ?? null,
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
@@ -340,6 +343,9 @@ export async function saveRepository(
     ...(patch.baseBranch === undefined ? {} : { baseBranch: patch.baseBranch }),
     ...(patch.releaseBranch === undefined ? {} : { releaseBranch: patch.releaseBranch }),
     ...(patch.askQuestions === undefined ? {} : { askQuestions: patch.askQuestions }),
+    ...(patch.reviewExternalPulls === undefined
+      ? {}
+      : { reviewExternalPulls: patch.reviewExternalPulls }),
     ...(patch.harness === undefined ? {} : { harness: patch.harness }),
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),

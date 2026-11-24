@@ -1,5 +1,5 @@
 import { TASK_STAGES, type TaskStage } from '../db/schema'
-import type { RoutedCode } from '../ingest/decide'
+import type { TaskRoutedCode } from '../ingest/decide'
 
 /**
  * What happens to a task for every stage it can be in and every event that can reach it, in one place.
@@ -45,7 +45,7 @@ type AutomaticEvent =
   | 'run_step'
 
 /** A delivery from GitHub: the label that hands an issue over, and every intent the event router gives. */
-type WebhookEvent = 'issue_labeled' | RoutedCode
+type WebhookEvent = 'issue_labeled' | TaskRoutedCode
 
 export type TransitionEvent = PanelEvent | AutomaticEvent | WebhookEvent
 

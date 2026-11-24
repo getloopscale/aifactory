@@ -425,9 +425,10 @@ export const watch = pgTable('watch', {
  */
 export const agentRun = pgTable('agent_run', {
   id: serial('id').primaryKey(),
-  taskId: integer('task_id')
-    .notNull()
-    .references(() => task.id),
+  /** The task the pass worked for; empty for the review of a pull request the factory did not open. */
+  taskId: integer('task_id').references(() => task.id),
+  /** The review of a pull request the pass belongs to, when it belongs to no task. */
+  pullReviewId: integer('pull_review_id'),
   role: text('role', { enum: ['builder', 'planner', 'reviewer', 'merger', 'security'] }).notNull(),
   harness: text('harness').notNull(),
   /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
@@ -547,6 +548,11 @@ export const repository = pgTable('repository', {
   releaseBranch: text('release_branch'),
   /** False for a repository nobody watches: the agent decides what is unclear instead of asking. */
   askQuestions: boolean('ask_questions').notNull().default(true),
+  /**
+   * Whether the reviewer reads pull requests the factory did not open. Off by default: an opened pull
+   * request is no more permission than a labelled issue.
+   */
+  reviewExternalPulls: boolean('review_external_pulls').notNull().default(false),
   /** The agent that builds and the one that reviews, when not the factory's default. */
   harness: text('harness'),
   reviewer: text('reviewer'),
@@ -592,6 +598,32 @@ export const repository = pgTable('repository', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * The review of one head commit of a pull request the factory did not open. The row is the claim: a
+ * delivery that finds it already there queues nothing, and a worker takes it by moving it from `queued`.
+ */
+export const pullReview = pgTable(
+  'pull_review',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    pullNumber: integer('pull_number').notNull(),
+    headSha: text('head_sha').notNull(),
+    /** Why it was taken: the author's association, or the label a maintainer added. */
+    trigger: text('trigger').notNull(),
+    status: text('status', { enum: ['queued', 'running', 'posted', 'skipped', 'failed'] })
+      .notNull()
+      .default('queued'),
+    /** The verdict and the reason a review was skipped or failed. */
+    detail: text('detail'),
+    githubReviewId: text('github_review_id'),
+    costUsd: real('cost_usd'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('pull_review_head').on(t.repository, t.pullNumber, t.headSha)],
+)
 
 /**
  * A plan: a goal the owner wrote for a repository, broken by an agent into issues. The owner edits the
