@@ -78,7 +78,7 @@ export async function endWithoutVersionPullRequest(
 }
 
 /**
- * Opens the Version Packages pull request from the version branch when the release workflow pushed it after
+ * Opens the Version Packages pull request from the version branch when the release workflow pushed it on
  * the promotion and opened none, which it does where the organisation does not let Actions open pull requests
  * (usetheokit/theokit). The next pass finds it and merges it once its checks are green.
  */
@@ -89,7 +89,9 @@ async function openFromVersionBranch(
 ): Promise<Ending | undefined> {
   const head = versionBranchFor(p.releaseBranch)
   const branch = await deps.api.branchAhead(p.repository, token, p.releaseBranch, head)
-  if (!versionBranchWaits(branch, p.startedAt)) return undefined
+  if (!branch || branch.aheadBy <= 0) return undefined
+  const holdsPromoted = await deps.api.contains(p.repository, token, branch.sha, p.promotedSha)
+  if (!versionBranchWaits(branch, holdsPromoted)) return undefined
   const pr = await deps.api.openPullRequest(
     p.repository,
     token,

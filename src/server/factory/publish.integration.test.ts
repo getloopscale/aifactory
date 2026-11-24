@@ -1013,6 +1013,7 @@ describe('a version branch the release workflow pushed without a pull request', 
     await waitingPublication()
     promotionOfAPackage()
     pushed(afterPromotion)
+    repo().holds('version1', ['promoted1'])
     // Version Packages #250 merged before this promotion: it belongs to the earlier release.
     versionPr({
       number: 250,
@@ -1044,6 +1045,7 @@ describe('a version branch the release workflow pushed without a pull request', 
   it('opens it as soon as the branch is there, before the grace window ends', async () => {
     await waitingPublication()
     pushed(afterPromotion)
+    repo().holds('version1', ['promoted1'])
 
     const result = await pollPublications(deps())
 
@@ -1063,10 +1065,22 @@ describe('a version branch the release workflow pushed without a pull request', 
     expect((await row()).detail).toMatch(/changes @theokit\/ui/)
   })
 
-  it('ignores a version branch committed before the promotion', async () => {
+  it('opens it for a branch pushed before the publication was recorded', async () => {
+    await waitingPublication()
+    pushed(new Date(STARTED.getTime() - 60_000))
+    repo().holds('version1', ['promoted1'])
+
+    const result = await pollPublications(deps())
+
+    expect(result.waiting).toBe(1)
+    expect(opened()).toHaveLength(1)
+  })
+
+  it('ignores a version branch that is not built on the promoted commit', async () => {
     await waitingPublication()
     promotionOfAPackage()
     pushed(new Date(STARTED.getTime() - 60_000))
+    repo().holds('version1', ['older'])
 
     const result = await pollPublications(deps(LATER))
 
