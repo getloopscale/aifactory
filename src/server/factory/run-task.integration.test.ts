@@ -593,7 +593,9 @@ describe('runTask', () => {
     ])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row.stage).toBe('done')
-    expect(sandbox.backend.commands.some((c) => c.includes('push origin factory/7 '))).toBe(true)
+    expect(
+      sandbox.backend.commands.some((c) => c.includes('push origin HEAD:refs/heads/factory/7 ')),
+    ).toBe(true)
     expect(github.asked).toContain('paulo/app')
     expect(sandbox.stopped).toBe(1)
   })
@@ -1187,6 +1189,31 @@ describe('runTask', () => {
     }
   })
 
+  it('pushes the commit it made even when the agent left HEAD detached from factory/<issue>', async () => {
+    const id = await seedTask()
+    const git = await RealGit.open()
+    try {
+      const detaching: CodingHarness = {
+        name: 'f',
+        egress: agentEgress,
+        run: async (_backend, input) => {
+          // `git checkout <sha> --` with no path detaches HEAD; the next commit lands on no branch.
+          execFileSync('git', ['checkout', '-q', '--detach'], { cwd: input.cwd })
+          await writeFile(join(input.cwd, 'detached.txt'), 'made on a detached HEAD\n')
+          return { ok: true, timedOut: false, summary: 'done' }
+        },
+      }
+
+      await runTask(deps(git.sandbox, { harness: detaching }), id)
+
+      const remote = git.remoteHead('factory/7')
+      expect(remote).toMatch(/^[0-9a-f]{40}$/)
+      expect(git.show(remote, 'detached.txt')).toBe('made on a detached HEAD\n')
+    } finally {
+      await git.close()
+    }
+  })
+
   it('keeps the work of a pass cut at its limit: commits and pushes it, and the failure names the commit', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())
@@ -1654,7 +1681,7 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'done', branch: 'factory/7' })
     const pushes = pushesOf(sandbox)
     expect(pushes).toEqual([
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:dead0001',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:dead0001',
     ])
   })
 
@@ -1665,7 +1692,7 @@ describe('runTask', () => {
     await runTask(deps(sandbox), id)
 
     expect(pushesOf(sandbox)).toEqual([
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:',
     ])
   })
 
@@ -1677,8 +1704,8 @@ describe('runTask', () => {
     await runTask(deps(sandbox, { harness: resumableBuilder(), reviewer }), id)
 
     expect(pushesOf(sandbox)).toEqual([
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:',
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:abc123def',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:abc123def',
     ])
   })
 
@@ -3356,7 +3383,9 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(commands.some((c) => c.includes('commit -F'))).toBe(false)
     expect(
       commands.some((c) =>
-        c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${approved}`),
+        c.includes(
+          `push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:${approved}`,
+        ),
       ),
     ).toBe(true)
     const stages = await stagesOf(id)
@@ -3848,7 +3877,9 @@ describe('runTask merging an integration branch that passes the checks again', (
     const commands = sandbox.backend.commands
     const merging = commands.findIndex((c) => c.includes(`merge --no-edit ${base}`))
     const pushing = commands.findIndex((c) =>
-      c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
+      c.includes(
+        `push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:${verified}`,
+      ),
     )
     expect(merging).toBeGreaterThan(-1)
     expect(pushing).toBeGreaterThan(merging)
@@ -4063,7 +4094,9 @@ describe('runTask merging an integration branch that passes the checks again', (
     ])
     expect(
       world.sandbox.backend.commands.some((c) =>
-        c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
+        c.includes(
+          `push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:${verified}`,
+        ),
       ),
     ).toBe(true)
   })
