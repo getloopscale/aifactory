@@ -149,3 +149,10 @@ request but passed on the factory's run of the same commit is rerun once per com
 `resolve_elsewhere` takes a commit the integration branch holds. The issue also names "a passing run", but a
 run proves nothing the factory can read about where the work landed, so a run alone is refused. The agent
 configuration is held for `pnpm evals:check` and merged by the owner, as the rules require.
+
+The cap of three unblocker actions is counted per task and head, but a decision is already unique per task,
+exception kind and head, so it binds only across different kinds on one head; the head of an exception is not a
+durable identity across reruns, so a new head starts a new count. `security` and `unknown` never reach the
+unblocker: only a person adds a security exception, and a failed read is waited out. A `blocked_by` on a task that
+stopped queues its run again (which waits on the blocker); on a task waiting for an answer it is refused, since
+nothing reads the line there.

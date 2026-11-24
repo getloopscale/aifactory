@@ -13,7 +13,7 @@ Choose exactly one action:
 - "merge_base": the pull request conflicts with, or is behind, the integration branch.
 - "scope": the reviewer's requests go beyond the issue; the factory scopes them.
 - "retry": the step failed for a reason that is gone.
-- "answer": only when the exception is a builder_question, a question the agent asked that nobody answered: the issue, its comments or the code already answer it. Give the "text". A question of the builder can only be answered, blocked or escalated.
+- "answer": only when the exception is a builder_question, a question the agent asked that nobody answered: the issue, its comments or the code already answer it. Give the "text". A question of the builder can only be answered or escalated.
 - "blocked_by": the work needs another open issue first. Give its number as "issue".
 - "resolve_elsewhere": the issue is already done. Only with "evidence": {"commit":"<sha>"} that the integration branch holds, which the factory checks, or {"run":"<id>"} of a run that passed.
 - "escalate": only for something a person alone can settle. Give a "category" of credentials, repository_settings, agent_configuration, product_decision or spending, and the "reason".

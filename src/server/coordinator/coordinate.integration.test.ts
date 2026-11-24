@@ -1525,6 +1525,30 @@ describe('the actions the unblocker applies through the coordinator', () => {
       expect(api.repo(REPO).issue(issue).body).toBe('Do it.\n\nBlocked by #900')
     })
 
+    it('queues the run of a handed-over task, which waits on the blocker, and refuses a waiting one', async () => {
+      const id = await seed('handoff', { headSha: SHA })
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      api.repo(REPO).issue(row.issueNumber, { body: 'Do it.' })
+      api.repo(REPO).issue(902, { state: 'open' })
+
+      expect(
+        await apply(exception(id, 'failure', `${SHA}@1`), { action: 'blocked_by', blockedBy: 902 }),
+      ).toBe('applied')
+      expect(await stageOf(id)).toBe('intake')
+
+      const waiting = await seed('waiting')
+      const [w] = await getDb().select().from(task).where(eq(task.id, waiting))
+      api.repo(REPO).issue(w.issueNumber, { body: 'Do it.' })
+      await getPool().query('truncate table coordinator_action')
+      expect(
+        await apply(exception(waiting, 'unknown', `q:${waiting}`), {
+          action: 'blocked_by',
+          blockedBy: 902,
+        }),
+      ).toBe('refused')
+      expect(api.repo(REPO).issue(w.issueNumber).body).toBe('Do it.')
+    })
+
     it('refuses an issue that blocks itself and one that is closed', async () => {
       const { issue, e } = await open()
       api.repo(REPO).issue(901, { state: 'closed' })

@@ -51,6 +51,10 @@ const NOT_THE_UNBLOCKERS = new Set<TaskException['kind']>([
   'release_blocked',
   'queue_blocked',
   'publication_stalled',
+  // Only a person adds a security exception (`security-judge.ts`): no action of the closed set may skip it.
+  'security',
+  // A read that failed: the next read usually works, so it waits and is never worth a model call.
+  'unknown',
 ])
 
 /** How much of the evidence the message carries. */

@@ -306,18 +306,31 @@ async function blockedBy(deps: ApplyDeps, taskId: number, blocker: number): Prom
   if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
   const allowed = transition(row, 'coordinator_blocked_by')
   if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
+  // Only a task in `intake` has its `Blocked by` lines read, and a task that waits for an answer never goes there.
+  if (row.stage === 'waiting')
+    throw new ActionRefused('a task that waits for an answer is not blocked by an issue')
   if (blocker === row.issueNumber) throw new ActionRefused('an issue cannot block itself')
   const { token } = await deps.github.installationToken(row.repository)
   const named = await deps.readIssue(row.repository, blocker, token)
   if (named.state !== 'open') throw new ActionRefused(`#${blocker} is not an open issue`)
   const issue = await deps.readIssue(row.repository, row.issueNumber, token)
   const declared = declaredBlockers(issue.body, row.repository)
-  if (declared.some((ref) => ref.repository === row.repository && ref.number === blocker)) {
-    return `#${blocker} was already named as a blocker`
+  const named_ = declared.some((ref) => ref.repository === row.repository && ref.number === blocker)
+  if (!named_) {
+    const body = `${issue.body.trimEnd()}\n\nBlocked by #${blocker}`
+    await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, body)
   }
-  const body = `${issue.body.trimEnd()}\n\nBlocked by #${blocker}`
-  await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, body)
-  return `added "Blocked by #${blocker}" to the issue`
+  // A task that stopped is not read again by itself: queue its run, which waits on the blocker before it starts.
+  if (row.stage !== 'intake') {
+    await sendBackByCoordinator(
+      deps,
+      taskId,
+      `The coordinator found that #${blocker} has to be done first: the run waits for it.`,
+    )
+  }
+  return named_
+    ? `#${blocker} was already named as a blocker`
+    : `added "Blocked by #${blocker}" to the issue`
 }
 
 /** Resolves the task elsewhere only on a commit the integration branch holds: a run alone proves nothing the factory can read. */

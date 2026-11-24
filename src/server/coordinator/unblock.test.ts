@@ -114,14 +114,13 @@ describe('unblockDecision', () => {
     })
   })
 
-  it('a question of the builder is only answered, blocked or escalated', () => {
+  it('a question of the builder is only answered or escalated', () => {
     const asked = exception({ kind: 'builder_question', head: 'question:4' })
     for (const action of ['send_back', 'rerun_checks', 'merge_base', 'scope', 'retry']) {
       expect(run({ action, note: 'n', reason: 'r' }, [], asked).action).toBe('escalate')
     }
-    expect(run({ action: 'blocked_by', issue: 3, reason: 'r' }, [], asked).action).toBe(
-      'blocked_by',
-    )
+    // Nothing reads a `Blocked by` line of a task that waits for an answer, so it would end the escalation for nothing.
+    expect(run({ action: 'blocked_by', issue: 3, reason: 'r' }, [], asked).action).toBe('escalate')
   })
 
   it('escalate keeps the owner category', () => {
@@ -186,6 +185,14 @@ describe('unblock', () => {
     )
     expect(d).toBe(escalation)
   })
+
+  it.each(['security', 'unknown'] as const)(
+    'leaves a %s exception to its own decision',
+    async (kind) => {
+      const d = await unblock(deps(answering('{}')), exception({ kind }), escalation, [])
+      expect(d).toBe(escalation)
+    },
+  )
 
   it('turns the answer into an action, with what it cost', async () => {
     const d = await unblock(

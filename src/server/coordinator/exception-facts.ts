@@ -250,7 +250,15 @@ async function unansweredQuestions(db: Database, at: Date): Promise<Asked[]> {
       askedAt: question.askedAt,
     })
     .from(question)
-    .where(and(isNull(question.answer), eq(question.origin, 'agent'), lt(question.askedAt, at)))
+    .innerJoin(task, eq(task.id, question.taskId))
+    .where(
+      and(
+        isNull(question.answer),
+        eq(question.origin, 'agent'),
+        lt(question.askedAt, at),
+        eq(task.stage, 'waiting'),
+      ),
+    )
     .orderBy(question.id)
 }
 

@@ -23,7 +23,7 @@ export const OWNER_CATEGORIES = [
 ] as const
 
 /** What the unblocker may do about a question of the builder that waits. */
-const QUESTION_ACTIONS: UnblockAnswer['action'][] = ['answer', 'blocked_by', 'escalate']
+const QUESTION_ACTIONS: UnblockAnswer['action'][] = ['answer', 'escalate']
 
 /** The most unblocker actions applied on one task and head; the next one is an `escalate`. */
 export const MAX_UNBLOCKER_APPLIED = 3
