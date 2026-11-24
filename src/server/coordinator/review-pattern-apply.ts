@@ -134,3 +134,24 @@ export async function reviewPatterns(
   }
   return result
 }
+
+/**
+ * The cron's step for the patterns: runs a pass unless the mode is `off`, logs what it did, and never
+ * throws, so a failure here does not stop the coordinator's own pass.
+ */
+export async function reviewPatternStep(
+  pass: () => Promise<ReviewPatternResult>,
+  mode: CoordinatorMode,
+  log: (line: string) => void,
+  logError: (line: string) => void,
+): Promise<void> {
+  if (mode === 'off') return
+  try {
+    const found = await pass()
+    if (Object.values(found).some((n) => n > 0)) {
+      log(JSON.stringify({ event: 'review_patterns', mode, ...found }))
+    }
+  } catch (error) {
+    logError(JSON.stringify({ event: 'review_patterns_failed', error: String(error) }))
+  }
+}
