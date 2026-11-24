@@ -39,6 +39,20 @@ describe('diffFacts', () => {
     expect(facts).toEqual({ guards: [], unplanned: [], required: [], touched: ['src/truncate.js'] })
   })
 
+  it('blocks a change that commits an AWS key, with its file and line', async () => {
+    const key = 'AKIA' + 'ABCDEFGHIJKLMNOP'
+    const repo = divergedRepository({
+      behind: true,
+      branch: { ...PLANNED_CHANGE, 'src/config.js': `export const k = '${key}'\n` },
+    })
+
+    const facts = await factsOf(repo)
+
+    expect(facts.guards).toEqual([
+      expect.objectContaining({ severity: 'blocker', file: 'src/config.js:1' }),
+    ])
+  })
+
   it('still reports what the branch itself did when the integration branch moved past it', async () => {
     const repo = divergedRepository({
       behind: true,
