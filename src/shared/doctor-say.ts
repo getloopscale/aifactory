@@ -22,6 +22,8 @@ export const DOCTOR_SAY_CODES = [
   'recipe_problem',
   'recipe_pending',
   'sandbox_refused',
+  'provider_checks_failed',
+  'provider_checks_untried',
   'ok_issues',
   'ok_app_access',
   'ok_app_events',
@@ -38,6 +40,7 @@ export const DOCTOR_SAY_CODES = [
   'ok_recipe',
   'ok_sandbox',
   'ok_sandbox_slots',
+  'ok_provider_checks',
 ] as const
 
 /** Every thing the doctor tries to read; an item it could not read says which, so the panel can name it. */
@@ -55,6 +58,7 @@ export const DOCTOR_TRIED_CODES = [
   'sandboxes',
   'token',
   'merge_settings',
+  'proofs',
 ] as const
 
 export type DoctorTriedCode = (typeof DOCTOR_TRIED_CODES)[number]
@@ -78,6 +82,7 @@ export const DOCTOR_TRIED_EN: DoctorTriedSentences = {
   sandboxes: () => 'reading the sandboxes the account has up',
   token: (v) => `minting a token for ${v.repo}`,
   merge_settings: (v) => `reading the merge settings of ${v.repo}`,
+  proofs: (v) => `reading the proofs of the checks of ${v.repo}`,
 }
 
 /** Why a recipe cannot be used, as the three ways `RecipeError` has of saying it. */
@@ -231,6 +236,19 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
         ? 'Build the sandbox template: node --env-file=.env.local scripts/build-e2b-template.mts. The task retries itself once the provider has it.'
         : 'Add credit to the sandbox provider, or fix its key on the server. The task retries itself once the provider accepts.',
   },
+  provider_checks_failed: {
+    cause: (v) =>
+      `The checks passed on ${v.passedOn} and failed on ${v.provider}: ${v.checks}. A run on ${v.provider} will fail the same way.`,
+    repair: (v) =>
+      `Make the recipe pass on ${v.provider} (its toolchain, or a check that depends on the provider), or run the factory on ${v.passedOn}; then prove the checks again.`,
+  },
+  provider_checks_untried: {
+    cause: (v) =>
+      v.passedOn
+        ? `The checks passed on ${v.passedOn} and were never proven on ${v.providers}, so it is not known whether a run there passes.`
+        : `The checks have not passed on any sandbox provider (not proven on ${v.providers}).`,
+    repair: (v) => `Prove the checks of the repository with the factory running on ${v.providers}.`,
+  },
   ok_issues: { cause: () => 'Issues are on.', repair: () => '' },
   ok_app_access: {
     cause: (v) => `The GitHub App reaches ${v.repo} with every permission it needs.`,
@@ -288,6 +306,10 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   },
   ok_sandbox: {
     cause: () => 'The sandbox provider has not refused the latest run.',
+    repair: () => '',
+  },
+  ok_provider_checks: {
+    cause: (v) => `The checks passed on every sandbox provider: ${v.providers}.`,
     repair: () => '',
   },
   ok_sandbox_slots: {

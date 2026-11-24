@@ -5,7 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentSettings } from '../../../shared/panel'
 
+import { en } from '../../lib/copy/en'
+
 import { EngineChooser } from './EngineChooser'
+
+// Without a provider the panel speaks English, and the expected text comes from its dictionary.
+const e = en.engine
 
 afterEach(() => {
   cleanup()
@@ -88,22 +93,16 @@ const optionsOf = (label: string) =>
 describe('choosing the coding agent of a role', () => {
   it('shows the agent in use for the builder, and has nothing to save until something changes', () => {
     mount('builder')
-    expect(
-      (screen.getByLabelText('Agente de código do Construtor') as HTMLSelectElement).value,
-    ).toBe('codex')
-    expect(optionsOf('Agente de código do Construtor')).toEqual(['claude-code', 'codex'])
-    expect((screen.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement).disabled).toBe(
-      true,
-    )
+    expect((screen.getByLabelText(e.roleLabel.builder) as HTMLSelectElement).value).toBe('codex')
+    expect(optionsOf(e.roleLabel.builder)).toEqual(['claude-code', 'codex'])
+    expect((screen.getByRole('button', { name: e.save }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('saves a new builder, and says it applies to the next runs without a restart', async () => {
     const { fetchMock, onSaved } = mount('builder')
-    choose('Agente de código do Construtor', 'claude-code')
-    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
-    await waitFor(() =>
-      expect(screen.getByRole('status').textContent).toContain('próximas execuções, sem reiniciar'),
-    )
+    choose(e.roleLabel.builder, 'claude-code')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain(e.saved))
     const [url, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
     expect(url).toBe('/api/panel/agents/settings')
     expect(init.method).toBe('PUT')
@@ -120,15 +119,15 @@ describe('choosing the coding agent of a role', () => {
       'planner',
       settings({ chosen: { builder: null, planner: 'claude-code', reviewer: null } }),
     )
-    const box = screen.getByLabelText('Agente de código do Planejador') as HTMLSelectElement
+    const box = screen.getByLabelText(e.roleLabel.planner) as HTMLSelectElement
     expect(box.value).toBe('claude-code')
-    expect(optionsOf('Agente de código do Planejador')).toEqual([
-      'O mesmo do Construtor (codex)',
+    expect(optionsOf(e.roleLabel.planner)).toEqual([
+      e.sameAsBuilder('codex'),
       'claude-code',
       'codex',
     ])
-    choose('Agente de código do Planejador', '')
-    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    choose(e.roleLabel.planner, '')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
     expect(JSON.parse(String(init.body)).planner).toBeNull()
@@ -136,9 +135,7 @@ describe('choosing the coding agent of a role', () => {
 
   it('shows "the same as the builder" for a role that was not given another', () => {
     mount('reviewer')
-    expect((screen.getByLabelText('Agente de código do Revisor') as HTMLSelectElement).value).toBe(
-      '',
-    )
+    expect((screen.getByLabelText(e.roleLabel.reviewer) as HTMLSelectElement).value).toBe('')
   })
 
   it('cannot pick an agent that cannot start, and says what is missing', () => {
@@ -152,11 +149,11 @@ describe('choosing the coding agent of a role', () => {
       }),
     )
     const claude = screen.getByRole('option', {
-      name: 'claude-code (indisponível)',
+      name: `claude-code${e.unavailable}`,
     }) as HTMLOptionElement
     expect(claude.disabled).toBe(true)
     expect(
-      screen.getByText(/não pode ser escolhido: CLAUDE_CODE_OAUTH_TOKEN is not set/),
+      screen.getByText(new RegExp(`${e.cannotChoose.trim()} CLAUDE_CODE_OAUTH_TOKEN is not set`)),
     ).toBeDefined()
   })
 
@@ -172,7 +169,7 @@ describe('choosing the coding agent of a role', () => {
     )
     expect(screen.getByText(/o\/own\./)).toBeDefined()
     expect(screen.queryByText(/o\/rev/)).toBeNull()
-    expect(screen.getByRole('link', { name: 'Mudar em Repositórios' }).getAttribute('href')).toBe(
+    expect(screen.getByRole('link', { name: e.changeInRepositories }).getAttribute('href')).toBe(
       '/repositories',
     )
     cleanup()
@@ -193,25 +190,31 @@ describe('choosing the coding agent of a role', () => {
         status: 409,
       }),
     )
-    choose('Agente de código do Construtor', 'claude-code')
-    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    choose(e.roleLabel.builder, 'claude-code')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
     expect((await screen.findByRole('alert')).textContent).toContain('codex cannot start: x')
     expect(onSaved).not.toHaveBeenCalled()
-    expect(
-      (screen.getByLabelText('Agente de código do Construtor') as HTMLSelectElement).value,
-    ).toBe('claude-code')
+    expect((screen.getByLabelText(e.roleLabel.builder) as HTMLSelectElement).value).toBe(
+      'claude-code',
+    )
   })
 })
 
 describe('choosing the model and the effort', () => {
   it('offers the models of the agent in use, with its own default first', () => {
     mount('builder')
-    expect(optionsOf('Modelo do Construtor')).toEqual([
-      'Padrão do agente',
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([
+      e.agentDefault,
       'GPT-6.1-Sol',
       'GPT-6-Luna',
     ])
-    expect(optionsOf('Esforço do Construtor')).toEqual(['Padrão', 'low', 'medium', 'high', 'ultra'])
+    expect(optionsOf(e.effortOf(e.roleName.builder))).toEqual([
+      e.default,
+      'low',
+      'medium',
+      'high',
+      'ultra',
+    ])
   })
 
   it('shows what was chosen, and what the model is for', () => {
@@ -222,10 +225,10 @@ describe('choosing the model and the effort', () => {
         chosenEffort: { builder: 'medium', planner: null, reviewer: null },
       }),
     )
-    expect((screen.getByLabelText('Modelo do Construtor') as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText(e.modelOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
       'gpt-6-luna',
     )
-    expect((screen.getByLabelText('Esforço do Construtor') as HTMLSelectElement).value).toBe(
+    expect((screen.getByLabelText(e.effortOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
       'medium',
     )
     expect(screen.getByText('Rápido e barato.')).toBeDefined()
@@ -233,13 +236,15 @@ describe('choosing the model and the effort', () => {
 
   it('narrows the effort to what the chosen model takes, and drops one it does not take', () => {
     mount('builder')
-    choose('Esforço do Construtor', 'ultra')
-    choose('Modelo do Construtor', 'gpt-6-luna')
-    expect(optionsOf('Esforço do Construtor')).toEqual(['Padrão', 'low', 'medium'])
-    expect((screen.getByLabelText('Esforço do Construtor') as HTMLSelectElement).value).toBe('')
-    choose('Esforço do Construtor', 'medium')
-    choose('Modelo do Construtor', 'gpt-6.1-sol')
-    expect((screen.getByLabelText('Esforço do Construtor') as HTMLSelectElement).value).toBe(
+    choose(e.effortOf(e.roleName.builder), 'ultra')
+    choose(e.modelOf(e.roleName.builder), 'gpt-6-luna')
+    expect(optionsOf(e.effortOf(e.roleName.builder))).toEqual([e.default, 'low', 'medium'])
+    expect((screen.getByLabelText(e.effortOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
+      '',
+    )
+    choose(e.effortOf(e.roleName.builder), 'medium')
+    choose(e.modelOf(e.roleName.builder), 'gpt-6.1-sol')
+    expect((screen.getByLabelText(e.effortOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
       'medium',
     )
   })
@@ -249,16 +254,18 @@ describe('choosing the model and the effort', () => {
       'builder',
       settings({ chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null } }),
     )
-    choose('Agente de código do Construtor', 'claude-code')
-    expect(optionsOf('Modelo do Construtor')).toEqual(['Padrão do agente', 'Sonnet', 'Opus'])
-    expect((screen.getByLabelText('Modelo do Construtor') as HTMLSelectElement).value).toBe('')
-    expect(optionsOf('Esforço do Construtor')).toEqual(['Padrão', 'low', 'medium', 'high'])
+    choose(e.roleLabel.builder, 'claude-code')
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault, 'Sonnet', 'Opus'])
+    expect((screen.getByLabelText(e.modelOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
+      '',
+    )
+    expect(optionsOf(e.effortOf(e.roleName.builder))).toEqual([e.default, 'low', 'medium', 'high'])
   })
 
   it('follows the agent of the builder for a planner that has none of its own', () => {
     mount('planner')
-    expect(optionsOf('Modelo do Planejador')).toEqual([
-      'Padrão do agente',
+    expect(optionsOf(e.modelOf(e.roleName.planner))).toEqual([
+      e.agentDefault,
       'GPT-6.1-Sol',
       'GPT-6-Luna',
     ])
@@ -266,9 +273,9 @@ describe('choosing the model and the effort', () => {
 
   it('saves a model and an effort for the role, and sends the agent only when it changed', async () => {
     const { fetchMock } = mount('builder')
-    choose('Modelo do Construtor', 'gpt-6.1-sol')
-    choose('Esforço do Construtor', 'high')
-    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    choose(e.modelOf(e.roleName.builder), 'gpt-6.1-sol')
+    choose(e.effortOf(e.roleName.builder), 'high')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
     expect(JSON.parse(String(init.body))).toEqual({
@@ -282,9 +289,9 @@ describe('choosing the model and the effort', () => {
       'builder',
       settings({ chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null } }),
     )
-    choose('Agente de código do Construtor', 'claude-code')
-    choose('Modelo do Construtor', 'opus')
-    fireEvent.click(screen.getByRole('button', { name: 'Salvar' }))
+    choose(e.roleLabel.builder, 'claude-code')
+    choose(e.modelOf(e.roleName.builder), 'opus')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
     expect(JSON.parse(String(init.body))).toEqual({
@@ -296,11 +303,10 @@ describe('choosing the model and the effort', () => {
 
   it('has something to save when only the model changed, and nothing once it is back', () => {
     mount('builder')
-    const save = () =>
-      (screen.getByRole('button', { name: 'Salvar' }) as HTMLButtonElement).disabled
-    choose('Modelo do Construtor', 'gpt-6-luna')
+    const save = () => (screen.getByRole('button', { name: e.save }) as HTMLButtonElement).disabled
+    choose(e.modelOf(e.roleName.builder), 'gpt-6-luna')
     expect(save()).toBe(false)
-    choose('Modelo do Construtor', '')
+    choose(e.modelOf(e.roleName.builder), '')
     expect(save()).toBe(true)
   })
 
@@ -311,12 +317,12 @@ describe('choosing the model and the effort', () => {
         engines: { 'claude-code': { models: [], efforts: [] }, codex: { models: [], efforts: [] } },
       }),
     )
-    expect(optionsOf('Modelo do Construtor')).toEqual(['Padrão do agente'])
-    expect(screen.getByText(/A lista de modelos de codex não está disponível aqui/)).toBeDefined()
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault])
+    expect(screen.getByText(e.noModelList('codex'))).toBeDefined()
   })
 
   it('copes with an agent the page has no list for', () => {
     mount('builder', settings({ engines: {} }))
-    expect(optionsOf('Modelo do Construtor')).toEqual(['Padrão do agente'])
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault])
   })
 })

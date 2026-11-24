@@ -5,6 +5,7 @@ import type { BaseHold } from '../factory/await-ci'
 import { NO_TIME_FOR_AGENT } from '../factory/agent-time'
 import { NO_CHANGE, NO_PULL_REQUEST } from '../factory/failure-reasons'
 import { automaticRunsLeft } from '../factory/transitions'
+import type { SecurityJudgement } from './security-judge'
 import { AGENT_OUT_OF_TIME, retryableFailure } from '../../shared/panel'
 
 /**
@@ -112,6 +113,8 @@ export type TaskException = {
   conflictFiles?: string[]
   /** The integration branch that is red, for the issue that fixes it. */
   base?: RedBase
+  /** What the security agent judged of a `security` exception, from a closed set (`security-judge.ts`). */
+  security?: SecurityJudgement
 }
 
 /** An integration branch whose checks fail: where, on which commit, and how to run them when that is known. */

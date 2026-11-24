@@ -10,7 +10,7 @@ import { ingress, lineIncident, task } from '../db/schema'
 import { jobBackend } from '../factory/job-backend'
 import { integrationHeldUntil } from '../factory/promotion-merge'
 import { inTransactionForRun } from '../factory/resume-queue'
-import { listStoppedLines } from './incident'
+import { fixGoesFirst, listStoppedLines } from './incident'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -205,5 +205,53 @@ describe('a stopped line whose scope is fix first', () => {
     await stop(fix.issue)
 
     expect(await integrationHeldUntil(getDb(), REPO, new Date(), other.id)).toBeUndefined()
+  })
+
+  describe('while the fix awaits integration', () => {
+    const setFix = (id: number, change: Partial<typeof task.$inferInsert>) =>
+      getDb().update(task).set(change).where(eq(task.id, id))
+
+    it.each([
+      ['merge', { stage: 'merge' as const }],
+      ['pr', { stage: 'pr' as const }],
+      ['done waiting for CI', { stage: 'done' as const, awaitingCiSha: 'abc' }],
+    ])('holds the other integrations while the fix is in %s, never the fix', async (_n, change) => {
+      const other = await queued()
+      const fix = await queued()
+      await stop(fix.issue)
+      await setFix(fix.id, change)
+
+      expect(await integrationHeldUntil(getDb(), REPO, new Date(), other.id)).toBeInstanceOf(Date)
+      expect(await integrationHeldUntil(getDb(), REPO, new Date(), fix.id)).toBeUndefined()
+      expect(await fixGoesFirst(getDb(), REPO, other.id)).toBe(true)
+      expect(await fixGoesFirst(getDb(), REPO, fix.id)).toBe(false)
+    })
+
+    it.each([
+      ['intake', { stage: 'intake' as const }],
+      ['failed', { stage: 'failed' as const }],
+      ['merged', { stage: 'done' as const, mergedSha: 'm' }],
+    ])('releases them once the fix is %s', async (_n, change) => {
+      const other = await queued()
+      const fix = await queued()
+      await stop(fix.issue)
+      await setFix(fix.id, { stage: 'merge' })
+      expect(await fixGoesFirst(getDb(), REPO, other.id)).toBe(true)
+      await setFix(fix.id, change)
+
+      expect(await integrationHeldUntil(getDb(), REPO, new Date(), other.id)).toBeUndefined()
+    })
+
+    it('holds nothing in another repository or once the incident is resolved', async () => {
+      const elsewhere = await queued('paulo/other')
+      const fix = await queued()
+      await stop(fix.issue)
+      await setFix(fix.id, { stage: 'merge' })
+      expect(await fixGoesFirst(getDb(), 'paulo/other', elsewhere.id)).toBe(false)
+
+      await getDb().update(lineIncident).set({ status: 'resolved' })
+      const other = await queued()
+      expect(await fixGoesFirst(getDb(), REPO, other.id)).toBe(false)
+    })
   })
 })

@@ -131,7 +131,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
                   {d.tag}
                 </a>{' '}
                 <span className="text-xs text-muted-foreground">
-                  {t.task.deliveryMeta(shortSha(d.sha), d.actor, ago(d.at))}
+                  {t.task.deliveryMeta(shortSha(d.sha), d.actor, ago(d.at, Date.now(), t.time))}
                 </span>
               </li>
             ))}
@@ -145,10 +145,12 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
           {detail.timeline.map((event) => (
             <li key={event.id} className="text-sm">
               <span className="font-medium">{event.stage}</span>{' '}
-              <span className="text-xs text-muted-foreground">{ago(event.at)}</span>
-              {describeEvent(event) ? (
+              <span className="text-xs text-muted-foreground">
+                {ago(event.at, Date.now(), t.time)}
+              </span>
+              {describeEvent(event, t.events) ? (
                 <div className="whitespace-pre-wrap text-muted-foreground">
-                  {describeEvent(event)}
+                  {describeEvent(event, t.events)}
                 </div>
               ) : null}
             </li>

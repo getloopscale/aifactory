@@ -26,8 +26,9 @@ import {
   releaseByMode,
   type Handed,
 } from './integration'
-import { lineHolds } from '../line/incident'
+import { fixGoesFirst, lineHolds } from '../line/incident'
 
+import { conflictTurnHolds } from './conflict-turn'
 import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
 import { outcome } from './transitions'
@@ -403,7 +404,10 @@ async function look(
     ...(row.integrationHeld
       ? {
           held:
-            holding.has(row.repository) || (await lineHolds(deps.db, row.repository, row.id))
+            holding.has(row.repository) ||
+            (await lineHolds(deps.db, row.repository, row.id)) ||
+            (await fixGoesFirst(deps.db, row.repository, row.id)) ||
+            (await conflictTurnHolds(deps.db, row.repository, row.id, deps.now?.()))
               ? ('holding' as const)
               : ('released' as const),
         }

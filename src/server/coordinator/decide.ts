@@ -5,6 +5,7 @@ import { conflictNote } from '../panel/actions'
 import type { ExceptionKind, RedBase, TaskException } from './exceptions'
 import type { CoordinatorMode } from './mode'
 import { bumpFor } from './release-train'
+import { securityDecision } from './security-judge'
 import type { ScopeDraft } from './scope'
 
 /**
@@ -404,6 +405,7 @@ const BY_KIND: Partial<
   base_red: fixBase,
   builder_question: ({ evidence }) =>
     escalate(`the builder's question has waited for an answer: ${evidence}`),
+  security: (exception) => securityDecision(exception),
   publication_stalled: ({ evidence }) =>
     escalate(
       `${evidence}. The release train holds the repository until it ends, so a person looks at the release workflow and its Version Packages pull request`,
