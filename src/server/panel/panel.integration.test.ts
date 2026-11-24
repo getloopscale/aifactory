@@ -1770,12 +1770,17 @@ describe('actions', () => {
     expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('intake')
     expect(await getDb().select().from(decision)).toEqual([])
     const intake = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
-    expect(intake.at(-1)?.detail).toMatchObject({ decision: 'request_changes', automatic: true })
-    expect(queued).toHaveLength(1)
-    const input = queued[0].input as { taskId: number; feedback?: string }
-    expect(input.taskId).toBe(id)
-    expect(input.feedback).toContain('git merge origin/workspace')
-    expect(input.feedback).toMatch(/generated file/)
+    expect(intake.at(-1)?.detail).toMatchObject({
+      decision: 'request_changes',
+      automatic: true,
+      mergeBase: true,
+    })
+    // A merge-only run (#227): the merge agent resolves the conflict, and no builder session starts.
+    expect(queued).toEqual([{ input: { taskId: id, mergeBase: true }, key: expect.any(String) }])
+    // The note stays on record as the reason, though no agent is given it.
+    const note = (intake.at(-1)?.detail as { note: string }).note
+    expect(note).toContain('git merge origin/workspace')
+    expect(note).toMatch(/generated file/)
   })
 
   it('sends back on its own branch a waiting integration that conflicts with its base, and starts over only without the branch', async () => {
@@ -1788,8 +1793,15 @@ describe('actions', () => {
     await sendBackConflictAutomatically(deps(), kept, 'workspace')
     expect(deleted()).toEqual([])
     const input = queued.at(-1)?.input as { taskId: number; feedback?: string }
-    expect(input.taskId).toBe(kept)
-    expect(input.feedback).toContain('git merge origin/workspace')
+    expect(input).toEqual({ taskId: kept, mergeBase: true })
+    const [sent] = (await getDb()
+      .select()
+      .from(stageEvent)
+      .where(eq(stageEvent.taskId, kept))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)) as { detail: { note: string; mergeBase?: boolean } }[]
+    expect(sent.detail).toMatchObject({ mergeBase: true, automatic: true })
+    expect(sent.detail.note).toContain('git merge origin/workspace')
 
     const gone = await seed('done', {
       issueNumber: 87,

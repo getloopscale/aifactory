@@ -192,6 +192,7 @@ function describeBuild(d: Detail, t: Events): string {
     d.attempt ? t.attempt(text(d.attempt)) : '',
     d.resumed ? t.resumed : '',
     d.rework ? t.rework : '',
+    d.merger ? t.merger : '',
     d.planned ? t.planned : '',
   )
 }

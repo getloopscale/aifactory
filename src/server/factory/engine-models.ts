@@ -84,11 +84,13 @@ export const MODEL_ENV: Record<AgentRole, string> = {
   builder: 'FACTORY_MODEL_BUILDER',
   planner: 'FACTORY_MODEL_PLANNER',
   reviewer: 'FACTORY_MODEL_REVIEWER',
+  merger: 'FACTORY_MODEL_MERGER',
 }
 export const EFFORT_ENV: Record<AgentRole, string> = {
   builder: 'FACTORY_EFFORT_BUILDER',
   planner: 'FACTORY_EFFORT_PLANNER',
   reviewer: 'FACTORY_EFFORT_REVIEWER',
+  merger: 'FACTORY_EFFORT_MERGER',
 }
 
 /**

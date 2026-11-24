@@ -482,6 +482,31 @@ class RealGit {
     run('push', '-q', 'origin', 'workspace')
   }
 
+  /** Leaves `factory/7` with a file of its own and `workspace` with another, so merging them is clean. */
+  divergeClean(): void {
+    const clone = join(this.root, 'diverge-clean')
+    const run = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd: clone,
+        encoding: 'utf8',
+      })
+    execFileSync('git', ['clone', '-q', '-b', 'workspace', this.remote, clone])
+    run('switch', '-q', '-c', 'factory/7')
+    writeFileSync(join(clone, 'work.txt'), 'the work\n')
+    run('add', '-A')
+    run('commit', '-qm', 'the work')
+    run('push', '-q', 'origin', 'factory/7')
+    run('switch', '-q', 'workspace')
+    writeFileSync(join(clone, 'base.txt'), 'the base\n')
+    run('add', '-A')
+    run('commit', '-qm', 'the base moves')
+    run('push', '-q', 'origin', 'workspace')
+  }
+
+  parentsOf(sha: string): string[] {
+    return this.git('rev-list', '--parents', '-n', '1', sha).split(' ').slice(1)
+  }
+
   /**
    * Leaves `factory/7` and `workspace` on the remote with both having appended a different entry to the
    * `[Unreleased]` section of `CHANGELOG.md`, which is what two tasks of one repository do.
@@ -3918,7 +3943,7 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(reviewer.prompts).toHaveLength(1)
   })
 
-  it('fails for a person, naming the files, when the base conflicts with the branch', async () => {
+  it('fails for a person, naming the file, when the merge agent leaves the conflict unresolved', async () => {
     const { id, queued } = await sentToMergeTheBase()
     const sandbox = new FakeSandbox(
       changed((command) => {
@@ -3945,32 +3970,202 @@ describe('runTask merging an integration branch that passes the checks again', (
     expect(retryableFailure({ error: (result as { error: string }).error })).toBeNull()
   })
 
-  it('records the branch and the files of a conflict, for the coordinator to send the merge to the agent', async () => {
+  /**
+   * What `git show :N:file` prints in a merge the factory cannot settle itself: the sides rewrote a line of the
+   * ancestor, so keeping both additions is not enough and the merge agent is asked.
+   */
+  function rewrittenSides(command: string): { stdout: string } | undefined {
+    const stage = /show :([123]):/.exec(command)?.[1]
+    return stage ? { stdout: `side ${stage}\n` } : undefined
+  }
+
+  /**
+   * A merge of `base` into the work that conflicts in CHANGELOG.md: git stops, the merge agent resolves it, and
+   * the merge commit is `merge`. `left` is what is still unmerged after the agent ran.
+   */
+  function conflictingSandbox(left: string) {
+    let onBranch = false
+    let agentRan = false
+    let committed = false
+    dirty = false
+    return {
+      ran: () => {
+        agentRan = true
+      },
+      sandbox: new FakeSandbox(
+        changed((command) => {
+          if (command.includes('checkout -B factory/7')) onBranch = true
+          if (command.includes('ls-remote'))
+            return { stdout: `${verified}\trefs/heads/factory/7\n` }
+          if (command.includes('show :')) return rewrittenSides(command)
+          if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
+          if (command.includes('--diff-filter=U'))
+            return { stdout: agentRan ? left : 'CHANGELOG.md\n' }
+          if (command.includes('merge-base FETCH_HEAD')) return { stdout: `${'d'.repeat(40)}\n` }
+          if (command.includes('patch-id --stable')) return { stdout: `p1 ${'0'.repeat(40)}\n` }
+          if (command.includes('commit --no-edit')) committed = true
+          if (command.includes('rev-list --parents')) {
+            return { stdout: `${merge} ${verified} ${base}\n` }
+          }
+          if (command.includes('rev-list --count')) return { stdout: committed ? '1\n' : '0\n' }
+          if (command.endsWith('rev-parse HEAD')) {
+            return { stdout: `${!onBranch ? base : committed ? merge : verified}\n` }
+          }
+          return undefined
+        }),
+      ),
+    }
+  }
+
+  it('has the merge agent resolve a conflict, never the builder, and reviews only the resolution', async () => {
     const { id, queued } = await sentToMergeTheBase()
-    const sandbox = new FakeSandbox(
-      changed((command) => {
-        if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
-        if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
-        if (command.includes('--diff-filter=U')) return { stdout: 'CHANGELOG.md\nsrc/a.ts\n' }
-        return undefined
-      }),
-    )
+    const world = conflictingSandbox('')
+    const builds: string[] = []
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        builds.push(input.prompt)
+        return { ok: true, summary: 'built' }
+      },
+    }
+    const merges: string[] = []
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        merges.push(input.prompt)
+        world.ran()
+        return { ok: true, summary: 'Kept both changelog entries.' }
+      },
+    }
+    const reviewer = reviewerSaying(verdictJson('approve'))
     const input = queued[0]!
 
-    await runTask(
-      deps(sandbox),
+    const result = await runTask(
+      deps(world.sandbox, { harness: builder, merger, reviewer }),
       id,
       undefined,
       runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
     )
 
-    const [failed] = await getDb()
-      .select()
-      .from(stageEvent)
-      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'failed')))
-    expect(failed!.detail).toMatchObject({
-      baseConflict: { branch: 'workspace', files: ['CHANGELOG.md', 'src/a.ts'] },
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(builds).toEqual([])
+    expect(merges).toHaveLength(1)
+    expect(merges[0]).toContain('CHANGELOG.md')
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(reviewer.prompts[0]).toContain(`git show --remerge-diff ${merge}`)
+    expect(reviewer.prompts[0]).not.toContain('git diff')
+    const roles = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(roles.map((r) => [r.role, r.harness])).toEqual([
+      ['merger', 'fake-merger'],
+      ['reviewer', 'fake-reviewer'],
+    ])
+    expect(
+      world.sandbox.backend.commands.some((c) =>
+        c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
+      ),
+    ).toBe(true)
+  })
+
+  it('reviews a resolved conflict even when the task patch is the one an earlier review approved', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    await approvedEarlier(id)
+    const world = conflictingSandbox('')
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async () => {
+        world.ran()
+        return { ok: true, summary: 'Kept both.' }
+      },
+    }
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const input = queued[0]!
+
+    await runTask(
+      deps(world.sandbox, { merger, reviewer }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(reviewer.prompts[0]).toContain('--remerge-diff')
+  })
+
+  it('asks no agent when the second attempt at the merge finds no conflict', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    let attempts = 0
+    let merged = false
+    let onBranch = false
+    dirty = false
+    const sandbox = new FakeSandbox(
+      changed((command) => {
+        if (command.includes('checkout -B factory/7')) onBranch = true
+        if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
+        if (command.includes('show :')) return rewrittenSides(command)
+        if (command.includes('merge --no-edit')) {
+          attempts += 1
+          if (attempts === 1) return { exitCode: 1, stdout: 'CONFLICT' }
+          merged = true
+          return undefined
+        }
+        if (command.includes('--diff-filter=U')) return { stdout: 'CHANGELOG.md\n' }
+        if (command.includes('rev-list --count')) return { stdout: merged ? '1\n' : '0\n' }
+        if (command.endsWith('rev-parse HEAD')) {
+          return { stdout: `${!onBranch ? base : merged ? merge : verified}\n` }
+        }
+        return undefined
+      }),
+    )
+    const asked: string[] = []
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async (_backend, input) => {
+        asked.push(input.prompt)
+        return { ok: true, summary: 'never' }
+      },
+    }
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(sandbox, { merger }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(asked).toEqual([])
+  })
+
+  it('fails the step, naming the file, when the merge agent leaves a file unmerged, and pushes nothing', async () => {
+    const { id, queued } = await sentToMergeTheBase()
+    const world = conflictingSandbox('CHANGELOG.md\n')
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async () => {
+        world.ran()
+        return { ok: true, summary: 'Left it.' }
+      },
+    }
+    const input = queued[0]!
+
+    const result = await runTask(
+      deps(world.sandbox, { merger }),
+      id,
+      undefined,
+      runContinuation(undefined, input.feedback, input.resume, input.mergeBase),
+    )
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('CHANGELOG.md is still unmerged'),
     })
+    expect(pushesOf(world.sandbox)).toEqual([])
   })
 
   it('queues the same run for a handed-over task the coordinator merges the base of', async () => {
@@ -7190,5 +7385,212 @@ describe('a run whose issue no longer asks for the work', () => {
       'cancelled',
     ])
     expect(await stageNow(id)).toBe('cancelled')
+  })
+})
+
+describe('runTask merging the integration branch before integrating (#227)', () => {
+  const base = 'c'.repeat(40)
+  const merge = 'b'.repeat(40)
+  const CHECKS = [{ name: 'unit', command: 'run-unit' }]
+  const INTEGRATION = [{ name: 'integration', command: 'run-integration' }]
+
+  async function configured(extra: Partial<typeof repository.$inferInsert> = {}) {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: CHECKS,
+        integrationChecks: INTEGRATION,
+        ...extra,
+      })
+  }
+
+  /** The work approved at `abc123def`, behind the integration branch, which is at `base`. */
+  function behind(
+    options: { conflict?: boolean; integrationExit?: number; baseExit?: number } = {},
+  ) {
+    let merged = false
+    let agentRan = false
+    const world = {
+      ran: () => {
+        agentRan = true
+      },
+      sandbox: new FakeSandbox(
+        changed((command) => {
+          if (command.includes('rev-parse FETCH_HEAD')) return { stdout: `${base}\n` }
+          if (command.includes('merge-base --is-ancestor')) return { exitCode: 1 }
+          if (command.includes('merge --no-edit')) {
+            if (options.conflict) return { exitCode: 1, stdout: 'CONFLICT' }
+            merged = true
+            return undefined
+          }
+          if (command.includes('--diff-filter=U')) {
+            return { stdout: options.conflict && !agentRan ? 'a.ts\n' : '' }
+          }
+          if (command.includes('commit --no-edit')) merged = true
+          if (command.includes('rev-list --parents')) {
+            return { stdout: `${merge} abc123def ${base}\n` }
+          }
+          if (command.includes('rev-list --count')) return { stdout: merged ? '1\n' : '0\n' }
+          if (command.endsWith('rev-parse HEAD') && merged) return { stdout: `${merge}\n` }
+          if (command.endsWith('run-integration')) {
+            return command.includes('aifactory-base')
+              ? { exitCode: options.baseExit ?? 0 }
+              : { exitCode: options.integrationExit ?? 0 }
+          }
+          return undefined
+        }),
+      ),
+    }
+    return world
+  }
+
+  it('merges the integration head into approved work, runs both lists of checks on the merge, and integrates it pinned', async () => {
+    await configured()
+    const id = await seedTask()
+    const world = behind()
+
+    const result = await runTask(deps(world.sandbox), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    const commands = world.sandbox.backend.commands
+    expect(commands.some((c) => c.includes(`merge --no-edit ${base}`))).toBe(true)
+    expect(pushesOf(world.sandbox).filter((c) => c.includes('factory/7'))).toHaveLength(2)
+    const stored = await getDb().select().from(evidence).where(eq(evidence.sha, merge))
+    expect(stored.map((e) => e.name).sort()).toEqual(['integration', 'unit'])
+    expect(seen.merges).toEqual([{ number: 12, sha: merge }])
+    // The approval holds for the merge commit and says so, so the integrated commit has a review on record.
+    const approvals = await getDb().select().from(review).where(eq(review.taskId, id))
+    expect(approvals.at(-1)).toMatchObject({ sha: merge, verdict: 'approve' })
+    expect(approvals.at(-1)!.summary).toContain('was clean')
+  })
+
+  it('fails the run, naming the check, when an integration check fails on the merge and passes on the base', async () => {
+    await configured()
+    const id = await seedTask()
+
+    const result = await runTask(deps(behind({ integrationExit: 1 }).sandbox), id)
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('"integration"'),
+    })
+    expect(seen.merges).toEqual([])
+  })
+
+  it('does not blame the work for an integration check that fails on the integration head too', async () => {
+    await configured()
+    const id = await seedTask()
+
+    const result = await runTask(deps(behind({ integrationExit: 1, baseExit: 1 }).sandbox), id)
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('fails on workspace at ccccccc too'),
+    })
+    const [failed] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'failed')))
+    expect(failed!.detail).toMatchObject({ baseRed: { checks: ['integration'] } })
+  })
+
+  it('runs the integration checks on approved work that already holds the integration head', async () => {
+    await configured()
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((command) => (command.endsWith('run-integration') ? { exitCode: 1 } : undefined)),
+    )
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'failed' })
+    expect(sandbox.backend.commands.some((c) => c.includes('merge --no-edit'))).toBe(false)
+  })
+
+  it('has the merge agent resolve a conflict found before integrating, and integrates only an approved resolution', async () => {
+    await configured({ integrationChecks: [] })
+    const id = await seedTask()
+    const world = behind({ conflict: true })
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async () => {
+        world.ran()
+        return { ok: true, summary: 'Kept both.' }
+      },
+    }
+    const reviewer = reviewerSaying(verdictJson('approve'), verdictJson('approve'))
+
+    const result = await runTask(deps(world.sandbox, { merger, reviewer }), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: merge })
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[1]).toContain(`git show --remerge-diff ${merge}`)
+    expect(seen.merges).toEqual([{ number: 12, sha: merge }])
+  })
+
+  it('fails the run, and integrates nothing, when the review of the resolution asks for changes', async () => {
+    await configured({ integrationChecks: [] })
+    const id = await seedTask()
+    const world = behind({ conflict: true })
+    const merger: CodingHarness = {
+      name: 'fake-merger',
+      egress: agentEgress,
+      run: async () => {
+        world.ran()
+        return { ok: true, summary: 'Took ours.' }
+      },
+    }
+    const reviewer = reviewerSaying(
+      verdictJson('approve'),
+      verdictJson('changes', [finding], 'the resolution drops their change'),
+    )
+
+    const result = await runTask(deps(world.sandbox, { merger, reviewer }), id)
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      error: expect.stringContaining('did not approve'),
+    })
+    expect(seen.merges).toEqual([])
+  })
+})
+
+describe('runTask merging real git before integrating (#227)', () => {
+  it('pushes a merge commit whose parents are the approved commit and the integration head, and integrates it pinned', async () => {
+    await getDb()
+      .insert(repository)
+      .values({
+        fullName: 'paulo/app',
+        enabled: true,
+        checks: [{ name: 'ok', command: 'true' }],
+        integrationChecks: [{ name: 'integration', command: 'true' }],
+      })
+    const id = await seedTask()
+    const git = await RealGit.open()
+    try {
+      git.divergeClean()
+      const approved = git.remoteHead('factory/7')
+      const base = git.remoteHead('workspace')
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: approved, pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      branchPushed()
+
+      const result = await runTask(deps(git.sandbox), id, undefined, { feedback: '', plain: true })
+
+      const pushed = git.remoteHead('factory/7')
+      expect(git.parentsOf(pushed)).toEqual([approved, base])
+      expect(result).toMatchObject({ status: 'done', sha: pushed })
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.headSha).toBe(pushed)
+      const stored = await getDb().select().from(evidence).where(eq(evidence.sha, pushed))
+      expect(stored.map((e) => e.name).sort()).toEqual(['integration', 'ok'])
+    } finally {
+      await git.close()
+    }
   })
 })

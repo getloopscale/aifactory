@@ -146,3 +146,40 @@ export function withConflictFiles(note: string, files: string[], max = 4_000): s
   if (listed === 0) return note.length <= max ? note : note.slice(0, max)
   return listed < paths.length ? `${text} and ${paths.length - listed} more` : text
 }
+
+/**
+ * What is wrong with a merge commit a merge agent left (#227), one sentence for each, naming the file. Nothing
+ * may stay unmerged or hold a conflict marker, and the commit must have exactly the work commit and the head of
+ * the integration branch as its parents, in that order. An empty list means the result may be reviewed.
+ */
+export async function resolutionProblems(
+  backend: SandboxBackend,
+  git: string,
+  merge: { work: string; base: string },
+): Promise<string[]> {
+  const unmerged = await must(backend, `${git} diff --name-only --diff-filter=U`)
+  const stillUnmerged = unmerged.stdout.split('\n').filter((f) => f !== '')
+  // With a file unmerged there is no merge commit to read yet.
+  if (stillUnmerged.length > 0) return stillUnmerged.map((file) => `${file} is still unmerged`)
+  const problems: string[] = []
+  const dirty = await must(backend, `${git} status --porcelain`)
+  for (const line of dirty.stdout.split('\n').filter((l) => l !== '')) {
+    problems.push(`${line.slice(3)} is not committed`)
+  }
+  const parents = (await must(backend, `${git} rev-list --parents -n 1 HEAD`)).stdout
+    .trim()
+    .split(/\s+/)
+    .slice(1)
+  if (parents.length !== 2 || parents[0] !== merge.work || parents[1] !== merge.base) {
+    problems.push(
+      `the commit is not a merge of ${merge.base.slice(0, 7)} into ${merge.work.slice(0, 7)}: its parents are ${parents.map((p) => p.slice(0, 7)).join(', ') || 'none'}`,
+    )
+  }
+  // `git diff --check` names a conflict marker in a line the merge added, by file and line.
+  const marked = await backend.execute(`${git} diff --check ${merge.work} HEAD`)
+  for (const line of `${marked.stdout}\n${marked.stderr}`.split('\n')) {
+    const found = /^(.+?):\d+: leftover conflict marker/.exec(line)
+    if (found) problems.push(`${found[1]} still has a conflict marker`)
+  }
+  return [...new Set(problems)]
+}

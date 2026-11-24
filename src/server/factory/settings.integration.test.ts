@@ -40,7 +40,12 @@ const ready = {
 
 describe('the choice of agent, kept in the panel', () => {
   it('starts with nothing chosen, so the environment decides', async () => {
-    expect(await loadChosen(getDb())).toEqual({ builder: null, planner: null, reviewer: null })
+    expect(await loadChosen(getDb())).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: null,
+      merger: null,
+    })
     const env = await effectiveEnv(getDb(), { FACTORY_HARNESS: 'codex' })
     expect(env.FACTORY_HARNESS).toBe('codex')
   })
@@ -65,12 +70,14 @@ describe('the choice of agent, kept in the panel', () => {
       builder: 'claude-code',
       planner: null,
       reviewer: 'claude-code',
+      merger: null,
     })
     await saveChosen(getDb(), { reviewer: null }, ready)
     expect(await loadChosen(getDb())).toEqual({
       builder: 'claude-code',
       planner: null,
       reviewer: null,
+      merger: null,
     })
     await saveChosen(getDb(), {}, ready)
     expect((await loadChosen(getDb())).builder).toBe('claude-code')
@@ -92,7 +99,12 @@ describe('the choice of agent, kept in the panel', () => {
     await expect(
       saveChosen(getDb(), { builder: 'claude-code', planner: 'gpt-9' }, ready),
     ).rejects.toBeInstanceOf(SettingRefused)
-    expect(await loadChosen(getDb())).toEqual({ builder: null, planner: null, reviewer: null })
+    expect(await loadChosen(getDb())).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: null,
+      merger: null,
+    })
   })
 
   it('turns a refusal into one the panel can show', async () => {
@@ -115,11 +127,17 @@ describe('the choice of agent, kept in the panel', () => {
       ['claude-code', true],
       ['codex', true],
     ])
-    expect(settings.chosen).toEqual({ builder: null, planner: null, reviewer: 'codex' })
+    expect(settings.chosen).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: 'codex',
+      merger: null,
+    })
     expect(settings.effective).toEqual({
       builder: 'claude-code',
       planner: 'codex',
       reviewer: 'codex',
+      merger: 'claude-code',
     })
     expect(settings.repositoriesWithOwn).toEqual([
       { repository: 'o/own', builder: 'codex', reviewer: null },
@@ -187,7 +205,12 @@ describe('the model and the effort, kept in the panel', () => {
     await expect(
       saveChosen(getDb(), { builder: 'codex', models: { builder: 'a;b' } }, ready, read),
     ).rejects.toThrow(/not a plain model name/)
-    expect(await loadChosen(getDb())).toEqual({ builder: null, planner: null, reviewer: null })
+    expect(await loadChosen(getDb())).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: null,
+      merger: null,
+    })
   })
 
   it('refuses an effort the model does not take, and takes any level of the agent when no model is chosen', async () => {
@@ -272,7 +295,12 @@ describe('the model and the effort, kept in the panel', () => {
       'opus',
       'fable',
     ])
-    expect(settings.chosenModel).toEqual({ builder: 'gpt-6-luna', planner: null, reviewer: null })
+    expect(settings.chosenModel).toEqual({
+      builder: 'gpt-6-luna',
+      planner: null,
+      reviewer: null,
+      merger: null,
+    })
   })
 
   it('shows the catalog with the model in use', async () => {
