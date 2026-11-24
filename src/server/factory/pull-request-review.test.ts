@@ -58,6 +58,22 @@ describe('renderReview', () => {
     expect(text).toContain('❌ `lint`')
   })
 
+  it("leaves no mention, link or comment opener of the agent's text in the public comment", () => {
+    const text = renderReview({
+      marker,
+      sha: 'abc1234',
+      verdict: {
+        verdict: 'changes',
+        summary: 'ping @owner see https://evil.example/x',
+        findings: [{ severity: 'major', issue: 'cc @team <!-- hidden -->' }],
+      },
+      results: [],
+    })
+    expect(text.replace(marker, '')).not.toMatch(/@(?=\w)/)
+    expect(text).not.toContain('https://')
+    expect(text).not.toContain('hidden -->')
+  })
+
   it('cuts a long list of findings', () => {
     const findings = Array.from({ length: 40 }, (_, i) => ({
       severity: 'minor' as const,
@@ -228,6 +244,12 @@ describe('reviewPullRequest', () => {
     expect(out).toMatchObject({ status: 'skipped' })
     expect(t.sandbox.stopped).toBe(1)
     expect(t.pull.reviews ?? []).toEqual([])
+  })
+
+  it('runs a pull request in a cache of its own', async () => {
+    const t = arrange({})
+    await reviewPullRequest(t.deps, 1)
+    for (const spec of t.sandbox.specs) expect(spec.cacheKey).toBe(`pull-review-${REPO}`)
   })
 
   it('skips a head that is not the commit claimed', async () => {

@@ -45,6 +45,12 @@ describe('reviewTrigger', () => {
     })
   })
 
+  it("does not read a stranger's ready_for_review because the label is still there", () => {
+    expect(
+      reviewTrigger(pull({ action: 'ready_for_review', labels: [REVIEW_LABEL] })),
+    ).toMatchObject({ review: false })
+  })
+
   it('never reads a pull request on a factory branch, whoever wrote it', () => {
     expect(
       reviewTrigger(pull({ headRef: 'factory/467', authorAssociation: 'OWNER' })),

@@ -31,8 +31,12 @@ export function reviewTrigger(
   if (intent.action === 'labeled' && intent.addedLabel !== REVIEW_LABEL) {
     return { review: false, why: `label "${intent.addedLabel ?? ''}" is not "${REVIEW_LABEL}"` }
   }
-  // The label lets one head be read, not every later push of a stranger: a new commit needs a new label.
-  if (intent.action !== 'synchronize' && intent.labels.includes(REVIEW_LABEL))
+  // The label lets the head it was added on be read, nothing a stranger pushes later: only the delivery of
+  // the label itself (or of a pull request opened with it) honours it, never a push or a ready_for_review.
+  if (
+    (intent.action === 'labeled' || intent.action === 'opened') &&
+    intent.labels.includes(REVIEW_LABEL)
+  )
     return { review: true, trigger: `label:${REVIEW_LABEL}` }
   if (TRUSTED_ASSOCIATIONS.includes(intent.authorAssociation)) {
     return { review: true, trigger: `author:${intent.authorAssociation}` }

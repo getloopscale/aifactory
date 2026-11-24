@@ -195,7 +195,8 @@ async function openAt(
   const sandbox = await createIsolatedSandbox(deps.sandbox, {
     owner: { owner: 'pull-review', repository: at.repo, pullNumber: at.number },
     timeoutMs: Math.min(deps.sandboxMs ?? SANDBOX_MS, deps.sandbox.maxSessionMs ?? Infinity),
-    cacheKey: at.repo,
+    // Its own cache: the commit's install scripts may poison it, and no trusted run may read it.
+    cacheKey: `pull-review-${at.repo}`,
     egress: rules.start,
   })
   try {
@@ -381,8 +382,15 @@ function summaryOfChecks(results: CheckResult[]): string {
 
 const FINDINGS_SHOWN = 30
 
+/** The agent read text an outsider wrote: what it says goes into a public comment with no mention and no link. */
+export const defanged = (text: string) =>
+  text
+    .replace(/https?:\/\/\S*/gi, '[link removed]')
+    .replace(/@(?=[\w-])/g, '@\u200b')
+    .replace(/<!--|-->/g, '')
+
 const renderFinding = (f: Finding) =>
-  `- **${f.severity}**${f.file ? ` \`${f.file}\`` : ''}: ${f.issue}`
+  `- **${f.severity}**${f.file ? ` \`${defanged(f.file).replace(/`/g, "'")}\`` : ''}: ${defanged(f.issue)}`
 
 /** The text of the review: the commit it read, the verdict, the findings and the checks. Comments only. */
 export function renderReview(input: {
@@ -407,7 +415,7 @@ export function renderReview(input: {
     input.marker,
     `**Factory review of \`${input.sha}\`: ${word}**`,
     '',
-    verdict.summary,
+    defanged(verdict.summary),
     '',
     shown.length > 0 ? `Findings:\n${shown.map(renderFinding).join('\n')}` : 'No findings.',
     more > 0 ? `\n…and ${more} more.` : '',
