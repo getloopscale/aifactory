@@ -119,10 +119,11 @@ function deps(remote: string, over: Partial<KnowledgeDeps> = {}) {
 
 let issue = 0
 async function aTask(repository = 'acme/app') {
+  const number = ++issue
   const [i] = await getDb()
     .insert(ingress)
     .values({
-      deliveryId: `k-${++issue}`,
+      deliveryId: `k-${number}`,
       event: 'issues',
       payload: {},
       outcome: 'task_created',
@@ -132,7 +133,7 @@ async function aTask(repository = 'acme/app') {
     .returning()
   const [t] = await getDb()
     .insert(task)
-    .values({ ingressId: i.id, repository, issueNumber: issue, issueTitle: `Issue ${issue}` })
+    .values({ ingressId: i.id, repository, issueNumber: number, issueTitle: `Issue ${number}` })
     .returning()
   return t
 }
