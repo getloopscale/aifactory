@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import { ingress, repository, stageEvent, task } from '../db/schema'
 
 import { decideIngress, type IngressDecision, type RoutedIntent } from './decide'
+import { actOnWriting, type WrittenResult } from './pull-request'
 import { startOverOnLabel } from './restart'
 import { withdrawTask } from './withdraw'
 
@@ -19,7 +20,14 @@ export type RecordResult =
   | { status: 'duplicate' }
   | { status: 'ignored'; code: string; reason: string }
   /** Understood and stored: no task and no job, but an issue that was closed or lost the label cancels its task. */
-  | { status: 'routed'; code: string; reason: string; intent: RoutedIntent }
+  | {
+      status: 'routed'
+      code: string
+      reason: string
+      intent: RoutedIntent
+      /** What was done for something written on a pull request, when the caller can act on it. */
+      written?: WrittenResult
+    }
   | { status: 'task_created'; taskId: number }
   | { status: 'task_exists'; taskId: number }
   | { status: 'task_restarted'; taskId: number }
@@ -73,6 +81,11 @@ export async function recordDelivery(
    * back with it. `restartedBy` names the delivery that started an existing task over.
    */
   onTaskCreated?: (taskId: number, restartedBy?: string) => Promise<unknown>,
+  /**
+   * Sends a task back with a note, in the transaction, as the panel's request for changes does. Without it,
+   * what is written on a pull request is only recorded.
+   */
+  sendBack?: (tx: Database, taskId: number, note: string) => Promise<unknown>,
 ): Promise<RecordResult> {
   const asked = decideIngress(delivery.event, delivery.payload)
 
@@ -96,7 +109,10 @@ export async function recordDelivery(
     if ('intent' in decision) {
       const { code, reason, intent } = decision
       await withdrawTask(tx, intent)
-      return { status: 'routed', code, reason, intent }
+      const written = sendBack
+        ? await actOnWriting(tx, intent, (taskId, note) => sendBack(tx, taskId, note))
+        : undefined
+      return { status: 'routed', code, reason, intent, ...(written ? { written } : {}) }
     }
     if (!decision.accept) return { status: 'ignored', code: decision.code, reason: decision.reason }
 

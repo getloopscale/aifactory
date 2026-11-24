@@ -4,7 +4,7 @@ import { z } from 'zod'
 export const FACTORY_LABEL = 'factory'
 
 const repositoryPayload = z.object({ full_name: z.string() })
-const actorPayload = z.object({ login: z.string() })
+const actorPayload = z.object({ login: z.string(), type: z.string().optional() })
 
 const issuesPayload = z.object({
   action: z.string(),
@@ -24,6 +24,7 @@ const commentPayload = z.object({
   id: z.number().int(),
   user: actorPayload,
   author_association: z.string(),
+  body: z.string().nullish(),
 })
 
 const pullRequestPayload = z.object({
@@ -32,7 +33,14 @@ const pullRequestPayload = z.object({
 })
 
 /** Something somebody wrote, by whom, and what GitHub says that person is to the repository. */
-type Written = { actorLogin: string; actorAssociation: string }
+type Written = {
+  actorLogin: string
+  actorAssociation: string
+  /** An App or another bot wrote it: never a person's request. */
+  actorIsBot: boolean
+  /** What was written, trimmed; empty for a review that only approves. */
+  text: string
+}
 
 /**
  * What a delivery that starts no task means, with what the next step needs to act on it and nothing
@@ -81,9 +89,15 @@ export type RoutedCode = RoutedIntent['kind']
 
 type Routed = { intent: RoutedIntent; reason: string }
 
-const written = (by: { user: { login: string }; author_association: string }): Written => ({
+const written = (by: {
+  user: { login: string; type?: string }
+  author_association: string
+  body?: string | null
+}): Written => ({
   actorLogin: by.user.login,
   actorAssociation: by.author_association,
+  actorIsBot: by.user.type === 'Bot' || by.user.login.endsWith('[bot]'),
+  text: (by.body ?? '').trim(),
 })
 
 /**
