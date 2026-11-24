@@ -2266,6 +2266,65 @@ describe('runTask review loop', () => {
     )
   })
 
+  describe('a builder that changes nothing because it is blocked', () => {
+    const saying = (summary: string): CodingHarness => ({
+      name: 'saying',
+      egress: agentEgress,
+      run: async () => ({ ok: true, summary }),
+    })
+    const nothingChanged = () =>
+      new FakeSandbox(
+        changed((c) => (c.includes('status --porcelain') ? { stdout: '' } : undefined)),
+      )
+    const lastFailure = async (id: number) =>
+      (
+        await getDb()
+          .select()
+          .from(stageEvent)
+          .where(eq(stageEvent.taskId, id))
+          .orderBy(desc(stageEvent.id))
+      )[0]
+
+    it('ends blocked by the open issue it names, to be read again, not as a no change', async () => {
+      const id = await seedTask()
+      const result = await runTask(
+        deps(nothingChanged(), {
+          harness: saying('Nothing to build yet: this is blocked by paulo/gateways#541.'),
+        }),
+        id,
+      )
+      expect(result).toMatchObject({ status: 'failed' })
+      expect(result.status === 'failed' && result.error).toContain('blocked by paulo/gateways#541')
+      expect((await lastFailure(id)).detail).toMatchObject({ blockedBy: ['paulo/gateways#541'] })
+    })
+
+    it('does not take its own issue for a blocker', async () => {
+      const id = await seedTask()
+      const result = await runTask(
+        deps(nothingChanged(), {
+          harness: saying('Issue #7 is still open, and the fix is already there.'),
+          reviewer: reviewerSaying(verdictJson('changes', [finding], 'it does not')),
+        }),
+        id,
+      )
+      expect(result.status === 'failed' && result.error).not.toContain('blocked by')
+      expect((await lastFailure(id)).detail).not.toHaveProperty('blockedBy')
+    })
+
+    it('ends as BLOCKED_NO_CHANGE when it names a release that is not published', async () => {
+      const id = await seedTask()
+      const result = await runTask(
+        deps(nothingChanged(), {
+          harness: saying('The change needs @theokit/sdk 9.9.9, which is not published yet.'),
+        }),
+        id,
+      )
+      expect(result.status === 'failed' && result.error).toMatch(
+        /^blocked, the agent made no change/,
+      )
+    })
+  })
+
   it('tells the agent not to ask when the owner marked the repository as unwatched, and lets it ask otherwise', async () => {
     const prompts: string[] = []
     const capture: CodingHarness = {

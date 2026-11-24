@@ -55,14 +55,15 @@ export function refOf(name: string): IssueRef | undefined {
 }
 
 const WAITING_ON =
-  /\b(?:blocked (?:by|on)|waiting (?:for|on)|depends on|dependent on|requires?|needs?|still open|not (?:yet )?(?:fixed|merged|resolved|closed|released|available))\b/i
+  /\b(?:blocked (?:by|on)|waiting (?:for|on)|depends on|dependent on|is still open|not yet (?:fixed|merged|resolved|closed|released))\b/i
 
 /**
  * The issues the builder says it cannot go on without, from the sentences of its explanation that say it is
  * waiting for something. An issue named in passing is context, not a blocker, and the caller reads each one
  * on GitHub before treating it as one. A reference without a repository is to the task's own.
  */
-export function blockersNamed(said: string, repository: string): IssueRef[] {
+export function blockersNamed(said: string, own: IssueRef): IssueRef[] {
+  const repository = own.repository
   const found = new Map<string, IssueRef>()
   for (const sentence of said.split(/(?<=[.;!?])\s+|\n+/)) {
     if (!WAITING_ON.test(sentence)) continue
@@ -71,11 +72,15 @@ export function blockersNamed(said: string, repository: string): IssueRef[] {
       found.set(nameOf(ref), ref)
     }
   }
-  return [...found.values()]
+  return withoutOwn([...found.values()], own)
 }
 
+/** The issues of `refs` other than the task's own, which stays open until its release and so blocks nothing. */
+export const withoutOwn = (refs: IssueRef[], own: IssueRef): IssueRef[] =>
+  refs.filter((r) => nameOf(r) !== nameOf(own))
+
 const UNAVAILABLE =
-  /\b(?:(?:not|never) (?:yet )?(?:been )?(?:published|released)|unpublished|unreleased|no (?:such )?(?:release|version) (?:exists|of)|branch\b[^.]{0,80}\b(?:not (?:yet )?merged|does not exist|unmerged)|(?:unmerged|unpushed) branch)/i
+  /\b(?:(?:is|are) not (?:yet )?published|has not been (?:published|released)|unpublished|no (?:such )?(?:release|version) (?:exists|of)|branch\b[^.]{0,80}\b(?:is not (?:yet )?merged|does not exist)|unmerged branch)/i
 
 /** The sentence in which the builder says a release, a package version or a branch it needs does not exist yet. */
 export function unavailableNamed(said: string): string | undefined {

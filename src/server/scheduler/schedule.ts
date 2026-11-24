@@ -1,7 +1,7 @@
 import type { Pool } from 'pg'
 
-import { openAmong } from '../factory/blocker-check'
-import { refOf } from '../factory/blockers'
+import { openAmong, type BlockerReads } from '../factory/blocker-check'
+import { refOf, withoutOwn } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
 
 import { applyOrder, askOwner, blockTask, recordDecision, type AskDeps } from './apply'
@@ -35,7 +35,9 @@ import { bodyHash, parseReadiness, readinessMessage, readinessStep } from './rea
  * `trial` nothing changes on a job, a task or an issue.
  */
 
-export type SchedulerDeps = FactsDeps & AskDeps & { judge: ReadinessJudge }
+export type SchedulerDeps = FactsDeps &
+  AskDeps &
+  Pick<BlockerReads, 'fetchIssue'> & { judge: ReadinessJudge }
 
 export type ScheduleResult = {
   judged: number
@@ -94,10 +96,11 @@ async function blockedByIssues(
   run: ReadRun,
   verdict: ReadinessRecord,
 ): Promise<boolean> {
-  const refs = (verdict.blockedBy ?? []).flatMap((n) => {
+  const named = (verdict.blockedBy ?? []).flatMap((n) => {
     const ref = refOf(n)
     return ref ? [ref] : []
   })
+  const refs = withoutOwn(named, { repository: run.repository, number: run.issueNumber })
   try {
     const open = await openAmong(deps, run.repository, refs)
     if (open.length === 0) return false

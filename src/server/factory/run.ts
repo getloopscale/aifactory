@@ -849,7 +849,7 @@ export class Run {
     const open = await openAmong(
       { ...deps, fetchIssue: deps.fetchIssue },
       row.repository,
-      blockersNamed(said, row.repository),
+      blockersNamed(said, { repository: row.repository, number: row.issueNumber }),
     ).catch((error: unknown) => {
       // An issue that cannot be read now is no evidence of a blocker: the run ends as a plain no change.
       console.error(
