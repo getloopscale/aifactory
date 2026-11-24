@@ -213,6 +213,46 @@ describe('pollWatches', () => {
     expect(stored.detail).toContain('conflicts')
   })
 
+  it('does not revert a release for checks that failed on its parent too', async () => {
+    const id = await watching()
+    api.repo('paulo/app').parentOf(MERGE, 'parent01').clearChecks('parent01')
+    api.repo('paulo/app').checkRun('parent01', { name: 'ci', conclusion: 'failure' })
+    checked(run('ci', 'completed', 'failure'))
+
+    expect((await poll()).silent).toEqual([id])
+
+    expect(await row(id)).toMatchObject({ status: 'silent', revertUrl: null })
+    expect((await row(id)).detail).toContain('ci')
+    expect(reverts()).toEqual([])
+  })
+
+  it('reverts for the new failure only, and records what it left to the base', async () => {
+    const id = await watching()
+    api.repo('paulo/app').parentOf(MERGE, 'parent02').clearChecks('parent02')
+    api.repo('paulo/app').checkRun('parent02', { name: 'ci', conclusion: 'failure' })
+    checked(run('ci', 'completed', 'failure'), run('lint', 'completed', 'failure'))
+
+    expect((await poll()).red).toEqual([id])
+
+    expect(await row(id)).toMatchObject({
+      status: 'red',
+      detail: 'failing: lint; left to the base: ci',
+    })
+    expect(reverts()).toHaveLength(1)
+  })
+
+  it('keeps the watch open when the parent cannot be read', async () => {
+    const id = await watching()
+    api.repo('paulo/app').parentOf(MERGE, 'parent03')
+    checked(run('ci', 'completed', 'failure'))
+    api.fail('firstParent', new Error('GitHub answered 502'))
+
+    await expect(poll()).rejects.toThrow('502')
+
+    expect((await row(id)).status).toBe('watching')
+    expect(reverts()).toEqual([])
+  })
+
   it('does not look at a watch that has already ended', async () => {
     const id = await watching()
     await getDb().update(watch).set({ status: 'green' }).where(eq(watch.id, id))
