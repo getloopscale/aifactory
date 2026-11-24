@@ -154,8 +154,8 @@ reads that file, not a convention.
   task keeps waiting, the checks blamed on the base are kept on its `done` event (`baseBlame`, for the verified commit),
   and once the base passes all of them the task runs again only to merge the base (`mergeFixedBase`, the job's
   `mergeBase`): `Run.mergeBase` merges the head of the integration branch into the work branch itself, with no agent,
-  and pushes it, so the checks run again on a commit that is verified and reviewed. A conflict, or a branch that
-  already holds that head, fails the run for a person. The base is read only when a required check failed.
+  and pushes it, so the checks run again on a commit that is verified and reviewed. A conflict goes to the merge agent (below); a branch that
+  already holds that head fails the run for a person. The base is read only when a required check failed.
   When GitHub refuses auto-merge because
   the pull request is already clean (its checks passed first), the factory merges it at once, pinned to the
   same commit, as if no check were required (`autoMergeOrMergeable` in `github/pulls.ts`). A pull request that is
@@ -261,7 +261,7 @@ reads that file, not a convention.
   kept none either, with what the failed checks of the pull request's head logged on GitHub (`ciFailures`, through
   `readEvidence` and `ciFailingOutput`). One whose pull request conflicts with its base is a `merge_base`
   (`mergeBaseByCoordinator`, which asks for `coordinator_merge_base` and queues the run with `mergeBase`), and a
-  merge that conflicts there fails with `baseConflict` and is a `base_conflict`, sent back with the files. The handoffs
+  merge that conflicted there before the merge agent existed failed with `baseConflict` and is still a `base_conflict`, sent back with the files; a conflict now goes to the merge agent. The handoffs
   `integrate-after-ci` writes after the automatic runs carry a cause too (`ci-wait.ts`): `pull_conflict` and
   `base_fixed` are a `merge_base`, and `ci_red` is sent back with what the handoff quoted of the failed checks, or
   what their GitHub Actions jobs logged; a required check that never reported stays a plain `handoff`. A
@@ -366,6 +366,22 @@ reads that file, not a convention.
   failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
   environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
+- **Approved work is merged with the integration branch before it is integrated (#227).** `Run.mergedBeforeIntegration`
+  fetches the head of the integration branch; when the work does not hold it, `mergeHead` merges it, pushes the merge
+  commit and runs the checks on it, and then the repository's `integration_checks` run on the result (merged or not;
+  an empty list adds none). A clean merge is the factory's own git step and keeps the approval: it is recorded for the
+  merge commit (`keepApprovalForMerge`). A conflict goes to the merge agent (`merger` role, `FACTORY_MERGER`, the
+  builder's agent in a fresh session unless chosen; prompt in `agents/prompts/merger.ts`), never to the builder: git
+  leaves the conflicts in place, the agent resolves and stages them, the factory commits, and `resolutionProblems`
+  (`factory/merge-base.ts`) refuses an unmerged file, a conflict marker, an uncommitted file or parents other than the
+  work and the integration head, naming the file. A resolved merge is reviewed alone (`resolutionReviewPrompt`: the
+  `--remerge-diff` of the merge commit and what follows, never the whole pull request; `Run.resolvedMerge` picks it);
+  anything but an approval fails the run. A check that fails on the merge and on the fetched head is `BaseRed`
+  (`BaseProbe`). `merge-task` is pinned to the commit that was checked, merge or not. A conflict found later
+  (`conflict_rerun` from `retry-due`, `send_back_conflict` from `integrate-after-ci`) queues a merge-only run
+  (`mergeBase: true`, no feedback), which starts no builder session; `conflictBuilderSessions`
+  (`metrics/conflict-sessions.ts`) counts the tasks that still ran one for a conflict. `run-case.ts` mirrors only the
+  integration checks, since a case runs on its own base and there is nothing to merge.
 - **A conflict with the integration branch is merged by the factory first, and in turn.** A send-back for a conflict
   (`CONFLICT_NOTE_OPENING`) makes the run call `mergeIntegration` before any agent (`Run.mergeWithoutAgent`): a Markdown
   file whose two sides both only added lines to the common ancestor keeps both (`merge-base.ts`), and the merge is

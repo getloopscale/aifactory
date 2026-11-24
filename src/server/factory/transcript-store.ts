@@ -6,7 +6,7 @@ import type { TranscriptEvent } from '../../shared/panel'
 
 import { toStored, type AgentEvent } from './transcript'
 
-export type Role = 'builder' | 'reviewer'
+export type Role = 'builder' | 'reviewer' | 'merger'
 
 /** The transcript of a task could not be written. The run's own work is not what failed. */
 export class TranscriptWriteError extends Error {

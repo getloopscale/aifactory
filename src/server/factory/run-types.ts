@@ -46,6 +46,11 @@ export type RunTaskDeps = {
    */
   reviewer?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
   /**
+   * The agent that resolves the conflicts of merging the integration branch into approved work (#227). Nothing
+   * (or no function) means the builder's agent does it in a fresh session.
+   */
+  merger?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
+  /**
    * The agent that writes the change plan, apart from the builder, chosen from the issue's labels and the
    * builder's name. Nothing (or no function) means the builder plans in the session it then builds in.
    */
