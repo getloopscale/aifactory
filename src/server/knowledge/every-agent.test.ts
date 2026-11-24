@@ -11,6 +11,7 @@ import { guideSpec } from '../factory/guides'
 import { buildPrompt } from '../factory/harness'
 import { planPrompt } from '../factory/plan'
 import { reviewPrompt } from '../factory/review'
+import { UNBLOCKER_SPEC } from '../coordinator/unblocker'
 import { READINESS_JUDGE_SPEC } from '../scheduler/judge'
 
 import { SANDBOX_KNOWLEDGE_DIR } from './format'
@@ -49,6 +50,7 @@ describe('every agent of the factory reads the knowledge base', () => {
     for (const spec of [
       CHAT_SPEC,
       SCOPE_DRAFTER_SPEC,
+      UNBLOCKER_SPEC,
       READINESS_JUDGE_SPEC,
       ...GUIDE_IDS.map((id) => guideSpec(id)),
     ]) {

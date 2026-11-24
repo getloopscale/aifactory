@@ -1,7 +1,7 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { question, task } from '../db/schema'
+import { coordinatorAction, question, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { GithubApi, IssueComment } from '../github/pulls'
 
@@ -10,6 +10,9 @@ import { enterStage } from './stages'
 
 /** Hidden in every comment the factory writes, so it never reads its own comment as an answer. */
 export const QUESTION_MARKER = '<!-- aifactory:question -->'
+
+/** Hidden in the comment the factory answers a question of the builder with: it names the question it answers. */
+export const answerMarker = (questionId: number) => `<!-- aifactory:answer:${questionId} -->`
 
 const QUESTION_LINE = /^QUESTION:[ \t]*/im
 const QUESTION_MAX = 1_500
@@ -54,17 +57,23 @@ const ANSWER_MAX = 4_000
 
 /**
  * The answer in a list of comments: what trusted people wrote after the question, in order. A
- * comment from a bot, from the factory itself, or from anyone without write access does not count.
+ * comment from a bot, from the factory itself, or from anyone without write access does not count, with one
+ * exception: the comment the coordinator's unblocker posted for this question. The coordinator recorded its id
+ * (`factoryAnswers`), and it carries the question's marker, so no other bot's comment passes for it.
  */
 export function pickAnswer(
   comments: IssueComment[],
-  asked: { commentId: string; at: Date },
+  asked: { commentId: string; at: Date; questionId?: number },
+  factoryAnswers: ReadonlySet<string> = new Set(),
 ): { text: string; by: string } | undefined {
+  const fromFactory = (c: IssueComment) =>
+    asked.questionId !== undefined &&
+    factoryAnswers.has(c.id) &&
+    c.body.includes(answerMarker(asked.questionId))
   const mine = comments.filter(
     (c) =>
       c.id !== asked.commentId &&
-      c.authorType === 'User' &&
-      TRUSTED.has(c.association) &&
+      (fromFactory(c) || (c.authorType === 'User' && TRUSTED.has(c.association))) &&
       !c.body.includes(QUESTION_MARKER) &&
       c.createdAt > asked.at &&
       c.body.trim() !== '',
@@ -132,7 +141,12 @@ export async function pollAnswers(deps: PollDeps): Promise<PollResult> {
     }
     const { token } = await deps.github.installationToken(repository)
     const comments = await deps.api.listIssueComments(repository, token, issueNumber, q.askedAt)
-    const answer = pickAnswer(comments, { commentId: q.commentId, at: q.askedAt })
+    const factoryAnswers = await answersOf(deps.db, q)
+    const answer = pickAnswer(
+      comments,
+      { commentId: q.commentId, at: q.askedAt, questionId: q.id },
+      factoryAnswers,
+    )
     if (!answer) {
       result.waiting += 1
       continue
@@ -143,6 +157,22 @@ export async function pollAnswers(deps: PollDeps): Promise<PollResult> {
     if (stored) result.answered.push(q.id)
   }
   return result
+}
+
+/** The ids of the comments the coordinator answered this question with, from what it recorded. */
+async function answersOf(db: Database, q: typeof question.$inferSelect): Promise<Set<string>> {
+  const rows = await db
+    .select({ id: sql<string | null>`${coordinatorAction.draft}->>'answerCommentId'` })
+    .from(coordinatorAction)
+    .where(
+      and(
+        eq(coordinatorAction.taskId, q.taskId),
+        eq(coordinatorAction.action, 'answer'),
+        eq(coordinatorAction.outcome, 'applied'),
+        sql`${coordinatorAction.draft}->>'questionId' = ${String(q.id)}`,
+      ),
+    )
+  return new Set(rows.flatMap((r) => (r.id ? [r.id] : [])))
 }
 
 /**
