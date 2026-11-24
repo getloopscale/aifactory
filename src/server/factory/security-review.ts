@@ -31,10 +31,10 @@ export function securityPrompt(input: {
 ${input.body || '(the issue has no description)'}
 
 ${
-    input.diff
-      ? `The change is below (the same as \`git diff ${input.baseSha}...HEAD\`). Judge it from this text; open a file only to see context a finding needs, and do not explore the rest of the repository. Finish quickly.\n\n<change>\n${input.diff}\n</change>\n\n`
-      : `Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches. `
-  }Review it for security only:
+  input.diff
+    ? `The change is below (the same as \`git diff ${input.baseSha}...HEAD\`). Judge it from this text; open a file only to see context a finding needs, and do not explore the rest of the repository. Finish quickly.\n\n<change>\n${input.diff}\n</change>\n\n`
+    : `Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches. `
+}Review it for security only:
 - Secrets and credentials the change adds (keys, tokens, passwords, private keys), in any file, including tests and examples.
 - Dependencies it adds or upgrades: a version with a known advisory, an unpinned or unusual source, a lifecycle script.
 - Injection: SQL, shell, path, template or prompt built from input that an outsider controls; unsafe deserialization; unvalidated redirects.
