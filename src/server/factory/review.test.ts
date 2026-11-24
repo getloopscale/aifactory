@@ -433,6 +433,74 @@ describe('diffGuards', () => {
     expect(findings.map((f) => f.file)).toEqual(['src/x.test.js', 'tests/y.js'])
   })
 
+  it('leaves a deleted test file to the reviewer when it goes with the module the issue removes', () => {
+    const issue = {
+      labels: ['factory'],
+      title: 'Use the kit',
+      body: 'Replace consent-state.ts with the hook.',
+    }
+    const findings = diffGuards({
+      ...clean,
+      changes: [
+        { status: 'D', path: 'src/consent/consent-state.ts' },
+        { status: 'D', path: 'tests/consent/consent-state.test.ts' },
+      ],
+      tests: { patch: '', issue },
+    })
+    expect(findings).toHaveLength(1)
+    expect(findings[0].severity).toBe('minor')
+    expect(findings[0].issue).toContain('consent-state.ts')
+  })
+
+  it('keeps a deleted test file major when its module stays or the issue does not name it', () => {
+    const named = {
+      labels: ['factory'],
+      title: 'Use the kit',
+      body: 'Replace consent-state.ts with the hook.',
+    }
+    const stays = diffGuards({
+      ...clean,
+      changes: [{ status: 'D', path: 'tests/consent/consent-state.test.ts' }],
+      tests: { patch: '', issue: named },
+    })
+    const unnamed = diffGuards({
+      ...clean,
+      changes: [
+        { status: 'D', path: 'src/consent/consent-state.ts' },
+        { status: 'D', path: 'tests/consent/consent-state.test.ts' },
+      ],
+      tests: { patch: '', issue: { ...named, body: 'Use the kit.' } },
+    })
+    const modified = diffGuards({
+      ...clean,
+      changes: [
+        { status: 'M', path: 'src/consent/consent-state.ts' },
+        { status: 'D', path: 'tests/consent/consent-state.test.ts' },
+      ],
+      tests: { patch: '', issue: named },
+    })
+    const noIssue = diffGuards({
+      ...clean,
+      changes: [
+        { status: 'D', path: 'src/consent/consent-state.ts' },
+        { status: 'D', path: 'tests/consent/consent-state.test.ts' },
+      ],
+    })
+    expect(stays.map((f) => f.severity)).toEqual(['major'])
+    expect(unnamed.map((f) => f.severity)).toEqual(['major'])
+    expect(modified.map((f) => f.severity)).toEqual(['major'])
+    const otherModule = diffGuards({
+      ...clean,
+      changes: [
+        { status: 'D', path: 'src/consent/trust-store.ts' },
+        { status: 'D', path: 'tests/consent/consent-state.test.ts' },
+      ],
+      tests: { patch: '', issue: named },
+    })
+    expect(noIssue.map((f) => f.severity)).toEqual(['major'])
+    expect(otherModule.map((f) => f.severity)).toEqual(['major'])
+  })
+
   it('treats a new test script on a repository that had none as a change', () => {
     const findings = diffGuards({
       changes: [],

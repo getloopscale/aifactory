@@ -1,10 +1,11 @@
-import { and, eq, inArray, isNotNull, like, notExists, or } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, like, notExists, notLike, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
 import { fetchIssue } from '../github/issues'
 import type { GithubApi } from '../github/pulls'
 
+import { publishedPackagesChanged } from './changed-packages'
 import { errorMessage } from './error-message'
 import { closeOpenIssue, releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
@@ -84,26 +85,35 @@ async function belongs(
   return deps.api.contains(s.repository, s.token, s.promotedSha, t.mergedSha!)
 }
 
+/** A failed publication of the repository that a later promotion superseded, or a tag whose workflow failed. */
+const supersededOrTag = (repo: string) =>
+  and(
+    eq(publication.repository, repo),
+    eq(publication.status, 'failed'),
+    or(eq(publication.kind, 'tag'), like(publication.detail, `${SUPERSEDED} %`)),
+  )
+
+/** A failed publication of the repository that failed for itself: its run ended and published nothing. */
+const failedForItself = (repo: string) =>
+  and(
+    eq(publication.repository, repo),
+    eq(publication.status, 'failed'),
+    eq(publication.kind, 'changesets'),
+    notLike(publication.detail, `${SUPERSEDED} %`),
+  )
+
 /**
- * The tasks whose publication a later promotion superseded (`supersedeUnmerged`) and that no release carried
- * yet (or whose tag's workflow failed): they wait in `released` for a publication that never published, so the next release that contains
- * their merge releases them.
+ * The tasks of a publication that failed and that no release carried yet. A failed publication published
+ * nothing, so its tasks wait in `released` for the next release that contains their merge.
  */
-const supersededUnreleased = (db: Database, repo: string) =>
+const failedUnreleased = (db: Database, repo: string) =>
   and(
     inArray(
       task.id,
       db
         .select({ id: publication.taskId })
         .from(publication)
-        .where(
-          and(
-            eq(publication.repository, repo),
-            eq(publication.status, 'failed'),
-            // A tag whose workflow failed published nothing, so the next release that holds its merge is its release.
-            or(eq(publication.kind, 'tag'), like(publication.detail, `${SUPERSEDED} %`)),
-          ),
-        ),
+        .where(or(supersededOrTag(repo), failedForItself(repo))),
     ),
     notExists(
       db
@@ -113,9 +123,49 @@ const supersededUnreleased = (db: Database, repo: string) =>
     ),
   )
 
+/** The package a changesets tag (`name@version`) names; a tag with no version names no package. */
+const packageOf = (tag: string) => {
+  const at = tag.lastIndexOf('@')
+  return at > 0 ? tag.slice(0, at) : undefined
+}
+
+/**
+ * Whether the release publishes every published package the task's merge changed. A publication that failed
+ * for itself is often one whose package had no changeset, so a later release carries its work only when it
+ * publishes that package (#100). A change to no published package is carried by any release. A diff that
+ * cannot be read leaves the task for a later release.
+ */
+async function publishesItsPackages(
+  api: GithubApi,
+  s: Shipment,
+  t: typeof task.$inferSelect,
+): Promise<boolean> {
+  const merge = t.mergedSha!
+  try {
+    const files = await api.changedFiles(s.repository, s.token, `${merge}^`, merge)
+    const changed = await publishedPackagesChanged(api, s.repository, s.token, {
+      head: merge,
+      files,
+    })
+    const released = new Set(s.tags.map((tag) => packageOf(tag.tag)))
+    return changed.every((name) => released.has(name))
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'failed_publication_task_unread',
+        repository: s.repository,
+        taskId: t.id,
+        error: message(error),
+      }),
+    )
+    return false
+  }
+}
+
 /**
  * Releases every task whose work is in the promoted commit: the one that asked for the release, each
- * finished task integrated before it, and each task of a superseded publication not released yet. Each gets a delivery per tag, moves to `released`, and its issue is
+ * finished task integrated before it, and each task of a failed publication not released yet (one that failed
+ * for itself only when this release publishes its packages, and its issue closed only if still open). Each gets a delivery per tag, moves to `released`, and its issue is
  * told where the fix is and closed. A task already holding a delivery of the first tag is left alone, so a
  * pass that runs again does not comment twice. An issue that cannot be closed is recorded on its task's
  * `released` stage and returned; the release is not undone.
@@ -134,13 +184,25 @@ export async function shipContained(
         or(
           eq(task.stage, 'done'),
           eq(task.id, s.askedTaskId),
-          supersededUnreleased(deps.db, s.repository),
+          failedUnreleased(deps.db, s.repository),
         ),
       ),
     )
+  const ownFailures = new Set(
+    (
+      await deps.db
+        .select({ id: publication.taskId })
+        .from(publication)
+        .where(failedForItself(s.repository))
+    ).map((row) => row.id),
+  )
+  const read = deps.fetchIssue ?? fetchIssue
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [] }
   for (const t of candidates) {
     if (!(await belongs(deps, s, t))) continue
+    // A task released by its own failed publication: a person may have closed its issue meanwhile.
+    const ownFailure = ownFailures.has(t.id) && t.id !== s.askedTaskId && t.stage === 'released'
+    if (ownFailure && !(await publishesItsPackages(deps.api, s, t))) continue
     await deps.db.insert(delivery).values(
       s.tags.map((tag) => ({
         taskId: t.id,
@@ -151,7 +213,16 @@ export async function shipContained(
         actor: s.actor,
       })),
     )
-    const issueError = await announce(deps.api, s, t.issueNumber)
+    const issueError = ownFailure
+      ? await closeOpenIssue(
+          deps.api,
+          (n) => read(s.repository, n, s.token),
+          s.repository,
+          s.token,
+          t.issueNumber,
+          availableIn(s),
+        )
+      : await announce(deps.api, s, t.issueNumber)
     await enterStage(deps.db, t.id, 'released', {
       actor: s.actor,
       tag: s.tags.map((tag) => tag.tag).join(', '),

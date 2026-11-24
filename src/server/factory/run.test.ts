@@ -490,7 +490,11 @@ describe('a run waits for a sandbox slot (#405)', () => {
     )
     const run = Object.create(Run.prototype) as Record<string, unknown>
     run.c = {
-      deps: { sandbox: { ...p, deleteSnapshot }, knowledge: undefined },
+      deps: {
+        sandbox: { ...p, deleteSnapshot },
+        knowledge: undefined,
+        github: { installationToken: async () => ({ token: 'after-the-wait' }) },
+      },
       taskId: 1,
       state: { current: 'review' },
       token: 't',
@@ -508,5 +512,7 @@ describe('a run waits for a sandbox slot (#405)', () => {
     await settled
     expect(p.restore).toHaveBeenCalledTimes(61)
     expect(deleteSnapshot).toHaveBeenCalledWith('snap')
+    // The token it held before the wait may be ending, so the restored session starts with one minted after it.
+    expect((run.c as { token: string }).token).toBe('after-the-wait')
   })
 })

@@ -1,5 +1,5 @@
 import type { Finding } from './review'
-import { TEST_FILE, testWeakening } from './test-weakening'
+import { issueNamesModule, moduleStem, TEST_FILE, testWeakening } from './test-weakening'
 
 export type Change = { status: string; path: string }
 
@@ -46,9 +46,34 @@ export function diffGuards(input: {
       issue: `the "test" script was changed (from ${JSON.stringify(input.baseTestScript ?? null)} to ${JSON.stringify(input.headTestScript ?? null)}); the checks now run something else`,
     })
   }
+  const deletedModules = input.changes
+    .filter((c) => c.status === 'D' && !TEST_FILE.test(c.path))
+    .map((c) => c.path)
   for (const { path } of input.changes.filter((c) => c.status === 'D' && TEST_FILE.test(c.path))) {
-    findings.push({ severity: 'major', file: path, issue: 'a test file was deleted' })
+    findings.push(deletedTest(path, deletedModules, input.tests?.issue))
   }
   if (input.tests) findings.push(...testWeakening(input.tests))
   return findings
+}
+
+/**
+ * A deleted test file is major, unless the change deletes the module of the same name and the issue names
+ * that module: then the tests went with the code the issue removes, and the reviewer judges whether their
+ * cases are still covered.
+ */
+function deletedTest(
+  path: string,
+  deletedModules: string[],
+  issue: { labels: string[]; title: string; body: string } | undefined,
+): Finding {
+  const stem = moduleStem(path)
+  const module = deletedModules.find((m) => moduleStem(m) === stem)
+  if (module && issue && issueNamesModule(issue, stem)) {
+    return {
+      severity: 'minor',
+      file: path,
+      issue: `a test file was deleted with ${module}, which the issue names; judge whether its cases are still covered`,
+    }
+  }
+  return { severity: 'major', file: path, issue: 'a test file was deleted' }
 }

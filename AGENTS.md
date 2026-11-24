@@ -336,7 +336,7 @@ reads that file, not a convention.
   sandbox is stored and the task enters `waiting`, all in one transaction; `poll-answers` takes the answer, puts the
   task back in `intake` and queues its first run, whose prompt carries the answers (`clarifications`). Then the order:
   among the runs that are due and not held, lower `priority:N` first (no label sorts right after `priority:5`), then a
-  `bug`, then the issue more queued issues name in their `Blocked by` line, then the oldest job, then the task id. In
+  run that continues a task (sent back, resumed or merging the base) before a first run, then a `bug`, then the issue more queued issues name in their `Blocked by` line, then the oldest job, then the task id. In
   `auto` the sorted runs get the `available_at` times the queue already had, copied in one statement from the job
   that had each, under `HOLD_LOCK`; only rows whose time changes are written. The scheduler never touches a job a
   worker holds, that failed, that the coordinator holds (`heldFrom`, 'infinity'), that is not due, or of a task that

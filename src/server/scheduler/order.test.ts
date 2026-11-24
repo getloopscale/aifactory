@@ -21,6 +21,7 @@ const entry = (taskId: number, over: Partial<QueuedEntry> = {}): QueuedEntry => 
   priority: null,
   bug: false,
   unblocks: 0,
+  continues: false,
   queuedAt: at(taskId),
   availableAt: at(taskId),
   ...over,
@@ -41,6 +42,20 @@ describe('the labels the order reads', () => {
   it('sees a bug only in the bug label', () => {
     expect(isBug(['Bug'])).toBe(true)
     expect(isBug(['bugfix', 'enhancement'])).toBe(false)
+  })
+})
+
+describe('work already under way', () => {
+  it('finishes a run that continues a task before it starts a new one of the same priority', () => {
+    const fresh = entry(1, { bug: true, unblocks: 2 })
+    const conflicted = entry(2, { continues: true, queuedAt: at(50) })
+    expect(order([fresh, conflicted])).toEqual([2, 1])
+  })
+
+  it('still lets a higher priority start first', () => {
+    const urgent = entry(1, { priority: 1 })
+    const conflicted = entry(2, { continues: true })
+    expect(order([conflicted, urgent])).toEqual([1, 2])
   })
 })
 

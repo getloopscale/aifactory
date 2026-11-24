@@ -30,6 +30,12 @@ export type WaitingRelease = {
 
 const short = (sha: string) => sha.slice(0, 7)
 
+/**
+ * How long a release waits for GitHub to show the auto-merge `release()` just enabled. The first pass after
+ * it read `auto_merge` as off and refused a release GitHub merged twenty minutes later (#429).
+ */
+export const AUTO_MERGE_SETTLE_MS = 2 * 60_000
+
 /** How a refusal for a release pull request that conflicts with the release branch starts. */
 export const CONFLICT_REFUSAL = 'the release pull request conflicts with'
 
@@ -79,6 +85,7 @@ export function decideWaitingRelease(input: WaitingRelease): ReleaseStep {
   if (input.pull.mergeableState === 'dirty') {
     return refuse(`${CONFLICT_REFUSAL} ${branch}`, true)
   }
+  if (!input.pull.autoMerge && input.waitedMs < AUTO_MERGE_SETTLE_MS) return { kind: 'wait' }
   if (!input.pull.autoMerge) {
     return refuse(
       'auto-merge was turned off on the release pull request, so nothing will merge it',

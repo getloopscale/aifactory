@@ -37,7 +37,7 @@ export type RepositoryReleaseFacts = {
   /** Its release mode, or the factory's default when it has none. */
   mode: ReleaseMode
   /** Its tasks with integrated work that no release holds (`done` with a merge), oldest first. */
-  releasable: { taskId: number; issueNumber: number }[]
+  releasable: { taskId: number; issueNumber: number; mergedSha?: string }[]
   /** Its tasks resolved with no change that no release holds, whether or not `develop` holds their commit. */
   resolvedCandidates?: ResolvedCandidate[]
   /** Its tasks running or waiting for the integration branch's checks. */
@@ -62,6 +62,11 @@ export type RepositoryReleaseFacts = {
    * means integrated work has not been promoted into it yet, so there is nothing to release.
    */
   ahead?: number
+  /**
+   * Which of `releasable` the head of the pre-release branch holds the merge of, read only when a release is
+   * due. An integration that has not reached that branch yet is not in its release, so it cannot anchor one.
+   */
+  integrated?: Read<{ taskId: number; issueNumber: number }[]>
   /** Which of `resolvedCandidates` the head of the pre-release branch holds; read with `head`. */
   resolved?: Read<ResolvedCandidate[]>
   attempts?: ReleaseAttempt[]
@@ -225,11 +230,15 @@ export const trainHolds = (f: RepositoryReleaseFacts): boolean =>
 export const eligibleTasks = (
   f: RepositoryReleaseFacts,
 ): { taskId: number; issueNumber: number }[] => [
-  ...f.releasable,
+  ...(f.integrated === undefined ? f.releasable : f.integrated.read ? f.integrated.value : []),
   ...(f.resolved?.read ? f.resolved.value : []),
 ]
 
 const short = (sha: string) => sha.slice(0, 7)
+
+/** How many of the tasks a release would carry are integrated work rather than resolved with no change. */
+const integratedCount = (f: RepositoryReleaseFacts) =>
+  eligibleTasks(f).length - (f.resolved?.read ? f.resolved.value.length : 0)
 
 /**
  * The attempt the train makes next on this head, given the release decisions already recorded on it: the
@@ -275,6 +284,12 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   if (f.ahead === 0) return undefined
   if (f.releasable.length === 0 && f.resolved?.read === false)
     return unknown(taskId, f.head.value, notRead(f.resolved, 'the commits of the resolved tasks'))
+  if (f.integrated?.read === false)
+    return unknown(
+      taskId,
+      f.head.value,
+      notRead(f.integrated, 'the merges of the integrated tasks'),
+    )
   const head = f.head.value
   const at = {
     taskId: eligibleTasks(f)[0]?.taskId ?? taskId,
@@ -291,7 +306,7 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   if (!f.labels?.read) return unknown(taskId, head, notRead(f.labels, 'the labels of the issues'))
   const tasks = eligibleTasks(f)
   const issues = tasks.map((t) => `#${t.issueNumber}`).join(', ')
-  const kinds = f.releasable.length === tasks.length ? 'integrated issues' : 'issues'
+  const kinds = tasks.length === integratedCount(f) ? 'integrated issues' : 'issues'
   return {
     kind,
     ...at,
