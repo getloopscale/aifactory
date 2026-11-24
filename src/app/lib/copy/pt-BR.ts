@@ -996,6 +996,8 @@ export const ptBR: Copy = {
   },
   metrics: {
     heading: 'Métricas',
+    conflictSessions: (last: number, before: number) =>
+      `Sessões do construtor iniciadas por um conflito com a branch de integração: ${last} nos últimos 14 dias, ${before} nos 14 anteriores.`,
     empty: 'Ainda não há trabalho concluído o bastante para medir.',
     indicator: 'Indicador',
     repository: 'Repositório',

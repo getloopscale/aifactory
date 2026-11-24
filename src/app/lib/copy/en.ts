@@ -735,6 +735,8 @@ export const en = {
   },
   metrics: {
     heading: 'Metrics',
+    conflictSessions: (last: number, before: number) =>
+      `Builder sessions started by a conflict with the integration branch: ${last} in the last 14 days, ${before} in the 14 before.`,
     empty: 'Not enough finished work to measure yet.',
     indicator: 'Indicator',
     repository: 'Repository',
