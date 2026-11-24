@@ -96,15 +96,32 @@ describe('unblockDecision', () => {
       'no commit or passing run',
     )
     expect(
-      run({ action: 'resolve_elsewhere', evidence: { commit: 'abc' }, reason: 'r' }).reason,
-    ).toContain('Resolved elsewhere (abc)')
+      run({ action: 'resolve_elsewhere', evidence: { commit: 'abc' }, reason: 'r' }),
+    ).toMatchObject({ action: 'resolve_elsewhere', evidenceFor: { commit: 'abc' } })
   })
 
-  it('answer and blocked_by are proposed to a person until the panel can carry them out', () => {
-    expect(run({ action: 'answer', text: 'see src/a.ts', reason: 'r' }).reason).toContain(
-      'Proposed answer: see src/a.ts',
+  it('answer is for a question of the builder, blocked_by names the issue', () => {
+    const asked = exception({ kind: 'builder_question', head: 'question:4' })
+    expect(run({ action: 'answer', text: 'see src/a.ts', reason: 'r' }, [], asked)).toMatchObject({
+      action: 'answer',
+      answerText: 'see src/a.ts',
+      by: 'unblocker',
+    })
+    expect(run({ action: 'answer', text: 'x', reason: 'r' }).action).toBe('escalate')
+    expect(run({ action: 'blocked_by', issue: 12, reason: 'r' })).toMatchObject({
+      action: 'blocked_by',
+      blockedBy: 12,
+    })
+  })
+
+  it('a question of the builder is only answered, blocked or escalated', () => {
+    const asked = exception({ kind: 'builder_question', head: 'question:4' })
+    for (const action of ['send_back', 'rerun_checks', 'merge_base', 'scope', 'retry']) {
+      expect(run({ action, note: 'n', reason: 'r' }, [], asked).action).toBe('escalate')
+    }
+    expect(run({ action: 'blocked_by', issue: 3, reason: 'r' }, [], asked).action).toBe(
+      'blocked_by',
     )
-    expect(run({ action: 'blocked_by', issue: 12, reason: 'r' }).reason).toContain('Blocked by #12')
   })
 
   it('escalate keeps the owner category', () => {
@@ -197,10 +214,15 @@ describe('unblock', () => {
     expect(d).toMatchObject({ action: 'escalate', failure: 'down' })
   })
 
-  it('has no tool but the two read tools of the knowledge base', () => {
+  it('has only read tools: its own four and the two of the knowledge base', () => {
     expect(Object.keys(assistantTools(UNBLOCKER_SPEC)).sort()).toEqual([
       'knowledge_read',
       'knowledge_search',
+      'task_checks',
+      'task_diff',
+      'task_history',
+      'task_issue',
     ])
+    expect(UNBLOCKER_SPEC.asks).toEqual({})
   })
 })

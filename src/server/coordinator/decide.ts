@@ -48,6 +48,12 @@ export type Decision = {
   failure?: string
   /** The red integration branch whose fix a `fix_base` files. */
   base?: RedBase
+  /** The reply an `answer` posts on the issue. */
+  answerText?: string
+  /** The open issue a `blocked_by` names. */
+  blockedBy?: number
+  /** The commit or run a `resolve_elsewhere` rests on, and the note that says where. */
+  evidenceFor?: { commit?: string; run?: string }
   /** `unblocker` when the unblocker investigated an escalation and this is what it proposed. */
   by?: 'unblocker'
   /** A `wait` after the first one: nothing is recorded, since the first says since when. */
@@ -138,12 +144,28 @@ function mergeConflictingBase(
   }
 }
 
+/** Whether the checks of this commit were already rerun by the coordinator: one rerun per commit, whatever the exception. */
+export const rerunDone = (recorded: RecordedAction[], head: string): boolean => {
+  const sha = head.split('@')[0]
+  return recorded.some(
+    (r) =>
+      r.action === 'rerun_checks' && r.outcome === 'applied' && r.headSha.split('@')[0] === sha,
+  )
+}
+
 function sendBack(exception: TaskException, context: Context): Decision {
   const { head, evidence, conflictsWith, checkOutput, ciOutput } = exception
   const what = `the required checks failed on ${short(head)} and the last run changed nothing`
   if (conflictsWith !== undefined) {
     const why = `the last run changed nothing after the required checks failed on ${short(head)}`
     return mergeConflictingBase(conflictsWith, what, why, context)
+  }
+  // Failed on GitHub and passed on the factory's own run of this commit: run the failed jobs again, once.
+  if (exception.rerunnable && !rerunDone(context.recorded, head)) {
+    return {
+      action: 'rerun_checks',
+      reason: `${what}, but the same commit passed the factory's own checks: the failed GitHub Actions jobs run again, once`,
+    }
   }
   // The handoff may have kept no output; what the factory's own checks printed on the head stands in for it,
   // and what the failed GitHub Actions jobs logged when the factory kept nothing either.
@@ -380,6 +402,8 @@ const BY_KIND: Partial<
       `the release branch is red (${evidence}): the release train waits on ${short(head)} until it is green again, and a person looks at it`,
     ),
   base_red: fixBase,
+  builder_question: ({ evidence }) =>
+    escalate(`the builder's question has waited for an answer: ${evidence}`),
   publication_stalled: ({ evidence }) =>
     escalate(
       `${evidence}. The release train holds the repository until it ends, so a person looks at the release workflow and its Version Packages pull request`,

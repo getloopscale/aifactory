@@ -860,6 +860,7 @@ export const EXCEPTION_KINDS = [
   'ci_red',
   'checks_broke_after_review',
   'publication_stalled',
+  'builder_question',
 ] as const
 
 /**
@@ -877,6 +878,9 @@ export const COORDINATOR_ACTIONS = [
   'fix_base',
   'merge_base',
   'rerun_checks',
+  'answer',
+  'blocked_by',
+  'resolve_elsewhere',
   'wait',
   'escalate',
 ] as const

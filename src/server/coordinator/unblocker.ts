@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm'
 
 import { UNBLOCKER_INSTRUCTIONS } from '../agents/prompts/unblocker'
+import { UNBLOCKER_TOOLS } from '../agents/tools/unblocker'
 import type { Database } from '../db'
 import { task } from '../db/schema'
 import { oneShotAssistant, type AssistantSpec } from '../factory/assistant'
@@ -15,8 +16,8 @@ import { parseUnblock, unblockDecision } from './unblock'
 /**
  * The step after `decide` for an escalation: the unblocker investigates what the coordinator would leave with a
  * person and proposes one action. It reads what the coordinator already read (the exception, its output and the
- * decisions recorded) plus the issue as GitHub holds it; it has no tool but the knowledge base's two, so it
- * changes nothing, and merges nothing.
+ * decisions recorded) plus the issue as GitHub holds it, and its read-only tools (`agents/tools/unblocker.ts`)
+ * reach the rest; it changes nothing, and merges nothing.
  */
 
 /** A model that answers one message, with what the answer cost. */
@@ -30,10 +31,10 @@ export type UnblockDeps = {
   unblocker?: Unblocker
 }
 
-/** The unblocker as an assistant: read-only, so only the knowledge base's two tools. */
+/** The unblocker as an assistant: read-only, so its own read tools and the knowledge base's two. */
 export const UNBLOCKER_SPEC: AssistantSpec = {
   system: UNBLOCKER_INSTRUCTIONS,
-  tools: {},
+  tools: UNBLOCKER_TOOLS,
   asks: {},
 }
 
@@ -69,7 +70,7 @@ export function unblockMessage(
     .map((r) => `- ${r.action} for ${r.exceptionKind}: ${r.outcome}`)
     .join('\n')
   return [
-    `Issue ${issue.repo}#${issue.number}: ${issue.title}`,
+    `Task ${exception.taskId} (the id your tools take). Issue ${issue.repo}#${issue.number}: ${issue.title}`,
     `<issue-body>\n${issue.body}\n</issue-body>`,
     `Exception: ${exception.kind} on ${exception.head}`,
     `Why the coordinator would escalate: ${escalation.reason}`,

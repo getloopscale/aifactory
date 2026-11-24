@@ -22,6 +22,9 @@ export const OWNER_CATEGORIES = [
   'spending',
 ] as const
 
+/** What the unblocker may do about a question of the builder that waits. */
+const QUESTION_ACTIONS: UnblockAnswer['action'][] = ['answer', 'blocked_by', 'escalate']
+
 /** The most unblocker actions applied on one task and head; the next one is an `escalate`. */
 export const MAX_UNBLOCKER_APPLIED = 3
 
@@ -110,9 +113,8 @@ function sendBackNote(a: Extract<UnblockAnswer, { action: 'send_back' }>): strin
 
 /**
  * What the decision that escalated becomes, given the unblocker's answer: one action of the closed set, or
- * the same escalation with what the unblocker found. A `retry` needs a finding to retry from; the `answer`,
- * `blocked_by` and `resolve_elsewhere` actions need panel actions that do not exist yet, so they escalate with
- * what the unblocker proposed, for a person to carry out.
+ * the same escalation with what the unblocker found. A `retry` needs a finding to retry from; an `answer` is
+ * only for a question of the builder.
  */
 export function unblockDecision(
   exception: TaskException,
@@ -136,6 +138,12 @@ export function unblockDecision(
     )
   }
   const why = `${escalation.reason}. The unblocker investigated: ${a.reason}`
+  // A question of the builder is answered, blocked or left to the owner: the task is not in a stage to be sent back.
+  if (exception.kind === 'builder_question' && !QUESTION_ACTIONS.includes(a.action)) {
+    return escalated(
+      `${why}. It proposed ${a.action}, which does not answer a question of the builder`,
+    )
+  }
   switch (a.action) {
     case 'escalate':
       return escalated(`${escalation.reason}. For the owner (${a.category}): ${a.reason}`)
@@ -165,16 +173,15 @@ export function unblockDecision(
         : { action: 'retry_from_finding', by, findingId: exception.findingId, reason: why }
     case 'resolve_elsewhere':
       return a.evidence.commit || a.evidence.run
-        ? escalated(
-            `${why}. Resolved elsewhere (${a.evidence.commit ?? `run ${a.evidence.run}`}): a person closes it`,
-          )
+        ? { action: 'resolve_elsewhere', by, reason: why, evidenceFor: a.evidence }
         : escalated(
             `${escalation.reason}. The unblocker said the work is resolved elsewhere, with no commit or passing run as evidence`,
           )
     case 'answer':
+      return exception.kind === 'builder_question'
+        ? { action: 'answer', by, reason: why, answerText: a.text }
+        : escalated(`${why}. It proposed an answer, but no question of the builder waits here`)
     case 'blocked_by':
-      return escalated(
-        `${why}. Proposed ${a.action}: ${a.action === 'answer' ? a.text : `Blocked by #${a.issue}`}`,
-      )
+      return { action: 'blocked_by', by, reason: why, blockedBy: a.issue }
   }
 }

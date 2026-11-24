@@ -35,6 +35,8 @@ type AutomaticEvent =
   | 'coordinator_send_back'
   | 'coordinator_merge_base'
   | 'coordinator_rerun_checks'
+  | 'coordinator_answer'
+  | 'coordinator_blocked_by'
   | 'hand_over'
   | 'integrate'
   | 'merged_by_person'
@@ -80,6 +82,10 @@ export type Action =
   | 'merge_base'
   /** The failed GitHub Actions jobs of the pull request's head run again; the task itself does not move. */
   | 'rerun_checks'
+  /** The factory answers the builder's question on the issue, as a person would. */
+  | 'answer'
+  /** A `Blocked by` line goes on the issue, naming the open issue the work waits for. */
+  | 'block'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -207,6 +213,11 @@ const rerunChecks: Rule = (task) => {
   if (task.mergedSha) return ALREADY_INTEGRATED
   return task.headSha ? act('rerun_checks') : NO_CHECKS_TO_RERUN
 }
+
+const NOT_ASKING = refuse('only a task that waits for an answer to its question can be answered')
+const NOT_BLOCKABLE = refuse(
+  'a blocker is recorded only on a task that is queued, waiting, handed over or failed',
+)
 
 const NOT_MERGED_INTO = refuse(
   'the coordinator merges the integration branch only into the branch of a handed-over task',
@@ -362,6 +373,17 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     handoff: rerunChecks,
     failed: rerunChecks,
     done: (task) => (task.awaitingCiSha ? rerunChecks(task) : NOT_RERUN),
+  },
+  coordinator_answer: {
+    ...each(
+      ['intake', ...WORKING, 'done', 'released', 'handoff', 'failed', 'cancelled'],
+      NOT_ASKING,
+    ),
+    waiting: act('answer'),
+  },
+  coordinator_blocked_by: {
+    ...each([...WORKING, 'done', 'released', 'cancelled'], NOT_BLOCKABLE),
+    ...each(['intake', 'waiting', 'handoff', 'failed'], act('block')),
   },
   hand_over: {
     ...each(WORKING, act('hand_over')),

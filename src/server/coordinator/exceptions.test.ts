@@ -9,6 +9,8 @@ import {
   failedChecksOutput,
   failingOutput,
   failureCause,
+  passedHere,
+  QUESTION_WAIT_MS,
   readsChecks,
   quotedCiOutput,
   readsBrokenCiOutput,
@@ -960,5 +962,60 @@ describe('a rework after the review that broke the checks', () => {
   it('reads the GitHub logs only when the factory kept no output of the broken checks', () => {
     expect(readsBrokenCiOutput({ checks: readOf([run({ sha: 'bad0000' })]) })).toBe(false)
     expect(readsBrokenCiOutput({ checks: readOf([]) })).toBe(true)
+  })
+})
+
+describe("checks that failed on GitHub and passed on the factory's own run of the same commit", () => {
+  const run = (passed: boolean, sha = 'abc', name = 'lint'): CheckRun => ({
+    name,
+    command: 'c',
+    passed,
+    output: '',
+    sha,
+  })
+  const facts = (over: Partial<TaskFacts> = {}): TaskFacts => ({
+    ...handedOver({ cause: 'checks_unchanged', reason: 'x' }),
+    checks: readOf([run(true)]),
+    ciFailures: readOf([{ name: 'ci', url: 'u', lines: [] }]),
+    pullRequest: readOf({ conflicting: false, base: 'workspace', head: 'abc' }),
+    ...over,
+  })
+
+  it('is evidence when the same commit failed there and passed here', () => {
+    expect(passedHere(facts())).toBe(true)
+    expect(recognise(facts())[0]).toMatchObject({ kind: 'checks_unchanged', rerunnable: true })
+  })
+
+  it('is not when a check failed here, none ran on the commit, or GitHub failed another commit', () => {
+    expect(passedHere(facts({ checks: readOf([run(true), run(false, 'abc', 'test')]) }))).toBe(
+      false,
+    )
+    expect(passedHere(facts({ checks: readOf([run(true, 'old')]) }))).toBe(false)
+    expect(
+      passedHere(facts({ pullRequest: readOf({ conflicting: false, base: 'w', head: 'zzz' }) })),
+    ).toBe(false)
+    expect(passedHere(facts({ ciFailures: readOf([]) }))).toBe(false)
+    expect(passedHere(facts({ ciFailures: unread('the failed checks', 'down') }))).toBe(false)
+  })
+})
+
+describe('a question of the builder', () => {
+  const at = new Date('2026-11-20T12:00:00Z')
+  const waiting = (askedAgo: number): TaskFacts => ({
+    taskId: 3,
+    stage: 'waiting',
+    headSha: null,
+    last: readOf({ stage: 'waiting', detail: null }),
+    automaticRuns: readOf(0),
+    findings: [],
+    at,
+    question: { id: 8, body: 'A or B?', askedAt: new Date(at.getTime() - askedAgo) },
+  })
+
+  it('is an exception once it waited fifteen minutes, identified by the question', () => {
+    expect(recognise(waiting(QUESTION_WAIT_MS - 1))).toEqual([])
+    expect(recognise(waiting(QUESTION_WAIT_MS))).toEqual([
+      { kind: 'builder_question', taskId: 3, head: 'question:8', evidence: 'A or B?' },
+    ])
   })
 })

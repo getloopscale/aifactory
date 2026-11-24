@@ -1,7 +1,9 @@
-import { and, desc, eq, isNotNull, like, sql } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, repository, task } from '../db/schema'
+import { declaredBlockers } from '../factory/blockers'
+import { integrationBranch } from '../factory/branches'
 import { release, ReleaseRefused } from '../factory/deliver'
 import { outcome as transition } from '../factory/transitions'
 import type { Issue } from '../github/issues'
@@ -9,8 +11,10 @@ import type { PromotionApi } from '../github/promotion-api'
 import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
+  answerByCoordinator,
   mergeBaseByCoordinator,
   rerunChecksByCoordinator,
+  resolveElsewhere,
   resolveFinding,
   sendBackByCoordinator,
   type ActionDeps,
@@ -18,7 +22,7 @@ import {
 import { FACTORY_LABEL, FACTORY_LABEL_SPEC } from '../panel/work'
 
 import { baseFixIssue, baseSignature } from './base-fix'
-import type { CoordinatorOutcome, Decision } from './decide'
+import { rerunDone, type CoordinatorOutcome, type Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { RedBase, TaskException } from './exceptions'
 import { fileOnce } from './file-once'
@@ -193,27 +197,82 @@ async function rerunChecks(deps: ApplyDeps, exception: TaskException): Promise<s
     throw new ActionRefused('no commit or no way to read its checks to rerun')
   }
   const earlier = await deps.db
-    .select({ id: coordinatorAction.id })
+    .select({
+      exceptionKind: coordinatorAction.exceptionKind,
+      headSha: coordinatorAction.headSha,
+      action: coordinatorAction.action,
+      outcome: coordinatorAction.outcome,
+    })
     .from(coordinatorAction)
     .where(
       and(
         eq(coordinatorAction.taskId, exception.taskId),
         eq(coordinatorAction.action, 'rerun_checks'),
-        eq(coordinatorAction.outcome, 'applied'),
-        like(coordinatorAction.headSha, `${sha}%`),
       ),
     )
-    .limit(1)
-  if (earlier.length > 0)
+  if (rerunDone(earlier, sha)) {
     throw new ActionRefused(`the checks of ${sha.slice(0, 7)} were already rerun once`)
-  return rerunChecksByCoordinator(deps, exception.taskId, {
-    failedChecks: ci.failedChecks,
-    rerunFailedJobs: ci.rerunFailedJobs,
-  })
+  }
+  return rerunChecksByCoordinator(
+    deps,
+    exception.taskId,
+    { failedChecks: ci.failedChecks, rerunFailedJobs: ci.rerunFailedJobs },
+    sha,
+  )
 }
 
 /** What carrying out a decision left: the follow-up a scope filed (null for none), or what a fix became. */
-type Performed = { followUpIssue?: number | null; done?: string }
+type Performed = {
+  followUpIssue?: number | null
+  done?: string
+  /** The comment that answered a question of the builder, and the question: what `poll-answers` trusts. */
+  answered?: { answerCommentId: string; questionId: number }
+}
+
+/** The open issue a `Blocked by` line names is added to the task's issue, once. */
+async function blockedBy(deps: ApplyDeps, taskId: number, blocker: number): Promise<string> {
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
+  const allowed = transition(row, 'coordinator_blocked_by')
+  if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
+  if (blocker === row.issueNumber) throw new ActionRefused('an issue cannot block itself')
+  const { token } = await deps.github.installationToken(row.repository)
+  const named = await deps.readIssue(row.repository, blocker, token)
+  if (named.state !== 'open') throw new ActionRefused(`#${blocker} is not an open issue`)
+  const issue = await deps.readIssue(row.repository, row.issueNumber, token)
+  const declared = declaredBlockers(issue.body, row.repository)
+  if (declared.some((ref) => ref.repository === row.repository && ref.number === blocker)) {
+    return `#${blocker} was already named as a blocker`
+  }
+  const body = `${issue.body.trimEnd()}\n\nBlocked by #${blocker}`
+  await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, body)
+  return `added "Blocked by #${blocker}" to the issue`
+}
+
+/** Resolves the task elsewhere only on a commit the integration branch holds: a run alone proves nothing the factory can read. */
+async function resolveWithEvidence(
+  deps: ApplyDeps,
+  taskId: number,
+  evidence: { commit?: string; run?: string },
+  why: string,
+): Promise<string> {
+  const commit = evidence.commit
+  if (!commit) throw new ActionRefused('name the commit that holds the work: a run is not checked')
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
+  const [config] = await deps.db
+    .select({ baseBranch: repository.baseBranch })
+    .from(repository)
+    .where(eq(repository.fullName, row.repository))
+  const branch = integrationBranch(config ?? {})
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, branch)
+  if (!head || !(await deps.api.contains(row.repository, token, head, commit))) {
+    throw new ActionRefused(`${branch} does not hold ${commit}`)
+  }
+  await resolveElsewhere(deps, taskId, `Resolved by ${commit}, which ${branch} holds. ${why}`)
+  return `resolved by ${commit.slice(0, 7)}`
+}
 
 /** Carries out a decision that changes something. Escalating and waiting change nothing, so they never come here. */
 async function perform(
@@ -237,6 +296,25 @@ async function perform(
       actor: COORDINATOR_ACTOR,
       expectedHead: exception.verifiedHead,
     })
+  } else if (decision.action === 'answer') {
+    const questionId = Number(/^question:(\d+)$/.exec(exception.head)?.[1])
+    if (!questionId) throw new ActionRefused('the exception names no question to answer')
+    const reply = decision.answerText ?? ''
+    const commentId = await answerByCoordinator(deps, exception.taskId, questionId, reply)
+    return {
+      done: `answered in comment ${commentId}`,
+      answered: { answerCommentId: commentId, questionId },
+    }
+  } else if (decision.action === 'blocked_by' && decision.blockedBy !== undefined) {
+    return { done: await blockedBy(deps, exception.taskId, decision.blockedBy) }
+  } else if (decision.action === 'resolve_elsewhere' && decision.evidenceFor) {
+    const done = await resolveWithEvidence(
+      deps,
+      exception.taskId,
+      decision.evidenceFor,
+      decision.reason,
+    )
+    return { done }
   } else if (decision.action === 'rerun_checks') {
     return { done: await rerunChecks(deps, exception) }
   } else if (decision.action === 'fix_base' && decision.base) {
@@ -254,6 +332,7 @@ type Carried = {
   reason: string
   /** The follow-up a scope filed (null for none); absent when nothing was applied. */
   followUpIssue?: number | null
+  answered?: Performed['answered']
 }
 
 /** A decision that was refused or failed, logged with its context, so a person sees it as well as the next pass. */
@@ -321,9 +400,9 @@ async function carryOut(
   if (refusal) return notCarried(exception, decision, 'refused', refusal)
   if (mode !== 'auto') return inTrial(exception, decision)
   try {
-    const { followUpIssue, done } = await perform(deps, exception, decision)
+    const { followUpIssue, done, answered } = await perform(deps, exception, decision)
     const reason = done ? `${decision.reason}: ${done}` : decision.reason
-    return { outcome: 'applied', reason, followUpIssue }
+    return { outcome: 'applied', reason, followUpIssue, answered }
   } catch (error) {
     const refused = error instanceof ActionRefused || error instanceof ReleaseRefused
     const outcome = refused ? 'refused' : 'failed'
@@ -333,16 +412,16 @@ async function carryOut(
 
 /** What the row keeps of the model's work: the draft with the follow-up it filed, or the unread answer. */
 function recordedDraft(decision: Decision, carried: Carried) {
-  const by = decision.by ? { by: decision.by } : {}
+  const extra = { ...(decision.by ? { by: decision.by } : {}), ...carried.answered }
   if (decision.draft) {
     return {
       ...decision.draft,
-      ...by,
+      ...extra,
       ...(carried.followUpIssue === undefined ? {} : { followUpIssue: carried.followUpIssue }),
     }
   }
-  if (decision.answer !== undefined) return { answer: decision.answer, ...by }
-  return decision.by ? by : null
+  if (decision.answer !== undefined) return { answer: decision.answer, ...extra }
+  return Object.keys(extra).length > 0 ? extra : null
 }
 
 /**

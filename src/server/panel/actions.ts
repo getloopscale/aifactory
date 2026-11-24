@@ -9,6 +9,7 @@ import { release as promote, ReleaseRefused } from '../factory/deliver'
 import type { PromotionApi } from '../github/promotion-api'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
+import { answerMarker } from '../factory/waiting'
 import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
 import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
@@ -545,9 +546,16 @@ export async function rerunChecksOf(
   row: Facts & { repository: string; headSha: string | null },
   token: string,
   ci: RerunApi,
+  expectedSha: string,
 ): Promise<string> {
   mustAllow(row, 'coordinator_rerun_checks')
   const sha = row.headSha!
+  // The coordinator's once-per-commit guard looked at `expectedSha`: a task that moved on is another commit.
+  if (sha !== expectedSha) {
+    throw new ActionRefused(
+      `the task moved to ${sha.slice(0, 7)} since ${expectedSha.slice(0, 7)}, which the decision was about`,
+    )
+  }
   const failed = (await ci.failedChecks(row.repository, token, sha)).filter((run) => run.actions)
   if (failed.length === 0)
     throw new ActionRefused(`no failed GitHub Actions job on ${sha.slice(0, 7)}`)
@@ -561,10 +569,47 @@ export async function rerunChecksOf(
 }
 
 /** The coordinator reruns the failed jobs of a task's head (`coordinator/apply.ts`). */
-export async function rerunChecksByCoordinator(deps: ActionDeps, taskId: number, ci: RerunApi) {
+export async function rerunChecksByCoordinator(
+  deps: ActionDeps,
+  taskId: number,
+  ci: RerunApi,
+  expectedSha: string,
+) {
   const row = await load(deps.db, taskId)
   const { token } = await deps.github.installationToken(row.repository)
-  return rerunChecksOf(row, token, ci)
+  return rerunChecksOf(row, token, ci, expectedSha)
+}
+
+/**
+ * The factory answers the question of the builder that waits, as a comment on the issue. The comment's id is
+ * what the coordinator records, and `poll-answers` takes only a comment with that id as the factory's answer.
+ */
+export async function answerByCoordinator(
+  deps: ActionDeps,
+  taskId: number,
+  questionId: number,
+  text: string,
+): Promise<string> {
+  const row = await load(deps.db, taskId)
+  mustAllow(row, 'coordinator_answer')
+  const [asked] = await deps.db.select().from(question).where(eq(question.id, questionId))
+  if (!asked || asked.taskId !== taskId || asked.answer !== null || asked.origin !== 'agent') {
+    throw new ActionRefused('this question is not waiting for an answer')
+  }
+  const reply = text.trim()
+  if (reply === '') throw new ActionRefused('an answer says something')
+  const { token } = await deps.github.installationToken(row.repository)
+  return deps.api.commentOnIssue(
+    row.repository,
+    token,
+    row.issueNumber,
+    [
+      answerMarker(questionId),
+      `**The factory answers its own question** (task ${taskId}), from the issue and the code:`,
+      '',
+      reply.slice(0, 4_000),
+    ].join('\n'),
+  )
 }
 
 /**

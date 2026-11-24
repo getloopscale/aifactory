@@ -44,20 +44,30 @@ describe('rerunChecksOf', () => {
 
   it('reads and reruns the failed Actions jobs of the bare commit', async () => {
     const { ci, seen } = api([{ id: 5, name: 'ci', actions: true }])
-    await expect(rerunChecksOf(row() as never, 't', ci)).resolves.toContain('reran')
+    await expect(rerunChecksOf(row() as never, 't', ci, 'abcdef1234')).resolves.toContain('reran')
     expect(seen).toEqual(['abcdef1234', 'rerun 5'])
   })
 
   it('refuses when nothing failed on GitHub Actions', async () => {
     const { ci } = api([{ id: 5, name: 'ext', actions: false }])
-    await expect(rerunChecksOf(row() as never, 't', ci)).rejects.toThrow(ActionRefused)
+    await expect(rerunChecksOf(row() as never, 't', ci, 'abcdef1234')).rejects.toThrow(
+      ActionRefused,
+    )
   })
 
   it('asks the transition table: a task still working has no checks to rerun', async () => {
     const { ci, seen } = api([{ id: 5, name: 'ci', actions: true }])
-    await expect(rerunChecksOf(row({ stage: 'build' }) as never, 't', ci)).rejects.toThrow(
-      ActionRefused,
-    )
+    await expect(
+      rerunChecksOf(row({ stage: 'build' }) as never, 't', ci, 'abcdef1234'),
+    ).rejects.toThrow(ActionRefused)
+    expect(seen).toEqual([])
+  })
+
+  it('refuses a task that moved since the decision, so the guard and the rerun are of one commit', async () => {
+    const { ci, seen } = api([{ id: 5, name: 'ci', actions: true }])
+    await expect(
+      rerunChecksOf(row({ headSha: 'newhead99' }) as never, 't', ci, 'abcdef1234'),
+    ).rejects.toThrow('moved to newhead')
     expect(seen).toEqual([])
   })
 
@@ -67,7 +77,7 @@ describe('rerunChecksOf', () => {
       ...ci,
       rerunFailedJobs: async () => ({ started: false as const, refusal: 'no' }),
     }
-    await expect(rerunChecksOf(row() as never, 't', refusing)).rejects.toThrow('no')
+    await expect(rerunChecksOf(row() as never, 't', refusing, 'abcdef1234')).rejects.toThrow('no')
   })
 })
 
