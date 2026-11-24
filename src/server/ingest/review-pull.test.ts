@@ -39,7 +39,7 @@ describe('reviewTrigger', () => {
     ).toEqual({ review: true, trigger: `label:${REVIEW_LABEL}` })
   })
 
-  it('does not read a stranger\'s later push because the label is still there', () => {
+  it("does not read a stranger's later push because the label is still there", () => {
     expect(reviewTrigger(pull({ action: 'synchronize', labels: [REVIEW_LABEL] }))).toMatchObject({
       review: false,
     })

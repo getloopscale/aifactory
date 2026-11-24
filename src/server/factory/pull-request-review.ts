@@ -320,11 +320,10 @@ async function reviewed(
     sandbox: started,
     repoDir,
     baseSha,
-  } = await openAt(
-    deps,
-    at,
-    { start: [githubEgress(at.token), ...at.base], after: [...at.base, ...agentEgress] },
-  )
+  } = await openAt(deps, at, {
+    start: [githubEgress(at.token), ...at.base],
+    after: [...at.base, ...agentEgress],
+  })
   let feed: KnowledgeFeed | undefined
   try {
     const facts = await deps.api.pullRequestFacts(at.repo, at.token, at.number)
