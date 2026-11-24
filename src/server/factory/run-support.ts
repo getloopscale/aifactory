@@ -160,6 +160,29 @@ export function unestablishedGates(repository: string, rows: StoredCheck[]): str
   return CI_QUALITY_GATES.filter((g) => !ran(g))
 }
 
+/** The panel's address from `FACTORY_PANEL_URL`, when it is an http(s) URL; the panel never goes through the tunnel, so there is no default. */
+export function panelBaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const raw = env.FACTORY_PANEL_URL?.trim()
+  if (!raw) return undefined
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+      ? url.origin + url.pathname.replace(/\/$/, '')
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** One markdown bullet for each stored file, linking its owner-only download. */
+export function artifactLinks(
+  base: string,
+  taskId: number,
+  files: { id: number; path: string }[],
+): string[] {
+  return files.map((f) => `- [${f.path}](${base}/api/panel/tasks/${taskId}/artifacts/${f.id})`)
+}
+
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 
 export function pullRequestBody(input: {
@@ -172,6 +195,8 @@ export function pullRequestBody(input: {
   /** The plan the builder wrote before it changed anything, as markdown. */
   plan?: string
   repository?: string
+  /** Links to the files the checks wrote for this commit, when the panel has an address. */
+  artifacts?: string[]
 }): string {
   const { review } = input
   const remaining = review.outcome.findings
@@ -188,6 +213,14 @@ export function pullRequestBody(input: {
     '',
     checkSummary(input.rows, input.repository),
     '',
+    ...(input.artifacts && input.artifacts.length > 0
+      ? [
+          'Files the checks wrote (owner-only, kept as long as the transcripts):',
+          '',
+          ...input.artifacts,
+          '',
+        ]
+      : []),
     `Independent review by ${review.reviewer}, attempt ${review.attempt}: ${review.outcome.verdict}. ${review.outcome.summary}`,
     ...(remaining.length > 0 ? ['', renderFindings(remaining)] : []),
     '',

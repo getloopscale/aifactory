@@ -26,7 +26,7 @@ import {
   resolutionProblems,
   withConflictFiles,
 } from './merge-base'
-import { storeEvidence } from './artifacts'
+import { artifactsAt, storeEvidence } from './artifacts'
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
@@ -116,6 +116,8 @@ import {
   StageFailure,
   type Continuation,
   type StoredCheck,
+  panelBaseUrl,
+  artifactLinks,
 } from './run-support'
 import {
   fitToSession,
@@ -2200,6 +2202,7 @@ export class Run {
         review: { reviewer: this.reviewer.name, attempt, outcome },
         plan: this.renderedPlan,
         repository: row.repository,
+        artifacts: await this.artifactLinksAt(sha),
       }),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
@@ -2391,6 +2394,14 @@ export class Run {
     })
   }
 
+  /** Links to the files the checks wrote on this commit, when the panel has an address to link to. */
+  private async artifactLinksAt(sha: string): Promise<string[]> {
+    const base = panelBaseUrl()
+    if (!base) return []
+    const files = await artifactsAt(this.c.deps.db, this.c.taskId, sha)
+    return artifactLinks(base, this.c.taskId, files)
+  }
+
   private async handOver(
     sha: string,
     attempt: number,
@@ -2422,6 +2433,7 @@ export class Run {
         handoff: reason,
         plan: this.renderedPlan,
         repository: row.repository,
+        artifacts: await this.artifactLinksAt(sha),
       }),
     })
     await api.commentOnIssue(

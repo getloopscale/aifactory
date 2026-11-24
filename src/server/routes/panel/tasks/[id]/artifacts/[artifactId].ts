@@ -1,10 +1,8 @@
-import { and, eq } from 'drizzle-orm'
 import { route } from 'theokit/server/define'
 import { z } from 'zod'
 
 import { getDb } from '../../../../../db'
-import { evidenceArtifact } from '../../../../../db/schema'
-import { artifactHeaders } from '../../../../../factory/artifacts'
+import { serveArtifact } from '../../../../../panel/artifact-file'
 import { ownerOnly } from '../../../../../panel/policy'
 
 /**
@@ -19,16 +17,5 @@ export const GET = route()
       artifactId: z.coerce.number().int().positive(),
     }),
   )
-  .handler(async ({ params }) => {
-    const [file] = await getDb()
-      .select()
-      .from(evidenceArtifact)
-      .where(
-        and(eq(evidenceArtifact.id, params.artifactId), eq(evidenceArtifact.taskId, params.id)),
-      )
-    if (!file) return new Response('not found', { status: 404 })
-    return new Response(new Uint8Array(file.content), {
-      headers: artifactHeaders(file.path, file.contentType),
-    })
-  })
+  .handler(({ params }) => serveArtifact(getDb(), params.id, params.artifactId))
   .build()

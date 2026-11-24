@@ -1,5 +1,5 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
-import { lt } from 'drizzle-orm'
+import { and, asc, eq, lt } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { evidence, evidenceArtifact } from '../db/schema'
@@ -189,4 +189,30 @@ export function artifactHeaders(path: string, contentType: string): Record<strin
     'content-security-policy': "default-src 'none'; sandbox",
     'cache-control': 'private, no-store',
   }
+}
+
+/** The files stored for a commit of a task, oldest first. */
+export async function artifactsAt(
+  db: Database,
+  taskId: number,
+  sha: string,
+): Promise<{ id: number; path: string }[]> {
+  return db
+    .select({ id: evidenceArtifact.id, path: evidenceArtifact.path })
+    .from(evidenceArtifact)
+    .where(and(eq(evidenceArtifact.taskId, taskId), eq(evidenceArtifact.sha, sha)))
+    .orderBy(asc(evidenceArtifact.id))
+}
+
+/**
+ * The files of the latest verification: the checks run on the newest commit that has evidence, so the files of
+ * older commits (a commit the work has since moved on from) are not shown as the current proof.
+ */
+export function ofLatestVerification<F extends { evidenceId: number }>(
+  checks: { id: number; sha: string }[],
+  files: F[],
+): F[] {
+  const latest = checks.at(-1)?.sha
+  const ids = new Set(checks.filter((c) => c.sha === latest).map((c) => c.id))
+  return files.filter((f) => ids.has(f.evidenceId))
 }

@@ -232,3 +232,21 @@ describe('unestablishedGates', () => {
     expect(resolvedComment({ ...input, repository: own })).toContain('Not run by the factory')
   })
 })
+
+describe('the links to the files the checks wrote', () => {
+  it('reads the panel address only from an http(s) URL', async () => {
+    const { panelBaseUrl } = await import('./run-support')
+    expect(panelBaseUrl({ FACTORY_PANEL_URL: 'https://panel.example/' })).toBe(
+      'https://panel.example',
+    )
+    expect(panelBaseUrl({ FACTORY_PANEL_URL: 'javascript:alert(1)' })).toBeUndefined()
+    expect(panelBaseUrl({})).toBeUndefined()
+  })
+
+  it('links each file to its owner-only download', async () => {
+    const { artifactLinks } = await import('./run-support')
+    expect(artifactLinks('https://p.example', 7, [{ id: 3, path: 'shots/home.png' }])).toEqual([
+      '- [shots/home.png](https://p.example/api/panel/tasks/7/artifacts/3)',
+    ])
+  })
+})

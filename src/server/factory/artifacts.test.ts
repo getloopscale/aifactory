@@ -12,6 +12,7 @@ import {
   collectArtifacts,
   MAX_ARTIFACT_BYTES,
   MAX_ARTIFACT_FILES,
+  ofLatestVerification,
   safeArtifactPath,
 } from './artifacts'
 
@@ -115,5 +116,22 @@ describe('artifactHeaders', () => {
       'application/octet-stream',
     )
     expect(artifactHeaders('x.html', 'text/html')['content-disposition']).toMatch(/^attachment/)
+  })
+})
+
+describe('ofLatestVerification', () => {
+  it('keeps only the files of the checks run on the newest commit', () => {
+    const checks = [
+      { id: 1, sha: 'old' },
+      { id: 2, sha: 'new' },
+      { id: 3, sha: 'new' },
+    ]
+    const files = [
+      { id: 10, evidenceId: 1 },
+      { id: 11, evidenceId: 2 },
+      { id: 12, evidenceId: 3 },
+    ]
+    expect(ofLatestVerification(checks, files).map((f) => f.id)).toEqual([11, 12])
+    expect(ofLatestVerification([], files)).toEqual([])
   })
 })
