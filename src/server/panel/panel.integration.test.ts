@@ -367,6 +367,30 @@ describe('listTasks and an integration that waits for the repository checks', ()
   })
 })
 
+describe('listTasks and the size of the change', () => {
+  it('shows the lines of the latest event that carries them, and nothing for a task never measured', async () => {
+    const change = {
+      sha: 'abc',
+      added: 40,
+      removed: 5,
+      testAdded: 10,
+      testRemoved: 1,
+      files: 3,
+      paths: ['a'],
+    }
+    const measured = await seed('done', { headSha: 'abc' }, [
+      { stage: 'merge', detail: { change } },
+      { stage: 'done', detail: { change: { ...change, added: 20, testAdded: 0 } } },
+    ])
+    const older = await seed('done', { headSha: 'abc' }, [{ stage: 'done', detail: {} }])
+
+    const cards = new Map((await listTasks(getDb())).map((c) => [c.id, c]))
+
+    expect(cards.get(measured)?.change).toEqual({ added: 20, removed: 6, files: 3 })
+    expect(cards.get(older)?.change).toBeNull()
+  })
+})
+
 describe('listTasks and a delivered task that went back', () => {
   const conflict = { decision: 'request_changes', automatic: true, note: conflictNote('workspace') }
 

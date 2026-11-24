@@ -399,6 +399,8 @@ export type TaskCard = {
    * which checks, on which branch, and since when. Null when nothing holds it.
    */
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
+  /** The size of the change at the reviewed commit; absent for a task whose change was not measured (#474). */
+  change?: { added: number; removed: number; files: number } | null
   /**
    * The task went back from `done` to an earlier stage and has not reached `done` again: why, when and the note
    * the run was given. Null for a task that never left `done`, or that reached it again.
