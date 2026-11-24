@@ -60,9 +60,12 @@ const isChangesets = (s: Shipment) => s.tags.length > 0 && s.tags.every((t) => p
 
 /** What an issue is told when the release published no package its change is in. */
 const onBranchOnly = (s: Shipment, why: string) =>
-  [`Released to \`${s.releaseBranch}\` in ${s.promotedSha.slice(0, 7)}; ${why}.`, '', releasedOn(s), ''].join(
-    '\n',
-  )
+  [
+    `Released to \`${s.releaseBranch}\` in ${s.promotedSha.slice(0, 7)}; ${why}.`,
+    '',
+    releasedOn(s),
+    '',
+  ].join('\n')
 
 /**
  * What a task's issue is told. A changesets release names only the published packages the task's merge
