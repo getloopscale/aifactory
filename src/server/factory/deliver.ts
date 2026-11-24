@@ -25,6 +25,7 @@ import { shipContained } from './ship'
 import { stalledPublication, supersedeUnmerged } from './stalled-publication'
 import { claimedUnrecorded } from './resolved-release'
 import { enterStage } from './stages'
+import { manifestRefusal, manifestsOutOfStep } from './tag-manifest'
 import { outcome } from './transitions'
 
 /** How the factory treats a release (the promotion), as opposed to the pre-release it always makes. */
@@ -266,6 +267,12 @@ export async function release(
     )
   await refuseKnownConflict(deps, { repository: row.repository, sha, target, actor: options.actor })
   const pull = { number: pr.number, url: pr.url }
+  if (!usesChangesets && (await publishesFromTag(deps.db, row.repository))) {
+    // The workflow that publishes the tag refuses a manifest that does not carry it: refused before merging.
+    const tag = await nextOwnTag(deps.api, row.repository, token, options.bump)
+    const found = await manifestsOutOfStep(deps.api, { repo: row.repository, token, ref: sha, tag })
+    if (found.length > 0) throw new ReleaseRefused(manifestRefusal(tag, sha, found))
+  }
   const required = await deps.api.requiredChecks(row.repository, token, target)
   if (required.length > 0) {
     const waited = await waitForChecks(deps, {
@@ -686,12 +693,22 @@ export async function createOwnTag(
  * A failure is returned, not thrown: the merge already happened.
  */
 async function createOwnRelease(
-  deps: Pick<DeliverDeps, 'api'>,
+  deps: Pick<DeliverDeps, 'api' | 'db'>,
   input: Omit<OwnRelease, 'tag' | 'promotion'> & { pr: { url: string }; bump: Bump },
 ): Promise<Published> {
   const { row, pr, token } = input
   try {
     const tag = await nextOwnTag(deps.api, row.repository, token, input.bump)
+    if (await publishesFromTag(deps.db, row.repository)) {
+      // Rechecked on the merge commit and the tag now next: both may have moved while CI waited.
+      const found = await manifestsOutOfStep(deps.api, {
+        repo: row.repository,
+        token,
+        ref: input.mergeSha,
+        tag,
+      })
+      if (found.length > 0) throw new Error(manifestRefusal(tag, input.mergeSha, found))
+    }
     const promotion = { label: 'Release pull request', url: pr.url }
     return { created: await createOwnTag(deps.api, { ...input, tag, promotion }) }
   } catch (error) {

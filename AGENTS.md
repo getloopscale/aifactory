@@ -321,7 +321,8 @@ reads that file, not a convention.
   check of a promotion head passed; a fix that ended with the promotion still red is followed by one more, then a
   person (`MAX_ATTEMPTS`), and the line stays stopped until it is green. These holds all go through `holdingLines`:
   with `FACTORY_LINE_STOP_SCOPE=fix_first` it returns none, so the incident and its fix issue stay, the issue's
-  priority label takes the fix ahead, and the rest of the repository keeps running and integrating (`hold`, the
+  priority label takes the fix ahead, and the rest of the repository keeps running and integrating, except that while the fix is in `merge`, `pr` or waiting to integrate the other integrations
+  wait (`fixGoesFirst`), so the base does not move under it (`hold`, the
   default, is what is described above).
 - **The scheduler orders the queue and holds back an issue that is not ready, and records every decision.**
   The `schedule` cron runs a pass every two minutes, one at a time on any process (`alone`, an advisory lock).
