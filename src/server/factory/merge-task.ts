@@ -6,6 +6,7 @@ import * as schema from '../db/schema'
 import { stageEvent, task } from '../db/schema'
 import { createGithubApi, type GithubApi } from '../github/pulls'
 
+import type { ChangeFacts } from './change-size'
 import { integrationBranch } from './branches'
 import { errorMessage } from './error-message'
 import {
@@ -41,7 +42,12 @@ export type MergeDetail = {
   /** The issue's title as the run read it, which names the pre-release. */
   issueTitle: string
   pullRequestBody: string
+  /** The size of the change at the reviewed commit; a task from before it was measured has none. */
+  change?: ChangeFacts
 }
+
+/** The change facts of the delivery, in the `done` event the indicators read. */
+const changeOf = (detail: MergeDetail) => (detail.change ? { change: detail.change } : {})
 
 /** What the job did: the run's own result once it got that far, or why the task was not its to merge. */
 export type MergeResult = RunResult | { status: 'skipped'; reason: string }
@@ -180,6 +186,7 @@ async function awaitChecks(
       costUsd: detail.costUsd,
       attempts: detail.attempts,
       agentSummary: detail.agentSummary,
+      ...changeOf(detail),
       ...describeIntegration(integrated),
     },
     {
@@ -231,6 +238,7 @@ async function delivered(
       pullRequestUrl,
       costUsd: detail.costUsd,
       attempts: detail.attempts,
+      ...changeOf(detail),
       ...describeIntegration(integrated),
       ...describeDelivery(handed),
     },

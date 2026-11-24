@@ -2,7 +2,10 @@ import { isMergeConflict } from '../factory/auto-retry'
 import { isFixedBaseNote } from '../factory/ci-wait'
 import type { decision, TaskStage } from '../db/schema'
 
+import { readFacts, totalAdded, type ChangeFacts } from '../factory/change-size'
+
 import type { MetricName } from './config'
+import type { Delivery } from './repeat-touch'
 
 export type HistoryEvent = { stage: TaskStage; at: Date; detail: Record<string, unknown> | null }
 
@@ -104,6 +107,13 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     values.minutes_to_delivery = (done.at.getTime() - run.start.getTime()) / MINUTE
     // The delivery is the sample; the decisions of its day are added by `personDecisions`.
     values.person_decisions_per_delivery = 0
+    const change = readFacts(done.detail?.change)
+    if (change) {
+      values.net_lines_per_delivery = change.added - change.removed
+      // A delivery that added nothing has no share of tests to give.
+      if (totalAdded(change) > 0)
+        values.test_share_of_change = change.testAdded / totalAdded(change)
+    }
     const cost = done.detail?.costUsd
     if (typeof cost === 'number') values.cost_per_delivery = cost
     const after = run.events.slice(doneAt + 1)
@@ -150,6 +160,16 @@ export function observe(h: TaskHistory): Observation[] {
     })
   }
   return out
+}
+
+/** The deliveries of a task whose change was measured, for the repeat touches. Older ones are unknown, not empty. */
+export function deliveriesOf(h: TaskHistory): Delivery[] {
+  return runsOf(h.events).flatMap((run) => {
+    const terminal = run.events.find((e) => TERMINAL.includes(e.stage))
+    if (terminal?.stage !== 'done' || Array.isArray(terminal.detail?.blockedBy)) return []
+    const change: ChangeFacts | undefined = readFacts(terminal.detail?.change)
+    return change ? [{ repository: h.repository, at: terminal.at, paths: change.paths }] : []
+  })
 }
 
 /** A row of `decision`, with the repository of its task. */

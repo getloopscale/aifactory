@@ -4,7 +4,13 @@ import { COORDINATOR_ACTOR } from '../coordinator/release-train'
 import { fixedBaseNote } from '../factory/ci-wait'
 
 import { METRICS } from './config'
-import { observe, personDecisions, type HistoryEvent, type TaskHistory } from './history'
+import {
+  deliveriesOf,
+  observe,
+  personDecisions,
+  type HistoryEvent,
+  type TaskHistory,
+} from './history'
 import { dailySeries } from './series'
 
 const T0 = Date.parse('2026-11-10T10:00:00Z')
@@ -593,5 +599,62 @@ describe('personDecisions', () => {
   it("leaves out a release the coordinator's release train started", () => {
     const rows = [decided(1, 'release', `${COORDINATOR_ACTOR} -> v1.3.0`)]
     expect(personDecisions(rows)).toEqual([])
+  })
+})
+
+describe('the size of the change a delivery added', () => {
+  const change = (over: Record<string, unknown> = {}) => ({
+    sha: 'a1',
+    added: 40,
+    removed: 5,
+    testAdded: 10,
+    testRemoved: 0,
+    files: 2,
+    paths: ['src/a.ts', 'src/a.test.ts'],
+    ...over,
+  })
+  const withChange = (c: unknown) =>
+    history({
+      events: [
+        ev(0, 'intake'),
+        ev(1, 'verify', { sha: 'a1' }),
+        ev(30, 'done', { sha: 'a1', change: c }),
+      ],
+    })
+
+  it('measures net lines outside tests and the share of added lines in tests', () => {
+    const h = withChange(change())
+
+    expect(value(h, 'net_lines_per_delivery')).toEqual([35])
+    expect(value(h, 'test_share_of_change')).toEqual([0.2])
+    expect(deliveriesOf(h)).toEqual([
+      { repository: 'o/r', at: at(30), paths: ['src/a.ts', 'src/a.test.ts'] },
+    ])
+  })
+
+  it('gives no share for a change that added no line, but still its net lines', () => {
+    const h = withChange(change({ added: 0, testAdded: 0, removed: 3 }))
+
+    expect(value(h, 'net_lines_per_delivery')).toEqual([-3])
+    expect(value(h, 'test_share_of_change')).toEqual([])
+  })
+
+  it('measures nothing for a delivery from before the size was stored', () => {
+    const h = withChange(undefined)
+
+    expect(value(h, 'net_lines_per_delivery')).toEqual([])
+    expect(deliveriesOf(h)).toEqual([])
+  })
+
+  it('makes a daily point only from the minimum number of deliveries', () => {
+    const obs = (n: number) => Array.from({ length: n }, () => observe(withChange(change()))).flat()
+
+    expect(
+      dailySeries(obs(2), METRICS).filter((s) => s.metric === 'net_lines_per_delivery'),
+    ).toEqual([])
+    expect(
+      dailySeries(obs(3), METRICS).filter((s) => s.metric === 'net_lines_per_delivery')[0]
+        .points[0],
+    ).toMatchObject({ value: 35, samples: 3 })
   })
 })
