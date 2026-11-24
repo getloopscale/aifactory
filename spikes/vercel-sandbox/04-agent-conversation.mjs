@@ -1,5 +1,4 @@
 // S2 and S3 of M13 (docs/adr/0013-agent-conversation.md), for Claude Code and Codex.
-// stdin is not measured: runCommand has `stdin: true`, which needs its own experiment.
 //   node --env-file=.env.local spikes/vercel-sandbox/04-agent-conversation.mjs [claude|codex]
 // Needs Vercel credentials for @vercel/sandbox and ANTHROPIC_API_KEY (claude) or OPENAI_API_KEY (codex).
 // Keys are attached by the firewall, never written into the sandbox. Prints only non-secret evidence:
@@ -17,6 +16,8 @@ const CLIS = {
     start: (p) => `claude -p ${p} --output-format json`,
     ask: (p) => `claude -p ${p} --permission-mode plan --output-format json`,
     resume: (p) => `claude -p ${p} --continue --output-format json`,
+    stdin: 'claude -p --input-format stream-json --output-format stream-json --verbose',
+    line: (t) => JSON.stringify({ type: 'user', message: { role: 'user', content: t } }) + '\n',
   },
   codex: {
     host: 'api.openai.com',
@@ -26,6 +27,8 @@ const CLIS = {
     start: (p) => `codex exec --skip-git-repo-check ${p}`,
     ask: (p) => `codex exec --skip-git-repo-check --sandbox read-only ${p}`,
     resume: (p) => `codex exec --skip-git-repo-check resume --last ${p}`,
+    stdin: 'codex exec --skip-git-repo-check -',
+    line: (t) => t + '\n',
   },
 }
 const CLI = CLIS[which]
@@ -98,6 +101,29 @@ try {
   report('S2 first command after the second message', {
     code: first.exitCode,
     finished: (await first.stdout()).includes('finished'),
+  })
+
+  // S2c: stdin through runCommand({ stdin: true }). Send a long task, then a second message while it
+  // runs, then close stdin. Records whether the second message was answered before the first ended
+  // (a queued turn) or only at EOF, and whether the first step survived.
+  const sin = await a.runCommand({
+    cmd: 'sh',
+    args: ['-c', `cd /tmp/w && ${CLI.stdin}`],
+    stdin: true,
+    detached: true,
+  })
+  const t0 = Date.now()
+  await sin.writeStdin(CLI.line(`Remember the code ${fact}. Then run sleep 45 and say finished.`))
+  await new Promise((ok) => setTimeout(ok, 15_000))
+  await sin.writeStdin(CLI.line('What is the code I told you? Answer with the code only.'))
+  await sin.closeStdin()
+  const sdone = await sin.wait({ signal: AbortSignal.timeout(240_000) })
+  const sout = await sdone.stdout()
+  report('S2 stdin delivery', {
+    code: sdone.exitCode,
+    finished: sout.includes('finished'),
+    secondAnswered: sout.split(fact).length > 2,
+    ms: Date.now() - t0,
   })
 
   // S3: save the session state, stop the sandbox, restore it in a new one, recall the fact.

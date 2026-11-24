@@ -27,6 +27,7 @@ tê-las). Nada foi rodado, e nenhum resultado abaixo é evidência.
 | ------------------------------------------------------ | ---------- | ---------- |
 | Versão do CLI                                          | não rodado | não rodado |
 | S2: mensagem chega ao processo em execução             | não rodado | não rodado |
+| S2: entrega por stdin (segunda mensagem respondida)    | não rodado | não rodado |
 | S2: o passo em andamento sobrevive                     | não rodado | não rodado |
 | S2: Perguntar não escreve (árvore e HEAD)              | não rodado | não rodado |
 | S3: fato único lembrado após restaurar em sandbox novo | não rodado | não rodado |
@@ -36,8 +37,9 @@ tê-las). Nada foi rodado, e nenhum resultado abaixo é evidência.
 
 Nenhum mecanismo está escolhido. O desenho do M13 permanece o do plano, **como hipótese**:
 
-- entrega: stdin onde existir; senão interromper e retomar. O roteiro mede só o segundo caminho; o
-  `stream-json` por stdin precisa de teste próprio, pois o backend da fábrica não expõe stdin, mas o `runCommand` do SDK tem `stdin: true`, ainda não testado;
+- entrega: stdin onde existir; senão interromper e retomar. O roteiro mede os dois
+  caminhos: `runCommand({ stdin: true })` com `writeStdin` (Claude `stream-json`, Codex `exec -`) e
+  retomar com `--continue`/`resume --last`. A fábrica hoje não expõe stdin; o SDK sim. Ainda não rodado;
 - isolamento do Perguntar: confirmar pela árvore de trabalho e pelo `git status`, não só pelo SHA da branch;
 - sessão: arquivos da pasta de sessões do CLI guardados em `agent_session`.
 
