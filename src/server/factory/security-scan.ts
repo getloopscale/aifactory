@@ -1,3 +1,5 @@
+import type { SandboxBackend } from '@theokit/agents/sandbox'
+
 import type { Finding } from './review'
 
 /**
@@ -24,26 +26,46 @@ export function secretsAdded(patch: string): Finding[] {
   const findings: Finding[] = []
   let file: string | undefined
   let line = 0
+  // Lines of the current hunk still to read: a line inside one is content, whatever it starts with.
+  let removing = 0
+  let adding = 0
   for (const text of patch.split('\n')) {
+    if (removing > 0 || adding > 0) {
+      if (text.startsWith('+')) {
+        adding -= 1
+        findings.push(...secretsIn(text.slice(1), file, line))
+        line += 1
+      } else if (text.startsWith('-')) {
+        removing -= 1
+      }
+      continue
+    }
     if (text.startsWith('+++ ')) {
       file = text === '+++ /dev/null' ? undefined : text.replace(/^\+\+\+ b\//, '')
     } else if (text.startsWith('@@')) {
-      line = Number(/\+(\d+)/.exec(text)?.[1] ?? 0)
-    } else if (text.startsWith('+') && file) {
-      for (const { name, cwe, pattern } of SECRET_PATTERNS) {
-        const hit = pattern.exec(text)
-        if (hit && !DOCUMENTED.test(hit[0])) {
-          findings.push({
-            severity: 'blocker',
-            file: `${file}:${line}`,
-            issue: `the change adds ${name} (${cwe}); remove it and rotate the credential`,
-          })
-        }
-      }
-      line += 1
+      const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(text)
+      removing = Number(hunk?.[1] ?? 1)
+      line = Number(hunk?.[2] ?? 0)
+      adding = Number(hunk?.[3] ?? 1)
     }
   }
   return findings
+}
+
+function secretsIn(content: string, file: string | undefined, line: number): Finding[] {
+  if (!file) return []
+  const found: Finding[] = []
+  for (const { name, cwe, pattern } of SECRET_PATTERNS) {
+    const hit = pattern.exec(content)
+    if (hit && !DOCUMENTED.test(hit[0])) {
+      found.push({
+        severity: 'blocker',
+        file: `${file}:${line}`,
+        issue: `the change adds ${name} (${cwe}); remove it and rotate the credential`,
+      })
+    }
+  }
+  return found
 }
 
 export type Advisory = { id: string; pkg: string; severity: string }
@@ -119,4 +141,40 @@ export function advisoriesAdded(baseAudit: string, headAudit: string): Finding[]
       file: 'package.json',
       issue: `the change adds the ${a.severity} advisory ${a.id} in ${a.pkg} (CWE-1395); upgrade to a patched version`,
     }))
+}
+
+const LOCKFILES = ['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock']
+
+/** The audit command of the package manager whose lockfile is `lockfile`. */
+const auditCommand = (lockfile: string) =>
+  lockfile === 'pnpm-lock.yaml' ? 'pnpm audit --json' : 'npm audit --json'
+
+/**
+ * The advisories a change adds, as blockers, when it touches a lockfile: the audit of the base (its manifest
+ * and lockfile extracted to a directory of its own) against the audit of the head. A change that touches no
+ * lockfile adds none. An audit that cannot be run or read is a blocker, never a pass (#241).
+ */
+export async function auditBlockers(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+  touched: string[],
+): Promise<Finding[]> {
+  const lockfile = LOCKFILES.find((name) => touched.includes(name))
+  if (!lockfile) return []
+  const audit = auditCommand(lockfile)
+  const run = async (command: string) => {
+    try {
+      return (await backend.execute(command, { timeoutMs: 3 * 60_000 })).stdout
+    } catch {
+      return ''
+    }
+  }
+  const git = `git -C ${repoDir}`
+  const files = `$(${git} ls-tree --name-only ${base} | grep -E '^(package.json|${lockfile}|pnpm-workspace.yaml|.npmrc)$')`
+  const baseAudit = await run(
+    `d=$(mktemp -d) && ${git} archive ${base} -- ${files} | tar -x -C "$d" && (cd "$d" && ${audit}); rm -rf "$d"`,
+  )
+  const headAudit = await run(`cd ${repoDir} && ${audit}`)
+  return advisoriesAdded(baseAudit, headAudit)
 }

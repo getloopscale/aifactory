@@ -11,7 +11,7 @@ import {
   type RequiredByCheck,
 } from './required-files'
 import { must } from './run-support'
-import { secretsAdded } from './security-scan'
+import { auditBlockers, secretsAdded } from './security-scan'
 import { TEST_PATHSPECS } from './test-weakening'
 
 export type DiffFacts = {
@@ -69,6 +69,7 @@ export async function diffFacts(
   const added = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
   guards.push(...secretsAdded(added.stdout))
   const paths = changes.map((change) => change.path)
+  guards.push(...(await auditBlockers(backend, repoDir, base, paths)))
   const required = await requiredByChecks(backend, git, base, input.checkRuns ?? [])
   const unplanned = input.plan ? unplannedFiles(paths, input.plan) : []
   const touched = nameStatus

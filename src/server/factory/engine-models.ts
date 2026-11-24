@@ -124,3 +124,15 @@ export function optionsFor(
     ...(effort && isSafeName(effort) ? { effort } : {}),
   }
 }
+
+/** The effort levels from lowest to highest that any engine lists, so the highest of a list can be told. */
+const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * The effort the security role always runs at: the highest its engine offers for the model (#241). `undefined`
+ * when the engine lists no level it knows: the security review then does not run, it never falls to a default.
+ */
+export function securityEffort(efforts: string[]): string | undefined {
+  const known = efforts.filter((e) => EFFORT_RANK.includes(e))
+  return known.sort((a, b) => EFFORT_RANK.indexOf(b) - EFFORT_RANK.indexOf(a))[0]
+}

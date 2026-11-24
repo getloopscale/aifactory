@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { advisoriesAdded, parseAudit, secretsAdded } from './security-scan'
+import { FakeBackend } from './fake-sandbox'
+import { auditBlockers, advisoriesAdded, parseAudit, secretsAdded } from './security-scan'
 
 const key = 'AKIA' + 'ABCDEFGHIJKLMNOP'
 const patch = (added: string) =>
@@ -20,6 +21,17 @@ describe('secretsAdded', () => {
   it('finds a private key header', () => {
     const header = '-----BEGIN ' + 'RSA PRIVATE KEY-----'
     expect(secretsAdded(patch(header))).toHaveLength(1)
+  })
+})
+
+describe('secretsAdded in a hunk', () => {
+  it('keeps the file when an added line starts with "++ "', () => {
+    const body = `--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1,0 +1,2 @@\n+++ not a header\n+k = "${key}"\n`
+    expect(secretsAdded(body)).toEqual([expect.objectContaining({ file: 'src/a.ts:2' })])
+  })
+  it('reads the next file after a hunk', () => {
+    const body = `--- a/a\n+++ b/a\n@@ -1 +1 @@\n-x\n+y\n--- a/b\n+++ b/b\n@@ -0,0 +1 @@\n+k = "${key}"\n`
+    expect(secretsAdded(body)).toEqual([expect.objectContaining({ file: 'b:1' })])
   })
 })
 
@@ -54,5 +66,38 @@ describe('advisoriesAdded', () => {
   it('is one blocker when an audit cannot be read', () => {
     expect(advisoriesAdded('not json', audit())).toHaveLength(1)
     expect(advisoriesAdded(audit(), '{}')).toHaveLength(1)
+  })
+})
+
+describe('auditBlockers', () => {
+  const audit = (id: string) =>
+    JSON.stringify({
+      advisories: { 1: { github_advisory_id: id, module_name: 'picomatch', severity: 'high' } },
+    })
+  const backendOf = (base: string, head: string) =>
+    new FakeBackend((command) =>
+      command.includes('audit --json')
+        ? { stdout: command.includes('archive') ? base : head, stderr: '', exitCode: 1 }
+        : undefined,
+    )
+
+  it('blocks a lockfile that adds a high advisory', async () => {
+    const found = await auditBlockers(
+      backendOf('{"advisories":{}}', audit('GHSA-new')),
+      '/r',
+      'abc',
+      ['pnpm-lock.yaml'],
+    )
+    expect(found).toEqual([
+      expect.objectContaining({ severity: 'blocker', issue: expect.stringContaining('GHSA-new') }),
+    ])
+  })
+  it('asks nothing when no lockfile changed', async () => {
+    expect(await auditBlockers(backendOf('', ''), '/r', 'abc', ['src/a.ts'])).toEqual([])
+  })
+  it('blocks when the audit is unreadable', async () => {
+    expect(await auditBlockers(backendOf('', ''), '/r', 'abc', ['package-lock.json'])).toHaveLength(
+      1,
+    )
   })
 })
