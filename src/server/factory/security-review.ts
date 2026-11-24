@@ -158,6 +158,10 @@ const CODE_SURFACES: [string, RegExp][] = [
     /req(uest)?\.(body|query|params|headers|json|text|formData)\b|\bsearchParams\b|\bformData\(|JSON\.parse\(|\bfetch\(|\bwebhook\b|\bdeserializ|\byaml\.load|\bunserialize|\bredirect\(|\.parse\(\s*(await\s+)?(req|body|input)/i,
   ],
   [
+    'routes, tools or exposed code without a visible authorization',
+    /\broute\(|\bdefineRoute\b|\.policy\(|\b(get|post|put|patch|delete)\(\s*['"`]\/|@Tool\b|@Agent\b|\bdefineTool\b|\bdefineCron\b|\bdefineJob\b|\.approval\(|\bonlyTools\b|innerHTML|dangerouslySetInnerHTML|\bNODE_TLS_REJECT_UNAUTHORIZED\b|\bpermissions?\b|\ballowlist\b|\bchmod\b|0o?777/i,
+  ],
+  [
     'paths from input',
     /\b(writeFile|writeFileSync|appendFile|createWriteStream|mkdir|mkdirSync|unlink|unlinkSync|rmSync|rm|rename|copyFile|createReadStream|readFile|readFileSync)\(|path\.(join|resolve)\(|\.\.\//,
   ],

@@ -155,6 +155,10 @@ describe('needsSecurityReview', () => {
     ['a shell', 'src/a.ts', 'execSync(cmd)'],
     ['SQL', 'src/a.ts', 'db.query(`SELECT * FROM t WHERE id = ${id}`)'],
     ['network input', 'src/a.ts', 'const body = req.body'],
+    ['a route', 'src/server/routes/x.ts', "route('/api/x').handler(run)"],
+    ['a tool', 'src/server/agents/tools/x.ts', '@Tool({ name: "x" })'],
+    ['a widened permission', 'src/a.ts', 'chmodSync(path, 0o777)'],
+    ['unescaped html', 'src/app/x.tsx', 'el.innerHTML = value'],
     ['a path from input', 'src/a.ts', 'writeFileSync(join(dir, name), data)'],
   ])('is true for %s', (_name, file, line) => {
     expect(needsSecurityReview(change(file, line))).toBe(true)
