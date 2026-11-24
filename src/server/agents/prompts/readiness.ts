@@ -10,7 +10,7 @@ First ask whether the work can be done here, now. Answer "blocked" when the issu
 - its fix is under \`.github/\` (the builder never edits that directory);
 - it requires a package version, a release, another issue or a branch that the issue itself says is not available yet (unpublished, still open, unmerged);
 - its fix sits outside this repository (another repository, or code the builder cannot change).
-Judge only from what the issue says; never guess that something is missing. With "blocked", "missing" names what is missing in one sentence (the release, the issue, the branch, the file under \`.github/\` or the other repository), and "question" is an empty string.
+Judge only from what the issue says; never guess that something is missing. With "blocked", "missing" names what is missing in one sentence (the release, the issue, the branch, the file under \`.github/\` or the other repository), and "question" is an empty string. When what is missing is an open issue, "blockedBy" lists it as \`owner/repo#number\` (always with its repository; this issue's is in the message), so it is read again and the task runs once it closes; for anything else leave it out.
 
 Otherwise answer "needs_refinement" only when one of these is true:
 - the issue has no acceptance criterion someone could observe (a behaviour, a test, an output to check);
@@ -24,4 +24,4 @@ You may read the knowledge base with your two tools when the owner's rules would
 
 Answer with one JSON object and nothing after it:
 
-{"verdict":"ready" or "needs_refinement" or "blocked","missing":"...","question":"..."}`
+{"verdict":"ready" or "needs_refinement" or "blocked","missing":"...","question":"...","blockedBy":["owner/repo#1"]}`

@@ -135,6 +135,7 @@ export type ReadinessRecord = {
   verdict: ReadinessVerdict
   missing: string
   question: string
+  blockedBy?: string[]
   /** The question asked on the issue for this verdict, once one was. */
   questionId?: number
 }

@@ -346,6 +346,7 @@ reads that file, not a convention.
   `FACTORY_READINESS_MODE` for the judge, since the order is a sort the tests prove and the judge holds back work
   only once its verdicts are compared with what became of the tasks. The panel's queued card shows its place, why and the
   verdict (`panel/queue-view.ts`).
+- **The readiness judge asks whether the work can be done here, now.** A `blocked` verdict names what is missing (a file under `.github/`, a release, an issue, a branch, another repository). In `auto` a blocker that is open issues (`blockedBy`, read on GitHub first) fails the task blocked at `intake`, and `retry-due` reads it again, the issues it recorded as well as those the body declares; any other blocker asks the owner. A builder that changes nothing and says it waits for an open issue ends the run blocked by it (`refuseWhenBlocked` in `run.ts`), and one that names a release or branch that does not exist ends it as `BLOCKED_NO_CHANGE`, which the coordinator does not send back.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

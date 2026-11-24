@@ -2,8 +2,8 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import { stageEvent, task } from '../db/schema'
 import { rerunsAfterConflict } from '../factory/auto-retry'
-import { openBlockersOf, type BlockerReads } from '../factory/blocker-check'
-import { BlockedByOpenIssues, nameOf, type IssueRef } from '../factory/blockers'
+import { openAmong, openBlockersOf, type BlockerReads } from '../factory/blocker-check'
+import { BlockedByOpenIssues, nameOf, refOf, type IssueRef } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
 import { fetchIssue } from '../github/issues'
 import { ActionRefused, retry, retryAutomatically, type ActionDeps } from './actions'
@@ -84,12 +84,32 @@ async function stillBlocked(
 ): Promise<boolean> {
   const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
   if (!row) return false
+  const [failure] = await deps.db
+    .select({ id: stageEvent.id, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, taskId), eq(stageEvent.stage, 'failed')))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  // The blockers the failure recorded count too: the builder or the readiness judge found them, and the issue
+  // body may not declare them. A task that was blocked once is not freed by the body alone.
+  const recorded = ((failure?.detail as { blockedBy?: unknown } | null)?.blockedBy ??
+    []) as unknown[]
+  const recordedRefs = recorded.flatMap((n) => {
+    const ref = typeof n === 'string' ? refOf(n) : undefined
+    return ref ? [ref] : []
+  })
   let open: IssueRef[]
   try {
     const readIssue = deps.fetchIssue ?? fetchIssue
     const { token } = await deps.github.installationToken(row.repository)
     const issue = await readIssue(row.repository, row.issueNumber, token)
-    open = await openBlockersOf(deps, row.repository, issue.body)
+    const declared = await openBlockersOf(deps, row.repository, issue.body)
+    const kept = await openAmong(
+      { ...deps, fetchIssue: readIssue },
+      row.repository,
+      recordedRefs.filter((r) => !declared.some((d) => nameOf(d) === nameOf(r))),
+    )
+    open = [...declared, ...kept]
   } catch (error) {
     console.error(
       JSON.stringify({ event: 'blocked_check_failed', taskId, error: errorMessage(error) }),
@@ -97,12 +117,6 @@ async function stillBlocked(
     return true
   }
   if (open.length === 0) return false
-  const [failure] = await deps.db
-    .select({ id: stageEvent.id, detail: stageEvent.detail })
-    .from(stageEvent)
-    .where(and(eq(stageEvent.taskId, taskId), eq(stageEvent.stage, 'failed')))
-    .orderBy(desc(stageEvent.id))
-    .limit(1)
   if (failure) {
     await deps.db
       .update(stageEvent)

@@ -25,6 +25,8 @@ import { resolveTimeouts } from '../factory/run-limit'
 import { labelsWithRepoChoice, loadRepoConfig } from '../factory/repo-config'
 import { effectiveEnv } from '../factory/settings'
 import { fetchIssue } from '../github/issues'
+import { modelReadinessJudge } from '../scheduler/judge'
+import { parseReadiness, readinessMessage } from '../scheduler/readiness'
 import type { KnowledgeSource } from '../knowledge/source'
 
 import { markQuick, selectCandidates, type EvalCase } from './cases'
@@ -256,4 +258,36 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
     expect(checked.reasons).toEqual([])
     expect(checked.ok).toBe(true)
   })
+})
+
+// The readiness judge on issues that cannot be done where they run (#238). The judge is a model, so only a live
+// answer shows that its prompt gets them: a fix under `.github/`, and a package version that is not published.
+describe.runIf(mode === 'check' || mode === 'judge')('the readiness judge', () => {
+  const blockedIssues = [
+    {
+      name: 'a fix under .github/',
+      title: 'The release workflow publishes with the wrong token',
+      body: 'The job `publish` in `.github/workflows/release.yml` reads `NPM_TOKEN` from the wrong secret.\nChange it to `NPM_PUBLISH_TOKEN` and the release workflow publishes again.\nDone when the next release run passes.',
+      mentions: /\.github|workflow/i,
+    },
+    {
+      name: 'an unpublished package version',
+      title: 'Use the new gateway API from @theokit/sdk 99.0.0',
+      body: 'Upgrade `@theokit/sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@theokit/sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
+      mentions: /@theokit\/sdk/i,
+    },
+  ]
+  it.each(blockedIssues)(
+    'answers blocked for $name',
+    async ({ title, body, mentions }) => {
+      const judge = modelReadinessJudge()
+      const answer = await judge(
+        readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
+      )
+      const read = parseReadiness(answer.response)
+      expect(read.verdict).toBe('blocked')
+      expect(read.missing).toMatch(mentions)
+    },
+    300_000,
+  )
 })

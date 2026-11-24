@@ -55,7 +55,6 @@ describe('a blocked verdict', () => {
       '{"verdict":"blocked","missing":"the fix is under .github/.","question":""}',
     )
     expect(read).toMatchObject({ verdict: 'blocked', missing: 'the fix is under .github/.' })
-    expect(read.question).toContain('the fix is under .github/.')
   })
 
   it('names an unpublished package', () => {
@@ -74,10 +73,29 @@ describe('a blocked verdict', () => {
     })
   })
 
-  it('asks the owner in auto only', () => {
+  it('keeps the issues it waits for, written with their repository', () => {
+    const read = parseReadiness(
+      '{"verdict":"blocked","missing":"gateways#541 is open","question":"","blockedBy":["o/gateways#541","541","o/gateways#541"]}',
+    )
+    expect(read.blockedBy).toEqual(['o/gateways#541'])
+  })
+
+  it('does not repeat what is missing in the question', () => {
+    const read = parseReadiness('{"verdict":"blocked","missing":"a release","question":""}')
+    expect(read.question).not.toContain('a release')
+  })
+
+  it('asks the owner in auto only when no issue can be read again', () => {
     const blocked = { verdict: 'blocked' as const, questionId: undefined }
     expect(readinessStep(blocked, 'auto')).toBe('ask')
     expect(readinessStep(blocked, 'trial')).toBe('none')
+  })
+
+  it('holds the task back in auto when it waits for issues', () => {
+    const blocked = { verdict: 'blocked' as const, blockedBy: ['o/app#2'] }
+    expect(readinessStep(blocked, 'auto')).toBe('block')
+    expect(readinessStep(blocked, 'trial')).toBe('none')
+    expect(readinessStep({ ...blocked, questionId: 3 }, 'auto')).toBe('none')
   })
 })
 

@@ -47,7 +47,10 @@ import {
   type Verdict,
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
-import { NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
+import { openAmong } from './blocker-check'
+import { errorMessage } from './error-message'
+import { BlockedByOpenIssues, blockersNamed, unavailableNamed } from './blockers'
+import { BLOCKED_NO_CHANGE, NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
 import { diffFacts, reviewBase, samePatch } from './diff-facts'
 import {
   changePlanPrompt,
@@ -835,6 +838,37 @@ export class Run {
     return head !== this.baseSha
   }
 
+  /**
+   * A builder that changed nothing because it waits for an open issue ends the run as blocked by it, like a
+   * task whose issue declares the blocker (`retry-due` reads it again); one that names a release or branch that
+   * does not exist ends it as `BLOCKED_NO_CHANGE`, which no playbook sends back. Anything else is a plain no change.
+   */
+  private async refuseWhenBlocked(): Promise<void> {
+    const { deps, row } = this.c
+    const said = this.summary
+    const open = await openAmong(
+      { ...deps, fetchIssue: deps.fetchIssue },
+      row.repository,
+      blockersNamed(said, row.repository),
+    ).catch((error: unknown) => {
+      // An issue that cannot be read now is no evidence of a blocker: the run ends as a plain no change.
+      console.error(
+        JSON.stringify({
+          event: 'blocker_read_failed',
+          taskId: this.c.taskId,
+          error: errorMessage(error),
+        }),
+      )
+      return []
+    })
+    if (open.length > 0) throw new BlockedByOpenIssues(open)
+    const missing = unavailableNamed(said)
+    if (missing)
+      throw new StageFailure(
+        `${BLOCKED_NO_CHANGE}. The agent said: ${oneLine(missing).slice(0, 700)}`,
+      )
+  }
+
   private async hasNothingToCommit(): Promise<boolean> {
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     return pending.stdout.trim() === '' && !(await this.hasUnpushedCommits())
@@ -863,7 +897,10 @@ export class Run {
     const uncommitted = changes.stdout.trim() !== ''
     if (!uncommitted && !(await this.hasUnpushedCommits())) {
       // A rework that changed nothing is the reviewer's business, not a fact about the issue.
-      if (!detail.rework) await this.keepNoChange()
+      if (!detail.rework) {
+        await this.refuseWhenBlocked()
+        await this.keepNoChange()
+      }
       throw new StageFailure(
         `${NO_CHANGE}${
           this.summary ? `. The agent said: ${oneLine(this.summary).slice(0, 700)}` : ''

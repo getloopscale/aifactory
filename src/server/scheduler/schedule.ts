@@ -1,8 +1,10 @@
 import type { Pool } from 'pg'
 
+import { openAmong } from '../factory/blocker-check'
+import { refOf } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
 
-import { applyOrder, askOwner, recordDecision, type AskDeps } from './apply'
+import { applyOrder, askOwner, blockTask, recordDecision, type AskDeps } from './apply'
 import {
   readinessKey,
   readQueue,
@@ -83,6 +85,35 @@ async function judge(
   return id === undefined ? undefined : { ...readiness, id }
 }
 
+/**
+ * Holds back a blocked task whose blockers are issues, once a read of GitHub says one is still open. When
+ * none is, there is nothing to wait for and the run goes on; a read that fails holds nothing and is logged.
+ */
+async function blockedByIssues(
+  deps: SchedulerDeps,
+  run: ReadRun,
+  verdict: ReadinessRecord,
+): Promise<boolean> {
+  const refs = (verdict.blockedBy ?? []).flatMap((n) => {
+    const ref = refOf(n)
+    return ref ? [ref] : []
+  })
+  try {
+    const open = await openAmong(deps, run.repository, refs)
+    if (open.length === 0) return false
+    const held = await blockTask(
+      deps,
+      run,
+      open.map((r) => `${r.repository}#${r.number}`),
+    )
+    if (!held.blocked) log('schedule_not_blocked', { taskId: run.taskId, reason: held.reason })
+    return held.blocked
+  } catch (error) {
+    log('schedule_block_failed', { taskId: run.taskId, error: errorMessage(error) })
+    return false
+  }
+}
+
 /** Judges one queued issue when its current body was not judged, and asks the owner in `auto` when needed. */
 async function readinessOf(
   deps: SchedulerDeps,
@@ -101,7 +132,9 @@ async function readinessOf(
     }
     result.judged += 1
   }
-  if (readinessStep(verdict, mode) !== 'ask') return false
+  const step = readinessStep(verdict, mode)
+  if (step === 'block') return blockedByIssues(deps, run, verdict!)
+  if (step !== 'ask') return false
   const asked = await askOwner(deps, run, verdict!, verdict!.id)
   if (!asked.asked) log('schedule_not_asked', { taskId: run.taskId, reason: asked.reason })
   return asked.asked
