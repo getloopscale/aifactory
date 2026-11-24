@@ -6,7 +6,13 @@ import type { RequiredByCheck } from './required-files'
 
 export type Severity = 'blocker' | 'major' | 'minor'
 
-export type Finding = { severity: Severity; file?: string; issue: string }
+export type Finding = {
+  severity: Severity
+  file?: string
+  issue: string
+  /** A short name for the kind of defect, in the reviewer's words. Optional: older answers have none. */
+  class?: string
+}
 
 export type ReviewVerdict = {
   verdict: 'approve' | 'changes' | 'invalid'
@@ -108,7 +114,7 @@ ${
 }${input.earlier ? earlierSection(input.earlier, input.baseSha) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
-{"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}
+{"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","class":"a short name for the kind of defect, or omit","issue":"what is wrong and what to do"}]}
 
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
 `
@@ -342,6 +348,9 @@ export function parseVerdict(
         severity: SEVERITIES.includes(f.severity as Severity) ? (f.severity as Severity) : 'major',
         ...(typeof f.file === 'string' ? { file: f.file.slice(0, 200) } : {}),
         issue: String(f.issue ?? '').slice(0, 600),
+        ...(typeof f.class === 'string' && f.class.trim() !== ''
+          ? { class: f.class.trim().slice(0, 120) }
+          : {}),
       }))
       .filter((f) => f.issue !== '')
     let forbidden = 0

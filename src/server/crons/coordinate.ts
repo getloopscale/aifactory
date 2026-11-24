@@ -7,7 +7,10 @@ import { modelSecurityJudge } from '../coordinator/security-judgement'
 import { evolveLog } from '../coordinator/evolve'
 import { evolve, evolveDeps } from '../coordinator/evolve-apply'
 import { coordinatorModeFromEnv } from '../coordinator/mode'
+import { reviewPatternModeFromEnv } from '../coordinator/review-pattern'
+import { reviewPatterns } from '../coordinator/review-pattern-apply'
 import { releaseModeFromEnv } from '../factory/deps'
+import { getDb } from '../db'
 import { mainProcessOnly } from '../factory/worker-only'
 import { fetchIssue, listOpenIssues } from '../github/issues'
 import { createIssuesApi } from '../github/issues-api'
@@ -28,6 +31,18 @@ export default defineCron('coordinate', {
   handler: mainProcessOnly(
     githubPass('coordinate', async () => {
       const mode = coordinatorModeFromEnv(process.env)
+      // The review patterns have a mode of their own, so they run whatever the coordinator's is.
+      const patternMode = reviewPatternModeFromEnv(process.env)
+      if (patternMode !== 'off') {
+        try {
+          const found = await reviewPatterns(getDb(), patternMode)
+          if (Object.values(found).some((n) => n > 0)) {
+            console.log(JSON.stringify({ event: 'review_patterns', mode: patternMode, ...found }))
+          }
+        } catch (error) {
+          console.error(JSON.stringify({ event: 'review_patterns_failed', error: String(error) }))
+        }
+      }
       if (mode === 'off') return
       let deps
       try {

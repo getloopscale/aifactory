@@ -243,6 +243,32 @@ describe('a note', () => {
     expect(PRODUCER).toBe(`aifactory/${packageJson.version}`)
   })
 
+  it('is a review-pattern note with every task as a source, still an unverified observation', () => {
+    const pattern = note({
+      kind: 'review-pattern',
+      baseSha: null,
+      sourceTasks: [
+        { taskId: 3, issueNumber: 41 },
+        { taskId: 4, issueNumber: 42 },
+        { taskId: 5, issueNumber: 43 },
+      ],
+    })
+    expect(noteTitle(pattern)).toBe('Review pattern seen on 3 tasks')
+    const text = renderNote(pattern)
+    const { frontmatter, problem } = readConcept(text)
+    expect(problem).toBeUndefined()
+    expect(frontmatter?.type).toBe('Observation')
+    expect(frontmatter?.status).toBe('draft')
+    expect((frontmatter?.sources as { resource: string }[]).map((x) => x.resource)).toEqual([
+      'https://github.com/acme/app/issues/41',
+      'https://github.com/acme/app/issues/42',
+      'https://github.com/acme/app/issues/43',
+    ])
+    expect(trustTier(frontmatter)).toBe('unverified')
+    expect(text).toContain('[^issue-43]: Issue #43 of acme/app')
+    expect(notePath(pattern)).toBe('memory/projects/acme/app/2026-11-06-review-pattern-7.md')
+  })
+
   it('says in its body where it came from and that it is not an instruction, with the text trimmed', () => {
     const { body } = readConcept(renderNote(note({ body: '  a fact about the tests  \n' })))
     expect(body).toBe(

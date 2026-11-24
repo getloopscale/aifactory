@@ -696,7 +696,7 @@ export const knowledgeNote = pgTable(
     id: serial('id').primaryKey(),
     /** The project the note is about, owner/name. */
     repository: text('repository').notNull(),
-    kind: text('kind', { enum: ['learned', 'no-change'] }).notNull(),
+    kind: text('kind', { enum: ['learned', 'no-change', 'review-pattern'] }).notNull(),
     body: text('body').notNull(),
     bodyHash: text('body_hash').notNull(),
     taskId: integer('task_id')
@@ -704,6 +704,11 @@ export const knowledgeNote = pgTable(
       .references(() => task.id),
     issueNumber: integer('issue_number').notNull(),
     baseSha: text('base_sha'),
+    /** The tasks a `review-pattern` note comes from; `taskId` is the first of them. Empty for the other kinds. */
+    sourceTasks: jsonb('source_tasks')
+      .$type<{ taskId: number; issueNumber: number }[]>()
+      .notNull()
+      .default([]),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     committedSha: text('committed_sha'),
     committedAt: timestamp('committed_at', { withTimezone: true }),
@@ -961,6 +966,34 @@ export const failureSignature = pgTable('failure_signature', {
   countAfter: integer('count_after'),
   measuredAt: timestamp('measured_at', { withTimezone: true }),
 })
+
+/**
+ * A class of defect the reviewer found as blocking on enough tasks of one repository (`coordinator/review-pattern.ts`).
+ * One row per repository and normalised class. `note_id` is the `review-pattern` note written for it (none in `trial`);
+ * the counts are the distinct tasks the class blocked in the 30 days before and after that note was written.
+ */
+export const reviewPattern = pgTable(
+  'review_pattern',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    classKey: text('class_key').notNull(),
+    /** The class in the reviewer's own words, from the first finding. */
+    className: text('class_name').notNull(),
+    /** What the reviewer said of the class, from a representative finding. */
+    invariant: text('invariant').notNull(),
+    taskIds: jsonb('task_ids').$type<number[]>().notNull(),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull(),
+    recordedAt: timestamp('recorded_at', { withTimezone: true }).notNull().defaultNow(),
+    noteId: integer('note_id').references(() => knowledgeNote.id),
+    proposalUrl: text('proposal_url'),
+    countBefore: integer('count_before'),
+    countAfter: integer('count_after'),
+    measuredAt: timestamp('measured_at', { withTimezone: true }),
+  },
+  (table) => [unique('review_pattern_once').on(table.repository, table.classKey)],
+)
 
 /** What the scheduler decides: the order of the queued runs, and whether an issue is ready to build. */
 export const SCHEDULER_DECISION_KINDS = ['order', 'readiness'] as const

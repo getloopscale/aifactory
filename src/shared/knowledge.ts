@@ -26,3 +26,19 @@ export type KnowledgeStatus = {
 
 /** The repository and branch the owner sends; a null repository clears the choice. */
 export type KnowledgeChoice = { repository: string | null; branch?: string | null }
+
+/** A class of defect the reviewer blocked on several tasks of one repository, as the panel lists it. */
+export type ReviewPatternView = {
+  id: number
+  repository: string
+  className: string
+  /** Distinct tasks, and which. */
+  tasks: { id: number; issueNumber: number }[]
+  /** Whether a `review-pattern` note was written (none in `trial`). */
+  noted: boolean
+  /** The pull request that proposes it as a rule, once opened. */
+  proposalUrl: string | null
+  /** The tasks the class blocked in the 30 days before and after the note; null until 30 days have passed. */
+  countBefore: number | null
+  countAfter: number | null
+}

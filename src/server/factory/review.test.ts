@@ -20,6 +20,25 @@ import {
 const answer = (verdict: unknown) => `I read the diff.\n\n${JSON.stringify(verdict)}`
 
 describe('parseVerdict', () => {
+  it('keeps the class of a finding, and reads a finding without one as before', () => {
+    const read = parseVerdict(
+      answer({
+        verdict: 'changes',
+        summary: 's',
+        findings: [
+          { severity: 'major', issue: 'a', class: ' input validated outside the route ' },
+          { severity: 'major', issue: 'b' },
+          { severity: 'major', issue: 'c', class: 7 },
+        ],
+      }),
+    )
+    expect(read.findings).toEqual([
+      { severity: 'major', issue: 'a', class: 'input validated outside the route' },
+      { severity: 'major', issue: 'b' },
+      { severity: 'major', issue: 'c' },
+    ])
+  })
+
   it('reads an approval and a request for changes at the end of an answer', () => {
     expect(parseVerdict(answer({ verdict: 'approve', summary: 'good', findings: [] }))).toEqual({
       verdict: 'approve',

@@ -856,6 +856,20 @@ export const ptBR: Copy = {
     approve: (count: number) =>
       `Aprovar ${count === 1 ? 'este domínio' : `estes ${count} domínios`}`,
   },
+  reviewPatterns: {
+    label: 'Padrões da revisão',
+    about:
+      'Uma classe de defeito que o revisor bloqueou em três ou mais tarefas deste repositório em 30 dias. A fábrica grava uma nota para o próximo construtor; você também pode propô-la como regra, o que abre um pull request no repositório de conhecimento para você mesclar.',
+    none: 'Nenhum padrão ainda.',
+    tasks: (count: number) => `${count} tarefas`,
+    noted: 'nota gravada',
+    notNoted: 'sem nota (trial)',
+    before: 'Tarefas que ela bloqueou nos 30 dias antes da nota',
+    after: 'e nos 30 dias depois',
+    measuring: 'Medido 30 dias depois da nota.',
+    propose: 'Propor como regra',
+    opened: 'Pull request aberto:',
+  },
   knowledge: {
     label: 'Base de conhecimento',
     about: (branch: string) =>
