@@ -2,6 +2,7 @@ import { ToolCallCard } from '@theokit/ui'
 import { useEffect, useState } from 'react'
 
 import type { TranscriptEvent, TranscriptPage } from '../../shared/panel'
+import { PERSONAS } from '../../shared/personas'
 import { get } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { ago } from '../lib/format'
@@ -89,7 +90,7 @@ export function Transcript({ taskId, live }: { taskId: number; live: boolean }) 
           ) : row.type === 'say' ? (
             <p className="whitespace-pre-wrap">
               <span className="mr-2 text-xs font-medium text-muted-foreground">
-                {t.transcript[row.role]}
+                {t.transcript[row.role]} · {PERSONAS[row.role].name}
               </span>
               {row.text}
             </p>

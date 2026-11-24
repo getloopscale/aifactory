@@ -5,6 +5,7 @@ import { question, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { GithubApi, IssueComment } from '../github/pulls'
 
+import { FACTORY_SIGNATURE } from '../../shared/personas'
 import { enterStage } from './stages'
 
 /** Hidden in every comment the factory writes, so it never reads its own comment as an answer. */
@@ -32,6 +33,8 @@ export function questionComment(taskId: number, body: string): string {
     body,
     '',
     'Reply in a comment on this issue. The work continues from where it stopped.',
+    '',
+    FACTORY_SIGNATURE,
   ].join('\n')
 }
 

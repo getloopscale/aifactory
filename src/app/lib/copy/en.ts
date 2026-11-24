@@ -1021,6 +1021,8 @@ export const en = {
     engine: 'Model or agent',
     howToChange: (change: string) => `How to change: ${change}`,
     canDo: 'What it may do',
+    persona: 'Persona',
+    never: 'It never',
     effects: {
       reads: 'only reads',
       asks: 'changes something, asks for your OK',

@@ -1,3 +1,4 @@
+import { FACTORY_SIGNATURE } from '../../shared/personas'
 import { describe, expect, it } from 'vitest'
 
 import type { IssueComment } from '../github/pulls'
@@ -37,6 +38,7 @@ describe('questionComment and answerPrompt', () => {
     expect(text).toContain(QUESTION_MARKER)
     expect(text).toContain('task 4')
     expect(text).toContain('A or B?')
+    expect(text.endsWith(FACTORY_SIGNATURE)).toBe(true)
   })
 
   it('puts the question, the answer and who gave it to the builder', () => {
