@@ -331,6 +331,9 @@ describe('publishing a changesets release', () => {
     const notYet = await seedTask('done', 'later1')
     const notIntegrated = await seedTask('done', null)
     repo().unreachable.add('later1')
+    const [first] = await getDb().select().from(task).where(eq(task.id, released))
+    mergeChanges(first.mergedSha!, 'packages/ui', '@theokit/ui')
+    mergeChanges('shipped1', 'packages/ui', '@theokit/ui')
     versionPr()
     releasesAre(published('@theokit/ui@1.13.0'), published('pre/7-abc'), published('v9.9.9'))
 
