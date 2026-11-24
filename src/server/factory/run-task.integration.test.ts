@@ -482,6 +482,37 @@ class RealGit {
     run('push', '-q', 'origin', 'workspace')
   }
 
+  /**
+   * Leaves `factory/7` and `workspace` on the remote with both having appended a different entry to the
+   * `[Unreleased]` section of `CHANGELOG.md`, which is what two tasks of one repository do.
+   */
+  divergeAppending(): void {
+    const clone = join(this.root, 'diverge-appending')
+    const run = (...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd: clone,
+        encoding: 'utf8',
+      })
+    const changelog = (entry: string) =>
+      writeFileSync(
+        join(clone, 'CHANGELOG.md'),
+        `# Changelog\n\n## Unreleased\n${entry}\n## 1.0.0\n`,
+      )
+    execFileSync('git', ['clone', '-q', '-b', 'workspace', this.remote, clone])
+    changelog('')
+    run('add', '-A')
+    run('commit', '-qm', 'a changelog')
+    run('push', '-q', 'origin', 'workspace')
+    run('switch', '-q', '-c', 'factory/7')
+    changelog('- the work\n')
+    run('commit', '-qam', 'the work')
+    run('push', '-q', 'origin', 'factory/7')
+    run('switch', '-q', 'workspace')
+    changelog('- the base\n')
+    run('commit', '-qam', 'the base moves')
+    run('push', '-q', 'origin', 'workspace')
+  }
+
   private git(...args: string[]): string {
     return execFileSync('git', ['--git-dir', this.remote, ...args], { encoding: 'utf8' }).trim()
   }
@@ -3360,6 +3391,42 @@ describe('runTask continuing from a branch a person sent back', () => {
 
       expect(prompts[0]).toContain('Files in conflict: shared.txt')
       expect(prompts[0]).not.toContain('both.txt')
+    } finally {
+      await git.close()
+    }
+  })
+
+  it('merges the base itself, keeping both entries of an appended changelog, and asks no agent', async () => {
+    const id = await seedTask()
+    const git = await RealGit.open()
+    try {
+      git.divergeAppending()
+      const before = git.remoteHead('factory/7')
+      await getDb()
+        .update(task)
+        .set({ stage: 'intake', headSha: before, pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      branchPushed()
+      const prompts: string[] = []
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        run: async (_backend, input) => {
+          prompts.push(input.prompt)
+          return { ok: true, summary: 'Looked at it.' }
+        },
+      }
+
+      await runTask(deps(git.sandbox, { harness: builder }), id, undefined, {
+        feedback:
+          'The pull request conflicts with workspace, which moved after this work was approved. Merge it.',
+      })
+
+      expect(prompts).toEqual([])
+      const pushed = git.show(git.remoteHead('factory/7'), 'CHANGELOG.md')
+      expect(pushed).toContain('- the work')
+      expect(pushed).toContain('- the base')
+      expect(git.parentOf(git.remoteHead('factory/7'))).toBe(before)
     } finally {
       await git.close()
     }
