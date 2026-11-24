@@ -67,6 +67,20 @@ const versionFiles = (files: Record<string, { before: string; after: string }>) 
     Object.fromEntries(Object.entries(files).map(([path, f]) => [path, f[pick]]))
   repo().files(`${VERSION_MERGE}^`, side('before')).files(VERSION_MERGE, side('after'))
 }
+/**
+ * Sets what the merge `sha` changed: one source file of the package in `dir`, named `name`, in a
+ * repository that publishes with changesets.
+ */
+const mergeChanges = (sha: string, dir: string, name: string) => {
+  const source = `${dir}/src/index.ts`
+  repo()
+    .compare(`${sha}^`, sha, [{ path: source, status: 'modified' }])
+    .files(sha, {
+      [`${dir}/package.json`]: JSON.stringify({ name, version: '1.0.0' }),
+      [source]: 'export {}',
+      '.changeset/config.json': '{}',
+    })
+}
 const merges = () =>
   api.callsTo('mergePullRequest').map(([number, sha, merge]) => ({ number, sha, merge }))
 /** The pull requests GitHub was asked for: by head, and as `head -> base` for the open ones. */
@@ -351,7 +365,7 @@ describe('publishing a changesets release', () => {
     expect(events.at(-1)?.detail).toMatchObject({ tag: '@theokit/ui@1.13.0', actor: 'human' })
   })
 
-  it('releases the task of a publication its promotion superseded, and not one of a publication that failed for itself', async () => {
+  it('releases the task of a publication its promotion superseded, and not one that failed for itself whose package this release does not publish', async () => {
     /** A publication of an earlier promotion that ended without publishing anything, with this detail. */
     const ended = async (mergedSha: string, detail: string) => {
       const id = await seedTask('released', mergedSha)
@@ -377,6 +391,7 @@ describe('publishing a changesets release', () => {
       'old2',
       'the release workflow opened no Version Packages pull request',
     )
+    mergeChanges('old2', 'packages/core', '@theokit/core')
     await waitingPublication()
     versionPr()
     releasesAre(published('@theokit/ui@1.13.0'))
@@ -408,6 +423,72 @@ describe('publishing a changesets release', () => {
       .from(delivery)
       .where(eq(delivery.tag, '@theokit/ui@1.14.0'))
     expect(later.map((d) => d.taskId)).toEqual([failed])
+  })
+
+  describe('a task of a publication that failed for itself', () => {
+    /** A task released by a publication that ended without publishing anything, its merge changing `name`. */
+    const failedFor = async (mergedSha: string, name: string) => {
+      const id = await seedTask('released', mergedSha)
+      await getDb()
+        .insert(publication)
+        .values({
+          taskId: id,
+          repository: REPO,
+          releaseBranch: 'main',
+          promotedSha: `${mergedSha}-promotion`,
+          actor: 'agent:coordinator',
+          status: 'failed',
+          detail: 'the release workflow opened no Version Packages pull request',
+          startedAt: new Date(STARTED.getTime() - 3_600_000),
+        })
+      mergeChanges(mergedSha, 'packages/ui', name)
+      return id
+    }
+    const issueState = (state: 'open' | 'closed') => ({
+      ...deps(),
+      fetchIssue: async (_repo: string, n: number) => ({
+        number: n,
+        title: '',
+        body: '',
+        labels: [],
+        state,
+      }),
+    })
+    const issueOf = async (id: number) =>
+      (await getDb().select().from(task).where(eq(task.id, id)))[0].issueNumber
+    const releasesOf = async (id: number) =>
+      (await getDb().select().from(delivery).where(eq(delivery.kind, 'release'))).filter(
+        (d) => d.taskId === id,
+      )
+
+    it('is released by the next release that publishes its package, and its open issue closed with the version', async () => {
+      const failed = await failedFor('old3', '@theokit/ui')
+      await waitingPublication()
+      versionPr()
+      releasesAre(published('@theokit/ui@1.13.0'))
+
+      await pollPublications(issueState('open'))
+
+      expect(await releasesOf(failed)).toMatchObject([{ tag: '@theokit/ui@1.13.0' }])
+      const issue = await issueOf(failed)
+      expect(closed()).toContain(issue)
+      const told = comments().find((c) => c.issue === issue)
+      expect(told?.body).toContain('Available in `@theokit/ui@1.13.0`')
+    })
+
+    it('is released without a comment when a person already closed its issue', async () => {
+      const failed = await failedFor('old4', '@theokit/ui')
+      await waitingPublication()
+      versionPr()
+      releasesAre(published('@theokit/ui@1.13.0'))
+
+      await pollPublications(issueState('closed'))
+
+      expect(await releasesOf(failed)).toHaveLength(1)
+      const issue = await issueOf(failed)
+      expect(comments().map((c) => c.issue)).not.toContain(issue)
+      expect(closed()).not.toContain(issue)
+    })
   })
 
   it('releases a task resolved with no change whose commit the promotion carries, and leaves one it does not', async () => {
