@@ -365,6 +365,13 @@ reads that file, not a convention.
   failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
   environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
+- **A conflict with the integration branch is merged by the factory first, and in turn.** A send-back for a conflict
+  (`CONFLICT_NOTE_OPENING`) makes the run call `mergeIntegration` before any agent (`Run.mergeWithoutAgent`): a Markdown
+  file whose two sides both only added lines to the common ancestor keeps both (`merge-base.ts`), and the merge is
+  checked and reviewed like any work. Any other conflict aborts the whole merge and goes to the agent as before. A task
+  whose pull request was refused for a conflict `CONFLICT_LIMIT` times is owed a turn (`factory/conflict-turn.ts`): the
+  repository's other integrations wait (`integrationHeldUntil`, `held` in `await-ci.ts`) until it merges, fails, is
+  handed over or stops moving for `TURN_STALE_MS`; the lowest task number goes first.
 - **A merge of the base is not the task's change.** The review and `diffFacts` measure the change from
   `reviewBase` (`factory/diff-facts.ts`): the merge base of HEAD and the integration branch fetched before each
   review. A later round reads what the task changed since the reviewed commit through `changedSinceCommand`
