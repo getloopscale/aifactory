@@ -470,6 +470,27 @@ export const agentEvent = pgTable(
 )
 
 /**
+ * What the owner wrote to an agent from the panel (M13), one row per message, in the order sent (`id`).
+ * `mode` is `ask` (the agent answers and changes nothing) or `steer` (it may change code, through the
+ * usual gates). `delivery` is `pending` until an agent takes it, then `delivered`, or `failed` with the
+ * reason in `failure`: a message is never dropped.
+ */
+export const agentMessage = pgTable('agent_message', {
+  id: serial('id').primaryKey(),
+  taskId: integer('task_id')
+    .notNull()
+    .references(() => task.id),
+  role: text('role', { enum: ['builder', 'reviewer'] }).notNull(),
+  mode: text('mode', { enum: ['ask', 'steer'] }).notNull(),
+  text: text('text').notNull(),
+  delivery: text('delivery', { enum: ['pending', 'delivered', 'failed'] })
+    .notNull()
+    .default('pending'),
+  failure: text('failure'),
+  at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * A process that creates sandboxes says it is alive here, every half minute. A sandbox names the process in
  * its metadata, so the supervisor can tell a sandbox whose owner died, on any host, from one in use. On its own
  * host the supervisor asks the system whether `pid` still runs since `started`; elsewhere it goes by the beat.

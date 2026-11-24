@@ -1,7 +1,16 @@
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
+import {
+  agentMessage,
+  decision,
+  finding,
+  question,
+  repository,
+  stageEvent,
+  task,
+  watch,
+} from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { integrationBranch } from '../factory/branches'
 import { CONFLICT_NOTE_OPENING, withConflictFiles } from '../factory/merge-base'
@@ -253,6 +262,32 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
     row.headSha,
   )
   return { decisionId }
+}
+
+/**
+ * Stores what the owner writes to an agent (M13). The message waits as `pending`, in the order sent; it
+ * approves nothing and skips no gate, and a `steer` of integrated work is refused by the transition table.
+ * Delivery to a live process or a resumed session is a later step: nothing here reaches an agent.
+ */
+export async function sendMessage(
+  deps: ActionDeps,
+  taskId: number,
+  input: { text: string; mode: 'ask' | 'steer'; role?: 'builder' | 'reviewer' },
+) {
+  const text = input.text.trim()
+  if (text === '') throw new ActionRefused('write something to send')
+  const row = await load(deps.db, taskId)
+  mustAllow(row, input.mode === 'steer' ? 'message_steer' : 'message_ask')
+  const [made] = await deps.db
+    .insert(agentMessage)
+    .values({
+      taskId,
+      role: input.role ?? 'builder',
+      mode: input.mode,
+      text: text.slice(0, NOTE_MAX),
+    })
+    .returning({ id: agentMessage.id })
+  return { messageId: made!.id }
 }
 
 /**

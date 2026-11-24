@@ -52,6 +52,8 @@ describe('the transition table', () => {
       retry_from_finding: true,
       resolve: true,
       release: true,
+      message_ask: true,
+      message_steer: true,
       retry_due: true,
       conflict_rerun: true,
       send_back_after_ci: true,
@@ -79,7 +81,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(31 * 15)
+    expect(pairs).toHaveLength(33 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -612,5 +614,17 @@ describe('the stages a task may be in when what was decided is carried out', () 
     expect(stagesWhere('resolve', {})).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', { mergedSha: 'm' })).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', {})).toEqual(['done', 'handoff', 'failed'])
+  })
+
+  it('lets the owner ask anywhere work exists, and steer only work that is not integrated', () => {
+    expect(outcome({ stage: 'done', mergedSha: 'm' }, 'message_ask').kind).toBe('action')
+    expect(outcome({ stage: 'intake' }, 'message_ask').kind).toBe('refused')
+    expect(outcome({ stage: 'build' }, 'message_steer').kind).toBe('action')
+    expect(outcome({ stage: 'done' }, 'message_steer').kind).toBe('action')
+    expect(outcome({ stage: 'done', mergedSha: 'm' }, 'message_steer')).toMatchObject({
+      kind: 'refused',
+      reason: expect.stringContaining('already integrated'),
+    })
+    expect(outcome({ stage: 'cancelled' }, 'message_steer').kind).toBe('refused')
   })
 })
