@@ -1,4 +1,5 @@
 // S2 and S3 of M13 (docs/adr/0013-agent-conversation.md), for Claude Code and Codex.
+// stdin is not measured: runCommand has `stdin: true`, which needs its own experiment.
 //   node --env-file=.env.local spikes/vercel-sandbox/04-agent-conversation.mjs [claude|codex]
 // Needs Vercel credentials for @vercel/sandbox and ANTHROPIC_API_KEY (claude) or OPENAI_API_KEY (codex).
 // Keys are attached by the firewall, never written into the sandbox. Prints only non-secret evidence:
@@ -49,9 +50,12 @@ const sh = async (sb, script, ms = 180_000) => {
   return { code: r.exitCode, out: (await r.stdout()).trim(), ms: Date.now() - t }
 }
 // The prompt reaches the CLI by file, never through the shell's parsing.
+// One file per prompt: a command still running must not read the next prompt.
+let prompts = 0
 const prompt = async (sb, text) => {
-  await sb.writeFiles([{ path: '/tmp/prompt.txt', content: Buffer.from(text) }])
-  return '"$(cat /tmp/prompt.txt)"'
+  const path = `/tmp/prompt-${++prompts}.txt`
+  await sb.writeFiles([{ path, content: Buffer.from(text) }])
+  return `"$(cat ${path})"`
 }
 const report = (label, v) => console.log(`${which} ${label}: ${JSON.stringify(v)}`)
 
@@ -76,9 +80,11 @@ try {
   // S2b: does a second message reach a running process? Start a long task, send a second message
   // with --continue while it runs, and see whether the first one survives.
   const long = await prompt(a, `Remember the code ${fact}. Then run sleep 60 and say finished.`)
-  const running = a
-    .runCommand({ cmd: 'sh', args: ['-c', `cd /tmp/w && ${CLI.start(long)}`], detached: true })
-    .catch((e) => e)
+  const running = await a.runCommand({
+    cmd: 'sh',
+    args: ['-c', `cd /tmp/w && ${CLI.start(long)}`],
+    detached: true,
+  })
   await new Promise((ok) => setTimeout(ok, 15_000))
   const second = await prompt(a, 'What is the code I told you? Answer with the code only.')
   const during = await sh(a, `cd /tmp/w && ${CLI.resume(second)} 2>&1 | tail -c 600`)
@@ -87,7 +93,12 @@ try {
     recalled: during.out.includes(fact),
     ms: during.ms,
   })
-  await running
+  // wait() is what tells whether the step in progress survived the second message.
+  const first = await running.wait({ signal: AbortSignal.timeout(180_000) })
+  report('S2 first command after the second message', {
+    code: first.exitCode,
+    finished: (await first.stdout()).includes('finished'),
+  })
 
   // S3: save the session state, stop the sandbox, restore it in a new one, recall the fact.
   const dir = `"$(dirname ${CLI.sessionDir})"`

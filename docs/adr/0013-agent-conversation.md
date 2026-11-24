@@ -37,11 +37,11 @@ tê-las). Nada foi rodado, e nenhum resultado abaixo é evidência.
 Nenhum mecanismo está escolhido. O desenho do M13 permanece o do plano, **como hipótese**:
 
 - entrega: stdin onde existir; senão interromper e retomar. O roteiro mede só o segundo caminho; o
-  `stream-json` por stdin precisa de teste próprio, pois o backend do Vercel não expõe stdin;
+  `stream-json` por stdin precisa de teste próprio, pois o backend da fábrica não expõe stdin, mas o `runCommand` do SDK tem `stdin: true`, ainda não testado;
 - isolamento do Perguntar: confirmar pela árvore de trabalho e pelo `git status`, não só pelo SHA da branch;
 - sessão: arquivos da pasta de sessões do CLI guardados em `agent_session`.
 
-## Pendente
+## Pendente (bloqueado por credenciais, precisa de uma pessoa)
 
 Rodar o roteiro para os dois CLIs com credenciais válidas, preencher a tabela com a saída (sem segredos nem
 conteúdo de sessão), escolher os mecanismos e reescrever o M13 se algo contradisser. A implementação do M13
