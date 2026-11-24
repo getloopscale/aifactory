@@ -38,7 +38,6 @@ export async function mergeIntegration(
 }
 
 const SAFE_PATH = /^[\w./@+-]+$/
-const TEMP = '/tmp/merge-base'
 
 /** Whether every line of `ancestor` is in `side`, in order: the side only added lines. */
 export function onlyAdds(ancestor: string[], side: string[]): boolean {
@@ -58,18 +57,17 @@ async function keepBothAdditions(
   git: string,
   conflicts: string[],
 ): Promise<string[]> {
-  const left: string[] = []
+  // Nothing is written until every file is known to be resolvable: a merge that is left half resolved cannot
+  // be aborted, and one conflict that needs judgement sends the whole merge to the agent anyway.
   for (const file of conflicts) {
-    if (!(await resolveAppended(backend, git, file))) left.push(file)
+    if (!(await onlyAppended(backend, git, file))) return conflicts
   }
-  return left
+  for (const file of conflicts) await keepBoth(backend, git, file)
+  return []
 }
 
-async function resolveAppended(
-  backend: SandboxBackend,
-  git: string,
-  file: string,
-): Promise<boolean> {
+/** Whether `file` is Markdown that both sides only added lines to, so keeping both sides loses nothing. */
+async function onlyAppended(backend: SandboxBackend, git: string, file: string): Promise<boolean> {
   if (!SAFE_PATH.test(file) || !file.endsWith('.md')) return false
   const stage = async (n: number) => {
     const shown = await backend.execute(`${git} show :${n}:${file}`)
@@ -78,16 +76,20 @@ async function resolveAppended(
   const [base, ours, theirs] = [await stage(1), await stage(2), await stage(3)]
   if (base === undefined || ours === undefined || theirs === undefined) return false
   const lines = (text: string) => text.split('\n')
-  if (!onlyAdds(lines(base), lines(ours)) || !onlyAdds(lines(base), lines(theirs))) return false
-  const dir = `${TEMP}-${process.pid}-${Date.now()}`
-  const q = (n: number) => `${dir}/${n}`
-  const merged = await backend.execute(
-    `mkdir -p ${dir} && ${git} show :2:${file} > ${q(2)} && ${git} show :1:${file} > ${q(1)} && ` +
-      `${git} show :3:${file} > ${q(3)} && git merge-file --union -p ${q(2)} ${q(1)} ${q(3)} > ${q(0)} && ` +
-      `blob=$(${git} hash-object -w ${q(0)}) && ${git} update-index --cacheinfo 100644,$blob,${file} && ` +
-      `${git} checkout-index -f -- ${file}; code=$?; rm -rf ${dir}; exit $code`,
+  return onlyAdds(lines(base), lines(ours)) && onlyAdds(lines(base), lines(theirs))
+}
+
+/** Writes `file` with both sides' additions, in the mode git recorded for our side, and stages it. */
+async function keepBoth(backend: SandboxBackend, git: string, file: string): Promise<void> {
+  await must(
+    backend,
+    `dir=$(mktemp -d) && ` +
+      `mode=$(${git} ls-files -u -- ${file} | grep -F ' 2' | head -n 1 | cut -d' ' -f1) && ` +
+      `${git} show :2:${file} > $dir/2 && ${git} show :1:${file} > $dir/1 && ` +
+      `${git} show :3:${file} > $dir/3 && git merge-file --union -p $dir/2 $dir/1 $dir/3 > $dir/0 && ` +
+      `blob=$(${git} hash-object -w $dir/0) && ${git} update-index --cacheinfo $mode,$blob,${file} && ` +
+      `${git} checkout-index -f -- ${file}; code=$?; rm -rf $dir; exit $code`,
   )
-  return merged.exitCode === 0
 }
 
 /** How a send-back for a conflict with the integration branch begins; the run finds its note by it. */

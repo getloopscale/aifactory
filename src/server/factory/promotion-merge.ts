@@ -6,6 +6,7 @@ import type { GithubApp } from '../github/app'
 import { lineHolds } from '../line/incident'
 import { autoMergeOrMergeable, type GithubApi, type OpenPullRequest } from '../github/pulls'
 
+import { conflictTurnHolds } from './conflict-turn'
 import { errorMessage } from './error-message'
 import type { ReleaseMode } from './deliver'
 import { WORKING } from './transitions'
@@ -162,6 +163,10 @@ export async function integrationHeldUntil(
 ): Promise<Date | undefined> {
   // A stopped line integrates only its fix (`line/`); the others are looked at again on the next pass.
   if (await lineHolds(db, repository, taskId)) return new Date(now.getTime() + LINE_RECHECK_MS)
+  // A task that conflicted again and again integrates alone, in turn (`conflict-turn.ts`).
+  if (await conflictTurnHolds(db, repository, taskId, now)) {
+    return new Date(now.getTime() + LINE_RECHECK_MS)
+  }
   const wait = await waitingIn(db, repository)
   return wait && holdsIntegrations(wait, now) ? wait.holdUntil : undefined
 }
