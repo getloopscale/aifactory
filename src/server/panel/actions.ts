@@ -11,6 +11,8 @@ import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
 import { answerMarker } from '../factory/waiting'
 import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
+import { fileOnce } from '../coordinator/file-once'
+import type { IssuesApi } from '../github/issues-api'
 import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
@@ -58,7 +60,7 @@ const NOTE_MAX = 4_000
  * cannot queue two runs. A task that runs again is not resolved any more: what the new run finds decides.
  */
 async function requeue(
-  deps: ActionDeps,
+  deps: Pick<ActionDeps, 'inTransaction'>,
   taskId: number,
   from: string[],
   kind: 'request_changes' | 'retry' | 'automatic_retry' | 'automatic_changes',
@@ -239,7 +241,11 @@ export async function approve(deps: ActionDeps, taskId: number) {
  * on GitHub (resolved with no change, or its branch deleted by a retry) starts from the integration
  * branch instead, as a first run does, with the same note.
  */
-export async function requestChanges(deps: ActionDeps, taskId: number, note: string) {
+export async function requestChanges(
+  deps: Pick<ActionDeps, 'db' | 'inTransaction'> & Partial<ActionDeps>,
+  taskId: number,
+  note: string,
+) {
   const text = note.trim()
   if (text === '') throw new ActionRefused('say what should change')
   const row = await load(deps.db, taskId)
@@ -717,4 +723,42 @@ export async function resolveFinding(
   }
   await deps.db.update(finding).set({ resolvedAt: new Date() }).where(eq(finding.id, findingId))
   return { findingId }
+}
+
+/** What a person wrote on the pull request of work already integrated, which asks for a follow-up issue. */
+export type FollowUpRequest = {
+  taskId: number
+  repository: string
+  issueNumber: number
+  /** Names the review or comment, so one that is delivered twice files one issue. */
+  signature: string
+  by: string
+  text: string
+}
+
+/**
+ * Files the follow-up issue for something a trusted person wrote on the pull request of integrated work, once
+ * per review or comment (`fileOnce`). GitHub cannot commit with the database, so this runs after the delivery
+ * is recorded; a delivery of the same review again finds the claim and files nothing.
+ */
+export async function openFollowUpIssue(
+  deps: Pick<ActionDeps, 'db' | 'github'> & { issues: Pick<IssuesApi, 'createIssue'> },
+  request: FollowUpRequest,
+): Promise<{ filed: number } | { already: number | null }> {
+  const { token } = await deps.github.installationToken(request.repository)
+  const done = await fileOnce(
+    deps.db,
+    { signature: request.signature, repository: request.repository, now: new Date() },
+    () =>
+      deps.issues.createIssue(request.repository, token, {
+        title: `Follow-up of #${request.issueNumber}: a review on its pull request`,
+        body: [
+          `${request.by} wrote this on the pull request of #${request.issueNumber}, after its work was integrated:`,
+          request.text.slice(0, NOTE_MAX).replace(/^/gm, '> '),
+          `Follow-up of #${request.issueNumber}.`,
+        ].join('\n\n'),
+        labels: ['follow-up'],
+      }),
+  )
+  return 'filed' in done ? { filed: done.filed.number } : { already: done.already }
 }
