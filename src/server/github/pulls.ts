@@ -1160,15 +1160,20 @@ export function createGithubApi(
     },
 
     async reviewedCommits(repo, token, number, marker) {
-      const response = await ensure(
-        await call(repo, token, `/pulls/${number}/reviews?per_page=100`),
-        `listing the reviews of ${repo}#${number}`,
-        [200],
-      )
-      const reviews = (await response.json()) as { body?: string | null; commit_id?: string }[]
-      return reviews.flatMap((review) =>
-        review.body?.includes(marker) && review.commit_id ? [review.commit_id] : [],
-      )
+      const found: string[] = []
+      // Every page: a pull request with many reviews must still show the one this factory posted.
+      for (let page = 1; ; page++) {
+        const response = await ensure(
+          await call(repo, token, `/pulls/${number}/reviews?per_page=100&page=${page}`),
+          `listing the reviews of ${repo}#${number}`,
+          [200],
+        )
+        const reviews = (await response.json()) as { body?: string | null; commit_id?: string }[]
+        for (const review of reviews) {
+          if (review.body?.includes(marker) && review.commit_id) found.push(review.commit_id)
+        }
+        if (reviews.length < 100) return found
+      }
     },
 
     async commentOnIssue(repo, token, issueNumber, body) {

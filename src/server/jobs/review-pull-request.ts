@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { getDb } from '../db'
 import { factoryDeps, githubAppFromEnv } from '../factory/deps'
-import { reviewExternalPull } from '../factory/external-review'
+import { drizzleStore, reviewExternalPull } from '../factory/external-review'
 import { withLeaseHeartbeat } from '../factory/lease'
 import { effectiveEnv } from '../factory/settings'
 import { createGithubApi } from '../github/pulls'
@@ -22,7 +22,7 @@ export default defineJob('review-pull-request', {
       }
       const outcome = await reviewExternalPull(
         {
-          db: getDb(),
+          store: drizzleStore(getDb()),
           github: githubAppFromEnv(env),
           api: createGithubApi(),
           sandbox: run.sandbox,

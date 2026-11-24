@@ -79,7 +79,7 @@ export type RoutedIntent =
       /** A pull request was opened, got a new head commit or left draft: the reviewer may read it. */
       kind: 'pull_request_to_review'
       repository: string
-      pullRequestNumber: number
+      pullNumber: number
       headSha: string
       /** The branch it targets, and the head's branch and repository (a fork is told apart by the latter). */
       baseRef: string
@@ -272,7 +272,7 @@ const ROUTES = new Map<string, { actions: string[]; payload: z.ZodType<Routed> }
           intent: {
             kind: 'pull_request_to_review',
             repository: repository.full_name,
-            pullRequestNumber: number,
+            pullNumber: number,
             headSha: pr.head.sha,
             baseRef: pr.base.ref,
             headRef: pr.head.ref,

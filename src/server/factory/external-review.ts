@@ -16,7 +16,7 @@ import { runChecks, type CheckResult } from './evidence'
 import type { CodingHarness } from './harness'
 import { prepareDeclaredPackageManager } from './package-manager'
 import { withRecipe, type Recipe } from './recipe'
-import { labelsWithRepoChoice, loadRepoConfig } from './repo-config'
+import { labelsWithRepoChoice, loadRepoConfig, type RepoConfig } from './repo-config'
 import { parseVerdict, pullRequestReviewPrompt, type Finding, type ReviewVerdict } from './review'
 import { mergeEgress, must } from './run-support'
 import { createIsolatedSandbox, type EgressRule, type IsolatedSandboxProvider } from './sandbox'
@@ -30,7 +30,7 @@ import { effectiveChecks } from './prove-checks'
  */
 
 export type ExternalReviewDeps = {
-  db: Database
+  store: ExternalReviewStore
   github: Pick<GithubApp, 'installationToken'>
   api: Pick<GithubApi, 'readPullRequest' | 'postPullRequestReview' | 'reviewedCommits'>
   sandbox: IsolatedSandboxProvider
@@ -42,6 +42,40 @@ export type ExternalReviewDeps = {
   reviewMs?: number
   sandboxMs?: number
 }
+
+/** What the review reads and writes in the database, so the flow can be tested without one. */
+export type ExternalReviewStore = {
+  load(id: number): Promise<typeof externalReview.$inferSelect | undefined>
+  settle(id: number, set: Partial<typeof externalReview.$inferInsert>): Promise<void>
+  /** The repository's row: enabled, and whether the owner turned this review on. */
+  setting(repo: string): Promise<{ enabled: boolean; on: boolean } | undefined>
+  config(repo: string): Promise<RepoConfig>
+  recordRun(run: typeof agentRun.$inferInsert): Promise<void>
+}
+
+export const drizzleStore = (db: Database): ExternalReviewStore => ({
+  async load(id) {
+    const [row] = await db.select().from(externalReview).where(eq(externalReview.id, id))
+    return row
+  },
+  async settle(id, set) {
+    await db
+      .update(externalReview)
+      .set({ ...set, updatedAt: new Date() })
+      .where(eq(externalReview.id, id))
+  },
+  async setting(repo) {
+    const [row] = await db
+      .select({ on: repository.reviewExternalPulls, enabled: repository.enabled })
+      .from(repository)
+      .where(sql`lower(${repository.fullName}) = lower(${repo})`)
+    return row
+  },
+  config: (repo) => loadRepoConfig(db, repo),
+  async recordRun(run) {
+    await db.insert(agentRun).values(run)
+  },
+})
 
 export type ExternalReviewResult = 'posted' | 'skipped'
 
@@ -89,45 +123,35 @@ ${findings}
 This is a comment, not an approval: a person decides the merge.`
 }
 
-async function settle(db: Database, id: number, set: Partial<typeof externalReview.$inferInsert>) {
-  await db
-    .update(externalReview)
-    .set({ ...set, updatedAt: new Date() })
-    .where(eq(externalReview.id, id))
-}
-
 export async function reviewExternalPull(
   deps: ExternalReviewDeps,
   reviewId: number,
 ): Promise<ExternalReviewResult> {
-  const { db } = deps
-  const [row] = await db.select().from(externalReview).where(eq(externalReview.id, reviewId))
+  const { store } = deps
+  const row = await store.load(reviewId)
   if (!row) throw new Error(`external review ${reviewId} does not exist`)
   if (row.status === 'posted' || row.status === 'skipped') {
     return row.status === 'posted' ? 'posted' : 'skipped'
   }
-  await settle(db, reviewId, { status: 'running', detail: null })
+  await store.settle(reviewId, { status: 'running', detail: null })
   try {
     const result = await review(deps, row)
-    await settle(db, reviewId, { status: result.status, detail: result.detail })
+    await store.settle(reviewId, { status: result.status, detail: result.detail })
     return result.status
   } catch (error) {
     if (error instanceof Skipped) {
-      await settle(db, reviewId, { status: 'skipped', detail: error.message })
+      await store.settle(reviewId, { status: 'skipped', detail: error.message })
       return 'skipped'
     }
-    await settle(db, reviewId, { status: 'failed', detail: errorMessage(error).slice(0, 500) })
+    await store.settle(reviewId, { status: 'failed', detail: errorMessage(error).slice(0, 500) })
     throw error
   }
 }
 
 async function review(deps: ExternalReviewDeps, row: typeof externalReview.$inferSelect) {
-  const { db, api } = deps
+  const { store, api } = deps
   const repo = row.repository
-  const [setting] = await db
-    .select({ on: repository.reviewExternalPulls, enabled: repository.enabled })
-    .from(repository)
-    .where(sql`lower(${repository.fullName}) = lower(${repo})`)
+  const setting = await store.setting(repo)
   if (!setting?.enabled || !setting.on)
     throw new Skipped('the repository no longer reviews pull requests')
 
@@ -143,7 +167,7 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
   const done = await api.reviewedCommits(repo, token, row.pullNumber, REVIEW_MARKER)
   if (done.includes(row.headSha)) return { status: 'posted' as const, detail: 'already reviewed' }
 
-  const config = withRecipe(await loadRepoConfig(db, repo), await deps.fetchRecipe?.(repo, token))
+  const config = withRecipe(await store.config(repo), await deps.fetchRecipe?.(repo, token))
   const reviewer = deps.reviewer(labelsWithRepoChoice([], config))
   const agentEgress = mergeEgress([await reviewer.egress()])
   // The token is in the firewall for the clone and the fetch only; the agent's rules come after the checks.
@@ -157,7 +181,7 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     owner: { owner: 'review-pull-request', repository: repo, pull: row.pullNumber },
     timeoutMs: fitToSession({ sandboxMs: deps.sandboxMs ?? SANDBOX_MS }, deps.sandbox.maxSessionMs)
       .sandboxMs,
-    cacheKey: repo,
+    // No cache key: the checks run a stranger's code, and a package store it wrote would be read by the next trusted run.
     egress: cloning,
   })
   let feed: KnowledgeFeed | undefined
@@ -184,6 +208,13 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     const at = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
     if (at !== row.headSha) throw new Error(`checked out ${at}, not ${row.headSha}`)
 
+    // Read before the repository's code has run, so what its checks leave behind cannot change the facts.
+    const facts = await diffFacts(backend, repoDir, {
+      baseSha,
+      plan: undefined,
+      issue: { labels: [], title: row.title, body: row.body },
+    })
+
     // From here the sandbox holds no GitHub credential, whatever the code that runs in it does.
     await sandbox.updateEgress(running)
     await prepareDeclaredPackageManager(backend, repoDir)
@@ -198,12 +229,6 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     await reviewer.prepare?.(backend)
     feed = await KnowledgeFeed.open(deps.knowledge, backend, repo, {})
     await backend.uploadFile(DESCRIPTION_FILE, `# ${row.title}\n\n${row.body}\n`)
-    const facts = await diffFacts(backend, repoDir, {
-      baseSha,
-      plan: undefined,
-      issue: { labels: [], title: row.title, body: row.body },
-    })
-
     const started = Date.now()
     let result
     try {
@@ -221,11 +246,11 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
         }),
       })
     } catch (error) {
-      await recordRun(db, row.id, reviewer, undefined, Date.now() - started)
+      await recordRun(store, row.id, reviewer, undefined, Date.now() - started)
       throw error
     }
-    await recordRun(db, row.id, reviewer, result, Date.now() - started)
-    await settle(db, row.id, { costUsd: result.costUsd ?? null })
+    await recordRun(store, row.id, reviewer, result, Date.now() - started)
+    await store.settle(row.id, { costUsd: result.costUsd ?? null })
     if (!result.ok) throw new Error(`the reviewer failed: ${result.summary.slice(0, 300)}`)
     const read = parseVerdict(result.summary)
     // A verdict that is not one is never posted as if it were.
@@ -250,7 +275,7 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
 }
 
 async function recordRun(
-  db: Database,
+  store: ExternalReviewStore,
   reviewId: number,
   who: CodingHarness,
   result:
@@ -266,7 +291,7 @@ async function recordRun(
     | undefined,
   durationMs: number,
 ) {
-  await db.insert(agentRun).values({
+  await store.recordRun({
     taskId: null,
     externalReviewId: reviewId,
     role: 'reviewer',

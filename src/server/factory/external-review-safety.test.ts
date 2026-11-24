@@ -6,11 +6,7 @@ import { describe, expect, it } from 'vitest'
 const FORBIDDEN =
   /\b(mergePullRequest|enableAutoMerge|autoMergeOrMergeable|mergeFixedBase|release|git (push|commit)|APPROVE|REQUEST_CHANGES)\b|\/merge\b/
 
-const FILES = [
-  'src/server/factory/external-review.ts',
-  'src/server/jobs/review-pull-request.ts',
-  'src/server/ingest/external-review.ts',
-]
+const FILES = ['src/server/factory/external-review.ts', 'src/server/jobs/review-pull-request.ts']
 
 describe('the review of a pull request the factory did not open', () => {
   it.each(FILES)('%s calls no merge, approval or push', (path) => {

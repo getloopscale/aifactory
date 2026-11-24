@@ -1671,3 +1671,40 @@ describe('firstParent', () => {
     await expect(createGithubApi(fetch).firstParent('o/r', 't', 'abc')).rejects.toThrow(/404/)
   })
 })
+
+describe('reviews of a pull request', () => {
+  it('posts a COMMENT review pinned to the commit', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /pulls/5/reviews': { status: 200, body: { id: 9 } },
+    })
+    const id = await createGithubApi(fetch, noWait).postPullRequestReview('o/r', 't', 5, {
+      sha: 'abc',
+      body: 'text',
+    })
+    expect(id).toBe('9')
+    expect(calls[0].body).toEqual({ commit_id: 'abc', body: 'text', event: 'COMMENT' })
+  })
+
+  it('fails when GitHub refuses the review', async () => {
+    const { fetch } = fakeFetch({ 'POST /pulls/5/reviews': { status: 422 } })
+    await expect(
+      createGithubApi(fetch, noWait).postPullRequestReview('o/r', 't', 5, { sha: 'a', body: 'b' }),
+    ).rejects.toThrow('422')
+  })
+
+  it('finds the marked review on a later page of a pull request with many reviews', async () => {
+    const pages: string[] = []
+    const fetch = async (url: string) => {
+      pages.push(url.split('?')[1])
+      const page = Number(/[?&]page=(\d+)/.exec(url)![1])
+      const reviews =
+        page === 1
+          ? Array.from({ length: 100 }, () => ({ body: 'someone else', commit_id: 'x' }))
+          : [{ body: 'MARK', commit_id: 'abc' }]
+      return new Response(JSON.stringify(reviews), { status: 200 })
+    }
+    const found = await createGithubApi(fetch, noWait).reviewedCommits('o/r', 't', 5, 'MARK')
+    expect(found).toEqual(['abc'])
+    expect(pages).toHaveLength(2)
+  })
+})
