@@ -73,6 +73,15 @@ export const THRESHOLDS = { passRateDrop: 0.2, costRise: 1, unmeasured: 0.2, pVa
 const mean = (values: number[]) =>
   values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length
 
+/** The fewest cases that ran to a verdict in both runs that the cost gate will judge. */
+export const MIN_COST_CASES = 3
+
+const median = (values: number[]) => {
+  const sorted = [...values].sort((x, y) => x - y)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
 export function summarize(results: CaseResult[]): Summary {
   const passed = results.filter((r) => r.passed).length
   return {
@@ -174,16 +183,23 @@ export function compareWithBaseline(
   if (before.passRate - now.passRate > thresholds.passRateDrop + EPSILON) {
     reasons.push(`the pass rate fell from ${percent(before.passRate)} to ${percent(now.passRate)}`)
   }
+  const priced = costed.filter((r) => earlier.get(r.id)!.costUsd > 0)
   if (costed.length === 0 && measured.length > 0) {
     reasons.push('no case ran to a verdict in both runs, so the cost could not be compared')
-  }
-  if (
-    before.meanCostUsd > 0 &&
-    now.meanCostUsd > before.meanCostUsd * (1 + thresholds.costRise) + EPSILON
-  ) {
+  } else if (costed.length < MIN_COST_CASES && measured.length > 0) {
     reasons.push(
-      `the mean cost per case rose from ${usd(before.meanCostUsd)} to ${usd(now.meanCostUsd)} (${costed.length} cases that ran to a verdict in both runs)`,
+      `only ${costed.length} cases ran to a verdict in both runs, and the cost gate needs ${MIN_COST_CASES}`,
     )
+  } else if (priced.length > 0) {
+    // The median of the paired excess over the line: one case's variance cannot carry it (#465).
+    const excess = median(
+      priced.map((r) => r.costUsd - earlier.get(r.id)!.costUsd * (1 + thresholds.costRise)),
+    )
+    if (excess > EPSILON) {
+      reasons.push(
+        `the median case cost rose past ${1 + thresholds.costRise}x its baseline (mean per case from ${usd(before.meanCostUsd)} to ${usd(now.meanCostUsd)}, ${priced.length} cases that ran to a verdict in both runs)`,
+      )
+    }
   }
   return { ok: reasons.length === 0, reasons, ...counts }
 }

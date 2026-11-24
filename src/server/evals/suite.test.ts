@@ -346,7 +346,7 @@ const baseline: Baseline = {
   commit: 'abc1234',
   ranAt: '2026-11-11T20:00:00.000Z',
   setup: { builder: 'claude-code', model: 'opus' },
-  results: [result('a', 0.5), result('b', 0.5)],
+  results: [result('a', 0.5), result('b', 0.5), result('c', 0.5), result('d', 0.5)],
 }
 
 describe('checkBeforeDeploy', () => {
@@ -371,7 +371,7 @@ describe('checkBeforeDeploy', () => {
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
-      runQuick: async () => [result('a', 0.5), result('b', 0.5)],
+      runQuick: async () => baseline.results,
     })
 
     expect(checked).toMatchObject({
@@ -386,7 +386,7 @@ describe('checkBeforeDeploy', () => {
       baseline,
       changedPaths: [],
       setup: { builder: 'claude-code', model: 'sonnet' },
-      runQuick: async () => [result('a', 0.5), result('b', 0.5)],
+      runQuick: async () => baseline.results,
     })
 
     expect(checked).toMatchObject({ ran: true, changed: ['model: opus -> sonnet'] })
@@ -397,7 +397,7 @@ describe('checkBeforeDeploy', () => {
       baseline: { ...baseline, setup: { reviewer: 'codex', builder: 'claude-code' } },
       changedPaths: [],
       setup: { reviewer: 'claude-code', builder: 'codex' },
-      runQuick: async () => [result('a', 0.5), result('b', 0.5)],
+      runQuick: async () => baseline.results,
     })
 
     expect(checked.changed).toEqual([
@@ -411,7 +411,7 @@ describe('checkBeforeDeploy', () => {
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
-      runQuick: async () => ({ results: [result('a', 0.5)], skipped: ['b'] }),
+      runQuick: async () => ({ results: [result('a', 0.5), result('c', 0.5), result('d', 0.5)], skipped: ['b'] }),
     })
 
     expect(checked.ok).toBe(false)
@@ -423,7 +423,7 @@ describe('checkBeforeDeploy', () => {
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       setup: baseline.setup,
-      runQuick: async () => [result('a', 0.5, 0, false), result('b', 0.5, 0, false)],
+      runQuick: async () => baseline.results.map((r) => result(r.id, 0.5, 0, false)),
     })
 
     expect(checked).toMatchObject({
