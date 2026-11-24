@@ -3335,7 +3335,7 @@ describe('runTask continuing from a branch a person sent back', () => {
       await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, id))
       await send()
       const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
-      expect(events.some((e) => e.stage === 'done')).toBe(false)
+      expect(events.filter((e) => e.stage === 'done')).toHaveLength(ended === 'done' ? 1 : 0)
       const last = events.at(-1)?.detail as { cause?: string; reason: string }
       expect(last.cause).toBeUndefined()
       expect(last.reason.match(/changed nothing/g)).toHaveLength(1)
