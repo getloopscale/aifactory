@@ -20,6 +20,8 @@ import {
   type ProcessIdentity,
 } from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
+import { MAX_RUN_MINUTES } from '../../shared/panel'
+
 import { detect, supervise } from './supervise'
 
 const NOW = new Date('2026-11-04T12:00:00Z')
@@ -99,6 +101,38 @@ describe('stalled work', () => {
     const [found] = (await detect({ db: getDb(), now })).found
     expect(found).toMatchObject({ kind: 'stalled', subject: 'run', taskId: stuck })
     expect(found.detail).toContain('in build and silent for 50 minutes')
+  })
+
+  it('leaves alone a silent run whose worker still holds its job, up to the longest a run may take', async () => {
+    const waiting = await seed('sandbox', 75)
+    const held = (taskId: number, minutesAhead: number) =>
+      getPool().query(
+        'insert into theokit_jobs (id, name, input, locked_until) values ($1, $2, $3, $4)',
+        [
+          `j-${Math.random()}`,
+          'run-task',
+          JSON.stringify({ taskId }),
+          new Date(NOW.getTime() + minutesAhead * 60_000),
+        ],
+      )
+    await held(waiting, 2)
+    const expired = await seed('sandbox', 75)
+    await held(expired, -2)
+    expect(await keys()).toEqual([`stalled:run:${expired}`])
+  })
+
+  it('flags a held run once it is silent past the longest a run may take', async () => {
+    const forever = await seed('build', MAX_RUN_MINUTES + 5)
+    await getPool().query(
+      'insert into theokit_jobs (id, name, input, locked_until) values ($1, $2, $3, $4)',
+      [
+        'j-forever',
+        'run-task',
+        JSON.stringify({ taskId: forever }),
+        new Date(NOW.getTime() + 60_000),
+      ],
+    )
+    expect(await keys()).toEqual([`stalled:run:${forever}`])
   })
 
   it('flags a run stalled while planning', async () => {

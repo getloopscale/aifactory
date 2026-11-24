@@ -30,7 +30,7 @@ import { ensureBranches, integrationBranch } from './branches'
 import { prepareDeclaredPackageManager } from './package-manager'
 import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
-import { githubEgress, renewGithubCredential } from './credential-renewal'
+import { freshGithubCredential, githubEgress, renewGithubCredential } from './credential-renewal'
 import { deliverPreRelease, describeDelivery, type Handed } from './integration'
 import { enterMerge } from './merge-task'
 import { heldForEvaluation, heldForReview } from '../evals/cases'
@@ -340,7 +340,7 @@ export class Run {
       throw error
     }
     this.sessionStartedAt = Date.now()
-    const sandbox = Run.withCredentials(this.c, restored, this.spec.egress)
+    const sandbox = await Run.withFreshCredentials(this.c, restored, this.spec.egress)
     state.sandbox = sandbox
     // The snapshot did its job; keeping it only costs storage.
     await deps.sandbox.deleteSnapshot?.(snapshotId).catch(() => {})
@@ -361,6 +361,30 @@ export class Run {
    * change of the firewall goes through one queue and is built from `egress` as it is when it is sent, so a
    * GitHub renewal never puts back an old Codex token and a Codex renewal never puts back an old GitHub one.
    */
+  /** Where the run's GitHub tokens come from, and where a new one goes. */
+  private static githubRenewal(c: RunContext) {
+    return {
+      mint: async () => (await c.deps.github.installationToken(c.row.repository)).token,
+      onToken: (token: string) => {
+        c.token = token
+      },
+    }
+  }
+
+  /**
+   * The sandbox with its credentials renewed while the run works, and a GitHub token minted now: the wait for the
+   * sandbox has no limit, so the token it was created with may be about to end (paulohenriquevn/aifactory#424).
+   */
+  private static async withFreshCredentials(
+    c: RunContext,
+    started: IsolatedSandbox,
+    egress: SandboxSpec['egress'],
+  ): Promise<IsolatedSandbox> {
+    const sandbox = Run.withCredentials(c, started, egress)
+    await freshGithubCredential(sandbox, egress, Run.githubRenewal(c))
+    return sandbox
+  }
+
   private static withCredentials(
     c: RunContext,
     started: IsolatedSandbox,
@@ -397,10 +421,7 @@ export class Run {
       )
     }
     return renewGithubCredential(serialized, egress, {
-      mint: async () => (await c.deps.github.installationToken(c.row.repository)).token,
-      onToken: (token) => {
-        c.token = token
-      },
+      ...Run.githubRenewal(c),
       onFailure: (error) =>
         console.warn(
           JSON.stringify({
@@ -498,7 +519,7 @@ export class Run {
     spec.owner = { owner: 'task', taskId: c.taskId, run: sandboxRun }
     const { started, startedAt } = await Run.startSandbox(c, spec, prep)
     c.state.sandbox = started
-    const sandbox = Run.withCredentials(c, started, spec.egress)
+    const sandbox = await Run.withFreshCredentials(c, started, spec.egress)
     c.state.sandbox = sandbox
     // The snapshot did its job; keeping it only costs storage.
     if (resuming) await deps.sandbox.deleteSnapshot?.(resuming.snapshotId).catch(() => {})

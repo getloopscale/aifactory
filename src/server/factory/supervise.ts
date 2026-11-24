@@ -7,6 +7,7 @@ import { raiseFinding, type Found } from './findings'
 import { readPause } from './provider-pause-store'
 import { stalledQueues, type QueueFacts } from './queue-stall'
 import { reapSandboxes } from './reap-sandboxes'
+import { MAX_RUN_MS } from './run-limit'
 import type { ListedSandbox } from './sandbox'
 import { WATCH_WINDOW_MS } from './watch'
 
@@ -62,6 +63,23 @@ async function queuedJobs(db: Database, name: string, field: string) {
   } catch {
     // The table is made when the worker first starts. Without it there is no queue to be missing from.
     return null
+  }
+}
+
+/**
+ * The tasks whose job a worker holds at `now`: the worker renews the lock while the run lives, so a run
+ * waiting a long time inside a step (for a sandbox slot, say) is alive. Empty when there is no queue table.
+ */
+async function heldTasks(db: Database, now: Date): Promise<Set<number>> {
+  try {
+    const rows = await db.execute<{ id: string }>(
+      sql`select distinct (input->>'taskId') as id from theokit_jobs
+          where locked_until > ${now.toISOString()}::timestamptz and failed_at is null`,
+    )
+    return new Set(rows.rows.map((r) => Number(r.id)))
+  } catch {
+    // The table is made when the worker first starts. Without it no worker holds anything.
+    return new Set()
   }
 }
 
@@ -226,9 +244,13 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
     .from(task)
     .innerJoin(lastEvent, eq(lastEvent.taskId, task.id))
     .where(inArray(task.stage, [...WORKING]))
+  const held = await heldTasks(db, now)
   for (const t of quiet) {
     const idle = now.getTime() - new Date(t.last).getTime()
-    if (idle > limits.stallMs) {
+    // A run whose worker still holds its job is alive, and a retry now would run the task twice
+    // (paulohenriquevn/aifactory#422); past the longest a run may take it is stalled all the same.
+    const alive = held.has(t.id) && idle <= MAX_RUN_MS
+    if (idle > limits.stallMs && !alive) {
       found.push({
         key: `stalled:run:${t.id}`,
         kind: 'stalled',

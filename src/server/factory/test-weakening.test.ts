@@ -335,6 +335,55 @@ describe('testWeakening', () => {
     expect(testWeakening({ patch, issue })[0].severity).toBe('minor')
   })
 
+  it('is minor when the cases went with what the file stops importing from a module the issue names', () => {
+    const patch = patchOf('tests/tui-frames.test.ts', [
+      '-import { applyFrame, nextSessionId } from "../src/tui/frames.js";',
+      '+import { nextSessionId } from "../src/tui/frames.js";',
+      '-  it("draws a running card for a tool call", () => {',
+      '-    expect(applyFrame(view, call).cards).toHaveLength(1)',
+    ])
+    const issue = { ...bug, body: 'frames.ts keeps its own reducer; use the one the kit exports.' }
+    const [finding] = testWeakening({ patch, issue })
+    expect(finding.severity).toBe('minor')
+    expect(finding.issue).toContain('frames')
+    expect(finding.issue).toContain('the issue names the module')
+  })
+
+  it('reads a module name of four letters, and not a shorter one', () => {
+    const cases = ['-  it("draws a card", () => {', '-    expect(draw()).toBe(1)']
+    const of = (module: string) =>
+      testWeakening({
+        patch: patchOf('tests/x.test.ts', [
+          `-import { draw } from "../src/${module}.js";`,
+          ...cases,
+        ]),
+        issue: { ...feature, body: `${module}.ts goes; use the kit.` },
+      })[0].severity
+    expect(of('view')).toBe('minor')
+    expect(of('ui')).toBe('major')
+  })
+
+  it('stays major when the issue names a module the file still imports in full', () => {
+    const patch = patchOf('tests/tui-frames.test.ts', [
+      '-  it("draws a running card for a tool call", () => {',
+      '-    expect(applyFrame(view, call).cards).toHaveLength(1)',
+    ])
+    const issue = {
+      ...feature,
+      body: 'frames.ts keeps its own reducer; use the one the kit exports.',
+    }
+    expect(testWeakening({ patch, issue })[0].severity).toBe('major')
+  })
+
+  it('stays major when the module the file stops importing is one the issue does not name', () => {
+    const patch = patchOf('tests/tui-frames.test.ts', [
+      '-import { applyFrame } from "../src/tui/frames.js";',
+      '-  it("draws a running card for a tool call", () => {',
+      '-    expect(applyFrame(view, call).cards).toHaveLength(1)',
+    ])
+    expect(testWeakening({ patch, issue: feature })[0].severity).toBe('major')
+  })
+
   it('does not take a short common word in the issue for the file name', () => {
     const patch = patchOf('src/a.test.ts', ['-  expect(a).toBe(1)'])
     expect(testWeakening({ patch, issue: { ...feature, body: 'a test' } })[0].severity).toBe(
