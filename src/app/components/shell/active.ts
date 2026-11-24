@@ -1,7 +1,7 @@
 import { useLocation } from 'react-router'
 
 import type { GuideId } from '../../../shared/guides'
-import { guideFor } from '../../lib/guides'
+import { guideIdFor } from '../../lib/guides'
 
 /** How the item of the menu the owner is in looks: clearly lighter than a hover, and heavier in weight. */
 export const ACTIVE = 'bg-muted text-foreground font-medium'
@@ -12,7 +12,7 @@ export const ACTIVE = 'bg-muted text-foreground font-medium'
  * address of the link.
  */
 export function usePlace(): GuideId | undefined {
-  return guideFor(useLocation().pathname)?.id
+  return guideIdFor(useLocation().pathname)
 }
 
 /** Whether the owner is on the empty conversation, the one "Novo chat" leads to. */

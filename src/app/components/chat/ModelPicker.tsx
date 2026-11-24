@@ -3,6 +3,7 @@ import { Check, ChevronDown } from 'lucide-react'
 
 import type { ChatModel } from '../../../shared/panel'
 import { MODELS } from '../../lib/chat'
+import { useCopy } from '../../lib/copy'
 
 /** Which agent answers, as a small menu in the composer. */
 export function ModelPicker({
@@ -12,13 +13,14 @@ export function ModelPicker({
   model: ChatModel
   onChange: (model: ChatModel) => void
 }) {
+  const { t } = useCopy()
   const current = MODELS.find((m) => m.id === model) ?? MODELS[0]
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          aria-label="Modelo"
+          aria-label={t.chat.model}
           className="flex items-center gap-1 rounded-full px-3 py-1.5 text-[14px] text-foreground/80 hover:bg-muted/60"
         >
           {current.name}
@@ -30,7 +32,7 @@ export function ModelPicker({
           <DropdownMenu.Item key={m.id} onSelect={() => onChange(m.id)} className="items-start">
             <span className="flex-1">
               <span className="block text-[14px]">{m.name}</span>
-              <span className="block text-xs text-foreground/50">{m.blurb}</span>
+              <span className="block text-xs text-foreground/50">{t.chat.blurbs[m.id]}</span>
             </span>
             {m.id === model ? <Check className="ml-3 mt-0.5 size-4" /> : null}
           </DropdownMenu.Item>

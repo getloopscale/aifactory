@@ -1,3 +1,4 @@
+import { FACTORY_SIGNATURE } from '../../shared/personas'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -268,6 +269,10 @@ const group = (over: Partial<SignatureGroup> = {}): SignatureGroup => ({
 
 describe('issueForSignature', () => {
   const { title, body } = issueForSignature(group())
+
+  it('is signed neutrally', () => {
+    expect(body.endsWith(FACTORY_SIGNATURE)).toBe(true)
+  })
 
   it('names the signature in the title', () => {
     expect(title).toBe(

@@ -3,6 +3,7 @@ import { Button } from '@usetheo/ui'
 
 import type { RepositoriesView } from '../../../shared/panel'
 import { describeApproval } from '../../lib/chat'
+import { useCopy } from '../../lib/copy'
 import { useResource } from '../../lib/live'
 
 type Pending = { approvalId: string; toolName?: string; input?: unknown }
@@ -23,7 +24,8 @@ function Card({
   conversation: Conversation
   repository?: RepositoriesView['repositories'][number]
 }) {
-  const text = describeApproval(call.toolName, call.input, repository)
+  const { t } = useCopy()
+  const text = describeApproval(call.toolName, call.input, repository, t.approvals)
   return (
     <div className="mb-3">
       <ApprovalCard
@@ -37,13 +39,13 @@ function Card({
                 variant="ghost"
                 onClick={() => void conversation.approve(call.approvalId, { approved: false })}
               >
-                Recusar
+                {t.chat.reject}
               </Button>
               <Button
                 size="sm"
                 onClick={() => void conversation.approve(call.approvalId, { approved: true })}
               >
-                Aprovar
+                {t.chat.approve}
               </Button>
             </span>
           </span>
@@ -68,24 +70,23 @@ function RepositoryCard({ call, conversation }: { call: Pending; conversation: C
  * The server hides why a model call failed behind a generic message, so what the owner is told is what
  * usually causes it and where to look, not the message itself.
  */
-function explain(error: Error | undefined): string {
+function explain(error: Error | undefined, hint: string): string {
   const message = error?.message ?? ''
   const generic = message === '' || /^an error occurred\.?$/i.test(message)
-  return generic
-    ? 'O modelo não respondeu. O mais comum é a chave do OpenRouter estar sem crédito ou sem permissão para este modelo. A página "Configuração" mostra o que está pronto. Tente de novo em instantes.'
-    : message
+  return generic ? hint : message
 }
 
 /** What stands between the owner and the next answer: an error to read, or changes to approve. */
 export function Pending({ conversation }: { conversation: Conversation }) {
+  const { t } = useCopy()
   return (
     <>
       {conversation.status === 'error' ? (
         <div className="mb-3">
           <AgentErrorCard
             kind="network"
-            title="Não consegui responder"
-            detail={explain(conversation.error)}
+            title={t.chat.failedTitle}
+            detail={explain(conversation.error, t.chat.failedHint)}
           />
         </div>
       ) : null}

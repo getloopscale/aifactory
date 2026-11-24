@@ -50,11 +50,13 @@ export default function RootLayout() {
 }
 
 function Shell() {
-  const { t } = useCopy()
+  const { t, adopt } = useCopy()
   const location = useLocation()
   const navigate = useNavigate()
   const onLogin = location.pathname === '/login'
-  const me = useResource<{ owner: boolean; name?: string }>('/api/panel/me', { everyMs: 60_000 })
+  const me = useResource<{ owner: boolean; name?: string; language?: string }>('/api/panel/me', {
+    everyMs: 60_000,
+  })
   const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
   const health = useResource<HealthReport>('/api/panel/health', { everyMs: 60_000 })
   const repositories = useResource<RepositoriesView>('/api/panel/repositories', {
@@ -63,6 +65,9 @@ function Shell() {
   })
   const [menuHidden, setMenuHidden] = useMenuHidden()
   const [searchOnOpen, setSearchOnOpen] = useState(false)
+
+  const savedLanguage = me.data?.language
+  useEffect(() => adopt(savedLanguage), [savedLanguage, adopt])
 
   useEffect(() => {
     if (me.data && !me.data.owner && !onLogin) void navigate('/login', { replace: true })

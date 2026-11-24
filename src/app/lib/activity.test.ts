@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { activityOf, withoutTools } from './activity'
+import { activityOf as activity, withoutTools } from './activity'
+import { ptBR } from './copy/pt-BR'
+
+// The words under test are those of the Portuguese dictionary.
+const activityOf = (message: Parameters<typeof activity>[0]) => activity(message, ptBR.activity)
 
 const call = (toolName: string, state: string) => ({
   type: 'dynamic-tool',
@@ -62,5 +66,16 @@ describe('what an answer did besides writing', () => {
       ],
     }
     expect(withoutTools(message)).toEqual({ id: 'm', parts: [{ type: 'text', text: 'oi' }] })
+  })
+})
+
+describe('in the language of the dictionary given', () => {
+  it('says the same thing in English, and in English when none is given', async () => {
+    const { en } = await import('./copy/en')
+    const message = { parts: [call('list_tasks', 'output-available')] }
+    expect(activity(message, en.activity).looked).toEqual([en.activity.reads.list_tasks])
+    expect(activity(message).looked).toEqual([en.activity.reads.list_tasks])
+    expect(activity(message, ptBR.activity).looked).toEqual([ptBR.activity.reads.list_tasks])
+    expect(en.activity.reads.list_tasks).not.toBe(ptBR.activity.reads.list_tasks)
   })
 })

@@ -990,6 +990,7 @@ export class Run {
           cwd: repoDir,
           timeoutMs,
           prompt,
+          role: 'builder',
         }),
       )
     }
@@ -1003,14 +1004,20 @@ export class Run {
     if (this.plan && this.plannedBy) {
       const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
       return this.settle(builder, 'builder', 1, (onEvent) =>
-        builder.run(backend, { onEvent, cwd: repoDir, timeoutMs, prompt }),
+        builder.run(backend, { onEvent, cwd: repoDir, timeoutMs, prompt, role: 'builder' }),
       )
     }
     if (this.planned && this.sessionId) {
       const prompt = implementPlanPrompt(this.planned)
       const sessionId = this.sessionId
       return this.settle(builder, 'builder', 1, (onEvent) =>
-        builder.resume!(backend, sessionId, { onEvent, cwd: repoDir, timeoutMs, prompt }),
+        builder.resume!(backend, sessionId, {
+          onEvent,
+          cwd: repoDir,
+          timeoutMs,
+          prompt,
+          role: 'builder',
+        }),
       )
     }
     return this.settle(builder, 'builder', 1, (onEvent) =>
@@ -1019,6 +1026,7 @@ export class Run {
         cwd: repoDir,
         timeoutMs,
         prompt: buildPrompt(this.buildInput()),
+        role: 'builder',
       }),
     )
   }
@@ -1092,7 +1100,13 @@ export class Run {
     await enterRunStage(deps.db, taskId, 'plan', agentFacts(planner))
     const prompt = changePlanPrompt(this.buildInput())
     const first = await this.settle(planner, 'planner', 1, (onEvent) =>
-      planner.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
+      planner.run(this.backend, {
+        onEvent,
+        cwd: this.repoDir,
+        timeoutMs,
+        prompt,
+        role: 'planner',
+      }),
     )
     if (!first.ok) throw new StageFailure(`the agent did not finish the plan: ${first.summary}`)
     // The planner's session is the builder's only when they are the same agent.
@@ -1126,6 +1140,7 @@ export class Run {
         cwd: this.repoDir,
         timeoutMs,
         prompt: planAgainPrompt(),
+        role: 'planner',
       }),
     )
     if (planner.name === this.builder.name) this.sessionId = again.sessionId ?? this.sessionId
@@ -1425,6 +1440,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs,
+        role: 'builder',
         prompt: notResolvedPrompt({
           summary: outcome.summary,
           findings: outcome.findings,
@@ -1456,6 +1472,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+        role: 'reviewer',
         prompt: resolvedPrompt({
           repo: row.repository,
           issueNumber: row.issueNumber,
@@ -1495,6 +1512,13 @@ export class Run {
     if (this.c.continuation?.mergeBase) {
       prep?.log()
       return { sha: await this.mergeBase() }
+    }
+    // A send-back for a conflict with the integration branch is first the factory's own merge, which keeps
+    // both sides of what only appended; the agent is asked only when a conflict needs judgement.
+    const mergedByFactory = await this.mergeWithoutAgent()
+    if (mergedByFactory) {
+      prep?.log()
+      return { sha: mergedByFactory }
     }
     await (prep ? prep.step('install', () => this.installProject()) : this.installProject())
     // The install is the last step of the preparation, so the line is logged once it ends.
@@ -1556,6 +1580,21 @@ export class Run {
     return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
   }
 
+  /**
+   * The merge of the integration branch a conflict send-back asks for, made with no agent when git can make
+   * it (or every conflict only kept both sides' additions). Answers the pushed commit, or nothing when the
+   * agent has to do it: a conflict that needs judgement leaves the branch as it was.
+   */
+  private async mergeWithoutAgent(): Promise<string | undefined> {
+    const { deps, branch } = this.c
+    if (!this.c.continuation?.feedback?.startsWith(CONFLICT_NOTE_OPENING)) return undefined
+    await this.backend.uploadFile(GITCONFIG, gitConfig(deps.author))
+    const merged = await mergeIntegration(this.backend, this.git, this.baseSha)
+    if (!('merged' in merged)) return undefined
+    const base = `${integrationBranch(this.c.repo)} at ${this.baseSha.slice(0, 7)}`
+    return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
+  }
+
   /** Throws `BaseRed` when the checks the work failed fail on the integration branch too (#219). */
   private async refuseRedBase(failed: CheckResult[]): Promise<void> {
     this.c.state.current = 'verify'
@@ -1596,6 +1635,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs,
+        role: 'builder',
         prompt: reworkPrompt({
           findings,
           failedChecks: failed,
@@ -1737,6 +1777,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+        role: 'reviewer',
         prompt: reviewPrompt({
           repo: row.repository,
           issueNumber: row.issueNumber,

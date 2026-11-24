@@ -76,6 +76,32 @@ export async function lineHolds(db: Db, repository: string, taskId: number): Pro
   return lines.has(repository) && lines.get(repository) !== taskId
 }
 
+/** Whether a task is merging or waiting to integrate: the short window in which a `fix_first` fix goes first. */
+export function awaitsIntegration(fix: {
+  stage: string
+  mergedSha: string | null
+  awaitingCiSha: string | null
+}): boolean {
+  if (fix.stage === 'merge' || fix.stage === 'pr') return true
+  return fix.stage === 'done' && !fix.mergedSha && fix.awaitingCiSha !== null
+}
+
+/**
+ * Whether the open incident's fix is about to integrate and the task is not it. Under `fix_first` the rest of the
+ * repository integrates, except while the fix is merging or waiting to integrate, so the base does not move under
+ * it. Under `hold` `lineHolds` already holds everything.
+ */
+export async function fixGoesFirst(db: Db, repository: string, taskId: number): Promise<boolean> {
+  if (lineStopScope() !== 'fix_first') return false
+  const fixId = (await stoppedLines(db)).get(repository)
+  if (fixId === undefined || fixId === taskId) return false
+  const [fix] = await db
+    .select({ stage: task.stage, mergedSha: task.mergedSha, awaitingCiSha: task.awaitingCiSha })
+    .from(task)
+    .where(eq(task.id, fixId))
+  return fix !== undefined && awaitsIntegration(fix)
+}
+
 export type NewIncident = {
   repository: string
   cause: 'promotion_red' | 'mass_failure'

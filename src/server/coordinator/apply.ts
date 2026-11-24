@@ -2,13 +2,19 @@ import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, repository, task } from '../db/schema'
+import { declaredBlockers } from '../factory/blockers'
+import { integrationBranch } from '../factory/branches'
 import { release, ReleaseRefused } from '../factory/deliver'
 import { outcome as transition } from '../factory/transitions'
 import type { Issue } from '../github/issues'
+import type { PromotionApi } from '../github/promotion-api'
 import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
+  answerByCoordinator,
   mergeBaseByCoordinator,
+  rerunChecksByCoordinator,
+  resolveElsewhere,
   resolveFinding,
   sendBackByCoordinator,
   type ActionDeps,
@@ -16,7 +22,7 @@ import {
 import { FACTORY_LABEL, FACTORY_LABEL_SPEC } from '../panel/work'
 
 import { baseFixIssue, baseSignature } from './base-fix'
-import type { CoordinatorOutcome, Decision } from './decide'
+import { rerunDone, type CoordinatorOutcome, type Decision } from './decide'
 import type { ReadIssue } from './draft'
 import type { RedBase, TaskException } from './exceptions'
 import { fileOnce } from './file-once'
@@ -27,6 +33,10 @@ import { COORDINATOR_ACTOR } from './release-train'
 import {
   followUpIssue,
   followUpOrigin,
+  gapIssue,
+  gapNote,
+  gapTargetAllowed,
+  sameGap,
   infeasibleNamed,
   qualityConfigurationNamed,
   sameFollowUp,
@@ -45,8 +55,10 @@ import {
 export type ApplyDeps = ActionDeps & {
   issues: Pick<IssuesApi, 'createIssue' | 'updateIssueBody' | 'ensureLabel'>
   readIssue: ReadIssue
+  /** Reads the failed checks of a commit and reruns their jobs (`rerun_checks`). */
+  ciChecks?: Pick<PromotionApi, 'failedChecks'> & Partial<Pick<PromotionApi, 'rerunFailedJobs'>>
   /** The open issues of a repository that carry a label, as `listOpenIssues` reads them: where a follow-up is looked for. */
-  listOpenIssues: (repo: string, label: string, token: string) => Promise<Issue[]>
+  listOpenIssues: (repo: string, label: string | null, token: string) => Promise<Issue[]>
   /** The clock a decision is recorded at, which is what the age of a `wait` is measured against. */
   now?: () => Date
 }
@@ -131,23 +143,88 @@ async function fileFollowUp(
 }
 
 /**
+ * Files the framework gap issue a review asked the builder for, in the repository the draft names and with that
+ * repository's own token, then sends the task back naming it. An open issue with the same title is named instead of
+ * filing another. Never falls back to another repository: a refusal is a failure the row records.
+ */
+async function fileGap(deps: ApplyDeps, row: TaskRow, draft: ScopeDraft): Promise<Performed> {
+  const issue = gapIssue(draft, row.repository, row.issueNumber)!
+  const allowed = gapTargetAllowed(draft, row.repository, await enabled(deps, issue.repository))
+  if (!allowed) {
+    throw new ActionRefused(
+      `${issue.repository} is neither the task's repository nor one the owner enabled`,
+    )
+  }
+  const { token } = await deps.github.installationToken(issue.repository)
+  const earlier = await gapOfTask(deps, row.id, issue.repository)
+  const number =
+    earlier ??
+    (await deps.listOpenIssues(issue.repository, null, token)).find((i) => sameGap(i, issue.title))
+      ?.number ??
+    (
+      await deps.issues.createIssue(issue.repository, token, {
+        title: issue.title,
+        body: issue.body,
+      })
+    ).number
+  const reference = `${issue.repository}#${number}`
+  try {
+    await sendBackByCoordinator(deps, row.id, gapNote(draft, reference), { fromReview: true })
+  } catch (error) {
+    throw new GapFiled(reference, error)
+  }
+  return { done: `filed the gap issue ${reference}`, gapIssue: reference }
+}
+
+/** A send-back that failed after the gap issue existed: the row keeps the reference, so a retry reuses it. */
+class GapFiled extends Error {
+  constructor(
+    readonly reference: string,
+    readonly original: unknown,
+  ) {
+    super(original instanceof Error ? original.message : String(original))
+  }
+}
+
+/** The gap issue an earlier decision of the task filed or found in the repository, as `owner/name#N`'s number. */
+async function gapOfTask(
+  deps: ApplyDeps,
+  taskId: number,
+  repo: string,
+): Promise<number | undefined> {
+  const rows = await deps.db
+    .select({ reference: sql<string>`${coordinatorAction.draft}->>'gapIssue'` })
+    .from(coordinatorAction)
+    .where(
+      and(
+        eq(coordinatorAction.taskId, taskId),
+        isNotNull(sql`${coordinatorAction.draft}->>'gapIssue'`),
+      ),
+    )
+    .orderBy(desc(coordinatorAction.id))
+  const found = rows.map((r) => r.reference).find((r) => r.startsWith(`${repo}#`))
+  return found ? Number(found.slice(repo.length + 1)) : undefined
+}
+
+/**
  * Scopes the task: asks the transition table before anything reaches GitHub, files the follow-up, appends
  * the decision to the issue body and sends the task back on its branch with the note. Returns the number
  * of the follow-up, or null when the draft filed none.
  */
-async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promise<number | null> {
+async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promise<Performed> {
   const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
   if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
   const allowed = transition(row, 'coordinator_send_back')
   if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
   const { token } = await deps.github.installationToken(row.repository)
+  if (draft.gap) return fileGap(deps, row, draft)
   const { body } = await deps.readIssue(row.repository, row.issueNumber, token)
   const followUp = await fileFollowUp(deps, row, token, draft, body)
   const section = scopeSection(draft, new Date().toISOString().slice(0, 10), followUp ?? undefined)
   const updated = [body.trimEnd(), section].filter((part) => part !== '').join('\n\n')
   await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, updated)
   await sendBackByCoordinator(deps, taskId, draft.note, { fromReview: true })
-  return followUp
+  return { followUpIssue: followUp }
 }
 
 /**
@@ -175,8 +252,186 @@ async function fixBase(deps: ApplyDeps, base: RedBase): Promise<string> {
     : `already filed as ${repo}#${done.already}, still open`
 }
 
+/** The commit of an exception's head: a handoff or a failure is `<sha>@<event id>`. */
+export const bareSha = (head: string) => head.split('@')[0]
+
+/**
+ * Reruns the failed jobs of the task's head, once per commit: an applied `rerun_checks` the task already has on this
+ * commit (on whatever exception) leaves the next one to a person. The panel's action asks the transition table.
+ */
+async function rerunChecks(deps: ApplyDeps, exception: TaskException): Promise<string> {
+  const ci = deps.ciChecks
+  const sha = bareSha(exception.head)
+  if (!ci?.rerunFailedJobs || sha === 'none') {
+    throw new ActionRefused('no commit or no way to read its checks to rerun')
+  }
+  const earlier = await deps.db
+    .select({
+      exceptionKind: coordinatorAction.exceptionKind,
+      headSha: coordinatorAction.headSha,
+      action: coordinatorAction.action,
+      outcome: coordinatorAction.outcome,
+    })
+    .from(coordinatorAction)
+    .where(
+      and(
+        eq(coordinatorAction.taskId, exception.taskId),
+        eq(coordinatorAction.action, 'rerun_checks'),
+      ),
+    )
+  if (rerunDone(earlier, sha)) {
+    throw new ActionRefused(`the checks of ${sha.slice(0, 7)} were already rerun once`)
+  }
+  return rerunChecksByCoordinator(
+    deps,
+    exception.taskId,
+    { failedChecks: ci.failedChecks, rerunFailedJobs: ci.rerunFailedJobs },
+    sha,
+  )
+}
+
 /** What carrying out a decision left: the follow-up a scope filed (null for none), or what a fix became. */
-type Performed = { followUpIssue?: number | null; done?: string }
+type Performed = {
+  followUpIssue?: number | null
+  done?: string
+  /** The gap issue a scope filed, as `owner/name#N`, kept even when the send-back after it failed. */
+  gapIssue?: string
+  /** The comment that answered a question of the builder, and the question: what `poll-answers` trusts. */
+  answered?: { answerCommentId: string; questionId: number }
+}
+
+/** The open issue a `Blocked by` line names is added to the task's issue, once. */
+async function blockedBy(deps: ApplyDeps, taskId: number, blocker: number): Promise<string> {
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
+  const allowed = transition(row, 'coordinator_blocked_by')
+  if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
+  // Only a task in `intake` has its `Blocked by` lines read, and a task that waits for an answer never goes there.
+  if (row.stage === 'waiting')
+    throw new ActionRefused('a task that waits for an answer is not blocked by an issue')
+  if (blocker === row.issueNumber) throw new ActionRefused('an issue cannot block itself')
+  const { token } = await deps.github.installationToken(row.repository)
+  const named = await deps.readIssue(row.repository, blocker, token)
+  if (named.state !== 'open') throw new ActionRefused(`#${blocker} is not an open issue`)
+  const issue = await deps.readIssue(row.repository, row.issueNumber, token)
+  const declared = declaredBlockers(issue.body, row.repository)
+  const named_ = declared.some((ref) => ref.repository === row.repository && ref.number === blocker)
+  if (!named_) {
+    const body = `${issue.body.trimEnd()}\n\nBlocked by #${blocker}`
+    await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, body)
+  }
+  // A task that stopped is not read again by itself: queue its run, which waits on the blocker before it starts.
+  if (row.stage !== 'intake') {
+    await sendBackByCoordinator(
+      deps,
+      taskId,
+      `The coordinator found that #${blocker} has to be done first: the run waits for it.`,
+    )
+  }
+  return named_
+    ? `#${blocker} was already named as a blocker`
+    : `added "Blocked by #${blocker}" to the issue`
+}
+
+/** Resolves the task elsewhere only on a commit the integration branch holds: a run alone proves nothing the factory can read. */
+async function resolveWithEvidence(
+  deps: ApplyDeps,
+  taskId: number,
+  evidence: { commit?: string; run?: string },
+  why: string,
+): Promise<string> {
+  const commit = evidence.commit
+  if (!commit) throw new ActionRefused('name the commit that holds the work: a run is not checked')
+  const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
+  const [config] = await deps.db
+    .select({ baseBranch: repository.baseBranch })
+    .from(repository)
+    .where(eq(repository.fullName, row.repository))
+  const branch = integrationBranch(config ?? {})
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, branch)
+  if (!head || !(await deps.api.contains(row.repository, token, head, commit))) {
+    throw new ActionRefused(`${branch} does not hold ${commit}`)
+  }
+  await resolveElsewhere(deps, taskId, `Resolved by ${commit}, which ${branch} holds. ${why}`)
+  return `resolved by ${commit.slice(0, 7)}`
+}
+
+type Applier = (
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+) => Promise<Performed | undefined>
+
+async function applyAnswer(
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+): Promise<Performed> {
+  const questionId = Number(/^question:(\d+)$/.exec(exception.head)?.[1])
+  if (!questionId) throw new ActionRefused('the exception names no question to answer')
+  const reply = decision.answerText ?? ''
+  const commentId = await answerByCoordinator(deps, exception.taskId, questionId, reply)
+  return {
+    done: `answered in comment ${commentId}`,
+    answered: { answerCommentId: commentId, questionId },
+  }
+}
+
+async function applyResolve(
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+): Promise<Performed | undefined> {
+  if (!decision.evidenceFor) return undefined
+  const done = await resolveWithEvidence(
+    deps,
+    exception.taskId,
+    decision.evidenceFor,
+    decision.reason,
+  )
+  return { done }
+}
+
+const APPLIERS: Partial<Record<Decision['action'], Applier>> = {
+  send_back: async (deps, exception, decision) => {
+    await sendBackByCoordinator(deps, exception.taskId, decision.note ?? '')
+    return {}
+  },
+  merge_base: async (deps, exception, decision) => {
+    await mergeBaseByCoordinator(deps, exception.taskId, decision.note ?? '')
+    return {}
+  },
+  review_again: async (deps, exception) => {
+    await sendBackByCoordinator(deps, exception.taskId, '')
+    return {}
+  },
+  retry_from_finding: async (deps, _exception, decision) => {
+    await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
+    return {}
+  },
+  scope: async (deps, exception, decision) =>
+    decision.draft ? await scope(deps, exception.taskId, decision.draft) : undefined,
+  release: async (deps, exception, decision) => {
+    if (!decision.bump) return undefined
+    await release(deps, exception.taskId, {
+      bump: decision.bump,
+      actor: COORDINATOR_ACTOR,
+      expectedHead: exception.verifiedHead,
+    })
+    return {}
+  },
+  answer: applyAnswer,
+  blocked_by: async (deps, exception, decision) =>
+    decision.blockedBy === undefined
+      ? undefined
+      : { done: await blockedBy(deps, exception.taskId, decision.blockedBy) },
+  resolve_elsewhere: applyResolve,
+  rerun_checks: async (deps, exception) => ({ done: await rerunChecks(deps, exception) }),
+  fix_base: async (deps, _exception, decision) =>
+    decision.base ? { done: await fixBase(deps, decision.base) } : undefined,
+}
 
 /** Carries out a decision that changes something. Escalating and waiting change nothing, so they never come here. */
 async function perform(
@@ -184,28 +439,14 @@ async function perform(
   exception: TaskException,
   decision: Decision,
 ): Promise<Performed> {
-  if (decision.action === 'send_back') {
-    await sendBackByCoordinator(deps, exception.taskId, decision.note ?? '')
-  } else if (decision.action === 'merge_base') {
-    await mergeBaseByCoordinator(deps, exception.taskId, decision.note ?? '')
-  } else if (decision.action === 'review_again') {
-    await sendBackByCoordinator(deps, exception.taskId, '')
-  } else if (decision.action === 'retry_from_finding') {
-    await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
-  } else if (decision.action === 'scope' && decision.draft) {
-    return { followUpIssue: await scope(deps, exception.taskId, decision.draft) }
-  } else if (decision.action === 'release' && decision.bump) {
-    await release(deps, exception.taskId, {
-      bump: decision.bump,
-      actor: COORDINATOR_ACTOR,
-      expectedHead: exception.verifiedHead,
-    })
-  } else if (decision.action === 'fix_base' && decision.base) {
-    return { done: await fixBase(deps, decision.base) }
-  } else {
+  const performed = await APPLIERS[decision.action]?.(deps, exception, decision)
+  if (!APPLIERS[decision.action]) {
     throw new Error(`the coordinator has no way to apply ${decision.action}`)
   }
-  return {}
+  if (!performed) {
+    throw new ActionRefused(`the ${decision.action} decision lacks what it needs to be applied`)
+  }
+  return performed
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
@@ -215,6 +456,9 @@ type Carried = {
   reason: string
   /** The follow-up a scope filed (null for none); absent when nothing was applied. */
   followUpIssue?: number | null
+  answered?: Performed['answered']
+  /** The gap issue a scope filed, as `owner/name#N`, kept even when the send-back after it failed. */
+  gapIssue?: string
 }
 
 /** A decision that was refused or failed, logged with its context, so a person sees it as well as the next pass. */
@@ -282,24 +526,37 @@ async function carryOut(
   if (refusal) return notCarried(exception, decision, 'refused', refusal)
   if (mode !== 'auto') return inTrial(exception, decision)
   try {
-    const { followUpIssue, done } = await perform(deps, exception, decision)
+    const { followUpIssue, done, answered, gapIssue } = await perform(deps, exception, decision)
     const reason = done ? `${decision.reason}: ${done}` : decision.reason
-    return { outcome: 'applied', reason, followUpIssue }
-  } catch (error) {
+    return { outcome: 'applied', reason, followUpIssue, answered, gapIssue }
+  } catch (caught) {
+    const filed = caught instanceof GapFiled ? caught : undefined
+    const error = filed ? filed.original : caught
     const refused = error instanceof ActionRefused || error instanceof ReleaseRefused
     const outcome = refused ? 'refused' : 'failed'
-    return notCarried(exception, decision, outcome, message(error))
+    return {
+      ...notCarried(exception, decision, outcome, message(error)),
+      gapIssue: filed?.reference,
+    }
   }
 }
 
 /** What the row keeps of the model's work: the draft with the follow-up it filed, or the unread answer. */
 function recordedDraft(decision: Decision, carried: Carried) {
+  const extra = { ...(decision.by ? { by: decision.by } : {}), ...carried.answered }
   if (decision.draft) {
-    return carried.followUpIssue === undefined
-      ? decision.draft
-      : { ...decision.draft, followUpIssue: carried.followUpIssue }
+    const withGap =
+      carried.gapIssue === undefined
+        ? decision.draft
+        : { ...decision.draft, gapIssue: carried.gapIssue }
+    return {
+      ...withGap,
+      ...extra,
+      ...(carried.followUpIssue === undefined ? {} : { followUpIssue: carried.followUpIssue }),
+    }
   }
-  return decision.answer === undefined ? null : { answer: decision.answer }
+  if (decision.answer !== undefined) return { answer: decision.answer, ...extra }
+  return Object.keys(extra).length > 0 ? extra : null
 }
 
 /**

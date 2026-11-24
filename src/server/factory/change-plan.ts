@@ -20,7 +20,7 @@ const TEXT_MAX = 500
 
 /** The turn before any change: the issue and the rules of a build, then the plan in place of the work. */
 export function changePlanPrompt(input: Parameters<typeof buildPrompt>[0]): string {
-  return `${buildPrompt(input)}
+  return `${buildPrompt(input, 'planner')}
 # This turn: plan only
 
 Do this in two turns. In this one, read the code and plan; you will be told to implement the plan in the next.

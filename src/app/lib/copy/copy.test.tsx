@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, renderHook } from '@testing-library/react'
+import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -67,6 +67,47 @@ describe('the language', () => {
     act(() => result.current.setLanguage('pt-BR'))
     expect(result.current.t).toBe(ptBR)
     expect(window.localStorage.getItem(LANGUAGE_KEY)).toBe('pt-BR')
+  })
+
+  it('saves the choice on the server, one save after the other', async () => {
+    const saved: unknown[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        saved.push([url, init.method, init.body])
+        return new Response('{}', { status: 200 })
+      }),
+    )
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <CopyProvider>{children}</CopyProvider>
+    )
+    const { result } = renderHook(() => useCopy(), { wrapper })
+    act(() => result.current.setLanguage('pt-BR'))
+    act(() => result.current.setLanguage('en'))
+    await waitFor(() => expect(saved).toHaveLength(2))
+    expect(saved).toEqual([
+      ['/api/panel/language', 'PUT', JSON.stringify({ language: 'pt-BR' })],
+      ['/api/panel/language', 'PUT', JSON.stringify({ language: 'en' })],
+    ])
+  })
+
+  it('takes the saved language, ignores a value that is none, and yields to the owner’s own choice', () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('{}')),
+    )
+    vi.stubGlobal('navigator', { language: 'en-US' })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <CopyProvider>{children}</CopyProvider>
+    )
+    const { result } = renderHook(() => useCopy(), { wrapper })
+    act(() => result.current.adopt('fr'))
+    expect(result.current.language).toBe('en')
+    act(() => result.current.adopt('pt-BR'))
+    expect(result.current.language).toBe('pt-BR')
+    act(() => result.current.setLanguage('en'))
+    act(() => result.current.adopt('pt-BR'))
+    expect(result.current.language).toBe('en')
   })
 
   it('works without a provider, in English', () => {

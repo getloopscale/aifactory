@@ -5,6 +5,7 @@ import type { BaseHold } from '../factory/await-ci'
 import { NO_TIME_FOR_AGENT } from '../factory/agent-time'
 import { NO_CHANGE, NO_PULL_REQUEST } from '../factory/failure-reasons'
 import { automaticRunsLeft } from '../factory/transitions'
+import type { SecurityJudgement } from './security-judge'
 import { AGENT_OUT_OF_TIME, retryableFailure } from '../../shared/panel'
 
 /**
@@ -73,6 +74,8 @@ export type TaskFacts = {
    * nothing else quoted them and the pull request merges cleanly: absent for any other task.
    */
   ciFailures?: Read<CiFailure[]>
+  /** The question of the builder that waits for an answer, read only for a task in `waiting`. */
+  question?: { id: number; body: string; askedAt: Date }
 }
 
 /** An integration branch red this long while it holds a task is for a person. */
@@ -99,12 +102,19 @@ export type TaskException = {
   checkOutput?: string
   /** What the failed GitHub Actions jobs of the pull request's head logged, for a send-back (`ciFailingOutput`). */
   ciOutput?: string
+  /**
+   * The checks that failed on GitHub for the pull request's head passed on the factory's own run of the same commit:
+   * the failure is not the code's, so rerunning the failed jobs is the first thing to try.
+   */
+  rerunnable?: true
   /** The integration branch a merge with no agent brings into the branch of the task (`base_fixed`). */
   mergeFrom?: string
   /** The files a merge of the integration branch with no agent conflicted in (`base_conflict`). */
   conflictFiles?: string[]
   /** The integration branch that is red, for the issue that fixes it. */
   base?: RedBase
+  /** What the security agent judged of a `security` exception, from a closed set (`security-judge.ts`). */
+  security?: SecurityJudgement
 }
 
 /** An integration branch whose checks fail: where, on which commit, and how to run them when that is known. */
@@ -260,6 +270,7 @@ type Found = Pick<
   | 'mergeFrom'
   | 'checkOutput'
   | 'ciOutput'
+  | 'rerunnable'
   | 'conflictFiles'
   | 'base'
 > & {
@@ -275,6 +286,21 @@ function lastOf(facts: TaskFacts): LastEvent | Found {
     return unknown(`the task is in ${facts.stage}, and its last event is ${last.stage}`)
   }
   return last
+}
+
+/**
+ * Whether the checks that failed on GitHub for the head of the pull request all passed on the factory's own run of
+ * that same commit: the head GitHub failed is the task's head, the factory ran checks on it, and its last result of
+ * each was a pass. Anything not read, or not on the same commit, is not evidence.
+ */
+export function passedHere(facts: TaskFacts): boolean {
+  const { checks, ciFailures, pullRequest, headSha } = facts
+  if (!headSha || !checks?.read || !ciFailures?.read || ciFailures.value.length === 0) return false
+  const pull = pullRequest?.read ? pullRequest.value : null
+  if (pull?.head !== headSha) return false
+  const last = new Map<string, boolean>()
+  for (const run of checks.value) if (run.sha === headSha) last.set(run.name, run.passed)
+  return last.size > 0 && [...last.values()].every(Boolean)
 }
 
 /** Failed checks the agent did not answer, with the base to merge when their pull request conflicts with it. */
@@ -295,7 +321,12 @@ function checksUnchanged(reason: string, facts: TaskFacts): Found {
     ? { checkOutput: failingOutput(checks.value, facts.headSha ?? '') }
     : {}
   const logged = ciFailures ? { ciOutput: ciFailingOutput(ciFailures.value) } : {}
-  return { ...found, ...quoted, ...logged }
+  return {
+    ...found,
+    ...quoted,
+    ...logged,
+    ...(passedHere(facts) ? { rerunnable: true as const } : {}),
+  }
 }
 
 /** Required checks that still fail after the automatic runs, with what the handoff or GitHub Actions said of them. */
@@ -450,6 +481,22 @@ function ofBase(facts: TaskFacts): Found | undefined {
   }
 }
 
+/** How long a question of the builder waits before the coordinator looks into it. */
+export const QUESTION_WAIT_MS = 15 * 60 * 1000
+
+/** A question the builder asked that nobody answered for a while: its identity is the question, not the commit. */
+function ofQuestion(facts: TaskFacts): Found | undefined {
+  const { question } = facts
+  if (facts.stage !== 'waiting' || !question) return undefined
+  const waited = (facts.at ?? new Date()).getTime() - question.askedAt.getTime()
+  if (waited < QUESTION_WAIT_MS) return undefined
+  return {
+    kind: 'builder_question',
+    evidence: question.body,
+    identity: `question:${question.id}`,
+  }
+}
+
 /** Every exception of a task: one for each open finding, and one for its stage or its hold when it has one. */
 export function recognise(facts: TaskFacts): TaskException[] {
   const at = { taskId: facts.taskId, head: facts.headSha ?? 'none' }
@@ -459,7 +506,7 @@ export function recognise(facts: TaskFacts): TaskException[] {
     evidence: f.detail,
     findingId: f.id,
   }))
-  const found = ofStage(facts) ?? ofBase(facts)
+  const found = ofStage(facts) ?? ofBase(facts) ?? ofQuestion(facts)
   if (!found) return fromFindings
   const { identity, ...rest } = found
   return [...fromFindings, { ...rest, ...at, ...(identity ? { head: identity } : {}) }]

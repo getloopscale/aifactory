@@ -2,6 +2,7 @@ import { Badge } from '@usetheo/ui'
 
 import type { AgentEntry } from '../../../shared/panel'
 import { GROUPS } from '../../lib/agents'
+import { useCopy } from '../../lib/copy'
 
 /** The agents in two groups, the chosen one marked. A group with none left by the search is not shown. */
 export function AgentList({
@@ -13,15 +14,20 @@ export function AgentList({
   selected: string | undefined
   onSelect: (id: string) => void
 }) {
+  const { t } = useCopy()
   return (
-    <nav aria-label="Agentes" className="space-y-5">
+    <nav aria-label={t.agents.heading} className="space-y-5">
       {GROUPS.map((group) => {
         const inGroup = agents.filter((a) => a.group === group.id)
         if (inGroup.length === 0) return null
         return (
-          <section key={group.id} aria-label={group.title}>
-            <h2 className="px-3 text-sm font-semibold text-foreground">{group.title}</h2>
-            <p className="mb-1 px-3 text-xs text-muted-foreground">{group.about}</p>
+          <section key={group.id} aria-label={t.agentGroups[group.id].title}>
+            <h2 className="px-3 text-sm font-semibold text-foreground">
+              {t.agentGroups[group.id].title}
+            </h2>
+            <p className="mb-1 px-3 text-xs text-muted-foreground">
+              {t.agentGroups[group.id].about}
+            </p>
             <ul className="space-y-0.5">
               {inGroup.map((agent) => {
                 const active = agent.id === selected

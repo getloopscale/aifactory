@@ -290,6 +290,56 @@ describe('a proof', () => {
     expect(examined).toEqual([NAME])
   })
 
+  it('records the result for the provider it ran on, replaces that provider only, and has the doctor look again', async () => {
+    const examined: string[] = []
+    const diagnose = async (name: string) => void examined.push(name)
+    const on = (provider: 'docker' | 'e2b', sandbox = sandboxWith()) =>
+      running(sandbox, { provider, diagnose })
+    await startProof(starting(), NAME, [LINT, TEST])
+    await runProof(on('e2b'), queued[0])
+    await startProof(starting(), NAME, [LINT, TEST])
+    await runProof(on('docker', sandboxWith(failing('npm test', { exitCode: 1 }))), queued[1])
+
+    const both = (await saved()).checksProofByProvider
+    expect(both.e2b).toMatchObject({ sha: SHA, passed: ['lint', 'test'], failed: [] })
+    expect(both.docker).toMatchObject({ sha: SHA, passed: ['lint'], failed: ['test'] })
+
+    await startProof(starting(), NAME, [TEST])
+    await runProof(on('docker'), queued[2])
+    const replaced = (await saved()).checksProofByProvider
+    expect(replaced.docker).toMatchObject({ passed: ['test'], failed: [] })
+    expect(replaced.e2b).toEqual(both.e2b)
+    // Each of the three proofs recorded a result, so the doctor looked each time.
+    expect(examined).toHaveLength(3)
+  })
+
+  it('has the doctor look again when a provider result was recorded though no check passed', async () => {
+    const examined: string[] = []
+    await startProof(starting(), NAME, [TEST])
+    await runProof(
+      running(sandboxWith(failing('npm test', { exitCode: 1 })), {
+        provider: 'docker',
+        diagnose: async (name) => void examined.push(name),
+      }),
+      queued[0],
+    )
+    expect(examined).toEqual([NAME])
+    expect((await saved()).checksProofByProvider.docker).toMatchObject({ failed: ['test'] })
+  })
+
+  it('keeps a result another provider recorded, merging in the database', async () => {
+    await startProof(starting(), NAME, [TEST])
+    await getDb()
+      .update(repository)
+      .set({
+        checksProofByProvider: { e2b: { at: 'x', sha: null, passed: ['test'], failed: [] } },
+      })
+      .where(eq(repository.fullName, NAME))
+    await runProof(running(sandboxWith(), { provider: 'docker' }), queued[0])
+    const stored = (await saved()).checksProofByProvider
+    expect(Object.keys(stored).sort()).toEqual(['docker', 'e2b'])
+  })
+
   it('keeps the saved checks when the doctor cannot examine the repository afterwards', async () => {
     const diagnose = async () => {
       throw new Error('GitHub is down')

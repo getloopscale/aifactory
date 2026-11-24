@@ -4,6 +4,11 @@ import {
   QUALITY_CONFIGURATION,
   followUpIssue,
   followUpOrigin,
+  gapIssue,
+  gapNote,
+  gapTargetAllowed,
+  gapTargetNamed,
+  sameGap,
   infeasibleNamed,
   parseScopeDraft,
   sameFollowUp,
@@ -323,5 +328,46 @@ describe('a draft that puts in scope what the factory cannot do', () => {
     expect(
       infeasibleNamed(draft({ outOfScope: ['Change .github/workflows/ci.yml'] })),
     ).toBeUndefined()
+  })
+})
+
+describe('the framework gap draft', () => {
+  const gap = { repository: 'o/framework', title: 'The router lacks X', body: 'It cannot do X.' }
+
+  it('parses a gap next to the scope fields, and an ordinary draft has none', () => {
+    const parsed = parseScopeDraft(JSON.stringify(draft({ gap })))
+    expect(parsed).toEqual({ ok: true, draft: draft({ gap }) })
+    expect(
+      parseScopeDraft(JSON.stringify({ ...draft(), gap: { ...gap, repository: 'nope' } })).ok,
+    ).toBe(false)
+  })
+
+  it('files the gap with a line linking the task issue', () => {
+    expect(gapIssue(draft(), 'o/r', 3)).toBeUndefined()
+    expect(gapIssue(draft({ gap }), 'o/r', 3)?.body).toContain('o/r#3')
+  })
+
+  it('matches an open gap by its title and names the issue in the note', () => {
+    expect(sameGap({ title: 'the router lacks x!' }, gap.title)).toBe(true)
+    expect(sameGap({ title: 'Other' }, gap.title)).toBe(false)
+    expect(gapNote(draft({ gap }), 'o/framework#9')).toContain('o/framework#9')
+  })
+
+  it('accepts a target only when the message names it', () => {
+    expect(gapTargetNamed(draft(), 'x')).toBe(true)
+    expect(gapTargetNamed(draft({ gap }), 'see O/Framework for it')).toBe(true)
+    expect(gapTargetNamed(draft({ gap }), 'nothing here')).toBe(false)
+  })
+
+  it('does not take a longer repository name for the target', () => {
+    expect(gapTargetNamed(draft({ gap }), 'see o/framework-extra and x/o/framework')).toBe(false)
+    expect(gapTargetNamed(draft({ gap }), 'see (o/framework).')).toBe(true)
+  })
+
+  it('allows only the task repository or an enabled one', () => {
+    expect(gapTargetAllowed(draft({ gap }), 'o/r', false)).toBe(false)
+    expect(gapTargetAllowed(draft({ gap }), 'o/r', true)).toBe(true)
+    expect(gapTargetAllowed(draft({ gap }), 'O/Framework', false)).toBe(true)
+    expect(gapTargetAllowed(draft(), 'o/r', false)).toBe(true)
   })
 })

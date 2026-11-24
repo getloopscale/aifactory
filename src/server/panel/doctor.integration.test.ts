@@ -98,6 +98,7 @@ describe('the doctor of a repository', () => {
       ['publish_mode', 'ok'],
       ['recipe', 'ok'],
       ['sandbox', 'ok'],
+      ['provider_checks', 'unknown'],
     ])
     expect(report.publishMode).toBe('none')
     const row = await saved()

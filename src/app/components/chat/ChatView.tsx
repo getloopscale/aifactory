@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router'
 import { useAgent } from 'theokit/client'
 
 import type { ChatMessageView, ChatModel } from '../../../shared/panel'
-import { AGENT_PATH, chatApi, displayed, promptWith, SUGGESTIONS } from '../../lib/chat'
+import { AGENT_PATH, chatApi, displayed, promptWith } from '../../lib/chat'
 import { useChatgptConnection } from '../../lib/chatgpt-connection'
 import { useChats } from '../../lib/chats'
 import { useCopy } from '../../lib/copy'
@@ -139,7 +139,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
         <h1 className="mb-8 text-[26px] font-normal tracking-tight">{t.chat.ready}</h1>
         <div className="w-full max-w-[770px]">{composer}</div>
         <ul className="mt-6 w-full max-w-[770px] space-y-1">
-          {SUGGESTIONS.map((text) => (
+          {t.chat.suggestions.map((text) => (
             <li key={text}>
               <button
                 type="button"
