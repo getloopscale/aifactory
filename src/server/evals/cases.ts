@@ -120,6 +120,8 @@ export const AGENT_CONFIGURATION = [
   'src/server/factory/models.ts',
   'src/server/factory/guards.ts',
   'src/server/factory/security-scan.ts',
+  'src/server/factory/security-role.ts',
+  'src/server/coordinator/security-judge.ts',
   'src/server/factory/required-files.ts',
   'src/server/factory/evidence.ts',
   'src/server/factory/e2b-template.ts',

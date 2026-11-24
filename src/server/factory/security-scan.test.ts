@@ -100,4 +100,9 @@ describe('auditBlockers', () => {
       1,
     )
   })
+  it('hands a yarn.lock change to a person instead of auditing it with npm', async () => {
+    const found = await auditBlockers(backendOf('', ''), '/r', 'abc', ['yarn.lock'])
+    expect(found).toEqual([expect.objectContaining({ file: 'yarn.lock' })])
+    expect(found[0].issue).toContain('a person')
+  })
 })

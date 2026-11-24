@@ -53,6 +53,38 @@ describe('diffFacts', () => {
     ])
   })
 
+  it('blocks a lockfile that adds a high advisory, through the audit of the base and the head', async () => {
+    const repo = divergedRepository({
+      behind: true,
+      branch: { ...PLANNED_CHANGE, 'pnpm-lock.yaml': 'lockfileVersion: 9\n' },
+    })
+    const history = readsHistory(repo.dir, repo.dir)
+    const audit = (id: string[]) =>
+      JSON.stringify({
+        advisories: Object.fromEntries(
+          id.map((x, i) => [
+            i,
+            { github_advisory_id: x, module_name: 'picomatch', severity: 'high' },
+          ]),
+        ),
+      })
+    const backend = new FakeBackend((command) =>
+      command.includes('audit --json')
+        ? {
+            stdout: audit(command.includes('archive') ? [] : ['GHSA-new']),
+            stderr: '',
+            exitCode: 1,
+          }
+        : history(command),
+    )
+
+    const facts = await diffFacts(backend, repo.dir, { baseSha: repo.baseSha, plan, issue })
+
+    expect(facts.guards).toEqual([
+      expect.objectContaining({ severity: 'blocker', issue: expect.stringContaining('GHSA-new') }),
+    ])
+  })
+
   it('still reports what the branch itself did when the integration branch moved past it', async () => {
     const repo = divergedRepository({
       behind: true,

@@ -147,7 +147,7 @@ const LOCKFILES = ['pnpm-lock.yaml', 'package-lock.json', 'npm-shrinkwrap.json',
 
 /** The audit command of the package manager whose lockfile is `lockfile`. */
 const auditCommand = (lockfile: string) =>
-  lockfile === 'pnpm-lock.yaml' ? 'pnpm audit --json' : 'npm audit --json'
+  lockfile === 'pnpm-lock.yaml' ? 'pnpm audit --json' : 'npm audit --json' // never yarn: handled before
 
 /**
  * The advisories a change adds, as blockers, when it touches a lockfile: the audit of the base (its manifest
@@ -162,6 +162,16 @@ export async function auditBlockers(
 ): Promise<Finding[]> {
   const lockfile = LOCKFILES.find((name) => touched.includes(name))
   if (!lockfile) return []
+  if (lockfile === 'yarn.lock') {
+    return [
+      {
+        severity: 'blocker',
+        file: lockfile,
+        issue:
+          'the change touches yarn.lock, which the factory cannot audit; a person reads the dependency change',
+      },
+    ]
+  }
   const audit = auditCommand(lockfile)
   const run = async (command: string) => {
     try {
