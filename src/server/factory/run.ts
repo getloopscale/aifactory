@@ -1343,7 +1343,7 @@ export class Run {
         branch,
         sha: row.headSha,
         reason,
-        heldReason: held.reason,
+        heldReason: held.reason ?? null,
         ...(held.cause ? { cause: held.cause } : {}),
         pullRequestUrl: row.pullRequestUrl,
         unchanged: true,
@@ -1393,7 +1393,8 @@ export class Run {
     const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
     return {
       cause: text(detail.cause) as HandoffCause | undefined,
-      reason: text(detail.heldReason) ?? text(detail.reason),
+      // `heldReason` is there, null when nothing held it, on every handoff of an unchanged send-back.
+      reason: 'heldReason' in detail ? text(detail.heldReason) : text(detail.reason),
     }
   }
 
