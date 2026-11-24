@@ -8,13 +8,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, knowledgeNote, repository, task } from '../db/schema'
+import { ingress, knowledgeCuration, knowledgeNote, repository, task } from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
+import { curate } from './curator'
 import { MEMORY_BRANCH } from './format'
 import { runGit } from './git'
 import { Mirror } from './mirror'
-import { conformance } from './okf'
+import { conformance, readConcept } from './okf'
 import { knowledgePass } from './pass'
 import { KnowledgeReader, NO_KNOWLEDGE } from './reader'
 import { knowledgeSource } from './source'
@@ -35,7 +36,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table knowledge_note, knowledge_delivery, setting, stage_event, task, ingress restart identity cascade',
+    'truncate table knowledge_curation, knowledge_note, knowledge_delivery, setting, stage_event, task, ingress restart identity cascade',
   )
 })
 const dirs: string[] = []
@@ -629,5 +630,133 @@ describe('one pass of the cron', () => {
         },
       },
     ])
+  })
+})
+
+describe('the curator', () => {
+  /** An assistant that answers what the test says, with the aliases the curator gave the notes. */
+  const answering = (groups: unknown) => async () => ({
+    response: JSON.stringify({ groups }),
+    cost: 0,
+  })
+
+  async function withNotes(count: number, taskCount: number) {
+    const { remote } = await knowledgeRepo([{ path: 'index.md', content: INDEX }])
+    const made = deps(remote)
+    await saveKnowledge(made.d, { repository: 'me/kb' })
+    const tasks = await Promise.all(Array.from({ length: taskCount }, () => aTask()))
+    await keep(
+      Array.from({ length: count }, (_, i) =>
+        note(tasks[i % taskCount].id, `Run pnpm build:packages before the tests, variant ${i}.`),
+      ),
+    )
+    await syncKnowledge(made.d)
+    return { ...made, remote }
+  }
+
+  const merge = [
+    {
+      action: 'merge',
+      notes: ['n1', 'n2'],
+      title: 'Build first',
+      text: 'Run pnpm build:packages first.',
+    },
+  ]
+  const curator = (made: { d: KnowledgeDeps }, groups: unknown) => ({
+    db: made.d.db,
+    root: made.d.root,
+    assistant: answering(groups),
+    now: made.d.now,
+  })
+
+  it('in trial records one merge and writes nothing to the memory branch', async () => {
+    const made = await withNotes(2, 2)
+    const before = (await runGit(['-C', made.remote, 'rev-parse', MEMORY_BRANCH])).toString()
+
+    await curate(curator(made, merge), 'trial')
+    await syncKnowledge(made.d)
+
+    const rows = await getDb().select().from(knowledgeCuration)
+    expect(rows.map((r) => [r.action, r.mode, r.status])).toEqual([['merge', 'trial', 'recorded']])
+    expect((await runGit(['-C', made.remote, 'rev-parse', MEMORY_BRANCH])).toString()).toBe(before)
+  })
+
+  it('in auto merges the two notes in one fast-forward commit that keeps both sources', async () => {
+    const made = await withNotes(2, 2)
+    const before = (await runGit(['-C', made.remote, 'rev-parse', MEMORY_BRANCH])).toString().trim()
+
+    await curate(curator(made, merge), 'auto')
+    await syncKnowledge(made.d)
+
+    const log = (await runGit(['-C', made.remote, 'rev-list', `${before}..${MEMORY_BRANCH}`]))
+      .toString()
+      .trim()
+      .split('\n')
+    expect(log).toHaveLength(1)
+    const index = await remoteFile(made.remote, MEMORY_BRANCH, 'memory/projects/acme/app/index.md')
+    expect(index.match(/^\* /gm)).toHaveLength(1)
+    const merged = (
+      await runGit([
+        '-C',
+        made.remote,
+        'ls-tree',
+        '--name-only',
+        MEMORY_BRANCH,
+        'memory/projects/acme/app/',
+      ])
+    )
+      .toString()
+      .split('\n')
+      .find((f) => f.includes('merged'))!
+    const text = await remoteFile(made.remote, MEMORY_BRANCH, merged)
+    expect(readConcept(text).problem).toBeUndefined()
+    const sources = (readConcept(text).frontmatter?.sources as { resource: string }[]).length
+    expect(sources).toBe(1)
+    expect((await getDb().select().from(knowledgeCuration))[0].status).toBe('applied')
+  })
+
+  it('records an error and writes nothing for an answer that is not JSON or names an unknown action', async () => {
+    const made = await withNotes(2, 2)
+    const before = (await runGit(['-C', made.remote, 'rev-parse', MEMORY_BRANCH])).toString()
+    const notJson = {
+      ...curator(made, merge),
+      assistant: async () => ({ response: 'sure', cost: 0 }),
+    }
+
+    await curate(notJson, 'auto')
+    await curate(curator(made, [{ action: 'delete', notes: ['n1'] }]), 'auto')
+    await syncKnowledge(made.d)
+
+    const rows = await getDb().select().from(knowledgeCuration)
+    expect(rows.map((r) => r.action)).toEqual(['error'])
+    expect((await runGit(['-C', made.remote, 'rev-parse', MEMORY_BRANCH])).toString()).toBe(before)
+  })
+
+  it('opens one pull request for notes of three tasks, and none again, also after it was closed unmerged', async () => {
+    const made = await withNotes(3, 3)
+    const promote = [
+      {
+        action: 'promote',
+        notes: ['n1', 'n2', 'n3'],
+        title: 'Build first',
+        text: 'Run pnpm build:packages first.',
+      },
+    ]
+
+    await curate(curator(made, promote), 'auto')
+    await syncKnowledge(made.d)
+    await syncKnowledge(made.d)
+    expect(made.pulls()).toHaveLength(1)
+    expect(made.pulls()[0].base).toBe('main')
+    expect(await remoteFile(made.remote, 'main', 'index.md')).toBe(INDEX)
+
+    for (const pull of (made.d.api as FakeGithub).repo('me/kb').pulls) pull.state = 'closed'
+    await syncKnowledge(made.d)
+    await curate(curator(made, promote), 'auto')
+    await syncKnowledge(made.d)
+
+    expect(made.pulls()).toHaveLength(1)
+    const rows = await getDb().select().from(knowledgeCuration)
+    expect(rows.map((r) => r.status)).toEqual(['closed'])
   })
 })

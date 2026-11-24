@@ -1,7 +1,7 @@
 import { and, asc, count, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { knowledgeDelivery, knowledgeNote, setting } from '../db/schema'
+import { knowledgeCuration, knowledgeDelivery, knowledgeNote, setting } from '../db/schema'
 
 import { noteHash, type Note, type NoteKind } from './format'
 
@@ -157,4 +157,93 @@ export async function recordDelivery(
     memorySha: input.pin.memorySha ?? null,
     files: input.files,
   })
+}
+
+export type CurationAction = 'merge' | 'promote' | 'keep' | 'error'
+export type CurationMode = 'trial' | 'auto'
+export type CurationStatus =
+  'recorded' | 'pending' | 'applied' | 'stale' | 'proposed' | 'closed' | 'merged'
+
+export type NewCuration = {
+  knowledgeRepository: string
+  repository: string
+  action: CurationAction
+  mode: CurationMode
+  groupKey: string
+  status: CurationStatus
+  memorySha: string
+  detail: Record<string, unknown>
+}
+
+/** Keeps decisions. One already kept for the same group, mode and action is not kept again. */
+export async function recordCurations(db: Database, rows: NewCuration[]): Promise<number> {
+  if (rows.length === 0) return 0
+  const kept = await db.insert(knowledgeCuration).values(rows).onConflictDoNothing().returning({
+    id: knowledgeCuration.id,
+  })
+  return kept.length
+}
+
+/** Whether the project's notes at this commit were already read in this mode. */
+export async function curatedAt(
+  db: Database,
+  input: { knowledgeRepository: string; repository: string; mode: CurationMode; memorySha: string },
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: knowledgeCuration.id })
+    .from(knowledgeCuration)
+    .where(
+      and(
+        eq(knowledgeCuration.knowledgeRepository, input.knowledgeRepository),
+        eq(knowledgeCuration.repository, input.repository),
+        eq(knowledgeCuration.mode, input.mode),
+        eq(knowledgeCuration.memorySha, input.memorySha),
+      ),
+    )
+    .limit(1)
+  return row !== undefined
+}
+
+export type StoredCuration = NewCuration & {
+  id: number
+  commitSha: string | null
+  pullNumber: number | null
+  pullUrl: string | null
+}
+
+/** The `auto` decisions in a status, oldest first. */
+export async function curationsIn(
+  db: Database,
+  knowledgeRepository: string,
+  status: CurationStatus,
+  limit: number,
+): Promise<StoredCuration[]> {
+  const rows = await db
+    .select()
+    .from(knowledgeCuration)
+    .where(
+      and(
+        eq(knowledgeCuration.knowledgeRepository, knowledgeRepository),
+        eq(knowledgeCuration.mode, 'auto'),
+        eq(knowledgeCuration.status, status),
+      ),
+    )
+    .orderBy(asc(knowledgeCuration.id))
+    .limit(limit)
+  return rows.map((r) => ({
+    ...r,
+    detail: r.detail as Record<string, unknown>,
+    memorySha: r.memorySha ?? '',
+  }))
+}
+
+export async function updateCuration(
+  db: Database,
+  id: number,
+  patch: Partial<Pick<StoredCuration, 'status' | 'commitSha' | 'pullNumber' | 'pullUrl'>>,
+): Promise<void> {
+  await db
+    .update(knowledgeCuration)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(knowledgeCuration.id, id))
 }

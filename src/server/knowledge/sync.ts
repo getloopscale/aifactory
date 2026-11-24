@@ -12,8 +12,14 @@ import type { GithubApi } from '../github/pulls'
 import {
   assertRepository,
   conformingCopy,
+  curatedNote,
   indexedNote,
   KnowledgeFormatError,
+  mergeLogEntry,
+  proposalNames,
+  renderMergedNote,
+  renderProposedRule,
+  taskCount,
   logDay,
   MEMORY_BRANCH,
   noteLogEntry,
@@ -26,17 +32,21 @@ import {
   type IndexedNote,
   type Note,
 } from './format'
-import { Mirror, mirrorDir } from './mirror'
+import { PROMOTE_MIN_TASKS } from './curator-answer'
+import { Mirror, mirrorDir, PushRejected } from './mirror'
 import { conformance, isReserved, logWith, OKF_VERSION } from './okf'
 import {
   loadKnowledgeConfig,
   loadSyncState,
+  curationsIn,
   markCommitted,
   noteCounts,
   pendingNotes,
   saveSyncState,
+  updateCuration,
   writeKnowledgeConfig,
   type KnowledgeConfig,
+  type StoredCuration,
   type SyncState,
 } from './store'
 
@@ -56,7 +66,7 @@ export class KnowledgeRefused extends Error {}
 export type KnowledgeDeps = {
   db: Database
   github: Pick<GithubApp, 'installationToken'>
-  api: Pick<GithubApi, 'defaultBranch' | 'branchHead' | 'openPullRequest'>
+  api: Pick<GithubApi, 'defaultBranch' | 'branchHead' | 'openPullRequest' | 'readPullRequest'>
   /** Where the mirrors are kept. */
   root: string
   /** Where the factory reaches a repository; GitHub, but a local path in the tests. */
@@ -174,6 +184,155 @@ async function writeNotes(c: Context, memorySha: string | undefined): Promise<st
   return commit
 }
 
+/** The notes of a curator's decision as they are on the memory branch now, or nothing when one is gone. */
+async function groupNotes(c: Context, memorySha: string, paths: unknown) {
+  if (!Array.isArray(paths) || paths.length === 0) return undefined
+  const found = []
+  for (const path of paths) {
+    if (typeof path !== 'string') return undefined
+    const text = await c.mirror.read(memorySha, path)
+    const note = text ? curatedNote(path, text.toString('utf8')) : undefined
+    if (!note) return undefined
+    found.push(note)
+  }
+  return found
+}
+
+const detailText = (row: StoredCuration, key: string) =>
+  typeof row.detail[key] === 'string' ? row.detail[key] : ''
+
+/**
+ * Applies the merges the curator queued, each as one commit on the memory branch: the one note that keeps
+ * the sources of the notes it replaces, those notes removed, and the index and log regenerated, pushed as a
+ * fast-forward. A merge whose notes are no longer on the branch as they were is `stale`; one the remote
+ * refused stays pending and starts again from what the next pass fetches. Returns where the branch is.
+ */
+async function applyMerges(c: Context, start: string | undefined): Promise<string | undefined> {
+  let memorySha = start
+  if (!memorySha) return memorySha
+  const queued = await curationsIn(c.deps.db, c.config.repository, 'pending', 50)
+  for (const row of queued.filter((r) => r.action === 'merge')) {
+    const notes = await groupNotes(c, memorySha, row.detail.paths)
+    if (!notes || notes.length < 2) {
+      await updateCuration(c.deps.db, row.id, { status: 'stale' })
+      continue
+    }
+    const project = row.repository
+    const merged = renderMergedNote({
+      repository: project,
+      title: detailText(row, 'title'),
+      text: detailText(row, 'text'),
+      notes,
+      now: c.now,
+    })
+    const replaced = new Set(notes.map((n) => n.path))
+    const folder = notesFolder(project)
+    const listed = [
+      ...(await notesOn(c, memorySha, project)).filter((n) => !replaced.has(n.path)),
+      ...[indexedNote(merged.path, merged.content)].flatMap((n) => n ?? []),
+    ]
+    const log = await c.mirror.read(memorySha, `${folder}log.md`)
+    try {
+      const commit = await c.mirror.commit({
+        parent: memorySha,
+        files: [
+          merged,
+          { path: `${folder}index.md`, content: renderNotesIndex(project, listed, c.now) },
+          {
+            path: `${folder}log.md`,
+            content: logWith(log?.toString('utf8'), notesLogTitle(project), logDay(c.now), [
+              mergeLogEntry(project, detailText(row, 'title'), merged.path, notes.length),
+            ]),
+          },
+        ],
+        remove: [...replaced],
+        message: `Merge ${notes.length} notes of ${project} that say the same thing\n\nReplaces: ${[...replaced].join(', ')}\n`,
+        author: c.deps.author,
+        date: c.now,
+      })
+      await c.mirror.push(c.url, commit, MEMORY_BRANCH, { token: c.token })
+      await c.mirror.setHead(MEMORY_BRANCH, commit)
+      await updateCuration(c.deps.db, row.id, { status: 'applied', commitSha: commit })
+      memorySha = commit
+    } catch (error) {
+      if (error instanceof PushRejected) break
+      throw error
+    }
+  }
+  return memorySha
+}
+
+/**
+ * Opens a pull request on the owner's branch for each promotion the curator queued, adding one rule from a
+ * branch of the factory's own. It only opens it: nothing here merges it, and a group whose pull request was
+ * closed without a merge is never proposed again, since its decision stays on record.
+ */
+async function applyPromotions(
+  c: Context,
+  memorySha: string | undefined,
+  knowledgeSha: string,
+  base: string,
+): Promise<void> {
+  const { db, api } = c.deps
+  const repository = c.config.repository
+  for (const row of await curationsIn(db, repository, 'proposed', 50)) {
+    if (row.pullNumber === null) continue
+    const pull = await api.readPullRequest(repository, c.token, row.pullNumber)
+    if (pull.state === 'closed') {
+      await updateCuration(db, row.id, { status: pull.merged ? 'merged' : 'closed' })
+    }
+  }
+  if (!memorySha) return
+  const queued = await curationsIn(db, repository, 'pending', 50)
+  for (const row of queued.filter((r) => r.action === 'promote')) {
+    const notes = await groupNotes(c, memorySha, row.detail.paths)
+    if (!notes || notes.length < PROMOTE_MIN_TASKS || taskCount(notes) < PROMOTE_MIN_TASKS) {
+      await updateCuration(db, row.id, { status: 'stale' })
+      continue
+    }
+    const title = detailText(row, 'title')
+    const names = proposalNames(
+      row.repository,
+      title,
+      notes.map((n) => n.path),
+    )
+    const rule = renderProposedRule({
+      repository: row.repository,
+      title,
+      text: detailText(row, 'text'),
+      notes,
+      now: c.now,
+    })
+    const commit = await c.mirror.commit({
+      parent: knowledgeSha,
+      files: [{ path: names.path, content: rule }],
+      message: `Propose a rule for ${row.repository}: ${title}\n\nFrom the notes of ${taskCount(notes)} tasks.\n`,
+      author: c.deps.author,
+      date: c.now,
+    })
+    await c.mirror.push(c.url, commit, names.branch, { token: c.token, force: true })
+    const pull = await api.openPullRequest(repository, c.token, {
+      head: names.branch,
+      base,
+      title: `Rule proposed for ${row.repository}: ${title}`.slice(0, 200),
+      body: [
+        `The factory's notes about ${row.repository} agree on this, from ${taskCount(notes)} different tasks. It adds \`${names.path}\` and changes nothing else.`,
+        '',
+        'The notes are observations, not verified facts: read the rule against the code before you merge it.',
+        'The factory never merges this pull request. Closing it without merging means the factory does not propose the same notes again.',
+        '',
+        ...notes.map((n) => `- \`${n.path}\``),
+      ].join('\n'),
+    })
+    await updateCuration(db, row.id, {
+      status: 'proposed',
+      commitSha: commit,
+      pullNumber: pull.number,
+      pullUrl: pull.url,
+    })
+  }
+}
+
 /** The markdown files of the rules at a commit, as text, up to the most a check reads. */
 async function markdownAt(c: Context, sha: string) {
   const files: { path: string; text: string }[] = []
@@ -222,7 +381,9 @@ export async function syncKnowledge(deps: KnowledgeDeps): Promise<SyncState | un
       kept.okf?.knowledgeSha === knowledgeSha
         ? kept.okf
         : { knowledgeSha, problems: await checkRules(c, knowledgeSha) }
-    const memorySha = await writeNotes(c, fetchedMemory)
+    const written = await writeNotes(c, fetchedMemory)
+    const memorySha = await applyMerges(c, written)
+    await applyPromotions(c, memorySha, knowledgeSha, branch)
     const state: SyncState = {
       repository: config.repository,
       branch,

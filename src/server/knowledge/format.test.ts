@@ -6,11 +6,13 @@ import {
   assertRepository,
   chooseSliceFiles,
   conformingCopy,
+  curatedNote,
   expiresOn,
   indexedNote,
   knowledgePaths,
   LEARNED_MAX,
   memoryPaths,
+  mergedNotePath,
   NOTE_LIFETIME_DAYS,
   noteHash,
   noteLogEntry,
@@ -20,7 +22,10 @@ import {
   noteTitle,
   parseLearned,
   PRODUCER,
+  proposalNames,
   renderMemoryRoot,
+  renderMergedNote,
+  renderProposedRule,
   renderNote,
   renderNotesIndex,
   SLICE_MAX_FILE_BYTES,
@@ -515,5 +520,69 @@ describe('what the factory proposes for a file of the rules', () => {
     ].map((path) => ({ path, text: readFileSync(`templates/knowledge/${path}`, 'utf8') }))
     expect(conformance(files[0].text, files)).toEqual([])
     for (const f of files) expect(conformingCopy(f.path, f.text), f.path).toEqual({})
+  })
+})
+
+describe('what the curator writes', () => {
+  const at = new Date('2026-11-24T12:00:00Z')
+  const read = (task: number, id: number, resource: string) => {
+    const text = renderNote(
+      note({ id, taskId: task, issueNumber: task, baseSha: null, body: `Fact ${id}` }),
+    )
+    const found = curatedNote(`memory/projects/acme/app/n-${id}.md`, text)
+    return { ...found!, sources: [{ id: 'issue', resource, title: 'Issue' }] }
+  }
+  const notes = [read(1, 1, 'https://x/1'), read(2, 2, 'https://x/2'), read(3, 3, 'https://x/1')]
+
+  it('reads the task of a note back from its file', () => {
+    expect(notes.map((n) => n.taskIds)).toEqual([[1], [2], [3]])
+  })
+
+  it('merges notes into one that keeps every source once, and conforms to OKF', () => {
+    const merged = renderMergedNote({
+      repository: 'acme/app',
+      title: 'Build first',
+      text: 'Run the build first.',
+      notes,
+      now: at,
+    })
+    const concept = readConcept(merged.content)
+    expect(concept.problem).toBeUndefined()
+    expect(concept.frontmatter?.type).toBe('Observation')
+    expect((concept.frontmatter?.sources as { resource: string }[]).map((s) => s.resource)).toEqual(
+      ['https://x/1', 'https://x/2'],
+    )
+    expect(indexedNote(merged.path, merged.content)).toBeDefined()
+    expect(
+      conformance('---\nokf_version: "0.2"\n---\n', [{ path: merged.path, text: merged.content }]),
+    ).toEqual([])
+  })
+
+  it('names the merged note the same for the same notes, whatever their order', () => {
+    const paths = notes.map((n) => n.path)
+    expect(mergedNotePath('acme/app', paths, at)).toBe(
+      mergedNotePath('acme/app', [...paths].reverse(), at),
+    )
+  })
+
+  it('proposes a rule with the tasks and the sources, in the project folder, and it conforms', () => {
+    const rule = renderProposedRule({
+      repository: 'acme/app',
+      title: 'Build first',
+      text: 'Run the build first.',
+      notes,
+      now: at,
+    })
+    const names = proposalNames(
+      'acme/app',
+      'Build first',
+      notes.map((n) => n.path),
+    )
+    expect(names.path).toMatch(/^knowledge\/projects\/acme\/app\/build-first-[0-9a-f]{8}\.md$/)
+    expect(readConcept(rule).problem).toBeUndefined()
+    expect(readConcept(rule).frontmatter?.type).toBe('Rule')
+    expect((readConcept(rule).frontmatter?.aifactory as { tasks: number[] }).tasks).toEqual([
+      1, 2, 3,
+    ])
   })
 })
