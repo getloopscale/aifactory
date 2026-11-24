@@ -1335,13 +1335,15 @@ export class Run {
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
-    const held = await this.unintegratedHandoff()
-    if (held) {
-      const reason = `the rework changed nothing, so the work still waits for a person: ${held.reason}`
+    // `done` means integrated, or waiting for CI to integrate: any other work waits for a person.
+    if (!(row.mergedSha || row.resolvedSha || row.awaitingCiSha)) {
+      const held = await this.previousHandoff()
+      const reason = `the rework changed nothing, so the work still waits for a person${held.reason ? `: ${held.reason}` : ''}`
       await enterRunStage(deps.db, taskId, 'handoff', {
         branch,
         sha: row.headSha,
         reason,
+        heldReason: held.reason,
         ...(held.cause ? { cause: held.cause } : {}),
         pullRequestUrl: row.pullRequestUrl,
         unchanged: true,
@@ -1374,25 +1376,24 @@ export class Run {
   }
 
   /**
-   * The handoff this run was sent back from, when the work was never integrated: `done` means integrated or
-   * waiting for CI, so a rework that changes nothing returns to the handoff it left, with its cause.
+   * The handoff the run was sent back from, with its cause and the reason it was first held for (never the
+   * reason of an unchanged send-back, so repeated ones do not stack their prefix). Empty when the last
+   * ending was not a handoff; an older handoff has no cause and none is invented.
    */
-  private async unintegratedHandoff(): Promise<
-    { cause?: HandoffCause; reason: string } | undefined
-  > {
-    const { deps, taskId, row } = this.c
-    if (row.mergedSha || row.resolvedSha || row.awaitingCiSha) return undefined
+  private async previousHandoff(): Promise<{ cause?: HandoffCause; reason?: string }> {
+    const { deps, taskId } = this.c
     const [ended] = await deps.db
       .select()
       .from(stageEvent)
       .where(and(eq(stageEvent.taskId, taskId), inArray(stageEvent.stage, ENDING_STAGES)))
       .orderBy(desc(stageEvent.id))
       .limit(1)
-    if (!ended || ended.stage !== 'handoff') return undefined
-    const detail = (ended.detail ?? {}) as { cause?: unknown; reason?: unknown }
+    if (!ended || ended.stage !== 'handoff') return {}
+    const detail = (ended.detail ?? {}) as Record<string, unknown>
+    const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
     return {
-      cause: typeof detail.cause === 'string' ? (detail.cause as HandoffCause) : undefined,
-      reason: typeof detail.reason === 'string' ? detail.reason : 'it was handed over',
+      cause: text(detail.cause) as HandoffCause | undefined,
+      reason: text(detail.heldReason) ?? text(detail.reason),
     }
   }
 
