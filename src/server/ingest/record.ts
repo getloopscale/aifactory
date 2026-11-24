@@ -4,7 +4,7 @@ import type { Database } from '../db'
 import { ingress, repository, stageEvent, task } from '../db/schema'
 
 import { decideIngress, type IngressDecision, type RoutedIntent } from './decide'
-import { actOnWriting, type WrittenResult } from './pull-request'
+import { actOnWriting, type Reactions, type WrittenResult } from './pull-request'
 import { startOverOnLabel } from './restart'
 import { withdrawTask } from './withdraw'
 
@@ -25,7 +25,7 @@ export type RecordResult =
       code: string
       reason: string
       intent: RoutedIntent
-      /** What was done for something written on a pull request, when the caller can act on it. */
+      /** What was done for something written on a pull request. */
       written?: WrittenResult
     }
   | { status: 'task_created'; taskId: number }
@@ -82,10 +82,13 @@ export async function recordDelivery(
    */
   onTaskCreated?: (taskId: number, restartedBy?: string) => Promise<unknown>,
   /**
-   * Sends a task back with a note, in the transaction, as the panel's request for changes does. Without it,
-   * what is written on a pull request is only recorded.
+   * What is done for what is written on a pull request: send a task back with a note in the transaction, as the
+   * panel's request for changes does, or file a follow-up. Without it, it is only recorded.
    */
-  sendBack?: (tx: Database, taskId: number, note: string) => Promise<unknown>,
+  reactions?: {
+    sendBack: (tx: Database, taskId: number, note: string) => Promise<unknown>
+    followUp: Reactions['followUp']
+  },
 ): Promise<RecordResult> {
   const asked = decideIngress(delivery.event, delivery.payload)
 
@@ -109,8 +112,11 @@ export async function recordDelivery(
     if ('intent' in decision) {
       const { code, reason, intent } = decision
       await withdrawTask(tx, intent)
-      const written = sendBack
-        ? await actOnWriting(tx, intent, (taskId, note) => sendBack(tx, taskId, note))
+      const written = reactions
+        ? await actOnWriting(tx, intent, {
+            sendBack: (taskId, note) => reactions.sendBack(tx, taskId, note),
+            followUp: reactions.followUp,
+          })
         : undefined
       return { status: 'routed', code, reason, intent, ...(written ? { written } : {}) }
     }

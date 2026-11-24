@@ -9,13 +9,18 @@ import { openFollowUpIssue, requestChanges } from '../panel/actions'
 import { githubAppFromEnv } from '../factory/deps'
 import { createIssuesApi } from '../github/issues-api'
 
+import type { Reactions } from './pull-request'
 import { recordDelivery, type Delivery } from './record'
 
 /**
  * Stores the delivery and, when it created a task, queues the run in the same transaction: a task
  * row never exists without its job, and a job never exists for a task that rolled back.
  */
-export async function recordAndQueue(delivery: Delivery, queue: QueueClient) {
+export async function recordAndQueue(
+  delivery: Delivery,
+  queue: QueueClient,
+  followUp: Reactions['followUp'] = fileFollowUp,
+) {
   const client = await getPool().connect()
   try {
     const enqueue = (input: { taskId: number }, key: string) =>
@@ -29,43 +34,22 @@ export async function recordAndQueue(delivery: Delivery, queue: QueueClient) {
       (taskId, restartedBy) =>
         enqueue({ taskId }, restartedBy ? `task-${taskId}-${restartedBy}` : `task-${taskId}`),
       // What a person wrote on the pull request is the panel's request for changes, in this transaction.
-      (tx, taskId, note) =>
-        requestChanges(
-          {
-            db: tx,
-            inTransaction: (work) => work(tx, (input, key) => enqueue(input, key)),
-          },
-          taskId,
-          note,
-        ),
+      {
+        sendBack: (tx, taskId, note) =>
+          requestChanges(
+            { db: tx, inTransaction: (work) => work(tx, (input, key) => enqueue(input, key)) },
+            taskId,
+            note,
+          ),
+        followUp,
+      },
     )
-    if (result.status === 'routed' && result.written?.done === 'follow_up') {
-      // GitHub cannot commit with the database: the issue is filed once the delivery is stored.
-      await openFollowUp(result.written.request)
-    }
     return result
   } finally {
     client.release()
   }
 }
 
-async function openFollowUp(request: Parameters<typeof openFollowUpIssue>[1]) {
-  try {
-    const filed = await openFollowUpIssue(
-      { db: getDb(), github: githubAppFromEnv(), issues: createIssuesApi() },
-      request,
-    )
-    console.log(
-      JSON.stringify({ event: 'pull_request_follow_up', signature: request.signature, ...filed }),
-    )
-  } catch (error) {
-    // The delivery is stored: a later writing of the same review files it, since the claim was given back.
-    console.error(
-      JSON.stringify({
-        event: 'pull_request_follow_up_failed',
-        signature: request.signature,
-        error: String(error),
-      }),
-    )
-  }
-}
+/** Files the follow-up on GitHub, on a connection of its own: the claim it keeps must outlive a rolled back delivery. */
+export const fileFollowUp: Reactions['followUp'] = (request) =>
+  openFollowUpIssue({ db: getDb(), github: githubAppFromEnv(), issues: createIssuesApi() }, request)
