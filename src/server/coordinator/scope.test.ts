@@ -6,6 +6,7 @@ import {
   followUpOrigin,
   gapIssue,
   gapNote,
+  gapTargetAllowed,
   gapTargetNamed,
   sameGap,
   infeasibleNamed,
@@ -356,5 +357,17 @@ describe('the framework gap draft', () => {
     expect(gapTargetNamed(draft(), 'x')).toBe(true)
     expect(gapTargetNamed(draft({ gap }), 'see O/Framework for it')).toBe(true)
     expect(gapTargetNamed(draft({ gap }), 'nothing here')).toBe(false)
+  })
+
+  it('does not take a longer repository name for the target', () => {
+    expect(gapTargetNamed(draft({ gap }), 'see o/framework-extra and x/o/framework')).toBe(false)
+    expect(gapTargetNamed(draft({ gap }), 'see (o/framework).')).toBe(true)
+  })
+
+  it('allows only the task repository or an enabled one', () => {
+    expect(gapTargetAllowed(draft({ gap }), 'o/r', false)).toBe(false)
+    expect(gapTargetAllowed(draft({ gap }), 'o/r', true)).toBe(true)
+    expect(gapTargetAllowed(draft({ gap }), 'O/Framework', false)).toBe(true)
+    expect(gapTargetAllowed(draft(), 'o/r', false)).toBe(true)
   })
 })

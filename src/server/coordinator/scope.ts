@@ -251,7 +251,19 @@ export function gapNote(draft: ScopeDraft, reference: string): string {
   return `${draft.note}\n\nThe framework gap issue is ${reference}. Link it in the done-when and say no more about filing it: the factory filed it, and the sandbox cannot.`
 }
 
-/** Whether the target of a gap is named in what the drafter read: the issue and the review, never a guess. */
+const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Whether the target of a gap is named, as a whole `owner/name`, in what the drafter read: never a guess. */
 export function gapTargetNamed(draft: ScopeDraft, message: string): boolean {
-  return !draft.gap || message.toLowerCase().includes(draft.gap.repository.toLowerCase())
+  if (!draft.gap) return true
+  return new RegExp(`(^|[^\\w./-])${escaped(draft.gap.repository)}(?![\\w.-])`, 'i').test(message)
+}
+
+/**
+ * Whether the factory may file the gap where the draft says: in the task's own repository or in one the owner
+ * enabled. Text of an issue names a target but never grants one: the App reaches every repository of the account.
+ */
+export function gapTargetAllowed(draft: ScopeDraft, own: string, enabled: boolean): boolean {
+  if (!draft.gap) return true
+  return draft.gap.repository.toLowerCase() === own.toLowerCase() || enabled
 }

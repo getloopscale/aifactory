@@ -2,7 +2,7 @@ import { and, asc, desc, eq } from 'drizzle-orm'
 
 import { SCOPE_INSTRUCTIONS } from '../agents/prompts/scope'
 import type { Database } from '../db'
-import { changePlan, review, stageEvent, task } from '../db/schema'
+import { changePlan, repository, review, stageEvent, task } from '../db/schema'
 import { oneShotAssistant, type AssistantSpec } from '../factory/assistant'
 import { renderChangePlan, type ChangePlan } from '../factory/change-plan'
 import { coordinatorModel } from '../factory/models'
@@ -13,11 +13,13 @@ import type { Issue } from '../github/issues'
 import type { Decision } from './decide'
 import type { TaskException } from './exceptions'
 import {
+  gapTargetAllowed,
   gapTargetNamed,
   parseScopeDraft,
   roundsOfRun,
   scopeMessage,
   type ReviewRound,
+  type ScopeDraft,
 } from './scope'
 
 /**
@@ -113,6 +115,22 @@ async function scopeMessageFor(deps: DraftDeps, taskId: number): Promise<string>
   })
 }
 
+/** Why the gap issue of a draft may not be filed where it says, or nothing: the target is named, and the task's or the owner's. */
+async function gapRefusal(deps: DraftDeps, taskId: number, draft: ScopeDraft, message: string) {
+  if (!draft.gap) return undefined
+  if (!gapTargetNamed(draft, message)) {
+    return 'the drafter named a repository for the gap issue that neither the issue nor the review names'
+  }
+  const [own] = await deps.db.select().from(task).where(eq(task.id, taskId))
+  const [target] = await deps.db
+    .select({ enabled: repository.enabled })
+    .from(repository)
+    .where(eq(repository.fullName, draft.gap.repository))
+  return gapTargetAllowed(draft, own?.repository ?? '', target?.enabled ?? false)
+    ? undefined
+    : `the gap issue's repository ${draft.gap.repository} is neither the task's nor one the owner enabled`
+}
+
 /** How much of an answer that did not parse is kept for a person. */
 const ANSWER_MAX = 4_000
 
@@ -136,10 +154,13 @@ export async function draftScope(
     return { ...decision, failure: error instanceof Error ? error.message : String(error) }
   }
   const parsed = parseScopeDraft(answer.response)
-  if (parsed.ok && !gapTargetNamed(parsed.draft, message!)) {
+  const unfit = parsed.ok
+    ? await gapRefusal(deps, exception.taskId, parsed.draft, message!)
+    : undefined
+  if (unfit) {
     return {
       action: 'escalate',
-      reason: `${decision.reason}, but the drafter named a repository for the gap issue that neither the issue nor the review names`,
+      reason: `${decision.reason}, but ${unfit}`,
       answer: answer.response.slice(0, ANSWER_MAX),
       costUsd: answer.cost,
     }

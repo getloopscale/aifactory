@@ -29,6 +29,7 @@ import {
   followUpOrigin,
   gapIssue,
   gapNote,
+  gapTargetAllowed,
   sameGap,
   infeasibleNamed,
   qualityConfigurationNamed,
@@ -140,10 +141,18 @@ async function fileFollowUp(
  */
 async function fileGap(deps: ApplyDeps, row: TaskRow, draft: ScopeDraft): Promise<Performed> {
   const issue = gapIssue(draft, row.repository, row.issueNumber)!
+  const allowed = gapTargetAllowed(draft, row.repository, await enabled(deps, issue.repository))
+  if (!allowed) {
+    throw new ActionRefused(
+      `${issue.repository} is neither the task's repository nor one the owner enabled`,
+    )
+  }
   const { token } = await deps.github.installationToken(issue.repository)
-  const open = await deps.listOpenIssues(issue.repository, null, token)
+  const earlier = await gapOfTask(deps, row.id, issue.repository)
   const number =
-    open.find((i) => sameGap(i, issue.title))?.number ??
+    earlier ??
+    (await deps.listOpenIssues(issue.repository, null, token)).find((i) => sameGap(i, issue.title))
+      ?.number ??
     (
       await deps.issues.createIssue(issue.repository, token, {
         title: issue.title,
@@ -151,8 +160,42 @@ async function fileGap(deps: ApplyDeps, row: TaskRow, draft: ScopeDraft): Promis
       })
     ).number
   const reference = `${issue.repository}#${number}`
-  await sendBackByCoordinator(deps, row.id, gapNote(draft, reference), { fromReview: true })
-  return { done: `filed the gap issue ${reference}` }
+  try {
+    await sendBackByCoordinator(deps, row.id, gapNote(draft, reference), { fromReview: true })
+  } catch (error) {
+    throw new GapFiled(reference, error)
+  }
+  return { done: `filed the gap issue ${reference}`, gapIssue: reference }
+}
+
+/** A send-back that failed after the gap issue existed: the row keeps the reference, so a retry reuses it. */
+class GapFiled extends Error {
+  constructor(
+    readonly reference: string,
+    readonly original: unknown,
+  ) {
+    super(original instanceof Error ? original.message : String(original))
+  }
+}
+
+/** The gap issue an earlier decision of the task filed or found in the repository, as `owner/name#N`'s number. */
+async function gapOfTask(
+  deps: ApplyDeps,
+  taskId: number,
+  repo: string,
+): Promise<number | undefined> {
+  const rows = await deps.db
+    .select({ reference: sql<string>`${coordinatorAction.draft}->>'gapIssue'` })
+    .from(coordinatorAction)
+    .where(
+      and(
+        eq(coordinatorAction.taskId, taskId),
+        isNotNull(sql`${coordinatorAction.draft}->>'gapIssue'`),
+      ),
+    )
+    .orderBy(desc(coordinatorAction.id))
+  const found = rows.map((r) => r.reference).find((r) => r.startsWith(`${repo}#`))
+  return found ? Number(found.slice(repo.length + 1)) : undefined
 }
 
 /**
@@ -202,7 +245,7 @@ async function fixBase(deps: ApplyDeps, base: RedBase): Promise<string> {
 }
 
 /** What carrying out a decision left: the follow-up a scope filed (null for none), or what a fix became. */
-type Performed = { followUpIssue?: number | null; done?: string }
+type Performed = { followUpIssue?: number | null; done?: string; gapIssue?: string }
 
 /** Carries out a decision that changes something. Escalating and waiting change nothing, so they never come here. */
 async function perform(
@@ -241,6 +284,8 @@ type Carried = {
   reason: string
   /** The follow-up a scope filed (null for none); absent when nothing was applied. */
   followUpIssue?: number | null
+  /** The gap issue a scope filed, as `owner/name#N`, kept even when the send-back after it failed. */
+  gapIssue?: string
 }
 
 /** A decision that was refused or failed, logged with its context, so a person sees it as well as the next pass. */
@@ -308,22 +353,31 @@ async function carryOut(
   if (refusal) return notCarried(exception, decision, 'refused', refusal)
   if (mode !== 'auto') return inTrial(exception, decision)
   try {
-    const { followUpIssue, done } = await perform(deps, exception, decision)
+    const { followUpIssue, done, gapIssue } = await perform(deps, exception, decision)
     const reason = done ? `${decision.reason}: ${done}` : decision.reason
-    return { outcome: 'applied', reason, followUpIssue }
-  } catch (error) {
+    return { outcome: 'applied', reason, followUpIssue, gapIssue }
+  } catch (caught) {
+    const filed = caught instanceof GapFiled ? caught : undefined
+    const error = filed ? filed.original : caught
     const refused = error instanceof ActionRefused || error instanceof ReleaseRefused
     const outcome = refused ? 'refused' : 'failed'
-    return notCarried(exception, decision, outcome, message(error))
+    return {
+      ...notCarried(exception, decision, outcome, message(error)),
+      gapIssue: filed?.reference,
+    }
   }
 }
 
 /** What the row keeps of the model's work: the draft with the follow-up it filed, or the unread answer. */
 function recordedDraft(decision: Decision, carried: Carried) {
   if (decision.draft) {
+    const withGap =
+      carried.gapIssue === undefined
+        ? decision.draft
+        : { ...decision.draft, gapIssue: carried.gapIssue }
     return carried.followUpIssue === undefined
-      ? decision.draft
-      : { ...decision.draft, followUpIssue: carried.followUpIssue }
+      ? withGap
+      : { ...withGap, followUpIssue: carried.followUpIssue }
   }
   return decision.answer === undefined ? null : { answer: decision.answer }
 }
