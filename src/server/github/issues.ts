@@ -67,19 +67,19 @@ type IssueData = {
 const NEXT_PAGE = /<([^>]+)>;\s*rel="next"/
 
 /**
- * The open issues of a repository that carry `label`, every page of them, in one call per hundred issues
+ * The open issues of a repository that carry `label` (every open issue when it is null), every page of them, in one call per hundred issues
  * rather than one per issue. GitHub lists pull requests with issues; they are left out.
  */
 export async function listOpenIssues(
   repo: string,
-  label: string,
+  label: string | null,
   token: string,
   fetchImpl: FetchLike = (url, init) => fetch(url, init),
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): Promise<Issue[]> {
   const issues: Issue[] = []
   let url: string | undefined =
-    `https://api.github.com/repos/${repo}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100`
+    `https://api.github.com/repos/${repo}/issues?state=open${label === null ? '' : `&labels=${encodeURIComponent(label)}`}&per_page=100`
   while (url) {
     const page = url
     const response = await retryRead(
@@ -96,7 +96,7 @@ export async function listOpenIssues(
     )
     if (!response.ok) {
       throw new Error(
-        `GitHub answered ${response.status} listing the open issues of ${repo} labelled ${label}`,
+        `GitHub answered ${response.status} listing the open issues of ${repo}${label === null ? '' : ` labelled ${label}`}`,
       )
     }
     for (const data of (await response.json()) as IssueData[]) {

@@ -19,6 +19,8 @@ Write the follow-up issue only when something is out of scope and worth doing: a
 
 The note goes to the coding agent, which works again on the same branch. Say plainly what to do now (the in-scope requests, as instructions), and what to leave alone because it went to the follow-up.
 
+One case is different. The coding agent runs in a sandbox with no \`gh\` and no credential to file an issue. When every blocking finding in <last-findings> asks only for an issue to be filed or linked (for example "link the framework gap issue") and nothing else, add a "gap" object: the repository (owner/name, written in the issue or the findings, never guessed), a title, and a body that says what the framework lacks, from the issue and the review. The factory files it and tells the agent its number, so the note says to link it. If any blocking finding asks for anything else, or the repository is not named, or you cannot say what the gap is, set "gap" to null.
+
 Answer with one JSON object and nothing after it:
 
-{"inScope":["a request that belongs to the issue"],"outOfScope":["a request that does not"],"followUp":{"title":"...","body":"..."} or null,"note":"what the coding agent does next"}`
+{"inScope":["a request that belongs to the issue"],"outOfScope":["a request that does not"],"followUp":{"title":"...","body":"..."} or null,"note":"what the coding agent does next","gap":{"repository":"owner/name","title":"...","body":"..."} or null}`

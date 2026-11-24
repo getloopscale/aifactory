@@ -16,6 +16,20 @@ export const scopeDraftSchema = z.object({
   outOfScope: z.array(text),
   followUp: z.object({ title: text, body: text }).nullable(),
   note: text,
+  /**
+   * Set only when every blocking finding asks for an issue the builder cannot file: the framework gap the
+   * factory files itself, in `repository` (`owner/name`, named in the findings or the issue).
+   */
+  gap: z
+    .object({
+      repository: z
+        .string()
+        .trim()
+        .regex(/^[\w.-]+\/[\w.-]+$/),
+      title: text,
+      body: text,
+    })
+    .nullish(),
 })
 
 export type ScopeDraft = z.infer<typeof scopeDraftSchema>
@@ -215,4 +229,41 @@ export function scopeMessage(input: ScopeInput): string {
     '',
     `Rounds: ${input.roundsNote.trim() || 'no count of the rounds was kept'}`,
   ].join('\n')
+}
+
+/** The gap issue a draft asks the factory to file, or nothing for an ordinary scope. */
+export function gapIssue(draft: ScopeDraft, repo: string, issueNumber: number) {
+  if (!draft.gap) return undefined
+  return {
+    repository: draft.gap.repository,
+    title: draft.gap.title,
+    body: `${draft.gap.body}\n\nFiled by the factory for ${repo}#${issueNumber}, whose review asked for this issue.`,
+  }
+}
+
+/** Whether an open issue is the gap issue `title` would file: the same title, as two people would write it. */
+export function sameGap(open: { title: string }, title: string): boolean {
+  return normalised(open.title) === normalised(title)
+}
+
+/** The send-back note of a gap: the drafter's note, then the issue the builder is to link. */
+export function gapNote(draft: ScopeDraft, reference: string): string {
+  return `${draft.note}\n\nThe framework gap issue is ${reference}. Link it in the done-when and say no more about filing it: the factory filed it, and the sandbox cannot.`
+}
+
+const escaped = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/** Whether the target of a gap is named, as a whole `owner/name`, in what the drafter read: never a guess. */
+export function gapTargetNamed(draft: ScopeDraft, message: string): boolean {
+  if (!draft.gap) return true
+  return new RegExp(`(^|[^\\w./-])${escaped(draft.gap.repository)}(?![\\w.-])`, 'i').test(message)
+}
+
+/**
+ * Whether the factory may file the gap where the draft says: in the task's own repository or in one the owner
+ * enabled. Text of an issue names a target but never grants one: the App reaches every repository of the account.
+ */
+export function gapTargetAllowed(draft: ScopeDraft, own: string, enabled: boolean): boolean {
+  if (!draft.gap) return true
+  return draft.gap.repository.toLowerCase() === own.toLowerCase() || enabled
 }

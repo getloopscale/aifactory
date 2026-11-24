@@ -15,6 +15,14 @@ describe('the sandbox toolchain', () => {
     expect(SANDBOX_TOOLCHAIN.nodeHeaders).toBe(SANDBOX_TOOLCHAIN.node)
   })
 
+  // A repository check that reads /usr/share/dict (theokit's TheoCode english-only lint) fails closed without them.
+  it('installs the American English and Brazilian Portuguese word lists', () => {
+    const installed = /apt-get install -y --no-install-recommends ([^\\\n]+)/
+      .exec(dockerfile)?.[1]
+      .split(' ')
+    expect(installed).toEqual(expect.arrayContaining(['wamerican', 'wbrazilian']))
+  })
+
   it('names the pnpm the factory itself declares', () => {
     const pkg = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'))
     expect(pkg.packageManager).toBe(`pnpm@${SANDBOX_TOOLCHAIN.pnpm}`)
