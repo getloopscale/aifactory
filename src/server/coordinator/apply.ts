@@ -274,55 +274,92 @@ async function resolveWithEvidence(
   return `resolved by ${commit.slice(0, 7)}`
 }
 
+type Applier = (
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+) => Promise<Performed | undefined>
+
+async function applyAnswer(
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+): Promise<Performed> {
+  const questionId = Number(/^question:(\d+)$/.exec(exception.head)?.[1])
+  if (!questionId) throw new ActionRefused('the exception names no question to answer')
+  const reply = decision.answerText ?? ''
+  const commentId = await answerByCoordinator(deps, exception.taskId, questionId, reply)
+  return {
+    done: `answered in comment ${commentId}`,
+    answered: { answerCommentId: commentId, questionId },
+  }
+}
+
+async function applyResolve(
+  deps: ApplyDeps,
+  exception: TaskException,
+  decision: Decision,
+): Promise<Performed | undefined> {
+  if (!decision.evidenceFor) return undefined
+  const done = await resolveWithEvidence(
+    deps,
+    exception.taskId,
+    decision.evidenceFor,
+    decision.reason,
+  )
+  return { done }
+}
+
+const APPLIERS: Partial<Record<Decision['action'], Applier>> = {
+  send_back: async (deps, exception, decision) => {
+    await sendBackByCoordinator(deps, exception.taskId, decision.note ?? '')
+    return {}
+  },
+  merge_base: async (deps, exception, decision) => {
+    await mergeBaseByCoordinator(deps, exception.taskId, decision.note ?? '')
+    return {}
+  },
+  review_again: async (deps, exception) => {
+    await sendBackByCoordinator(deps, exception.taskId, '')
+    return {}
+  },
+  retry_from_finding: async (deps, _exception, decision) => {
+    await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
+    return {}
+  },
+  scope: async (deps, exception, decision) =>
+    decision.draft
+      ? { followUpIssue: await scope(deps, exception.taskId, decision.draft) }
+      : undefined,
+  release: async (deps, exception, decision) => {
+    if (!decision.bump) return undefined
+    await release(deps, exception.taskId, {
+      bump: decision.bump,
+      actor: COORDINATOR_ACTOR,
+      expectedHead: exception.verifiedHead,
+    })
+    return {}
+  },
+  answer: applyAnswer,
+  blocked_by: async (deps, exception, decision) =>
+    decision.blockedBy === undefined
+      ? undefined
+      : { done: await blockedBy(deps, exception.taskId, decision.blockedBy) },
+  resolve_elsewhere: applyResolve,
+  rerun_checks: async (deps, exception) => ({ done: await rerunChecks(deps, exception) }),
+  fix_base: async (deps, _exception, decision) =>
+    decision.base ? { done: await fixBase(deps, decision.base) } : undefined,
+}
+
 /** Carries out a decision that changes something. Escalating and waiting change nothing, so they never come here. */
 async function perform(
   deps: ApplyDeps,
   exception: TaskException,
   decision: Decision,
 ): Promise<Performed> {
-  if (decision.action === 'send_back') {
-    await sendBackByCoordinator(deps, exception.taskId, decision.note ?? '')
-  } else if (decision.action === 'merge_base') {
-    await mergeBaseByCoordinator(deps, exception.taskId, decision.note ?? '')
-  } else if (decision.action === 'review_again') {
-    await sendBackByCoordinator(deps, exception.taskId, '')
-  } else if (decision.action === 'retry_from_finding') {
-    await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
-  } else if (decision.action === 'scope' && decision.draft) {
-    return { followUpIssue: await scope(deps, exception.taskId, decision.draft) }
-  } else if (decision.action === 'release' && decision.bump) {
-    await release(deps, exception.taskId, {
-      bump: decision.bump,
-      actor: COORDINATOR_ACTOR,
-      expectedHead: exception.verifiedHead,
-    })
-  } else if (decision.action === 'answer') {
-    const questionId = Number(/^question:(\d+)$/.exec(exception.head)?.[1])
-    if (!questionId) throw new ActionRefused('the exception names no question to answer')
-    const reply = decision.answerText ?? ''
-    const commentId = await answerByCoordinator(deps, exception.taskId, questionId, reply)
-    return {
-      done: `answered in comment ${commentId}`,
-      answered: { answerCommentId: commentId, questionId },
-    }
-  } else if (decision.action === 'blocked_by' && decision.blockedBy !== undefined) {
-    return { done: await blockedBy(deps, exception.taskId, decision.blockedBy) }
-  } else if (decision.action === 'resolve_elsewhere' && decision.evidenceFor) {
-    const done = await resolveWithEvidence(
-      deps,
-      exception.taskId,
-      decision.evidenceFor,
-      decision.reason,
-    )
-    return { done }
-  } else if (decision.action === 'rerun_checks') {
-    return { done: await rerunChecks(deps, exception) }
-  } else if (decision.action === 'fix_base' && decision.base) {
-    return { done: await fixBase(deps, decision.base) }
-  } else {
-    throw new Error(`the coordinator has no way to apply ${decision.action}`)
-  }
-  return {}
+  const performed = await APPLIERS[decision.action]?.(deps, exception, decision)
+  if (!performed) throw new Error(`the coordinator has no way to apply ${decision.action}`)
+  return performed
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
