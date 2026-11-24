@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { BlockedByOpenIssues, declaredBlockers, openBlockers } from './blockers'
+import {
+  BlockedByOpenIssues,
+  blockersNamed,
+  declaredBlockers,
+  openBlockers,
+  refOf,
+  unavailableNamed,
+} from './blockers'
 
 describe('the issues an issue says it is blocked by', () => {
   it('reads references to other repositories and to its own, from the line that starts with Blocked by', () => {
@@ -63,5 +70,50 @@ describe('a task blocked by open issues', () => {
       'blocked by o/a#1, o/b#2, still open; the task runs again on its own once they are closed',
     )
     expect(error.blockedBy).toEqual(['o/a#1', 'o/b#2'])
+  })
+})
+
+describe('what a builder says it waits for', () => {
+  it('names the issues in the sentences that say it waits, with the task repository by default', () => {
+    const said =
+      'I changed nothing. It is blocked by o/gateways#541 and #542, still open. See also #7 for context.'
+    expect(
+      blockersNamed(said, { repository: 'o/app', number: 1 }).map(
+        (r) => `${r.repository}#${r.number}`,
+      ),
+    ).toEqual(['o/gateways#541', 'o/app#542'])
+  })
+
+  it('takes an issue named in passing for context', () => {
+    expect(
+      blockersNamed('Done like #12 did. Nothing else to do.', { repository: 'o/app', number: 1 }),
+    ).toEqual([])
+  })
+
+  it('never takes the task own issue for a blocker, nor an incidental need', () => {
+    const own = { repository: 'o/app', number: 238 }
+    expect(
+      blockersNamed('Issue #238 is still open and needs a change under .github/.', own),
+    ).toEqual([])
+    expect(blockersNamed('It needs #12 to be read by the router.', own)).toEqual([])
+  })
+
+  it('takes an incidental sentence about a release for no blocker', () => {
+    expect(
+      unavailableNamed('The change is not released by this task. It already works.'),
+    ).toBeUndefined()
+  })
+
+  it('finds the sentence that says a release or a branch does not exist', () => {
+    expect(unavailableNamed('Checked. @theokit/sdk 2.0.0 is not published yet. Stopping.')).toBe(
+      '@theokit/sdk 2.0.0 is not published yet.',
+    )
+    expect(unavailableNamed('The branch factory/1963 is not merged.')).toBeDefined()
+    expect(unavailableNamed('The code already does this.')).toBeUndefined()
+  })
+
+  it('reads a recorded blocker back, and nothing else', () => {
+    expect(refOf('o/app#4')).toEqual({ repository: 'o/app', number: 4 })
+    expect(refOf('release 2.0')).toBeUndefined()
   })
 })

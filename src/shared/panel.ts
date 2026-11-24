@@ -445,7 +445,7 @@ export type QueueView = {
   /** What the scheduler last read of its issue to place it; null before it placed the task. */
   reasons: { priority: number | null; bug: boolean; unblocks: number } | null
   /** The scheduler's verdict on the issue, when it judged it. */
-  readiness: { verdict: 'ready' | 'needs_refinement'; missing: string } | null
+  readiness: { verdict: 'ready' | 'needs_refinement' | 'blocked'; missing: string } | null
 }
 
 /** A release that waits for the release branch's required checks, or why it did not happen. */
