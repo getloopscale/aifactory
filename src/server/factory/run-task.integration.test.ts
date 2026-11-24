@@ -5524,6 +5524,26 @@ describe('release', () => {
     ).rejects.toThrow(/still waits for the workflow run of v1.3.0/)
   })
 
+  it('refuses a tag-publishing release whose manifest does not carry the tag, before merging, tagging or closing anything', async () => {
+    const id = await delivered()
+    await getDb()
+      .insert(repository)
+      .values({ fullName: 'paulo/app', enabled: true, publishMode: 'tag' })
+    repo().tags.add('v1.2.3')
+    repo().files(repo().heads.get('develop') ?? 'c'.repeat(40), {
+      'packages/app/package.json': '{"name":"@paulo/app","version":"1.2.3"}',
+    })
+
+    await expect(release(dependencies(), id, { bump: 'minor', actor: 'human' })).rejects.toThrow(
+      /packages\/app\/package\.json says 1\.2\.3.*set the version to 1\.3\.0/,
+    )
+
+    expect(seen.releases).toEqual([])
+    expect(seen.closed).toEqual([])
+    expect(await getDb().select().from(publication)).toEqual([])
+    expect(await stageOf(id)).toBe('done')
+  })
+
   it('does not take a repository whose publish mode is not the tag for a tag publication', async () => {
     const id = await delivered()
     await getDb()
