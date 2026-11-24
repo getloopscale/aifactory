@@ -13,7 +13,7 @@ export const pluginDir = (role: CodingRole): string => `/tmp/factory-plugin-${ro
  */
 export const GUARD_SCRIPT = `#!/usr/bin/env node
 const role = process.argv[2]
-const WRITES = new Set(['commit', 'push', 'add', 'rm', 'mv', 'reset', 'rebase', 'merge', 'cherry-pick', 'tag', 'stash', 'am', 'apply', 'pull', 'revert', 'commit-tree', 'update-ref'])
+const WRITES = new Set(['commit', 'push'])
 const EDITS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 const WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace'])
 
@@ -37,7 +37,7 @@ function decide(call) {
   const input = call.tool_input || {}
   if (tool === 'Bash') {
     const verb = gitWrite(input.command)
-    if (verb) return 'git ' + verb + ' writes: the factory commits and pushes, and no role does it'
+    if (verb) return 'git ' + verb + ' is denied: the factory commits and pushes, and no role does it'
     return undefined
   }
   if (EDITS.has(tool)) {

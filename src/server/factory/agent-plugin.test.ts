@@ -30,7 +30,13 @@ describe('the guard of a role', () => {
 
   it('denies a git write inside a chain or with options before the verb', () => {
     expect(decide('builder', 'Bash', { command: 'npm test && git push origin x' })).toBeDefined()
-    expect(decide('builder', 'Bash', { command: 'git -C /w add -A' })).toBeDefined()
+    expect(decide('builder', 'Bash', { command: 'git -C /w push' })).toBeDefined()
+  })
+
+  it('lets the builder merge the base, as the conflict note tells it', () => {
+    for (const command of ['git fetch origin workspace && git merge origin/workspace', 'git add -A', 'git stash', 'git pull', 'git rebase main']) {
+      expect(decide('builder', 'Bash', { command })).toBeUndefined()
+    }
   })
 
   it('lets the builder read with git and edit files', () => {
