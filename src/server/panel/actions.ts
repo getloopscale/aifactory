@@ -265,32 +265,6 @@ export async function requestChanges(deps: ActionDeps, taskId: number, note: str
 }
 
 /**
- * Stores what the owner writes to an agent (M13). The message waits as `pending`, in the order sent; it
- * approves nothing and skips no gate, and a `steer` of integrated work is refused by the transition table.
- * Delivery to a live process or a resumed session is a later step: nothing here reaches an agent.
- */
-export async function sendMessage(
-  deps: ActionDeps,
-  taskId: number,
-  input: { text: string; mode: 'ask' | 'steer'; role?: 'builder' | 'reviewer' },
-) {
-  const text = input.text.trim()
-  if (text === '') throw new ActionRefused('write something to send')
-  const row = await load(deps.db, taskId)
-  mustAllow(row, input.mode === 'steer' ? 'message_steer' : 'message_ask')
-  const [made] = await deps.db
-    .insert(agentMessage)
-    .values({
-      taskId,
-      role: input.role ?? 'builder',
-      mode: input.mode,
-      text: text.slice(0, NOTE_MAX),
-    })
-    .returning({ id: agentMessage.id })
-  return { messageId: made!.id }
-}
-
-/**
  * Withdraws a send-back that has not started: the queued run goes, the task returns to the stage it was
  * in before the person sent it back, and the decision is recorded as withdrawn. Only a person's own
  * request for changes can be withdrawn, and only while its run waits in the queue.

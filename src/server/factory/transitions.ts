@@ -289,9 +289,6 @@ const ISSUE_WITHDRAWN = {
 }
 
 const NO_SESSION_YET = refuse('no agent has worked on this task yet: there is nobody to write to')
-const NOT_STEERABLE = refuse(
-  'only a task that is running, or finished with an open pull request, can be steered',
-)
 const STEER_INTEGRATED = refuse(
   'this work is already integrated, so a steer has no pull request to update: ask, or open a new job for what should change',
 )
@@ -356,7 +353,7 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     ...each(['done', 'handoff', 'failed'], (task) =>
       task.mergedSha ? STEER_INTEGRATED : act('queue_message'),
     ),
-    released: NOT_STEERABLE,
+    released: STEER_INTEGRATED,
   },
 
   retry_due: {
@@ -507,6 +504,9 @@ export const NOT_WIRED: readonly TransitionEvent[] = [
   'check_suite_completed',
   'check_run_completed',
   'issue_reopened',
+  // The owner's messages (M13) have no delivery yet: the table says what they will do.
+  'message_ask',
+  'message_steer',
 ]
 
 /** What `event` does to a task in this state. */

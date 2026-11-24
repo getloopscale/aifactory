@@ -123,6 +123,8 @@ describe('the transition table', () => {
         'check_suite_completed',
         'check_run_completed',
         'issue_reopened',
+        'message_ask',
+        'message_steer',
       ].sort(),
     )
   })
@@ -622,6 +624,10 @@ describe('the stages a task may be in when what was decided is carried out', () 
     expect(outcome({ stage: 'build' }, 'message_steer').kind).toBe('action')
     expect(outcome({ stage: 'done' }, 'message_steer').kind).toBe('action')
     expect(outcome({ stage: 'done', mergedSha: 'm' }, 'message_steer')).toMatchObject({
+      kind: 'refused',
+      reason: expect.stringContaining('already integrated'),
+    })
+    expect(outcome({ stage: 'released', mergedSha: 'm' }, 'message_steer')).toMatchObject({
       kind: 'refused',
       reason: expect.stringContaining('already integrated'),
     })
