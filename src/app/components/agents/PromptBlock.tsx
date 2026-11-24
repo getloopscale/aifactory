@@ -4,6 +4,7 @@ import { useState } from 'react'
 
 import type { AgentPrompt } from '../../../shared/panel'
 import { markCount, pieces } from '../../lib/agents'
+import { useCopy } from '../../lib/copy'
 
 const STYLE = {
   plain: '',
@@ -16,6 +17,7 @@ const STYLE = {
  * coloured, so it is clear which parts are the same every time and which are filled in for each task.
  */
 export function PromptBlock({ prompt, query }: { prompt: AgentPrompt; query: string }) {
+  const { t } = useCopy()
   const [copied, setCopied] = useState(false)
   const marks = markCount(prompt.text)
 
@@ -40,10 +42,10 @@ export function PromptBlock({ prompt, query }: { prompt: AgentPrompt; query: str
           size="sm"
           variant="ghost"
           onClick={() => void copy()}
-          aria-label={`Copiar: ${prompt.title}`}
+          aria-label={t.promptBlock.copyTitle(prompt.title)}
         >
           {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-          {copied ? 'Copiado' : 'Copiar'}
+          {copied ? t.promptBlock.copied : t.promptBlock.copy}
         </Button>
       </header>
       <pre className="max-h-[520px] overflow-auto whitespace-pre-wrap break-words px-4 py-3 font-mono text-[12.5px] leading-relaxed text-foreground/90">
@@ -55,8 +57,11 @@ export function PromptBlock({ prompt, query }: { prompt: AgentPrompt; query: str
       </pre>
       {prompt.template ? (
         <footer className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
-          Modelo: o que está em <span className={STYLE.mark}>‹azul›</span> muda a cada tarefa (
-          {marks} {marks === 1 ? 'lugar' : 'lugares'}); o resto é igual sempre.
+          {t.promptBlock.templatePrefix}
+          <span className={STYLE.mark}>{t.promptBlock.blue}</span>
+          {t.promptBlock.templateMiddle}
+          {marks} {marks === 1 ? t.promptBlock.place : t.promptBlock.places}
+          {t.promptBlock.templateSuffix}
         </footer>
       ) : null}
     </section>

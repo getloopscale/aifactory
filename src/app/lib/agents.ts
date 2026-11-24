@@ -1,13 +1,7 @@
 import type { AgentEntry } from '../../shared/panel'
 
-export const GROUPS: { id: AgentEntry['group']; title: string; about: string }[] = [
-  { id: 'factory', title: 'Constroem o código', about: 'Rodam num sandbox isolado' },
-  {
-    id: 'panel',
-    title: 'Conversam com você',
-    about: 'Rodam no servidor, com ferramentas limitadas',
-  },
-]
+/** The groups the agents are listed in, in order; what each is called is the dictionary's. */
+export const GROUPS: { id: AgentEntry['group'] }[] = [{ id: 'factory' }, { id: 'panel' }]
 
 const norm = (text: string) =>
   text

@@ -98,7 +98,7 @@ export function GuideThread({
   }, [messages])
 
   const focus = focusOf(pathname, search)
-  const starters = startersFor(guide, focus)
+  const starters = startersFor(guide, focus, t)
   const running = agent.status === 'streaming'
 
   function send(text: string) {

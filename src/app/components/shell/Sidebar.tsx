@@ -197,7 +197,7 @@ export function Sidebar({
   const onNewChat = useOnNewChat()
   const [searching, setSearching] = useState(startSearching)
   const [filter, setFilter] = useState('')
-  const { pinned, recent } = groupChats(chats, filter)
+  const { pinned, recent } = groupChats(chats, filter, t.menu.newChat)
 
   return (
     <aside

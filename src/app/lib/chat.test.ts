@@ -2,7 +2,20 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChatMessageView, ChatSummary } from '../../shared/panel'
 
-import { describeApproval, displayed, groupChats, NEW_MESSAGE, promptWith, textOf } from './chat'
+import {
+  describeApproval as describe_,
+  displayed,
+  groupChats as group,
+  NEW_MESSAGE,
+  promptWith,
+  textOf,
+} from './chat'
+import { ptBR } from './copy/pt-BR'
+
+// The words under test are those of the Portuguese dictionary.
+const describeApproval = (tool: string | undefined, input: unknown, repo?: RepositoryView) =>
+  describe_(tool, input, repo, ptBR.approvals)
+const groupChats = (chats: ChatSummary[], filter = '') => group(chats, filter, 'novo chat')
 import type { RepositoryView } from '../../shared/panel'
 
 const say = (role: ChatMessageView['role'], text: string): ChatMessageView => ({
@@ -205,5 +218,21 @@ describe('describeApproval for the guides', () => {
     expect(
       describeApproval('update_repository', { repository: 'o/r', releaseBranch: 'x' }).request,
     ).toContain('Branch de release: x')
+  })
+})
+
+describe('describeApproval in the language of the dictionary given', () => {
+  it('speaks the language it is given, and English by default', async () => {
+    const { en } = await import('./copy/en')
+    expect(describe_('retry_task', { id: 4 }, undefined, en.approvals).title).toBe(
+      en.approvals.retryTask.title,
+    )
+    expect(describe_('retry_task', { id: 4 }).title).toBe(en.approvals.retryTask.title)
+    expect(describe_('retry_task', { id: 4 }, undefined, ptBR.approvals).title).toBe(
+      ptBR.approvals.retryTask.title,
+    )
+    expect(describe_(undefined, undefined, undefined, ptBR.approvals).title).toBe(
+      ptBR.approvals.fallbackTitle,
+    )
   })
 })

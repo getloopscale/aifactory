@@ -456,3 +456,27 @@ describe('duration', () => {
     expect(duration(0.4)).toBe('0m')
   })
 })
+
+describe('describeEvent in the language of the owner', () => {
+  const failed = { id: 1, stage: 'failed', at: '2026-11-04T10:00:00Z' } as TimelineEvent
+  const sandbox = (renewed: boolean) =>
+    ({
+      id: 2,
+      stage: 'sandbox',
+      at: '2026-11-04T10:00:00Z',
+      detail: { provider: 'e2b', renewed, sessionMinutes: 55 },
+    }) as TimelineEvent
+
+  it('says the same thing with the words of each dictionary', () => {
+    for (const copy of [en, ptBR]) {
+      const quota = { ...failed, detail: { quota: true, resetsAt: 'at noon' } }
+      expect(describeEvent(quota, copy.events)).toBe(copy.events.outOfQuota('at noon'))
+      expect(describeEvent(sandbox(true), copy.events)).toBe(copy.events.newSession('e2b', '55'))
+    }
+    expect(describeEvent(sandbox(true), ptBR.events)).not.toBe(describeEvent(sandbox(true)))
+  })
+
+  it('is English with no dictionary given', () => {
+    expect(describeEvent(sandbox(false))).toBe('e2b')
+  })
+})
