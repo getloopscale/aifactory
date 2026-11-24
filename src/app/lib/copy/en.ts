@@ -273,6 +273,11 @@ export const en = {
     sendBackWaiting: 'A send-back waits for its run to start. Withdraw it to correct the note.',
     withdraw: 'Withdraw send-back',
     confirmWithdraw: 'Withdraw this send-back? The run does not start and the task goes back.',
+    mergeBase: 'Merge the integration branch',
+    mergeBaseHelp:
+      "Merges the integration branch into the task's branch. The factory merges it and a conflict goes to the merge agent, not the builder.",
+    confirmMergeBase: "Merge the integration branch into this task's branch?",
+    mergeBaseQueued: 'Merge of the integration branch queued.',
     withdrawn: 'Send-back withdrawn.',
     changesContext: (title: string, n: number, repository: string) =>
       `Pull request for the issue "${title}" (#${n}) in ${repository}`,
