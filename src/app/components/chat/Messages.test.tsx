@@ -37,8 +37,8 @@ describe('a conversation as the owner reads it', () => {
         ]}
       />,
     )
-    expect(screen.getByText(`${en.chat.looked}: as tarefas`)).toBeDefined()
-    expect(screen.getByText(`${en.chat.did}: começou uma tarefa de novo`)).toBeDefined()
+    expect(screen.getByText(`${en.chat.looked}: ${en.activity.reads.list_tasks}`)).toBeDefined()
+    expect(screen.getByText(`${en.chat.did}: ${en.activity.changes.retry_task}`)).toBeDefined()
     expect(await screen.findByText(/Pronto/)).toBeDefined()
     expect(screen.queryByText(/RAW/)).toBeNull()
     expect(screen.queryByText('list_tasks')).toBeNull()
@@ -52,8 +52,10 @@ describe('a conversation as the owner reads it', () => {
         messages={[{ id: 'a', role: 'assistant', parts: [call('approve_task', 'output-denied')] }]}
       />,
     )
-    expect(screen.getByText(`${en.chat.refused}: aprovou um pull request`)).toBeDefined()
-    expect(container.textContent).toBe(`${en.chat.refused}: aprovou um pull request`)
+    expect(
+      screen.getByText(`${en.chat.refused}: ${en.activity.changes.approve_task}`),
+    ).toBeDefined()
+    expect(container.textContent).toBe(`${en.chat.refused}: ${en.activity.changes.approve_task}`)
   })
 
   it('shows that an answer is coming', () => {

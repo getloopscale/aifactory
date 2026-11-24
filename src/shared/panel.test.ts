@@ -1,3 +1,5 @@
+import { en } from '../app/lib/copy/en'
+import { ptBR } from '../app/lib/copy/pt-BR'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -255,5 +257,20 @@ describe('the Merge column', () => {
       waiting_for_checks: 2,
       awaiting_merge: 1,
     })
+  })
+
+  it('gives every column a title, in both languages', () => {
+    expect(COLUMNS.map((c) => en.columns[c.id])).toEqual([
+      'Queued',
+      'Working',
+      'Waiting for you',
+      'Will retry itself',
+      'Merge',
+      'Delivered',
+      'Released',
+      'Already resolved',
+      'Needs a person',
+    ])
+    for (const c of COLUMNS) expect(ptBR.columns[c.id].length).toBeGreaterThan(0)
   })
 })

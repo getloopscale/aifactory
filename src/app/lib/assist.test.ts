@@ -171,3 +171,15 @@ describe('assistProblem, at its edges', () => {
     }
   })
 })
+
+describe('assistProblem in the language of the dictionary given', () => {
+  it('speaks the language it is given', async () => {
+    const { ptBR } = await import('./copy/pt-BR')
+    expect(assistProblem(new Error('socket hang up'), ptBR.assistProblems)).toBe(
+      ptBR.assistProblems.couldNot('socket hang up'),
+    )
+    expect(assistProblem(new Error('HTTP 403'), ptBR.assistProblems)).toBe(
+      ptBR.assistProblems.signIn,
+    )
+  })
+})

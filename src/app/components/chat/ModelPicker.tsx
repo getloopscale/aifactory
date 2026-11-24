@@ -32,7 +32,7 @@ export function ModelPicker({
           <DropdownMenu.Item key={m.id} onSelect={() => onChange(m.id)} className="items-start">
             <span className="flex-1">
               <span className="block text-[14px]">{m.name}</span>
-              <span className="block text-xs text-foreground/50">{m.blurb}</span>
+              <span className="block text-xs text-foreground/50">{t.chat.blurbs[m.id]}</span>
             </span>
             {m.id === model ? <Check className="ml-3 mt-0.5 size-4" /> : null}
           </DropdownMenu.Item>

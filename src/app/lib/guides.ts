@@ -1,7 +1,7 @@
 import type { GuideId } from '../../shared/guides'
 import type { RepositoryView } from '../../shared/panel'
 
-import type { Copy } from './copy/en'
+import { en, type Copy } from './copy/en'
 
 export type Starter = {
   text: string
@@ -142,55 +142,52 @@ export function finishedChanges(messages: { parts: Record<string, unknown>[] }[]
   )
 }
 
-const yesNo = (v: unknown) => (v ? 'sim' : 'não')
-const orDefault = (v: unknown) =>
-  v === null || v === undefined || v === '' ? 'o padrão' : String(v)
-const RELEASE: Record<string, string> = {
-  manual: 'só uma pessoa libera',
-  trial: 'só registra o que faria',
-  auto: 'um agente pode liberar',
-}
+type Fields = Copy['approvals']['fields']
 
-const FIELDS: Record<
+const FIELDS = (
+  f: Fields,
+): Record<
   string,
   { label: string; of: (r: RepositoryView) => unknown; show: (v: unknown) => string }
-> = {
-  enabled: { label: 'Fábrica ativa neste repositório', of: (r) => r.enabled, show: yesNo },
-  checks: {
-    label: 'Verificações',
-    of: (r) => r.checks,
-    show: (v) =>
-      Array.isArray(v) && v.length > 0
-        ? v.map((c: { name: string }) => c.name).join(', ')
-        : 'o padrão (npm test)',
-  },
-  egress: {
-    label: 'Domínios extras do sandbox',
-    of: (r) => r.egress,
-    show: (v) => (Array.isArray(v) && v.length > 0 ? v.join(', ') : 'nenhum'),
-  },
-  baseBranch: { label: 'Branch de integração', of: (r) => r.baseBranch, show: orDefault },
-  releaseBranch: { label: 'Branch de release', of: (r) => r.releaseBranch, show: orDefault },
-  askQuestions: {
-    label: 'O agente pode perguntar na issue',
-    of: (r) => r.askQuestions,
-    show: yesNo,
-  },
-  harness: { label: 'Agente construtor', of: (r) => r.harness, show: orDefault },
-  reviewer: { label: 'Revisor', of: (r) => r.reviewer, show: orDefault },
-  releaseMode: {
-    label: 'Release',
-    of: (r) => r.releaseMode,
-    show: (v) => (typeof v === 'string' && v in RELEASE ? RELEASE[v] : 'o padrão da fábrica'),
-  },
+> => {
+  const yesNo = (v: unknown) => (v ? f.yes : f.no)
+  const orDefault = (v: unknown) =>
+    v === null || v === undefined || v === '' ? f.theDefault : String(v)
+  return {
+    enabled: { label: f.enabled, of: (r) => r.enabled, show: yesNo },
+    checks: {
+      label: f.checks,
+      of: (r) => r.checks,
+      show: (v) =>
+        Array.isArray(v) && v.length > 0
+          ? v.map((c: { name: string }) => c.name).join(', ')
+          : f.defaultChecks,
+    },
+    egress: {
+      label: f.egress,
+      of: (r) => r.egress,
+      show: (v) => (Array.isArray(v) && v.length > 0 ? v.join(', ') : f.none),
+    },
+    baseBranch: { label: f.baseBranch, of: (r) => r.baseBranch, show: orDefault },
+    releaseBranch: { label: f.releaseBranch, of: (r) => r.releaseBranch, show: orDefault },
+    askQuestions: { label: f.askQuestions, of: (r) => r.askQuestions, show: yesNo },
+    harness: { label: f.harness, of: (r) => r.harness, show: orDefault },
+    reviewer: { label: f.reviewer, of: (r) => r.reviewer, show: orDefault },
+    releaseMode: {
+      label: f.releaseMode,
+      of: (r) => r.releaseMode,
+      show: (v) => (typeof v === 'string' && v in f.release ? f.release[v] : f.factoryDefault),
+    },
+  }
 }
 
 /** The lines of what a save would change, "before → after" when the current settings are known. */
 export function repoChanges(
   current: RepositoryView | undefined,
   input: Record<string, unknown>,
+  fields: Fields = en.approvals.fields,
 ): string[] {
-  return Object.entries(FIELDS).flatMap(([key, field]) => {
+  return Object.entries(FIELDS(fields)).flatMap(([key, field]) => {
     if (!(key in input) || input[key] === undefined) return []
     const after = field.show(input[key])
     if (!current) return [`${field.label}: ${after}`]

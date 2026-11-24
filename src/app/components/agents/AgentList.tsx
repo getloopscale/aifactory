@@ -21,9 +21,13 @@ export function AgentList({
         const inGroup = agents.filter((a) => a.group === group.id)
         if (inGroup.length === 0) return null
         return (
-          <section key={group.id} aria-label={group.title}>
-            <h2 className="px-3 text-sm font-semibold text-foreground">{group.title}</h2>
-            <p className="mb-1 px-3 text-xs text-muted-foreground">{group.about}</p>
+          <section key={group.id} aria-label={t.agentGroups[group.id].title}>
+            <h2 className="px-3 text-sm font-semibold text-foreground">
+              {t.agentGroups[group.id].title}
+            </h2>
+            <p className="mb-1 px-3 text-xs text-muted-foreground">
+              {t.agentGroups[group.id].about}
+            </p>
             <ul className="space-y-0.5">
               {inGroup.map((agent) => {
                 const active = agent.id === selected

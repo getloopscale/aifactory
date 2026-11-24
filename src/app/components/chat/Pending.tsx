@@ -25,7 +25,7 @@ function Card({
   repository?: RepositoriesView['repositories'][number]
 }) {
   const { t } = useCopy()
-  const text = describeApproval(call.toolName, call.input, repository)
+  const text = describeApproval(call.toolName, call.input, repository, t.approvals)
   return (
     <div className="mb-3">
       <ApprovalCard

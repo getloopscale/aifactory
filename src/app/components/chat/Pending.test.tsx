@@ -2,11 +2,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { CopyProvider, LANGUAGE_KEY } from '../../lib/copy'
 import { en } from '../../lib/copy/en'
+import { ptBR } from '../../lib/copy/pt-BR'
 
 import { Pending, type Conversation } from './Pending'
 
 afterEach(() => {
+  window.localStorage.clear()
   cleanup()
   vi.unstubAllGlobals()
 })
@@ -19,16 +22,38 @@ const conversation = (over: Partial<Conversation> = {}): Conversation => ({
 })
 
 describe('what waits for the owner', () => {
-  it('shows a change in words, with the buttons from the dictionary, and passes the decision on', () => {
+  it('shows a change in words, with the buttons in Portuguese, and passes the decision on', () => {
+    window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
     const c = conversation({
       pendingApprovals: [{ approvalId: 'a1', toolName: 'retry_task', input: { id: 49 } }],
     })
-    render(<Pending conversation={c} />)
-    expect(screen.getByText('Repetir uma tarefa')).toBeDefined()
+    render(
+      <CopyProvider>
+        <Pending conversation={c} />
+      </CopyProvider>,
+    )
+    expect(screen.getByText(ptBR.approvals.retryTask.title)).toBeDefined()
+    expect(screen.getByText(ptBR.approvals.retryTask.title)).not.toBe(en.approvals.retryTask.title)
+    expect(screen.queryByText('Approve')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: ptBR.chat.approve }))
+    expect(c.approve).toHaveBeenCalledWith('a1', { approved: true })
+    fireEvent.click(screen.getByRole('button', { name: ptBR.chat.reject }))
+    expect(c.approve).toHaveBeenCalledWith('a1', { approved: false })
+  })
+
+  it('says the same in English when that is the language', () => {
+    window.localStorage.setItem(LANGUAGE_KEY, 'en')
+    const c = conversation({
+      pendingApprovals: [{ approvalId: 'a1', toolName: 'retry_task', input: { id: 49 } }],
+    })
+    render(
+      <CopyProvider>
+        <Pending conversation={c} />
+      </CopyProvider>,
+    )
+    expect(screen.getByText(en.approvals.retryTask.title)).toBeDefined()
     fireEvent.click(screen.getByRole('button', { name: en.chat.approve }))
     expect(c.approve).toHaveBeenCalledWith('a1', { approved: true })
-    fireEvent.click(screen.getByRole('button', { name: en.chat.reject }))
-    expect(c.approve).toHaveBeenCalledWith('a1', { approved: false })
   })
 
   it('shows what a repository change replaces, from the settings it reads when asked', async () => {
@@ -53,8 +78,18 @@ describe('what waits for the owner', () => {
       ],
     })
     render(<Pending conversation={c} />)
-    await waitFor(() => expect(screen.getByText(/Branch de release: main → release/)).toBeDefined())
-    expect(screen.getByText(/O agente pode perguntar na issue: sim → não/)).toBeDefined()
+    await waitFor(() =>
+      expect(
+        screen.getByText(new RegExp(`${en.approvals.fields.releaseBranch}: main → release`)),
+      ).toBeDefined(),
+    )
+    expect(
+      screen.getByText(
+        new RegExp(
+          `${en.approvals.fields.askQuestions}: ${en.approvals.fields.yes} → ${en.approvals.fields.no}`,
+        ),
+      ),
+    ).toBeDefined()
   })
 
   it('still shows a repository change while the settings are not known yet', () => {
@@ -72,7 +107,7 @@ describe('what waits for the owner', () => {
       ],
     })
     render(<Pending conversation={c} />)
-    expect(screen.getByText(/Branch de release: x/)).toBeDefined()
+    expect(screen.getByText(new RegExp(`${en.approvals.fields.releaseBranch}: x`))).toBeDefined()
   })
 
   it('says what usually causes a failure when the server only says an error occurred', () => {

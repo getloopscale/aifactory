@@ -921,6 +921,11 @@ export const ptBR: Copy = {
     failedTitle: 'Não consegui responder',
     failedHint:
       'O modelo não respondeu. O mais comum é a chave do OpenRouter estar sem crédito ou sem permissão para este modelo. A página "Configuração" mostra o que está pronto. Tente de novo em instantes.',
+    blurbs: {
+      openrouter: 'Uma chave da OpenRouter, pago por uso',
+      codex: 'A sua assinatura do ChatGPT (Codex)',
+    },
+    suggestions: ['Como está a fábrica agora?', 'O que precisa de mim?', 'Como anda o backlog?'],
     approve: 'Aprovar',
     reject: 'Recusar',
     looked: 'Consultou',
@@ -1105,6 +1110,131 @@ export const ptBR: Copy = {
     mergedNoRelease: (actor: string, error: string) =>
       `integrada por ${actor}, mas o release não pôde ser criado: ${error}`,
     outOfQuota: (resetsAt: string) => `sem cota${resetsAt ? `, renova ${resetsAt}` : ''}`,
+  },
+  approvals: {
+    fallbackTitle: 'Ação',
+    nothingChanges: '- nada muda',
+    retryTask: {
+      title: 'Repetir uma tarefa',
+      request: (id: string) =>
+        `Começar de novo a tarefa ${id}. A branch e o PR dela são apagados antes.`,
+    },
+    requestChanges: {
+      title: 'Pedir mudanças',
+      request: (id: string, note: string) =>
+        `Devolver a tarefa ${id} ao agente com esta nota:\n${note}`,
+    },
+    startJob: {
+      title: 'Abrir uma issue e começar',
+      request: (repository: string, title: string, body: string) =>
+        `Em ${repository}: ${title}\n\n${body}`,
+    },
+    approveTask: {
+      title: 'Aprovar o pull request',
+      request: (id: string) =>
+        `Aprovar o PR da tarefa ${id}, no commit em que ele está agora. Isso não faz merge nem release.`,
+    },
+    updateRepository: {
+      title: 'Salvar configurações',
+      request: (repository: string, lines: string) => `Em ${repository}:\n${lines}`,
+    },
+    createPlan: {
+      title: 'Começar um plano',
+      request: (repository: string, goal: string) =>
+        `Em ${repository}, com este objetivo:\n${goal}\nNenhuma issue é criada ainda: você revisa o plano antes.`,
+    },
+    createPlanIssues: {
+      title: 'Criar as issues do plano',
+      request: (planId: string, start: boolean) =>
+        `Criar no GitHub as issues selecionadas do plano ${planId}, ${start ? 'e já começar o trabalho nelas' : 'deixando-as esperando para você começar depois'}.`,
+    },
+    resolveFinding: {
+      title: 'Resolver um achado',
+      actions: {
+        retry: 'Começar de novo a tarefa travada (a branch e o PR dela são apagados antes).',
+        resume: 'Retomar a tarefa, cuja pergunta já foi respondida.',
+        delete_snapshot: 'Apagar o snapshot que nenhuma tarefa usa.',
+        mark_revert_unknown:
+          'Mostrar a main como vermelha, para alguém conferir o revert no repositório.',
+      } as Record<string, string>,
+      other: (action: string, id: string) => `Fazer "${action}" sobre o achado ${id}.`,
+    },
+    updateAgentSettings: {
+      title: 'Trocar o agente de código',
+      roles: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+      backToDefault: (role: string) => `- ${role}: volta ao padrão (o mesmo agente do Construtor)`,
+      chosen: (role: string, value: string) => `- ${role}: ${value}`,
+      model: 'modelo',
+      effort: 'esforço',
+      detail: (role: string, what: string, value: string | null) =>
+        `- ${role}, ${what}: ${value === null ? 'o padrão do agente' : value}`,
+      request: (lines: string) =>
+        `${lines}\nVale para as próximas execuções, sem reiniciar. As que estão rodando terminam com o agente antigo.`,
+    },
+    acknowledgeWatch: {
+      title: 'Marcar como visto',
+      request: (id: string) => `Marcar a main vermelha ${id} como vista por uma pessoa.`,
+    },
+    fields: {
+      enabled: 'Fábrica ativa neste repositório',
+      checks: 'Verificações',
+      egress: 'Domínios extras do sandbox',
+      baseBranch: 'Branch de integração',
+      releaseBranch: 'Branch de release',
+      askQuestions: 'O agente pode perguntar na issue',
+      harness: 'Agente construtor',
+      reviewer: 'Revisor',
+      releaseMode: 'Release',
+      yes: 'sim',
+      no: 'não',
+      theDefault: 'o padrão',
+      defaultChecks: 'o padrão (npm test)',
+      none: 'nenhum',
+      factoryDefault: 'o padrão da fábrica',
+      release: {
+        manual: 'só uma pessoa libera',
+        trial: 'só registra o que faria',
+        auto: 'um agente pode liberar',
+      } as Record<string, string>,
+    },
+  },
+  activity: {
+    reads: {
+      factory_status: 'o estado da fábrica',
+      list_tasks: 'as tarefas',
+      task_detail: 'os detalhes de uma tarefa',
+      backlog_progress: 'o andamento do backlog',
+      inbox_items: 'a caixa de entrada',
+      health_report: 'a saúde da fábrica',
+      setup_report: 'a configuração',
+      list_plans: 'os planos',
+      plan_detail: 'um plano',
+      list_repositories: 'os repositórios',
+      repo_files: 'os arquivos do projeto',
+      repo_file: 'um arquivo do projeto',
+    } as Record<string, string>,
+    changes: {
+      retry_task: 'começou uma tarefa de novo',
+      request_changes: 'devolveu um trabalho com uma nota',
+      start_job: 'abriu uma issue e começou',
+      approve_task: 'aprovou um pull request',
+      update_repository: 'salvou as configurações de um repositório',
+      create_plan: 'começou um plano',
+      create_plan_issues: 'criou as issues de um plano',
+      resolve_finding: 'resolveu um achado',
+      acknowledge_watch: 'marcou a main vermelha como vista',
+      update_agent_settings: 'trocou o agente que constrói, planeja ou revisa',
+    } as Record<string, string>,
+  },
+  assistProblems: {
+    signIn: 'Entre de novo no painel e tente outra vez.',
+    noCredit:
+      'O assistente está sem crédito de modelo: defina ANTHROPIC_API_KEY no servidor (veja Configuração).',
+    couldNot: (message: string) => `O assistente não conseguiu responder: ${message}`,
+  },
+  agentGroups: {
+    factory: { title: 'Constroem o código', about: 'Rodam num sandbox isolado' },
+    panel: { title: 'Conversam com você', about: 'Rodam no servidor, com ferramentas limitadas' },
   },
   planSection: {
     title: 'Plano',

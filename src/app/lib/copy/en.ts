@@ -682,6 +682,11 @@ export const en = {
     failedTitle: "I couldn't answer",
     failedHint:
       'The model did not answer. The most common cause is the OpenRouter key being out of credit or without permission for this model. The "Setup" page shows what is ready. Try again in a moment.',
+    blurbs: {
+      openrouter: 'An OpenRouter key, pay per use',
+      codex: 'Your ChatGPT subscription (Codex)',
+    },
+    suggestions: ['How is the factory doing now?', 'What needs me?', 'How is the backlog going?'],
     approve: 'Approve',
     reject: 'Reject',
     looked: 'Looked at',
@@ -864,6 +869,129 @@ export const en = {
     mergedNoRelease: (actor: string, error: string) =>
       `merged by ${actor}, but the release could not be created: ${error}`,
     outOfQuota: (resetsAt: string) => `out of quota${resetsAt ? `, resets ${resetsAt}` : ''}`,
+  },
+  approvals: {
+    fallbackTitle: 'Action',
+    nothingChanges: '- nothing changes',
+    retryTask: {
+      title: 'Repeat a task',
+      request: (id: string) => `Start task ${id} over. Its branch and PR are deleted first.`,
+    },
+    requestChanges: {
+      title: 'Ask for changes',
+      request: (id: string, note: string) =>
+        `Send task ${id} back to the agent with this note:\n${note}`,
+    },
+    startJob: {
+      title: 'Open an issue and start',
+      request: (repository: string, title: string, body: string) =>
+        `In ${repository}: ${title}\n\n${body}`,
+    },
+    approveTask: {
+      title: 'Approve the pull request',
+      request: (id: string) =>
+        `Approve the PR of task ${id}, at the commit it is on now. This merges nothing and releases nothing.`,
+    },
+    updateRepository: {
+      title: 'Save settings',
+      request: (repository: string, lines: string) => `In ${repository}:\n${lines}`,
+    },
+    createPlan: {
+      title: 'Start a plan',
+      request: (repository: string, goal: string) =>
+        `In ${repository}, with this goal:\n${goal}\nNo issue is created yet: you review the plan first.`,
+    },
+    createPlanIssues: {
+      title: 'Create the issues of the plan',
+      request: (planId: string, start: boolean) =>
+        `Create on GitHub the selected issues of plan ${planId}, ${start ? 'and start the work on them right away' : 'leaving them waiting for you to start later'}.`,
+    },
+    resolveFinding: {
+      title: 'Resolve a finding',
+      actions: {
+        retry: 'Start the stuck task over (its branch and PR are deleted first).',
+        resume: 'Resume the task, whose question was already answered.',
+        delete_snapshot: 'Delete the snapshot that no task uses.',
+        mark_revert_unknown: 'Show main as red, for someone to check the revert in the repository.',
+      } as Record<string, string>,
+      other: (action: string, id: string) => `Do "${action}" on finding ${id}.`,
+    },
+    updateAgentSettings: {
+      title: 'Change the coding agent',
+      roles: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer' },
+      backToDefault: (role: string) =>
+        `- ${role}: back to the default (the same agent as the Builder)`,
+      chosen: (role: string, value: string) => `- ${role}: ${value}`,
+      model: 'model',
+      effort: 'effort',
+      detail: (role: string, what: string, value: string | null) =>
+        `- ${role}, ${what}: ${value === null ? "the agent's default" : value}`,
+      request: (lines: string) =>
+        `${lines}\nIt applies to the next runs, with no restart. The ones running finish with the old agent.`,
+    },
+    acknowledgeWatch: {
+      title: 'Mark as seen',
+      request: (id: string) => `Mark the red main ${id} as seen by a person.`,
+    },
+    fields: {
+      enabled: 'Factory active in this repository',
+      checks: 'Checks',
+      egress: 'Extra sandbox domains',
+      baseBranch: 'Integration branch',
+      releaseBranch: 'Release branch',
+      askQuestions: 'The agent may ask on the issue',
+      harness: 'Builder agent',
+      reviewer: 'Reviewer',
+      releaseMode: 'Release',
+      yes: 'yes',
+      no: 'no',
+      theDefault: 'the default',
+      defaultChecks: 'the default (npm test)',
+      none: 'none',
+      factoryDefault: "the factory's default",
+      release: {
+        manual: 'only a person releases',
+        trial: 'only records what it would do',
+        auto: 'an agent may release',
+      } as Record<string, string>,
+    },
+  },
+  activity: {
+    reads: {
+      factory_status: "the factory's state",
+      list_tasks: 'the tasks',
+      task_detail: 'the details of a task',
+      backlog_progress: 'the progress of the backlog',
+      inbox_items: 'the inbox',
+      health_report: "the factory's health",
+      setup_report: 'the setup',
+      list_plans: 'the plans',
+      plan_detail: 'a plan',
+      list_repositories: 'the repositories',
+      repo_files: "the project's files",
+      repo_file: 'a file of the project',
+    } as Record<string, string>,
+    changes: {
+      retry_task: 'started a task over',
+      request_changes: 'sent work back with a note',
+      start_job: 'opened an issue and started',
+      approve_task: 'approved a pull request',
+      update_repository: "saved a repository's settings",
+      create_plan: 'started a plan',
+      create_plan_issues: 'created the issues of a plan',
+      resolve_finding: 'resolved a finding',
+      acknowledge_watch: 'marked the red main as seen',
+      update_agent_settings: 'changed the agent that builds, plans or reviews',
+    } as Record<string, string>,
+  },
+  assistProblems: {
+    signIn: 'Sign in to the panel again, then retry.',
+    noCredit: 'The assistant has no model credit: set ANTHROPIC_API_KEY on the server (see Setup).',
+    couldNot: (message: string) => `The assistant could not answer: ${message}`,
+  },
+  agentGroups: {
+    factory: { title: 'Build the code', about: 'Run in an isolated sandbox' },
+    panel: { title: 'Talk to you', about: 'Run on the server, with limited tools' },
   },
   planSection: {
     title: 'Plan',

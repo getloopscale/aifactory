@@ -65,6 +65,7 @@ export function CopyProvider({ children }: { children: ReactNode }) {
         // One save after the other, so a quick second choice is the one the server ends with.
         saving.current = saving.current
           .then(() => put('/api/panel/language', { language: next }))
+          // A save that fails leaves the choice in the browser for this visit; the next choice saves again.
           .catch(() => {})
       },
       adopt: (saved) => {

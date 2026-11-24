@@ -11,11 +11,17 @@ import {
   focusOf,
   guideIn,
   guideFor,
-  repoChanges,
+  repoChanges as changes,
   startersFor,
   toolNameOf,
   whereIs,
 } from './guides'
+
+// The words under test are those of the Portuguese dictionary.
+const repoChanges = (
+  current: Parameters<typeof changes>[0],
+  input: Parameters<typeof changes>[1],
+) => changes(current, input, ptBR.approvals.fields)
 
 describe('the guide of a page', () => {
   it('is picked by where the owner is, for every page of the menu but the chat', () => {
@@ -68,7 +74,7 @@ describe('what the owner has open', () => {
     expect(whereIs(guideIn('plans', ptBR), '/plans/3', '')).toContain('o plano 3 aberto')
   })
 
-  it('puts the questions about the open item first, in the language of the owner', () => {
+  it('puts the questions about the open item first', () => {
     for (const t of [en, ptBR]) {
       const board = guideIn('board', t)
       const plans = guideIn('plans', t)

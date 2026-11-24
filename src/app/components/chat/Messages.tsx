@@ -43,7 +43,7 @@ export function Messages({
     <ChatThread>
       {messages.map((m) => {
         const said = withoutTools(m)
-        const { looked, did, refused } = activityOf(m)
+        const { looked, did, refused } = activityOf(m, t.activity)
         return (
           <Fragment key={m.id}>
             <Line icon={Search} label={t.chat.looked} items={looked} />
