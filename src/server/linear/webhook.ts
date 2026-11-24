@@ -44,7 +44,7 @@ export async function handleLinearDelivery(
     return Response.json({ error: 'invalid_json' }, { status: 400 })
   }
   const stamp = (payload as { webhookTimestamp?: unknown } | null)?.webhookTimestamp
-  if (typeof stamp === 'number' && Math.abs((deps.now ?? Date.now)() - stamp) > MAX_AGE_MS) {
+  if (typeof stamp !== 'number' || Math.abs((deps.now ?? Date.now)() - stamp) > MAX_AGE_MS) {
     return Response.json({ error: 'stale_delivery' }, { status: 401 })
   }
   return Response.json(await deps.record({ deliveryId, payload }))

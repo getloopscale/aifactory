@@ -1,7 +1,7 @@
 import { getDb } from '../db'
 import { githubAppFromEnv } from '../factory/deps'
 import { botAuthor } from '../github/bot-author'
-import { createGithubApi } from '../work-source/api'
+import { createGithubApi } from '../github/pulls'
 
 import { knowledgeRoot } from './source'
 import type { KnowledgeDeps } from './sync'

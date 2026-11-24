@@ -7,9 +7,8 @@ import { repository, review, stageEvent, task } from '../../db/schema'
 import { integrationBranch } from '../../factory/branches'
 import { readEvidence } from '../../factory/check-evidence'
 import { githubAppFromEnv } from '../../factory/deps'
-import { fetchIssue } from '../../work-source/api'
 import { createPromotionApi } from '../../github/promotion-api'
-import { createGithubApi } from '../../work-source/api'
+import { createGithubApi, fetchIssue } from '../../work-source/api'
 
 /**
  * The tools of the coordinator's unblocker. Every one is read-only and scoped to a task: it names a task id and

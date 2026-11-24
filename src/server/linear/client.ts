@@ -116,16 +116,10 @@ export function createLinearSource(
       return rels
         .filter((r) => r.type === 'blocks')
         .map((r) => {
-          const type = r.issue?.state?.type as string | undefined
           return {
             ref: { source: 'linear' as const, id: r.issue.id as string },
             display: r.issue.identifier as string,
-            state:
-              type === 'completed' || type === 'canceled'
-                ? ('closed' as const)
-                : type
-                  ? ('open' as const)
-                  : ('unknown' as const),
+            state: stateOf(r.issue?.state?.type),
           }
         })
     },

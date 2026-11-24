@@ -15,8 +15,8 @@ const issue = (extra = {}) => ({
 })
 
 describe('handleLinearDelivery', () => {
-  const run = async (signature: string | null, secret = 's') => {
-    const body = JSON.stringify(issue())
+  const run = async (signature: string | null, secret = 's', extra: object = {}) => {
+    const body = JSON.stringify(issue({ webhookTimestamp: Date.now(), ...extra }))
     const records: unknown[] = []
     const headers: Record<string, string> = { 'linear-delivery': 'd1' }
     if (signature !== null) headers['linear-signature'] = signature || sign(body)
@@ -41,6 +41,16 @@ describe('handleLinearDelivery', () => {
       expect(records).toHaveLength(0)
     }
     expect(verifyLinearSignature('x', 'zz', 's')).toBe(false)
+  })
+  it('refuses a signed delivery with no timestamp or a stale one', async () => {
+    for (const extra of [
+      { webhookTimestamp: undefined },
+      { webhookTimestamp: Date.now() - 120_000 },
+    ]) {
+      const { res, records } = await run('', 's', extra)
+      expect(res.status).toBe(401)
+      expect(records).toHaveLength(0)
+    }
   })
   it('refuses without a secret', async () => {
     expect((await run('', '')).res.status).toBe(503)
