@@ -210,6 +210,36 @@ describe('claudeCredentialFromEnv', () => {
   })
 })
 
+describe('claudeCodeHarness plugin', () => {
+  const id = '7db0be59-83ce-4961-a568-391f7b5c0327'
+
+  it("loads the role's plugin on a reviewer's run and on a builder's resume", async () => {
+    const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    const harness = claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+    const input = { prompt: 'P', cwd: '/w', timeoutMs: 5 }
+
+    await harness.run(backend, { ...input, role: 'reviewer' })
+    expect(sandbox.backend.commands.at(-1)).toContain('--plugin-dir /tmp/factory-plugin-reviewer')
+    expect(sandbox.backend.files.has('/tmp/factory-plugin-reviewer/hooks/guard.mjs')).toBe(true)
+
+    await harness.resume?.(backend, id, { ...input, role: 'builder' })
+    expect(sandbox.backend.commands.at(-1)).toContain('--plugin-dir /tmp/factory-plugin-builder')
+    expect(sandbox.backend.commands.at(-1)).toContain(`--resume ${id}`)
+  })
+
+  it('loads no plugin for a pass with no role', async () => {
+    const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    await claudeCodeHarness({ kind: 'api-key', secret: 'k' }).run(backend, {
+      prompt: 'P',
+      cwd: '/w',
+      timeoutMs: 5,
+    })
+    expect(sandbox.backend.commands.at(-1)).not.toContain('--plugin-dir')
+  })
+})
+
 describe('claudeCodeHarness resume and quota', () => {
   const id = '7db0be59-83ce-4961-a568-391f7b5c0327'
 

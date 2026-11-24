@@ -954,6 +954,8 @@ export const ptBR: Copy = {
     engine: 'Modelo ou agente',
     howToChange: (change: string) => `Como mudar: ${change}`,
     canDo: 'O que pode fazer',
+    persona: 'Persona',
+    never: 'Nunca faz',
     effects: {
       reads: 'só lê',
       asks: 'muda algo, pede seu OK',

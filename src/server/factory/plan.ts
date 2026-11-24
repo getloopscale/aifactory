@@ -5,6 +5,7 @@ import { plan, planItem } from '../db/schema'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
+import { personaPreamble } from '../agents/prompts/personas'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 
@@ -29,7 +30,8 @@ export type PlanDraft = {
 
 /** What the planning agent is told. It reads the repository and writes nothing. */
 export function planPrompt(input: { repo: string; goal: string; knowledgeDir?: string }): string {
-  return `You are planning work for the repository ${input.repo}. The owner wants this:
+  return `${personaPreamble('planner')}
+You are planning work for the repository ${input.repo}. The owner wants this:
 
 ${input.goal}
 
@@ -154,6 +156,7 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
     const result = await agent.run(sandbox.backend, {
       cwd: repoDir,
       timeoutMs: deps.timeoutMs ?? 15 * 60_000,
+      role: 'planner',
       prompt: planPrompt({ repo: row.repository, goal: row.goal, knowledgeDir: feed.dir }),
     })
     const cost = result.costUsd ?? 0

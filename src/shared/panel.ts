@@ -1,3 +1,5 @@
+import type { Persona } from './personas'
+
 import type { DoctorSay } from './doctor-say'
 import type { LeadTime } from './lead-time'
 
@@ -856,6 +858,8 @@ export type AgentEntry = {
   shared: string[]
   /** The files its instructions and tools are written in. */
   source: string[]
+  /** Who the agent is (ADR 0012), for the agents that have a persona. */
+  persona?: Persona
 }
 
 export type AgentsView = {
