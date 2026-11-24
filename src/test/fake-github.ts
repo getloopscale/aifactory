@@ -186,6 +186,7 @@ export class FakeRepository {
   private readonly comparisons = new Map<string, ChangedFile[]>()
   private readonly aheadBy = new Map<string, number>()
   private readonly committedAt = new Map<string, Date>()
+  private readonly parents = new Map<string, string>()
   private readonly runs = new Map<string, FakeCheckRun[]>()
   private readonly statuses = new Map<string, FakeStatus[]>()
   private readonly merged = new Map<string, Set<string>>()
@@ -373,6 +374,16 @@ export class FakeRepository {
       !reports.some((r) => r.name === name && r.state !== 'success')
     if (!(this.required.get(pull.baseRef) ?? []).every(passed)) return 'blocked'
     return reports.some((r) => r.state === 'failure') ? 'unstable' : 'clean'
+  }
+
+  /** Says which commit is the first parent of `sha`. A commit nobody said this of has none. */
+  parentOf(sha: string, parent: string): this {
+    this.parents.set(sha, parent)
+    return this
+  }
+
+  firstParentOf(sha: string): string | null {
+    return this.parents.get(sha) ?? null
   }
 
   /** Puts a check run on a commit, in place of the one with the same name. Left to the defaults, it passed. */
@@ -931,6 +942,12 @@ export class FakeGithub implements GithubApi {
   async checkReports(repo: string, token: string, sha: string) {
     return this.call({ method: 'checkReports', repo, token, args: [sha], failed: false }, (r) =>
       r.reports(sha),
+    )
+  }
+
+  async firstParent(repo: string, token: string, sha: string) {
+    return this.call({ method: 'firstParent', repo, token, args: [sha], failed: false }, (r) =>
+      r.firstParentOf(sha),
     )
   }
 

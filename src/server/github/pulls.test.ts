@@ -1652,3 +1652,22 @@ describe('a call refused for the rate limit', () => {
     ).rejects.toBeInstanceOf(RateLimited)
   })
 })
+
+describe('firstParent', () => {
+  it('answers the first parent of a commit', async () => {
+    const { fetch } = fakeFetch({
+      'GET /commits/abc': { status: 200, body: { parents: [{ sha: 'p1' }, { sha: 'p2' }] } },
+    })
+    expect(await createGithubApi(fetch).firstParent('o/r', 't', 'abc')).toBe('p1')
+  })
+
+  it('answers null for a commit with no parent', async () => {
+    const { fetch } = fakeFetch({ 'GET /commits/abc': { status: 200, body: { parents: [] } } })
+    expect(await createGithubApi(fetch).firstParent('o/r', 't', 'abc')).toBeNull()
+  })
+
+  it('throws when GitHub will not answer', async () => {
+    const { fetch } = fakeFetch({})
+    await expect(createGithubApi(fetch).firstParent('o/r', 't', 'abc')).rejects.toThrow(/404/)
+  })
+})
