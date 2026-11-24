@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import { SECURITY_EFFORT_CEILING } from '../../shared/panel'
 import { agentConfigurationChanged } from './cases'
 import {
   compareWithBaseline,
@@ -258,7 +259,7 @@ export function agentSetup(
       ? {
           security,
           securityModel: options(env, 'security', security).model ?? 'default',
-          securityEffort: 'highest (pinned)',
+          securityEffort: `pinned, at most ${SECURITY_EFFORT_CEILING}`,
         }
       : {}),
   }
