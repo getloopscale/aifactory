@@ -7,6 +7,7 @@ import {
   caseOutcome,
   compareWithBaseline,
   summarize,
+  MIN_COST_CASES,
   type Baseline,
   type CaseResult,
 } from './compare'
@@ -99,10 +100,10 @@ describe('compareWithBaseline', () => {
 
     expect(compared.ok).toBe(false)
     expect(compared.regressions).toEqual(['a', 'b'])
-    expect(compared.reasons).toEqual(['the pass rate fell from 80% to 40%'])
+    expect(compared.reasons).toContain('the pass rate fell from 80% to 40%')
   })
 
-  it('accepts a mean cost exactly at the threshold and refuses one above it', () => {
+  it('accepts a cost exactly at the threshold and refuses one above it', () => {
     const at = before.results.map((r) => ({ ...r, costUsd: 0.5 * (1 + THRESHOLDS.costRise) }))
     const above = before.results.map((r) => ({
       ...r,
@@ -112,7 +113,7 @@ describe('compareWithBaseline', () => {
     expect(compareWithBaseline(at, before).ok).toBe(true)
     const refused = compareWithBaseline(above, before)
     expect(refused.ok).toBe(false)
-    expect(refused.reasons).toEqual(['the mean cost per case rose from US$ 0.50 to US$ 1.01 (4 cases that ran to a verdict in both runs)'])
+    expect(refused.reasons).toEqual(['the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.01, 4 cases that ran to a verdict in both runs)'])
   })
 
   it('refuses a cost rise that one early failure at zero cost would hide', () => {
@@ -124,16 +125,18 @@ describe('compareWithBaseline', () => {
 
     expect(compared.ok).toBe(false)
     expect(compared.reasons).toEqual([
-      'the mean cost per case rose from US$ 0.50 to US$ 1.25 (4 cases that ran to a verdict in both runs)',
+      'the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.25, 4 cases that ran to a verdict in both runs)',
     ])
   })
 
   it('leaves out a case that reached no verdict in the baseline, and a legacy failure, since its review rounds may hold an invalid review', () => {
     const base = baseline([
       result('a', true),
+      result('c', true),
+      result('d', true),
       { ...result('b', false, 0), reviewRounds: 1 },
     ])
-    const run = [result('a', true, 0.5), result('b', true, 9)]
+    const run = [result('a', true, 0.5), result('c', true), result('d', true), result('b', true, 9)]
 
     expect(compareWithBaseline(run, base).ok).toBe(true)
   })
@@ -160,24 +163,51 @@ describe('compareWithBaseline', () => {
     const runaway = before.results.map((r) => ({ ...r, costUsd: 0.5 * 2 + 0.01 }))
 
     expect(compareWithBaseline(runaway, before).reasons).toEqual([
-      'the mean cost per case rose from US$ 0.50 to US$ 1.01 (4 cases that ran to a verdict in both runs)',
+      'the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.01, 4 cases that ran to a verdict in both runs)',
     ])
   })
 
   it('does not judge cost against a baseline that cost nothing', () => {
-    const free = baseline([result('a', true, 0)])
+    const ids = ['a', 'b', 'c']
+    const free = baseline(ids.map((id) => result(id, true, 0)))
 
-    expect(compareWithBaseline([result('a', true, 5)], free).ok).toBe(true)
+    expect(compareWithBaseline(ids.map((id) => result(id, true, 5)), free).ok).toBe(true)
+  })
+
+  it('does not let one expensive case decide the cost', () => {
+    const run = before.results.map((r, i) => ({ ...r, costUsd: i === 0 ? 4 : 0.6 }))
+
+    expect(compareWithBaseline(run, before).ok).toBe(true)
+  })
+
+  it('refuses a rise past twice the baseline that most cases share', () => {
+    const run = before.results.map((r, i) => ({ ...r, costUsd: i === 0 ? 0.5 : 1.2 }))
+
+    expect(compareWithBaseline(run, before).ok).toBe(false)
+  })
+
+  it('refuses to judge the cost over fewer than three cases that ran to a verdict in both runs', () => {
+    const run = before.results.slice(0, 2).map((r) => ({ ...r }))
+
+    expect(compareWithBaseline(run, before).reasons).toEqual([
+      `only 2 cases ran to a verdict in both runs, and the cost gate needs ${MIN_COST_CASES}`,
+    ])
   })
 
   it('compares only the cases both runs have', () => {
-    const run = [result('a', true), result('z', false), result('y', false)]
+    const run = [
+      result('a', true),
+      result('b', true),
+      result('c', true),
+      result('z', false),
+      result('y', false),
+    ]
 
     const compared = compareWithBaseline(run, before)
 
     expect(compared.ok).toBe(true)
-    expect(compared.now.cases).toBe(1)
-    expect(compared.before.cases).toBe(1)
+    expect(compared.now.cases).toBe(3)
+    expect(compared.before.cases).toBe(3)
   })
 
   it('refuses a run with no case in common with the baseline', () => {
