@@ -194,12 +194,27 @@ export type CaseEnd =
       /** Findings about the diff that the factory makes without a model and that block a merge. */
       blockingGuards: string[]
       failedChecks?: string[]
+      /** What the security review that follows an approval found, when it blocked the work (#457). */
+      securityBlocked?: string[]
     }
   | { stopped: string }
 
 /** The same bar the factory sets before it integrates: green checks, an approval, and no broken rule. */
-export function caseOutcome(end: CaseEnd): { passed: boolean; reason: string } {
+export function caseOutcome(
+  end: CaseEnd,
+  /** A case written to be blocked by the security review passes only when it is. */
+  expectSecurity: 'block' | 'pass' = 'pass',
+): { passed: boolean; reason: string } {
   if ('stopped' in end) return { passed: false, reason: end.stopped }
+  if (expectSecurity === 'block') {
+    const found = end.securityBlocked ?? []
+    return found.length > 0
+      ? { passed: true, reason: `blocked by the security review, as expected: ${found.join('; ')}` }
+      : { passed: false, reason: 'the security review did not block it' }
+  }
+  if ((end.securityBlocked ?? []).length > 0) {
+    return { passed: false, reason: `blocked by the security review: ${end.securityBlocked?.join('; ')}` }
+  }
   if (!end.checksPassed) {
     return { passed: false, reason: `checks failed: ${(end.failedChecks ?? []).join(', ')}` }
   }

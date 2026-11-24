@@ -48,7 +48,8 @@ import {
 } from './evidence'
 import { FIX_COMMIT_MESSAGE, fixDetail, runFixes, type FixedRound } from './fixes'
 import { NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
-import { diffFacts, reviewBase, samePatch } from './diff-facts'
+import { diffFacts, reviewBase, samePatch, securityFloor } from './diff-facts'
+import { decideSecurity, findingKey, parseSecurityVerdict, securityPrompt } from './security-review'
 import {
   changePlanPrompt,
   givenPlanPrompt,
@@ -162,6 +163,9 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
 /** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
 type Held = { headline: string; reason: string; cause: HandoffCause }
 
+/** The security review sent the work back and the builder pushed this commit: the loop checks and reviews it again. */
+type Reworked = { reworked: string }
+
 /** A commit of the run that passed the checks and was reviewed without an approval, with that review. */
 type Reviewed = {
   sha: string
@@ -245,6 +249,13 @@ export class Run {
 
   /** The agent that writes the change plan: the builder, unless the owner chose another for the role. */
   private planner: CodingHarness | undefined
+  /** The security reviewer, when the deployment has one (`deps.security`); `securityRequired` says it must. */
+  private security: CodingHarness | undefined
+  private securityRequired = false
+  /** The blocking findings the security review already named, and how often it sent the work back. */
+  private readonly securitySeen = new Set<string>()
+  private securityReworks = 0
+  private securityEarlier: Finding[] = []
 
   /** The plan another agent wrote, which the builder's first pass is given as text. */
   private plannedBy: string | undefined
@@ -494,7 +505,8 @@ export class Run {
     const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
     const reviewer = chosen ?? builder
     const planner = deps.planner?.(labels, builder.name) ?? builder
-    const agents = [builder, reviewer, planner].filter(
+    const security = deps.security?.(labels)
+    const agents = [builder, reviewer, planner, ...(security ? [security] : [])].filter(
       (agent, at, all) => all.findIndex((other) => other.name === agent.name) === at,
     )
     const agentEgress = await prep.step('credentials', async () =>
@@ -543,6 +555,8 @@ export class Run {
       const told = await Run.withConflictFiles(c, sandbox.backend, repoDir, baseSha)
       const run = new Run(told, builder, reviewer, attached, spec, repoDir, baseSha, startedAt)
       run.planner = planner
+      run.security = security
+      run.securityRequired = deps.security !== undefined
       run.feed = feed
       run.preparation = prep
       run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
@@ -633,7 +647,7 @@ export class Run {
   /** Runs the agent, books its cost and session, and turns a quota stop into its own error. */
   private async settle(
     who: CodingHarness,
-    role: 'builder' | 'planner' | 'reviewer',
+    role: 'builder' | 'planner' | 'reviewer' | 'security',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -643,7 +657,7 @@ export class Run {
     const started = Date.now()
     let result: HarnessResult
     try {
-      result = await call(this.transcript.sink(role === 'planner' ? 'builder' : role, attempt))
+      result = await call(this.transcript.sink(transcriptRole(role), attempt))
       if (result.unauthorized && who.reauthorize) {
         await this.transcript.drain()
         result = await this.afterRefusal(who, role, attempt, call)
@@ -702,7 +716,7 @@ export class Run {
    */
   private async afterRefusal(
     who: CodingHarness,
-    role: 'builder' | 'planner' | 'reviewer',
+    role: 'builder' | 'planner' | 'reviewer' | 'security',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -728,7 +742,7 @@ export class Run {
         `Codex login was refused and could not be renewed (${error instanceof Error ? error.message : String(error)}): connect Codex again from the Setup page`,
       )
     }
-    const again = await call(this.transcript!.sink(role === 'planner' ? 'builder' : role, attempt))
+    const again = await call(this.transcript!.sink(transcriptRole(role), attempt))
     if (again.unauthorized) {
       const now = rules[at]?.headers?.authorization?.replace(/^Bearer /, '')
       if (now) await who.markRefused?.(now).catch(() => {})
@@ -1862,8 +1876,10 @@ export class Run {
     attempt: number,
     here: StoredCheck[],
     outcome: ReviewVerdict,
-  ): Promise<RunResult> {
+  ): Promise<RunResult | Reworked> {
     const { deps, taskId, row, branch, state } = this.c
+    const secured = await this.secured(sha, attempt, here)
+    if (secured) return secured
     const held = heldFor(
       heldForEvaluation(row.repository, this.touched, deps.ownRepository),
       heldForReview(row.repository, this.touched, deps.ownRepository),
@@ -1892,6 +1908,108 @@ export class Run {
       }),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
+  }
+
+  /**
+   * The security review of approved work (#457), read-only, between the approval and `merge`. The deterministic floor
+   * is read again on the commit, so no approval can skip it; the agent then reads the change at the highest effort its
+   * engine offers. A finding of the floor, an unusable answer, a finding named before, or a second send-back too many
+   * goes to a person; the first block goes back to the builder. Nothing when the review passes or the deployment has
+   * no security step. An agent that cannot start is no approval: the work goes to a person.
+   */
+  private async secured(
+    sha: string,
+    attempt: number,
+    here: StoredCheck[],
+  ): Promise<RunResult | Reworked | undefined> {
+    if (!this.securityRequired) return undefined
+    const { deps, taskId, row, issue, state } = this.c
+    const agent = this.security
+    state.current = 'review'
+    await enterRunStage(deps.db, taskId, 'review', {
+      step: 'security',
+      sha,
+      attempt,
+      ...(agent ? agentFacts(agent) : {}),
+    })
+    const base = await reviewBase(this.backend, this.repoDir, {
+      baseSha: this.baseSha,
+      integration: integrationBranch(this.c.repo),
+    })
+    const floor = await securityFloor(this.backend, this.repoDir, base)
+    const stopped = (summary: string): ReviewVerdict => ({
+      verdict: 'invalid',
+      summary,
+      findings: [],
+    })
+    let verdict: ReviewVerdict
+    if (floor.some((f) => f.severity !== 'minor')) {
+      verdict = { verdict: 'changes', summary: 'the deterministic floor blocks it', findings: [] }
+    } else if (!agent) {
+      verdict = stopped('no security agent could start: its highest effort is not known')
+    } else {
+      const result = await this.settle(agent, 'security', attempt, (onEvent) =>
+        agent.run(this.backend, {
+          onEvent,
+          cwd: this.repoDir,
+          timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+          prompt: securityPrompt({
+            repo: row.repository,
+            issueNumber: row.issueNumber,
+            title: issue.title,
+            body: issue.body,
+            baseSha: base,
+            knowledgeDir: this.feed?.dir,
+            earlier: this.securityEarlier,
+          }),
+        }),
+      )
+      // The security agent reads and does not write. If it wrote anyway, none of it counts.
+      await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
+      await must(this.backend, `git -C ${this.repoDir} clean -fd`)
+      verdict = result.ok
+        ? parseSecurityVerdict(result.summary)
+        : stopped(`the security review failed: ${result.summary}`)
+    }
+    const decision = decideSecurity({
+      floor,
+      verdict,
+      seen: this.securitySeen,
+      reworks: this.securityReworks,
+      canRework: this.builder.resume !== undefined && !!this.sessionId,
+    })
+    const findings = [...floor, ...verdict.findings]
+    await enterRunStage(deps.db, taskId, 'review', {
+      step: 'security',
+      sha,
+      attempt,
+      verdict: decision.kind === 'pass' ? 'approve' : verdict.verdict,
+      outcome: decision.kind,
+      summary: verdict.summary,
+      findings,
+      ...(agent ? agentFacts(agent) : {}),
+    })
+    if (decision.kind === 'pass') return undefined
+    for (const f of findings.filter((x) => x.severity !== 'minor'))
+      this.securitySeen.add(findingKey(f))
+    this.securityEarlier = findings
+    if (decision.kind === 'rework') {
+      this.securityReworks += 1
+      const reworked = await this.rework(attempt + 1, decision.findings, [], sha)
+      if (reworked) return { reworked }
+    }
+    const reason =
+      decision.kind === 'handoff'
+        ? decision.reason
+        : 'the builder changed nothing in answer to the security review'
+    return this.handOver(
+      sha,
+      attempt,
+      here,
+      { verdict: 'changes', summary: verdict.summary, findings },
+      [],
+      { headline: 'The security review blocks this', reason, cause: 'security' },
+    )
   }
 
   /**
@@ -1944,7 +2062,7 @@ export class Run {
     here: StoredCheck[],
     outcome: ReviewVerdict,
     counts: number[],
-  ): Promise<RunResult> {
+  ): Promise<RunResult | Reworked> {
     const judged = await this.review(sha, attempt + 1)
     if (judged.verdict === 'approve') return this.approved(sha, attempt + 1, here, judged)
     if (judged.verdict === 'invalid') return this.disputed(sha, attempt, here, outcome, counts)
@@ -2129,9 +2247,19 @@ export class Run {
 
       failedBefore = undefined
       const kept = counts.length === 0 ? await this.approvalKept(sha, attempt) : undefined
-      if (kept) return this.approved(sha, attempt, checked.here, kept)
+      if (kept) {
+        const done = await this.approved(sha, attempt, checked.here, kept)
+        if (!('reworked' in done)) return done
+        sha = done.reworked
+        continue
+      }
       const outcome = await this.review(sha, attempt)
-      if (outcome.verdict === 'approve') return this.approved(sha, attempt, checked.here, outcome)
+      if (outcome.verdict === 'approve') {
+        const done = await this.approved(sha, attempt, checked.here, outcome)
+        if (!('reworked' in done)) return done
+        sha = done.reworked
+        continue
+      }
       counts.push(blockingCount(outcome.findings))
       reviewed = { sha, attempt, here: checked.here, outcome, counts: [...counts] }
       const mayRework =
@@ -2140,14 +2268,25 @@ export class Run {
         reviewAllowsRework(counts.length, counts)
       if (outcome.verdict === 'changes' && mayRework) {
         const reworked = await this.rework(attempt + 1, outcome.findings, [], sha)
-        if (reworked === undefined)
-          return this.arbitrate(sha, attempt, checked.here, outcome, counts)
+        if (reworked === undefined) {
+          const done = await this.arbitrate(sha, attempt, checked.here, outcome, counts)
+          if (!('reworked' in done)) return done
+          sha = done.reworked
+          continue
+        }
         sha = reworked
         continue
       }
       return this.handOver(sha, attempt, checked.here, outcome, counts)
     }
   }
+}
+
+/** The transcript keeps two roles: the planner is read as the builder, the security reviewer as the reviewer. */
+function transcriptRole(
+  role: 'builder' | 'planner' | 'reviewer' | 'security',
+): 'builder' | 'reviewer' {
+  return role === 'planner' ? 'builder' : role === 'security' ? 'reviewer' : role
 }
 
 /** What a stage records about the agent working in it, so the panel can say who it is and on which model. */

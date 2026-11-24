@@ -91,6 +91,7 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
       at: '2026-11-04T10:03:00Z',
     },
   ],
+  securityReviews: [],
   reviews: [
     {
       id: 1,

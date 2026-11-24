@@ -22,11 +22,11 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
     { id: 'claude-code', ready: true },
     { id: 'codex', ready: true },
   ],
-  chosen: { builder: null, planner: null, reviewer: null },
-  effective: { builder: 'codex', planner: 'codex', reviewer: 'codex' },
+  chosen: { builder: null, planner: null, reviewer: null, security: null },
+  effective: { builder: 'codex', planner: 'codex', reviewer: 'codex', security: 'codex' },
   repositoriesWithOwn: [],
-  chosenModel: { builder: null, planner: null, reviewer: null },
-  chosenEffort: { builder: null, planner: null, reviewer: null },
+  chosenModel: { builder: null, planner: null, reviewer: null, security: null },
+  chosenEffort: { builder: null, planner: null, reviewer: null, security: null },
   engines: {
     'claude-code': {
       models: [
@@ -67,7 +67,7 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
 })
 
 function mount(
-  role: 'builder' | 'planner' | 'reviewer',
+  role: 'builder' | 'planner' | 'reviewer' | 'security',
   s = settings(),
   answer = new Response('{}'),
 ) {
@@ -117,7 +117,9 @@ describe('choosing the coding agent of a role', () => {
   it('lets the planner and the reviewer follow the builder, which is saved as going back to the default', async () => {
     const { fetchMock } = mount(
       'planner',
-      settings({ chosen: { builder: null, planner: 'claude-code', reviewer: null } }),
+      settings({
+        chosen: { builder: null, planner: 'claude-code', reviewer: null, security: null },
+      }),
     )
     const box = screen.getByLabelText(e.roleLabel.planner) as HTMLSelectElement
     expect(box.value).toBe('claude-code')
@@ -221,8 +223,8 @@ describe('choosing the model and the effort', () => {
     mount(
       'builder',
       settings({
-        chosenModel: { builder: 'gpt-6-luna', planner: null, reviewer: null },
-        chosenEffort: { builder: 'medium', planner: null, reviewer: null },
+        chosenModel: { builder: 'gpt-6-luna', planner: null, reviewer: null, security: null },
+        chosenEffort: { builder: 'medium', planner: null, reviewer: null, security: null },
       }),
     )
     expect((screen.getByLabelText(e.modelOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
@@ -252,7 +254,9 @@ describe('choosing the model and the effort', () => {
   it("swaps the lists for the other agent's, and forgets a model that belongs to the first", () => {
     mount(
       'builder',
-      settings({ chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null } }),
+      settings({
+        chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null, security: null },
+      }),
     )
     choose(e.roleLabel.builder, 'claude-code')
     expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault, 'Sonnet', 'Opus'])
@@ -287,7 +291,9 @@ describe('choosing the model and the effort', () => {
   it('sends the agent with its model when both changed, and null where it went back to the default', async () => {
     const { fetchMock } = mount(
       'builder',
-      settings({ chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null } }),
+      settings({
+        chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null, security: null },
+      }),
     )
     choose(e.roleLabel.builder, 'claude-code')
     choose(e.modelOf(e.roleName.builder), 'opus')
@@ -324,5 +330,27 @@ describe('choosing the model and the effort', () => {
   it('copes with an agent the page has no list for', () => {
     mount('builder', settings({ engines: {} }))
     expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault])
+  })
+
+  it('shows the security role at the highest effort of its model, with no control to lower it', async () => {
+    const { fetchMock } = mount(
+      'security',
+      settings({
+        effective: {
+          builder: 'claude-code',
+          planner: 'claude-code',
+          reviewer: 'claude-code',
+          security: 'claude-code',
+        },
+      }),
+    )
+    expect(screen.getByText(e.pinnedEffort('high'))).toBeDefined()
+    expect(screen.queryByRole('combobox', { name: e.effortOf(e.roleName.security) })).toBeNull()
+    choose(e.modelOf(e.roleName.security), 'sonnet')
+    expect(screen.getByText(e.pinnedEffort('high'))).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
+    expect(JSON.parse(String(init.body))).not.toHaveProperty('efforts')
   })
 })

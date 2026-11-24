@@ -190,6 +190,7 @@ export const ptBR: Copy = {
       building: 'construindo',
       fixing: 'corrigindo achados',
       reviewing: 'revisando',
+      securing: 'revisão de segurança',
       checks: 'verificações',
     },
     stepAttempt: (n: number) => `tentativa ${n}`,
@@ -302,6 +303,10 @@ export const ptBR: Copy = {
       `em ${sha} · saída ${exit} · ${secs} s`,
     output: 'Saída',
     reviews: 'Revisões',
+    securityReviews: 'Revisão de segurança',
+    noSecurityReview: 'Nenhuma revisão de segurança foi registrada para esta tarefa.',
+    securityLine: (round: number, verdict: string, outcome: string) =>
+      `Rodada ${round}: ${verdict}, ${outcome}`,
     notReviewed: 'Ainda não foi revisada.',
     reviewLine: (round: number, verdict: string) => `Tentativa ${round}: ${verdict}`,
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} em ${sha}`,
@@ -956,8 +961,18 @@ export const ptBR: Copy = {
       builder: 'Agente de código do Construtor',
       planner: 'Agente de código do Planejador',
       reviewer: 'Agente de código do Revisor',
+      security: 'Agente de código do Revisor de segurança',
     },
-    roleName: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+    roleName: {
+      builder: 'Construtor',
+      planner: 'Planejador',
+      reviewer: 'Revisor',
+      security: 'Revisor de segurança',
+    },
+    pinnedEffort: (level: string) =>
+      `Sempre ${level}, o mais alto que este modelo oferece; não dá para baixar`,
+    pinnedUnknown:
+      'O esforço mais alto deste modelo não é conhecido, então a revisão de segurança não roda',
     choice: (label: string) => `Escolha: ${label}`,
     sameAsBuilder: (builder: string) => `O mesmo do Construtor (${builder})`,
     unavailable: ' (indisponível)',
@@ -1179,7 +1194,12 @@ export const ptBR: Copy = {
     },
     updateAgentSettings: {
       title: 'Trocar o agente de código',
-      roles: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+      roles: {
+        builder: 'Construtor',
+        planner: 'Planejador',
+        reviewer: 'Revisor',
+        security: 'Revisor de segurança',
+      },
       backToDefault: (role: string) => `- ${role}: volta ao padrão (o mesmo agente do Construtor)`,
       chosen: (role: string, value: string) => `- ${role}: ${value}`,
       model: 'modelo',

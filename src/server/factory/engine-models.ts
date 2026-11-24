@@ -84,11 +84,14 @@ export const MODEL_ENV: Record<AgentRole, string> = {
   builder: 'FACTORY_MODEL_BUILDER',
   planner: 'FACTORY_MODEL_PLANNER',
   reviewer: 'FACTORY_MODEL_REVIEWER',
+  security: 'FACTORY_MODEL_SECURITY',
 }
 export const EFFORT_ENV: Record<AgentRole, string> = {
   builder: 'FACTORY_EFFORT_BUILDER',
   planner: 'FACTORY_EFFORT_PLANNER',
   reviewer: 'FACTORY_EFFORT_REVIEWER',
+  /** Never read: the security role's effort is pinned (`securityEffort`). */
+  security: 'FACTORY_EFFORT_SECURITY',
 }
 
 /**
@@ -118,21 +121,12 @@ export function optionsFor(
     untag(env[names[role]], engine) ??
     (role === 'builder' ? undefined : untag(env[names.builder], engine))
   const model = pick(MODEL_ENV)
-  const effort = pick(EFFORT_ENV)
+  // The security role never takes an effort from a setting: `securityOptions` pins the highest.
+  const effort = role === 'security' ? undefined : pick(EFFORT_ENV)
   return {
     ...(model && isSafeName(model) ? { model } : {}),
     ...(effort && isSafeName(effort) ? { effort } : {}),
   }
 }
 
-/** The effort levels from lowest to highest that any engine lists, so the highest of a list can be told. */
-const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
-
-/**
- * The effort the security role always runs at: the highest its engine offers for the model (#241). `undefined`
- * when the engine lists no level it knows: the security review then does not run, it never falls to a default.
- */
-export function securityEffort(efforts: string[]): string | undefined {
-  const known = efforts.filter((e) => EFFORT_RANK.includes(e))
-  return known.sort((a, b) => EFFORT_RANK.indexOf(b) - EFFORT_RANK.indexOf(a))[0]
-}
+export { securityEffort } from '../../shared/panel'

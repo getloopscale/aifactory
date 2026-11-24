@@ -5,7 +5,8 @@ import { task } from '../db/schema'
 
 import { applyDecision, type ApplyDeps } from './apply'
 import { decide, seen, type CoordinatorOutcome } from './decide'
-import { draftScope, type DraftDeps } from './draft'
+import { draftScope, type DraftDeps, type ScopeDrafter } from './draft'
+import { judgeSecurity } from './security-judgement'
 import { readExceptionFacts, readRecordedActions, type FactsDeps } from './exception-facts'
 import { readCurrentReasons, readQueueFacts } from './queue-facts'
 import { isHeld, recogniseQueue, testOf } from './queue-order'
@@ -23,7 +24,11 @@ export type PassResult = Record<CoordinatorOutcome, number>
 export type CoordinatorDeps = ApplyDeps &
   DraftDeps &
   Pick<ReleaseFactsDeps, 'releaseMode'> &
-  Pick<FactsDeps, 'ciChecks'> & { now?: () => Date }
+  Pick<FactsDeps, 'ciChecks'> & {
+    now?: () => Date
+    /** The model that judges a `security` exception from the closed set; without one it is escalated. */
+    judge?: ScopeDrafter
+  }
 
 /**
  * The exceptions of the tasks, then the release of each repository the train does not hold and the publication that
@@ -102,7 +107,8 @@ export async function coordinate(
     const applying = exception.trialOnly ? 'trial' : mode
     if (seen(exception, forTask, applying)) continue
     const now = deps.now?.() ?? new Date()
-    const decision = await draftScope(deps, exception, decide(exception, forTask, now))
+    const judged = await judgeSecurity(deps.judge, exception)
+    const decision = await draftScope(deps, judged, decide(judged, forTask, now))
     const outcome = await applyDecision(deps, exception, decision, applying)
     forTask.push({
       exceptionKind: exception.kind,

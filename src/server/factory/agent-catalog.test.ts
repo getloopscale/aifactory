@@ -26,6 +26,7 @@ describe('the catalog of agents', () => {
     expect(agents.map((a) => a.id)).toEqual([
       'builder',
       'reviewer',
+      'security',
       'planner',
       'chat',
       ...GUIDE_IDS.map((id) => `guide-${id}`),
@@ -34,6 +35,7 @@ describe('the catalog of agents', () => {
     ])
     expect(new Set(agents.map((a) => a.id)).size).toBe(agents.length)
     expect(agents.filter((a) => a.group === 'factory').map((a) => a.runsIn)).toEqual([
+      'sandbox',
       'sandbox',
       'sandbox',
       'sandbox',

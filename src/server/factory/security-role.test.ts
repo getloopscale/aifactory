@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { securityEffort } from './engine-models'
-import { SECURITY_TOOLS, securityOptions } from './security-role'
+import { SECURITY_TOOLS, securityEfforts, securityOptions } from './security-role'
 
 describe('security role', () => {
   it('always runs at the highest effort the engine lists', () => {
@@ -17,5 +17,25 @@ describe('security role', () => {
     for (const tool of SECURITY_TOOLS) {
       expect(tool).not.toMatch(/write|edit|bash|shell|exec|ignore|delete|patch/i)
     }
+  })
+})
+
+describe('securityEfforts', () => {
+  const catalog = {
+    models: [
+      { id: 'a', label: 'A', note: '', efforts: ['low', 'high', 'xhigh'] },
+      { id: 'b', label: 'B', note: '', efforts: ['low', 'high'] },
+    ],
+    efforts: ['low', 'high', 'xhigh'],
+  }
+  it("takes the chosen model's levels", () => {
+    expect(securityEfforts(catalog, 'a')).toEqual(['low', 'high', 'xhigh'])
+  })
+  it('takes the levels every model offers when none is chosen', () => {
+    expect(securityEfforts(catalog)).toEqual(['low', 'high'])
+  })
+  it('offers none for an unknown model or engine, so the review does not run on a guess', () => {
+    expect(securityEfforts(catalog, 'zzz')).toEqual([])
+    expect(securityEfforts(undefined)).toEqual([])
   })
 })

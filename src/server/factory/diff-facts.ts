@@ -66,10 +66,15 @@ export async function diffFacts(
     tests: { patch: tests.stdout, issue: input.issue },
   })
   // The deterministic floor of the security review: a secret the change adds blocks it, whatever the reviewer says.
-  const added = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
-  guards.push(...secretsAdded(added.stdout))
+  guards.push(
+    ...(await securityFloor(
+      backend,
+      repoDir,
+      base,
+      changes.map((change) => change.path),
+    )),
+  )
   const paths = changes.map((change) => change.path)
-  guards.push(...(await auditBlockers(backend, repoDir, base, paths)))
   const required = await requiredByChecks(backend, git, base, input.checkRuns ?? [])
   const unplanned = input.plan ? unplannedFiles(paths, input.plan) : []
   const touched = nameStatus
@@ -77,6 +82,27 @@ export async function diffFacts(
     .flatMap((line) => line.split('\t').slice(1))
     .filter((path) => path !== '')
   return { guards, unplanned: withoutRequired(unplanned, required), required, touched }
+}
+
+/**
+ * The deterministic floor of the security review (#241) on the change from `base` to HEAD: the secrets it adds
+ * and the audit blockers of the packages it touches. The review reads it as a guard, and the security step
+ * (`Run.secured`) reads it again before an approval can merge, so a kept approval cannot skip it.
+ */
+export async function securityFloor(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+  paths?: string[],
+): Promise<Finding[]> {
+  const git = `git -C ${repoDir}`
+  const added = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
+  const touched =
+    paths ??
+    parseNameStatus((await must(backend, `${git} diff --name-status ${base} HEAD`)).stdout).map(
+      (change) => change.path,
+    )
+  return [...secretsAdded(added.stdout), ...(await auditBlockers(backend, repoDir, base, touched))]
 }
 
 /** A branch name with nothing a shell reads as more than a name. */

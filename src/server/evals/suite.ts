@@ -229,10 +229,12 @@ export function agentSetup(
   reviewer: string,
   options: (
     env: NodeJS.ProcessEnv,
-    role: 'builder' | 'reviewer' | 'planner',
+    role: 'builder' | 'reviewer' | 'planner' | 'security',
     engine: string,
   ) => { model?: string; effort?: string },
   planner?: string,
+  /** The security reviewer's agent, whose effort is pinned at the highest its model offers. */
+  security?: string,
 ): AgentSetup {
   const b = options(env, 'builder', builder)
   const r = options(env, 'reviewer', reviewer)
@@ -246,6 +248,13 @@ export function agentSetup(
     reviewerEffort: r.effort ?? 'default',
     ...(planner && p
       ? { planner, plannerModel: p.model ?? 'default', plannerEffort: p.effort ?? 'default' }
+      : {}),
+    ...(security
+      ? {
+          security,
+          securityModel: options(env, 'security', security).model ?? 'default',
+          securityEffort: 'highest (pinned)',
+        }
       : {}),
   }
 }

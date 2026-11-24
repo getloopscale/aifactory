@@ -40,7 +40,12 @@ const ready = {
 
 describe('the choice of agent, kept in the panel', () => {
   it('starts with nothing chosen, so the environment decides', async () => {
-    expect(await loadChosen(getDb())).toEqual({ builder: null, planner: null, reviewer: null })
+    expect(await loadChosen(getDb())).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: null,
+      security: null,
+    })
     const env = await effectiveEnv(getDb(), { FACTORY_HARNESS: 'codex' })
     expect(env.FACTORY_HARNESS).toBe('codex')
   })
@@ -65,12 +70,14 @@ describe('the choice of agent, kept in the panel', () => {
       builder: 'claude-code',
       planner: null,
       reviewer: 'claude-code',
+      security: null,
     })
     await saveChosen(getDb(), { reviewer: null }, ready)
     expect(await loadChosen(getDb())).toEqual({
       builder: 'claude-code',
       planner: null,
       reviewer: null,
+      security: null,
     })
     await saveChosen(getDb(), {}, ready)
     expect((await loadChosen(getDb())).builder).toBe('claude-code')
@@ -92,7 +99,12 @@ describe('the choice of agent, kept in the panel', () => {
     await expect(
       saveChosen(getDb(), { builder: 'claude-code', planner: 'gpt-9' }, ready),
     ).rejects.toBeInstanceOf(SettingRefused)
-    expect(await loadChosen(getDb())).toEqual({ builder: null, planner: null, reviewer: null })
+    expect(await loadChosen(getDb())).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: null,
+      security: null,
+    })
   })
 
   it('turns a refusal into one the panel can show', async () => {
@@ -115,11 +127,17 @@ describe('the choice of agent, kept in the panel', () => {
       ['claude-code', true],
       ['codex', true],
     ])
-    expect(settings.chosen).toEqual({ builder: null, planner: null, reviewer: 'codex' })
+    expect(settings.chosen).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: 'codex',
+      security: null,
+    })
     expect(settings.effective).toEqual({
       builder: 'claude-code',
       planner: 'codex',
       reviewer: 'codex',
+      security: 'claude-code',
     })
     expect(settings.repositoriesWithOwn).toEqual([
       { repository: 'o/own', builder: 'codex', reviewer: null },
@@ -156,6 +174,35 @@ const cache = JSON.stringify({
 })
 const read = () => cache
 
+describe("the security role's effort", () => {
+  it('refuses an effort below the highest the agent offers, and stores none', async () => {
+    await expect(
+      saveChosen(getDb(), { efforts: { security: 'low' } }, ready, read),
+    ).rejects.toBeInstanceOf(SettingRefused)
+    await expect(
+      changeAgentSettings(getDb(), { efforts: { security: 'medium' } }, ready, read),
+    ).rejects.toBeInstanceOf(ActionRefused)
+    expect(await getDb().select().from(setting)).toEqual([])
+  })
+
+  it('takes the highest effort as it is, without storing a choice for it', async () => {
+    await saveChosen(getDb(), { efforts: { security: 'max' } }, ready, read)
+    const settings = await agentSettings(getDb(), ready, read)
+    expect(settings.chosenEffort.security).toBeNull()
+    expect(settings.effective.security).toBe(settings.effective.builder)
+  })
+
+  it('is never told an effort from an environment, so it cannot be lowered there either', () => {
+    expect(
+      optionsFor(
+        { FACTORY_EFFORT_SECURITY: 'claude-code:low', FACTORY_EFFORT_BUILDER: 'claude-code:low' },
+        'security',
+        'claude-code',
+      ),
+    ).toEqual({})
+  })
+})
+
 describe('the model and the effort, kept in the panel', () => {
   it('saves a model and an effort for a role, and a run is told them for that agent', async () => {
     await saveChosen(
@@ -187,7 +234,12 @@ describe('the model and the effort, kept in the panel', () => {
     await expect(
       saveChosen(getDb(), { builder: 'codex', models: { builder: 'a;b' } }, ready, read),
     ).rejects.toThrow(/not a plain model name/)
-    expect(await loadChosen(getDb())).toEqual({ builder: null, planner: null, reviewer: null })
+    expect(await loadChosen(getDb())).toEqual({
+      builder: null,
+      planner: null,
+      reviewer: null,
+      security: null,
+    })
   })
 
   it('refuses an effort the model does not take, and takes any level of the agent when no model is chosen', async () => {
@@ -272,7 +324,12 @@ describe('the model and the effort, kept in the panel', () => {
       'opus',
       'fable',
     ])
-    expect(settings.chosenModel).toEqual({ builder: 'gpt-6-luna', planner: null, reviewer: null })
+    expect(settings.chosenModel).toEqual({
+      builder: 'gpt-6-luna',
+      planner: null,
+      reviewer: null,
+      security: null,
+    })
   })
 
   it('shows the catalog with the model in use', async () => {
