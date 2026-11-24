@@ -1,7 +1,9 @@
+import { personaPreamble, type PersonaRole } from '../agents/prompts/personas'
 import { knowledgeRules, LEARNED_RULE } from '../knowledge/prompt'
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import { streams, type EgressRule, type ExecuteResult } from './sandbox'
+import type { CodingRole } from './agent-plugin'
 import type { CheckSpec } from './evidence'
 import type { AgentEvent } from './transcript'
 
@@ -26,6 +28,8 @@ export type HarnessInput = {
   timeoutMs: number
   /** Called with each step of the agent while it works, when the sandbox can stream its output. */
   onEvent?: (event: AgentEvent) => void
+  /** The role this pass plays: its persona's plugin is loaded when the agent supports one. */
+  role?: CodingRole
 }
 
 const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
@@ -164,30 +168,34 @@ export function installFailureRule(
   return `- The factory ran \`${failed.command}\` before your pass to install the project, and it ${failed.timedOut ? 'ran out of time' : 'failed'}. Dependencies may be missing, so tests, the typecheck and the linter may not run here. Its last lines:\n\`\`\`\n${tail}\n\`\`\`\n`
 }
 
-export function buildPrompt(input: {
-  repo: string
-  issueNumber: number
-  title: string
-  body: string
-  branch: string
-  /** What a person asked to change in an earlier pull request from this branch. */
-  feedback?: string
-  /** Who sent the work back: a person (the default) or the repository's required checks. */
-  feedbackFrom?: 'person' | 'checks'
-  /** True when the branch the feedback was about is gone: the work starts from the integration branch. */
-  startsOver?: boolean
-  /** False when nobody is there to answer: the agent decides, and says what it assumed. */
-  askQuestions?: boolean
-  /** Where the knowledge base is in the sandbox, when the factory delivered one. */
-  knowledgeDir?: string
-  /** What the owner answered before any run started, when the scheduler found the issue not ready. */
-  clarifications?: Clarification[]
-  /** What the factory runs on the commit. */
-  checks?: CheckSpec[]
-  /** The install the factory ran before the pass, when it failed. */
-  installFailed?: Parameters<typeof installFailureRule>[0]
-}): string {
-  return `You are working on the repository ${input.repo}, on the branch ${input.branch}.
+export function buildPrompt(
+  input: {
+    repo: string
+    issueNumber: number
+    title: string
+    body: string
+    branch: string
+    /** What a person asked to change in an earlier pull request from this branch. */
+    feedback?: string
+    /** Who sent the work back: a person (the default) or the repository's required checks. */
+    feedbackFrom?: 'person' | 'checks'
+    /** True when the branch the feedback was about is gone: the work starts from the integration branch. */
+    startsOver?: boolean
+    /** False when nobody is there to answer: the agent decides, and says what it assumed. */
+    askQuestions?: boolean
+    /** Where the knowledge base is in the sandbox, when the factory delivered one. */
+    knowledgeDir?: string
+    /** What the owner answered before any run started, when the scheduler found the issue not ready. */
+    clarifications?: Clarification[]
+    /** What the factory runs on the commit. */
+    checks?: CheckSpec[]
+    /** The install the factory ran before the pass, when it failed. */
+    installFailed?: Parameters<typeof installFailureRule>[0]
+  },
+  role: PersonaRole = 'builder',
+): string {
+  return `${personaPreamble(role)}
+You are working on the repository ${input.repo}, on the branch ${input.branch}.
 
 Implement this issue.
 

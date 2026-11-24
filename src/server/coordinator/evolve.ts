@@ -1,3 +1,4 @@
+import { FACTORY_SIGNATURE } from '../../shared/personas'
 import type { CoordinatorMode } from './mode'
 
 /**
@@ -199,6 +200,8 @@ export function issueForSignature(g: SignatureGroup): { title: string; body: str
     '1. Open each task above in the panel. Its `failed` or `handoff` event carries the reason quoted here.',
     '2. Pass each reason to `signatureOf` in `src/server/coordinator/evolve.ts`: every one gives the signature above.',
     `3. Fix the cause, and the signature stops showing up on new tasks. The coordinator opens no other issue for it, and ${EVOLVE.windowDays} days after this one closes it counts the signature against the ${EVOLVE.windowDays} days before this issue, commenting here when it still shows up.`,
+    '',
+    FACTORY_SIGNATURE,
   ].join('\n')
   const title = `coordinator: the same failure ended ${g.tasks} tasks in ${EVOLVE.windowDays} days: ${g.signature}`
   return { title: hyphens(title).slice(0, EVOLVE.titleLength), body: hyphens(body) }

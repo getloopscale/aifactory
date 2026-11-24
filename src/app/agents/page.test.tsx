@@ -12,6 +12,7 @@ import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AgentEntry, AgentsView } from '../../shared/panel'
+import { PERSONAS } from '../../shared/personas'
 
 vi.mock('theokit/client', () => ({ Metadata: () => null }))
 
@@ -105,6 +106,7 @@ const view: AgentsView = {
   agents: [
     entry({
       id: 'builder',
+      persona: PERSONAS.builder,
       group: 'factory',
       name: 'Construtor',
       role: 'Escreve o código',
@@ -207,6 +209,14 @@ describe('the agents page', () => {
     expect(screen.getByRole('button', { name: /Construtor/ }).getAttribute('aria-current')).toBe(
       'true',
     )
+  })
+
+  it('shows the persona card of an agent that has one', async () => {
+    show()
+    const article = await screen.findByRole('article', { name: 'Construtor' })
+    const card = within(article).getByRole('region', { name: ptBR.agents.persona })
+    expect(within(card).getByText(/Forge/)).toBeDefined()
+    expect(within(card).getByText(ptBR.agents.never)).toBeDefined()
   })
 
   it('says what the agent is, where it runs, what runs it and where its instructions are written', async () => {

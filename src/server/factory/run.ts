@@ -967,6 +967,7 @@ export class Run {
           cwd: repoDir,
           timeoutMs,
           prompt,
+          role: 'builder',
         }),
       )
     }
@@ -980,14 +981,20 @@ export class Run {
     if (this.plan && this.plannedBy) {
       const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
       return this.settle(builder, 'builder', 1, (onEvent) =>
-        builder.run(backend, { onEvent, cwd: repoDir, timeoutMs, prompt }),
+        builder.run(backend, { onEvent, cwd: repoDir, timeoutMs, prompt, role: 'builder' }),
       )
     }
     if (this.planned && this.sessionId) {
       const prompt = implementPlanPrompt(this.planned)
       const sessionId = this.sessionId
       return this.settle(builder, 'builder', 1, (onEvent) =>
-        builder.resume!(backend, sessionId, { onEvent, cwd: repoDir, timeoutMs, prompt }),
+        builder.resume!(backend, sessionId, {
+          onEvent,
+          cwd: repoDir,
+          timeoutMs,
+          prompt,
+          role: 'builder',
+        }),
       )
     }
     return this.settle(builder, 'builder', 1, (onEvent) =>
@@ -996,6 +1003,7 @@ export class Run {
         cwd: repoDir,
         timeoutMs,
         prompt: buildPrompt(this.buildInput()),
+        role: 'builder',
       }),
     )
   }
@@ -1069,7 +1077,13 @@ export class Run {
     await enterRunStage(deps.db, taskId, 'plan', agentFacts(planner))
     const prompt = changePlanPrompt(this.buildInput())
     const first = await this.settle(planner, 'planner', 1, (onEvent) =>
-      planner.run(this.backend, { onEvent, cwd: this.repoDir, timeoutMs, prompt }),
+      planner.run(this.backend, {
+        onEvent,
+        cwd: this.repoDir,
+        timeoutMs,
+        prompt,
+        role: 'planner',
+      }),
     )
     if (!first.ok) throw new StageFailure(`the agent did not finish the plan: ${first.summary}`)
     // The planner's session is the builder's only when they are the same agent.
@@ -1103,6 +1117,7 @@ export class Run {
         cwd: this.repoDir,
         timeoutMs,
         prompt: planAgainPrompt(),
+        role: 'planner',
       }),
     )
     if (planner.name === this.builder.name) this.sessionId = again.sessionId ?? this.sessionId
@@ -1400,6 +1415,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs,
+        role: 'builder',
         prompt: notResolvedPrompt({
           summary: outcome.summary,
           findings: outcome.findings,
@@ -1431,6 +1447,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+        role: 'reviewer',
         prompt: resolvedPrompt({
           repo: row.repository,
           issueNumber: row.issueNumber,
@@ -1593,6 +1610,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs,
+        role: 'builder',
         prompt: reworkPrompt({
           findings,
           failedChecks: failed,
@@ -1734,6 +1752,7 @@ export class Run {
         onEvent,
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+        role: 'reviewer',
         prompt: reviewPrompt({
           repo: row.repository,
           issueNumber: row.issueNumber,
