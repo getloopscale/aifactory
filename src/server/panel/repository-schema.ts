@@ -18,6 +18,7 @@ export const repositoryPatchSchema = z.object({
   integrationChecks: checksSchema.optional(),
   fixes: z.array(z.string().max(600)).max(20).optional(),
   egress: z.array(z.string().max(253)).max(50).optional(),
+  riskPatterns: z.array(z.string().max(200)).max(50).optional(),
   baseBranch: z.string().max(100).nullable().optional(),
   releaseBranch: z.string().max(100).nullable().optional(),
   askQuestions: z.boolean().optional(),

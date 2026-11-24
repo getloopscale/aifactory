@@ -13,7 +13,7 @@ import {
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
 
-import { cutPatch, diffFacts, reviewBase, samePatch } from './diff-facts'
+import { changedLinesOf, cutPatch, diffFacts, reviewBase, samePatch } from './diff-facts'
 import { FakeBackend } from './fake-sandbox'
 import { changedSinceCommand } from './review'
 
@@ -36,7 +36,13 @@ describe('diffFacts', () => {
   it('finds nothing in a branch behind the integration branch that changed only what it planned', async () => {
     const facts = await factsOf(divergedRepository({ behind: true }))
 
-    expect(facts).toEqual({ guards: [], unplanned: [], required: [], touched: ['src/truncate.js'] })
+    expect(facts).toEqual({
+      guards: [],
+      unplanned: [],
+      required: [],
+      touched: ['src/truncate.js'],
+      changedLines: 1,
+    })
   })
 
   it('blocks a change that commits an AWS key, with its file and line', async () => {
@@ -109,6 +115,7 @@ describe('diffFacts', () => {
       required: [],
       // Only what the branch itself changed, not what the integration branch did after it.
       touched: ['src/extra.js', 'src/shared.test.js', 'src/truncate.js'],
+      changedLines: 3,
     })
   })
 
@@ -469,5 +476,14 @@ describe('cutPatch', () => {
     expect(cutPatch(file('big.ts', 500) + file('c.ts', 5), 100)).toContain(
       'big.ts (cut inside), c.ts',
     )
+  })
+})
+
+describe('changedLinesOf', () => {
+  it('adds the added and removed lines of every text file and counts a binary file as none', () => {
+    expect(changedLinesOf('3\t1\ta.ts\n-\t-\timage.png\n0\t2\tb.ts\n')).toBe(6)
+  })
+  it('counts nothing for no output', () => {
+    expect(changedLinesOf('')).toBe(0)
   })
 })

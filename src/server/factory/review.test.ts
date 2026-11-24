@@ -87,6 +87,24 @@ describe('parseVerdict', () => {
 })
 
 describe('prompts', () => {
+  it('names the risk level and its reasons to the reviewer, when there is one', () => {
+    const input = {
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+    }
+    const prompt = reviewPrompt({
+      ...input,
+      risk: { level: 'high', reasons: ['drizzle/0001.sql matches the pattern drizzle/**'] },
+    })
+    expect(prompt).toContain('# Risk the factory recorded')
+    expect(prompt).toContain('high (drizzle/0001.sql matches the pattern drizzle/**)')
+    expect(reviewPrompt(input)).not.toContain('Risk the factory recorded')
+  })
+
   it('tells the reviewer the base commit and not to write', () => {
     const prompt = reviewPrompt({
       repo: 'o/r',

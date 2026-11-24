@@ -23,6 +23,19 @@ export type DiffFacts = {
   required: RequiredByCheck[]
   /** Every path the change touches, the old path of a rename included. */
   touched: string[]
+  /** Changed text lines, added plus removed, renames followed; a binary file counts none (#470). */
+  changedLines: number
+}
+
+/** The text lines `git diff --numstat` counts: a binary file prints `-` for both and counts none. */
+export function changedLinesOf(numstat: string): number {
+  let total = 0
+  for (const line of numstat.split('\n')) {
+    const [added, removed] = line.split('\t')
+    const sum = Number(added) + Number(removed)
+    if (/^\d+$/.test(added ?? '') && /^\d+$/.test(removed ?? '')) total += sum
+  }
+  return total
 }
 
 /**
@@ -82,7 +95,16 @@ export async function diffFacts(
     .split('\n')
     .flatMap((line) => line.split('\t').slice(1))
     .filter((path) => path !== '')
-  return { guards, unplanned: withoutRequired(unplanned, required), required, touched }
+  // A change that cannot be counted counts none: the size is one signal among several and decides nothing alone.
+  const counted = await backend.execute(`${git} diff --numstat --no-color -M ${base} HEAD`)
+  const changedLines = counted.exitCode === 0 ? changedLinesOf(counted.stdout) : 0
+  return {
+    guards,
+    unplanned: withoutRequired(unplanned, required),
+    required,
+    touched,
+    changedLines,
+  }
 }
 
 /**

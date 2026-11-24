@@ -163,6 +163,25 @@ export const review = pgTable('review', {
 })
 
 /**
+ * The risk of the change as it stood at one reviewed commit (#470): the level and why. One row per task and
+ * commit, so a rework that removes the risky file records a new level for its new commit. Only recorded.
+ */
+export const taskRisk = pgTable(
+  'task_risk',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    sha: text('sha').notNull(),
+    level: text('level', { enum: ['low', 'medium', 'high'] }).notNull(),
+    reasons: jsonb('reasons').$type<string[]>().notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [uniqueIndex('task_risk_one_per_commit').on(table.taskId, table.sha)],
+)
+
+/**
  * The plan the builder wrote before it changed anything (`ChangePlan`): the files, the order, the risks,
  * the proof and what it left out. The reviewer measures the diff against the latest one of the task, and a
  * run that continues the task (an answer, a person's changes) keeps it instead of planning again.
@@ -568,6 +587,8 @@ export const repository = pgTable('repository', {
   /** The last proof of proposed checks, running or finished. */
   checksProof: jsonb('checks_proof').$type<StoredProof>(),
   /** The last completed proof of the checks on each sandbox provider; no entry means never tried there. */
+  /** Path globs whose change is `high` risk; empty means the defaults (`DEFAULT_RISK_PATTERNS`). */
+  riskPatterns: jsonb('risk_patterns').$type<string[]>().notNull().default([]),
   checksProofByProvider: jsonb('checks_proof_by_provider')
     .$type<ProviderProofs>()
     .notNull()

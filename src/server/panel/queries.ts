@@ -16,6 +16,7 @@ import {
   stageEvent,
   task,
   watch,
+  taskRisk,
 } from '../db/schema'
 import {
   DEFAULT_LEAD_TIME,
@@ -186,6 +187,11 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     rows.filter((r) => r.stage === 'intake').map((r) => r.id),
   )
   const steps = await stepEvents(db, ids)
+  const risks = await db
+    .select()
+    .from(taskRisk)
+    .where(inArray(taskRisk.taskId, ids))
+    .orderBy(asc(taskRisk.id))
   const limits = await leadTimeLimits(db, rows)
   const now = new Date()
   return rows.map((r) => {
@@ -214,6 +220,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
       waitingOnBase: holds.get(r.id) ?? null,
+      risk: riskOfCard(risks, r),
       returned: returns.get(r.id) ?? null,
       queue: r.stage === 'intake' ? (queues.get(r.id) ?? EMPTY_QUEUE) : null,
       resolved: r.resolvedSha !== null,
@@ -772,4 +779,14 @@ export async function health(db: Database, now = new Date()): Promise<HealthRepo
       lastSeenAt: iso(f.lastSeenAt),
     })),
   }
+}
+
+/** The risk recorded for the commit the card is at, or the latest one recorded for the task; none for work never classified. */
+export function riskOfCard(
+  risks: { taskId: number; sha: string; level: 'low' | 'medium' | 'high'; reasons: string[] }[],
+  r: { id: number; headSha: string | null },
+): TaskCard['risk'] {
+  const own = risks.filter((k) => k.taskId === r.id)
+  const found = own.find((k) => k.sha === r.headSha) ?? own[own.length - 1]
+  return found ? { level: found.level, reasons: found.reasons } : null
 }

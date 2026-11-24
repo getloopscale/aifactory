@@ -94,6 +94,7 @@ function Settings({
   const [checks, setChecks] = useState(formatChecks(repo.checks))
   const [integration, setIntegration] = useState(formatChecks(repo.integrationChecks))
   const [fixes, setFixes] = useState(formatFixes(repo.fixes))
+  const [riskPatterns, setRiskPatterns] = useState(formatFixes(repo.riskPatterns))
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
@@ -133,6 +134,7 @@ function Settings({
         integrationChecks: parseChecks(integration),
         fixes: parseFixes(fixes),
         egress: parseDomains(domains),
+        riskPatterns: parseFixes(riskPatterns),
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,
         askQuestions: ask,
@@ -184,6 +186,16 @@ function Settings({
         rows={2}
         placeholder={s.fixesPlaceholder}
         context={s.fixesAssistContext}
+      />
+      <CommandsBox
+        repository={repo.fullName}
+        label={s.riskPatterns}
+        value={riskPatterns}
+        onChange={setRiskPatterns}
+        rows={2}
+        placeholder={s.riskPatternsPlaceholder}
+        context={s.riskPatternsAssistContext}
+        hint={s.riskPatternsHelp}
       />
       <label className="block">
         <span className="text-foreground">{s.domains}</span>

@@ -6,6 +6,12 @@ const agents = ['claude-code', 'codex']
 const problem = (patch: Parameters<typeof patchProblem>[0]) => patchProblem(patch, agents)
 
 describe('patchProblem', () => {
+  it('accepts a list of risk patterns, an empty one, and refuses a path outside the repository', () => {
+    expect(problem({ riskPatterns: ['src/billing/**'] })).toBeUndefined()
+    expect(problem({ riskPatterns: [] })).toBeUndefined()
+    expect(problem({ riskPatterns: ['../etc/**'] })).toContain('not a path pattern')
+  })
+
   it('has nothing to say about an empty patch or a good one', () => {
     expect(problem({})).toBeUndefined()
     expect(

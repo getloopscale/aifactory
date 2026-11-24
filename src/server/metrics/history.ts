@@ -15,6 +15,8 @@ export type TaskHistory = {
   evidence: { sha: string; passed: boolean; at: Date }[]
   /** The default branch went red after a release of this task. */
   releaseWentRed: boolean
+  /** The risk level recorded for each commit of the task (#470); absent or empty for work classified before it existed. */
+  risks?: { sha: string; level: 'low' | 'medium' | 'high' }[]
 }
 
 /**
@@ -112,6 +114,9 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     const cameBack = next !== undefined && !isFixedBaseNote(next.events[0]?.detail?.note)
     const failed = cameBack || after.some((e) => CAME_BACK.includes(e.stage)) || h.releaseWentRed
     values.change_failure = failed ? 1 : 0
+    // The same observation, in the series of the level recorded for the delivered commit; none when it has none.
+    const level = h.risks?.find((r) => r.sha === done.detail?.sha)?.level
+    if (level) values[`change_failure_${level}`] = failed ? 1 : 0
     const cause = failed
       ? causeOfReturn(done, next, h.releaseWentRed && next === undefined)
       : undefined

@@ -399,6 +399,8 @@ export type TaskCard = {
    * which checks, on which branch, and since when. Null when nothing holds it.
    */
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
+  /** The risk the factory recorded for the commit the card is at, and why; null when none was recorded (#470). Only a record. */
+  risk: { level: 'low' | 'medium' | 'high'; reasons: string[] } | null
   /**
    * The task went back from `done` to an earlier stage and has not reached `done` again: why, when and the note
    * the run was given. Null for a task that never left `done`, or that reached it again.
@@ -639,6 +641,8 @@ export type RepositoryView = {
   releaseMode: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; null means the factory's default. */
   runLimitMinutes: number | null
+  /** Path globs whose change is `high` risk; empty means the factory's defaults. */
+  riskPatterns: string[]
   /** From this many minutes of lead time a task is at risk; null means the factory's default. */
   leadTimeAtRiskMinutes: number | null
   /** From this many minutes of lead time a task is overdue; null means the factory's default. */

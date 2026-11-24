@@ -595,3 +595,32 @@ describe('personDecisions', () => {
     expect(personDecisions(rows)).toEqual([])
   })
 })
+
+describe('change failure by risk level (#470)', () => {
+  const level = (h: TaskHistory, l: string) => value(h, `change_failure_${l}`)
+
+  it('puts a delivery in the series of the level recorded for its delivered commit', () => {
+    const high = { ...delivered, risks: [{ sha: 'a1', level: 'high' as const }] }
+    expect(level(high, 'high')).toEqual([0])
+    expect(level(high, 'low')).toEqual([])
+    expect(level(high, 'medium')).toEqual([])
+  })
+
+  it('counts a delivery that came back as 1 in its level', () => {
+    const back = history({
+      ...delivered,
+      events: [...delivered.events, ev(40, 'failed', {})],
+      risks: [{ sha: 'a1', level: 'medium' }],
+    })
+    expect(level(back, 'medium')).toEqual([1])
+  })
+
+  it('ignores the level of another commit and leaves unclassified work out of every series', () => {
+    const other = { ...delivered, risks: [{ sha: 'zz', level: 'high' as const }] }
+    for (const l of ['low', 'medium', 'high']) {
+      expect(level(other, l)).toEqual([])
+      expect(level(delivered, l)).toEqual([])
+    }
+    expect(value(delivered, 'change_failure')).toEqual([0])
+  })
+})

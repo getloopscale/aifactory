@@ -11,6 +11,7 @@ import {
   review as reviewTable,
   stageEvent,
   task,
+  taskRisk as taskRiskTable,
 } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
@@ -27,6 +28,7 @@ import {
   withConflictFiles,
 } from './merge-base'
 import { evidenceOfNote } from './ci-wait'
+import { classifyRisk, type Risk } from './risk'
 import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
 import { prepareDeclaredPackageManager } from './package-manager'
@@ -55,6 +57,7 @@ import { BlockedByOpenIssues, blockersNamed, unavailableNamed } from './blockers
 import { BLOCKED_NO_CHANGE, NO_CHANGE, NO_PULL_REQUEST } from './failure-reasons'
 import {
   diffFacts,
+  type DiffFacts,
   reviewBase,
   samePatch,
   securityDiff,
@@ -255,6 +258,9 @@ export class Run {
   private planned: { discarded: boolean } | undefined
   /** Every path the change under review touches, as the last review read it. */
   private touched: string[] = []
+  /** The risk of the change at each commit that was reviewed or approved (#470); only recorded, nothing reads it to decide. */
+  private readonly risks = new Map<string, Risk>()
+  private latestRisk: Risk | undefined
   /** Whether the checks the run failed fail on the base too, asking each check at most once (#219). */
   private readonly baseProbe = new BaseProbe()
   /** The last review of this run that asked for changes: the next round starts from its findings. */
@@ -1783,6 +1789,14 @@ export class Run {
       .orderBy(desc(reviewTable.id))
       .limit(1)
     if (!last) return
+    const risk = this.risks.get(approved)
+    if (risk) {
+      await deps.db
+        .insert(taskRiskTable)
+        .values({ taskId, sha: merge, level: risk.level, reasons: risk.reasons })
+        .onConflictDoNothing()
+      this.risks.set(merge, risk)
+    }
     await deps.db.insert(reviewTable).values({
       taskId,
       round: last.round,
@@ -1984,6 +1998,35 @@ export class Run {
       .orderBy(asc(evidence.id))
   }
 
+  /**
+   * The risk of the change at `sha`, from the facts of its diff, stored for that commit (#470). Only a record:
+   * the run does the same whatever the level is. A rework that changes the diff stores a new level for its commit.
+   */
+  private async recordRisk(sha: string, facts: DiffFacts): Promise<Risk> {
+    const risk = classifyRisk({
+      touched: facts.touched,
+      changedLines: facts.changedLines,
+      labels: this.c.issue.labels,
+      unplanned: facts.unplanned,
+      patterns: this.c.repo.riskPatterns,
+    })
+    await this.c.deps.db
+      .insert(taskRiskTable)
+      .values({ taskId: this.c.taskId, sha, level: risk.level, reasons: risk.reasons })
+      .onConflictDoUpdate({
+        target: [taskRiskTable.taskId, taskRiskTable.sha],
+        set: { level: risk.level, reasons: risk.reasons },
+      })
+    this.risks.set(sha, risk)
+    this.latestRisk = risk
+    return risk
+  }
+
+  /** The risk recorded for `sha`; a merge commit of the integration branch carries that of the commit it merged. */
+  private riskAt(sha: string): Risk | undefined {
+    return this.risks.get(sha) ?? this.latestRisk
+  }
+
   /** Has the reviewer read the commit, adds the facts about the diff, and records the outcome. */
   private async review(sha: string, attempt: number): Promise<ReviewVerdict> {
     const { deps, taskId, row, issue, branch, state } = this.c
@@ -1999,12 +2042,14 @@ export class Run {
       integration: integrationBranch(this.c.repo),
     })
     this.reviewedFrom = base
-    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
+    const facts = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,
       issue,
       checkRuns: await this.checkRuns(),
     })
+    const { guards, unplanned, required, touched } = facts
+    const risk = await this.recordRisk(sha, facts)
     const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent) =>
       this.reviewer.run(this.backend, {
         onEvent,
@@ -2032,6 +2077,7 @@ export class Run {
               ...(this.earlier ? { earlier: this.earlier } : {}),
               builderSummary: this.reviewAnswer ?? this.summary,
               ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
+              risk,
             }),
       }),
     )
@@ -2108,13 +2154,15 @@ export class Run {
       baseSha: this.baseSha,
       integration,
     })
-    const { guards, touched } = await diffFacts(this.backend, this.repoDir, {
+    const facts = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,
       issue: this.c.issue,
     })
+    const { guards, touched } = facts
     if (guards.some((g) => g.severity !== 'minor')) return undefined
     this.touched = touched
+    await this.recordRisk(sha, facts)
     this.c.state.current = 'review'
     await enterRunStage(deps.db, taskId, 'review', { sha, attempt, approvalOf: last.sha })
     const kept: ReviewVerdict = {
@@ -2198,6 +2246,7 @@ export class Run {
         review: { reviewer: this.reviewer.name, attempt, outcome },
         plan: this.renderedPlan,
         repository: row.repository,
+        risk: this.riskAt(sha),
       }),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
@@ -2420,6 +2469,7 @@ export class Run {
         handoff: reason,
         plan: this.renderedPlan,
         repository: row.repository,
+        risk: this.riskAt(sha),
       }),
     })
     await api.commentOnIssue(

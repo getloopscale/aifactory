@@ -280,6 +280,13 @@ export function Card({ task }: { task: TaskCard }) {
             {t.board.waitingOnBase(task.waitingOnBase.checks.join(', '), task.waitingOnBase.branch)}
           </div>
         ) : null}
+        {task.risk ? (
+          <div
+            className={`mt-1 text-xs ${task.risk.level === 'high' ? 'font-medium text-destructive' : 'text-muted-foreground'}`}
+          >
+            {t.board.risk(task.risk.level, task.risk.reasons.join('; '))}
+          </div>
+        ) : null}
         {task.queue ? <QueueLines queue={task.queue} /> : null}
         {task.retryAt ? (
           <div className="mt-1 text-xs text-muted-foreground">

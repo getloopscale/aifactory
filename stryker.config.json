@@ -9,6 +9,7 @@
     "src/server/ingest/decide.ts",
     "src/server/line/decide.ts",
     "src/server/factory/evidence.ts",
+    "src/server/factory/risk.ts",
     "src/server/factory/release.ts",
     "src/server/factory/review.ts:64-177",
     "src/server/factory/required-files.ts",

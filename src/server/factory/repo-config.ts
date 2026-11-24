@@ -28,6 +28,8 @@ export type RepoConfig = {
   releaseMode?: ReleaseMode
   /** How long a run may last, in ms; absent means the factory's default. */
   runLimitMs?: number
+  /** Path globs whose change is `high` risk; absent means the defaults (#470). */
+  riskPatterns?: string[]
 }
 
 export const NO_CONFIG: RepoConfig = { egress: [] }
@@ -70,6 +72,7 @@ export async function loadRepoConfig(db: Database, fullName: string): Promise<Re
     reviewer: row.reviewer ?? undefined,
     releaseMode: row.releaseMode ?? undefined,
     runLimitMs: row.runLimitMinutes ? row.runLimitMinutes * 60_000 : undefined,
+    riskPatterns: row.riskPatterns.length > 0 ? row.riskPatterns : undefined,
   }
 }
 

@@ -124,3 +124,23 @@ describe('versions and notes, at their edges', () => {
     expect(body).not.toContain('Z')
   })
 })
+
+describe('preReleaseNotes risk', () => {
+  const notes = {
+    issueNumber: 7,
+    title: 'T',
+    sha: 'abcdef1234567890',
+    pullRequestUrl: undefined,
+    checks: [],
+    review: undefined,
+    attempts: 1,
+    costUsd: 0,
+    agentSummary: '',
+  }
+
+  it('says the risk and why, and nothing for work with none recorded', () => {
+    const { body } = preReleaseNotes({ ...notes, risk: { level: 'medium', reasons: ['a', 'b'] } })
+    expect(body).toContain('Risk: medium (a; b)')
+    expect(preReleaseNotes(notes).body).not.toContain('Risk:')
+  })
+})

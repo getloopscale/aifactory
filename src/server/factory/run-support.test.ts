@@ -161,6 +161,23 @@ describe('pullRequestBody', () => {
       },
     })
 
+  it('shows the risk and why, and nothing for work with none recorded', () => {
+    const withRisk = pullRequestBody({
+      issueNumber: 1,
+      sha: 'abc1234def',
+      rows: [],
+      agentSummary: '',
+      review: {
+        reviewer: 'codex',
+        attempt: 1,
+        outcome: { verdict: 'approve', summary: 'Fine.', findings: [] },
+      },
+      risk: { level: 'high', reasons: ['Dockerfile matches the pattern Dockerfile'] },
+    })
+    expect(withRisk).toContain('Risk: high (Dockerfile matches the pattern Dockerfile)')
+    expect(body()).not.toContain('Risk:')
+  })
+
   it('ends with the neutral signature', () => {
     expect(body().trimEnd().endsWith(FACTORY_SIGNATURE)).toBe(true)
   })

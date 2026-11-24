@@ -15,6 +15,9 @@ export const METRIC_NAMES = [
   'change_failure_merge_conflict',
   'change_failure_release_red',
   'change_failure_other',
+  'change_failure_low',
+  'change_failure_medium',
+  'change_failure_high',
   'hours_to_release',
   'handoff_share',
   'person_decisions_per_delivery',
@@ -93,6 +96,25 @@ export const METRICS: Record<MetricName, MetricSpec> = {
   },
   change_failure_other: {
     label: 'Delivered work that came back: another cause',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  // `change_failure` split by the risk level recorded for the delivered commit (#470); work delivered before it was recorded is in none.
+  change_failure_low: {
+    label: 'Delivered work that came back: low risk',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  change_failure_medium: {
+    label: 'Delivered work that came back: medium risk',
+    unit: 'share',
+    worse: 'up',
+    minSamples: 3,
+  },
+  change_failure_high: {
+    label: 'Delivered work that came back: high risk',
     unit: 'share',
     worse: 'up',
     minSamples: 3,

@@ -9,6 +9,7 @@ import {
   review,
   stageEvent,
   task,
+  taskRisk,
   watch,
 } from '../db/schema'
 
@@ -70,7 +71,7 @@ export async function loadHistories(db: Database, since: Date): Promise<TaskHist
     .where(gte(stageEvent.at, since))
   const ids = active.map((r) => r.id)
   if (ids.length === 0) return []
-  const [tasks, events, reviews, checks, red] = await Promise.all([
+  const [tasks, events, reviews, checks, red, risks] = await Promise.all([
     db
       .select({ id: task.id, repository: task.repository, createdAt: task.createdAt })
       .from(task)
@@ -103,6 +104,10 @@ export async function loadHistories(db: Database, since: Date): Promise<TaskHist
       .selectDistinct({ taskId: watch.taskId })
       .from(watch)
       .where(and(inArray(watch.taskId, ids), eq(watch.status, 'red'))),
+    db
+      .select({ taskId: taskRisk.taskId, sha: taskRisk.sha, level: taskRisk.level })
+      .from(taskRisk)
+      .where(inArray(taskRisk.taskId, ids)),
   ])
   const redIds = new Set(red.map((r) => r.taskId))
   return tasks.map((t) => ({
@@ -118,6 +123,7 @@ export async function loadHistories(db: Database, since: Date): Promise<TaskHist
     reviews: reviews.filter((r) => r.taskId === t.id),
     evidence: checks.filter((c) => c.taskId === t.id),
     releaseWentRed: redIds.has(t.id),
+    risks: risks.filter((r) => r.taskId === t.id),
   }))
 }
 

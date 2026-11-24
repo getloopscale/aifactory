@@ -152,6 +152,7 @@ export const ptBR: Copy = {
     mainRedAfterRelease: 'a main quebrou depois da versão',
     mainRed: 'main quebrada',
     waitingOnBase: (checks: string, branch: string) => `espera ${checks} passar em ${branch}`,
+    risk: (level: string, reasons: string) => `Risco ${level}: ${reasons}`,
     returned: {
       base_conflict: 'Voltou: conflito com a base',
       ci_red: 'Voltou: a CI falhou',
@@ -731,6 +732,12 @@ export const ptBR: Copy = {
       fixesAssistContext:
         'Só os comandos de correção: um comando de shell por linha que reescreve arquivos e não decide nada (um formatador, um autofix de lint), sem nome na frente. Não são verificações.',
       fixesPlaceholder: 'Vazio não roda nenhuma. Por exemplo: pnpm prettier --write .',
+      riskPatterns: 'Caminhos cuja mudança é de risco alto',
+      riskPatternsAssistContext:
+        'Somente padrões de caminho: um glob por linha, a partir da raiz do repositório (** atravessa pastas, * fica em uma), para os arquivos cuja mudança é arriscada: migrações, autenticação, pagamentos, a API pública, infraestrutura. Nenhum comando.',
+      riskPatternsPlaceholder: 'Vazio usa os padrões da fábrica. Por exemplo: src/billing/**',
+      riskPatternsHelp:
+        'A fábrica registra um nível de risco para cada mudança e o mostra no card e no pull request. Isso não muda nada do que ela faz. Uma lista aqui substitui os padrões.',
       domains: 'Domínios extras que o sandbox pode acessar',
       domainsPlaceholder:
         'GitHub, o agente e o registro do npm ficam sempre abertos. Para Python: pypi.org, files.pythonhosted.org',

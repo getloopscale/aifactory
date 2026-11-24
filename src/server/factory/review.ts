@@ -3,6 +3,7 @@ import { knowledgeRules } from '../knowledge/prompt'
 import type { CheckSpec } from './evidence'
 import { checksRule, forbiddenPathsRule, FORBIDDEN_PATHS, isForbiddenPath } from './harness'
 import type { RequiredByCheck } from './required-files'
+import { renderRisk, type Risk } from './risk'
 
 export type Severity = 'blocker' | 'major' | 'minor'
 
@@ -84,6 +85,8 @@ export function reviewPrompt(input: {
   required?: RequiredByCheck[]
   /** The review this one follows in the same run, when it asked for changes. */
   earlier?: EarlierReview
+  /** The risk the factory recorded for this commit and why; the review reads a `high` change knowing why (#470). */
+  risk?: Risk
 }): string {
   const required = input.required ?? []
   return `${personaPreamble('reviewer')}
@@ -92,7 +95,7 @@ You are an independent code reviewer for the repository ${input.repo}. Another a
 # ${input.title} (#${input.issueNumber})
 
 ${input.body || '(the issue has no description)'}
-${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
+${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}${riskSection(input.risk)}
 Review the work:
 - Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches.
 - Decide whether it does what the issue asks, no more and no less.
@@ -112,6 +115,12 @@ Finish with one JSON object on its own, and nothing after it:
 
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
 `
+}
+
+/** What the factory recorded about the risk of the change, found without a model; it decides nothing. */
+function riskSection(risk: Risk | undefined): string {
+  if (!risk) return ''
+  return `\n# Risk the factory recorded\n\n${renderRisk(risk)}\n\nThis was found from the files and size of the diff, without a model. Read a \`high\` change with the reasons in mind; the level does not change what you decide.\n`
 }
 
 /**

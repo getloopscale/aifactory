@@ -3,6 +3,7 @@ import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { FACTORY_SIGNATURE } from '../../shared/personas'
 import type { EgressRule } from './sandbox'
 import type { CheckResult } from './evidence'
+import { renderRisk, type Risk } from './risk'
 import { MAX_ATTEMPTS, renderFindings, type ReviewVerdict } from './review'
 import type { RunResult } from './run-types'
 import { quotaResumesAt } from './quota-reset'
@@ -172,6 +173,8 @@ export function pullRequestBody(input: {
   /** The plan the builder wrote before it changed anything, as markdown. */
   plan?: string
   repository?: string
+  /** The risk recorded for the reviewed commit (#470). */
+  risk?: Risk
 }): string {
   const { review } = input
   const remaining = review.outcome.findings
@@ -190,6 +193,7 @@ export function pullRequestBody(input: {
     '',
     `Independent review by ${review.reviewer}, attempt ${review.attempt}: ${review.outcome.verdict}. ${review.outcome.summary}`,
     ...(remaining.length > 0 ? ['', renderFindings(remaining)] : []),
+    ...(input.risk ? ['', `Risk: ${renderRisk(input.risk)}`] : []),
     '',
     ...plan,
     '<details><summary>What the agent said</summary>',

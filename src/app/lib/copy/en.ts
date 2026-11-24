@@ -77,6 +77,7 @@ export const en = {
     mainRedAfterRelease: 'main is red after the release',
     mainRed: 'main is red',
     waitingOnBase: (checks: string, branch: string) => `waits for ${checks} to pass on ${branch}`,
+    risk: (level: string, reasons: string) => `Risk ${level}: ${reasons}`,
     returned: {
       base_conflict: 'Returned: conflicts with base',
       ci_red: 'Returned: CI failed',
@@ -476,6 +477,12 @@ export const en = {
       fixesAssistContext:
         'Only the fix commands: one shell command per line that rewrites files and decides nothing (a formatter, a lint autofix), with no name before it. Not checks.',
       fixesPlaceholder: 'Empty runs none. For example: pnpm prettier --write .',
+      riskPatterns: 'Paths whose change is high risk',
+      riskPatternsAssistContext:
+        'Only path patterns: one glob per line, from the repository root (** crosses folders, * stays in one), for the files whose change is risky: migrations, authentication, payments, the public API, infrastructure. No commands.',
+      riskPatternsPlaceholder: 'Empty uses the factory defaults. For example: src/billing/**',
+      riskPatternsHelp:
+        'The factory records a risk level for each change and shows it on the card and the pull request. It changes nothing it does. A list here replaces the defaults.',
       domains: 'Extra domains the sandbox may reach',
       domainsPlaceholder:
         'GitHub, the agent and the npm registry are always open. For Python: pypi.org, files.pythonhosted.org',

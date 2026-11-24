@@ -5,6 +5,7 @@ import { plan, planItem, repository } from '../db/schema'
 import { ensureBranches, integrationBranch } from '../factory/branches'
 import { proofView, provenAfter, unprovenChecks } from '../factory/prove-checks'
 import { DOMAIN, validBranch } from '../factory/repo-config'
+import { parseRiskPatterns } from '../factory/risk'
 import { loadKnowledgeConfig } from '../knowledge/store'
 import type { AppRepos, GithubApp, ReachableRepository } from '../github/app'
 import type { IssuesApi } from '../github/issues-api'
@@ -72,6 +73,8 @@ export type RepositoryPatch = {
   releaseMode?: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; `null` clears it, so the factory's default applies. */
   runLimitMinutes?: number | null
+  /** Path globs whose change is `high` risk; empty restores the defaults. */
+  riskPatterns?: string[]
   /** From this many minutes of lead time a task is at risk; `null` clears it, so the default applies. */
   leadTimeAtRiskMinutes?: number | null
   /** From this many minutes of lead time a task is overdue; `null` clears it, so the default applies. */
@@ -104,6 +107,12 @@ function checksProblem(checks: NonNullable<RepositoryPatch['checks']>): string |
   return undefined
 }
 
+/** The list as it is stored: what `parseRiskPatterns` accepts, or nothing for a list it refuses. */
+function riskPatternsOf(list: string[]): string[] {
+  const parsed = parseRiskPatterns(list)
+  return parsed.ok ? parsed.patterns : []
+}
+
 /** Fixes take the limits of checks: as many, and each command as long. */
 function fixesProblem(fixes: string[]): string | undefined {
   if (fixes.length > MAX_CHECKS) return `at most ${MAX_CHECKS} fixes`
@@ -121,6 +130,10 @@ export function patchProblem(patch: RepositoryPatch, agents: string[]): string |
   const minutes = patch.runLimitMinutes
   if (minutes != null && (minutes < MIN_RUN_MINUTES || minutes > MAX_RUN_MINUTES)) {
     return `a run may last from ${MIN_RUN_MINUTES} to ${MAX_RUN_MINUTES} minutes`
+  }
+  if (patch.riskPatterns) {
+    const parsed = parseRiskPatterns(patch.riskPatterns)
+    if (!parsed.ok) return parsed.error
   }
   const leadTime = leadTimeLimitsProblem({
     atRiskMinutes: patch.leadTimeAtRiskMinutes ?? null,
@@ -186,6 +199,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
       runLimitMinutes: row?.runLimitMinutes ?? null,
+      riskPatterns: row?.riskPatterns ?? [],
       leadTimeAtRiskMinutes: row?.leadTimeAtRiskMinutes ?? null,
       leadTimeOverdueMinutes: row?.leadTimeOverdueMinutes ?? null,
       checksProvenSha: row?.checksProvenSha ?? null,
@@ -344,6 +358,9 @@ export async function saveRepository(
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),
     ...(patch.runLimitMinutes === undefined ? {} : { runLimitMinutes: patch.runLimitMinutes }),
+    ...(patch.riskPatterns === undefined
+      ? {}
+      : { riskPatterns: riskPatternsOf(patch.riskPatterns) }),
     ...(patch.leadTimeAtRiskMinutes === undefined
       ? {}
       : { leadTimeAtRiskMinutes: patch.leadTimeAtRiskMinutes }),

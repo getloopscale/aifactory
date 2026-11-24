@@ -10,6 +10,7 @@ import {
   repository,
   review,
   task,
+  taskRisk,
   watch,
 } from '../db/schema'
 import type { GithubApp } from '../github/app'
@@ -81,7 +82,12 @@ export async function createPreRelease(
       .where(eq(review.taskId, input.taskId))
       .orderBy(asc(review.id))
   ).slice(-1)
+  const [recorded] = await deps.db
+    .select({ level: taskRisk.level, reasons: taskRisk.reasons })
+    .from(taskRisk)
+    .where(and(eq(taskRisk.taskId, input.taskId), eq(taskRisk.sha, input.sha)))
   const { name, body } = preReleaseNotes({
+    ...(recorded ? { risk: recorded } : {}),
     issueNumber: input.issueNumber,
     title: input.title,
     sha: input.sha,

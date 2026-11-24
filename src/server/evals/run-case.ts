@@ -1,3 +1,4 @@
+import { classifyRisk, type Risk } from '../factory/risk'
 import { randomUUID } from 'node:crypto'
 
 import type { SandboxBackend } from '@theokit/agents/sandbox'
@@ -420,6 +421,7 @@ class CaseRun {
     sha: string,
     unplanned: string[],
     required: RequiredByCheck[],
+    risk: Risk,
   ): Promise<ReviewVerdict> {
     this.reviewRounds++
     const { c } = this
@@ -439,6 +441,7 @@ class CaseRun {
         ...(this.earlier ? { earlier: this.earlier } : {}),
         builderSummary: this.reviewAnswer ?? this.summary,
         ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
+        risk,
       }),
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
@@ -585,18 +588,26 @@ class CaseRun {
         continue
       }
       failedBefore = undefined
-      const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
+      const facts = await diffFacts(this.backend, this.repoDir, {
         baseSha: this.c.baseSha,
         plan: this.plan,
         issue: { labels: this.c.labels, title: this.c.title, body: this.c.body },
         checkRuns: this.checkRuns,
+      })
+      const { guards, unplanned, required } = facts
+      // The same risk the factory records for this commit (#470), handed to the reviewer; a case stores nothing.
+      const risk = classifyRisk({
+        touched: facts.touched,
+        changedLines: facts.changedLines,
+        labels: this.c.labels,
+        unplanned,
       })
       const blocking = guards.filter((g) => g.severity !== 'minor')
       if (blocking.length > 0 && this.c.expectSecurity === 'block') {
         const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
         for (const f of floor) if (!this.floorFound.includes(f.issue)) this.floorFound.push(f.issue)
       }
-      const read = await this.review(sha, unplanned, required)
+      const read = await this.review(sha, unplanned, required, risk)
       // Any valid verdict counts, even when the case ends later without one.
       if (read.verdict !== 'invalid') this.verdictSeen = true
       // A file outside the plan is on record; whether it was needed is the reviewer's call.
@@ -642,7 +653,7 @@ class CaseRun {
       // A rework that changed nothing has the reviewer judge the builder's reasons on the same commit, once, as
       // `Run.arbitrate` does; a review that still blocks ends the case as the factory hands it over.
       if (!(await this.rework(findings, [], sha))) {
-        const judged = await this.review(sha, unplanned, required)
+        const judged = await this.review(sha, unplanned, required, risk)
         if (judged.verdict === 'approve' && blocking.length === 0) {
           const secured = await this.secure(sha)
           if (secured === 'pass') {
