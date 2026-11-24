@@ -220,14 +220,18 @@ describe('versionBranchFor', () => {
 })
 
 describe('versionBranchWaits', () => {
-  const branch = (aheadBy: number) => ({
+  const branch = (aheadBy: number, committedAt: string) => ({
     sha: 'v1',
     aheadBy,
-    committedAt: new Date('2026-11-12T09:00:00Z'),
+    committedAt: new Date(committedAt),
   })
 
-  it('is true for a branch ahead of the release branch that holds the promoted commit, whenever it was committed', () => {
-    expect(versionBranchWaits(branch(1), true)).toBe(true)
+  it('is true for a branch ahead of the release branch that holds the promoted commit', () => {
+    expect(versionBranchWaits(branch(1, '2026-11-12T10:04:00Z'), true)).toBe(true)
+  })
+
+  it('is true whatever the commit time: a late record of the publication does not matter', () => {
+    expect(versionBranchWaits(branch(1, '2026-11-12T09:59:59Z'), true)).toBe(true)
   })
 
   it('is false when there is no such branch', () => {
@@ -235,11 +239,12 @@ describe('versionBranchWaits', () => {
   })
 
   it('is false for a branch the release branch already holds', () => {
-    expect(versionBranchWaits(branch(0), true)).toBe(false)
+    expect(versionBranchWaits(branch(0, '2026-11-12T10:04:00Z'), true)).toBe(false)
   })
 
-  it('is false for a branch that does not hold the promoted commit', () => {
-    expect(versionBranchWaits(branch(1), false)).toBe(false)
+  it('is false for a branch that does not hold the promoted commit, however recent', () => {
+    expect(versionBranchWaits(branch(1, '2026-11-12T10:04:00Z'), false)).toBe(false)
+    expect(versionBranchWaits(branch(1, '2026-11-12T09:59:59Z'), false)).toBe(false)
   })
 })
 

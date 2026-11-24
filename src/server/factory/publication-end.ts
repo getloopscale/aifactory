@@ -82,8 +82,8 @@ export async function endWithoutVersionPullRequest(
  * the promotion and opened none, which it does where the organisation does not let Actions open pull requests
  * (usetheokit/theokit). The next pass finds it and merges it once its checks are green.
  */
-async function openFromVersionBranch(
-  deps: EndDeps,
+export async function openFromVersionBranch(
+  deps: Pick<EndDeps, 'api'>,
   p: Publication,
   token: string,
 ): Promise<Ending | undefined> {

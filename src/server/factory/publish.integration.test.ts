@@ -1065,7 +1065,7 @@ describe('a version branch the release workflow pushed without a pull request', 
     expect((await row()).detail).toMatch(/changes @theokit\/ui/)
   })
 
-  it('opens it for a branch pushed before the publication was recorded', async () => {
+  it('opens it for a branch committed before the publication was recorded, since it holds the promoted commit', async () => {
     await waitingPublication()
     pushed(new Date(STARTED.getTime() - 60_000))
     repo().holds('version1', ['promoted1'])
@@ -1076,7 +1076,7 @@ describe('a version branch the release workflow pushed without a pull request', 
     expect(opened()).toHaveLength(1)
   })
 
-  it('ignores a version branch that is not built on the promoted commit', async () => {
+  it('ignores a version branch committed before the promotion that does not hold the promoted commit', async () => {
     await waitingPublication()
     promotionOfAPackage()
     pushed(new Date(STARTED.getTime() - 60_000))
