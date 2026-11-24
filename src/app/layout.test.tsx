@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import RootLayout from './layout'
+import WorkPage from './work/page'
 import { en } from './lib/copy/en'
 import { ptBR } from './lib/copy/pt-BR'
 
@@ -49,13 +51,13 @@ const signedIn = {
   'POST /api/panel/logout': { ok: true },
 }
 
-function renderAt(path: string) {
+function renderAt(path: string, work: ReactElement = <p>the board</p>) {
   render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route element={<RootLayout />}>
           <Route path="/" element={<p>the chat</p>} />
-          <Route path="/work" element={<p>the board</p>} />
+          <Route path="/work" element={work} />
           <Route path="/tasks/:id" element={<p>a task</p>} />
           <Route path="/chat/:chatId" element={<p>a chat</p>} />
           <Route path="/login" element={<p>the login</p>} />
@@ -285,5 +287,60 @@ describe('the layout', () => {
     expect(screen.getByRole('link', { name: en.places.board })).toBeDefined()
     expect(screen.queryByRole('link', { name: ptBR.places.board })).toBeNull()
     expect(window.localStorage.getItem('aifactory.language')).toBe('en')
+  })
+})
+
+describe('the language of the panel', () => {
+  const board = (calls: Calls) => calls.filter((c) => c.url === '/api/panel/tasks').length
+
+  it('is the one saved on the server, over what the browser kept', async () => {
+    serve({ ...signedIn, 'GET /api/panel/me': { owner: true, name: 'paulo', language: 'en' } })
+    renderAt('/')
+    await waitFor(() => expect(screen.getByRole('link', { name: en.places.board })).toBeDefined())
+    expect(screen.queryByRole('link', { name: ptBR.places.board })).toBeNull()
+  })
+
+  it('changes the menu and the column titles, saves the choice, and asks for no tasks again', async () => {
+    const calls = serve({
+      ...signedIn,
+      'GET /api/panel/me': { owner: true, name: 'paulo', language: 'en' },
+      'GET /api/panel/tasks': {
+        tasks: [
+          {
+            id: 1,
+            repository: 'paulo/app',
+            issueNumber: 7,
+            title: 'Add truncate',
+            stage: 'intake',
+            column: 'queued',
+            costUsd: 0,
+            attempts: 0,
+            createdAt: '2026-11-04T10:00:00Z',
+            updatedAt: '2026-11-04T10:00:00Z',
+          },
+        ],
+      },
+      'PUT /api/panel/language': { language: 'pt-BR' },
+    })
+    renderAt('/work', <WorkPage />)
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: en.columns.queued })).toBeDefined(),
+    )
+    const before = board(calls)
+    expect(before).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: en.topBar.switchLanguage }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('region', { name: ptBR.columns.queued })).toBeDefined(),
+    )
+    expect(screen.getByRole('link', { name: ptBR.places.plans })).toBeDefined()
+    expect(screen.queryByRole('region', { name: en.columns.queued })).toBeNull()
+    await waitFor(() =>
+      expect(calls).toContainEqual(
+        expect.objectContaining({ url: '/api/panel/language', method: 'PUT' }),
+      ),
+    )
+    expect(board(calls)).toBe(before)
   })
 })

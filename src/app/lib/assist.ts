@@ -1,5 +1,7 @@
 import type { UIMessage } from 'theokit/client'
 
+import { en, type Copy } from './copy/en'
+
 export type AssistKind = 'goal' | 'job' | 'issue' | 'changes' | 'resolution' | 'setup'
 
 /** What the assistant hands back through its `propose` tool, which is what the owner can accept. */
@@ -66,13 +68,15 @@ export function proposalOf(thread: UIMessage[]): Proposal | undefined {
 }
 
 /** Why the assistant could not answer, in words an owner can act on. */
-export function assistProblem(error: Error | undefined): string | undefined {
+export function assistProblem(
+  error: Error | undefined,
+  t: Copy['assistProblems'] = en.assistProblems,
+): string | undefined {
   if (!error) return undefined
   const message = error.message
-  if (/\b(401|403)\b|forbidden|policy/i.test(message))
-    return 'Sign in to the panel again, then retry.'
+  if (/\b(401|403)\b|forbidden|policy/i.test(message)) return t.signIn
   if (/api[-_ ]?key|authentication|unauthor|credit|billing/i.test(message)) {
-    return 'The assistant has no model credit: set ANTHROPIC_API_KEY on the server (see Setup).'
+    return t.noCredit
   }
-  return `The assistant could not answer: ${message}`
+  return t.couldNot(message)
 }

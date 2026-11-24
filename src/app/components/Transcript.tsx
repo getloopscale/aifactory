@@ -79,7 +79,7 @@ export function Transcript({ taskId, live }: { taskId: number; live: boolean }) 
               tool={row.tool}
               target={row.target}
               status={row.status}
-              timestamp={ago(row.at)}
+              timestamp={ago(row.at, Date.now(), t.time)}
               output={
                 row.output ? (
                   <pre className="max-h-64 overflow-auto whitespace-pre-wrap">{row.output}</pre>

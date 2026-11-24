@@ -49,7 +49,7 @@ export function Assist({
   const [instruction, setInstruction] = useState('')
   const proposal = proposalOf(agent.thread)
   const working = agent.status === 'streaming'
-  const problem = assistProblem(agent.error)
+  const problem = assistProblem(agent.error, t.assistProblems)
   const ready = !NEEDS_WORDS[kind] || text.trim().length >= 3
 
   const ask = (change?: string) =>

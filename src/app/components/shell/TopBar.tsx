@@ -16,7 +16,7 @@ const tab = (active: boolean) =>
 export function TopBar() {
   const { mode, toggleMode } = useTheme()
   const { t, language, setLanguage } = useCopy()
-  const guide = guideFor(useLocation().pathname)
+  const guide = guideFor(useLocation().pathname, t)
   const { open, setOpen, seen } = useGuideState()
   const { pathname } = useLocation()
   const work = inWork(pathname)

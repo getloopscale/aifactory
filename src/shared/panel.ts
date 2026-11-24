@@ -34,16 +34,17 @@ export type Column =
   | 'resolved'
   | 'attention'
 
-export const COLUMNS: { id: Column; title: string }[] = [
-  { id: 'queued', title: 'Queued' },
-  { id: 'working', title: 'Working' },
-  { id: 'waiting', title: 'Waiting for you' },
-  { id: 'retrying', title: 'Will retry itself' },
-  { id: 'merge', title: 'Merge' },
-  { id: 'review', title: 'Delivered' },
-  { id: 'released', title: 'Released' },
-  { id: 'resolved', title: 'Already resolved' },
-  { id: 'attention', title: 'Needs a person' },
+/** The columns of the board, in order. What each is called is the panel's dictionary, in the owner's language. */
+export const COLUMNS: { id: Column }[] = [
+  { id: 'queued' },
+  { id: 'working' },
+  { id: 'waiting' },
+  { id: 'retrying' },
+  { id: 'merge' },
+  { id: 'review' },
+  { id: 'released' },
+  { id: 'resolved' },
+  { id: 'attention' },
 ]
 
 /**

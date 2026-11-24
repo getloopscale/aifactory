@@ -1,50 +1,25 @@
+import { en, type Copy } from './copy/en'
 import { ACTING, toolNameOf } from './guides'
-
-/** What each tool is called to someone who has never heard of a tool. */
-const READS: Record<string, string> = {
-  factory_status: 'o estado da fábrica',
-  list_tasks: 'as tarefas',
-  task_detail: 'os detalhes de uma tarefa',
-  backlog_progress: 'o andamento do backlog',
-  inbox_items: 'a caixa de entrada',
-  health_report: 'a saúde da fábrica',
-  setup_report: 'a configuração',
-  list_plans: 'os planos',
-  plan_detail: 'um plano',
-  list_repositories: 'os repositórios',
-  repo_files: 'os arquivos do projeto',
-  repo_file: 'um arquivo do projeto',
-}
-
-const CHANGES: Record<string, string> = {
-  retry_task: 'começou uma tarefa de novo',
-  request_changes: 'devolveu um trabalho com uma nota',
-  start_job: 'abriu uma issue e começou',
-  approve_task: 'aprovou um pull request',
-  update_repository: 'salvou as configurações de um repositório',
-  create_plan: 'começou um plano',
-  create_plan_issues: 'criou as issues de um plano',
-  resolve_finding: 'resolveu um achado',
-  acknowledge_watch: 'marcou a main vermelha como vista',
-  update_agent_settings: 'trocou o agente que constrói, planeja ou revisa',
-}
 
 export type Activity = { looked: string[]; did: string[]; refused: string[] }
 
 const unique = (items: string[]) => [...new Set(items)]
 
 /** What the assistant did in a message besides writing: what it looked at, what it changed, what was refused. */
-export function activityOf(message: { parts: Record<string, unknown>[] }): Activity {
+export function activityOf(
+  message: { parts: Record<string, unknown>[] },
+  t: Copy['activity'] = en.activity,
+): Activity {
   const looked: string[] = []
   const did: string[] = []
   const refused: string[] = []
   for (const part of message.parts) {
     const name = toolNameOf(part)
     if (!name) continue
-    if (part.state === 'output-denied' && name in CHANGES) refused.push(CHANGES[name])
+    if (part.state === 'output-denied' && name in t.changes) refused.push(t.changes[name])
     else if (part.state !== 'output-available') continue
-    else if (ACTING.has(name)) did.push(CHANGES[name] ?? name)
-    else looked.push(READS[name] ?? name)
+    else if (ACTING.has(name)) did.push(t.changes[name] ?? name)
+    else looked.push(t.reads[name] ?? name)
   }
   return { looked: unique(looked), did: unique(did), refused: unique(refused) }
 }
