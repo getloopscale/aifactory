@@ -91,6 +91,7 @@ describe('recordLinearDelivery', () => {
       title: 'Nine',
       teamId: 'team-1',
       labels: ['factory'],
+      closed: false,
     }))
     const ok = await recordLinearDelivery(
       getDb(),
@@ -112,5 +113,36 @@ describe('recordLinearDelivery', () => {
       .from(ingress)
       .where(eq(ingress.deliveryId, 'linear:d5'))
     expect(n).toBe(0)
+  })
+
+  it('cancels the task of an item that closed or lost its label, and ignores a closed item that never had one', async () => {
+    const started = await recordLinearDelivery(
+      getDb(),
+      { deliveryId: 'linear:w1', payload: payload('team-1') },
+      nothingToRead,
+    )
+    expect(started.status).toBe('task_created')
+    const closed = {
+      ...payload('team-1'),
+      action: 'update',
+      data: { ...payload('team-1').data, state: { type: 'completed' } },
+    }
+    const result = await recordLinearDelivery(
+      getDb(),
+      { deliveryId: 'linear:w2', payload: closed },
+      nothingToRead,
+    )
+    expect(result).toMatchObject({ status: 'routed', code: 'issue_closed' })
+    const [row] = await getDb().select().from(task)
+    expect(row.stage).toBe('cancelled')
+    const never = await recordLinearDelivery(
+      getDb(),
+      {
+        deliveryId: 'linear:w3',
+        payload: { ...closed, data: { ...closed.data, id: 'item-2' } },
+      },
+      nothingToRead,
+    )
+    expect(never).toMatchObject({ status: 'ignored', code: 'item_closed' })
   })
 })

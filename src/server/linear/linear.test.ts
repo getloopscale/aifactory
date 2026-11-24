@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createLinearQuery } from './client'
 import {
+  asksForWork,
   decideLinearItem,
   handleLinearDelivery,
   isComplete,
@@ -20,6 +21,7 @@ const facts = (teamId: string, labels = ['factory']): LinearFacts => ({
   title: 'T',
   teamId,
   labels,
+  closed: false,
 })
 const mapping = { repository: 'o/r', enabled: true, label: null }
 const sign = (raw: string) => createHmac('sha256', 's').update(raw).digest('hex')
@@ -49,6 +51,18 @@ describe('decideLinearItem', () => {
   })
 })
 
+describe('a closed item', () => {
+  it('is not new work and does not ask for any', () => {
+    expect(decideLinearItem({ ...facts('t1'), closed: true }, mapping)).toMatchObject({
+      accept: false,
+      code: 'item_closed',
+    })
+    expect(asksForWork({ ...facts('t1'), closed: true }, null)).toBe(false)
+    expect(asksForWork(facts('t1', []), null)).toBe(false)
+    expect(asksForWork(facts('t1'), null)).toBe(true)
+  })
+})
+
 describe('prefilterLinear', () => {
   const payload = (data: object, type = 'Issue', action = 'create') => ({ type, action, data })
   it('ignores what is not an issue being created or updated, and a bad payload', () => {
@@ -65,7 +79,14 @@ describe('prefilterLinear', () => {
     expect(pre).toMatchObject({ itemId: 'a' })
     expect(isComplete((pre as { known: Partial<LinearFacts> }).known)).toBe(false)
     const full = prefilterLinear({
-      ...payload({ id: 'a', identifier: 'E-1', title: 'T', teamId: 't', labels: [] }),
+      ...payload({
+        id: 'a',
+        identifier: 'E-1',
+        title: 'T',
+        teamId: 't',
+        labels: [],
+        state: { type: 'started' },
+      }),
       url: 'u',
     })
     expect(isComplete((full as { known: Partial<LinearFacts> }).known)).toBe(true)

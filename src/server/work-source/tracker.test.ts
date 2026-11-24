@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { createGithubApi } from '../github/pulls'
 import { fetchIssue } from '../github/issues'
+import { createIssuesApi } from '../github/issues-api'
+import { createPromotionApi } from '../github/promotion-api'
+import { BlockedByOpenIssues } from '../factory/blockers'
 
 const tracked = vi.hoisted(() => ({
   source: {
@@ -47,5 +50,24 @@ describe('a Linear task goes through its own source', () => {
       state: 'open',
     })
     expect(noFetch).not.toHaveBeenCalled()
+  })
+})
+
+describe('what only GitHub can do is refused for a Linear task, never sent as a negative number', () => {
+  it('refuses editing a body or labels', async () => {
+    const issues = createIssuesApi(noFetch)
+    await expect(issues.updateIssueBody('o/r', 't', -1, 'x')).rejects.toThrow(/Linear/)
+    await expect(issues.addLabels('o/r', 't', -1, ['a'])).rejects.toThrow(/Linear/)
+    expect(noFetch).not.toHaveBeenCalled()
+  })
+  it('reads whether a Linear item is open from Linear', async () => {
+    expect(await createPromotionApi(noFetch).issueOpen('o/r', 't', -1)).toBe(true)
+    expect(noFetch).not.toHaveBeenCalled()
+  })
+  it('names Linear blockers as the identifiers a person reads', () => {
+    expect(new BlockedByOpenIssues(['ENG-2', { repository: 'o/r', number: 3 }]).blockedBy).toEqual([
+      'ENG-2',
+      'o/r#3',
+    ])
   })
 })

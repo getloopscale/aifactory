@@ -54,3 +54,15 @@ export async function trackerFor(
     id: row.externalId,
   }
 }
+
+/**
+ * A call that only GitHub can answer (editing an issue's body, its labels) never carries a Linear task's
+ * negative ordinal: it would reach GitHub as `/issues/-1`. It is refused by name instead.
+ */
+export function refuseTracked(repository: string, issueNumber: number, action: string): void {
+  if (issueNumber < 0) {
+    throw new Error(
+      `${action} ${repository}#${issueNumber} is not possible: the item lives on Linear, which the factory only reads, comments on and closes`,
+    )
+  }
+}

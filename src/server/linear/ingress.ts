@@ -25,7 +25,11 @@ export type LinearFacts = {
   title: string
   teamId: string
   labels: string[]
+  /** Completed or canceled: it no longer asks for work. */
+  closed: boolean
 }
+
+const CLOSED_STATES = new Set(['completed', 'canceled'])
 
 const payload = z.object({
   type: z.string(),
@@ -38,6 +42,7 @@ const payload = z.object({
     teamId: z.string().optional(),
     team: z.object({ id: z.string() }).optional(),
     labels: z.array(z.object({ name: z.string() })).optional(),
+    state: z.object({ type: z.string() }).optional(),
   }),
 })
 
@@ -45,6 +50,7 @@ export type LinearIgnoreCode =
   | 'payload_invalid'
   | 'event_not_issues'
   | 'action_not_relevant'
+  | 'item_closed'
   | 'label_not_factory'
   | 'team_not_mapped'
   | 'repository_disabled'
@@ -71,6 +77,7 @@ export function prefilterLinear(body: unknown): LinearPrefilter {
       ...(data.title ? { title: data.title } : {}),
       ...(teamId ? { teamId } : {}),
       ...(data.labels ? { labels: data.labels.map((l) => l.name) } : {}),
+      ...(data.state ? { closed: CLOSED_STATES.has(data.state.type) } : {}),
     },
   }
 }
@@ -79,6 +86,7 @@ export function prefilterLinear(body: unknown): LinearPrefilter {
 export const isComplete = (known: Partial<LinearFacts>): known is LinearFacts =>
   known.teamId !== undefined &&
   known.labels !== undefined &&
+  known.closed !== undefined &&
   known.title !== undefined &&
   known.identifier !== undefined &&
   known.url !== undefined
@@ -91,6 +99,10 @@ export type LinearDecision =
   | { accept: false; code: LinearIgnoreCode; reason: string; repository: string | null }
 
 /** A labelled item is not permission: its team must map to a repository the owner enabled. */
+/** Whether an item still asks for work: open, and carrying the label of its mapping. */
+export const asksForWork = (facts: LinearFacts, label: string | null): boolean =>
+  !facts.closed && facts.labels.includes(label ?? DEFAULT_LINEAR_LABEL)
+
 export function decideLinearItem(
   facts: LinearFacts,
   mapping: LinearMapping | undefined,
@@ -104,6 +116,15 @@ export function decideLinearItem(
     }
   }
   const label = mapping.label ?? DEFAULT_LINEAR_LABEL
+  if (facts.closed) {
+    // An item already completed or canceled is not new work.
+    return {
+      accept: false,
+      code: 'item_closed',
+      reason: `${facts.identifier} is already closed`,
+      repository: mapping.repository,
+    }
+  }
   if (!facts.labels.includes(label)) {
     return {
       accept: false,

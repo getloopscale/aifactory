@@ -129,5 +129,6 @@ export async function readLinearFacts(
     title: item.title,
     teamId: data.issue.team.id,
     labels: item.labels,
+    closed: item.state === 'closed',
   }
 }

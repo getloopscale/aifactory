@@ -8,6 +8,7 @@ import type { Database } from '../db'
 import * as schema from '../db/schema'
 import { ingress, repository, stageEvent, task } from '../db/schema'
 import {
+  asksForWork,
   decideLinearItem,
   isComplete,
   prefilterLinear,
@@ -19,6 +20,8 @@ import { readLinearFacts } from '../linear/source'
 import { linearQueryFromEnv } from '../work-source/tracker'
 
 import type { RecordResult } from './record'
+import { startOverOnLabel } from './restart'
+import { withdrawTask } from './withdraw'
 
 export type LinearDelivery = { deliveryId: string; payload: unknown }
 
@@ -31,7 +34,7 @@ export async function recordLinearDelivery(
   db: Database,
   delivery: LinearDelivery,
   readFacts: (itemId: string) => Promise<LinearFacts>,
-  onTaskCreated?: (taskId: number) => Promise<unknown>,
+  onTaskCreated?: (taskId: number, restartedBy?: string) => Promise<unknown>,
 ): Promise<RecordResult> {
   const pre = prefilterLinear(delivery.payload)
   let facts: LinearFacts | undefined
@@ -41,6 +44,12 @@ export async function recordLinearDelivery(
 
   return db.transaction(async (tx) => {
     let decision: LinearDecision
+    let withdrawn:
+      | {
+          kind: 'issue_closed' | 'issue_unlabeled'
+          task: { repository: string; issueNumber: number }
+        }
+      | undefined
     if (facts) {
       const [mapped] = await tx
         .select({
@@ -51,6 +60,16 @@ export async function recordLinearDelivery(
         .from(repository)
         .where(eq(repository.linearTeamId, facts.teamId))
       decision = decideLinearItem(facts, mapped)
+      // An item that closed or lost its label withdraws the task it started, as a GitHub issue does.
+      if (!asksForWork(facts, mapped?.label ?? null)) {
+        const [started] = await tx
+          .select({ repository: task.repository, issueNumber: task.issueNumber })
+          .from(task)
+          .where(and(eq(task.source, 'linear'), eq(task.externalId, facts.itemId)))
+        if (started) {
+          withdrawn = { kind: facts.closed ? 'issue_closed' : 'issue_unlabeled', task: started }
+        }
+      }
     } else {
       const ignored = pre as { ignore: LinearIgnoreCode; reason: string }
       decision = { accept: false, code: ignored.ignore, reason: ignored.reason, repository: null }
@@ -63,13 +82,23 @@ export async function recordLinearDelivery(
         event: 'linear.issue',
         repository: decision.repository,
         payload: delivery.payload,
-        outcome: decision.accept ? 'task_created' : 'ignored',
+        outcome: withdrawn ? 'routed' : decision.accept ? 'task_created' : 'ignored',
         code: decision.code,
         reason: decision.reason,
       })
       .onConflictDoNothing({ target: ingress.deliveryId })
       .returning({ id: ingress.id })
     if (!row) return { status: 'duplicate' }
+    if (withdrawn) {
+      const intent = {
+        kind: withdrawn.kind,
+        repository: withdrawn.task.repository,
+        issueNumber: withdrawn.task.issueNumber,
+        actorLogin: 'linear',
+      } as const
+      await withdrawTask(tx, intent)
+      return { status: 'routed', code: intent.kind, reason: decision.reason, intent }
+    }
     if (!decision.accept) return { status: 'ignored', code: decision.code, reason: decision.reason }
 
     const item = decision.facts
@@ -104,6 +133,11 @@ export async function recordLinearDelivery(
         ),
       )
     await tx.update(ingress).set({ outcome: 'task_exists' }).where(eq(ingress.id, row.id))
+    // An item labelled again starts its cancelled, failed or handed-over task over.
+    if (await startOverOnLabel(tx, existing.id, 'linear')) {
+      await onTaskCreated?.(existing.id, delivery.deliveryId)
+      return { status: 'task_restarted', taskId: existing.id }
+    }
     return { status: 'task_exists', taskId: existing.id }
   })
 }
