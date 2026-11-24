@@ -139,3 +139,37 @@ describe('createLinearSource', () => {
     expect((await source.blockers({ source: 'linear', id: 'i' }))[0].state).toBe('unknown')
   })
 })
+
+describe('toWorkItem', () => {
+  const ref = { source: 'linear' as const, id: 'abc' }
+  it('maps a full issue', async () => {
+    const { toWorkItem } = await import('./client')
+    const item = toWorkItem(ref, {
+      identifier: 'ENG-1',
+      title: 'T',
+      description: 'B',
+      url: 'u',
+      state: { type: 'started' },
+      labels: { nodes: [{ name: 'factory' }] },
+    })
+    expect(item).toEqual({
+      ref,
+      display: 'ENG-1',
+      title: 'T',
+      body: 'B',
+      labels: ['factory'],
+      state: 'open',
+      url: 'u',
+    })
+  })
+  it('defaults a missing body, labels and state', async () => {
+    const { toWorkItem } = await import('./client')
+    const item = toWorkItem(ref, { identifier: 'ENG-2', title: 'T', url: 'u' })
+    expect(item).toMatchObject({ body: '', labels: [], state: 'unknown' })
+  })
+  it('closes completed and canceled', async () => {
+    const { stateOf } = await import('./client')
+    expect(stateOf('completed')).toBe('closed')
+    expect(stateOf('canceled')).toBe('closed')
+  })
+})

@@ -7,6 +7,23 @@ const MAX_PAGES = 20
 
 type Json = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
 
+export function stateOf(type: string | undefined): 'open' | 'closed' | 'unknown' {
+  if (type === 'completed' || type === 'canceled') return 'closed'
+  return type ? 'open' : 'unknown'
+}
+
+export function toWorkItem(ref: ItemRef, i: Json): WorkItem {
+  return {
+    ref,
+    display: i.identifier,
+    title: i.title,
+    body: i.description ?? '',
+    labels: (i.labels?.nodes ?? []).map((l: { name: string }) => l.name),
+    state: stateOf(i.state?.type),
+    url: i.url,
+  }
+}
+
 /**
  * Linear as a work source. The API key lives in the host's environment and is passed here; it is sent
  * only to api.linear.app and never reaches a sandbox (which is not given Linear's domain either).
@@ -61,17 +78,7 @@ export function createLinearSource(
           state { type } labels { nodes { name } } } }`,
         { id: ref.id },
       )
-      const i = data.issue
-      const type = i.state?.type as string | undefined
-      return {
-        ref,
-        display: i.identifier,
-        title: i.title,
-        body: i.description ?? '',
-        labels: (i.labels?.nodes ?? []).map((l: { name: string }) => l.name),
-        state: type === 'completed' || type === 'canceled' ? 'closed' : type ? 'open' : 'unknown',
-        url: i.url,
-      }
+      return toWorkItem(ref, data.issue)
     },
     async comments(ref) {
       const self = await viewer()
