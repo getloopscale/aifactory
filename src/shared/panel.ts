@@ -675,6 +675,19 @@ export type ChecksProof = {
   setup?: ProvenCheck[]
 }
 
+/** The sandbox providers the factory can run on. */
+export const SANDBOX_PROVIDERS = ['vercel', 'docker', 'e2b'] as const
+export type SandboxProviderName = (typeof SANDBOX_PROVIDERS)[number]
+
+/**
+ * What the last completed proof of a repository's checks found on one sandbox provider: the commit, and the
+ * names of the checks that passed and of those that did not (failed or too slow).
+ */
+export type ProviderProof = { at: string; sha: string | null; passed: string[]; failed: string[] }
+
+/** The last completed proof of the checks on each provider; a provider with no entry was never tried. */
+export type ProviderProofs = Partial<Record<SandboxProviderName, ProviderProof>>
+
 /** A proof as a repository's row keeps it: one stored before proofs had a kind has none, and is of `checks`. */
 export type StoredProof = Omit<ChecksProof, 'kind'> & { kind?: ProofKind }
 
@@ -717,6 +730,7 @@ export type DoctorItemId =
   | 'publish_mode'
   | 'recipe'
   | 'sandbox'
+  | 'provider_checks'
 
 /**
  * What the doctor found about one thing a repository needs. `blocked` stops work, `warn` does not, and

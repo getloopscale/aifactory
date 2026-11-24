@@ -6,7 +6,9 @@ import {
   SANDBOX_TEMPLATE_MISSING,
   type DoctorItem,
   type DoctorItemId,
+  type ProviderProofs,
   type PublishMode,
+  SANDBOX_PROVIDERS,
 } from '../../shared/panel'
 import {
   DOCTOR_SAY_EN,
@@ -81,6 +83,7 @@ export const DOCTOR_ITEMS = [
   'publish_mode',
   'recipe',
   'sandbox',
+  'provider_checks',
 ] as const satisfies readonly DoctorItemId[]
 
 /** Whether the App reaches the repository, what its installation was granted and what the factory asks for. */
@@ -152,6 +155,8 @@ export type DoctorFacts = {
   publish: Read<PublishFacts>
   recipe: Read<RecipeFacts>
   sandbox: Read<SandboxFacts>
+  /** What the last completed proof of the checks found on each sandbox provider. */
+  providerProofs: Read<ProviderProofs>
 }
 
 /**
@@ -561,6 +566,47 @@ export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
   )
 }
 
+const PROVIDER_LABEL = { vercel: 'Vercel', docker: 'Docker', e2b: 'E2B' } as const
+
+/**
+ * Whether the checks passed on one provider and not on another. A provider with no completed proof is not
+ * known to pass, and is `unknown`; one a check failed on is a warning, naming the check. Where no provider
+ * has passed there is nothing to compare, and nothing is called fine.
+ */
+export function providerChecksItem(proofs: Read<ProviderProofs>): DoctorItem {
+  if (!proofs.read) return unknownItem('provider_checks', proofs)
+  const tried = SANDBOX_PROVIDERS.filter((name) => proofs.value[name])
+  const passedOn = tried.filter((name) => proofs.value[name]!.failed.length === 0)
+  const names = (list: readonly (keyof typeof PROVIDER_LABEL)[]) =>
+    list.map((name) => PROVIDER_LABEL[name]).join(', ')
+  const link = '/repositories'
+  const failedOn = tried.find((name) => proofs.value[name]!.failed.length > 0)
+  if (passedOn.length > 0 && failedOn) {
+    return problem(
+      'provider_checks',
+      'warn',
+      'provider_checks_failed',
+      {
+        provider: PROVIDER_LABEL[failedOn],
+        checks: proofs.value[failedOn]!.failed.join(', '),
+        passedOn: names(passedOn),
+      },
+      { link },
+    )
+  }
+  const untried = SANDBOX_PROVIDERS.filter((name) => !proofs.value[name])
+  if (passedOn.length === 0 || untried.length > 0) {
+    return problem(
+      'provider_checks',
+      'unknown',
+      'provider_checks_untried',
+      { providers: names(untried.length > 0 ? untried : tried), passedOn: names(passedOn) },
+      { link },
+    )
+  }
+  return fine('provider_checks', 'ok_provider_checks', { providers: names(passedOn) })
+}
+
 /** The report: one item for each diagnosis, in the order of `DOCTOR_ITEMS`. */
 export function diagnose(facts: DoctorFacts): DoctorItem[] {
   const { repo, integration, required, settings } = facts
@@ -576,6 +622,7 @@ export function diagnose(facts: DoctorFacts): DoctorItem[] {
     publishItem(repo, facts.publish),
     recipeItem(facts.recipe),
     sandboxItem(facts.sandbox),
+    providerChecksItem(facts.providerProofs),
   ]
 }
 
@@ -593,6 +640,8 @@ const NOT_ITS_TO_REPAIR: Record<Exclude<DoctorItemId, Repairable>, string> = {
   publish_mode: 'the version a release carries is decided in the repository, by a commit',
   recipe: 'the recipe changes by a commit on the default branch, and a domain by your approval',
   sandbox: 'the credit and the key of the sandbox provider are outside the factory',
+  provider_checks:
+    "which provider a recipe runs on is the owner's choice, and a proof is asked for in the panel",
 }
 
 /** Why an item cannot be repaired by the factory, or nothing for the ones it repairs. */

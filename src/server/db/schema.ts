@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-import type { DoctorReport, ProvenCheck, StoredProof } from '../../shared/panel'
+import type { DoctorReport, ProvenCheck, ProviderProofs, StoredProof } from '../../shared/panel'
 
 /**
  * The stages of a task, in the order a successful run passes through them, then the ways a run ends
@@ -567,6 +567,11 @@ export const repository = pgTable('repository', {
   checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
   /** The last proof of proposed checks, running or finished. */
   checksProof: jsonb('checks_proof').$type<StoredProof>(),
+  /** The last completed proof of the checks on each sandbox provider; no entry means never tried there. */
+  checksProofByProvider: jsonb('checks_proof_by_provider')
+    .$type<ProviderProofs>()
+    .notNull()
+    .default({}),
   /**
    * The checks run on the merge of the work with the integration branch, after the checks above:
    * `[{ name, command }]`. Empty means none.
