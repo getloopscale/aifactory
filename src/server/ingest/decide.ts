@@ -1,5 +1,7 @@
 import { z } from 'zod'
 
+import { decideLinear, LINEAR_EVENT, type LinearSettings } from './decide-linear'
+
 /** The label that asks the factory to take an issue. */
 export const FACTORY_LABEL = 'factory'
 
@@ -238,6 +240,15 @@ export type IngressDecision =
       /** Who added the label or opened the issue, when the delivery names a sender. */
       actorLogin: string | null
     }
+  | {
+      accept: true
+      code: 'item_labeled'
+      reason: string
+      repository: string
+      /** A Linear item: its id and what its tracker calls it. */
+      linear: { itemId: string; display: string }
+      issueTitle: string
+    }
   | { accept: false; code: RoutedCode; reason: string; repository: string; intent: RoutedIntent }
   | { accept: false; code: IgnoreCode; reason: string; repository: string | null }
 
@@ -246,6 +257,7 @@ export type IgnoreCode =
   | 'payload_invalid'
   | 'action_not_relevant'
   | 'label_not_factory'
+  | 'team_not_mapped'
   | 'repository_disabled'
 
 /**
@@ -255,7 +267,12 @@ export type IgnoreCode =
  * later step to act on. Everything else is recorded and ignored, with a code and the reason, so a
  * refusal can be explained later.
  */
-export function decideIngress(event: string, payload: unknown): IngressDecision {
+export function decideIngress(
+  event: string,
+  payload: unknown,
+  linear?: LinearSettings,
+): IngressDecision {
+  if (event === LINEAR_EVENT) return fromLinear(payload, linear)
   if (event === 'issues') return decideIssues(payload)
 
   const route = ROUTES.get(event)
@@ -351,4 +368,17 @@ function actionOf(payload: unknown): string | undefined {
 function repositoryOf(payload: unknown): string | null {
   const parsed = z.object({ repository: repositoryPayload }).safeParse(payload)
   return parsed.success ? parsed.data.repository.full_name : null
+}
+
+function fromLinear(payload: unknown, settings: LinearSettings | undefined): IngressDecision {
+  const d = decideLinear(payload, settings)
+  if (!d.accept) return d
+  return {
+    accept: true,
+    code: 'item_labeled',
+    reason: d.reason,
+    repository: d.repository,
+    linear: { itemId: d.itemId, display: d.display },
+    issueTitle: d.title,
+  }
 }

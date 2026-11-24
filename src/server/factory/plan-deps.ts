@@ -1,4 +1,4 @@
-import { createGithubApi } from '../github/pulls'
+import { createGithubApi } from '../work-source/api'
 
 import { factoryDeps } from './deps'
 import { optionsFor } from './engine-models'

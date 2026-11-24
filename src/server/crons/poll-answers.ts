@@ -5,7 +5,7 @@ import { factoryDeps } from '../factory/deps'
 import { inTransaction } from '../factory/resume-queue'
 import { SNAPSHOT_TTL_MS } from '../factory/vercel-sandbox'
 import { pollAnswers } from '../factory/waiting'
-import { createGithubApi } from '../github/pulls'
+import { createGithubApi } from '../work-source/api'
 import { mainProcessOnly } from '../factory/worker-only'
 import { githubPass } from '../github/budget-pass'
 

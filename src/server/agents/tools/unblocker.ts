@@ -9,7 +9,7 @@ import { readEvidence } from '../../factory/check-evidence'
 import { githubAppFromEnv } from '../../factory/deps'
 import { fetchIssue } from '../../github/issues'
 import { createPromotionApi } from '../../github/promotion-api'
-import { createGithubApi } from '../../github/pulls'
+import { createGithubApi } from '../../work-source/api'
 
 /**
  * The tools of the coordinator's unblocker. Every one is read-only and scoped to a task: it names a task id and

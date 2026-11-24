@@ -3,7 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
 import { pollWatches } from '../factory/watch'
-import { createGithubApi } from '../github/pulls'
+import { createGithubApi } from '../work-source/api'
 import { mainProcessOnly } from '../factory/worker-only'
 import { githubPass } from '../github/budget-pass'
 

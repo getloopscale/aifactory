@@ -172,6 +172,8 @@ export function pullRequestBody(input: {
   /** The plan the builder wrote before it changed anything, as markdown. */
   plan?: string
   repository?: string
+  /** A work item that is not a GitHub issue: the pull request names it, as its tracker calls it. */
+  item?: { display: string }
 }): string {
   const { review } = input
   const remaining = review.outcome.findings
@@ -181,7 +183,9 @@ export function pullRequestBody(input: {
   return [
     // No closing keyword: where the integration branch is the repository's default one, GitHub would close
     // the issue at integration. The factory closes it when a release ships the change, naming the version.
-    `For #${input.issueNumber}. The factory closes the issue when a release ships this change.`,
+    input.item
+      ? `For ${input.item.display}. The factory closes the item when a release ships this change.`
+      : `For #${input.issueNumber}. The factory closes the issue when a release ships this change.`,
     '',
     ...(input.handoff ? [`**This needs a person:** ${input.handoff}.`, ''] : []),
     `Checks the factory ran on \`${input.sha.slice(0, 7)}\`:`,

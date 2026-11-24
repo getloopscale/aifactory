@@ -11,7 +11,7 @@ import { inTransactionForPlan, inTransactionForRun } from '../factory/resume-que
 import { sandboxChoice, sandboxProviderFromEnv } from '../factory/sandbox-provider'
 import { createGithubApp } from '../github/app'
 import { createIssuesApi } from '../github/issues-api'
-import { createGithubApi } from '../github/pulls'
+import { createGithubApi } from '../work-source/api'
 
 import { ActionRefused, type ActionDeps } from './actions'
 import { repositoryDoctor, type DoctorDeps } from './doctor'

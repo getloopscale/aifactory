@@ -3,12 +3,14 @@ import { and, eq, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { ingress, repository, stageEvent, task } from '../db/schema'
 
+import { LINEAR_EVENT } from './decide-linear'
+import { readLinearSettings } from './linear-settings'
 import { decideIngress, type IngressDecision, type RoutedIntent } from './decide'
 import { startOverOnLabel } from './restart'
 import { withdrawTask } from './withdraw'
 
 export type Delivery = {
-  /** The `X-GitHub-Delivery` header. */
+  /** The `X-GitHub-Delivery` or `Linear-Delivery` header. */
   deliveryId: string
   /** The `X-GitHub-Event` header. */
   event: string
@@ -74,9 +76,12 @@ export async function recordDelivery(
    */
   onTaskCreated?: (taskId: number, restartedBy?: string) => Promise<unknown>,
 ): Promise<RecordResult> {
-  const asked = decideIngress(delivery.event, delivery.payload)
-
   return db.transaction(async (tx) => {
+    const asked = decideIngress(
+      delivery.event,
+      delivery.payload,
+      delivery.event === LINEAR_EVENT ? await readLinearSettings(tx) : undefined,
+    )
     const decision = await withRepositoryPermission(tx, asked)
     const [row] = await tx
       .insert(ingress)
@@ -100,15 +105,31 @@ export async function recordDelivery(
     }
     if (!decision.accept) return { status: 'ignored', code: decision.code, reason: decision.reason }
 
+    // A Linear item is keyed by its own id; the number its task takes comes from a sequence no GitHub issue reaches.
+    const linear = 'linear' in decision ? decision.linear : undefined
     const [created] = await tx
       .insert(task)
-      .values({
-        ingressId: row.id,
-        repository: decision.repository,
-        issueNumber: decision.issueNumber,
-        issueTitle: decision.issueTitle,
+      .values(
+        linear
+          ? {
+              ingressId: row.id,
+              repository: decision.repository,
+              source: 'linear' as const,
+              externalId: linear.itemId,
+              externalDisplay: linear.display,
+              issueNumber: sql`nextval('linear_task_number')`,
+              issueTitle: decision.issueTitle,
+            }
+          : {
+              ingressId: row.id,
+              repository: decision.repository,
+              issueNumber: (decision as { issueNumber: number }).issueNumber,
+              issueTitle: decision.issueTitle,
+            },
+      )
+      .onConflictDoNothing({
+        target: linear ? [task.source, task.externalId] : [task.repository, task.issueNumber],
       })
-      .onConflictDoNothing({ target: [task.repository, task.issueNumber] })
       .returning({ id: task.id })
     if (created) {
       await tx.insert(stageEvent).values({ taskId: created.id, stage: 'intake' })
@@ -120,10 +141,17 @@ export async function recordDelivery(
       .select({ id: task.id })
       .from(task)
       .where(
-        and(eq(task.repository, decision.repository), eq(task.issueNumber, decision.issueNumber)),
+        linear
+          ? and(eq(task.source, 'linear'), eq(task.externalId, linear.itemId))
+          : and(
+              eq(task.repository, decision.repository),
+              eq(task.issueNumber, (decision as { issueNumber: number }).issueNumber),
+            ),
       )
     await tx.update(ingress).set({ outcome: 'task_exists' }).where(eq(ingress.id, row.id))
-    if (await startOverOnLabel(tx, existing.id, decision.actorLogin)) {
+    if (
+      await startOverOnLabel(tx, existing.id, 'actorLogin' in decision ? decision.actorLogin : null)
+    ) {
       await onTaskCreated?.(existing.id, delivery.deliveryId)
       return { status: 'task_restarted', taskId: existing.id }
     }

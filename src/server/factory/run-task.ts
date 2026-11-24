@@ -7,7 +7,7 @@ import { BlockedByOpenIssues } from './blockers'
 import { errorMessage } from './error-message'
 import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
-import { createGithubApi } from '../github/pulls'
+import { createGithubApi } from '../work-source/api'
 
 import {
   Asked,

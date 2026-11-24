@@ -4,7 +4,7 @@ import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
 import { pollPublications } from '../factory/publish'
 import { mainProcessOnly } from '../factory/worker-only'
-import { createGithubApi } from '../github/pulls'
+import { createGithubApi } from '../work-source/api'
 import { githubPass } from '../github/budget-pass'
 
 /**

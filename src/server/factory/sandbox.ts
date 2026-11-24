@@ -134,6 +134,10 @@ export function assertIsolated(spec: SandboxSpec): void {
     throw new IsolationRefused('the sandbox has no timeout')
   }
   for (const { domain } of spec.egress) {
+    // The tracker's host is reached only by the factory's process, with a key the sandbox never holds.
+    if (/(^|\.)linear\.app$/i.test(domain)) {
+      throw new IsolationRefused(`${JSON.stringify(domain)} is not reachable from a sandbox`)
+    }
     if (domain === '*' || IP_LITERAL.test(domain) || !DOMAIN.test(domain)) {
       throw new IsolationRefused(`${JSON.stringify(domain)} is not an allowed destination`)
     }

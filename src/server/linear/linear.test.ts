@@ -4,39 +4,14 @@ import { describe, expect, it } from 'vitest'
 
 import { createLinearSource } from './client'
 import { createLinearGate, LinearRateLimited, linearGated } from './rate-limit'
-import { decideLinearIngress, handleLinearDelivery, verifyLinearSignature } from './webhook'
+import { handleLinearDelivery, verifyLinearSignature } from './webhook'
 
-const settings = { labelId: 'L1', teams: { T1: 'o/r' } }
 const sign = (body: string, secret = 's') => createHmac('sha256', secret).update(body).digest('hex')
 const issue = (extra = {}) => ({
   action: 'create',
   type: 'Issue',
   data: { id: 'i1', identifier: 'ENG-1', title: 't', teamId: 'T1', labelIds: ['L1'] },
   ...extra,
-})
-
-describe('decideLinearIngress', () => {
-  it('takes a labelled item of a mapped team', () => {
-    expect(decideLinearIngress(issue(), settings)).toMatchObject({
-      accept: true,
-      repository: 'o/r',
-    })
-  })
-  it('ignores an item without the label, an unmapped team and a plain update', () => {
-    const bare = issue({ data: { id: 'i', title: 't', teamId: 'T1', labelIds: [] } })
-    expect(decideLinearIngress(bare, settings)).toMatchObject({ code: 'label_not_factory' })
-    const other = issue({ data: { id: 'i', title: 't', teamId: 'T9', labelIds: ['L1'] } })
-    expect(decideLinearIngress(other, settings)).toMatchObject({ code: 'team_not_mapped' })
-    expect(
-      decideLinearIngress(issue({ action: 'update', updatedFrom: { labelIds: ['L1'] } }), settings),
-    ).toMatchObject({ code: 'action_not_relevant' })
-    expect(
-      decideLinearIngress(issue({ action: 'update', updatedFrom: { labelIds: [] } }), settings),
-    ).toMatchObject({ accept: true })
-  })
-  it('refuses a payload it cannot read', () => {
-    expect(decideLinearIngress({}, settings)).toMatchObject({ code: 'payload_invalid' })
-  })
 })
 
 describe('handleLinearDelivery', () => {
@@ -49,7 +24,6 @@ describe('handleLinearDelivery', () => {
       new Request('http://x', { method: 'POST', body, headers }),
       {
         secret,
-        settings: async () => settings,
         record: async (d) => records.push(d),
       },
     )
@@ -144,10 +118,10 @@ describe('createLinearSource', () => {
       createLinearSource('k', states([])).close({ source: 'linear', id: 'i' }),
     ).rejects.toThrow(/no completed/)
     await expect(
-      createLinearSource('k', states([{ id: 's', type: 'completed', position: 1 }])).close(
-        { source: 'linear', id: 'i' },
-        'v1',
-      ),
+      createLinearSource('k', states([{ id: 's', type: 'completed', position: 1 }])).close({
+        source: 'linear',
+        id: 'i',
+      }),
     ).resolves.toBeUndefined()
   })
   it('treats a blocker with no state as unknown', async () => {

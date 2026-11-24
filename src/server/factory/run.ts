@@ -2198,6 +2198,9 @@ export class Run {
         review: { reviewer: this.reviewer.name, attempt, outcome },
         plan: this.renderedPlan,
         repository: row.repository,
+        ...(row.source === 'linear'
+          ? { item: { display: row.externalDisplay ?? row.externalId } }
+          : {}),
       }),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
@@ -2420,6 +2423,9 @@ export class Run {
         handoff: reason,
         plan: this.renderedPlan,
         repository: row.repository,
+        ...(row.source === 'linear'
+          ? { item: { display: row.externalDisplay ?? row.externalId } }
+          : {}),
       }),
     })
     await api.commentOnIssue(

@@ -93,10 +93,11 @@ export function createLinearSource(
     },
     async comment(ref, body) {
       const data = await gql(
-        `mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success } }`,
+        `mutation($id: String!, $body: String!) { commentCreate(input: { issueId: $id, body: $body }) { success comment { id } } }`,
         { id: ref.id, body },
       )
       if (!data.commentCreate?.success) throw new Error('Linear refused the comment')
+      return String(data.commentCreate.comment?.id ?? '')
     },
     async blockers(ref): Promise<Blocker[]> {
       const rels = await pages<Json>(
@@ -121,7 +122,7 @@ export function createLinearSource(
           }
         })
     },
-    async close(ref, comment) {
+    async close(ref) {
       const data = await gql(
         `query($id: String!) { issue(id: $id) { team { states { nodes { id type name position } } } } }`,
         { id: ref.id },
@@ -130,7 +131,6 @@ export function createLinearSource(
         .filter((s) => s.type === 'completed')
         .sort((a, b) => a.position - b.position)
       if (done.length === 0) throw new Error(`Linear: the team of ${ref.id} has no completed state`)
-      if (comment) await this.comment(ref, comment)
       const moved = await gql(
         `mutation($id: String!, $state: String!) { issueUpdate(id: $id, input: { stateId: $state }) { success } }`,
         { id: ref.id, state: done[0].id },

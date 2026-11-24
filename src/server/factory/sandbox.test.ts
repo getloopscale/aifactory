@@ -11,6 +11,12 @@ import {
 const ok = { timeoutMs: 60_000, egress: [{ domain: 'github.com' }] }
 
 describe('assertIsolated', () => {
+  it('never lets a sandbox reach the tracker whose key stays on the host', () => {
+    for (const domain of ['api.linear.app', '*.linear.app', 'linear.app']) {
+      expect(() => assertIsolated({ ...ok, egress: [{ domain }] })).toThrow(IsolationRefused)
+    }
+  })
+
   it('accepts an explicit list of domains', () => {
     expect(() =>
       assertIsolated({

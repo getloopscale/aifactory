@@ -9,6 +9,7 @@ import { storageFromUrl } from '../db/config'
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { ingress, stageEvent, task } from '../db/schema'
 
+import { saveLinearSettings } from './linear-settings'
 import { recordDelivery, type Delivery } from './record'
 import { handleGithubDelivery } from './webhook'
 
@@ -269,5 +270,53 @@ describe('which repositories may start work', () => {
     await take('paulo/other', 'x-4')
     const [row] = await getDb().select().from(ingress).where(eq(ingress.deliveryId, 'x-4'))
     expect(row).toMatchObject({ outcome: 'ignored', code: 'repository_disabled' })
+  })
+})
+
+describe('a Linear delivery', () => {
+  const linear = (extra: object = {}, teamId = 'T1') => ({
+    action: 'create',
+    type: 'Issue',
+    data: { id: 'lin-1', identifier: 'ENG-1', title: 'Do it', teamId, labelIds: ['L1'] },
+    ...extra,
+  })
+  const record = (payload: unknown, id: string) =>
+    recordDelivery(getDb(), { deliveryId: id, event: 'linear.Issue', payload })
+
+  beforeEach(async () => {
+    await saveLinearSettings(getDb(), {
+      labelId: 'L1',
+      teams: { T1: 'paulo/app', T2: 'paulo/off' },
+    })
+    await getPool().query("insert into repository (full_name, enabled) values ('paulo/off', false)")
+  })
+
+  it('creates one task, keyed by its Linear id and a number no GitHub issue has', async () => {
+    expect(await record(linear(), 'l-1')).toMatchObject({ status: 'task_created' })
+    expect(await record(linear(), 'l-1')).toEqual({ status: 'duplicate' })
+    expect(await record(linear(), 'l-2')).toMatchObject({ status: 'task_exists' })
+    const tasks = await getDb().select().from(task)
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]).toMatchObject({
+      source: 'linear',
+      externalId: 'lin-1',
+      externalDisplay: 'ENG-1',
+    })
+    expect(tasks[0].issueNumber).toBeGreaterThanOrEqual(1_000_000_000)
+  })
+
+  it('records a mapped team whose repository is disabled and creates no task', async () => {
+    expect(await record(linear({}, 'T2'), 'l-3')).toMatchObject({
+      status: 'ignored',
+      code: 'repository_disabled',
+    })
+    expect(await getDb().select().from(task)).toHaveLength(0)
+    expect(await getDb().select().from(ingress)).toHaveLength(1)
+  })
+
+  it('gives a GitHub task its external id and keeps both keys apart', async () => {
+    await recordDelivery(getDb(), { deliveryId: 'g-1', event: 'issues', payload: labeledIssue(7) })
+    const [row] = await getDb().select().from(task)
+    expect(row).toMatchObject({ source: 'github', externalId: 'paulo/app#7' })
   })
 })

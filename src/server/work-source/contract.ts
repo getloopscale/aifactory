@@ -34,11 +34,19 @@ export type WorkSource = {
   readonly name: WorkSourceName
   read(ref: ItemRef): Promise<WorkItem>
   comments(ref: ItemRef): Promise<ItemComment[]>
-  comment(ref: ItemRef, body: string): Promise<void>
+  /** Posts a comment and returns its id. */
+  comment(ref: ItemRef, body: string): Promise<string>
   /** What blocks the item. A relation that cannot be read is `unknown`, never `closed`. */
   blockers(ref: ItemRef): Promise<Blocker[]>
   /** Marks the item done (closes a GitHub issue, moves a Linear item to its completed state). */
-  close(ref: ItemRef, comment?: string): Promise<void>
+  close(ref: ItemRef): Promise<void>
 }
 
 export const itemKey = (ref: ItemRef): string => `${ref.source}:${ref.id}`
+
+/**
+ * A Linear task takes its `task.issue_number` from a sequence that starts here, above any GitHub issue
+ * number (the database refuses one outside its source's range). Code that still names a task by that number
+ * therefore never reaches a GitHub issue by accident: `work-source/api.ts` sends such a number to Linear.
+ */
+export const LINEAR_NUMBER_BASE = 1_000_000_000

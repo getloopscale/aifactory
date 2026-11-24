@@ -147,6 +147,25 @@ describe('who the builder is told sent the work back', () => {
   })
 })
 
+describe('pullRequestBody for a Linear item', () => {
+  it('names the item and not a GitHub issue number', () => {
+    const text = pullRequestBody({
+      issueNumber: 1_000_000_001,
+      item: { display: 'ENG-34' },
+      sha: 'abc1234def',
+      rows: [],
+      agentSummary: 'x',
+      review: {
+        reviewer: 'codex',
+        attempt: 1,
+        outcome: { verdict: 'approve', summary: 'ok', findings: [] },
+      },
+    })
+    expect(text.startsWith('For ENG-34.')).toBe(true)
+    expect(text).not.toContain('#1000000001')
+  })
+})
+
 describe('pullRequestBody', () => {
   const body = () =>
     pullRequestBody({

@@ -68,6 +68,21 @@ export const task = pgTable(
       .notNull()
       .references(() => ingress.id),
     repository: text('repository').notNull(),
+    /**
+     * Where the work item lives. A GitHub task's `issue_number` is the issue's. A Linear task has none, so it
+     * takes a number from `linear_task_number` (from 1e9 up, which no GitHub issue reaches) and its Linear id
+     * is `external_id`: no key of the two sources can meet, and no branch name made of the number can.
+     */
+    source: text('source', { enum: ['github', 'linear'] })
+      .notNull()
+      .default('github'),
+    /**
+     * The id the source keeps for the item: `owner/repo#12` for GitHub, the item's UUID for Linear. Left empty
+     * on insert, a trigger fills it for a GitHub task, so a writer that knows only the issue number is unchanged.
+     */
+    externalId: text('external_id').notNull().default(''),
+    /** What a person calls the item in its tracker, for a Linear item (`ENG-34`). */
+    externalDisplay: text('external_display'),
     issueNumber: integer('issue_number').notNull(),
     issueTitle: text('issue_title').notNull(),
     stage: text('stage', { enum: TASK_STAGES }).notNull().default('intake'),
@@ -99,7 +114,10 @@ export const task = pgTable(
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique('task_issue_unique').on(table.repository, table.issueNumber)],
+  (table) => [
+    unique('task_issue_unique').on(table.repository, table.issueNumber),
+    unique('task_source_item_unique').on(table.source, table.externalId),
+  ],
 )
 
 /** Every stage a task entered, in order. `task.stage` is only the latest of these. */
