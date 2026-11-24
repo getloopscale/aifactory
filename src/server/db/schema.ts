@@ -428,7 +428,7 @@ export const agentRun = pgTable('agent_run', {
   taskId: integer('task_id')
     .notNull()
     .references(() => task.id),
-  role: text('role', { enum: ['builder', 'planner', 'reviewer'] }).notNull(),
+  role: text('role', { enum: ['builder', 'planner', 'reviewer', 'merger'] }).notNull(),
   harness: text('harness').notNull(),
   /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
   model: text('model'),
@@ -458,7 +458,7 @@ export const agentEvent = pgTable(
     taskId: integer('task_id')
       .notNull()
       .references(() => task.id),
-    role: text('role', { enum: ['builder', 'reviewer'] }).notNull(),
+    role: text('role', { enum: ['builder', 'reviewer', 'merger'] }).notNull(),
     attempt: integer('attempt').notNull(),
     seq: integer('seq').notNull(),
     kind: text('kind', { enum: ['message', 'tool_use', 'tool_result', 'cost', 'error'] }).notNull(),
@@ -675,7 +675,7 @@ export const setting = pgTable('setting', {
  */
 export const agentSettingChange = pgTable('agent_setting_change', {
   id: serial('id').primaryKey(),
-  role: text('role', { enum: ['builder', 'planner', 'reviewer'] }).notNull(),
+  role: text('role', { enum: ['builder', 'planner', 'reviewer', 'merger'] }).notNull(),
   field: text('field', { enum: ['engine', 'model', 'effort'] }).notNull(),
   oldValue: text('old_value'),
   newValue: text('new_value'),

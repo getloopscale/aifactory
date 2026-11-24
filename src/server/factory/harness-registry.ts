@@ -52,7 +52,7 @@ export function pickHarness(
   registry: HarnessRegistry,
   fallback: string,
   labels: string[],
-  role: 'harness' | 'reviewer' | 'planner' = 'harness',
+  role: 'harness' | 'reviewer' | 'planner' | 'merger' = 'harness',
   /** What to tell the agent that ends up chosen, which depends on which one it is. */
   optionsFor: (engine: string) => HarnessOptions | undefined = () => undefined,
 ): CodingHarness {

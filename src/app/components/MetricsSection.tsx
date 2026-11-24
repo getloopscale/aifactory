@@ -61,6 +61,14 @@ export function MetricsSection() {
           </tbody>
         </table>
       )}
+      {data?.conflictSessions ? (
+        <p className="mt-3 text-sm" data-metric="conflict_sessions">
+          {t.metrics.conflictSessions(
+            data.conflictSessions.last14Days,
+            data.conflictSessions.previous14Days,
+          )}
+        </p>
+      ) : null}
       {data && data.signals.length > 0 ? (
         <ul className="mt-3 space-y-1 text-sm">
           {data.signals.map((s) => (

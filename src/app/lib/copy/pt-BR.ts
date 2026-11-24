@@ -357,6 +357,7 @@ export const ptBR: Copy = {
     none: 'Nenhum passo foi registrado para esta tarefa.',
     builder: 'Construtor',
     reviewer: 'Revisor',
+    merger: 'Mesclador',
   },
   retryWaiting: {
     button: 'Refazer as tarefas que esperavam a conta',
@@ -957,8 +958,14 @@ export const ptBR: Copy = {
       builder: 'Agente de código do Construtor',
       planner: 'Agente de código do Planejador',
       reviewer: 'Agente de código do Revisor',
+      merger: 'Agente de código do Mesclador',
     },
-    roleName: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+    roleName: {
+      builder: 'Construtor',
+      planner: 'Planejador',
+      reviewer: 'Revisor',
+      merger: 'Mesclador',
+    },
     choice: (label: string) => `Escolha: ${label}`,
     sameAsBuilder: (builder: string) => `O mesmo do Construtor (${builder})`,
     unavailable: ' (indisponível)',
@@ -990,6 +997,8 @@ export const ptBR: Copy = {
   },
   metrics: {
     heading: 'Métricas',
+    conflictSessions: (last: number, before: number) =>
+      `Sessões do construtor iniciadas por um conflito com a branch de integração: ${last} nos últimos 14 dias, ${before} nos 14 anteriores.`,
     empty: 'Ainda não há trabalho concluído o bastante para medir.',
     indicator: 'Indicador',
     repository: 'Repositório',
@@ -1117,6 +1126,7 @@ export const ptBR: Copy = {
     resumed: 'retomada depois de uma resposta',
     rework: 'retrabalho',
     planned: 'seguindo o plano',
+    merger: 'agente de mesclagem resolvendo um conflito',
     approvedBy: (reviewer: string) => `aprovada por ${reviewer}`,
     resolvedNow: (sha: string, branch: string) => `já resolvida em ${sha}, agora em ${branch}`,
     promotedChangesets: (actor: string) =>
@@ -1180,7 +1190,12 @@ export const ptBR: Copy = {
     },
     updateAgentSettings: {
       title: 'Trocar o agente de código',
-      roles: { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' },
+      roles: {
+        builder: 'Construtor',
+        planner: 'Planejador',
+        reviewer: 'Revisor',
+        merger: 'Mesclador',
+      },
       backToDefault: (role: string) => `- ${role}: volta ao padrão (o mesmo agente do Construtor)`,
       chosen: (role: string, value: string) => `- ${role}: ${value}`,
       model: 'modelo',

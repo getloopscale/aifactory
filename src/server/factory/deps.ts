@@ -70,6 +70,13 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
           optionsFor(env, 'reviewer', engine),
         )
       : undefined
+  const mergerName = env.FACTORY_MERGER
+  const pickMerger = (labels: string[]) =>
+    mergerName || labels.some((l) => /^merger:/i.test(l))
+      ? pickHarness(registry, mergerName ?? fallback, labels, 'merger', (engine) =>
+          optionsFor(env, 'merger', engine),
+        )
+      : undefined
   const pickPlanner = (labels: string[], builder: string) =>
     plannerFor(registry, {
       configured: env.FACTORY_PLANNER,
@@ -85,6 +92,7 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
     harness: pick,
     releaseMode: releaseModeFromEnv(env),
     reviewer: pickReviewer,
+    merger: pickMerger,
     planner: pickPlanner,
     author,
     knowledge: knowledgeSource(getDb(), knowledgeRoot(env)),

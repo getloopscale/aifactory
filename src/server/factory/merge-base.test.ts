@@ -6,7 +6,12 @@ import { join } from 'node:path'
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { conflictingFiles, mergeIntegration, withConflictFiles } from './merge-base'
+import {
+  conflictingFiles,
+  mergeIntegration,
+  resolutionProblems,
+  withConflictFiles,
+} from './merge-base'
 
 /** A backend that runs each command in a shell on this machine, as the sandbox runs it in its own. */
 const local = {
@@ -302,5 +307,60 @@ describe('withConflictFiles', () => {
     const text = withConflictFiles(note, ['some/long/path.ts'])
 
     expect(text).toBe(note)
+  })
+})
+
+describe('resolutionProblems', () => {
+  it('accepts a merge of the integration head into the work with the conflict resolved', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    run(`merge -q --no-edit ${base}`)
+
+    expect(await resolutionProblems(local, git(), { work, base })).toEqual([])
+  })
+
+  it('names a file with a conflict marker left in a merge commit', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    run(`merge -q --no-commit --no-ff ${base}`)
+    write('src.txt', '<<<<<<< HEAD\nthe work\n=======\nother\n>>>>>>> base\n')
+    run('add src.txt')
+    run('commit -q -m merge')
+
+    expect(await resolutionProblems(local, git(), { work, base })).toEqual([
+      'src.txt still has a conflict marker',
+    ])
+  })
+
+  it('names a file that is still unmerged and nothing else', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    commit('CHANGELOG.md', '# Changelog\n\nother\n', 'other')
+    run(`merge ${base} || true`)
+
+    expect(await resolutionProblems(local, git(), { work, base })).toEqual([
+      'CHANGELOG.md is still unmerged',
+    ])
+  })
+
+  it('names a commit that is not the merge of the work and the integration head', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    run(`merge -q --no-edit ${base}`)
+
+    const problems = await resolutionProblems(local, git(), { work: base, base: work })
+
+    expect(problems.join('\n')).toContain('is not a merge of')
+  })
+
+  it('names a file the merge left uncommitted', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    run(`merge -q --no-edit ${base}`)
+    write('stray.txt', 'left\n')
+
+    expect(await resolutionProblems(local, git(), { work, base })).toEqual([
+      'stray.txt is not committed',
+    ])
   })
 })

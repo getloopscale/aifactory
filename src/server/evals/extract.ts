@@ -78,6 +78,7 @@ export type CaseSources = {
     integrationBranch: string
     egress: string[]
     fixes?: string[]
+    integrationChecks?: CheckSpec[]
   }>
 }
 
@@ -97,6 +98,7 @@ export async function toCase(candidate: Candidate, sources: CaseSources): Promis
     baseSha: await sources.parentOf(repository, candidate.startSha ?? candidate.firstSha),
     checks: candidate.checks,
     ...(config.fixes?.length ? { fixes: config.fixes } : {}),
+    ...(config.integrationChecks?.length ? { integrationChecks: config.integrationChecks } : {}),
     egress: config.egress,
     original: {
       taskId: candidate.taskId,

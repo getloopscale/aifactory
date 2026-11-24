@@ -185,6 +185,9 @@ describe('describeEvent', () => {
       'claude-code, attempt 2, resumed after an answer',
     )
     expect(line('build', { harness: 'codex', rework: true })).toBe('codex, rework')
+    expect(line('build', { harness: 'codex', attempt: 1, merger: true })).toBe(
+      'codex, attempt 1, merge agent resolving a conflict',
+    )
     expect(line('build', { harness: 'claude-code' })).toBe('claude-code')
     expect(line('build', { harness: 'codex', attempt: 1, planned: true })).toBe(
       'codex, attempt 1, following its plan',

@@ -282,6 +282,7 @@ export const en = {
     none: 'No steps were recorded for this task.',
     builder: 'Builder',
     reviewer: 'Reviewer',
+    merger: 'Merger',
   },
   retryWaiting: {
     button: 'Retry the tasks that were waiting for the account',
@@ -700,8 +701,9 @@ export const en = {
       builder: 'Coding agent of the Builder',
       planner: 'Coding agent of the Planner',
       reviewer: 'Coding agent of the Reviewer',
+      merger: 'Coding agent of the Merger',
     },
-    roleName: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer' },
+    roleName: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer', merger: 'Merger' },
     choice: (label: string) => `Choice: ${label}`,
     sameAsBuilder: (builder: string) => `Same as the Builder (${builder})`,
     unavailable: ' (unavailable)',
@@ -734,6 +736,8 @@ export const en = {
   },
   metrics: {
     heading: 'Metrics',
+    conflictSessions: (last: number, before: number) =>
+      `Builder sessions started by a conflict with the integration branch: ${last} in the last 14 days, ${before} in the 14 before.`,
     empty: 'Not enough finished work to measure yet.',
     indicator: 'Indicator',
     repository: 'Repository',
@@ -857,6 +861,7 @@ export const en = {
     attempt: (n: string) => `attempt ${n}`,
     resumed: 'resumed after an answer',
     rework: 'rework',
+    merger: 'merge agent resolving a conflict',
     planned: 'following its plan',
     approvedBy: (reviewer: string) => `approved by ${reviewer}`,
     resolvedNow: (sha: string, branch: string) => `already resolved at ${sha}, now on ${branch}`,
@@ -919,7 +924,7 @@ export const en = {
     },
     updateAgentSettings: {
       title: 'Change the coding agent',
-      roles: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer' },
+      roles: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer', merger: 'Merger' },
       backToDefault: (role: string) =>
         `- ${role}: back to the default (the same agent as the Builder)`,
       chosen: (role: string, value: string) => `- ${role}: ${value}`,
