@@ -1224,24 +1224,32 @@ export function createGithubApi(
     },
 
     async listReviews(repo, token, number) {
-      const reviews = (await (
-        await ensure(
-          await call(repo, token, `/pulls/${number}/reviews?per_page=100`),
-          `listing reviews of ${repo}#${number}`,
-          [200],
+      const all: PostedReview[] = []
+      // A pull request may hold more than a page of reviews; the factory's own must not be missed.
+      for (let page = 1; page <= 20; page++) {
+        const reviews = (await (
+          await ensure(
+            await call(repo, token, `/pulls/${number}/reviews?per_page=100&page=${page}`),
+            `listing reviews of ${repo}#${number}`,
+            [200],
+          )
+        ).json()) as {
+          id: number
+          body: string | null
+          commit_id: string
+          user: { login: string } | null
+        }[]
+        all.push(
+          ...reviews.map((r) => ({
+            id: r.id,
+            body: r.body ?? '',
+            commitSha: r.commit_id,
+            authorLogin: r.user?.login ?? '',
+          })),
         )
-      ).json()) as {
-        id: number
-        body: string | null
-        commit_id: string
-        user: { login: string } | null
-      }[]
-      return reviews.map((r) => ({
-        id: r.id,
-        body: r.body ?? '',
-        commitSha: r.commit_id,
-        authorLogin: r.user?.login ?? '',
-      }))
+        if (reviews.length < 100) break
+      }
+      return all
     },
 
     async createReview(repo, token, number, review) {

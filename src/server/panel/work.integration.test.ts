@@ -690,6 +690,21 @@ describe('the repositories page', () => {
     expect(await asks()).toBe(true)
   })
 
+  it('keeps review of pull requests the factory did not open off until the owner turns it on', async () => {
+    await enable()
+    const reviews = async () =>
+      (await listRepositories(deps())).repositories.find((r) => r.fullName === 'Paulo/App')
+        ?.reviewExternalPulls
+    expect(await reviews()).toBe(false)
+
+    await saveRepository(deps(), 'paulo/app', { reviewExternalPulls: true })
+    expect((await getDb().select().from(repository))[0].reviewExternalPulls).toBe(true)
+    expect(await reviews()).toBe(true)
+
+    await saveRepository(deps(), 'paulo/app', { harness: 'codex' })
+    expect(await reviews()).toBe(true)
+  })
+
   it('refuses a branch name git would not take', async () => {
     await enable()
     await expect(saveRepository(deps(), 'paulo/app', { baseBranch: '-x' })).rejects.toThrow(

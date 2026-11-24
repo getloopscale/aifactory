@@ -2,12 +2,11 @@ import { defineJob } from 'theokit/server/jobs'
 import { z } from 'zod'
 
 import { getDb } from '../db'
-import { errorMessage } from '../factory/error-message'
 import { githubAppFromEnv } from '../factory/deps'
 import { optionsFor } from '../factory/engine-models'
 import { DEFAULT_HARNESS, harnessRegistry, pickHarness } from '../factory/harness-registry'
 import { withLeaseHeartbeat } from '../factory/lease'
-import { reviewPullRequest } from '../factory/pull-request-review'
+import { drizzleStore, reviewPullRequest } from '../factory/pull-request-review'
 import { readRecipe } from '../factory/recipe'
 import { sandboxProviderFromEnv } from '../factory/sandbox-provider'
 import { effectiveEnv } from '../factory/settings'
@@ -16,15 +15,18 @@ import { knowledgeRoot, knowledgeSource } from '../knowledge/source'
 
 export default defineJob('review-pull-request', {
   input: z.object({ reviewId: z.number().int().positive() }),
-  // The row records how it ended, and a retry would take a review another worker may be posting.
-  maxAttempts: 1,
+  // A failed attempt leaves its row `failed`, which the next attempt takes; one that posted is found by its marker.
+  maxAttempts: 3,
   async handler({ input, extendLease }) {
     const env = await effectiveEnv(getDb())
     const registry = harnessRegistry(env)
+    const slug = env.GITHUB_APP_SLUG
+    if (!slug) throw new Error('GITHUB_APP_SLUG is not set')
     await withLeaseHeartbeat(extendLease, async () => {
       const outcome = await reviewPullRequest(
         {
-          db: getDb(),
+          store: drizzleStore(getDb()),
+          botLogin: `${slug}[bot]`,
           github: githubAppFromEnv(env),
           api: createGithubApi(),
           sandbox: sandboxProviderFromEnv(env),
@@ -40,8 +42,10 @@ export default defineJob('review-pull-request', {
           fetchRecipe: (repo, token) => readRecipe(repo, token),
         },
         input.reviewId,
-      ).catch((error: unknown) => ({ status: 'failed' as const, error: errorMessage(error) }))
+      )
       console.log(JSON.stringify({ event: 'pull_review_finished', ...input, ...outcome }))
+      // A failed attempt is tried again: the posted review is found by its marker, never posted twice.
+      if (outcome.status === 'failed') throw new Error(outcome.error)
     })
   },
 })

@@ -1671,3 +1671,48 @@ describe('firstParent', () => {
     await expect(createGithubApi(fetch).firstParent('o/r', 't', 'abc')).rejects.toThrow(/404/)
   })
 })
+
+describe('createReview', () => {
+  it('posts a comment pinned to the commit, whatever the text says, and never an approval', async () => {
+    const { fetch, calls } = fakeFetch({
+      'POST /pulls/12/reviews': { status: 200, body: { id: 77 } },
+    })
+
+    const id = await createGithubApi(fetch).createReview('o/r', 't', 12, {
+      commitSha: 'abc',
+      body: 'APPROVE',
+    })
+
+    expect(id).toBe(77)
+    expect(calls[0]).toMatchObject({
+      method: 'POST',
+      url: '/pulls/12/reviews',
+      body: { commit_id: 'abc', body: 'APPROVE', event: 'COMMENT' },
+    })
+  })
+})
+
+describe('listReviews', () => {
+  it('reads every page, so the factory’s own review is found however many came before it', async () => {
+    const page = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: from + i,
+        body: `r${from + i}`,
+        commit_id: 'abc',
+        user: { login: 'bot' },
+      }))
+    const pages: Record<string, unknown[]> = { '1': page(1, 100), '2': page(101, 3) }
+    const seen: string[] = []
+    const fetch = async (url: string) => {
+      const p = new URL(url).searchParams.get('page') ?? ''
+      seen.push(p)
+      return new Response(JSON.stringify(pages[p] ?? []), { status: 200 })
+    }
+
+    const reviews = await createGithubApi(fetch).listReviews('o/r', 't', 12)
+
+    expect(seen).toEqual(['1', '2'])
+    expect(reviews).toHaveLength(103)
+    expect(reviews[102]).toEqual({ id: 103, body: 'r103', commitSha: 'abc', authorLogin: 'bot' })
+  })
+})

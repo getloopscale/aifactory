@@ -27,3 +27,11 @@ describe('fixes', () => {
     expect(repositoryPatchSchema.safeParse({ fixes: ['x'.repeat(601)] }).success).toBe(false)
   })
 })
+
+describe('reviewExternalPulls', () => {
+  it('accepts a boolean and nothing else', () => {
+    expect(repositoryPatchSchema.safeParse({ reviewExternalPulls: true }).success).toBe(true)
+    expect(repositoryPatchSchema.safeParse({ reviewExternalPulls: false }).success).toBe(true)
+    expect(repositoryPatchSchema.safeParse({ reviewExternalPulls: 'yes' }).success).toBe(false)
+  })
+})

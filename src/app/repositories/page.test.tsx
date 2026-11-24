@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -32,7 +32,7 @@ function show(language: Language, body: RepositoriesView) {
   window.localStorage.setItem(LANGUAGE_KEY, language)
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    vi.fn(async () => new Response(JSON.stringify({ items: [], ...body }), { status: 200 })),
   )
   return render(
     <MemoryRouter>
@@ -69,4 +69,63 @@ describe('the repositories page in two languages', () => {
       expect(await screen.findByText(t.repositories.noneTitle)).toBeTruthy()
     })
   }
+})
+
+describe('the setting that reads pull requests the factory did not open', () => {
+  const settled = (reviewExternalPulls: boolean) =>
+    ({
+      ...repo,
+      enabled: true,
+      checks: null,
+      integrationChecks: [],
+      fixes: [],
+      egress: [],
+      baseBranch: null,
+      releaseBranch: null,
+      askQuestions: true,
+      reviewExternalPulls,
+      harness: null,
+      reviewer: null,
+      releaseMode: null,
+      runLimitMinutes: null,
+      leadTimeAtRiskMinutes: null,
+      leadTimeOverdueMinutes: null,
+      checksProven: [],
+      checksProvenSha: null,
+      unprovenChecks: [],
+      checksProof: null,
+      integrationChecksProvenSha: null,
+      unprovenIntegrationChecks: [],
+      integrationChecksProof: null,
+    }) as unknown as RepositoriesView['repositories'][number]
+
+  for (const [language, t] of [
+    ['en', en],
+    ['pt-BR', ptBR],
+  ] as const) {
+    it(`is off by default and says in ${language} who can start a review`, async () => {
+      show(language, view([settled(false)]))
+      const box = (await screen.findByLabelText(
+        t.repositories.settings.reviewOthers,
+      )) as HTMLInputElement
+      expect(box.checked).toBe(false)
+      expect(screen.getByText(t.repositories.settings.reviewOthersHelp)).toBeTruthy()
+    })
+  }
+
+  it('shows the saved choice and sends it with the rest of the settings', async () => {
+    show('en', view([settled(true)]))
+    const box = (await screen.findByLabelText(
+      en.repositories.settings.reviewOthers,
+    )) as HTMLInputElement
+    expect(box.checked).toBe(true)
+
+    fireEvent.click(box)
+    fireEvent.click(screen.getByRole('button', { name: en.repositories.settings.save }))
+    await waitFor(() => {
+      const puts = vi.mocked(fetch).mock.calls.filter(([, init]) => init?.method === 'PUT')
+      expect(puts).toHaveLength(1)
+      expect(JSON.parse(String(puts[0][1]?.body))).toMatchObject({ reviewExternalPulls: false })
+    })
+  })
 })
