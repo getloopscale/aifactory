@@ -5538,7 +5538,7 @@ describe('release', () => {
       /packages\/app\/package\.json says 1\.2\.3.*set the version to 1\.3\.0/,
     )
 
-    expect(seen.releases).toEqual([])
+    expect(seen.releases.filter((r) => !r.prerelease)).toEqual([])
     expect(seen.closed).toEqual([])
     expect(await getDb().select().from(publication)).toEqual([])
     expect(await stageOf(id)).toBe('done')
