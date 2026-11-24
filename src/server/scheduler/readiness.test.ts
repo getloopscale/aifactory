@@ -49,6 +49,38 @@ describe('reading the readiness answer', () => {
   })
 })
 
+describe('a blocked verdict', () => {
+  it('names what is missing and gets a question for the owner', () => {
+    const read = parseReadiness(
+      '{"verdict":"blocked","missing":"the fix is under .github/.","question":""}',
+    )
+    expect(read).toMatchObject({ verdict: 'blocked', missing: 'the fix is under .github/.' })
+    expect(read.question).toContain('the fix is under .github/.')
+  })
+
+  it('names an unpublished package', () => {
+    const read = parseReadiness(
+      '{"verdict":"blocked","missing":"@theokit/sdk 9.9.9 is not published","question":""}',
+    )
+    expect(read.verdict).toBe('blocked')
+    expect(read.missing).toContain('@theokit/sdk')
+  })
+
+  it('takes a blocked verdict that names nothing as ready, with the error recorded', () => {
+    const read = parseReadiness('{"verdict":"blocked","missing":" ","question":""}')
+    expect(read).toMatchObject({
+      verdict: 'ready',
+      error: 'a blocked answer must name what is missing',
+    })
+  })
+
+  it('asks the owner in auto only', () => {
+    const blocked = { verdict: 'blocked' as const, questionId: undefined }
+    expect(readinessStep(blocked, 'auto')).toBe('ask')
+    expect(readinessStep(blocked, 'trial')).toBe('none')
+  })
+})
+
 describe('the version of an issue a verdict is for', () => {
   it('is the same for the same title and body', () => {
     expect(bodyHash('T', 'B')).toBe(bodyHash('T', 'B'))

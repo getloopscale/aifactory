@@ -11,10 +11,10 @@ import { jsonObjects } from '../factory/review'
  * back by an answer nobody could read.
  */
 
-export type ReadinessVerdict = 'ready' | 'needs_refinement'
+export type ReadinessVerdict = 'ready' | 'needs_refinement' | 'blocked'
 
 export const readinessSchema = z.object({
-  verdict: z.enum(['ready', 'needs_refinement']),
+  verdict: z.enum(['ready', 'needs_refinement', 'blocked']),
   missing: z.string(),
   question: z.string(),
 })
@@ -46,6 +46,14 @@ function readCandidate(candidate: string): Readiness {
   const { verdict, missing, question } = parsed.data
   if (verdict === 'needs_refinement' && question.trim() === '') {
     return unreadable('a needs_refinement answer must carry a question for the owner')
+  }
+  if (verdict === 'blocked') {
+    if (missing.trim() === '') return unreadable('a blocked answer must name what is missing')
+    const named = missing.trim()
+    const asked =
+      question.trim() ||
+      `This issue cannot be built yet: ${named} Can it be unblocked, or should the issue change?`
+    return { verdict, missing: named, question: asked }
   }
   return { verdict, missing: missing.trim(), question: question.trim() }
 }
@@ -90,7 +98,6 @@ export function readinessStep(
   mode: 'trial' | 'auto',
 ): 'judge' | 'ask' | 'none' {
   if (!recorded) return 'judge'
-  const asks =
-    mode === 'auto' && recorded.verdict === 'needs_refinement' && recorded.questionId === undefined
+  const asks = mode === 'auto' && recorded.verdict !== 'ready' && recorded.questionId === undefined
   return asks ? 'ask' : 'none'
 }

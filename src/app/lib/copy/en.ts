@@ -102,6 +102,7 @@ export const en = {
     ready: 'ready to build',
     needsRefinement: (missing: string) =>
       missing ? `needs refinement: ${missing}` : 'needs refinement',
+    blocked: (missing: string) => (missing ? `blocked: ${missing}` : 'blocked'),
     attempt: (n: number) => `attempt ${n} of 3`,
     leadTime: {
       on_track: 'On track',

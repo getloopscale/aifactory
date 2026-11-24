@@ -176,6 +176,7 @@ export const ptBR: Copy = {
     ready: 'pronta para construir',
     needsRefinement: (missing: string) =>
       missing ? `precisa de refinamento: ${missing}` : 'precisa de refinamento',
+    blocked: (missing: string) => (missing ? `bloqueada: ${missing}` : 'bloqueada'),
     attempt: (n: number) => `tentativa ${n} de 3`,
     leadTime: {
       on_track: 'No prazo',

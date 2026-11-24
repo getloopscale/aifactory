@@ -29,7 +29,7 @@ async function positions(db: Database, taskIds: number[]): Promise<Map<number, n
   return new Map(rows.rows.map((r) => [r.task_id, r.position]))
 }
 
-type ReadinessDetail = { verdict: 'ready' | 'needs_refinement'; missing: string }
+type ReadinessDetail = { verdict: 'ready' | 'needs_refinement' | 'blocked'; missing: string }
 
 /** The latest readiness verdict of each task. */
 async function verdicts(db: Database, taskIds: number[]): Promise<Map<number, ReadinessDetail>> {
