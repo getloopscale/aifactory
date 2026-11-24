@@ -134,6 +134,8 @@ export function resolutionReviewPrompt(input: {
   branch: string
   mergeSha: string
   knowledgeDir?: string
+  /** The risk level of the work and why (#470). */
+  risk?: RiskAssessment
 }): string {
   return `You are an independent code reviewer for the repository ${input.repo}. The work for #${input.issueNumber} (${input.title}) on the branch ${input.branch} was reviewed and approved. Another agent then merged the integration branch into it and resolved conflicts in the merge commit ${input.mergeSha}. You did not write it and you must not change it.
 
@@ -148,7 +150,7 @@ ${
 ${knowledgeRules(input.knowledgeDir)}
 `
     : ''
-}
+}${input.risk ? riskSection(input.risk) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
 {"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}

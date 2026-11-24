@@ -2032,6 +2032,7 @@ export class Run {
               branch,
               mergeSha: this.resolvedMerge,
               knowledgeDir: this.feed?.dir,
+              risk: this.risk,
             })
           : reviewPrompt({
               repo: row.repository,
@@ -2143,10 +2144,12 @@ export class Run {
       baseSha: this.baseSha,
       integration,
     })
+    // The checks of this task too, as `review` passes them, so the kept commit is rated as a reviewed one is.
     const { guards, touched, size, unplanned } = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,
       issue: this.c.issue,
+      checkRuns: await this.checkRuns(),
     })
     if (guards.some((g) => g.severity !== 'minor')) return undefined
     this.touched = touched

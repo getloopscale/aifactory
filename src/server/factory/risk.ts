@@ -107,7 +107,8 @@ export function assessRisk(facts: RiskFacts): RiskResult {
     level = higher(level, to)
     reasons.push(reason)
   }
-  for (const path of facts.paths) {
+  // A Markdown file is documentation, whatever folder it sits in: no path pattern rates it.
+  for (const path of facts.paths.filter((p) => !MARKDOWN.test(p))) {
     const hit = patterns.find((p) => matchesGlob(path, p.glob))
     if (hit) raise(hit.level, `${path} matches ${hit.level}: ${hit.glob}`)
   }

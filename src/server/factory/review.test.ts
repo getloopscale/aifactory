@@ -103,6 +103,17 @@ describe('prompts', () => {
     expect(prompt).not.toContain('risk, without a model')
   })
 
+  it('names the risk level and its reasons in the review of a resolved merge too', () => {
+    const base = { repo: 'o/r', issueNumber: 3, title: 'T', branch: 'factory/3', mergeSha: 'abc' }
+    expect(resolutionReviewPrompt(base)).not.toContain('risk, without a model')
+    const prompt = resolutionReviewPrompt({
+      ...base,
+      risk: { sha: 's', level: 'high', reasons: ['src/auth/x.ts matches high: **/auth/**'] },
+    })
+    expect(prompt).toContain('rated this change high risk')
+    expect(prompt).toContain('- src/auth/x.ts matches high: **/auth/**')
+  })
+
   it('names the risk level and its reasons when the factory rated the change', () => {
     const prompt = reviewPrompt({
       repo: 'o/r',

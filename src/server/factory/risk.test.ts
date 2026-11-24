@@ -33,6 +33,15 @@ describe('assessRisk', () => {
       reasons: ['only Markdown files changed'],
     })
   })
+  it('rates no Markdown file by its folder, but still rates the other files of the change', () => {
+    expect(assessRisk(facts({ paths: ['docs/auth/guide.md', 'drizzle/README.md'] })).level).toBe(
+      'low',
+    )
+    expect(assessRisk(facts({ paths: ['src/api/README.md'] })).level).toBe('low')
+    const mixed = assessRisk(facts({ paths: ['docs/auth/guide.md', 'src/auth/login.ts'] }))
+    expect(mixed.level).toBe('high')
+    expect(mixed.reasons).toHaveLength(1)
+  })
   it('is low for a small plain change', () => {
     expect(assessRisk(facts()).level).toBe('low')
   })

@@ -2543,6 +2543,8 @@ describe('runTask review loop', () => {
     expect(await handoffDetail(id)).toMatchObject({
       cause: 'checks_broke_after_review',
       sha: 'abc123def5',
+      // The restored tree is the reviewed one: its level is the reviewed commit's, recorded for the new commit.
+      risk: { sha: 'abc123def5', level: expect.stringMatching(/^(low|medium|high)$/) },
       reason:
         'the last rework broke the checks ("test" failed at abc123d), so the branch is back at abc123d, which passed them and was reviewed',
     })
