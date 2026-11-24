@@ -22,7 +22,8 @@ type PanelEvent =
  * (`retryAt`), `conflict_rerun` a pull request that conflicts with its base, `integrate` approved work
  * reaching its pull request, `coordinator_send_back` the coordinator sending a handed-over or failed task back to its
  * agent (`coordinator/apply.ts`), `coordinator_merge_base` the coordinator queueing the run that merges the integration
- * branch into a handed-over task's branch with no agent, `merged_by_person` a person merging the pull request a handoff left,
+ * branch into a handed-over task's branch with no agent, `coordinator_rerun_checks` the coordinator rerunning the failed GitHub
+ * Actions jobs of the pull request's head, `merged_by_person` a person merging the pull request a handoff left,
  * `needs_refinement` the scheduler finding a queued issue not ready to build (`scheduler/apply.ts`),
  * `merge_due` the `merge-task` job taking approved work to its pull request and the integration branch,
  * `run_step` a run recording the stage it reached (`enterRunStage` in `stages.ts`).
@@ -33,6 +34,7 @@ type AutomaticEvent =
   | 'send_back_after_ci'
   | 'coordinator_send_back'
   | 'coordinator_merge_base'
+  | 'coordinator_rerun_checks'
   | 'hand_over'
   | 'integrate'
   | 'merged_by_person'
@@ -76,6 +78,8 @@ export type Action =
   | 'record_stage'
   /** A new run merges the integration branch into the task's branch itself, with no agent, and checks the merge. */
   | 'merge_base'
+  /** The failed GitHub Actions jobs of the pull request's head run again; the task itself does not move. */
+  | 'rerun_checks'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -194,6 +198,15 @@ const NOT_AWAITING_CHECKS = refuse(
 const NOT_HANDED_OVER = refuse(
   'the coordinator sends back only a task that was handed over to a person or failed',
 )
+
+const NOT_RERUN = refuse(
+  'the coordinator reruns the checks only of a task that was handed over, failed, or waits for the repository checks',
+)
+const NO_CHECKS_TO_RERUN = refuse('this task has no pull request whose checks could be rerun')
+const rerunChecks: Rule = (task) => {
+  if (task.mergedSha) return ALREADY_INTEGRATED
+  return task.headSha ? act('rerun_checks') : NO_CHECKS_TO_RERUN
+}
 
 const NOT_MERGED_INTO = refuse(
   'the coordinator merges the integration branch only into the branch of a handed-over task',
@@ -343,6 +356,12 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
       NOT_MERGED_INTO,
     ),
     handoff: mergeBase,
+  },
+  coordinator_rerun_checks: {
+    ...each(['intake', ...WORKING, 'waiting', 'released', 'cancelled'], NOT_RERUN),
+    handoff: rerunChecks,
+    failed: rerunChecks,
+    done: (task) => (task.awaitingCiSha ? rerunChecks(task) : NOT_RERUN),
   },
   hand_over: {
     ...each(WORKING, act('hand_over')),

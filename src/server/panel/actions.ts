@@ -6,6 +6,7 @@ import type { GithubApp } from '../github/app'
 import { integrationBranch } from '../factory/branches'
 import { CONFLICT_NOTE_OPENING, withConflictFiles } from '../factory/merge-base'
 import { release as promote, ReleaseRefused } from '../factory/deliver'
+import type { PromotionApi } from '../github/promotion-api'
 import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
 import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
@@ -530,6 +531,40 @@ export async function mergeBaseByCoordinator(deps: ActionDeps, taskId: number, n
     mergeBase: true,
     preAgent: false,
   })
+}
+
+/** What the rerun of a task's checks needs from GitHub. */
+export type RerunApi = Pick<PromotionApi, 'failedChecks' | 'rerunFailedJobs'>
+
+/**
+ * Reruns the failed GitHub Actions jobs of the commit the task is at (the bare sha, never a coordinator identity),
+ * once the transition table allows it. Answers which checks it reran; nothing failed there, or a refusal of GitHub,
+ * is the action's refusal.
+ */
+export async function rerunChecksOf(
+  row: Facts & { repository: string; headSha: string | null },
+  token: string,
+  ci: RerunApi,
+): Promise<string> {
+  mustAllow(row, 'coordinator_rerun_checks')
+  const sha = row.headSha!
+  const failed = (await ci.failedChecks(row.repository, token, sha)).filter((run) => run.actions)
+  if (failed.length === 0)
+    throw new ActionRefused(`no failed GitHub Actions job on ${sha.slice(0, 7)}`)
+  const names: string[] = []
+  for (const run of failed) {
+    const answer = await ci.rerunFailedJobs(row.repository, token, run.id)
+    if (!answer.started) throw new ActionRefused(answer.refusal)
+    names.push(run.name)
+  }
+  return `reran the failed jobs of ${names.join(', ')} on ${sha.slice(0, 7)}`
+}
+
+/** The coordinator reruns the failed jobs of a task's head (`coordinator/apply.ts`). */
+export async function rerunChecksByCoordinator(deps: ActionDeps, taskId: number, ci: RerunApi) {
+  const row = await load(deps.db, taskId)
+  const { token } = await deps.github.installationToken(row.repository)
+  return rerunChecksOf(row, token, ci)
 }
 
 /**

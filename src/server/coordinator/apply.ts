@@ -1,4 +1,4 @@
-import { and, desc, eq, isNotNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, like, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, repository, task } from '../db/schema'
@@ -10,6 +10,7 @@ import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
   mergeBaseByCoordinator,
+  rerunChecksByCoordinator,
   resolveFinding,
   sendBackByCoordinator,
   type ActionDeps,
@@ -178,35 +179,37 @@ async function fixBase(deps: ApplyDeps, base: RedBase): Promise<string> {
     : `already filed as ${repo}#${done.already}, still open`
 }
 
-/** The stages whose pull request has checks a rerun may help: a handover, a failure and work waiting for CI. */
-const RERUNNABLE = ['handoff', 'failed', 'done']
+/** The commit of an exception's head: a handoff or a failure is `<sha>@<event id>`. */
+export const bareSha = (head: string) => head.split('@')[0]
 
 /**
- * Reruns the failed jobs of the task's head, once: a run of the head is rerun only if GitHub still lists it as
- * failed, so a head whose checks passed meanwhile reruns nothing. A refusal of GitHub is the action's refusal.
+ * Reruns the failed jobs of the task's head, once per commit: an applied `rerun_checks` the task already has on this
+ * commit (on whatever exception) leaves the next one to a person. The panel's action asks the transition table.
  */
 async function rerunChecks(deps: ApplyDeps, exception: TaskException): Promise<string> {
-  const [row] = await deps.db.select().from(task).where(eq(task.id, exception.taskId))
-  if (!row) throw new ActionRefused(`task ${exception.taskId} does not exist`)
-  if (!RERUNNABLE.includes(row.stage)) {
-    throw new ActionRefused(`the checks of a task in ${row.stage} are not rerun`)
-  }
   const ci = deps.ciChecks
-  if (!ci?.rerunFailedJobs || exception.head === 'none') {
+  const sha = bareSha(exception.head)
+  if (!ci?.rerunFailedJobs || sha === 'none') {
     throw new ActionRefused('no commit or no way to read its checks to rerun')
   }
-  const { token } = await deps.github.installationToken(row.repository)
-  const failed = (await ci.failedChecks(row.repository, token, exception.head)).filter(
-    (run) => run.actions,
-  )
-  if (failed.length === 0) throw new ActionRefused('no failed GitHub Actions job on that commit')
-  const names: string[] = []
-  for (const run of failed) {
-    const answer = await ci.rerunFailedJobs(row.repository, token, run.id)
-    if (!answer.started) throw new ActionRefused(answer.refusal)
-    names.push(run.name)
-  }
-  return `reran the failed jobs of ${names.join(', ')}`
+  const earlier = await deps.db
+    .select({ id: coordinatorAction.id })
+    .from(coordinatorAction)
+    .where(
+      and(
+        eq(coordinatorAction.taskId, exception.taskId),
+        eq(coordinatorAction.action, 'rerun_checks'),
+        eq(coordinatorAction.outcome, 'applied'),
+        like(coordinatorAction.headSha, `${sha}%`),
+      ),
+    )
+    .limit(1)
+  if (earlier.length > 0)
+    throw new ActionRefused(`the checks of ${sha.slice(0, 7)} were already rerun once`)
+  return rerunChecksByCoordinator(deps, exception.taskId, {
+    failedChecks: ci.failedChecks,
+    rerunFailedJobs: ci.rerunFailedJobs,
+  })
 }
 
 /** What carrying out a decision left: the follow-up a scope filed (null for none), or what a fix became. */

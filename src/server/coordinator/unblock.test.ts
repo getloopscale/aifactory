@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import type { Decision, RecordedAction } from './decide'
 import type { TaskException } from './exceptions'
 import { MAX_UNBLOCKER_APPLIED, parseUnblock, unblockDecision } from './unblock'
-import { unblockMessage } from './unblocker'
+import { unblock, unblockMessage, UNBLOCKER_SPEC, type UnblockDeps } from './unblocker'
+import { assistantTools } from '../factory/assistant'
 
 const exception = (more: Partial<TaskException> = {}): TaskException =>
   ({
@@ -139,5 +140,67 @@ describe('unblockMessage', () => {
     })
     expect(message).toContain('<issue-body>\nb\n</issue-body>')
     expect(message).toContain('boom')
+  })
+})
+
+describe('unblock', () => {
+  const row = { id: 1, repository: 'o/r', issueNumber: 3 }
+  const deps = (unblocker?: UnblockDeps['unblocker']): UnblockDeps =>
+    ({
+      db: { select: () => ({ from: () => ({ where: async () => [row] }) }) },
+      github: { installationToken: async () => ({ token: 't' }) },
+      readIssue: async () => ({ title: 't', body: 'b' }),
+      unblocker,
+    }) as never
+  const answering = (response: string) => async () => ({ response, cost: 0.2 })
+
+  it('leaves an escalation alone with no unblocker, and any other decision', async () => {
+    expect(await unblock(deps(), exception(), escalation, [])).toBe(escalation)
+    const send: Decision = { action: 'send_back', reason: 'r' }
+    expect(await unblock(deps(answering('{}')), exception(), send, [])).toBe(send)
+  })
+
+  it('leaves the escalations of a repository, a release or the queue to a person', async () => {
+    const d = await unblock(
+      deps(answering('{}')),
+      exception({ kind: 'release_blocked' }),
+      escalation,
+      [],
+    )
+    expect(d).toBe(escalation)
+  })
+
+  it('turns the answer into an action, with what it cost', async () => {
+    const d = await unblock(
+      deps(answering('{"action":"merge_base","reason":"behind"}')),
+      exception(),
+      escalation,
+      [],
+    )
+    expect(d).toMatchObject({ action: 'merge_base', by: 'unblocker', costUsd: 0.2 })
+  })
+
+  it('an answer that does not parse stays an escalation with the answer kept', async () => {
+    const d = await unblock(deps(answering('no idea')), exception(), escalation, [])
+    expect(d).toMatchObject({ action: 'escalate', by: 'unblocker', answer: 'no idea' })
+  })
+
+  it('a model that throws is the decision failure, not a thrown error', async () => {
+    const d = await unblock(
+      deps(async () => {
+        throw new Error('down')
+      }),
+      exception(),
+      escalation,
+      [],
+    )
+    expect(d).toMatchObject({ action: 'escalate', failure: 'down' })
+  })
+
+  it('has no tool but the two read tools of the knowledge base', () => {
+    expect(Object.keys(assistantTools(UNBLOCKER_SPEC)).sort()).toEqual([
+      'knowledge_read',
+      'knowledge_search',
+    ])
   })
 })
