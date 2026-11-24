@@ -155,93 +155,80 @@ export function stageLabel(
 
 const text = (value: unknown) => (value === undefined || value === null ? '' : String(value))
 
+type Detail = Record<string, unknown>
+type Events = Copy['events']
+
+/** The parts of a line that have something to say, joined with commas. */
+const parts = (...values: string[]) => values.filter(Boolean).join(', ')
+
 /** What a task's work came to when it finished: its pull request, its delivery, its integration. */
-function describeDone(d: Record<string, unknown>): string {
-  if (d.resolved) return `already resolved at ${text(d.sha).slice(0, 7)}, issue closed`
+function describeDone(d: Detail, t: Events): string {
+  if (d.resolved) return t.resolved(text(d.sha).slice(0, 7))
   return [
     text(d.pullRequestUrl),
-    d.preRelease ? `pre-release ${text(d.preRelease)}` : '',
-    d.preReleaseError ? `no pre-release: ${text(d.preReleaseError)}` : '',
-    d.unchanged ? 'nothing to change' : '',
-    Array.isArray(d.awaitingChecks)
-      ? `waiting for the repository checks: ${d.awaitingChecks.join(', ')}`
-      : '',
-    d.integratedBy ? `merged by ${text(d.integratedBy)} at ${text(d.mergedSha).slice(0, 7)}` : '',
+    d.preRelease ? t.preRelease(text(d.preRelease)) : '',
+    d.preReleaseError ? t.noPreRelease(text(d.preReleaseError)) : '',
+    d.unchanged ? t.nothingToChange : '',
+    Array.isArray(d.awaitingChecks) ? t.awaitingChecks(d.awaitingChecks.join(', ')) : '',
+    d.integratedBy ? t.mergedBy(text(d.integratedBy), text(d.mergedSha).slice(0, 7)) : '',
   ]
     .filter(Boolean)
     .join('\n')
 }
 
-type Detail = Record<string, unknown>
-
-/** The parts of a line that have something to say, joined with commas. */
-const parts = (...values: string[]) => values.filter(Boolean).join(', ')
-
-function describeIntake(d: Detail): string {
+function describeIntake(d: Detail, t: Events): string {
   if (!d.decision) return ''
-  const who = d.automatic ? 'the factory' : 'a person'
-  return `${who} ${text(d.decision).replace('_', ' ')}${d.note ? `: ${text(d.note)}` : ''}`
+  const who = d.automatic ? t.byFactory : t.byPerson
+  return t.decided(who, text(d.decision).replace('_', ' '), text(d.note))
 }
 
-function describeSandbox(d: Detail): string {
-  return d.renewed
-    ? `${text(d.provider)}, new session: the last one had run ${text(d.sessionMinutes)} minutes, the disk moved over`
-    : text(d.provider)
+function describeSandbox(d: Detail, t: Events): string {
+  return d.renewed ? t.newSession(text(d.provider), text(d.sessionMinutes)) : text(d.provider)
 }
 
-function describeBuild(d: Detail): string {
+function describeBuild(d: Detail, t: Events): string {
   return parts(
     text(d.harness),
-    d.attempt ? `attempt ${text(d.attempt)}` : '',
-    d.resumed ? 'resumed after an answer' : '',
-    d.rework ? 'rework' : '',
-    d.planned ? 'following its plan' : '',
+    d.attempt ? t.attempt(text(d.attempt)) : '',
+    d.resumed ? t.resumed : '',
+    d.rework ? t.rework : '',
+    d.planned ? t.planned : '',
   )
 }
 
-function describeReleased(d: Detail): string {
-  if (d.resolvedSha) {
-    return `already resolved at ${shortSha(d.resolvedSha as string)}, now on ${text(d.releaseBranch)}`
-  }
-  if (d.publishing === 'changesets') {
-    return `promoted by ${text(d.actor)}; the repository's release workflow publishes it`
-  }
-  if (d.publishing === 'tag') {
-    return `promoted by ${text(d.actor)}; ${text(d.tag)} waits for its release workflow to publish it`
-  }
-  if (d.published === false) {
-    return `${text(d.tag)} was not published: ${text(d.releaseError)}`
-  }
+function describeReleased(d: Detail, t: Events): string {
+  if (d.resolvedSha) return t.resolvedNow(shortSha(d.resolvedSha as string), text(d.releaseBranch))
+  if (d.publishing === 'changesets') return t.promotedChangesets(text(d.actor))
+  if (d.publishing === 'tag') return t.promotedTag(text(d.actor), text(d.tag))
+  if (d.published === false) return t.notPublished(text(d.tag), text(d.releaseError))
   return d.tag
-    ? `${text(d.tag)} by ${text(d.actor)}${d.releaseError ? `, but the release could not be created: ${text(d.releaseError)}` : ''}`
-    : `merged by ${text(d.actor)}, but the release could not be created: ${text(d.releaseError)}`
+    ? t.taggedBy(text(d.tag), text(d.actor), text(d.releaseError))
+    : t.mergedNoRelease(text(d.actor), text(d.releaseError))
 }
 
-function describeFailed(d: Detail): string {
-  return d.quota
-    ? `out of quota${d.resetsAt ? `, resets ${text(d.resetsAt)}` : ''}`
-    : `${text(d.failedAt)}: ${text(d.error)}`
+function describeFailed(d: Detail, t: Events): string {
+  return d.quota ? t.outOfQuota(text(d.resetsAt)) : `${text(d.failedAt)}: ${text(d.error)}`
 }
 
-const DESCRIBE: Partial<Record<TimelineEvent['stage'], (d: Detail) => string>> = {
+const DESCRIBE: Partial<Record<TimelineEvent['stage'], (d: Detail, t: Events) => string>> = {
   intake: describeIntake,
   sandbox: describeSandbox,
   plan: (d) => text(d.harness),
   build: describeBuild,
   push: (d) => text(d.branch),
-  verify: (d) => parts(shortSha(d.sha as string), d.attempt ? `attempt ${text(d.attempt)}` : ''),
+  verify: (d, t) => parts(shortSha(d.sha as string), d.attempt ? t.attempt(text(d.attempt)) : ''),
   review: (d) => parts(text(d.reviewer), shortSha(d.sha as string)),
   waiting: (d) => text(d.question),
-  merge: (d) =>
-    parts(shortSha(d.sha as string), d.reviewer ? `approved by ${text(d.reviewer)}` : ''),
+  merge: (d, t) =>
+    parts(shortSha(d.sha as string), d.reviewer ? t.approvedBy(text(d.reviewer)) : ''),
   done: describeDone,
   released: describeReleased,
   handoff: (d) => text(d.reason),
   failed: describeFailed,
 }
 
-/** One line about what happened at a stage, from what the factory recorded. */
-export function describeEvent(event: TimelineEvent): string {
+/** One line about what happened at a stage, from what the factory recorded, in the owner's language. */
+export function describeEvent(event: TimelineEvent, t: Events = en.events): string {
   const describe = DESCRIBE[event.stage]
-  return describe ? describe((event.detail ?? {}) as Detail) : ''
+  return describe ? describe((event.detail ?? {}) as Detail, t) : ''
 }
