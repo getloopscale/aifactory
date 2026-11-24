@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, isNull, or } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { coordinatorAction, evidence, finding, repository, stageEvent, task } from '../db/schema'
@@ -312,10 +312,13 @@ export async function readRecordedActions(
       action: coordinatorAction.action,
       outcome: coordinatorAction.outcome,
       at: coordinatorAction.at,
+      by: sql<string | null>`${coordinatorAction.draft}->>'by'`,
     })
     .from(coordinatorAction)
     .where(inArray(coordinatorAction.taskId, taskIds))
     .orderBy(coordinatorAction.id)
-  for (const { taskId, ...row } of rows) byTask.get(taskId)?.push(row)
+  for (const { taskId, by, ...row } of rows) {
+    byTask.get(taskId)?.push(by === 'unblocker' ? { ...row, by } : row)
+  }
   return byTask
 }

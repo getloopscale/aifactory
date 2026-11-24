@@ -876,6 +876,7 @@ export const COORDINATOR_ACTIONS = [
   'prioritise',
   'fix_base',
   'merge_base',
+  'rerun_checks',
   'wait',
   'escalate',
 ] as const

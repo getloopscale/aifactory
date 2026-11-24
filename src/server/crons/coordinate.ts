@@ -1,6 +1,7 @@
 import { defineCron } from 'theokit/server/cron'
 
 import { coordinate } from '../coordinator/coordinate'
+import { modelUnblocker } from '../coordinator/unblocker'
 import { modelScopeDrafter } from '../coordinator/draft'
 import { evolveLog } from '../coordinator/evolve'
 import { evolve, evolveDeps } from '../coordinator/evolve-apply'
@@ -37,6 +38,7 @@ export default defineCron('coordinate', {
           listOpenIssues: (repo: string, label: string, token: string) =>
             listOpenIssues(repo, label, token),
           drafter: modelScopeDrafter(),
+          unblocker: modelUnblocker(),
           releaseMode: releaseModeFromEnv(process.env),
           ciChecks: createPromotionApi(),
         }

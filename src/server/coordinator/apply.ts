@@ -5,6 +5,7 @@ import { coordinatorAction, repository, task } from '../db/schema'
 import { release, ReleaseRefused } from '../factory/deliver'
 import { outcome as transition } from '../factory/transitions'
 import type { Issue } from '../github/issues'
+import type { PromotionApi } from '../github/promotion-api'
 import type { IssuesApi } from '../github/issues-api'
 import {
   ActionRefused,
@@ -45,6 +46,8 @@ import {
 export type ApplyDeps = ActionDeps & {
   issues: Pick<IssuesApi, 'createIssue' | 'updateIssueBody' | 'ensureLabel'>
   readIssue: ReadIssue
+  /** Reads the failed checks of a commit and reruns their jobs (`rerun_checks`). */
+  ciChecks?: Pick<PromotionApi, 'failedChecks'> & Partial<Pick<PromotionApi, 'rerunFailedJobs'>>
   /** The open issues of a repository that carry a label, as `listOpenIssues` reads them: where a follow-up is looked for. */
   listOpenIssues: (repo: string, label: string, token: string) => Promise<Issue[]>
   /** The clock a decision is recorded at, which is what the age of a `wait` is measured against. */
@@ -175,6 +178,37 @@ async function fixBase(deps: ApplyDeps, base: RedBase): Promise<string> {
     : `already filed as ${repo}#${done.already}, still open`
 }
 
+/** The stages whose pull request has checks a rerun may help: a handover, a failure and work waiting for CI. */
+const RERUNNABLE = ['handoff', 'failed', 'done']
+
+/**
+ * Reruns the failed jobs of the task's head, once: a run of the head is rerun only if GitHub still lists it as
+ * failed, so a head whose checks passed meanwhile reruns nothing. A refusal of GitHub is the action's refusal.
+ */
+async function rerunChecks(deps: ApplyDeps, exception: TaskException): Promise<string> {
+  const [row] = await deps.db.select().from(task).where(eq(task.id, exception.taskId))
+  if (!row) throw new ActionRefused(`task ${exception.taskId} does not exist`)
+  if (!RERUNNABLE.includes(row.stage)) {
+    throw new ActionRefused(`the checks of a task in ${row.stage} are not rerun`)
+  }
+  const ci = deps.ciChecks
+  if (!ci?.rerunFailedJobs || exception.head === 'none') {
+    throw new ActionRefused('no commit or no way to read its checks to rerun')
+  }
+  const { token } = await deps.github.installationToken(row.repository)
+  const failed = (await ci.failedChecks(row.repository, token, exception.head)).filter(
+    (run) => run.actions,
+  )
+  if (failed.length === 0) throw new ActionRefused('no failed GitHub Actions job on that commit')
+  const names: string[] = []
+  for (const run of failed) {
+    const answer = await ci.rerunFailedJobs(row.repository, token, run.id)
+    if (!answer.started) throw new ActionRefused(answer.refusal)
+    names.push(run.name)
+  }
+  return `reran the failed jobs of ${names.join(', ')}`
+}
+
 /** What carrying out a decision left: the follow-up a scope filed (null for none), or what a fix became. */
 type Performed = { followUpIssue?: number | null; done?: string }
 
@@ -200,6 +234,8 @@ async function perform(
       actor: COORDINATOR_ACTOR,
       expectedHead: exception.verifiedHead,
     })
+  } else if (decision.action === 'rerun_checks') {
+    return { done: await rerunChecks(deps, exception) }
   } else if (decision.action === 'fix_base' && decision.base) {
     return { done: await fixBase(deps, decision.base) }
   } else {
@@ -294,12 +330,16 @@ async function carryOut(
 
 /** What the row keeps of the model's work: the draft with the follow-up it filed, or the unread answer. */
 function recordedDraft(decision: Decision, carried: Carried) {
+  const by = decision.by ? { by: decision.by } : {}
   if (decision.draft) {
-    return carried.followUpIssue === undefined
-      ? decision.draft
-      : { ...decision.draft, followUpIssue: carried.followUpIssue }
+    return {
+      ...decision.draft,
+      ...by,
+      ...(carried.followUpIssue === undefined ? {} : { followUpIssue: carried.followUpIssue }),
+    }
   }
-  return decision.answer === undefined ? null : { answer: decision.answer }
+  if (decision.answer !== undefined) return { answer: decision.answer, ...by }
+  return decision.by ? by : null
 }
 
 /**

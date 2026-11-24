@@ -24,6 +24,8 @@ export type RecordedAction = {
   outcome: CoordinatorOutcome
   /** When it was recorded: how long a fact has been unreadable is measured from its first `wait`. */
   at?: Date
+  /** `unblocker` when the unblocker proposed it: its own cap counts these. */
+  by?: 'unblocker'
 }
 
 export type Decision = {
@@ -46,6 +48,8 @@ export type Decision = {
   failure?: string
   /** The red integration branch whose fix a `fix_base` files. */
   base?: RedBase
+  /** `unblocker` when the unblocker investigated an escalation and this is what it proposed. */
+  by?: 'unblocker'
   /** A `wait` after the first one: nothing is recorded, since the first says since when. */
   quiet?: true
 }
