@@ -111,3 +111,23 @@ export function linearWorkSource({ query, factoryUserId }: LinearSourceDeps): Wo
     },
   }
 }
+
+/** Reads what a decision needs of an item, for a webhook that did not carry it. A failure throws. */
+export async function readLinearFacts(
+  query: LinearQuery,
+  itemId: string,
+): Promise<import('./ingress').LinearFacts> {
+  const data = await query<{ issue: IssueNode }>(
+    `query($id: String!) { issue(id: $id) { ${ISSUE} } }`,
+    { id: itemId },
+  )
+  const item = linearItem(data.issue)
+  return {
+    itemId: item.id,
+    identifier: item.identifier,
+    url: item.url,
+    title: item.title,
+    teamId: data.issue.team.id,
+    labels: item.labels,
+  }
+}

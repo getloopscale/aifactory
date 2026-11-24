@@ -3,25 +3,25 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createLinearQuery } from './client'
-import { decideLinearIngress, handleLinearDelivery, type LinearSettings } from './ingress'
+import {
+  decideLinearItem,
+  handleLinearDelivery,
+  isComplete,
+  prefilterLinear,
+  type LinearFacts,
+} from './ingress'
 import { createLinearGate, gatedLinear, LinearRateLimited } from './rate-limit'
 import { linearWorkSource } from './source'
 
-const settings: LinearSettings = {
-  label: 'factory',
-  teams: { t1: { repository: 'o/r', enabled: true }, t2: { repository: 'o/off', enabled: false } },
-}
-const body = (teamId: string, labels = ['factory']) => ({
-  type: 'Issue',
-  action: 'create',
-  data: {
-    id: 'i1',
-    identifier: 'ENG-1',
-    title: 'T',
-    teamId,
-    labels: labels.map((name) => ({ name })),
-  },
+const facts = (teamId: string, labels = ['factory']): LinearFacts => ({
+  itemId: 'i1',
+  identifier: 'ENG-1',
+  url: 'https://linear.app/x/issue/ENG-1',
+  title: 'T',
+  teamId,
+  labels,
 })
+const mapping = { repository: 'o/r', enabled: true, label: null }
 const sign = (raw: string) => createHmac('sha256', 's').update(raw).digest('hex')
 const request = (raw: string, signature: string) =>
   new Request('http://x/', {
@@ -30,49 +30,72 @@ const request = (raw: string, signature: string) =>
     headers: { 'linear-signature': signature, 'linear-delivery': 'd1' },
   })
 
-describe('decideLinearIngress', () => {
+describe('decideLinearItem', () => {
   it('takes a labelled item of a team mapped to an enabled repository', () => {
-    expect(decideLinearIngress(body('t1'), settings)).toMatchObject({
+    expect(decideLinearItem(facts('t1'), mapping)).toMatchObject({
       accept: true,
       repository: 'o/r',
     })
+    expect(decideLinearItem(facts('t1', ['go']), { ...mapping, label: 'go' })).toMatchObject({
+      accept: true,
+    })
   })
   it('refuses a disabled repository, an unmapped team and a missing label', () => {
-    expect(decideLinearIngress(body('t2'), settings)).toMatchObject({ code: 'repository_disabled' })
-    expect(decideLinearIngress(body('t9'), settings)).toMatchObject({ code: 'team_not_mapped' })
-    expect(decideLinearIngress(body('t1', []), settings)).toMatchObject({
-      code: 'label_not_factory',
+    expect(decideLinearItem(facts('t1'), { ...mapping, enabled: false })).toMatchObject({
+      code: 'repository_disabled',
     })
-    expect(decideLinearIngress({}, settings)).toMatchObject({ code: 'payload_invalid' })
+    expect(decideLinearItem(facts('t9'), undefined)).toMatchObject({ code: 'team_not_mapped' })
+    expect(decideLinearItem(facts('t1', []), mapping)).toMatchObject({ code: 'label_not_factory' })
+  })
+})
+
+describe('prefilterLinear', () => {
+  const payload = (data: object, type = 'Issue', action = 'create') => ({ type, action, data })
+  it('ignores what is not an issue being created or updated, and a bad payload', () => {
+    expect(prefilterLinear({})).toMatchObject({ ignore: 'payload_invalid' })
+    expect(prefilterLinear(payload({ id: 'a' }, 'Comment'))).toMatchObject({
+      ignore: 'event_not_issues',
+    })
+    expect(prefilterLinear(payload({ id: 'a' }, 'Issue', 'remove'))).toMatchObject({
+      ignore: 'action_not_relevant',
+    })
+  })
+  it('reports a payload that omits the team or the labels as incomplete', () => {
+    const pre = prefilterLinear(payload({ id: 'a', title: 'T' }))
+    expect(pre).toMatchObject({ itemId: 'a' })
+    expect(isComplete((pre as { known: Partial<LinearFacts> }).known)).toBe(false)
+    const full = prefilterLinear({
+      ...payload({ id: 'a', identifier: 'E-1', title: 'T', teamId: 't', labels: [] }),
+      url: 'u',
+    })
+    expect(isComplete((full as { known: Partial<LinearFacts> }).known)).toBe(true)
   })
 })
 
 describe('handleLinearDelivery', () => {
-  const raw = JSON.stringify(body('t1'))
+  const raw = JSON.stringify({ type: 'Issue', action: 'create', data: { id: 'i1' } })
   it('answers 401 and records nothing for a bad signature', async () => {
     const record = vi.fn()
-    const res = await handleLinearDelivery(request(raw, sign('other')), {
-      secret: 's',
-      settings: async () => settings,
-      record,
-    })
+    const res = await handleLinearDelivery(request(raw, sign('other')), { secret: 's', record })
     expect(res.status).toBe(401)
     expect(record).not.toHaveBeenCalled()
   })
   it('records a signed delivery under a source-scoped id', async () => {
     const record = vi.fn(async () => ({ ok: true }))
-    const res = await handleLinearDelivery(request(raw, sign(raw)), {
-      secret: 's',
-      settings: async () => settings,
-      record,
-    })
+    const res = await handleLinearDelivery(request(raw, sign(raw)), { secret: 's', record })
     expect(res.status).toBe(200)
     expect(record).toHaveBeenCalledWith(expect.objectContaining({ deliveryId: 'linear:d1' }))
+  })
+  it('answers 502, not a recorded ignore, when the facts could not be read', async () => {
+    const record = vi.fn(async () => {
+      throw new Error('Linear answered 500')
+    })
+    const res = await handleLinearDelivery(request(raw, sign(raw)), { secret: 's', record })
+    expect(res.status).toBe(502)
   })
   it('refuses everything without a secret', async () => {
     const res = await handleLinearDelivery(request(raw, sign(raw)), {
       secret: undefined,
-      settings: async () => settings,
       record: vi.fn(),
     })
     expect(res.status).toBe(503)

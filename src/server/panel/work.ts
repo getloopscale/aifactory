@@ -66,6 +66,10 @@ export type RepositoryPatch = {
   baseBranch?: string | null
   /** `null` clears it, so the default branch is the release branch. */
   releaseBranch?: string | null
+  /** The Linear team whose labelled items become this repository's tasks; `null` clears it. One repository per team. */
+  linearTeamId?: string | null
+  /** The label a Linear item carries to ask for work; `null` means `factory`. */
+  linearLabel?: string | null
   askQuestions?: boolean
   harness?: string | null
   reviewer?: string | null
@@ -181,6 +185,8 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       egress: row?.egress ?? [],
       baseBranch: row?.baseBranch ?? null,
       releaseBranch: row?.releaseBranch ?? null,
+      linearTeamId: row?.linearTeamId ?? null,
+      linearLabel: row?.linearLabel ?? null,
       askQuestions: row?.askQuestions ?? true,
       harness: row?.harness ?? null,
       reviewer: row?.reviewer ?? null,
@@ -327,6 +333,22 @@ export async function saveRepository(
       )
     }
   }
+  if (patch.linearTeamId?.trim()) {
+    const [taken] = await deps.db
+      .select({ fullName: repository.fullName })
+      .from(repository)
+      .where(
+        and(
+          eq(repository.linearTeamId, patch.linearTeamId.trim()),
+          sql`lower(${repository.fullName}) <> lower(${canonical!})`,
+        ),
+      )
+    if (taken) {
+      throw new ActionRefused(
+        `that Linear team already feeds ${taken.fullName}: a team maps to one repository`,
+      )
+    }
+  }
   const checks = savedChecks(patch, existing)
   const integration = savedIntegrationChecks(patch, existing)
   const values = {
@@ -339,6 +361,10 @@ export async function saveRepository(
       : { egress: [...new Set(patch.egress.map((d) => d.toLowerCase()))] }),
     ...(patch.baseBranch === undefined ? {} : { baseBranch: patch.baseBranch }),
     ...(patch.releaseBranch === undefined ? {} : { releaseBranch: patch.releaseBranch }),
+    ...(patch.linearTeamId === undefined
+      ? {}
+      : { linearTeamId: patch.linearTeamId?.trim() || null }),
+    ...(patch.linearLabel === undefined ? {} : { linearLabel: patch.linearLabel?.trim() || null }),
     ...(patch.askQuestions === undefined ? {} : { askQuestions: patch.askQuestions }),
     ...(patch.harness === undefined ? {} : { harness: patch.harness }),
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),

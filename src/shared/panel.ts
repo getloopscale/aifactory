@@ -634,6 +634,9 @@ export type RepositoryView = {
   baseBranch: string | null
   /** The branch a release lands on; null means the default branch. */
   releaseBranch: string | null
+  /** The Linear team whose labelled items become this repository's tasks, and the label that asks for work. */
+  linearTeamId: string | null
+  linearLabel: string | null
   /** False when the agent decides what is unclear instead of asking on the issue. */
   askQuestions: boolean
   harness: string | null

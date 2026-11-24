@@ -107,6 +107,8 @@ import {
   MAX_CHECK_REWORKS,
   oneLine,
   squashTitle,
+  itemIdentifier,
+  itemLink,
   pullRequestBody,
   pushWithRetry,
   resolvedComment,
@@ -472,7 +474,7 @@ export class Run {
     })
   }
   private get title() {
-    return squashTitle(this.c.issue.title, this.c.row.issueNumber)
+    return squashTitle(this.c.issue.title, this.c.row.issueNumber, itemIdentifier(this.c.row))
   }
   private get fixes(): string[] {
     return this.c.repo.fixes ?? []
@@ -2201,6 +2203,7 @@ export class Run {
       issueTitle: this.c.issue.title,
       pullRequestBody: pullRequestBody({
         issueNumber: row.issueNumber,
+        item: itemLink(row),
         sha,
         rows: here,
         agentSummary: this.summary,

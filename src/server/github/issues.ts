@@ -1,6 +1,7 @@
 import type { FetchLike } from './app'
 import { gated } from './rate-limit'
 import { retryRead } from './retry-read'
+import { trackerFor } from '../work-source/tracker'
 
 export type Issue = {
   number: number
@@ -21,6 +22,12 @@ export async function fetchIssue(
   fetchImpl: FetchLike = (url, init) => fetch(url, init),
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): Promise<Issue> {
+  // A Linear task's item is read from Linear, through its own source.
+  const tracked = await trackerFor(repo, number)
+  if (tracked) {
+    const item = await tracked.source.read(tracked.id)
+    return { number, title: item.title, body: item.body, labels: item.labels, state: item.state }
+  }
   // A read GitHub answers with a 5xx, or the network drops, is asked again with a pause.
   const response = await retryRead(
     () =>
