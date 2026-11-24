@@ -1335,6 +1335,27 @@ export class Run {
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
+    const held = await this.unintegratedHandoff()
+    if (held) {
+      const reason = `the rework changed nothing, so the work still waits for a person: ${held.reason}`
+      await enterRunStage(deps.db, taskId, 'handoff', {
+        branch,
+        sha: row.headSha,
+        reason,
+        ...(held.cause ? { cause: held.cause } : {}),
+        pullRequestUrl: row.pullRequestUrl,
+        unchanged: true,
+        agentSummary: first.summary.slice(0, 4_000),
+        costUsd: this.cost,
+      })
+      return {
+        status: 'handoff',
+        branch,
+        sha: row.headSha,
+        pullRequestUrl: row.pullRequestUrl,
+        reason,
+      }
+    }
     await enterRunStage(deps.db, taskId, 'done', {
       branch,
       sha: row.headSha,
@@ -1349,6 +1370,27 @@ export class Run {
       sha: row.headSha,
       pullRequestUrl: row.pullRequestUrl,
       summary: first.summary,
+    }
+  }
+
+  /**
+   * The handoff this run was sent back from, when the work was never integrated: `done` means integrated or
+   * waiting for CI, so a rework that changes nothing returns to the handoff it left, with its cause.
+   */
+  private async unintegratedHandoff(): Promise<{ cause?: HandoffCause; reason: string } | undefined> {
+    const { deps, taskId, row } = this.c
+    if (row.mergedSha || row.resolvedSha || row.awaitingCiSha) return undefined
+    const [ended] = await deps.db
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, taskId), inArray(stageEvent.stage, ENDING_STAGES)))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    if (!ended || ended.stage !== 'handoff') return undefined
+    const detail = (ended.detail ?? {}) as { cause?: unknown; reason?: unknown }
+    return {
+      cause: typeof detail.cause === 'string' ? (detail.cause as HandoffCause) : undefined,
+      reason: typeof detail.reason === 'string' ? detail.reason : 'it was handed over',
     }
   }
 

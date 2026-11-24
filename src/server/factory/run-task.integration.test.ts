@@ -3258,6 +3258,48 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(sandbox.stopped).toBe(1)
   })
 
+  it('returns to the handoff it left, with its cause, when a send-back changes nothing and nothing was integrated', async () => {
+    const id = await seedTask()
+    branchPushed()
+    await getDb()
+      .update(task)
+      .set({ stage: 'handoff', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+      .where(eq(task.id, id))
+    await getDb().insert(stageEvent).values({
+      taskId: id,
+      stage: 'handoff',
+      detail: { reason: 'held for evaluation', cause: 'agent_configuration' },
+    })
+    await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, id))
+    const sandbox = new FakeSandbox(changed())
+    const builder: CodingHarness = {
+      name: 'fake-agent',
+      egress: agentEgress,
+      run: async () => {
+        dirty = false
+        return { ok: true, summary: 'I did not merge origin/workspace.' }
+      },
+    }
+
+    const result = await runTask(deps(sandbox, { harness: builder }), id, undefined, {
+      feedback: 'Merge origin/workspace, the pull request conflicts.',
+    })
+
+    expect(result).toMatchObject({ status: 'handoff', pullRequestUrl: PR_URL })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('handoff')
+    expect(row.mergedSha).toBeNull()
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    expect(events.some((e) => e.stage === 'done')).toBe(false)
+    expect(events.at(-1)?.detail).toMatchObject({
+      cause: 'agent_configuration',
+      unchanged: true,
+      reason: expect.stringMatching(/rework changed nothing/),
+    })
+    expect(seen.pulls).toEqual([])
+    expect(sandbox.backend.commands.some((c) => c.includes('push origin'))).toBe(false)
+  })
+
   it('checks and reviews the head of the branch when the agent finds nothing to change and no review approved that head', async () => {
     const pushed = 'f'.repeat(40)
     const id = await seedTask()
