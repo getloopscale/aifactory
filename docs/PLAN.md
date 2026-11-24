@@ -247,6 +247,9 @@ Critérios de aceite:
 
 ### M13: conversa com os agentes
 
+**Parado nos spikes S2 e S3.** Nenhum código do M13 até os dois rodarem com credenciais e o resultado entrar no
+ADR 0013 (`docs/adr/0013-conversa-com-agentes.md`). A issue dos spikes está em `docs/issues/spikes-s2-s3.md`.
+
 O Paulo escreve para um agente pelo painel. Há dois casos, e eles têm mecânicas diferentes.
 
 **Falar com a instância que está trabalhando.** A mensagem chega ao processo do builder (ou do reviewer)
