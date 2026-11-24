@@ -2465,6 +2465,7 @@ export class Run {
         pullRequestUrl: pull.url,
         findings: outcome.findings,
         costUsd: this.cost,
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
         attempts: attempt,
         ...describeDelivery(handed),
       },

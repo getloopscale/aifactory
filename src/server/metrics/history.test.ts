@@ -627,6 +627,7 @@ describe('the size of the change a delivery added', () => {
 
     expect(value(h, 'net_lines_per_delivery')).toEqual([35])
     expect(value(h, 'test_share_of_change')).toEqual([0.2])
+    expect(observe(h).find((o) => o.metric === 'test_share_of_change')?.weight).toBe(50)
     expect(deliveriesOf(h)).toEqual([
       { repository: 'o/r', at: at(30), paths: ['src/a.ts', 'src/a.test.ts'] },
     ])

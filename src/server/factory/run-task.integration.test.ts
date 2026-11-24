@@ -2047,7 +2047,11 @@ describe('runTask review loop', () => {
     expect(stages).not.toContain('done')
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row).toMatchObject({ stage: 'handoff', pullRequestUrl: PR_URL })
-    expect(await handoffDetail(id)).toMatchObject({ cause: 'review_plateau' })
+    expect(await handoffDetail(id)).toMatchObject({
+      cause: 'review_plateau',
+      // What a person's merge of the draft delivers: the size of the change goes with the handoff.
+      change: { sha: expect.any(String), files: expect.any(Number), paths: expect.any(Array) },
+    })
   })
 
   const roundsOf = (...sizes: number[]) =>
