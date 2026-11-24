@@ -1,13 +1,14 @@
 import { and, desc, eq, inArray, max, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { stageEvent, task } from '../db/schema'
+import { repository, stageEvent, task } from '../db/schema'
 import { APP_PERMISSIONS, type AppAccess, type AppEvents, type GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
 import { FACTORY_LABEL } from '../ingest/decide'
 
 import { integrationBranch, PRE_RELEASE_BRANCH } from './branches'
 import { usesChangesets, withChangesetCheck } from './changesets'
+import type { ProviderProofs } from '../../shared/panel'
 import type { DoctorTried, RecipeWhy } from '../../shared/doctor-say'
 import {
   manifestVersion,
@@ -231,7 +232,19 @@ function factoryCheckNames(reader: Reader, recipe: Recipe | undefined, changeset
   return withChangesetCheck(checks, changesets, reader.integration).map((check) => check.name)
 }
 
-type RepositoryFacts = Omit<DoctorFacts, 'repo' | 'integration' | 'access' | 'events' | 'sandbox'>
+type RepositoryFacts = Omit<
+  DoctorFacts,
+  'repo' | 'integration' | 'access' | 'events' | 'sandbox' | 'providerProofs'
+>
+
+/** What the proofs of the repository's checks found on each sandbox provider. */
+async function readProviderProofs(db: Database, name: string): Promise<ProviderProofs> {
+  const [row] = await db
+    .select({ proofs: repository.checksProofByProvider })
+    .from(repository)
+    .where(sql`lower(${repository.fullName}) = lower(${name})`)
+  return row?.proofs ?? {}
+}
 
 async function readRepository(reader: Reader): Promise<RepositoryFacts> {
   const { api, name, token, config, integration } = reader
@@ -279,16 +292,17 @@ export async function collectFacts(sources: DoctorSources, name: string): Promis
   const { db, github, api } = sources
   const config = await loadRepoConfig(db, name)
   const integration = integrationBranch(config)
-  const [access, events, sandbox, token] = await Promise.all([
+  const [access, events, sandbox, providerProofs, token] = await Promise.all([
     attempt(triedOf('installation', { repo: name }), () => readAccess(github, name)),
     attempt(triedOf('events'), () => github.subscriptions()),
     attempt(triedOf('runs', { repo: name }), () => readSandbox(db, name, sources.sandboxes)),
+    attempt(triedOf('proofs', { repo: name }), () => readProviderProofs(db, name)),
     attempt(
       triedOf('token', { repo: name }),
       async () => (await github.installationToken(name)).token,
     ),
   ])
-  const local = { repo: name, integration, access, events, sandbox }
+  const local = { repo: name, integration, access, events, sandbox, providerProofs }
   if (!token.read) {
     return {
       ...local,

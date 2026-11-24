@@ -1,6 +1,12 @@
 import { and, sql } from 'drizzle-orm'
 
-import type { ChecksProof, ProofKind } from '../../shared/panel'
+import type {
+  ChecksProof,
+  ProofKind,
+  ProviderProof,
+  ProviderProofs,
+  SandboxProviderName,
+} from '../../shared/panel'
 import type { Database } from '../db'
 import { repository } from '../db/schema'
 import { DEFAULT_CHECK_MS } from '../factory/agent-time'
@@ -38,6 +44,8 @@ export type StartProofDeps = {
 
 export type RunProofDeps = ProveDeps & {
   db: Database
+  /** The sandbox provider the proof runs on, to keep what it found for that provider. */
+  provider?: SandboxProviderName
   /** Examines the repository again after its checks changed: the doctor, whose report names them. */
   diagnose?: (fullName: string) => Promise<unknown>
 }
@@ -167,8 +175,8 @@ function unrun(proof: ChecksProof, error: unknown): Settled {
  * is kept only in the proof, with its output, and when none passed the saved checks stay as they were. A
  * proof that could not run is recorded as failed with the reason, as a plan is: nobody retries it from a
  * queue. Whatever is written is written only while this proof is still the repository's last of its kind.
- * The doctor examines the repository again only after its checks changed, since its report names them and
- * not the integration checks.
+ * The doctor examines the repository again after its checks changed or a provider's result was recorded, since
+ * its report names them and not the integration checks.
  */
 export async function runProof(deps: RunProofDeps, job: ProofJob): Promise<void> {
   const { db } = deps
@@ -180,19 +188,36 @@ export async function runProof(deps: RunProofDeps, job: ProofJob): Promise<void>
   const proof: ChecksProof = { ...stored, kind }
 
   let values: Settled
+  let byProvider: ProviderProofs | undefined
   try {
     const config = await loadRepoConfig(db, row.fullName)
     const repo = { fullName: row.fullName, config }
-    values = settled(proof, await proveChecks(deps, repo, proof.checks, OPTIONS[kind]))
+    const found = await proveChecks(deps, repo, proof.checks, OPTIONS[kind])
+    values = settled(proof, found)
+    if (kind === 'checks' && deps.provider && found.results.length > 0) {
+      const entry: ProviderProof = {
+        at: new Date().toISOString(),
+        sha: found.sha,
+        passed: found.results.filter((r) => r.status === 'passed').map((r) => r.name),
+        failed: found.results.filter((r) => r.status !== 'passed').map((r) => r.name),
+      }
+      byProvider = { [deps.provider]: entry }
+    }
   } catch (error) {
     values = unrun(proof, error)
   }
   const written = await db
     .update(repository)
-    .set(values)
+    .set({
+      ...values,
+      // Merged by the database: another provider's proof may have been recorded while this one ran.
+      ...(byProvider && {
+        checksProofByProvider: sql`${repository.checksProofByProvider} || ${JSON.stringify(byProvider)}::jsonb`,
+      }),
+    })
     .where(and(named(row.fullName), sql`${repository[column]}->>'at' = ${job.at}`))
     .returning({ id: repository.id })
-  if (written.length > 0 && kind === 'checks' && 'checks' in values) {
+  if (written.length > 0 && kind === 'checks' && ('checks' in values || byProvider)) {
     await deps.diagnose?.(row.fullName)
   }
 }
