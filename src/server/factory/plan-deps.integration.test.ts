@@ -60,6 +60,6 @@ describe('the knowledge base of the agents in a sandbox', () => {
 
     expect(run).toBeDefined()
     expect(plans).toBeDefined()
-    expect(Object.keys(plans!).sort()).toEqual(['delivered', 'keep', 'pin', 'slice'])
+    expect(Object.keys(plans!).sort()).toEqual(['delivered', 'keep', 'keepGaps', 'pin', 'slice'])
   })
 })
