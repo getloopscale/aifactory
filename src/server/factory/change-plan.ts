@@ -132,7 +132,7 @@ export function parseChangePlan(text: string): ChangePlan | undefined {
 }
 
 /** Files that change because their manifest did: nobody plans them one by one. */
-const LOCKFILE =
+export const LOCKFILE =
   /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|go\.sum|Cargo\.lock|uv\.lock|poetry\.lock)$/
 
 /** A planned path as a test: a folder ending in "/", `*` within a folder, `**` at any depth. */

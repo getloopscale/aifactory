@@ -9,7 +9,9 @@ import { integrationBranch } from './branches'
 import { versionedTags } from './changed-packages'
 import {
   isPackageTag,
+  noReleasesRead,
   pickBackMerge,
+  pickVersionSuccessor,
   releasesRead,
   versionBranchFor,
   type ReleasesRead,
@@ -158,6 +160,46 @@ async function readReleases(
 }
 
 /**
+ * The release workflow, run on the merge of the recorded Version Packages pull request, may find changesets
+ * still pending and open a second one instead of publishing. When one is open from the version branch, into
+ * the release branch, and its head holds the recorded merge, it belongs to this publication and goes through
+ * the same merge. Undefined when there is none. `at` is when the recorded pull request merged.
+ */
+async function mergeVersionSuccessor(
+  deps: PublishDeps,
+  p: Publication,
+  token: string,
+  recorded: number,
+  mergeCommitSha: string,
+): Promise<VersionStep | undefined> {
+  const open = await deps.api.openPullRequestsBetween(
+    p.repository,
+    token,
+    versionBranchFor(p.releaseBranch),
+    p.releaseBranch,
+  )
+  const holding = []
+  for (const pr of open) {
+    if (!pickVersionSuccessor([pr], { repo: p.repository, release: p.releaseBranch }, recorded))
+      continue
+    if (await deps.api.contains(p.repository, token, pr.headSha, mergeCommitSha)) holding.push(pr)
+  }
+  const pr = pickVersionSuccessor(
+    holding,
+    { repo: p.repository, release: p.releaseBranch },
+    recorded,
+  )
+  if (!pr) return undefined
+  return mergeWhenGreen(deps, {
+    repo: p.repository,
+    token,
+    pr,
+    name: `Version Packages #${pr.number}, opened after #${recorded} merged`,
+    base: p.releaseBranch,
+  })
+}
+
+/**
  * A publication of a tag the factory pushed: the tasks are released, and their issues closed, only once the
  * workflow the tag started succeeded. A failed run fails the publication with the reason on the task, and the
  * next release that holds the tasks' merges releases them.
@@ -216,6 +258,19 @@ async function advanceTag(deps: PublishDeps, p: Publication, result: PublishResu
   result.published.push(p.id)
 }
 
+/** Ends a publication that published nothing, with the reason on it and on its task's `released` stage. */
+async function failPublication(deps: PublishDeps, p: Publication, reason: string) {
+  await deps.db
+    .update(publication)
+    .set({ status: 'failed', detail: reason })
+    .where(eq(publication.id, p.id))
+  await enterStage(deps.db, p.taskId, 'released', {
+    actor: p.actor,
+    mergeSha: p.promotedSha,
+    releaseError: reason,
+  })
+}
+
 /** One publication, one step further: the Version Packages merge, then the published versions. */
 async function advance(deps: PublishDeps, p: Publication, result: PublishResult) {
   if (p.kind === 'tag') return advanceTag(deps, p, result)
@@ -243,10 +298,47 @@ async function advance(deps: PublishDeps, p: Publication, result: PublishResult)
   const tags = (await deps.api.releasesSince(p.repository, token, p.startedAt)).filter((r) =>
     isPackageTag(r.tag),
   )
-  const read: ReleasesRead =
-    tags.length === 0
-      ? { wait: 'waiting for the release workflow to publish' }
-      : await readReleases(deps, p, token, versionPullRequest, tags)
+  let read: ReleasesRead
+  if (tags.length === 0) {
+    const last = await deps.api.readPullRequest(p.repository, token, versionPullRequest)
+    let waiting = 'waiting for the release workflow to publish'
+    if (last.mergeCommitSha) {
+      const next = await mergeVersionSuccessor(
+        deps,
+        p,
+        token,
+        versionPullRequest,
+        last.mergeCommitSha,
+      )
+      if (next && 'merged' in next) {
+        merged += `merged Version Packages #${next.merged} for ${p.actor}, opened after #${versionPullRequest} merged; `
+        await deps.db
+          .update(publication)
+          .set({ versionPullRequest: next.merged, detail: merged })
+          .where(eq(publication.id, p.id))
+        result.merged.push(p.id)
+        result.waiting += 1
+        return
+      }
+      if (next && 'wait' in next) waiting = next.wait
+    }
+    const end = noReleasesRead(
+      last.mergedAt ?? p.startedAt,
+      deps.now?.() ?? new Date(),
+      versionPullRequest,
+    )
+    if ('failed' in end) {
+      const reason = waiting.startsWith('waiting for the release')
+        ? end.failed
+        : `${end.failed}; ${waiting}`
+      await failPublication(deps, p, `${merged}${reason}`)
+      result.failed.push(p.id)
+      return
+    }
+    read = { wait: waiting }
+  } else {
+    read = await readReleases(deps, p, token, versionPullRequest, tags)
+  }
   if ('wait' in read) {
     await note(deps.db, p.id, `${merged}${read.wait}`)
     result.waiting += 1

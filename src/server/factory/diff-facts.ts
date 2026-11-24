@@ -1,6 +1,7 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import { unplannedFiles, type ChangePlan } from './change-plan'
+import { MAX_PATHS, parseNumstat, type ChangeSize } from './change-size'
 import { changesetPackages, isChangesetFile } from './changesets'
 import { diffGuards, parseNameStatus, testScriptOf } from './guards'
 import type { Finding } from './review'
@@ -23,6 +24,8 @@ export type DiffFacts = {
   required: RequiredByCheck[]
   /** Every path the change touches, the old path of a rename included. */
   touched: string[]
+  /** The size of the change, and the paths that count in it (#474), for the commit measured. */
+  size: ChangeSize & { paths: string[] }
 }
 
 /**
@@ -82,7 +85,10 @@ export async function diffFacts(
     .split('\n')
     .flatMap((line) => line.split('\t').slice(1))
     .filter((path) => path !== '')
-  return { guards, unplanned: withoutRequired(unplanned, required), required, touched }
+  const numstat = await must(backend, `${git} diff --numstat --no-color --no-renames ${base} HEAD`)
+  const measured = parseNumstat(numstat.stdout)
+  const size = { ...measured.size, paths: measured.paths.slice(0, MAX_PATHS) }
+  return { guards, unplanned: withoutRequired(unplanned, required), required, touched, size }
 }
 
 /**

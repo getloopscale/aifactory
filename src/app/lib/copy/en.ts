@@ -76,6 +76,8 @@ export const en = {
     nothingHere: 'Nothing here.',
     mainRedAfterRelease: 'main is red after the release',
     mainRed: 'main is red',
+    changeSize: (added: number, removed: number, files: number) =>
+      `${added} lines added, ${removed} removed, in ${files} ${files === 1 ? 'file' : 'files'}`,
     waitingOnBase: (checks: string, branch: string) => `waits for ${checks} to pass on ${branch}`,
     returned: {
       base_conflict: 'Returned: conflicts with base',

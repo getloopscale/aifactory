@@ -466,8 +466,9 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
 export const EVENTS = Object.keys(TRANSITIONS) as TransitionEvent[]
 
 /**
- * The events whose outcome is declared here and read by nothing yet. These webhook intents are only recorded
- * (`ingest/decide.ts`), and a later step will act on them as this says; an issue that was closed or lost the
+ * The events whose outcome is declared here and read by nothing yet. Their webhook intents are only recorded
+ * (`ingest/decide.ts`), and a later step will act on them as this says. What is written on a pull request
+ * is wired (`ingest/pull-request.ts`), and so is an issue that was closed or lost the
  * label already cancels its task (`ingest/withdraw.ts`). A run hands its own work over, and the
  * `merge-task` job integrates it where it is (`integrate`, `autoMergeOrMergeable`, `integrate-after-ci`); the table states what
  * those do, and they do not ask it.
@@ -476,9 +477,6 @@ export const NOT_WIRED: readonly TransitionEvent[] = [
   'hand_over',
   'integrate',
   'issue_comment_created',
-  'pull_request_comment_created',
-  'pull_request_review_submitted',
-  'pull_request_review_comment_created',
   'check_suite_completed',
   'check_run_completed',
   'issue_reopened',

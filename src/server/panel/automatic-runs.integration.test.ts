@@ -103,6 +103,17 @@ describe('automaticRunsSincePerson', () => {
     expect(await counted(events)).toBe(0)
   })
 
+  it('starts again from zero at a send-back a person wrote on the pull request', async () => {
+    const person: Event[] = ranAgain({
+      decision: 'request_changes',
+      note: 'alice wrote on the pull request',
+    })
+    // The send-back of a review is a decision with no `automatic`, as the panel's own is.
+    person[0] = { stage: 'intake', detail: { decision: 'request_changes', note: 'alice wrote' } }
+
+    expect(await counted([...first, ...times(3, ciRed), ...person])).toBe(0)
+  })
+
   it('counts the runs that only merge the base once there are more than the free ones', async () => {
     const events = [...first, ...times(FREE_BASE_RUNS + 2, conflict), ...ciRed]
 

@@ -171,6 +171,26 @@ describe('pullRequestBody', () => {
     expect(body().startsWith('For #114.')).toBe(true)
     expect(body()).not.toMatch(/\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b:?\s+#114\b/i)
   })
+
+  it('shows the lines the change added and removed, and nothing for a task that was not measured', () => {
+    const input = {
+      issueNumber: 114,
+      sha: 'abc1234def',
+      rows: [],
+      agentSummary: 'x',
+      review: {
+        reviewer: 'codex',
+        attempt: 1,
+        outcome: { verdict: 'approve' as const, summary: 'Fine.', findings: [] },
+      },
+    }
+    const change = { added: 40, removed: 5, testAdded: 10, testRemoved: 0, files: 2 }
+
+    expect(pullRequestBody({ ...input, change })).toContain(
+      'Size of the change: +50 −5 lines in 2 files (10 added in tests).',
+    )
+    expect(pullRequestBody(input)).not.toContain('Size of the change')
+  })
 })
 
 describe('unestablishedGates', () => {

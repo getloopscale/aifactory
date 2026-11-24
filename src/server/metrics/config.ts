@@ -18,6 +18,9 @@ export const METRIC_NAMES = [
   'hours_to_release',
   'handoff_share',
   'person_decisions_per_delivery',
+  'net_lines_per_delivery',
+  'test_share_of_change',
+  'repeat_touch_share',
 ] as const
 export type MetricName = (typeof METRIC_NAMES)[number]
 
@@ -113,6 +116,25 @@ export const METRICS: Record<MetricName, MetricSpec> = {
   person_decisions_per_delivery: {
     label: "A person's decisions per delivered run",
     unit: 'count',
+    worse: 'up',
+    minSamples: 3,
+  },
+  // The three below describe the code the deliveries add up to (#474). Their samples are deliveries with a measured change.
+  net_lines_per_delivery: {
+    label: 'Lines added minus removed outside tests, per delivered run',
+    unit: 'count',
+    worse: 'up',
+    minSamples: 3,
+  },
+  test_share_of_change: {
+    label: 'Share of the added lines that are in test files',
+    unit: 'share',
+    worse: 'down',
+    minSamples: 3,
+  },
+  repeat_touch_share: {
+    label: 'Delivered runs that changed a file another delivery changed in the 14 days before',
+    unit: 'share',
     worse: 'up',
     minSamples: 3,
   },

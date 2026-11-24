@@ -35,6 +35,7 @@ import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
 import { freshGithubCredential, githubEgress, renewGithubCredential } from './credential-renewal'
 import { deliverPreRelease, describeDelivery, type Handed } from './integration'
+import type { ChangeFacts } from './change-size'
 import { enterMerge } from './merge-task'
 import { heldForEvaluation, heldForReview } from '../evals/cases'
 import {
@@ -258,6 +259,8 @@ export class Run {
   private planned: { discarded: boolean } | undefined
   /** Every path the change under review touches, as the last review read it. */
   private touched: string[] = []
+  /** The size of the change at the commit last reviewed (#474), kept for the pull request and the delivery. */
+  private changeFacts: ChangeFacts | undefined
   /** Whether the checks the run failed fail on the base too, asking each check at most once (#219). */
   private readonly baseProbe = new BaseProbe()
   /** The last review of this run that asked for changes: the next round starts from its findings. */
@@ -2003,12 +2006,16 @@ export class Run {
       integration: integrationBranch(this.c.repo),
     })
     this.reviewedFrom = base
-    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
-      baseSha: base,
-      plan: this.plan,
-      issue,
-      checkRuns: await this.checkRuns(),
-    })
+    const { guards, unplanned, required, touched, size } = await diffFacts(
+      this.backend,
+      this.repoDir,
+      {
+        baseSha: base,
+        plan: this.plan,
+        issue,
+        checkRuns: await this.checkRuns(),
+      },
+    )
     const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent) =>
       this.reviewer.run(this.backend, {
         onEvent,
@@ -2040,6 +2047,7 @@ export class Run {
       }),
     )
     this.touched = touched
+    this.changeFacts = { ...size, sha }
     // The reviewer reads and does not write. If it wrote anyway, none of it counts.
     await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
     await must(this.backend, `git -C ${this.repoDir} clean -fd`)
@@ -2112,13 +2120,14 @@ export class Run {
       baseSha: this.baseSha,
       integration,
     })
-    const { guards, touched } = await diffFacts(this.backend, this.repoDir, {
+    const { guards, touched, size } = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,
       issue: this.c.issue,
     })
     if (guards.some((g) => g.severity !== 'minor')) return undefined
     this.touched = touched
+    this.changeFacts = { ...size, sha }
     this.c.state.current = 'review'
     await enterRunStage(deps.db, taskId, 'review', { sha, attempt, approvalOf: last.sha })
     const kept: ReviewVerdict = {
@@ -2203,7 +2212,9 @@ export class Run {
         plan: this.renderedPlan,
         repository: row.repository,
         artifacts: await this.artifactLinksAt(sha),
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
       }),
+      ...(this.changeFacts ? { change: this.changeFacts } : {}),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
   }
@@ -2434,6 +2445,7 @@ export class Run {
         plan: this.renderedPlan,
         repository: row.repository,
         artifacts: await this.artifactLinksAt(sha),
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
       }),
     })
     await api.commentOnIssue(
@@ -2467,6 +2479,7 @@ export class Run {
         pullRequestUrl: pull.url,
         findings: outcome.findings,
         costUsd: this.cost,
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
         attempts: attempt,
         ...describeDelivery(handed),
       },

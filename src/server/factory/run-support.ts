@@ -1,6 +1,7 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import { FACTORY_SIGNATURE } from '../../shared/personas'
+import { describeSize, type ChangeSize } from './change-size'
 import type { EgressRule } from './sandbox'
 import type { CheckResult } from './evidence'
 import { MAX_ATTEMPTS, renderFindings, type ReviewVerdict } from './review'
@@ -197,6 +198,8 @@ export function pullRequestBody(input: {
   repository?: string
   /** Links to the files the checks wrote for this commit, when the panel has an address. */
   artifacts?: string[]
+  /** The size of the change at the reviewed commit. */
+  change?: ChangeSize
 }): string {
   const { review } = input
   const remaining = review.outcome.findings
@@ -221,6 +224,7 @@ export function pullRequestBody(input: {
           '',
         ]
       : []),
+    ...(input.change ? [`Size of the change: ${describeSize(input.change)}.`, ''] : []),
     `Independent review by ${review.reviewer}, attempt ${review.attempt}: ${review.outcome.verdict}. ${review.outcome.summary}`,
     ...(remaining.length > 0 ? ['', renderFindings(remaining)] : []),
     '',

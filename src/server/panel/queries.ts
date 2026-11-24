@@ -26,6 +26,7 @@ import {
   type LeadTimeLimits,
 } from '../../shared/lead-time'
 import { ofLatestVerification } from '../factory/artifacts'
+import { readFacts, totalAdded, totalRemoved } from '../factory/change-size'
 import { retryAt } from '../factory/auto-retry'
 import { CONFLICT_NOTE_OPENING } from '../factory/merge-base'
 import { FREE_BASE_RUNS } from '../factory/transitions'
@@ -188,6 +189,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     rows.filter((r) => r.stage === 'intake').map((r) => r.id),
   )
   const steps = await stepEvents(db, ids)
+  const changes = await changeSizes(db, ids)
   const limits = await leadTimeLimits(db, rows)
   const now = new Date()
   return rows.map((r) => {
@@ -216,6 +218,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
       waitingOnBase: holds.get(r.id) ?? null,
+      change: changes.get(r.id) ?? null,
       returned: returns.get(r.id) ?? null,
       queue: r.stage === 'intake' ? (queues.get(r.id) ?? EMPTY_QUEUE) : null,
       resolved: r.resolvedSha !== null,
@@ -228,6 +231,39 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       ...cardAgent(r.stage as Stage, steps.get(r.id) ?? []),
     }
   })
+}
+
+/**
+ * The size of each task's change at its latest approved commit, from the `merge` or `done` event that carries it.
+ * A task from before the size was measured has none, which is not a change of zero lines.
+ */
+async function changeSizes(
+  db: Database,
+  ids: number[],
+): Promise<Map<number, { added: number; removed: number; files: number }>> {
+  const events = await db
+    .selectDistinctOn([stageEvent.taskId], { taskId: stageEvent.taskId, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(
+      and(
+        inArray(stageEvent.taskId, ids),
+        inArray(stageEvent.stage, ['merge', 'done']),
+        sql`${stageEvent.detail} -> 'change' is not null`,
+      ),
+    )
+    .orderBy(stageEvent.taskId, desc(stageEvent.id))
+  const out = new Map<number, { added: number; removed: number; files: number }>()
+  for (const e of events) {
+    const facts = readFacts((e.detail as Record<string, unknown> | null)?.change)
+    if (facts) {
+      out.set(e.taskId, {
+        added: totalAdded(facts),
+        removed: totalRemoved(facts),
+        files: facts.files,
+      })
+    }
+  }
+  return out
 }
 
 /** The stages in which a task is delivered, so its lead time stopped at its last `done`. */
