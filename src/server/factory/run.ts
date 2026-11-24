@@ -1517,6 +1517,80 @@ export class Run {
     return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
   }
 
+  /** The stored results of the checks on `sha`. */
+  private async checksAt(sha: string) {
+    return (await this.checkRuns()).filter((r) => r.sha === sha)
+  }
+
+  /**
+   * Before the approved work is integrated (#227): the head of the integration branch is fetched and, when the
+   * work does not hold it, merged into the work with a merge commit that is pushed, and the checks run on it. The
+   * repository's integration checks run on the result too, merged or not. Answers the commit to integrate: the
+   * merge commit, or `sha` when nothing was merged. A conflict changes nothing: the integration finds it as before.
+   * A check that fails on the merge and on the fetched head is the base's (`BaseRed`); any other fails the run.
+   */
+  private async mergedBeforeIntegration(sha: string, attempt: number): Promise<string> {
+    const { backend, git } = this
+    const integration = integrationBranch(this.c.repo)
+    const extra = this.c.repo.integrationChecks ?? []
+    await must(backend, `git -C ${this.repoDir} fetch origin ${integration}`)
+    const head = (await must(backend, `git -C ${this.repoDir} rev-parse FETCH_HEAD`)).stdout.trim()
+    const held = await backend.execute(
+      `git -C ${this.repoDir} merge-base --is-ancestor ${head} ${sha}`,
+    )
+    let target = sha
+    if (held.exitCode !== 0) {
+      await backend.uploadFile(GITCONFIG, gitConfig(this.c.deps.author))
+      const merge = await mergeIntegration(backend, git, head)
+      if ('conflicts' in merge) return sha
+      target = await this.commitAndPush(
+        `Merge ${integration} at ${head.slice(0, 7)} into ${this.c.branch}`,
+        { mergeBeforeIntegration: true, base: head },
+      )
+      const checked = await this.verify(target, attempt, { publish: true })
+      if (!checked.verdict.open) {
+        await this.refuseMerged(
+          checked.results.filter((r) => !r.passed),
+          head,
+          target,
+        )
+      }
+    }
+    if (extra.length === 0) return target
+    this.c.state.current = 'verify'
+    const results = await runChecks(
+      backend,
+      this.repoDir,
+      extra,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
+    for (const check of results) {
+      await this.c.deps.db.insert(evidence).values({ taskId: this.c.taskId, sha: target, ...check })
+    }
+    const failed = results.filter((r) => !r.passed)
+    if (failed.length > 0) await this.refuseMerged(failed, head, target)
+    return target
+  }
+
+  /** The checks failed on the work merged with the integration branch: the base's, or the run's failure. */
+  private async refuseMerged(failed: CheckResult[], head: string, sha: string): Promise<never> {
+    const red = await this.baseProbe.red(
+      this.backend,
+      {
+        repoDir: this.repoDir,
+        baseSha: head,
+        checks: [...this.checks, ...(this.c.repo.integrationChecks ?? [])],
+        timeoutMs: this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+      },
+      failed,
+    )
+    if (red) throw new BaseRed(red, head, integrationBranch(this.c.repo))
+    const names = failed.map((r) => `"${r.name}"`).join(', ')
+    throw new StageFailure(
+      `${names} failed on the work merged with ${integrationBranch(this.c.repo)} at ${head.slice(0, 7)} (${sha.slice(0, 7)})`,
+    )
+  }
+
   /** Throws `BaseRed` when the checks the work failed fail on the integration branch too (#219). */
   private async refuseRedBase(failed: CheckResult[]): Promise<void> {
     this.c.state.current = 'verify'
@@ -1849,6 +1923,11 @@ export class Run {
     if (held) return this.handOver(sha, attempt, here, outcome, [], held)
     const empty = await this.reopenedOrEmpty(sha)
     if (empty) return empty
+    const merged = await this.mergedBeforeIntegration(sha, attempt)
+    if (merged !== sha) {
+      here = await this.checksAt(merged)
+      sha = merged
+    }
     state.current = 'merge'
     await enterMerge(taskId, {
       branch,

@@ -11,6 +11,7 @@ import {
   resolvedPrompt,
   reviewAllowsRework,
   reviewPrompt,
+  resolutionReviewPrompt,
   reworkPrompt,
   roundsNote,
   type Finding,
@@ -847,5 +848,21 @@ describe('paths the builder may not touch', () => {
     )
     expect(result.verdict).toBe('changes')
     expect(result.findings[0]?.severity).toBe('major')
+  })
+})
+
+describe('resolutionReviewPrompt', () => {
+  it('asks for the remerge diff of the merge commit and not for the whole pull request', () => {
+    const prompt = resolutionReviewPrompt({
+      repo: 'o/r',
+      issueNumber: 7,
+      title: 'T',
+      branch: 'factory/7',
+      mergeSha: 'abc1234',
+    })
+    expect(prompt).toContain('git show --remerge-diff abc1234')
+    expect(prompt).toContain('abc1234..HEAD')
+    expect(prompt).not.toContain('git diff')
+    expect(prompt).toContain('not the pull request again')
   })
 })

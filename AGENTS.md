@@ -364,6 +364,12 @@ reads that file, not a convention.
   failure records `baseRed`, `retryableFailure` reads it as `base`, and the task runs again on its own like an
   environment failure, from half an hour; past its automatic runs the coordinator escalates it as `base_red`.
   `run-case.ts` takes the same step and leaves such a case unmeasured.
+- **Approved work is merged with the integration branch before it is integrated (#227).** `Run.mergedBeforeIntegration`
+  fetches the head of the integration branch; when the work does not hold it, the factory merges it with no agent,
+  pushes the merge commit and runs the checks on it, and then runs the repository's `integration_checks` on the result
+  (merged or not). A failure that is also on the fetched head is `BaseRed` (`BaseProbe`). A conflict changes nothing and
+  the integration finds it as before. `merge-task` is pinned to the merge commit. `resolutionProblems`
+  (`factory/merge-base.ts`) and `resolutionReviewPrompt` (`factory/review.ts`) are for the merge agent, not yet wired.
 - **A merge of the base is not the task's change.** The review and `diffFacts` measure the change from
   `reviewBase` (`factory/diff-facts.ts`): the merge base of HEAD and the integration branch fetched before each
   review. A later round reads what the task changed since the reviewed commit through `changedSinceCommand`

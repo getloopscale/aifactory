@@ -112,6 +112,41 @@ Use "changes" when there is any blocker or major finding. Use "approve" only whe
 `
 }
 
+/**
+ * The prompt of the review of a conflict a merge agent resolved (#227). The work was reviewed and approved before
+ * the merge, so only how each conflict was resolved is read: the merge commit's `--remerge-diff` and any commit
+ * after it, never the whole pull request again.
+ */
+export function resolutionReviewPrompt(input: {
+  repo: string
+  issueNumber: number
+  title: string
+  branch: string
+  mergeSha: string
+  knowledgeDir?: string
+}): string {
+  return `You are an independent code reviewer for the repository ${input.repo}. The work for #${input.issueNumber} (${input.title}) on the branch ${input.branch} was reviewed and approved. Another agent then merged the integration branch into it and resolved conflicts in the merge commit ${input.mergeSha}. You did not write it and you must not change it.
+
+Review only the resolution, not the pull request again:
+- Read how each conflict was resolved with \`git show --remerge-diff ${input.mergeSha}\`, and any commit made after it with \`git log ${input.mergeSha}..HEAD -p\`.
+- Decide whether each resolution keeps what both sides changed, loses nothing of either, and leaves the code coherent (a generated file is regenerated, not edited by hand).
+- Do not review the rest of the change: it was approved.
+- You may run the project's tests. Do not edit, create or delete files, and do not run any git command that writes.
+${
+  input.knowledgeDir
+    ? `
+${knowledgeRules(input.knowledgeDir)}
+`
+    : ''
+}
+Finish with one JSON object on its own, and nothing after it:
+
+{"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}
+
+Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is.
+`
+}
+
 /** A review round that asked for changes: the commit it read and what it found. */
 export type EarlierReview = { sha: string; findings: Finding[] }
 
