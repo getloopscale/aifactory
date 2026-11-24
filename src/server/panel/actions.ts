@@ -599,6 +599,11 @@ export async function answerByCoordinator(
   const reply = text.trim()
   if (reply === '') throw new ActionRefused('an answer says something')
   const { token } = await deps.github.installationToken(row.repository)
+  // An earlier pass may have posted the answer and failed before recording it: that comment is the answer, not a second one.
+  const posted = (
+    await deps.api.listIssueComments(row.repository, token, row.issueNumber, asked.askedAt)
+  ).find((c) => c.authorType === 'Bot' && c.body.includes(answerMarker(questionId)))
+  if (posted) return posted.id
   return deps.api.commentOnIssue(
     row.repository,
     token,

@@ -358,7 +358,12 @@ async function perform(
   decision: Decision,
 ): Promise<Performed> {
   const performed = await APPLIERS[decision.action]?.(deps, exception, decision)
-  if (!performed) throw new Error(`the coordinator has no way to apply ${decision.action}`)
+  if (!APPLIERS[decision.action]) {
+    throw new Error(`the coordinator has no way to apply ${decision.action}`)
+  }
+  if (!performed) {
+    throw new ActionRefused(`the ${decision.action} decision lacks what it needs to be applied`)
+  }
   return performed
 }
 

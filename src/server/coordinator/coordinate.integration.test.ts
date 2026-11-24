@@ -13,6 +13,7 @@ import {
   finding,
   ingress,
   repository,
+  question,
   review,
   stageEvent,
   task,
@@ -1451,5 +1452,196 @@ describe('the handoffs of an integration that waited for the required checks', (
     await coordinate(deps(), 'auto')
 
     expect(queued.map((q) => q.input)).toEqual([{ taskId: id, mergeBase: true }])
+  })
+})
+
+describe('the actions the unblocker applies through the coordinator', () => {
+  const REPO = 'paulo/app'
+  const SHA = 'abcdef1234abcdef1234abcdef1234abcdef1234'
+  const exception = (taskId: number, kind: string, head: string) =>
+    ({ kind, taskId, head, evidence: 'x' }) as never
+  const apply = (
+    e: ReturnType<typeof exception>,
+    d: Record<string, unknown>,
+    over: Partial<CoordinatorDeps> = {},
+  ) => applyDecision({ ...deps(), ...over }, e, { reason: 'because', ...d } as never, 'auto')
+  const last = async () => (await actions()).at(-1)!
+
+  describe('rerun_checks', () => {
+    const ciChecks = (calls: number[]) => ({
+      jobLog: async () => '',
+      annotations: async () => [],
+      failedChecks: async () => [{ id: 5, name: 'ci', actions: true, url: '', summary: '' }],
+      rerunFailedJobs: async (_r: string, _t: string, id: number) => {
+        calls.push(id)
+        return { started: true as const }
+      },
+    })
+
+    it('reruns the failed jobs once per commit and refuses the second time', async () => {
+      const id = await seed('handoff', { headSha: SHA })
+      const calls: number[] = []
+      const e = exception(id, 'checks_unchanged', `${SHA}@1`)
+
+      expect(await apply(e, { action: 'rerun_checks' }, { ciChecks: ciChecks(calls) })).toBe(
+        'applied',
+      )
+      expect(calls).toEqual([5])
+      const again = exception(id, 'failure', `${SHA}@2`)
+      expect(await apply(again, { action: 'rerun_checks' }, { ciChecks: ciChecks(calls) })).toBe(
+        'refused',
+      )
+      expect(calls).toEqual([5])
+      expect((await last()).reason).toContain('already rerun once')
+    })
+
+    it('refuses without a commit or a way to rerun', async () => {
+      const id = await seed('handoff', { headSha: SHA })
+
+      expect(await apply(exception(id, 'failure', 'none'), { action: 'rerun_checks' })).toBe(
+        'refused',
+      )
+      expect((await last()).reason).toContain('no commit or no way')
+    })
+  })
+
+  describe('blocked_by', () => {
+    const open = async (body = 'Do it.') => {
+      const id = await seed('intake')
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      api.repo(REPO).issue(row.issueNumber, { body })
+      return { id, issue: row.issueNumber, e: exception(id, 'unknown', `blocked:${id}`) }
+    }
+
+    it('adds one Blocked by line naming an open issue, and not a second', async () => {
+      const { issue, e } = await open()
+      api.repo(REPO).issue(900, { state: 'open' })
+
+      expect(await apply(e, { action: 'blocked_by', blockedBy: 900 })).toBe('applied')
+      expect(api.repo(REPO).issue(issue).body).toBe('Do it.\n\nBlocked by #900')
+      await getPool().query('truncate table coordinator_action')
+      expect(await apply(e, { action: 'blocked_by', blockedBy: 900 })).toBe('applied')
+      expect((await last()).reason).toContain('already named')
+      expect(api.repo(REPO).issue(issue).body).toBe('Do it.\n\nBlocked by #900')
+    })
+
+    it('refuses an issue that blocks itself and one that is closed', async () => {
+      const { issue, e } = await open()
+      api.repo(REPO).issue(901, { state: 'closed' })
+
+      expect(await apply(e, { action: 'blocked_by', blockedBy: issue })).toBe('refused')
+      expect((await last()).reason).toContain('cannot block itself')
+      await getPool().query('truncate table coordinator_action')
+      expect(await apply(e, { action: 'blocked_by', blockedBy: 901 })).toBe('refused')
+      expect((await last()).reason).toContain('is not an open issue')
+      expect(api.repo(REPO).issue(issue).body).toBe('Do it.')
+    })
+  })
+
+  describe('resolve_elsewhere', () => {
+    it('refuses evidence that is only a run, and a commit the integration branch does not hold', async () => {
+      const id = await seed('handoff', { headSha: SHA })
+      const e = exception(id, 'failure', `${SHA}@1`)
+      api.repo(REPO).heads.set('workspace', 'f'.repeat(40))
+
+      expect(await apply(e, { action: 'resolve_elsewhere', evidenceFor: { run: '12' } })).toBe(
+        'refused',
+      )
+      expect((await last()).reason).toContain('name the commit')
+      await getPool().query('truncate table coordinator_action')
+      api.repo(REPO).unreachable.add('c'.repeat(40))
+      expect(
+        await apply(e, { action: 'resolve_elsewhere', evidenceFor: { commit: 'c'.repeat(40) } }),
+      ).toBe('refused')
+      expect((await last()).reason).toContain('does not hold')
+      expect(await stageOf(id)).toBe('handoff')
+    })
+
+    it('resolves the task on a commit the integration branch holds', async () => {
+      const id = await seed('handoff', { headSha: SHA })
+      api.repo(REPO).heads.set('workspace', 'f'.repeat(40))
+
+      const result = await apply(exception(id, 'failure', `${SHA}@1`), {
+        action: 'resolve_elsewhere',
+        evidenceFor: { commit: 'a'.repeat(40) },
+      })
+
+      expect(result).toBe('applied')
+      expect(await stageOf(id)).toBe('done')
+    })
+  })
+
+  describe('answer', () => {
+    const waiting = async () => {
+      const id = await seed('waiting')
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      const [q] = await getDb()
+        .insert(question)
+        .values({ taskId: id, body: 'Which?', commentId: '1', costUsd: 0 })
+        .returning({ id: question.id })
+      return { id, q: q.id, issue: row.issueNumber }
+    }
+
+    it('posts the answer and records the comment and question it answers', async () => {
+      const { id, q, issue } = await waiting()
+
+      const result = await apply(exception(id, 'builder_question', `question:${q}`), {
+        action: 'answer',
+        answerText: 'Use A.',
+        by: 'unblocker',
+      })
+
+      expect(result).toBe('applied')
+      const [comment] = api.repo(REPO).issue(issue).comments
+      expect(comment.body).toContain('Use A.')
+      expect((await last()).draft).toMatchObject({
+        by: 'unblocker',
+        answerCommentId: comment.id,
+        questionId: q,
+      })
+    })
+
+    it('refuses an exception that names no question', async () => {
+      const { id } = await waiting()
+
+      expect(
+        await apply(exception(id, 'builder_question', 'other'), {
+          action: 'answer',
+          answerText: 'Use A.',
+        }),
+      ).toBe('refused')
+      expect((await last()).reason).toContain('names no question')
+    })
+
+    it('does not post a second comment when the first was posted and never recorded', async () => {
+      const { id, q, issue } = await waiting()
+      const e = exception(id, 'builder_question', `question:${q}`)
+      const d = { action: 'answer', answerText: 'Use A.' }
+      await apply(e, d)
+      await getPool().query('truncate table coordinator_action')
+
+      await apply(e, d)
+
+      const comments = api.repo(REPO).issue(issue).comments
+      expect(comments).toHaveLength(1)
+      expect((await last()).draft).toMatchObject({ answerCommentId: comments[0].id })
+    })
+  })
+
+  describe('a decision that lacks what its action needs', () => {
+    it.each([
+      ['blocked_by', {}],
+      ['fix_base', {}],
+      ['scope', {}],
+      ['release', {}],
+      ['resolve_elsewhere', {}],
+    ])('refuses %s with a reason instead of failing', async (action, extra) => {
+      const id = await seed('intake')
+
+      const result = await apply(exception(id, 'unknown', `x:${id}`), { action, ...extra })
+
+      expect(result).toBe('refused')
+      expect((await last()).reason).toContain('lacks what it needs')
+    })
   })
 })
