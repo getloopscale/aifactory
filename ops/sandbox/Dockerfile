@@ -3,7 +3,7 @@
 # everything goes through the egress proxy of its sandbox (see docker-sandbox.ts).
 FROM node:22.23.5-bookworm
 RUN apt-get update \
- && apt-get install -y --no-install-recommends bubblewrap jq strace unzip \
+ && apt-get install -y --no-install-recommends bubblewrap jq strace unzip wamerican wbrazilian \
  && rm -rf /var/lib/apt/lists/* \
  && corepack enable \
  && mkdir -p /work /cache \

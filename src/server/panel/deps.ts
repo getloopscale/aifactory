@@ -8,7 +8,7 @@ import { githubAppFromEnv } from '../factory/deps'
 import { harnessRegistry } from '../factory/harness-registry'
 import { readRecipe } from '../factory/recipe'
 import { inTransactionForPlan, inTransactionForRun } from '../factory/resume-queue'
-import { sandboxProviderFromEnv } from '../factory/sandbox-provider'
+import { sandboxChoice, sandboxProviderFromEnv } from '../factory/sandbox-provider'
 import { createGithubApp } from '../github/app'
 import { createIssuesApi } from '../github/issues-api'
 import { createGithubApi } from '../github/pulls'
@@ -112,6 +112,7 @@ export function proofDeps(env: NodeJS.ProcessEnv = process.env): RunProofDeps {
     github: githubAppFromEnv(env),
     api: createGithubApi(),
     sandbox: sandboxProviderFromEnv(env),
+    provider: sandboxChoice(env),
     fetchRecipe: (repo, token) => readRecipe(repo, token),
     diagnose: (fullName) => repositoryDoctor(doctorDeps(env), fullName),
   }

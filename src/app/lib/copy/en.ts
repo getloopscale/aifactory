@@ -679,7 +679,84 @@ export const en = {
     loading: 'Loading…',
     ready: 'Ready when you are.',
     askFactory: 'Ask the factory',
+    metaDescription: 'Talk to the factory.',
+    failedTitle: "I couldn't answer",
+    failedHint:
+      'The model did not answer. The most common cause is the OpenRouter key being out of credit or without permission for this model. The "Setup" page shows what is ready. Try again in a moment.',
+    blurbs: {
+      openrouter: 'An OpenRouter key, pay per use',
+      codex: 'Your ChatGPT subscription (Codex)',
+    },
+    suggestions: ['How is the factory doing now?', 'What needs me?', 'How is the backlog going?'],
+    approve: 'Approve',
+    reject: 'Reject',
+    looked: 'Looked at',
+    did: 'Did',
+    refused: 'You refused',
+    model: 'Model',
   },
+  engine: {
+    roleLabel: {
+      builder: 'Coding agent of the Builder',
+      planner: 'Coding agent of the Planner',
+      reviewer: 'Coding agent of the Reviewer',
+      merger: 'Coding agent of the Merger',
+    },
+    roleName: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer', merger: 'Merger' },
+    choice: (label: string) => `Choice: ${label}`,
+    sameAsBuilder: (builder: string) => `Same as the Builder (${builder})`,
+    unavailable: ' (unavailable)',
+    model: 'Model',
+    modelOf: (role: string) => `Model of the ${role}`,
+    agentDefault: "Agent's default",
+    effort: 'Effort',
+    effortOf: (role: string) => `Effort of the ${role}`,
+    default: 'Default',
+    save: 'Save',
+    saved:
+      'Saved. It applies to the next runs, with no restart. The ones running finish as they started.',
+    noModelList: (engine: string) =>
+      `The list of models of ${engine} is not available here: it uses its own default.`,
+    cannotChoose: ' cannot be chosen: ',
+    ownAgent:
+      'These repositories have an agent of their own, which counts for more than this choice:',
+    changeInRepositories: 'Change in Repositories',
+  },
+  promptBlock: {
+    copy: 'Copy',
+    copied: 'Copied',
+    copyTitle: (title: string) => `Copy: ${title}`,
+    templatePrefix: 'Template: what is in ',
+    blue: '‹blue›',
+    templateMiddle: ' changes with each task (',
+    place: 'place',
+    places: 'places',
+    templateSuffix: '); the rest is always the same.',
+  },
+  metrics: {
+    heading: 'Metrics',
+    empty: 'Not enough finished work to measure yet.',
+    indicator: 'Indicator',
+    repository: 'Repository',
+    day: 'Day',
+    value: 'Value',
+    baseline: 'Baseline',
+    band: 'Band',
+    allRepositories: 'All repositories',
+    bands: {
+      no_baseline: 'no baseline yet',
+      in_band: 'in band',
+      log: 'drifting',
+      show: 'out of band',
+      act: 'issue opened',
+    },
+    brokeIn: ' in ',
+    broke: ' broke ',
+    on: ' on ',
+    issue: 'issue',
+    notOpened: (error: string) => ` (issue not opened: ${error})`,
+  },
+  notFound: { title: 'Page not found', home: 'Go back home' },
   guide: {
     close: 'Close the guide',
     subtitle: 'Explains and adjusts this page',
@@ -687,6 +764,237 @@ export const en = {
     understand: 'Understand',
     act: 'Do',
     placeholder: 'Ask the guide',
+  },
+  guides: {
+    names: {
+      board: 'Guide of the Board',
+      plans: 'Guide of Plans',
+      repositories: 'Guide of Repositories',
+      inbox: 'Guide of the Inbox',
+      health: 'Guide of Health',
+      agents: 'Guide of Agents',
+      setup: 'Guide of Setup',
+    },
+    board: {
+      about: 'Here you follow every task of the factory, from the queue to delivery.',
+      understand: [
+        'What does each column mean?',
+        'Why are there tasks in "Will retry itself"?',
+        'How does a task get to the board?',
+      ],
+      act: [
+        { text: 'Does any task need me now?' },
+        { text: 'I want to open a job for ', fill: true },
+      ],
+    },
+    plans: {
+      about:
+        'Here a goal of yours becomes a list of small issues, for you to review before the factory starts.',
+      understand: ['How does a plan work?', 'How do I write a good goal?'],
+      act: [
+        { text: 'I want to plan this goal: ', fill: true },
+        { text: 'Which plans are ready to review?' },
+      ],
+    },
+    repositories: {
+      about:
+        'Here you choose which repositories the factory may work in and how it works in each one.',
+      understand: ['What does each setting do?', 'What are the checks?'],
+      act: [
+        { text: 'Which repositories are active and how are they set up?' },
+        { text: 'Set up the checks of ', fill: true },
+      ],
+    },
+    inbox: {
+      about:
+        'Only what is waiting for a person is here: a question, a PR to review, work that got stuck.',
+      understand: ['What is each kind of item?', 'Does approving a PR publish anything yet?'],
+      act: [{ text: 'Where do I start?' }, { text: 'What should I do with the oldest item?' }],
+    },
+    health: {
+      about: 'Here you see how much the factory spent and the problems it found by itself.',
+      understand: ['Am I spending too much?', 'What are these findings?'],
+      act: [{ text: 'Is there anything I need to solve?' }],
+    },
+    agents: {
+      about:
+        'Here you see who works in the factory, the instructions each agent receives and what each can do.',
+      understand: [
+        'What is the difference between the builder and the reviewer?',
+        'What is a prompt, and where is it here?',
+      ],
+      act: [{ text: 'Which agent is doing what now?' }, { text: "Explain the builder's prompt." }],
+    },
+    setup: {
+      about: 'Here you see what the factory still needs to work and how to solve each part.',
+      understand: ['What is each item for?', 'What is missing for the factory to work?'],
+      act: [{ text: 'Guide me through the next step.' }],
+      note: 'Never paste keys or passwords here.',
+    },
+    open: {
+      task: (id: number) => ({
+        explain: `Explain task ${id}`,
+        act: `What should I do with task ${id}?`,
+      }),
+      plan: (id: number) => ({
+        explain: `Explain plan ${id}`,
+        act: `Create the issues of plan ${id}`,
+      }),
+    },
+  },
+  events: {
+    resolved: (sha: string) => `already resolved at ${sha}, issue closed`,
+    preRelease: (name: string) => `pre-release ${name}`,
+    noPreRelease: (error: string) => `no pre-release: ${error}`,
+    nothingToChange: 'nothing to change',
+    awaitingChecks: (checks: string) => `waiting for the repository checks: ${checks}`,
+    mergedBy: (by: string, sha: string) => `merged by ${by} at ${sha}`,
+    byFactory: 'the factory',
+    byPerson: 'a person',
+    decided: (who: string, decision: string, note: string) =>
+      `${who} ${decision}${note ? `: ${note}` : ''}`,
+    newSession: (provider: string, minutes: string) =>
+      `${provider}, new session: the last one had run ${minutes} minutes, the disk moved over`,
+    attempt: (n: string) => `attempt ${n}`,
+    resumed: 'resumed after an answer',
+    rework: 'rework',
+    merger: 'merge agent resolving a conflict',
+    planned: 'following its plan',
+    approvedBy: (reviewer: string) => `approved by ${reviewer}`,
+    resolvedNow: (sha: string, branch: string) => `already resolved at ${sha}, now on ${branch}`,
+    promotedChangesets: (actor: string) =>
+      `promoted by ${actor}; the repository's release workflow publishes it`,
+    promotedTag: (actor: string, tag: string) =>
+      `promoted by ${actor}; ${tag} waits for its release workflow to publish it`,
+    notPublished: (tag: string, error: string) => `${tag} was not published: ${error}`,
+    taggedBy: (tag: string, actor: string, error: string) =>
+      `${tag} by ${actor}${error ? `, but the release could not be created: ${error}` : ''}`,
+    mergedNoRelease: (actor: string, error: string) =>
+      `merged by ${actor}, but the release could not be created: ${error}`,
+    outOfQuota: (resetsAt: string) => `out of quota${resetsAt ? `, resets ${resetsAt}` : ''}`,
+  },
+  approvals: {
+    fallbackTitle: 'Action',
+    nothingChanges: '- nothing changes',
+    retryTask: {
+      title: 'Repeat a task',
+      request: (id: string) => `Start task ${id} over. Its branch and PR are deleted first.`,
+    },
+    requestChanges: {
+      title: 'Ask for changes',
+      request: (id: string, note: string) =>
+        `Send task ${id} back to the agent with this note:\n${note}`,
+    },
+    startJob: {
+      title: 'Open an issue and start',
+      request: (repository: string, title: string, body: string) =>
+        `In ${repository}: ${title}\n\n${body}`,
+    },
+    approveTask: {
+      title: 'Approve the pull request',
+      request: (id: string) =>
+        `Approve the PR of task ${id}, at the commit it is on now. This merges nothing and releases nothing.`,
+    },
+    updateRepository: {
+      title: 'Save settings',
+      request: (repository: string, lines: string) => `In ${repository}:\n${lines}`,
+    },
+    createPlan: {
+      title: 'Start a plan',
+      request: (repository: string, goal: string) =>
+        `In ${repository}, with this goal:\n${goal}\nNo issue is created yet: you review the plan first.`,
+    },
+    createPlanIssues: {
+      title: 'Create the issues of the plan',
+      request: (planId: string, start: boolean) =>
+        `Create on GitHub the selected issues of plan ${planId}, ${start ? 'and start the work on them right away' : 'leaving them waiting for you to start later'}.`,
+    },
+    resolveFinding: {
+      title: 'Resolve a finding',
+      actions: {
+        retry: 'Start the stuck task over (its branch and PR are deleted first).',
+        resume: 'Resume the task, whose question was already answered.',
+        delete_snapshot: 'Delete the snapshot that no task uses.',
+        mark_revert_unknown: 'Show main as red, for someone to check the revert in the repository.',
+      } as Record<string, string>,
+      other: (action: string, id: string) => `Do "${action}" on finding ${id}.`,
+    },
+    updateAgentSettings: {
+      title: 'Change the coding agent',
+      roles: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer', merger: 'Merger' },
+      backToDefault: (role: string) =>
+        `- ${role}: back to the default (the same agent as the Builder)`,
+      chosen: (role: string, value: string) => `- ${role}: ${value}`,
+      model: 'model',
+      effort: 'effort',
+      detail: (role: string, what: string, value: string | null) =>
+        `- ${role}, ${what}: ${value === null ? "the agent's default" : value}`,
+      request: (lines: string) =>
+        `${lines}\nIt applies to the next runs, with no restart. The ones running finish with the old agent.`,
+    },
+    acknowledgeWatch: {
+      title: 'Mark as seen',
+      request: (id: string) => `Mark the red main ${id} as seen by a person.`,
+    },
+    fields: {
+      enabled: 'Factory active in this repository',
+      checks: 'Checks',
+      egress: 'Extra sandbox domains',
+      baseBranch: 'Integration branch',
+      releaseBranch: 'Release branch',
+      askQuestions: 'The agent may ask on the issue',
+      harness: 'Builder agent',
+      reviewer: 'Reviewer',
+      releaseMode: 'Release',
+      yes: 'yes',
+      no: 'no',
+      theDefault: 'the default',
+      defaultChecks: 'the default (npm test)',
+      none: 'none',
+      factoryDefault: "the factory's default",
+      release: {
+        manual: 'only a person releases',
+        trial: 'only records what it would do',
+        auto: 'an agent may release',
+      } as Record<string, string>,
+    },
+  },
+  activity: {
+    reads: {
+      factory_status: "the factory's state",
+      list_tasks: 'the tasks',
+      task_detail: 'the details of a task',
+      backlog_progress: 'the progress of the backlog',
+      inbox_items: 'the inbox',
+      health_report: "the factory's health",
+      setup_report: 'the setup',
+      list_plans: 'the plans',
+      plan_detail: 'a plan',
+      list_repositories: 'the repositories',
+      repo_files: "the project's files",
+      repo_file: 'a file of the project',
+    } as Record<string, string>,
+    changes: {
+      retry_task: 'started a task over',
+      request_changes: 'sent work back with a note',
+      start_job: 'opened an issue and started',
+      approve_task: 'approved a pull request',
+      update_repository: "saved a repository's settings",
+      create_plan: 'started a plan',
+      create_plan_issues: 'created the issues of a plan',
+      resolve_finding: 'resolved a finding',
+      acknowledge_watch: 'marked the red main as seen',
+      update_agent_settings: 'changed the agent that builds, plans or reviews',
+    } as Record<string, string>,
+  },
+  assistProblems: {
+    signIn: 'Sign in to the panel again, then retry.',
+    noCredit: 'The assistant has no model credit: set ANTHROPIC_API_KEY on the server (see Setup).',
+    couldNot: (message: string) => `The assistant could not answer: ${message}`,
+  },
+  agentGroups: {
+    factory: { title: 'Build the code', about: 'Run in an isolated sandbox' },
+    panel: { title: 'Talk to you', about: 'Run on the server, with limited tools' },
   },
   planSection: {
     title: 'Plan',

@@ -14,7 +14,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-import type { DoctorReport, ProvenCheck, StoredProof } from '../../shared/panel'
+import type { DoctorReport, ProvenCheck, ProviderProofs, StoredProof } from '../../shared/panel'
 
 /**
  * The stages of a task, in the order a successful run passes through them, then the ways a run ends
@@ -567,6 +567,11 @@ export const repository = pgTable('repository', {
   checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
   /** The last proof of proposed checks, running or finished. */
   checksProof: jsonb('checks_proof').$type<StoredProof>(),
+  /** The last completed proof of the checks on each sandbox provider; no entry means never tried there. */
+  checksProofByProvider: jsonb('checks_proof_by_provider')
+    .$type<ProviderProofs>()
+    .notNull()
+    .default({}),
   /**
    * The checks run on the merge of the work with the integration branch, after the checks above:
    * `[{ name, command }]`. Empty means none.
@@ -834,7 +839,8 @@ export const metricSignal = pgTable(
  * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
  * (`base_conflict`); any other is a `failure`. A handoff of integrated work after its automatic runs is its own kind
  * too: a pull request that still conflicts with its base (`pull_conflict`), a base that passes the checks blamed on
- * it again (`base_fixed`) and required checks that still fail (`ci_red`).
+ * it again (`base_fixed`) and required checks that still fail (`ci_red`). A red security check, or anything that
+ * would ignore an advisory, lower a level or skip a check, is a `security` exception (#241).
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -860,6 +866,7 @@ export const EXCEPTION_KINDS = [
   'ci_red',
   'checks_broke_after_review',
   'publication_stalled',
+  'security',
 ] as const
 
 /**

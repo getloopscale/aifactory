@@ -80,14 +80,112 @@ describe('mergeIntegration', () => {
   })
 
   it('names the files that conflict, and leaves the branch as it was', async () => {
-    commit('CHANGELOG.md', '# Changelog\n\nthe work\n', 'the work changes the changelog')
+    commit('CHANGELOG.md', 'the work\n', 'the work changes the changelog')
     const head = run('rev-parse HEAD')
-    const base = baseMoves('# Changelog\n\nthe base\n')
+    const base = baseMoves('the base\n')
 
     expect(await mergeIntegration(local, git(), base)).toEqual({ conflicts: ['CHANGELOG.md'] })
 
     expect(run('rev-parse HEAD')).toBe(head)
     expect(run('status --porcelain')).toBe('')
+  })
+
+  it('keeps both entries when two tasks append to the same Unreleased section', async () => {
+    const shape = '# Changelog\n\n## Unreleased\n\n## 1.0.0\n'
+    run('switch -q workspace')
+    commit('CHANGELOG.md', shape, 'shape')
+    run('switch -q factory/7')
+    run('merge -q workspace')
+    commit('CHANGELOG.md', shape.replace('\n\n## 1.0.0', '\n- the work\n\n## 1.0.0'), 'work')
+    const base = baseMoves(shape.replace('\n\n## 1.0.0', '\n- the base\n\n## 1.0.0'))
+
+    expect(await mergeIntegration(local, git(), base)).toEqual({ merged: true })
+
+    const text = execSync(`cat ${dir}/CHANGELOG.md`, { encoding: 'utf8' })
+    expect(text).toContain('- the work')
+    expect(text).toContain('- the base')
+    expect(text).not.toContain('<<<<<<<')
+    expect(run('status --porcelain')).toBe('')
+  })
+
+  it('leaves a Markdown conflict that edits an existing line to the agent', async () => {
+    const shape = '# Changelog\n\n## Unreleased\n\n- first\n\n## 1.0.0\n'
+    run('switch -q workspace')
+    commit('CHANGELOG.md', shape, 'shape')
+    run('switch -q factory/7')
+    run('merge -q workspace')
+    const head = commit(
+      'CHANGELOG.md',
+      shape.replace('- first', '- first, as the work words it'),
+      'w',
+    )
+    const base = baseMoves(shape.replace('- first', '- first, as the base words it'))
+
+    expect(await mergeIntegration(local, git(), base)).toEqual({ conflicts: ['CHANGELOG.md'] })
+
+    expect(run('rev-parse HEAD')).toBe(head)
+    expect(run('status --porcelain')).toBe('')
+  })
+
+  it('leaves a conflict outside Markdown to the agent even when both sides only add', async () => {
+    run('switch -q workspace')
+    commit('codes.txt', 'a\n', 'codes')
+    run('switch -q factory/7')
+    run('merge -q workspace')
+    commit('codes.txt', 'a\nwork\n', 'w')
+    run('switch -q workspace')
+    const base = commit('codes.txt', 'a\nbase\n', 'b')
+    run('switch -q factory/7')
+
+    expect(await mergeIntegration(local, git(), base)).toEqual({ conflicts: ['codes.txt'] })
+  })
+
+  it('does not merge at all when one file is resolved and another is not', async () => {
+    run('switch -q workspace')
+    commit('codes.txt', 'a\n', 'codes')
+    commit('CHANGELOG.md', '# Changelog\n\n## Unreleased\n', 'shape')
+    run('switch -q factory/7')
+    run('merge -q workspace')
+    write('codes.txt', 'a\nwork\n')
+    write('CHANGELOG.md', '# Changelog\n\n## Unreleased\n- work\n')
+    run('commit -q -am w')
+    const head = run('rev-parse HEAD')
+    run('switch -q workspace')
+    write('codes.txt', 'a\nbase\n')
+    write('CHANGELOG.md', '# Changelog\n\n## Unreleased\n- base\n')
+    run('commit -q -am b')
+    const base = run('rev-parse HEAD')
+    run('switch -q factory/7')
+
+    expect(await mergeIntegration(local, git(), base)).toEqual({
+      conflicts: expect.arrayContaining(['codes.txt', 'CHANGELOG.md']),
+    })
+
+    expect(run('rev-parse HEAD')).toBe(head)
+    expect(run('status --porcelain')).toBe('')
+  })
+
+  it('keeps the mode of the file it resolves', async () => {
+    const shape = '# Notes\n\n## Unreleased\n'
+    run('switch -q workspace')
+    commit('NOTES.md', shape, 'shape')
+    run('switch -q factory/7')
+    run('merge -q workspace')
+    write('NOTES.md', `${shape}- work\n`)
+    execSync(`chmod +x ${dir}/NOTES.md`)
+    run('add NOTES.md')
+    run('commit -q -m w')
+    run('switch -q workspace')
+    write('NOTES.md', `${shape}- base\n`)
+    execSync(`chmod +x ${dir}/NOTES.md`)
+    run('add NOTES.md')
+    run('commit -q -m b')
+    const base = run('rev-parse HEAD')
+    run('switch -q factory/7')
+
+    expect(await mergeIntegration(local, git(), base)).toEqual({ merged: true })
+
+    expect(run('ls-files -s NOTES.md')).toMatch(/^100755 /)
   })
 
   it('throws what git said when the merge fails without a conflict', async () => {

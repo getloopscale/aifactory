@@ -1,4 +1,5 @@
 import type {
+  AgentRole,
   ChatDetail,
   ChatMessageView,
   ChatModel,
@@ -7,12 +8,13 @@ import type {
 } from '../../shared/panel'
 
 import { del, get, post, put } from './api'
+import { en, type Copy } from './copy/en'
 import { repoChanges } from './guides'
 
 /** The agents the owner can talk to, as the picker names them. */
-export const MODELS: { id: ChatModel; name: string; blurb: string }[] = [
-  { id: 'openrouter', name: 'OpenRouter', blurb: 'Uma chave da OpenRouter, pago por uso' },
-  { id: 'codex', name: 'ChatGPT', blurb: 'A sua assinatura do ChatGPT (Codex)' },
+export const MODELS: { id: ChatModel; name: string }[] = [
+  { id: 'openrouter', name: 'OpenRouter' },
+  { id: 'codex', name: 'ChatGPT' },
 ]
 
 export const AGENT_PATH: Record<ChatModel, string> = {
@@ -69,10 +71,10 @@ export function displayed<M extends { role: string; parts: Record<string, unknow
 }
 
 /** The pinned conversations and the others, each the one touched last first. */
-export function groupChats(chats: ChatSummary[], filter = '') {
+export function groupChats(chats: ChatSummary[], filter = '', untitled = en.menu.newChat) {
   const needle = filter.trim().toLowerCase()
   const shown = chats.filter(
-    (c) => needle === '' || (c.title || 'novo chat').toLowerCase().includes(needle),
+    (c) => needle === '' || (c.title || untitled).toLowerCase().includes(needle),
   )
   return { pinned: shown.filter((c) => c.pinned), recent: shown.filter((c) => !c.pinned) }
 }
@@ -97,90 +99,86 @@ export type Connection = {
 
 type Approval = { title: string; request: string }
 type Args = Record<string, unknown>
+type Approvals = Copy['approvals']
 
 const text = (v: unknown) => String(v ?? '')
 
-const FINDING_ACTIONS: Record<string, string> = {
-  retry: 'Começar de novo a tarefa travada (a branch e o PR dela são apagados antes).',
-  resume: 'Retomar a tarefa, cuja pergunta já foi respondida.',
-  delete_snapshot: 'Apagar o snapshot que nenhuma tarefa usa.',
-  mark_revert_unknown:
-    'Mostrar a main como vermelha, para alguém conferir o revert no repositório.',
-}
-
 /** What each tool that changes something says to the owner before it runs. */
-const APPROVALS: Record<string, (a: Args, repo?: RepositoryView) => Approval> = {
-  retry_task: (a) => ({
-    title: 'Repetir uma tarefa',
-    request: `Começar de novo a tarefa ${String(a.id)}. A branch e o PR dela são apagados antes.`,
+const APPROVALS: Record<string, (a: Args, t: Approvals, repo?: RepositoryView) => Approval> = {
+  retry_task: (a, t) => ({
+    title: t.retryTask.title,
+    request: t.retryTask.request(String(a.id)),
   }),
-  request_changes: (a) => ({
-    title: 'Pedir mudanças',
-    request: `Devolver a tarefa ${String(a.id)} ao agente com esta nota:\n${text(a.note)}`,
+  request_changes: (a, t) => ({
+    title: t.requestChanges.title,
+    request: t.requestChanges.request(String(a.id), text(a.note)),
   }),
-  start_job: (a) => ({
-    title: 'Abrir uma issue e começar',
-    request: `Em ${String(a.repository)}: ${String(a.title)}\n\n${text(a.body).slice(0, 600)}`,
+  start_job: (a, t) => ({
+    title: t.startJob.title,
+    request: t.startJob.request(String(a.repository), String(a.title), text(a.body).slice(0, 600)),
   }),
-  approve_task: (a) => ({
-    title: 'Aprovar o pull request',
-    request: `Aprovar o PR da tarefa ${String(a.id)}, no commit em que ele está agora. Isso não faz merge nem release.`,
+  approve_task: (a, t) => ({
+    title: t.approveTask.title,
+    request: t.approveTask.request(String(a.id)),
   }),
-  update_repository: (a, repo) => {
+  update_repository: (a, t, repo) => {
     const { repository, ...patch } = a
-    const lines = repoChanges(repo, patch)
+    const lines = repoChanges(repo, patch, t.fields)
     return {
-      title: 'Salvar configurações',
-      request: `Em ${String(repository)}:\n${lines.length > 0 ? lines.map((l) => `- ${l}`).join('\n') : '- nada muda'}`,
+      title: t.updateRepository.title,
+      request: t.updateRepository.request(
+        String(repository),
+        lines.length > 0 ? lines.map((l) => `- ${l}`).join('\n') : t.nothingChanges,
+      ),
     }
   },
-  create_plan: (a) => ({
-    title: 'Começar um plano',
-    request: `Em ${String(a.repository)}, com este objetivo:\n${text(a.goal).slice(0, 600)}\nNenhuma issue é criada ainda: você revisa o plano antes.`,
+  create_plan: (a, t) => ({
+    title: t.createPlan.title,
+    request: t.createPlan.request(String(a.repository), text(a.goal).slice(0, 600)),
   }),
-  create_plan_issues: (a) => ({
-    title: 'Criar as issues do plano',
-    request: `Criar no GitHub as issues selecionadas do plano ${String(a.planId)}, ${a.start ? 'e já começar o trabalho nelas' : 'deixando-as esperando para você começar depois'}.`,
+  create_plan_issues: (a, t) => ({
+    title: t.createPlanIssues.title,
+    request: t.createPlanIssues.request(String(a.planId), Boolean(a.start)),
   }),
-  resolve_finding: (a) => ({
-    title: 'Resolver um achado',
+  resolve_finding: (a, t) => ({
+    title: t.resolveFinding.title,
     request:
-      FINDING_ACTIONS[text(a.action)] ??
-      `Fazer "${text(a.action)}" sobre o achado ${String(a.id)}.`,
+      t.resolveFinding.actions[text(a.action)] ??
+      t.resolveFinding.other(text(a.action), String(a.id)),
   }),
-  update_agent_settings: (a) => {
-    const names = {
-      builder: 'Construtor',
-      planner: 'Planejador',
-      reviewer: 'Revisor',
-      merger: 'Mesclador',
-    } as const
-    const lines = (Object.keys(names) as (keyof typeof names)[])
+  update_agent_settings: (a, t) => {
+    const roles = Object.keys(t.updateAgentSettings.roles) as AgentRole[]
+    const name = (role: AgentRole) => t.updateAgentSettings.roles[role]
+    const lines = roles
       .filter((role) => role in a && a[role] !== undefined)
       .map((role) =>
         a[role] === null
-          ? `- ${names[role]}: volta ao padrão (o mesmo agente do Construtor)`
-          : `- ${names[role]}: ${String(a[role])}`,
+          ? t.updateAgentSettings.backToDefault(name(role))
+          : t.updateAgentSettings.chosen(name(role), String(a[role])),
       )
-    const extra = (Object.keys(names) as (keyof typeof names)[]).flatMap((role) =>
+    const extra = roles.flatMap((role) =>
       (['models', 'efforts'] as const).flatMap((kind) => {
         const map = a[kind] as Record<string, unknown> | undefined
         if (!map || map[role] === undefined) return []
-        const what = kind === 'models' ? 'modelo' : 'esforço'
+        const what = kind === 'models' ? t.updateAgentSettings.model : t.updateAgentSettings.effort
         return [
-          `- ${names[role]}, ${what}: ${map[role] === null ? 'o padrão do agente' : String(map[role])}`,
+          t.updateAgentSettings.detail(
+            name(role),
+            what,
+            map[role] === null ? null : String(map[role]),
+          ),
         ]
       }),
     )
     const all = [...lines, ...extra]
     return {
-      title: 'Trocar o agente de código',
-      request: `${all.length > 0 ? all.join('\n') : '- nada muda'}\nVale para as próximas execuções, sem reiniciar. As que estão rodando terminam com o agente antigo.`,
+      title: t.updateAgentSettings.title,
+      request: t.updateAgentSettings.request(all.length > 0 ? all.join('\n') : t.nothingChanges),
     }
   },
-  acknowledge_watch: (a) => ({
-    title: 'Marcar como visto',
-    request: `Marcar a main vermelha ${String(a.id)} como vista por uma pessoa.`,
+  acknowledge_watch: (a, t) => ({
+    title: t.acknowledgeWatch.title,
+    request: t.acknowledgeWatch.request(String(a.id)),
   }),
 }
 
@@ -192,17 +190,11 @@ export function describeApproval(
   toolName: string | undefined,
   input: unknown,
   repo?: RepositoryView,
+  t: Approvals = en.approvals,
 ): Approval {
   const args = (input && typeof input === 'object' ? input : {}) as Args
   const describe = toolName ? APPROVALS[toolName] : undefined
   return describe
-    ? describe(args, repo)
-    : { title: toolName ?? 'Ação', request: JSON.stringify(input, null, 2) ?? '' }
+    ? describe(args, t, repo)
+    : { title: toolName ?? t.fallbackTitle, request: JSON.stringify(input, null, 2) ?? '' }
 }
-
-/** The suggestions under an empty conversation. */
-export const SUGGESTIONS = [
-  'Como está a fábrica agora?',
-  'O que precisa de mim?',
-  'Como anda o backlog?',
-]

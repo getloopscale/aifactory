@@ -13,6 +13,7 @@ import {
   diagnose,
   failureOf,
   DOCTOR_ITEMS,
+  providerChecksItem,
   issuesItem,
   labelItem,
   manifestVersion,
@@ -814,6 +815,11 @@ describe('the report', () => {
     }),
     recipe: readOf({ pending: [], url: 'https://github.com/o/r/blob/main/.factory/setup.json' }),
     sandbox: readOf({}),
+    providerProofs: readOf({
+      vercel: { at: '', sha: 'a', passed: ['test'], failed: [] },
+      docker: { at: '', sha: 'a', passed: ['test'], failed: [] },
+      e2b: { at: '', sha: 'a', passed: ['test'], failed: [] },
+    }),
   }
 
   it('has one item for each diagnosis, in the order they are declared, all fine for a healthy repository', () => {
@@ -831,6 +837,7 @@ describe('the report', () => {
       'publish_mode',
       'recipe',
       'sandbox',
+      'provider_checks',
     ])
     expect(items.map((i) => i.status)).toEqual(items.map(() => 'ok'))
     // The sentence of a fine item has a code too, and the code makes the same English sentence.
@@ -864,6 +871,7 @@ describe('the report', () => {
       publish_mode: 'ok',
       recipe: 'ok',
       sandbox: 'ok',
+      provider_checks: 'ok',
     })
     expect(items.find((i) => i.id === 'auto_merge')?.cause).toContain('staging requires')
     expect(items.find((i) => i.id === 'ci_silent')?.cause).toContain('staging requires lint')
@@ -884,8 +892,49 @@ describe('the report', () => {
       publish: down,
       recipe: down,
       sandbox: down,
+      providerProofs: down,
     })
     expect(items.map((i) => i.status)).toEqual(items.map(() => 'unknown'))
+  })
+})
+
+describe('providerChecksItem', () => {
+  const proof = (passed: string[], failed: string[] = []) => ({ at: '', sha: 'a', passed, failed })
+
+  it('warns, naming Docker and the failing check, when the checks passed on E2B and failed on Docker', () => {
+    const item = providerChecksItem(
+      readOf({ e2b: proof(['lint', 'test']), docker: proof(['lint'], ['test']) }),
+    )
+    expect(item.status).toBe('warn')
+    expect(item.cause).toContain('Docker')
+    expect(item.cause).toContain('test')
+    expect(item.cause).toContain('E2B')
+  })
+
+  it('is unknown, not fine, for a provider the checks never ran on', () => {
+    const item = providerChecksItem(readOf({ e2b: proof(['test']) }))
+    expect(item.status).toBe('unknown')
+    expect(item.cause).toContain('Docker')
+  })
+
+  it('is unknown when no provider has a proof, or none passed, and unknown when unread', () => {
+    expect(providerChecksItem(readOf({})).status).toBe('unknown')
+    expect(providerChecksItem(readOf({ e2b: proof([], ['test']) })).status).toBe('unknown')
+    expect(
+      providerChecksItem({ read: false, tried: 'reading the proofs', error: 'boom' }).status,
+    ).toBe('unknown')
+  })
+
+  it('does not count a proof with no check as a pass', () => {
+    expect(providerChecksItem(readOf({ e2b: proof(['t']), docker: proof([]) })).status).toBe(
+      'unknown',
+    )
+    expect(providerChecksItem(readOf({ e2b: proof([]) })).status).toBe('unknown')
+  })
+
+  it('is fine only when every provider passed', () => {
+    const all = { vercel: proof(['t']), docker: proof(['t']), e2b: proof(['t']) }
+    expect(providerChecksItem(readOf(all)).status).toBe('ok')
   })
 })
 

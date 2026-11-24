@@ -25,11 +25,71 @@ export async function mergeIntegration(
       const said = (merged.stderr || merged.stdout).trim().slice(-500)
       throw new Error(`git merge of ${baseSha} exited ${merged.exitCode}: ${said}`)
     }
+    const unresolved = await keepBothAdditions(backend, git, conflicts)
+    if (unresolved.length === 0) {
+      await must(backend, `${git} commit --no-edit`)
+      return { merged: true }
+    }
     await must(backend, `${git} merge --abort`)
-    return { conflicts }
+    return { conflicts: unresolved }
   }
   const after = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
   return after === before ? { upToDate: true } : { merged: true }
+}
+
+const SAFE_PATH = /^[\w./@+-]+$/
+
+/** Whether every line of `ancestor` is in `side`, in order: the side only added lines. */
+export function onlyAdds(ancestor: string[], side: string[]): boolean {
+  let at = 0
+  for (const line of side) if (at < ancestor.length && line === ancestor[at]) at += 1
+  return at === ancestor.length
+}
+
+/**
+ * Resolves, in the merge in progress, the conflicts that need no judgement: a Markdown file (a changelog's
+ * `[Unreleased]` section, a list of error codes) whose two sides both only added lines to the common
+ * ancestor, which keeps both additions. Any other conflict is left as git left it. Answers the files still in
+ * conflict; the caller commits the merge only when none is.
+ */
+async function keepBothAdditions(
+  backend: SandboxBackend,
+  git: string,
+  conflicts: string[],
+): Promise<string[]> {
+  // Nothing is written until every file is known to be resolvable: a merge that is left half resolved cannot
+  // be aborted, and one conflict that needs judgement sends the whole merge to the agent anyway.
+  for (const file of conflicts) {
+    if (!(await onlyAppended(backend, git, file))) return conflicts
+  }
+  for (const file of conflicts) await keepBoth(backend, git, file)
+  return []
+}
+
+/** Whether `file` is Markdown that both sides only added lines to, so keeping both sides loses nothing. */
+async function onlyAppended(backend: SandboxBackend, git: string, file: string): Promise<boolean> {
+  if (!SAFE_PATH.test(file) || !file.endsWith('.md')) return false
+  const stage = async (n: number) => {
+    const shown = await backend.execute(`${git} show :${n}:${file}`)
+    return shown.exitCode === 0 ? shown.stdout : undefined
+  }
+  const [base, ours, theirs] = [await stage(1), await stage(2), await stage(3)]
+  if (base === undefined || ours === undefined || theirs === undefined) return false
+  const lines = (text: string) => text.split('\n')
+  return onlyAdds(lines(base), lines(ours)) && onlyAdds(lines(base), lines(theirs))
+}
+
+/** Writes `file` with both sides' additions, in the mode git recorded for our side, and stages it. */
+async function keepBoth(backend: SandboxBackend, git: string, file: string): Promise<void> {
+  await must(
+    backend,
+    `dir=$(mktemp -d) && ` +
+      `mode=$(${git} ls-files -u -- ${file} | grep -F ' 2' | head -n 1 | cut -d' ' -f1) && ` +
+      `${git} show :2:${file} > $dir/2 && ${git} show :1:${file} > $dir/1 && ` +
+      `${git} show :3:${file} > $dir/3 && git merge-file --union -p $dir/2 $dir/1 $dir/3 > $dir/0 && ` +
+      `blob=$(${git} hash-object -w $dir/0) && ${git} update-index --cacheinfo $mode,$blob,${file} && ` +
+      `${git} checkout-index -f -- ${file}; code=$?; rm -rf $dir; exit $code`,
+  )
 }
 
 /** How a send-back for a conflict with the integration branch begins; the run finds its note by it. */
