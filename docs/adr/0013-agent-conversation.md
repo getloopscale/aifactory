@@ -72,7 +72,7 @@ existem, não que funcionam:
 - Sessão: o Claude deriva o diretório da sessão do `cwd`, que precisa ser idêntico na restauração; medir o
   tamanho do arquivo e checar se contém segredo antes de guardá-lo.
 
-| Spike                      | Claude     | Codex      | Evidência |
-| -------------------------- | ---------- | ---------- | --------- |
-| S2 caixa de correio        | não rodado | n/a        | —         |
-| S2 interromper e retomar   | não rodado | não rodado | —         |
+| Spike                    | Claude     | Codex      | Evidência |
+| ------------------------ | ---------- | ---------- | --------- |
+| S2 caixa de correio      | não rodado | n/a        | —         |
+| S2 interromper e retomar | não rodado | não rodado | —         |
