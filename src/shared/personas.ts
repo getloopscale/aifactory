@@ -2,7 +2,14 @@
  * Who each agent is: a name, its one job, what it never does and how it sounds (ADR 0012). The data lives
  * here, with no server code, because the agents page and the transcript show it too.
  */
-export const PERSONA_ROLES = ['builder', 'reviewer', 'merger', 'planner', 'coordinator', 'guide'] as const
+export const PERSONA_ROLES = [
+  'builder',
+  'reviewer',
+  'merger',
+  'planner',
+  'coordinator',
+  'guide',
+] as const
 export type PersonaRole = (typeof PERSONA_ROLES)[number]
 
 export type Persona = {
