@@ -3912,6 +3912,15 @@ describe('runTask merging an integration branch that passes the checks again', (
   })
 
   /**
+   * What `git show :N:file` prints in a merge the factory cannot settle itself: the sides rewrote a line of the
+   * ancestor, so keeping both additions is not enough and the merge agent is asked.
+   */
+  function rewrittenSides(command: string): { stdout: string } | undefined {
+    const stage = /show :([123]):/.exec(command)?.[1]
+    return stage ? { stdout: `side ${stage}\n` } : undefined
+  }
+
+  /**
    * A merge of `base` into the work that conflicts in CHANGELOG.md: git stops, the merge agent resolves it, and
    * the merge commit is `merge`. `left` is what is still unmerged after the agent ran.
    */
@@ -3929,6 +3938,7 @@ describe('runTask merging an integration branch that passes the checks again', (
           if (command.includes('checkout -B factory/7')) onBranch = true
           if (command.includes('ls-remote'))
             return { stdout: `${verified}\trefs/heads/factory/7\n` }
+          if (command.includes('show :')) return rewrittenSides(command)
           if (command.includes('merge --no-edit')) return { exitCode: 1, stdout: 'CONFLICT' }
           if (command.includes('--diff-filter=U'))
             return { stdout: agentRan ? left : 'CHANGELOG.md\n' }
@@ -4035,6 +4045,7 @@ describe('runTask merging an integration branch that passes the checks again', (
       changed((command) => {
         if (command.includes('checkout -B factory/7')) onBranch = true
         if (command.includes('ls-remote')) return { stdout: `${verified}\trefs/heads/factory/7\n` }
+        if (command.includes('show :')) return rewrittenSides(command)
         if (command.includes('merge --no-edit')) {
           attempts += 1
           if (attempts === 1) return { exitCode: 1, stdout: 'CONFLICT' }
