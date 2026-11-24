@@ -287,6 +287,7 @@ export const en = {
     none: 'No steps were recorded for this task.',
     builder: 'Builder',
     reviewer: 'Reviewer',
+    merger: 'Merger',
   },
   retryWaiting: {
     button: 'Retry the tasks that were waiting for the account',
@@ -705,12 +706,14 @@ export const en = {
       builder: 'Coding agent of the Builder',
       planner: 'Coding agent of the Planner',
       reviewer: 'Coding agent of the Reviewer',
+      merger: 'Coding agent of the Merger',
       security: 'Coding agent of the Security reviewer',
     },
     roleName: {
       builder: 'Builder',
       planner: 'Planner',
       reviewer: 'Reviewer',
+      merger: 'Merger',
       security: 'Security reviewer',
     },
     pinnedEffort: (level: string) =>
@@ -749,6 +752,8 @@ export const en = {
   },
   metrics: {
     heading: 'Metrics',
+    conflictSessions: (last: number, before: number) =>
+      `Builder sessions started by a conflict with the integration branch: ${last} in the last 14 days, ${before} in the 14 before.`,
     empty: 'Not enough finished work to measure yet.',
     indicator: 'Indicator',
     repository: 'Repository',
@@ -872,6 +877,7 @@ export const en = {
     attempt: (n: string) => `attempt ${n}`,
     resumed: 'resumed after an answer',
     rework: 'rework',
+    merger: 'merge agent resolving a conflict',
     planned: 'following its plan',
     approvedBy: (reviewer: string) => `approved by ${reviewer}`,
     resolvedNow: (sha: string, branch: string) => `already resolved at ${sha}, now on ${branch}`,
@@ -938,6 +944,7 @@ export const en = {
         builder: 'Builder',
         planner: 'Planner',
         reviewer: 'Reviewer',
+        merger: 'Merger',
         security: 'Security reviewer',
       },
       backToDefault: (role: string) =>

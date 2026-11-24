@@ -22,11 +22,17 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
     { id: 'claude-code', ready: true },
     { id: 'codex', ready: true },
   ],
-  chosen: { builder: null, planner: null, reviewer: null, security: null },
-  effective: { builder: 'codex', planner: 'codex', reviewer: 'codex', security: 'codex' },
+  chosen: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+  effective: {
+    builder: 'codex',
+    planner: 'codex',
+    reviewer: 'codex',
+    merger: 'codex',
+    security: 'codex',
+  },
   repositoriesWithOwn: [],
-  chosenModel: { builder: null, planner: null, reviewer: null, security: null },
-  chosenEffort: { builder: null, planner: null, reviewer: null, security: null },
+  chosenModel: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+  chosenEffort: { builder: null, planner: null, reviewer: null, merger: null, security: null },
   engines: {
     'claude-code': {
       models: [
@@ -67,7 +73,7 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
 })
 
 function mount(
-  role: 'builder' | 'planner' | 'reviewer' | 'security',
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
   s = settings(),
   answer = new Response('{}'),
 ) {
@@ -118,7 +124,13 @@ describe('choosing the coding agent of a role', () => {
     const { fetchMock } = mount(
       'planner',
       settings({
-        chosen: { builder: null, planner: 'claude-code', reviewer: null, security: null },
+        chosen: {
+          builder: null,
+          planner: 'claude-code',
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
       }),
     )
     const box = screen.getByLabelText(e.roleLabel.planner) as HTMLSelectElement
@@ -223,8 +235,20 @@ describe('choosing the model and the effort', () => {
     mount(
       'builder',
       settings({
-        chosenModel: { builder: 'gpt-6-luna', planner: null, reviewer: null, security: null },
-        chosenEffort: { builder: 'medium', planner: null, reviewer: null, security: null },
+        chosenModel: {
+          builder: 'gpt-6-luna',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
+        chosenEffort: {
+          builder: 'medium',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
       }),
     )
     expect((screen.getByLabelText(e.modelOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
@@ -255,7 +279,13 @@ describe('choosing the model and the effort', () => {
     mount(
       'builder',
       settings({
-        chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null, security: null },
+        chosenModel: {
+          builder: 'gpt-6.1-sol',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
       }),
     )
     choose(e.roleLabel.builder, 'claude-code')
@@ -292,7 +322,13 @@ describe('choosing the model and the effort', () => {
     const { fetchMock } = mount(
       'builder',
       settings({
-        chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null, security: null },
+        chosenModel: {
+          builder: 'gpt-6.1-sol',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
       }),
     )
     choose(e.roleLabel.builder, 'claude-code')
@@ -340,6 +376,7 @@ describe('choosing the model and the effort', () => {
           builder: 'claude-code',
           planner: 'claude-code',
           reviewer: 'claude-code',
+          merger: 'claude-code',
           security: 'claude-code',
         },
       }),

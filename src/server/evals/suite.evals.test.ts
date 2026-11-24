@@ -91,12 +91,15 @@ async function currentSetup(cases: EvalCase[]) {
   const setup: Record<string, string> = {}
   for (const repository of [...new Set(cases.map((c) => c.repository))].sort()) {
     const { builder, reviewer, planner, security } = await evalDeps(repository, [])
+    const effective = await effectiveEnv(getDb(), env)
+    const merger = effective.FACTORY_MERGER
     const one = agentSetup(
-      await effectiveEnv(getDb(), env),
+      effective,
       builder.name,
       reviewer.name,
       optionsFor,
       planner?.name,
+      merger && merger !== builder.name ? merger : undefined,
       security?.name,
     )
     for (const [key, value] of Object.entries(one)) setup[`${repository} ${key}`] = value
@@ -204,7 +207,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
           },
           config: async (repo) => {
             const config = await loadRepoConfig(getDb(), repo)
-            return { integrationBranch: integrationBranch(config), egress: config.egress, fixes: config.fixes }
+            return { integrationBranch: integrationBranch(config), egress: config.egress, fixes: config.fixes, integrationChecks: config.integrationChecks }
           },
         }),
       )

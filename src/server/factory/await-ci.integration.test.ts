@@ -56,7 +56,7 @@ const gh = {
 const sentBack: { taskId: number; note: string }[] = []
 const startedOver: number[] = []
 /** The runs the real panel action queued, as the integration pass asked for them. */
-const queuedRuns: { taskId: number; feedback?: string }[] = []
+const queuedRuns: { taskId: number; feedback?: string; mergeBase?: boolean }[] = []
 const actionDeps = (): ActionDeps => ({
   db: getDb(),
   github: {
@@ -696,9 +696,15 @@ describe('pollAwaitingIntegrations', () => {
     expect(await row(id)).toMatchObject({ stage: 'intake' })
     expect(queuedRuns).toHaveLength(1)
     expect(queuedRuns[0].taskId).toBe(id)
-    expect(queuedRuns[0].feedback).toContain('git merge origin/workspace')
+    // Merge-only (#227): the merge agent resolves the conflict and no builder session starts.
+    expect(queuedRuns[0].feedback).toBeUndefined()
+    expect(queuedRuns[0].mergeBase).toBe(true)
     const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
-    expect(events.at(-1)?.detail).toMatchObject({ decision: 'request_changes', automatic: true })
+    expect(events.at(-1)?.detail).toMatchObject({
+      decision: 'request_changes',
+      automatic: true,
+      mergeBase: true,
+    })
   })
 
   it('starts over from the base, plain, when the branch of a conflicting pull request is gone', async () => {

@@ -93,6 +93,8 @@ type World = {
   fixChanges?: boolean
   /** What the install check answers (the command ends with `&& pnpm install`). */
   install?: Reply[]
+  /** Exit code of the integration check (the command contains `pnpm test:integration`). */
+  integrationExit?: number
   /** What `git status --porcelain` says right after an install: what it changed in the checkout. */
   installChanges?: string
 }
@@ -127,6 +129,7 @@ function sandbox(world: World = {}) {
     if (command.endsWith('&& fix-it')) return { ...world.fix } as Reply
     if (command.startsWith('cd /tmp/aifactory-base') && command.includes('pnpm test'))
       return { exitCode: baseExits.shift() ?? 0, stdout: 'ran' }
+    if (command.includes('pnpm test:integration')) return { exitCode: world.integrationExit ?? 0 }
     if (command.includes('pnpm test')) return { exitCode: exits.shift() ?? 0, stdout: 'ran' }
     if (command.includes('diff --name-status'))
       return {
@@ -1118,6 +1121,38 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false })
     expect(result.reason).toContain('is not a commit hash')
     expect(provider.specs).toEqual([])
+  })
+})
+
+describe('runCase integration checks', () => {
+  const withIntegration = {
+    ...evalCase,
+    integrationChecks: [{ name: 'integration', command: 'pnpm test:integration' }],
+  }
+  const approved = () => [{ ok: true, summary: APPROVE }]
+
+  it('fails an approved case whose integration checks fail, as the factory fails the run', async () => {
+    const provider = sandbox({ integrationExit: 1 })
+
+    const result = await runCase(
+      deps(provider, agent('builder', planned(built())), agent('reviewer', approved())),
+      withIntegration,
+    )
+
+    expect(result.passed).toBe(false)
+    expect(result.reason).toBe('checks failed: integration')
+  })
+
+  it('passes an approved case whose integration checks pass', async () => {
+    const provider = sandbox()
+
+    const result = await runCase(
+      deps(provider, agent('builder', planned(built())), agent('reviewer', approved())),
+      withIntegration,
+    )
+
+    expect(result.passed).toBe(true)
+    expect(provider.backend.commands.some((c) => c.includes('pnpm test:integration'))).toBe(true)
   })
 })
 

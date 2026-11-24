@@ -251,7 +251,7 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'planner' | 'reviewer' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
   harness: string
   /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
@@ -282,7 +282,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'planner' | 'reviewer' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -330,7 +330,15 @@ export type MetricSignalView = {
   error: string | null
 }
 
-export type MetricsReport = { rows: MetricRow[]; signals: MetricSignalView[] }
+export type MetricsReport = {
+  rows: MetricRow[]
+  signals: MetricSignalView[]
+  /**
+   * Tasks that ran a builder session because of a conflict with the integration branch (#227), in the last 14
+   * days and in the 14 before: the comparison the issue asks for once merge-only retries are live.
+   */
+  conflictSessions?: { last14Days: number; previous14Days: number }
+}
 
 /** How fast the factory delivers right now, measured live rather than by the daily indicators. */
 export type PulseReport = {
@@ -593,7 +601,7 @@ export type InboxItem = {
 export type TranscriptEvent = {
   /** The order of the step within the task, across every run of its agents. */
   seq: number
-  role: 'builder' | 'reviewer'
+  role: 'builder' | 'reviewer' | 'merger'
   attempt: number
   kind: 'message' | 'tool_use' | 'tool_result' | 'cost' | 'error'
   tool: string | null
@@ -909,7 +917,7 @@ export type AgentsView = {
 }
 
 /** The roles of a coding agent (the security role's effort is pinned at the highest, never chosen) that the owner can give to one agent or another. */
-export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'security'
+export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
 
 /** The effort levels from lowest to highest that any engine lists, so the highest of a list can be told. */
 const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']

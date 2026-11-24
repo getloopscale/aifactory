@@ -33,6 +33,7 @@ describe('the catalog of agents', () => {
     expect(agents.map((a) => a.id)).toEqual([
       'builder',
       'reviewer',
+      'merger',
       'security',
       'planner',
       'chat',
@@ -42,6 +43,7 @@ describe('the catalog of agents', () => {
     ])
     expect(new Set(agents.map((a) => a.id)).size).toBe(agents.length)
     expect(agents.filter((a) => a.group === 'factory').map((a) => a.runsIn)).toEqual([
+      'sandbox',
       'sandbox',
       'sandbox',
       'sandbox',
@@ -148,12 +150,19 @@ describe('the catalog of agents', () => {
   })
 
   it('says the agents that build act only inside the sandbox, and read the knowledge base there', () => {
-    for (const id of ['builder', 'reviewer', 'planner']) {
+    for (const id of ['builder', 'reviewer', 'merger', 'planner']) {
       expect(agent(id).tools.map((t) => [t.name, t.effect])).toEqual([
         ['sandbox', 'sandbox'],
         ['knowledge', 'reads'],
       ])
     }
+  })
+
+  it('lists the merger with its prompt, which names the files in conflict and both sides', () => {
+    const merger = agent('merger')
+    expect(merger.prompts[0].text).toContain('‹arquivo em conflito›')
+    expect(merger.prompts[0].text).toContain('git add')
+    expect(agent('merger', { FACTORY_MERGER: 'codex' }).engine.value).toContain('codex')
   })
 
   it('reports the model and the coding agent as they are configured now', () => {
@@ -207,7 +216,7 @@ describe('the catalog of agents', () => {
     for (const id of ['chat', 'guide-board', 'assist', 'assist-setup']) {
       expect(agent(id).engine.change, id).toContain('depois de reiniciar o painel')
     }
-    for (const id of ['builder', 'reviewer', 'planner']) {
+    for (const id of ['builder', 'reviewer', 'merger', 'planner']) {
       expect(agent(id).engine.change, id).not.toContain('FACTORY_')
       expect(agent(id).engine.change, id).toContain('Agentes')
     }

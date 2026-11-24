@@ -16,6 +16,7 @@ describe('which agent a role uses', () => {
       builder: 'FACTORY_HARNESS',
       planner: 'FACTORY_PLANNER',
       reviewer: 'FACTORY_REVIEWER',
+      merger: 'FACTORY_MERGER',
       security: 'FACTORY_SECURITY',
     })
   })
@@ -25,6 +26,7 @@ describe('which agent a role uses', () => {
       builder: 'claude-code',
       planner: 'codex',
       reviewer: 'claude-code',
+      merger: 'claude-code',
       security: 'claude-code',
     })
   })
@@ -34,6 +36,7 @@ describe('which agent a role uses', () => {
       builder: 'claude-code',
       planner: 'claude-code',
       reviewer: 'claude-code',
+      merger: 'claude-code',
       security: 'claude-code',
     })
   })
@@ -43,6 +46,7 @@ describe('which agent a role uses', () => {
       builder: 'codex',
       planner: 'codex',
       reviewer: 'codex',
+      merger: 'codex',
       security: 'codex',
     })
     expect(
@@ -51,13 +55,16 @@ describe('which agent a role uses', () => {
       builder: 'codex',
       planner: 'codex',
       reviewer: 'claude-code',
+      merger: 'codex',
       security: 'codex',
     })
     expect(effectiveOf({ FACTORY_PLANNER: 'codex' }, cannotStart).planner).toBe('codex')
+    expect(effectiveOf({ FACTORY_MERGER: 'codex' }, cannotStart).merger).toBe('codex')
     expect(effectiveOf({ FACTORY_PLANNER: '', FACTORY_HARNESS: '' }, cannotStart)).toEqual({
       builder: 'claude-code',
       planner: 'claude-code',
       reviewer: 'claude-code',
+      merger: 'claude-code',
       security: 'claude-code',
     })
   })

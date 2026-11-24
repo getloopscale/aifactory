@@ -15,6 +15,7 @@ import {
 import type { Issue } from '../github/issues'
 import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
+import { mergerPrompt } from '../agents/prompts/merger'
 import { parseLearned, withoutLearned } from '../knowledge/format'
 
 import { cloneRepository } from './clone'
@@ -22,6 +23,7 @@ import {
   CONFLICT_NOTE_OPENING,
   conflictingFiles,
   mergeIntegration,
+  resolutionProblems,
   withConflictFiles,
 } from './merge-base'
 import { evidenceOfNote } from './ci-wait'
@@ -71,6 +73,7 @@ import {
   renderFindings,
   resolvedPrompt,
   reviewAllowsRework,
+  resolutionReviewPrompt,
   reviewPrompt,
   reworkPrompt,
   roundsNote,
@@ -94,7 +97,6 @@ import {
   pushWithRetry,
   resolvedComment,
   Asked,
-  BaseConflict,
   BaseRed,
   QuotaStop,
   StageFailure,
@@ -259,6 +261,12 @@ export class Run {
   private readonly securitySeen = new Set<string>()
   private securityReworks = 0
   private securityEarlier: Finding[] = []
+
+  /** The merge commit the merge agent resolved: the review reads only that resolution (#227). */
+  private resolvedMerge: string | undefined
+
+  /** The agent that resolves a conflict of merging the integration branch into approved work: the builder's unless chosen. */
+  private merger: CodingHarness | undefined
 
   /** The plan another agent wrote, which the builder's first pass is given as text. */
   private plannedBy: string | undefined
@@ -508,8 +516,10 @@ export class Run {
     const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
     const reviewer = chosen ?? builder
     const planner = deps.planner?.(labels, builder.name) ?? builder
+    const chosenMerger = typeof deps.merger === 'function' ? deps.merger(labels) : deps.merger
+    const merger = chosenMerger ?? builder
     const security = deps.security?.(labels)
-    const agents = [builder, reviewer, planner, ...(security ? [security] : [])].filter(
+    const agents = [builder, reviewer, planner, merger, ...(security ? [security] : [])].filter(
       (agent, at, all) => all.findIndex((other) => other.name === agent.name) === at,
     )
     const agentEgress = await prep.step('credentials', async () =>
@@ -560,6 +570,7 @@ export class Run {
       run.planner = planner
       run.security = security
       run.securityRequired = deps.security !== undefined
+      run.merger = merger
       run.feed = feed
       run.preparation = prep
       run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
@@ -650,7 +661,7 @@ export class Run {
   /** Runs the agent, books its cost and session, and turns a quota stop into its own error. */
   private async settle(
     who: CodingHarness,
-    role: 'builder' | 'planner' | 'reviewer' | 'security',
+    role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -719,7 +730,7 @@ export class Run {
    */
   private async afterRefusal(
     who: CodingHarness,
-    role: 'builder' | 'planner' | 'reviewer' | 'security',
+    role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
     attempt: number,
     call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
   ): Promise<HarnessResult> {
@@ -1578,20 +1589,213 @@ export class Run {
    * or a branch that already holds that commit, fails the run with the reason, for a person.
    */
   private async mergeBase(): Promise<string> {
-    const { deps, branch, state } = this.c
+    const { branch, state } = this.c
     state.current = 'push'
     const base = `${integrationBranch(this.c.repo)} at ${this.baseSha.slice(0, 7)}`
-    await this.backend.uploadFile(GITCONFIG, gitConfig(deps.author))
-    const merged = await mergeIntegration(this.backend, this.git, this.baseSha)
-    if ('conflicts' in merged) {
-      throw new BaseConflict(integrationBranch(this.c.repo), merged.conflicts, base, branch)
-    }
+    const merged = await this.mergeHead(this.baseSha, 1, { mergeBase: this.baseSha })
     if ('upToDate' in merged) {
       throw new StageFailure(
         `${branch} already holds ${base}, so merging it makes no commit for the required checks to run on again`,
       )
     }
-    return this.commitAndPush(`Merge ${base} into ${branch}`, { mergeBase: this.baseSha })
+    return merged.sha
+  }
+
+  /**
+   * Merges `head`, a commit of the integration branch, into the checked-out work and pushes the merge commit. A
+   * clean merge is the factory's own git step. A conflict goes to the merge agent (`resolveConflicts`), never to
+   * the builder (#227).
+   */
+  private async mergeHead(
+    head: string,
+    attempt: number,
+    detail: Record<string, unknown>,
+  ): Promise<{ sha: string; resolved: boolean } | { upToDate: true }> {
+    const { backend, git } = this
+    const message = `Merge ${integrationBranch(this.c.repo)} at ${head.slice(0, 7)} into ${this.c.branch}`
+    await backend.uploadFile(GITCONFIG, gitConfig(this.c.deps.author))
+    const merged = await mergeIntegration(backend, git, head)
+    if ('upToDate' in merged) return merged
+    if ('merged' in merged) {
+      return { sha: await this.commitAndPush(message, detail), resolved: false }
+    }
+    const sha = await this.resolveConflicts(head, merged.conflicts, message, attempt, detail)
+    return { sha, resolved: true }
+  }
+
+  /**
+   * The merge agent resolves the conflicts of merging `head` into the work, which git left in place for it. The
+   * factory makes the merge commit when the agent only staged, then refuses a result with an unmerged file, a
+   * conflict marker or parents other than the work and `head` (`resolutionProblems`), naming the file. The merge
+   * is pushed and remembered, so the review that follows reads only the resolution.
+   */
+  private async resolveConflicts(
+    head: string,
+    files: string[],
+    message: string,
+    attempt: number,
+    detail: Record<string, unknown>,
+  ): Promise<string> {
+    const { deps, taskId, issue, row, branch, state } = this.c
+    const { backend, git } = this
+    const merger = this.merger ?? this.builder
+    const work = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
+    // mergeIntegration aborted its merge to leave the branch as it was; the agent gets the conflicts in place.
+    const again = await backend.execute(`${git} merge --no-edit ${head}`)
+    // The base moved back, or git found no conflict this time: there is nothing for the agent to resolve.
+    if (again.exitCode === 0) return this.commitAndPush(message, detail)
+    const timeoutMs = await this.agentTimeout()
+    state.current = 'build'
+    await enterRunStage(deps.db, taskId, 'build', {
+      ...agentFacts(merger),
+      attempt,
+      merger: true,
+      files: files.slice(0, 50),
+    })
+    const result = await this.settle(merger, 'merger', attempt, (onEvent) =>
+      merger.run(backend, {
+        onEvent,
+        cwd: this.repoDir,
+        timeoutMs,
+        prompt: mergerPrompt({
+          repo: row.repository,
+          issueNumber: row.issueNumber,
+          title: issue.title,
+          body: issue.body,
+          branch,
+          integration: integrationBranch(this.c.repo),
+          workSha: work,
+          baseSha: head,
+          files,
+          knowledgeDir: this.feed?.dir,
+        }),
+      }),
+    )
+    if (!result.ok) {
+      throw new StageFailure(`the merge agent did not finish the conflicts: ${result.summary}`)
+    }
+    const merging = await backend.execute(`${git} rev-parse -q --verify MERGE_HEAD`)
+    const left = (await must(backend, `${git} diff --name-only --diff-filter=U`)).stdout.trim()
+    if (merging.exitCode === 0 && left === '') await must(backend, `${git} commit --no-edit`)
+    const problems = await resolutionProblems(backend, git, { work, base: head })
+    if (problems.length > 0) {
+      throw new StageFailure(
+        `the merge of ${integrationBranch(this.c.repo)} at ${head.slice(0, 7)} was not resolved: ${problems.join('; ')}`,
+      )
+    }
+    const pushed = await this.commitAndPush(message, {
+      ...detail,
+      resolvedBy: merger.name,
+      files: files.slice(0, 50),
+    })
+    this.resolvedMerge = pushed
+    return pushed
+  }
+
+  /** The stored results of the checks on `sha`. */
+  private async checksAt(sha: string) {
+    return (await this.checkRuns()).filter((r) => r.sha === sha)
+  }
+
+  /**
+   * Before the approved work is integrated (#227): the head of the integration branch is fetched and, when the
+   * work does not hold it, merged into the work and pushed, and the checks run on the merge commit. A clean merge
+   * is the factory's own and keeps the approval; a conflict goes to the merge agent and only its resolution is
+   * reviewed (a review that does not approve fails the run). The repository's integration checks then run on the
+   * result, merged or not. Answers the commit to integrate. A check that fails on the merge and on the fetched
+   * head is the base's (`BaseRed`); any other fails the run.
+   */
+  private async mergedBeforeIntegration(sha: string, attempt: number): Promise<string> {
+    const { backend } = this
+    const extra = this.c.repo.integrationChecks ?? []
+    await must(backend, `git -C ${this.repoDir} fetch origin ${integrationBranch(this.c.repo)}`)
+    const head = (await must(backend, `git -C ${this.repoDir} rev-parse FETCH_HEAD`)).stdout.trim()
+    const held = await backend.execute(
+      `git -C ${this.repoDir} merge-base --is-ancestor ${head} ${sha}`,
+    )
+    let target = sha
+    if (held.exitCode !== 0) {
+      const merged = await this.mergeHead(head, attempt, {
+        mergeBeforeIntegration: true,
+        base: head,
+      })
+      if ('upToDate' in merged) return sha
+      target = merged.sha
+      const checked = await this.verify(target, attempt, { publish: true })
+      if (!checked.verdict.open) {
+        await this.refuseMerged(failingChecks(checked.results), head, target)
+      }
+      if (merged.resolved) await this.approveResolution(target, attempt)
+      else await this.keepApprovalForMerge(sha, target, head)
+    }
+    if (extra.length === 0) return target
+    this.c.state.current = 'verify'
+    const results = await runChecks(
+      backend,
+      this.repoDir,
+      extra,
+      this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+    )
+    for (const check of results) {
+      await this.c.deps.db.insert(evidence).values({ taskId: this.c.taskId, sha: target, ...check })
+    }
+    const failed = failingChecks(results)
+    if (failed.length > 0) await this.refuseMerged(failed, head, target)
+    return target
+  }
+
+  /** The resolution of a conflict is reviewed alone; anything but an approval fails the run with what was found. */
+  private async approveResolution(mergeSha: string, attempt: number): Promise<void> {
+    const outcome = await this.review(mergeSha, attempt)
+    if (outcome.verdict === 'approve') return
+    const found = outcome.findings.map((f) => f.issue).join('; ')
+    throw new StageFailure(
+      `the review of the conflict resolution in ${mergeSha.slice(0, 7)} did not approve: ${outcome.summary}${found ? ` (${found.slice(0, 700)})` : ''}`,
+    )
+  }
+
+  /**
+   * A clean merge of the integration branch is checked, not reviewed again: the approval of `approved` holds for
+   * the merge commit and is recorded for it, as `approvalKept` does for a merge a run made, so the history shows
+   * what the commit that is integrated was approved by.
+   */
+  private async keepApprovalForMerge(approved: string, merge: string, head: string): Promise<void> {
+    const { deps, taskId } = this.c
+    const [last] = await deps.db
+      .select()
+      .from(reviewTable)
+      .where(eq(reviewTable.taskId, taskId))
+      .orderBy(desc(reviewTable.id))
+      .limit(1)
+    if (!last) return
+    await deps.db.insert(reviewTable).values({
+      taskId,
+      round: last.round,
+      sha: merge,
+      reviewer: last.reviewer,
+      verdict: 'approve',
+      summary: `The approval of ${approved.slice(0, 7)} holds: merging ${integrationBranch(this.c.repo)} at ${head.slice(0, 7)} was clean and the checks passed on the merge. ${last.summary}`,
+      findings: last.findings as Finding[],
+    })
+  }
+
+  /** The checks failed on the work merged with the integration branch: the base's, or the run's failure. */
+  private async refuseMerged(failed: CheckResult[], head: string, sha: string): Promise<never> {
+    const red = await this.baseProbe.red(
+      this.backend,
+      {
+        repoDir: this.repoDir,
+        baseSha: head,
+        checks: [...this.checks, ...(this.c.repo.integrationChecks ?? [])],
+        timeoutMs: this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+      },
+      failed,
+    )
+    if (red) throw new BaseRed(red, head, integrationBranch(this.c.repo))
+    const names = failed.map((r) => `"${r.name}"`).join(', ')
+    throw new StageFailure(
+      `${names} failed on the work merged with ${integrationBranch(this.c.repo)} at ${head.slice(0, 7)} (${sha.slice(0, 7)})`,
+    )
   }
 
   /**
@@ -1792,19 +1996,28 @@ export class Run {
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
         role: 'reviewer',
-        prompt: reviewPrompt({
-          repo: row.repository,
-          issueNumber: row.issueNumber,
-          title: issue.title,
-          body: issue.body,
-          branch,
-          baseSha: base,
-          knowledgeDir: this.feed?.dir,
-          required,
-          ...(this.earlier ? { earlier: this.earlier } : {}),
-          builderSummary: this.reviewAnswer ?? this.summary,
-          ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
-        }),
+        prompt: this.resolvedMerge
+          ? resolutionReviewPrompt({
+              repo: row.repository,
+              issueNumber: row.issueNumber,
+              title: issue.title,
+              branch,
+              mergeSha: this.resolvedMerge,
+              knowledgeDir: this.feed?.dir,
+            })
+          : reviewPrompt({
+              repo: row.repository,
+              issueNumber: row.issueNumber,
+              title: issue.title,
+              body: issue.body,
+              branch,
+              baseSha: base,
+              knowledgeDir: this.feed?.dir,
+              required,
+              ...(this.earlier ? { earlier: this.earlier } : {}),
+              builderSummary: this.reviewAnswer ?? this.summary,
+              ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
+            }),
       }),
     )
     this.touched = touched
@@ -1859,6 +2072,8 @@ export class Run {
    */
   private async approvalKept(sha: string, attempt: number): Promise<ReviewVerdict | undefined> {
     if (!this.mergesOnly()) return undefined
+    // A conflict the merge agent resolved is reviewed, whatever the patch says: the resolution is new work (#227).
+    if (this.resolvedMerge === sha) return undefined
     const { deps, taskId } = this.c
     const [last] = await deps.db
       .select()
@@ -1945,6 +2160,11 @@ export class Run {
     if (held) return this.handOver(sha, attempt, here, outcome, [], held)
     const empty = await this.reopenedOrEmpty(sha)
     if (empty) return empty
+    const merged = await this.mergedBeforeIntegration(sha, attempt)
+    if (merged !== sha) {
+      here = await this.checksAt(merged)
+      sha = merged
+    }
     state.current = 'merge'
     await enterMerge(taskId, {
       branch,
@@ -2340,10 +2560,10 @@ export class Run {
   }
 }
 
-/** The transcript keeps two roles: the planner is read as the builder, the security reviewer as the reviewer. */
+/** The transcript keeps three roles: the planner is read as the builder, the security reviewer as the reviewer. */
 function transcriptRole(
-  role: 'builder' | 'planner' | 'reviewer' | 'security',
-): 'builder' | 'reviewer' {
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
+): 'builder' | 'reviewer' | 'merger' {
   return role === 'planner' ? 'builder' : role === 'security' ? 'reviewer' : role
 }
 

@@ -6,6 +6,7 @@ import { GUIDE_IDS, GUIDE_NAMES, type GuideId } from '../../shared/guides'
 import type { AgentEntry, AgentPrompt, AgentRole, AgentsView, AgentTool } from '../../shared/panel'
 import { PERSONAS } from '../../shared/personas'
 import { ASSIST_INSTRUCTIONS, SETUP_INSTRUCTIONS } from '../agents/prompts/assist'
+import { mergerPrompt } from '../agents/prompts/merger'
 import { proposeTool } from '../agents/tools/propose'
 import { repoFileTool, repoTreeTool } from '../agents/tools/repo'
 import { SANDBOX_KNOWLEDGE_DIR } from '../knowledge/format'
@@ -176,6 +177,36 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
           'Instruções da revisão',
           'Toda vez que o revisor entra, com o diff entre o commit base e o commit do construtor.',
           reviewPrompt({ ...issue, baseSha: '‹commit base›' }),
+        ),
+      ],
+    },
+    {
+      id: 'merger',
+      group: 'factory',
+      name: 'Mesclador',
+      role: 'Traz a branch de integração para dentro de um trabalho já aprovado e resolve os conflitos. Só mescla: não muda o que o trabalho faz.',
+      runsIn: 'sandbox',
+      engine: {
+        value: `${engineValue(env, 'merger', env.FACTORY_MERGER || builder)}${env.FACTORY_MERGER ? '' : ' (o mesmo agente do construtor, numa sessão nova)'}`,
+        change:
+          'Aqui mesmo, na página Agentes, ou a label merger:<nome> numa issue. Roda só quando a mescla tem conflito; sem conflito a fábrica mescla sozinha.',
+      },
+      when: 'Quando o trabalho aprovado conflita com a branch de integração, antes de integrar, ou quando um pull request conflita depois. Um conflito resolvido é revisado de novo, só a resolução.',
+      tools: [SANDBOX_TOOL, KNOWLEDGE_TOOL],
+      shared: [],
+      source: ['src/server/agents/prompts/merger.ts', 'src/server/factory/merge-base.ts'],
+      prompts: [
+        template(
+          'merge',
+          'Instruções da mescla',
+          'Cada vez que há um conflito a resolver, com os arquivos em conflito.',
+          mergerPrompt({
+            ...issue,
+            integration: '‹branch de integração›',
+            workSha: '‹commit aprovado›',
+            baseSha: '‹cabeça da integração›',
+            files: ['‹arquivo em conflito›'],
+          }),
         ),
       ],
     },

@@ -44,6 +44,7 @@ describe('the choice of agent, kept in the panel', () => {
       builder: null,
       planner: null,
       reviewer: null,
+      merger: null,
       security: null,
     })
     const env = await effectiveEnv(getDb(), { FACTORY_HARNESS: 'codex' })
@@ -70,6 +71,7 @@ describe('the choice of agent, kept in the panel', () => {
       builder: 'claude-code',
       planner: null,
       reviewer: 'claude-code',
+      merger: null,
       security: null,
     })
     await saveChosen(getDb(), { reviewer: null }, ready)
@@ -77,6 +79,7 @@ describe('the choice of agent, kept in the panel', () => {
       builder: 'claude-code',
       planner: null,
       reviewer: null,
+      merger: null,
       security: null,
     })
     await saveChosen(getDb(), {}, ready)
@@ -103,6 +106,7 @@ describe('the choice of agent, kept in the panel', () => {
       builder: null,
       planner: null,
       reviewer: null,
+      merger: null,
       security: null,
     })
   })
@@ -131,12 +135,14 @@ describe('the choice of agent, kept in the panel', () => {
       builder: null,
       planner: null,
       reviewer: 'codex',
+      merger: null,
       security: null,
     })
     expect(settings.effective).toEqual({
       builder: 'claude-code',
       planner: 'codex',
       reviewer: 'codex',
+      merger: 'claude-code',
       security: 'claude-code',
     })
     expect(settings.repositoriesWithOwn).toEqual([
@@ -238,6 +244,7 @@ describe('the model and the effort, kept in the panel', () => {
       builder: null,
       planner: null,
       reviewer: null,
+      merger: null,
       security: null,
     })
   })
@@ -328,6 +335,7 @@ describe('the model and the effort, kept in the panel', () => {
       builder: 'gpt-6-luna',
       planner: null,
       reviewer: null,
+      merger: null,
       security: null,
     })
   })
