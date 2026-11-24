@@ -13,6 +13,7 @@ import {
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
 
+import { NO_CHANGE } from './change-size'
 import { cutPatch, diffFacts, reviewBase, samePatch } from './diff-facts'
 import { FakeBackend } from './fake-sandbox'
 import { changedSinceCommand } from './review'
@@ -36,7 +37,58 @@ describe('diffFacts', () => {
   it('finds nothing in a branch behind the integration branch that changed only what it planned', async () => {
     const facts = await factsOf(divergedRepository({ behind: true }))
 
-    expect(facts).toEqual({ guards: [], unplanned: [], required: [], touched: ['src/truncate.js'] })
+    expect(facts).toEqual({
+      guards: [],
+      unplanned: [],
+      required: [],
+      touched: ['src/truncate.js'],
+      size: { ...NO_CHANGE, added: 1, files: 1, paths: ['src/truncate.js'] },
+    })
+  })
+
+  it('measures the size of the change from where the branch meets the integration branch, not what that branch added since', async () => {
+    const repo = divergedRepository({
+      behind: true,
+      branch: {
+        ...PLANNED_CHANGE,
+        'src/a.js': 'a\n'.repeat(40),
+        'src/a.test.js': 'b\n'.repeat(10),
+      },
+    })
+
+    const { size } = await factsOf(repo)
+
+    expect(size).toEqual({
+      added: 41,
+      removed: 0,
+      testAdded: 10,
+      testRemoved: 0,
+      files: 3,
+      paths: ['src/a.js', 'src/a.test.js', 'src/truncate.js'],
+    })
+  })
+
+  it('stores no lines for a change to a lockfile alone', async () => {
+    const repo = divergedRepository({
+      behind: false,
+      branch: { 'pnpm-lock.yaml': 'lockfileVersion: 9\n'.repeat(30) },
+    })
+
+    const { size } = await factsOf(repo)
+
+    expect(size).toEqual({ ...NO_CHANGE, paths: [] })
+  })
+
+  it('measures the new commit after a rework that removes half of the change', async () => {
+    const repo = divergedRepository({
+      behind: false,
+      branch: { 'src/a.js': 'a\n'.repeat(40) },
+    })
+    commit(repo.dir, { 'src/a.js': 'a\n'.repeat(20) }, 'rework')
+
+    const { size } = await factsOf(repo)
+
+    expect(size.added).toBe(20)
   })
 
   it('blocks a change that commits an AWS key, with its file and line', async () => {
@@ -109,6 +161,14 @@ describe('diffFacts', () => {
       required: [],
       // Only what the branch itself changed, not what the integration branch did after it.
       touched: ['src/extra.js', 'src/shared.test.js', 'src/truncate.js'],
+      size: {
+        added: 2,
+        removed: 0,
+        testAdded: 0,
+        testRemoved: 1,
+        files: 3,
+        paths: ['src/extra.js', 'src/shared.test.js', 'src/truncate.js'],
+      },
     })
   })
 

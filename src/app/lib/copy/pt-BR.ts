@@ -151,6 +151,8 @@ export const ptBR: Copy = {
     nothingHere: 'Nada aqui.',
     mainRedAfterRelease: 'a main quebrou depois da versão',
     mainRed: 'main quebrada',
+    changeSize: (added: number, removed: number, files: number) =>
+      `${added} linhas adicionadas, ${removed} removidas, em ${files} ${files === 1 ? 'arquivo' : 'arquivos'}`,
     waitingOnBase: (checks: string, branch: string) => `espera ${checks} passar em ${branch}`,
     returned: {
       base_conflict: 'Voltou: conflito com a base',
