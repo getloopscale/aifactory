@@ -1966,7 +1966,7 @@ export class Run {
       )
       // The security agent reads and does not write. If it wrote anyway, none of it counts.
       await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
-      await must(this.backend, `git -C ${this.repoDir} clean -fd`)
+      await must(this.backend, `git -C ${this.repoDir} clean -fdx -e node_modules`)
       verdict = result.ok
         ? parseSecurityVerdict(result.summary)
         : stopped(`the security review failed: ${result.summary}`)

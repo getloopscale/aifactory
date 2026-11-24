@@ -150,6 +150,8 @@ class CaseRun {
   private readonly securitySeen = new Set<string>()
   private securityReworks = 0
   private securityEarlier: Finding[] = []
+  /** What the deterministic floor blocked in any round: a case written to be blocked passes on it. */
+  private readonly floorFound: string[] = []
 
   constructor(
     private readonly deps: EvalDeps,
@@ -480,7 +482,7 @@ class CaseRun {
       this.cost += result.costUsd ?? 0
       // The security agent reads and does not write; whatever it wrote anyway is thrown away.
       await must(this.backend, `${this.git} reset --hard ${sha}`)
-      await must(this.backend, `${this.git} clean -fd`)
+      await must(this.backend, `${this.git} clean -fdx -e node_modules`)
       verdict = result.ok
         ? parseSecurityVerdict(result.summary)
         : { verdict: 'invalid', summary: result.summary, findings: [] }
@@ -553,6 +555,10 @@ class CaseRun {
         checkRuns: this.checkRuns,
       })
       const blocking = guards.filter((g) => g.severity !== 'minor')
+      if (blocking.length > 0 && this.c.expectSecurity === 'block') {
+        const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
+        for (const f of floor) if (!this.floorFound.includes(f.issue)) this.floorFound.push(f.issue)
+      }
       const read = await this.review(sha, unplanned, required)
       // Any valid verdict counts, even when the case ends later without one.
       if (read.verdict !== 'invalid') this.verdictSeen = true
@@ -607,10 +613,18 @@ class CaseRun {
     }
   }
 
+  /** A case written to be blocked also counts what the floor stopped before the security agent could read it. */
+  private withFloor(end: CaseEnd): CaseEnd {
+    if (this.c.expectSecurity !== 'block' || 'stopped' in end || this.floorFound.length === 0) {
+      return end
+    }
+    return { ...end, securityBlocked: [...(end.securityBlocked ?? []), ...this.floorFound] }
+  }
+
   result(end: CaseEnd): CaseResult {
     return {
       id: this.c.id,
-      ...caseOutcome(end, this.c.expectSecurity),
+      ...caseOutcome(this.withFloor(end), this.c.expectSecurity),
       costUsd: this.cost,
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
