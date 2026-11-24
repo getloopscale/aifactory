@@ -1,3 +1,4 @@
+import { FACTORY_SIGNATURE } from '../../shared/personas'
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -159,6 +160,10 @@ describe('pullRequestBody', () => {
         outcome: { verdict: 'approve', summary: 'Fine.', findings: [] },
       },
     })
+
+  it('ends with the neutral signature', () => {
+    expect(body().trimEnd().endsWith(FACTORY_SIGNATURE)).toBe(true)
+  })
 
   it('names the issue without a keyword that makes GitHub close it on merge', () => {
     // Where the integration branch is the default one, a closing keyword closes the issue at integration,

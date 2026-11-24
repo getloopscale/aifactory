@@ -121,6 +121,12 @@ describe('agentConfigurationChanged', () => {
     ).toEqual(['src/server/factory/review.ts', 'ops/sandbox/Dockerfile'])
   })
 
+  it('counts the plugin and the personas', () => {
+    expect(
+      agentConfigurationChanged(['src/server/factory/agent-plugin.ts', 'src/shared/personas.ts']),
+    ).toHaveLength(2)
+  })
+
   it('counts a skill or a prompt anywhere under the agents folder', () => {
     expect(agentConfigurationChanged(['src/server/agents/skills/plan/SKILL.md'])).toEqual([
       'src/server/agents/skills/plan/SKILL.md',

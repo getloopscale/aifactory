@@ -1,5 +1,6 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
+import { FACTORY_SIGNATURE } from '../../shared/personas'
 import type { EgressRule } from './sandbox'
 import type { CheckResult } from './evidence'
 import { MAX_ATTEMPTS, renderFindings, type ReviewVerdict } from './review'
@@ -196,6 +197,8 @@ export function pullRequestBody(input: {
     input.agentSummary.slice(0, 3_000),
     '',
     '</details>',
+    '',
+    FACTORY_SIGNATURE,
     '',
   ].join('\n')
 }
