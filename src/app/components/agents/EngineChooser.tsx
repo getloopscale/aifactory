@@ -11,12 +11,14 @@ const ROLE_LABEL: Record<AgentRole, string> = {
   builder: 'Agente de código do Construtor',
   planner: 'Agente de código do Planejador',
   reviewer: 'Agente de código do Revisor',
+  merger: 'Agente de código do Mesclador',
 }
 
 const ROLE_NAME: Record<AgentRole, string> = {
   builder: 'Construtor',
   planner: 'Planejador',
   reviewer: 'Revisor',
+  merger: 'Mesclador',
 }
 
 const select = 'h-9 min-w-52 rounded-lg border border-border bg-card px-2 text-sm text-foreground'

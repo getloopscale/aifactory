@@ -97,10 +97,14 @@ export async function resolutionProblems(
   git: string,
   merge: { work: string; base: string },
 ): Promise<string[]> {
-  const problems: string[] = []
   const unmerged = await must(backend, `${git} diff --name-only --diff-filter=U`)
-  for (const file of unmerged.stdout.split('\n').filter((f) => f !== '')) {
-    problems.push(`${file} is still unmerged`)
+  const stillUnmerged = unmerged.stdout.split('\n').filter((f) => f !== '')
+  // With a file unmerged there is no merge commit to read yet.
+  if (stillUnmerged.length > 0) return stillUnmerged.map((file) => `${file} is still unmerged`)
+  const problems: string[] = []
+  const dirty = await must(backend, `${git} status --porcelain`)
+  for (const line of dirty.stdout.split('\n').filter((l) => l !== '')) {
+    problems.push(`${line.slice(3)} is not committed`)
   }
   const parents = (await must(backend, `${git} rev-list --parents -n 1 HEAD`)).stdout
     .trim()

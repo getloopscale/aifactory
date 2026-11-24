@@ -149,7 +149,12 @@ const APPROVALS: Record<string, (a: Args, repo?: RepositoryView) => Approval> = 
       `Fazer "${text(a.action)}" sobre o achado ${String(a.id)}.`,
   }),
   update_agent_settings: (a) => {
-    const names = { builder: 'Construtor', planner: 'Planejador', reviewer: 'Revisor' } as const
+    const names = {
+      builder: 'Construtor',
+      planner: 'Planejador',
+      reviewer: 'Revisor',
+      merger: 'Mesclador',
+    } as const
     const lines = (Object.keys(names) as (keyof typeof names)[])
       .filter((role) => role in a && a[role] !== undefined)
       .map((role) =>

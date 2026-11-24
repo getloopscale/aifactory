@@ -221,7 +221,7 @@ function setupChanges(before: AgentSetup, now: AgentSetup): string[] {
 
 /**
  * Which agents a run gets and the model and effort each is told to use, `default` when nothing is set. A
- * planner apart from the builder is part of the setup; one that is the builder adds nothing.
+ * planner apart from the builder is part of the setup, and so is a merger the owner chose apart from the builder; one that is the builder adds nothing.
  */
 export function agentSetup(
   env: NodeJS.ProcessEnv,
@@ -229,13 +229,15 @@ export function agentSetup(
   reviewer: string,
   options: (
     env: NodeJS.ProcessEnv,
-    role: 'builder' | 'reviewer' | 'planner',
+    role: 'builder' | 'reviewer' | 'planner' | 'merger',
     engine: string,
   ) => { model?: string; effort?: string },
   planner?: string,
+  merger?: string,
 ): AgentSetup {
   const b = options(env, 'builder', builder)
   const r = options(env, 'reviewer', reviewer)
+  const m = merger ? options(env, 'merger', merger) : undefined
   const p = planner ? options(env, 'planner', planner) : undefined
   return {
     builder,
@@ -246,6 +248,9 @@ export function agentSetup(
     reviewerEffort: r.effort ?? 'default',
     ...(planner && p
       ? { planner, plannerModel: p.model ?? 'default', plannerEffort: p.effort ?? 'default' }
+      : {}),
+    ...(merger && m
+      ? { merger, mergerModel: m.model ?? 'default', mergerEffort: m.effort ?? 'default' }
       : {}),
   }
 }

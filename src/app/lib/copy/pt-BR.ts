@@ -355,6 +355,7 @@ export const ptBR: Copy = {
     none: 'Nenhum passo foi registrado para esta tarefa.',
     builder: 'Construtor',
     reviewer: 'Revisor',
+    merger: 'Mesclador',
   },
   retryWaiting: {
     button: 'Refazer as tarefas que esperavam a conta',

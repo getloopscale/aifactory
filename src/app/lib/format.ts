@@ -195,6 +195,7 @@ function describeBuild(d: Detail): string {
     d.attempt ? `attempt ${text(d.attempt)}` : '',
     d.resumed ? 'resumed after an answer' : '',
     d.rework ? 'rework' : '',
+    d.merger ? 'merge agent resolving a conflict' : '',
     d.planned ? 'following its plan' : '',
   )
 }

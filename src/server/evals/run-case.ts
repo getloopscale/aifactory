@@ -439,6 +439,25 @@ class CaseRun {
     return this.checkReworks < MAX_CHECK_REWORKS && this.canResume()
   }
 
+  /**
+   * As `Run.mergedBeforeIntegration` does for approved work: the repository's integration checks run on the
+   * approved commit. A case runs on its own base, which nothing moves, so there is never a merge to make here.
+   * Answers the end of a case whose integration checks failed, as the factory fails the run.
+   */
+  private async integrationGate(sha: string): Promise<CaseEnd | undefined> {
+    const checks = this.c.integrationChecks ?? []
+    if (checks.length === 0) return undefined
+    const results = await runChecks(
+      this.backend,
+      this.repoDir,
+      checks,
+      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    )
+    this.checkRuns.push(...results.map((result) => ({ ...result, sha })))
+    const failed = failingChecks(results)
+    return failed.length > 0 ? checksFailed(failed) : undefined
+  }
+
   /** Checks, reviews and reworks until the case is approved or out of attempts, as `Run.loop` does. */
   async loop(): Promise<CaseEnd> {
     let sha = await this.applyFixes(await this.commit())
@@ -486,7 +505,13 @@ class CaseRun {
       // The same findings `Run.review` stores, so the rounds are counted as the factory counts them.
       this.blockingCounts.push(blockingCount([...guards, ...outside, ...read.findings]))
       if (read.verdict === 'approve' && blocking.length === 0) {
-        return { checksPassed: true, verdict: 'approve', blockingGuards: [] }
+        return (
+          (await this.integrationGate(sha)) ?? {
+            checksPassed: true,
+            verdict: 'approve',
+            blockingGuards: [],
+          }
+        )
       }
       // What the factory hands over: green checks and a review that did not approve.
       const handedOver: CaseEnd = {
@@ -510,7 +535,13 @@ class CaseRun {
       if (!(await this.rework(findings, [], sha))) {
         const judged = await this.review(sha, unplanned, required)
         if (judged.verdict === 'approve' && blocking.length === 0) {
-          return { checksPassed: true, verdict: 'approve', blockingGuards: [] }
+          return (
+            (await this.integrationGate(sha)) ?? {
+              checksPassed: true,
+              verdict: 'approve',
+              blockingGuards: [],
+            }
+          )
         }
         return judged.verdict === 'invalid' ? handedOver : { ...handedOver, verdict: judged.verdict }
       }

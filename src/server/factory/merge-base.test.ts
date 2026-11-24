@@ -234,15 +234,35 @@ describe('resolutionProblems', () => {
     ])
   })
 
-  it('names an unmerged file and a commit that is not the merge of the two heads', async () => {
+  it('names a file that is still unmerged and nothing else', async () => {
     const work = run('rev-parse HEAD')
     const base = baseMoves('# Changelog\n\n## 1.0.0\n')
-    const other = commit('CHANGELOG.md', '# Changelog\n\nother\n', 'other')
+    commit('CHANGELOG.md', '# Changelog\n\nother\n', 'other')
     run(`merge ${base} || true`)
 
-    const problems = await resolutionProblems(local, git(), { work, base: other })
+    expect(await resolutionProblems(local, git(), { work, base })).toEqual([
+      'CHANGELOG.md is still unmerged',
+    ])
+  })
 
-    expect(problems.join('\n')).toContain('CHANGELOG.md is still unmerged')
+  it('names a commit that is not the merge of the work and the integration head', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    run(`merge -q --no-edit ${base}`)
+
+    const problems = await resolutionProblems(local, git(), { work: base, base: work })
+
     expect(problems.join('\n')).toContain('is not a merge of')
+  })
+
+  it('names a file the merge left uncommitted', async () => {
+    const work = run('rev-parse HEAD')
+    const base = baseMoves('# Changelog\n\n## 1.0.0\n')
+    run(`merge -q --no-edit ${base}`)
+    write('stray.txt', 'left\n')
+
+    expect(await resolutionProblems(local, git(), { work, base })).toEqual([
+      'stray.txt is not committed',
+    ])
   })
 })

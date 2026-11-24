@@ -38,6 +38,20 @@ describe('agentSetup', () => {
   })
 })
 
+describe('agentSetup with a merger apart from the builder', () => {
+  it('names the merger with its own model and effort, and adds nothing when there is none', () => {
+    const options = (_env: NodeJS.ProcessEnv, role: string) =>
+      role === 'merger' ? { model: 'gpt-6.1-terra', effort: 'low' } : {}
+
+    expect(agentSetup({}, 'claude-code', 'codex', options, undefined, 'codex')).toMatchObject({
+      merger: 'codex',
+      mergerModel: 'gpt-6.1-terra',
+      mergerEffort: 'low',
+    })
+    expect(agentSetup({}, 'claude-code', 'codex', options)).not.toHaveProperty('merger')
+  })
+})
+
 describe('agentSetup with a planner apart from the builder', () => {
   it('names the planner with its own model and effort', () => {
     const setup = agentSetup(

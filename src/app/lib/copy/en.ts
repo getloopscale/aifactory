@@ -281,6 +281,7 @@ export const en = {
     none: 'No steps were recorded for this task.',
     builder: 'Builder',
     reviewer: 'Reviewer',
+    merger: 'Merger',
   },
   retryWaiting: {
     button: 'Retry the tasks that were waiting for the account',

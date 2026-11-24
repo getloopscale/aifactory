@@ -17,11 +17,11 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
     { id: 'claude-code', ready: true },
     { id: 'codex', ready: true },
   ],
-  chosen: { builder: null, planner: null, reviewer: null },
-  effective: { builder: 'codex', planner: 'codex', reviewer: 'codex' },
+  chosen: { builder: null, planner: null, reviewer: null, merger: null },
+  effective: { builder: 'codex', planner: 'codex', reviewer: 'codex', merger: 'codex' },
   repositoriesWithOwn: [],
-  chosenModel: { builder: null, planner: null, reviewer: null },
-  chosenEffort: { builder: null, planner: null, reviewer: null },
+  chosenModel: { builder: null, planner: null, reviewer: null, merger: null },
+  chosenEffort: { builder: null, planner: null, reviewer: null, merger: null },
   engines: {
     'claude-code': {
       models: [
@@ -118,7 +118,7 @@ describe('choosing the coding agent of a role', () => {
   it('lets the planner and the reviewer follow the builder, which is saved as going back to the default', async () => {
     const { fetchMock } = mount(
       'planner',
-      settings({ chosen: { builder: null, planner: 'claude-code', reviewer: null } }),
+      settings({ chosen: { builder: null, planner: 'claude-code', reviewer: null, merger: null } }),
     )
     const box = screen.getByLabelText('Agente de código do Planejador') as HTMLSelectElement
     expect(box.value).toBe('claude-code')
@@ -218,8 +218,8 @@ describe('choosing the model and the effort', () => {
     mount(
       'builder',
       settings({
-        chosenModel: { builder: 'gpt-6-luna', planner: null, reviewer: null },
-        chosenEffort: { builder: 'medium', planner: null, reviewer: null },
+        chosenModel: { builder: 'gpt-6-luna', planner: null, reviewer: null, merger: null },
+        chosenEffort: { builder: 'medium', planner: null, reviewer: null, merger: null },
       }),
     )
     expect((screen.getByLabelText('Modelo do Construtor') as HTMLSelectElement).value).toBe(
@@ -247,7 +247,9 @@ describe('choosing the model and the effort', () => {
   it("swaps the lists for the other agent's, and forgets a model that belongs to the first", () => {
     mount(
       'builder',
-      settings({ chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null } }),
+      settings({
+        chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null, merger: null },
+      }),
     )
     choose('Agente de código do Construtor', 'claude-code')
     expect(optionsOf('Modelo do Construtor')).toEqual(['Padrão do agente', 'Sonnet', 'Opus'])
@@ -280,7 +282,9 @@ describe('choosing the model and the effort', () => {
   it('sends the agent with its model when both changed, and null where it went back to the default', async () => {
     const { fetchMock } = mount(
       'builder',
-      settings({ chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null } }),
+      settings({
+        chosenModel: { builder: 'gpt-6.1-sol', planner: null, reviewer: null, merger: null },
+      }),
     )
     choose('Agente de código do Construtor', 'claude-code')
     choose('Modelo do Construtor', 'opus')

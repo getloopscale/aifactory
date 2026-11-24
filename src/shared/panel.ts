@@ -248,7 +248,7 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'planner' | 'reviewer'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger'
   harness: string
   /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
@@ -279,7 +279,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'planner' | 'reviewer'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -567,7 +567,7 @@ export type InboxItem = {
 export type TranscriptEvent = {
   /** The order of the step within the task, across every run of its agents. */
   seq: number
-  role: 'builder' | 'reviewer'
+  role: 'builder' | 'reviewer' | 'merger'
   attempt: number
   kind: 'message' | 'tool_use' | 'tool_result' | 'cost' | 'error'
   tool: string | null
@@ -866,8 +866,8 @@ export type AgentsView = {
   settings: AgentSettings
 }
 
-/** The three roles of a coding agent that the owner can give to one agent or another. */
-export type AgentRole = 'builder' | 'planner' | 'reviewer'
+/** The roles of a coding agent that the owner can give to one agent or another. */
+export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger'
 
 export type EngineOption = {
   id: string

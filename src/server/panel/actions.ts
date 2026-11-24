@@ -428,7 +428,12 @@ async function mergesTheBase(
     .from(repository)
     .where(eq(repository.fullName, row.repository))
   const base = integrationBranch(config ?? {})
-  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
+  // The run only merges (`Run.mergeBase`): the merge agent resolves the conflict, no builder session starts (#227).
+  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base), row.headSha, {
+    note: conflictNote(base),
+    mergeBase: true,
+    preAgent: false,
+  })
   return true
 }
 
@@ -462,7 +467,11 @@ export async function sendBackConflictAutomatically(
     await requeue(deps, taskId, ['done'], 'automatic_retry', '', row.headSha)
     return
   }
-  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
+  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha, {
+    note: conflictNote(base),
+    mergeBase: true,
+    preAgent: false,
+  })
 }
 
 /**

@@ -13,6 +13,7 @@ export const ROLE_ENV: Record<AgentRole, string> = {
   builder: 'FACTORY_HARNESS',
   planner: 'FACTORY_PLANNER',
   reviewer: 'FACTORY_REVIEWER',
+  merger: 'FACTORY_MERGER',
 }
 
 const ROLES = Object.keys(ROLE_ENV) as AgentRole[]
@@ -33,7 +34,7 @@ export const SETTINGS_LOCK = 81_001
 export type Chosen = Record<AgentRole, string | null>
 type Stored = { engine: Chosen; model: Chosen; effort: Chosen }
 
-const nobody = (): Chosen => ({ builder: null, planner: null, reviewer: null })
+const nobody = (): Chosen => ({ builder: null, planner: null, reviewer: null, merger: null })
 
 /** What the owner saved, the model and the effort still tagged with the agent they were chosen for. */
 async function loadStored(db: Pick<Database, 'select'>): Promise<Stored> {
@@ -88,6 +89,7 @@ export function effectiveOf(
     builder,
     planner: env.FACTORY_PLANNER || defaultPlannerName(builder, ready),
     reviewer: env.FACTORY_REVIEWER || builder,
+    merger: env.FACTORY_MERGER || builder,
   }
 }
 
