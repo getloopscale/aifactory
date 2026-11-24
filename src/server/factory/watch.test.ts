@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { CommitChecks } from '../github/pulls'
 
-import { classify } from './watch'
+import { blameRelease, classify } from './watch'
 
 const run = (name: string, status: string, conclusion: string | null) => ({
   name,
@@ -87,5 +87,58 @@ describe('classify, at its edges', () => {
   it('waits an hour before giving up on checks that never report', async () => {
     const { WATCH_WINDOW_MS } = await import('./watch')
     expect(WATCH_WINDOW_MS).toBe(3_600_000)
+  })
+})
+
+describe('blameRelease', () => {
+  const failed = (...names: string[]) => checks(names.map((n) => run(n, 'completed', 'failure')))
+  const green = checks([run('ci', 'completed', 'success')])
+
+  it('is red when the parent was green', () => {
+    expect(blameRelease(failed('ci'), green)).toEqual({ state: 'red', failing: ['ci'], base: [] })
+  })
+
+  it('is red when the commit has no parent to compare with', () => {
+    expect(blameRelease(failed('ci'), null).state).toBe('red')
+  })
+
+  it('does not blame the release for checks that failed on the parent too', () => {
+    expect(blameRelease(failed('ci', 'node 22'), failed('ci', 'node 22'))).toEqual({
+      state: 'base',
+      failing: [],
+      base: ['ci', 'node 22'],
+    })
+  })
+
+  it('names only the new failure when the parent failed on another check', () => {
+    expect(blameRelease(failed('ci', 'lint'), failed('ci'))).toEqual({
+      state: 'red',
+      failing: ['lint'],
+      base: ['ci'],
+    })
+  })
+
+  it('keeps watching while other checks run and the only failure is the base', () => {
+    const merge = checks([run('ci', 'completed', 'failure'), run('slow', 'in_progress', null)])
+    expect(blameRelease(merge, failed('ci')).state).toBe('pending')
+  })
+
+  it('matches commit statuses by context', () => {
+    const status = (...contexts: [string, string][]) => ({
+      checkRuns: [],
+      statuses: 'failure' as const,
+      statusContexts: contexts.map(([context, state]) => ({ context, state })),
+    })
+    expect(
+      blameRelease(status(['a', 'failure'], ['b', 'failure']), status(['a', 'failure'])),
+    ).toEqual({
+      state: 'red',
+      failing: ['b'],
+      base: ['a'],
+    })
+  })
+
+  it('passes a merge that is not red through', () => {
+    expect(blameRelease(green, failed('ci'))).toEqual({ state: 'green', failing: [], base: [] })
   })
 })

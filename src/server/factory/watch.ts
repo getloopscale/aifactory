@@ -29,6 +29,45 @@ export function classify(checks: CommitChecks): MainState {
   return { state: 'green', failing: [] }
 }
 
+/** The names of the checks that failed, each commit status by its own context when it is known. */
+function failedNames(checks: CommitChecks): string[] {
+  const names = checks.checkRuns
+    .filter((r) => r.status === 'completed' && r.conclusion !== null && BROKEN.has(r.conclusion))
+    .map((r) => r.name)
+  if (checks.statusContexts) {
+    for (const s of checks.statusContexts) {
+      if (s.state === 'failure' || s.state === 'error') names.push(s.context)
+    }
+  } else if (checks.statuses === 'failure' || checks.statuses === 'error') {
+    names.push('commit status')
+  }
+  return names
+}
+
+/** What the merge commit's checks say once the ones that already failed on its first parent are set aside. */
+export type ReleaseState = Omit<MainState, 'state'> & {
+  state: MainState['state'] | 'base'
+  /** The checks that failed on the merge commit and on its parent: the base's, not the release's. */
+  base: string[]
+}
+
+/**
+ * Red only for checks that failed on the merge commit and did not fail on its first parent. When every
+ * failure is the parent's, the release is not blamed: it is `pending` while other checks still run, and
+ * `base` once none does, which says nothing about the release either way.
+ */
+export function blameRelease(merge: CommitChecks, parent: CommitChecks | null): ReleaseState {
+  const seen = classify(merge)
+  if (seen.state !== 'red') return { ...seen, base: [] }
+  const before = new Set(parent ? failedNames(parent) : [])
+  const failed = failedNames(merge)
+  const own = failed.filter((n) => !before.has(n))
+  const base = failed.filter((n) => before.has(n))
+  if (own.length > 0) return { state: 'red', failing: own, base }
+  const running = merge.checkRuns.some((r) => r.status !== 'completed')
+  return { state: running || merge.statuses === 'pending' ? 'pending' : 'base', failing: [], base }
+}
+
 /** How long after a release the watch waits for checks to report before it gives up. */
 export const WATCH_WINDOW_MS = 60 * 60_000
 
@@ -45,6 +84,11 @@ export type WatchResult = {
   red: number[]
   silent: number[]
   waiting: number
+}
+
+function failingDetail(seen: ReleaseState): string {
+  const base = seen.base.length > 0 ? `; left to the base: ${seen.base.join(', ')}` : ''
+  return `failing: ${seen.failing.join(', ')}${base}`
 }
 
 function revertBody(input: {
@@ -91,20 +135,27 @@ export async function pollWatches(deps: WatchDeps): Promise<WatchResult> {
 
   for (const { w, title, issueNumber } of open) {
     const { token } = await deps.github.installationToken(w.repository)
-    const seen = classify(await deps.api.commitChecks(w.repository, token, w.sha))
+    const merged = await deps.api.commitChecks(w.repository, token, w.sha)
+    // The parent is read only for a red merge commit. A read that fails leaves the watch open.
+    let parent: CommitChecks | null = null
+    if (classify(merged).state === 'red') {
+      const first = await deps.api.firstParent(w.repository, token, w.sha)
+      if (first) parent = await deps.api.commitChecks(w.repository, token, first)
+    }
+    const seen = blameRelease(merged, parent)
 
     if (seen.state === 'red') {
       // Taken before the revert is made, so two passes cannot open two. It stays `reverting`, not
       // `red`, until the attempt is over: a red watch is read as "no revert was opened" if it has none.
       const taken = await deps.db
         .update(watch)
-        .set({ status: 'reverting', detail: `failing: ${seen.failing.join(', ')}` })
+        .set({ status: 'reverting', detail: failingDetail(seen) })
         .where(and(eq(watch.id, w.id), eq(watch.status, 'watching')))
         .returning({ id: watch.id })
       if (taken.length === 0) continue
       result.red.push(w.id)
       let revertUrl: string | null = null
-      let detail = `failing: ${seen.failing.join(', ')}`
+      let detail = failingDetail(seen)
       try {
         const revert = await deps.api.revertPullRequest(w.repository, token, w.pullRequestNumber, {
           title: `Revert: ${title} (#${issueNumber})`,
@@ -125,6 +176,9 @@ export async function pollWatches(deps: WatchDeps): Promise<WatchResult> {
         .update(watch)
         .set({ status: 'red', endedAt: now, revertUrl, detail })
         .where(eq(watch.id, w.id))
+    } else if (seen.state === 'base') {
+      const detail = `left to the base, failing on the parent too: ${seen.base.join(', ')}`
+      if (await end(w.id, 'silent', { detail })) result.silent.push(w.id)
     } else if (seen.state === 'green') {
       if (await end(w.id, 'green')) result.green.push(w.id)
     } else if (now.getTime() - w.startedAt.getTime() > windowMs) {
@@ -132,9 +186,10 @@ export async function pollWatches(deps: WatchDeps): Promise<WatchResult> {
         seen.state === 'none'
           ? 'no check reported on the merge commit'
           : 'checks were still running'
+      const left = seen.base.length > 0 ? `; left to the base: ${seen.base.join(', ')}` : ''
       if (
         await end(w.id, 'silent', {
-          detail: `${why} after ${Math.round(windowMs / 60_000)} minutes`,
+          detail: `${why} after ${Math.round(windowMs / 60_000)} minutes${left}`,
         })
       ) {
         result.silent.push(w.id)

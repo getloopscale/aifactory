@@ -293,6 +293,8 @@ export type GithubApi = {
   checkReports(repo: string, token: string, sha: string): Promise<CheckReport[]>
   /** The check runs and commit statuses a commit has so far. */
   commitChecks(repo: string, token: string, sha: string): Promise<CommitChecks>
+  /** The first parent of a commit, or null when it has none. Throws when GitHub will not say. */
+  firstParent(repo: string, token: string, sha: string): Promise<string | null>
   /**
    * Opens a pull request that reverts a merged one. It only opens it: nothing here merges it.
    */
@@ -894,6 +896,17 @@ export function createGithubApi(
         ).json()) as { sha: string }
         return { sha: merged.sha }
       }
+    },
+
+    async firstParent(repo, token, sha) {
+      const commit = (await (
+        await ensure(
+          await call(repo, token, `/commits/${sha}`),
+          `reading the commit ${sha.slice(0, 7)} of ${repo}`,
+          [200],
+        )
+      ).json()) as { parents?: { sha: string }[] }
+      return commit.parents?.[0]?.sha ?? null
     },
 
     async commitChecks(repo, token, sha) {
