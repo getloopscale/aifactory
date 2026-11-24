@@ -18,6 +18,7 @@ const TRIED: DoctorTriedSentences = {
   sandboxes: () => 'listar os sandboxes que a conta tem ativos',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
+  proofs: (v) => `ler as provas dos checks de ${v.repo}`,
 }
 
 /** What was tried, in Portuguese when the code is one this panel knows, and as the server said it otherwise. */
@@ -484,6 +485,23 @@ export const ptBR: Copy = {
           SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
             : 'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
+      },
+      provider_checks_failed: {
+        cause: (v) =>
+          `Os checks passaram em ${v.passedOn} e falharam em ${v.provider}: ${v.checks}. Uma execução em ${v.provider} falhará do mesmo jeito.`,
+        repair: (v) =>
+          `Faça a receita passar em ${v.provider} (o toolchain, ou um check que depende do provedor), ou rode a fábrica em ${v.passedOn}; depois prove os checks de novo.`,
+      },
+      provider_checks_untried: {
+        cause: (v) =>
+          v.passedOn
+            ? `Os checks passaram em ${v.passedOn} e nunca foram provados em ${v.providers}; não se sabe se uma execução lá passa.`
+            : `Os checks não passaram em nenhum provedor de sandbox (não provados em ${v.providers}).`,
+        repair: (v) => `Prove os checks do repositório com a fábrica rodando em ${v.providers}.`,
+      },
+      ok_provider_checks: {
+        cause: (v) => `Os checks passaram em todos os provedores de sandbox: ${v.providers}.`,
+        repair: () => '',
       },
       ok_issues: { cause: () => 'As Issues estão ligadas.', repair: () => '' },
       ok_app_access: {
