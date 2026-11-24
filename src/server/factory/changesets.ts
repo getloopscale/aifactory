@@ -220,12 +220,13 @@ export const NOT_OPENED =
 export const versionBranchFor = (releaseBranch: string) => `changeset-release/${releaseBranch}`
 
 /**
- * Whether the version branch holds versions for this publication: ahead of the release branch and committed
- * after the promotion. A release workflow that may not open pull requests (usetheokit/theokit) pushes it and
- * stops there. One committed before the promotion belongs to an earlier release.
+ * Whether the version branch holds versions for this publication: ahead of the release branch and built on the
+ * promoted commit (`holdsPromoted`: the branch contains it). A release workflow that may not open pull requests
+ * (usetheokit/theokit) pushes it and stops there. One that does not contain the promoted commit belongs to an
+ * earlier release. The time the factory recorded the publication says nothing: it can be hours after the push.
  */
-export const versionBranchWaits = (branch: BranchAhead | undefined, startedAt: Date) =>
-  branch !== undefined && branch.aheadBy > 0 && branch.committedAt.getTime() > startedAt.getTime()
+export const versionBranchWaits = (branch: BranchAhead | undefined, holdsPromoted: boolean) =>
+  branch !== undefined && branch.aheadBy > 0 && holdsPromoted
 
 /** The Version Packages pull request the factory opens from a version branch the release workflow pushed. */
 export function versionPullRequestFrom(releaseBranch: string, promotedSha: string) {
