@@ -331,6 +331,9 @@ describe('publishing a changesets release', () => {
     const notYet = await seedTask('done', 'later1')
     const notIntegrated = await seedTask('done', null)
     repo().unreachable.add('later1')
+    const [first] = await getDb().select().from(task).where(eq(task.id, released))
+    mergeChanges(first.mergedSha!, 'packages/ui', '@theokit/ui')
+    mergeChanges('shipped1', 'packages/ui', '@theokit/ui')
     versionPr()
     releasesAre(published('@theokit/ui@1.13.0'), published('pre/7-abc'), published('v9.9.9'))
 
@@ -591,7 +594,32 @@ describe('publishing a changesets release', () => {
     })
 
     it('publishes with every tag once each versioned package has its release', async () => {
-      await waitingPublication()
+      const waiting = await waitingPublication()
+      const [t] = await getDb().select().from(task).where(eq(task.id, waiting))
+      const sha = t.mergedSha!
+      const dirs = {
+        'packages/gateway': '@theokit/gateway',
+        'packages/slack': '@theokit/gateway-slack',
+        'packages/yuanbao': '@theokit/gateway-yuanbao',
+      }
+      repo()
+        .compare(
+          `${sha}^`,
+          sha,
+          Object.keys(dirs).map((d) => ({
+            path: `${d}/src/index.ts`,
+            status: 'modified' as const,
+          })),
+        )
+        .files(sha, {
+          ...Object.fromEntries(
+            Object.entries(dirs).map(([d, name]) => [
+              `${d}/package.json`,
+              JSON.stringify({ name, version: '1.0.0' }),
+            ]),
+          ),
+          '.changeset/config.json': '{}',
+        })
       releasesAre(...ALL.map(published))
 
       const result = await pollPublications(deps(STILL_RUNNING))

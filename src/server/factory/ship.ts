@@ -52,6 +52,54 @@ export const availableIn = (s: Shipment) =>
     '',
   ].join('\n')
 
+const releasedOn = (s: Shipment) =>
+  `Released by ${s.actor}: the promotion \`${s.promotedSha.slice(0, 7)}\` to \`${s.releaseBranch}\`${s.publishedBy ? `, published by ${s.publishedBy}` : ''}.`
+
+/** Whether every tag of the release names a package, as changesets tags do (`name@version`). */
+const isChangesets = (s: Shipment) => s.tags.length > 0 && s.tags.every((t) => packageOf(t.tag))
+
+/** What an issue is told when the release published no package its change is in. */
+const onBranchOnly = (s: Shipment, why: string) =>
+  [
+    `Released to \`${s.releaseBranch}\` in ${s.promotedSha.slice(0, 7)}; ${why}.`,
+    '',
+    releasedOn(s),
+    '',
+  ].join('\n')
+
+/**
+ * What a task's issue is told. A changesets release names only the published packages the task's merge
+ * changed; a task that changed none, or whose packages cannot be read, is told it reached the branch.
+ */
+export async function issueComment(
+  api: GithubApi,
+  s: Shipment,
+  mergedSha: string | null,
+): Promise<string> {
+  if (!isChangesets(s)) return availableIn(s)
+  if (!mergedSha) {
+    return onBranchOnly(s, 'it changed no package, so no published version contains it')
+  }
+  try {
+    const files = await api.changedFiles(s.repository, s.token, `${mergedSha}^`, mergedSha)
+    const changed = new Set(
+      await publishedPackagesChanged(api, s.repository, s.token, { head: mergedSha, files }),
+    )
+    const tags = s.tags.filter((t) => changed.has(packageOf(t.tag)!))
+    if (tags.length > 0) return availableIn({ ...s, tags })
+    return onBranchOnly(s, 'the packages it changed are not published to npm')
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: 'issue_packages_unread',
+        repository: s.repository,
+        error: message(error),
+      }),
+    )
+    return onBranchOnly(s, 'which published packages contain it could not be determined')
+  }
+}
+
 /**
  * Comments where the fix is and closes the issue. A failure is returned, not thrown: the release already
  * happened, and one issue GitHub refuses must not stop the others.
@@ -60,9 +108,15 @@ async function announce(
   api: GithubApi,
   s: Shipment,
   issueNumber: number,
+  mergedSha: string | null,
 ): Promise<string | undefined> {
   try {
-    await api.commentOnIssue(s.repository, s.token, issueNumber, availableIn(s))
+    await api.commentOnIssue(
+      s.repository,
+      s.token,
+      issueNumber,
+      await issueComment(api, s, mergedSha),
+    )
     await api.closeIssue(s.repository, s.token, issueNumber)
     return undefined
   } catch (error) {
@@ -220,9 +274,9 @@ export async function shipContained(
           s.repository,
           s.token,
           t.issueNumber,
-          availableIn(s),
+          await issueComment(deps.api, s, t.mergedSha),
         )
-      : await announce(deps.api, s, t.issueNumber)
+      : await announce(deps.api, s, t.issueNumber, t.mergedSha)
     await enterStage(deps.db, t.id, 'released', {
       actor: s.actor,
       tag: s.tags.map((tag) => tag.tag).join(', '),
@@ -252,14 +306,14 @@ async function shipResolved(
 ) {
   const read = deps.fetchIssue ?? fetchIssue
   const resolved = await releaseResolved(deps, {
-    afterRelease: (row) =>
+    afterRelease: async (row) =>
       closeOpenIssue(
         deps.api,
         (n) => read(s.repository, n, s.token),
         s.repository,
         s.token,
         row.issueNumber,
-        availableIn(s),
+        await issueComment(deps.api, s, null),
       ),
     repository: s.repository,
     token: s.token,
