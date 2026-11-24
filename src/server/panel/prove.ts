@@ -1,6 +1,12 @@
 import { and, sql } from 'drizzle-orm'
 
-import type { ChecksProof, ProofKind, SandboxProviderName } from '../../shared/panel'
+import type {
+  ChecksProof,
+  ProofKind,
+  ProviderProof,
+  ProviderProofs,
+  SandboxProviderName,
+} from '../../shared/panel'
 import type { Database } from '../db'
 import { repository } from '../db/schema'
 import { DEFAULT_CHECK_MS } from '../factory/agent-time'
@@ -182,35 +188,36 @@ export async function runProof(deps: RunProofDeps, job: ProofJob): Promise<void>
   const proof: ChecksProof = { ...stored, kind }
 
   let values: Settled
+  let byProvider: ProviderProofs | undefined
   try {
     const config = await loadRepoConfig(db, row.fullName)
     const repo = { fullName: row.fullName, config }
     const found = await proveChecks(deps, repo, proof.checks, OPTIONS[kind])
     values = settled(proof, found)
-    if (kind === 'checks' && deps.provider) {
-      values.checksProofByProvider = {
-        ...(row.checksProofByProvider ?? {}),
-        [deps.provider]: {
-          at: new Date().toISOString(),
-          sha: found.sha,
-          passed: found.results.filter((r) => r.status === 'passed').map((r) => r.name),
-          failed: found.results.filter((r) => r.status !== 'passed').map((r) => r.name),
-        },
+    if (kind === 'checks' && deps.provider && found.results.length > 0) {
+      const entry: ProviderProof = {
+        at: new Date().toISOString(),
+        sha: found.sha,
+        passed: found.results.filter((r) => r.status === 'passed').map((r) => r.name),
+        failed: found.results.filter((r) => r.status !== 'passed').map((r) => r.name),
       }
+      byProvider = { [deps.provider]: entry }
     }
   } catch (error) {
     values = unrun(proof, error)
   }
   const written = await db
     .update(repository)
-    .set(values)
+    .set({
+      ...values,
+      // Merged by the database: another provider's proof may have been recorded while this one ran.
+      ...(byProvider && {
+        checksProofByProvider: sql`${repository.checksProofByProvider} || ${JSON.stringify(byProvider)}::jsonb`,
+      }),
+    })
     .where(and(named(row.fullName), sql`${repository[column]}->>'at' = ${job.at}`))
     .returning({ id: repository.id })
-  if (
-    written.length > 0 &&
-    kind === 'checks' &&
-    ('checks' in values || 'checksProofByProvider' in values)
-  ) {
+  if (written.length > 0 && kind === 'checks' && ('checks' in values || byProvider)) {
     await deps.diagnose?.(row.fullName)
   }
 }

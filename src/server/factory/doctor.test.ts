@@ -925,6 +925,13 @@ describe('providerChecksItem', () => {
     ).toBe('unknown')
   })
 
+  it('does not count a proof with no check as a pass', () => {
+    expect(providerChecksItem(readOf({ e2b: proof(['t']), docker: proof([]) })).status).toBe(
+      'unknown',
+    )
+    expect(providerChecksItem(readOf({ e2b: proof([]) })).status).toBe('unknown')
+  })
+
   it('is fine only when every provider passed', () => {
     const all = { vercel: proof(['t']), docker: proof(['t']), e2b: proof(['t']) }
     expect(providerChecksItem(readOf(all)).status).toBe('ok')

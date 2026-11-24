@@ -575,7 +575,12 @@ const PROVIDER_LABEL = { vercel: 'Vercel', docker: 'Docker', e2b: 'E2B' } as con
  */
 export function providerChecksItem(proofs: Read<ProviderProofs>): DoctorItem {
   if (!proofs.read) return unknownItem('provider_checks', proofs)
-  const tried = SANDBOX_PROVIDERS.filter((name) => proofs.value[name])
+  // An entry with no check in it proved nothing: it is a provider not tried.
+  const proven = (name: (typeof SANDBOX_PROVIDERS)[number]) => {
+    const proof = proofs.value[name]
+    return proof !== undefined && proof.passed.length + proof.failed.length > 0
+  }
+  const tried = SANDBOX_PROVIDERS.filter(proven)
   const passedOn = tried.filter((name) => proofs.value[name]!.failed.length === 0)
   const names = (list: readonly (keyof typeof PROVIDER_LABEL)[]) =>
     list.map((name) => PROVIDER_LABEL[name]).join(', ')
@@ -594,7 +599,7 @@ export function providerChecksItem(proofs: Read<ProviderProofs>): DoctorItem {
       { link },
     )
   }
-  const untried = SANDBOX_PROVIDERS.filter((name) => !proofs.value[name])
+  const untried = SANDBOX_PROVIDERS.filter((name) => !proven(name))
   if (passedOn.length === 0 || untried.length > 0) {
     return problem(
       'provider_checks',
