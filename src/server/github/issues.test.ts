@@ -129,6 +129,16 @@ describe('listing the open issues that carry a label', () => {
     expect(urls[1]).toBe('https://api.github.com/next-page')
   })
 
+  it('lists every open issue when no label is given', async () => {
+    const urls: string[] = []
+    const fetch = async (url: string) => {
+      urls.push(url)
+      return page([{ number: 1, title: 'a', body: null, labels: [], state: 'open' }])
+    }
+    expect(await listOpenIssues('o/r', null, 't', fetch, noWait)).toHaveLength(1)
+    expect(urls[0]).toBe('https://api.github.com/repos/o/r/issues?state=open&per_page=100')
+  })
+
   it('fails loudly on an answer that is not 200', async () => {
     const fetch = async () => new Response('x', { status: 404 })
     await expect(listOpenIssues('o/r', 'factory', 't', fetch, noWait)).rejects.toThrow(

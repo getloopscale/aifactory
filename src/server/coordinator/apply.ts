@@ -27,6 +27,9 @@ import { COORDINATOR_ACTOR } from './release-train'
 import {
   followUpIssue,
   followUpOrigin,
+  gapIssue,
+  gapNote,
+  sameGap,
   infeasibleNamed,
   qualityConfigurationNamed,
   sameFollowUp,
@@ -46,7 +49,7 @@ export type ApplyDeps = ActionDeps & {
   issues: Pick<IssuesApi, 'createIssue' | 'updateIssueBody' | 'ensureLabel'>
   readIssue: ReadIssue
   /** The open issues of a repository that carry a label, as `listOpenIssues` reads them: where a follow-up is looked for. */
-  listOpenIssues: (repo: string, label: string, token: string) => Promise<Issue[]>
+  listOpenIssues: (repo: string, label: string | null, token: string) => Promise<Issue[]>
   /** The clock a decision is recorded at, which is what the age of a `wait` is measured against. */
   now?: () => Date
 }
@@ -131,23 +134,46 @@ async function fileFollowUp(
 }
 
 /**
+ * Files the framework gap issue a review asked the builder for, in the repository the draft names and with that
+ * repository's own token, then sends the task back naming it. An open issue with the same title is named instead of
+ * filing another. Never falls back to another repository: a refusal is a failure the row records.
+ */
+async function fileGap(deps: ApplyDeps, row: TaskRow, draft: ScopeDraft): Promise<Performed> {
+  const issue = gapIssue(draft, row.repository, row.issueNumber)!
+  const { token } = await deps.github.installationToken(issue.repository)
+  const open = await deps.listOpenIssues(issue.repository, null, token)
+  const number =
+    open.find((i) => sameGap(i, issue.title))?.number ??
+    (
+      await deps.issues.createIssue(issue.repository, token, {
+        title: issue.title,
+        body: issue.body,
+      })
+    ).number
+  const reference = `${issue.repository}#${number}`
+  await sendBackByCoordinator(deps, row.id, gapNote(draft, reference), { fromReview: true })
+  return { done: `filed the gap issue ${reference}` }
+}
+
+/**
  * Scopes the task: asks the transition table before anything reaches GitHub, files the follow-up, appends
  * the decision to the issue body and sends the task back on its branch with the note. Returns the number
  * of the follow-up, or null when the draft filed none.
  */
-async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promise<number | null> {
+async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promise<Performed> {
   const [row] = await deps.db.select().from(task).where(eq(task.id, taskId))
   if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
   const allowed = transition(row, 'coordinator_send_back')
   if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
   const { token } = await deps.github.installationToken(row.repository)
+  if (draft.gap) return fileGap(deps, row, draft)
   const { body } = await deps.readIssue(row.repository, row.issueNumber, token)
   const followUp = await fileFollowUp(deps, row, token, draft, body)
   const section = scopeSection(draft, new Date().toISOString().slice(0, 10), followUp ?? undefined)
   const updated = [body.trimEnd(), section].filter((part) => part !== '').join('\n\n')
   await deps.issues.updateIssueBody(row.repository, token, row.issueNumber, updated)
   await sendBackByCoordinator(deps, taskId, draft.note, { fromReview: true })
-  return followUp
+  return { followUpIssue: followUp }
 }
 
 /**
@@ -193,7 +219,7 @@ async function perform(
   } else if (decision.action === 'retry_from_finding') {
     await resolveFinding(deps, decision.findingId!, 'retry', { automatic: true })
   } else if (decision.action === 'scope' && decision.draft) {
-    return { followUpIssue: await scope(deps, exception.taskId, decision.draft) }
+    return await scope(deps, exception.taskId, decision.draft)
   } else if (decision.action === 'release' && decision.bump) {
     await release(deps, exception.taskId, {
       bump: decision.bump,

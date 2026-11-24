@@ -12,7 +12,13 @@ import type { Issue } from '../github/issues'
 
 import type { Decision } from './decide'
 import type { TaskException } from './exceptions'
-import { parseScopeDraft, roundsOfRun, scopeMessage, type ReviewRound } from './scope'
+import {
+  gapTargetNamed,
+  parseScopeDraft,
+  roundsOfRun,
+  scopeMessage,
+  type ReviewRound,
+} from './scope'
 
 /**
  * The step between `decide` and `apply` for a `scope`: it reads what the drafter needs, asks the model and
@@ -122,12 +128,22 @@ export async function draftScope(
 ): Promise<Decision> {
   if (decision.action !== 'scope') return decision
   let answer: { response: string; cost: number }
+  let message: string
   try {
-    answer = await deps.drafter(await scopeMessageFor(deps, exception.taskId))
+    message = await scopeMessageFor(deps, exception.taskId)
+    answer = await deps.drafter(message)
   } catch (error) {
     return { ...decision, failure: error instanceof Error ? error.message : String(error) }
   }
   const parsed = parseScopeDraft(answer.response)
+  if (parsed.ok && !gapTargetNamed(parsed.draft, message!)) {
+    return {
+      action: 'escalate',
+      reason: `${decision.reason}, but the drafter named a repository for the gap issue that neither the issue nor the review names`,
+      answer: answer.response.slice(0, ANSWER_MAX),
+      costUsd: answer.cost,
+    }
+  }
   if (parsed.ok) return { ...decision, draft: parsed.draft, costUsd: answer.cost }
   return {
     action: 'escalate',

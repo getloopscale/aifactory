@@ -34,7 +34,7 @@ export default defineCron('coordinate', {
           issues: createIssuesApi(),
           readIssue: (repo: string, number: number, token: string) =>
             fetchIssue(repo, number, token),
-          listOpenIssues: (repo: string, label: string, token: string) =>
+          listOpenIssues: (repo: string, label: string | null, token: string) =>
             listOpenIssues(repo, label, token),
           drafter: modelScopeDrafter(),
           releaseMode: releaseModeFromEnv(process.env),
