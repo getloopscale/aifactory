@@ -14,6 +14,7 @@ import {
   review,
   stageEvent,
   task,
+  taskRisk,
   watch,
 } from '../db/schema'
 import { metricsReport } from '../panel/metrics'
@@ -415,8 +416,28 @@ describe('loadHistories', () => {
         reviews: [{ taskId: id, verdict: 'approve', at: dayAt(19, 20) }],
         evidence: [{ taskId: id, sha: 'a1', passed: true, at: dayAt(19, 10) }],
         releaseWentRed: true,
+        risks: [],
       },
     ])
+  })
+
+  it('reads the risk level recorded for each commit of a task, and none for a task never classified', async () => {
+    const classified = await delivered(19, 1)
+    const unclassified = await delivered(19, 2)
+    await getDb()
+      .insert(taskRisk)
+      .values({ taskId: classified, sha: 'a1', level: 'high', reasons: ['Dockerfile'] })
+
+    const histories = await loadHistories(getDb(), new Date(FIRST))
+
+    const risksOf = (id: number) => {
+      const found = histories.find((h) =>
+        h.events.some((e) => e.detail?.costUsd === (id === classified ? 1 : 2)),
+      )
+      return found?.risks
+    }
+    expect(risksOf(classified)).toEqual([{ taskId: classified, sha: 'a1', level: 'high' }])
+    expect(risksOf(unclassified)).toEqual([])
   })
 
   it('reads nothing when no task moved since the day given', async () => {

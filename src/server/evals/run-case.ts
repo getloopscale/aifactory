@@ -1,4 +1,3 @@
-import { classifyRisk, type Risk } from '../factory/risk'
 import { randomUUID } from 'node:crypto'
 
 import type { SandboxBackend } from '@theokit/agents/sandbox'
@@ -59,6 +58,7 @@ import {
   type Finding,
   type ReviewVerdict,
 } from '../factory/review'
+import { classifyRisk, type Risk } from '../factory/risk'
 import { DEFAULT_TIMEOUTS, PLAN_MS } from '../factory/run'
 import {
   COMMIT_MESSAGE,

@@ -27,3 +27,19 @@ describe('fixes', () => {
     expect(repositoryPatchSchema.safeParse({ fixes: ['x'.repeat(601)] }).success).toBe(false)
   })
 })
+
+describe('riskPatterns', () => {
+  const parseRisk = (riskPatterns: unknown) => repositoryPatchSchema.safeParse({ riskPatterns })
+  it('accepts a list of at most 50 patterns of at most 200 characters, and an empty one', () => {
+    expect(parseRisk(['src/billing/**']).success).toBe(true)
+    expect(parseRisk([]).success).toBe(true)
+    expect(parseRisk(Array.from({ length: 50 }, (_, i) => `p${i}`)).success).toBe(true)
+    expect(parseRisk(['a'.repeat(200)]).success).toBe(true)
+  })
+  it('refuses more than 50, one over 200 characters, and what is not a list of text', () => {
+    expect(parseRisk(Array.from({ length: 51 }, (_, i) => `p${i}`)).success).toBe(false)
+    expect(parseRisk(['a'.repeat(201)]).success).toBe(false)
+    expect(parseRisk('src/**').success).toBe(false)
+    expect(parseRisk([1]).success).toBe(false)
+  })
+})

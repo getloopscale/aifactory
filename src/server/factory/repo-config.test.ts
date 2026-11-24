@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { DOMAIN, validBranch, labelsWithRepoChoice, NO_CONFIG } from './repo-config'
+import {
+  configuredRiskPatterns,
+  DOMAIN,
+  validBranch,
+  labelsWithRepoChoice,
+  NO_CONFIG,
+} from './repo-config'
 
 describe('labelsWithRepoChoice', () => {
   it('adds the repository agents when the issue names none', () => {
@@ -95,5 +101,19 @@ describe('validBranch', () => {
     ]) {
       expect(validBranch(bad), JSON.stringify(bad)).toBe(false)
     }
+  })
+})
+
+describe('configuredRiskPatterns', () => {
+  it('loads a configured list as it is', () => {
+    expect(configuredRiskPatterns(['src/billing/**', 'infra/**'])).toEqual([
+      'src/billing/**',
+      'infra/**',
+    ])
+  })
+  it('is nothing for an empty or absent list, so the defaults apply', () => {
+    expect(configuredRiskPatterns([])).toBeUndefined()
+    expect(configuredRiskPatterns(undefined)).toBeUndefined()
+    expect(configuredRiskPatterns(null)).toBeUndefined()
   })
 })

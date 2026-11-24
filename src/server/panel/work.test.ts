@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { patchProblem } from './work'
+import { patchProblem, riskPatternsOf } from './work'
 
 const agents = ['claude-code', 'codex']
 const problem = (patch: Parameters<typeof patchProblem>[0]) => patchProblem(patch, agents)
@@ -125,5 +125,14 @@ describe('patchProblem and the branch', () => {
       '"--upload-pack=x" is not a branch name',
     )
     expect(problem({ baseBranch: 'a b' })).toBe('"a b" is not a branch name')
+  })
+})
+
+describe('riskPatternsOf', () => {
+  it('stores what patchProblem accepts, trimmed', () => {
+    expect(riskPatternsOf([' src/a/** ', 'src/a/**', ''])).toEqual(['src/a/**'])
+  })
+  it('throws for a list that was not checked, instead of resetting it to the defaults', () => {
+    expect(() => riskPatternsOf(['../x'])).toThrow('risk patterns not saved')
   })
 })

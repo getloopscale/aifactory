@@ -51,6 +51,11 @@ export function validBranch(name: string): boolean {
 /** A hostname the firewall can take: letters, digits, hyphens and dots, with at least one dot. */
 export const DOMAIN = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 
+/** The owner's risk patterns as the run reads them: none for an empty list, so the defaults apply (#470). */
+export function configuredRiskPatterns(stored: string[] | null | undefined): string[] | undefined {
+  return stored && stored.length > 0 ? stored : undefined
+}
+
 /** The owner's settings for a repository, matched without regard to case as GitHub does. */
 export async function loadRepoConfig(db: Database, fullName: string): Promise<RepoConfig> {
   const [row] = await db
@@ -72,7 +77,7 @@ export async function loadRepoConfig(db: Database, fullName: string): Promise<Re
     reviewer: row.reviewer ?? undefined,
     releaseMode: row.releaseMode ?? undefined,
     runLimitMs: row.runLimitMinutes ? row.runLimitMinutes * 60_000 : undefined,
-    riskPatterns: row.riskPatterns.length > 0 ? row.riskPatterns : undefined,
+    riskPatterns: configuredRiskPatterns(row.riskPatterns),
   }
 }
 

@@ -26,6 +26,7 @@ import {
   review,
   stageEvent,
   task,
+  taskRisk,
   watch,
 } from '../db/schema'
 import type { GithubApp } from '../github/app'
@@ -1879,6 +1880,11 @@ const reviewsOf = async (taskId: number) =>
 
 const finding = { severity: 'major', file: 'src/truncate.js', issue: 'max=0 is not rejected' }
 
+const risksOf = async (taskId: number) =>
+  (
+    await getDb().select().from(taskRisk).where(eq(taskRisk.taskId, taskId)).orderBy(taskRisk.id)
+  ).map((r) => ({ sha: r.sha, level: r.level, reasons: r.reasons }))
+
 describe('runTask review loop', () => {
   it('opens the pull request with the review in it when the reviewer approves', async () => {
     const id = await seedTask()
@@ -2021,6 +2027,59 @@ describe('runTask review loop', () => {
     expect(seen.pulls).toEqual(['factory/7'])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row.headSha).toBe('abc123def2')
+  })
+
+  it('records the risk of each reviewed commit: a rework that drops the risky file stores a new level for the new commit (#470)', async () => {
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(verdictJson('changes', [finding]), verdictJson('approve'))
+    let commits = 0
+    const sandbox = new FakeSandbox(
+      changed((c) => {
+        if (c.includes('commit -F')) commits += 1
+        if (c.includes('diff --name-status')) {
+          return { stdout: commits <= 1 ? 'M\tDockerfile\n' : 'M\tsrc/truncate.js\n' }
+        }
+        return undefined
+      }),
+    )
+
+    await runTask(deps(sandbox, { harness: builder, reviewer }), id)
+
+    const risks = await risksOf(id)
+    expect(risks.map((r) => [r.sha, r.level])).toEqual([
+      ['abc123def', 'high'],
+      ['abc123def2', 'low'],
+    ])
+    expect(risks[0]!.reasons[0]).toBe('Dockerfile matches the pattern Dockerfile')
+    // Each review is told the level of the commit it reads.
+    expect(reviewer.prompts[0]).toContain('high (Dockerfile matches the pattern Dockerfile')
+    expect(reviewer.prompts[1]).toContain('low (no risk signal)')
+    // The pull request body and the pre-release notes carry the level of the delivered commit, not the first one.
+    const [mergeEvent] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'merge')))
+    expect((mergeEvent.detail as { pullRequestBody: string }).pullRequestBody).toContain(
+      'Risk: low (no risk signal)',
+    )
+    const notes = seen.releases.at(-1) as { body: string }
+    expect(notes.body).toContain('Risk: low (no risk signal)')
+  })
+
+  it('integrates and delivers a high-risk change exactly as it does any other (#470)', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(
+      changed((c) =>
+        c.includes('diff --name-status') ? { stdout: 'M\tDockerfile\n' } : undefined,
+      ),
+    )
+
+    const result = await runTask(deps(sandbox), id)
+
+    expect(result).toMatchObject({ status: 'done', sha: 'abc123def', pullRequestUrl: PR_URL })
+    expect((await risksOf(id))[0]).toMatchObject({ level: 'high' })
+    expect(seen.merges).toEqual([{ number: 12, sha: 'abc123def' }])
   })
 
   // Blocking findings that never fall get one round past MAX_ATTEMPTS (MAX_STALLED_ATTEMPTS), then a person.
@@ -3940,6 +3999,8 @@ describe('runTask merging an integration branch that passes the checks again', (
     const reviews = await reviewsOf(id)
     expect(reviews.at(-1)).toMatchObject({ sha: merge, verdict: 'approve' })
     expect(reviews.at(-1)!.summary).toContain(verified.slice(0, 7))
+    // The kept approval records the risk of the commit it holds for.
+    expect((await risksOf(id)).map((r) => r.sha)).toEqual([merge])
   })
 
   it('reviews the merge again when merging the base changed the patch of the work', async () => {
@@ -7657,6 +7718,10 @@ describe('runTask merging the integration branch before integrating (#227)', () 
     const approvals = await getDb().select().from(review).where(eq(review.taskId, id))
     expect(approvals.at(-1)).toMatchObject({ sha: merge, verdict: 'approve' })
     expect(approvals.at(-1)!.summary).toContain('was clean')
+    // The level recorded for the reviewed commit is carried to the merge commit that is integrated.
+    const risks = await risksOf(id)
+    expect(risks.map((r) => r.sha)).toEqual(['abc123def', merge])
+    expect(risks[1]!.level).toBe(risks[0]!.level)
   })
 
   it('fails the run, naming the check, when an integration check fails on the merge and passes on the base', async () => {

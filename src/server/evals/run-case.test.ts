@@ -672,6 +672,23 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false, reviewRounds: 6 })
   })
 
+  it('gives each review the risk of the commit it reads: a rework that drops the risky file is read as low', async () => {
+    const provider = sandbox({
+      nameStatusPerCommit: ['M\tDockerfile\n', 'M\tsrc/cli.ts\n'],
+    })
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: CHANGES },
+      { ok: true, summary: APPROVE },
+    ])
+
+    await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(reviewer.prompts[0]).toContain('# Risk the factory recorded')
+    expect(reviewer.prompts[0]).toContain('high (Dockerfile matches the pattern Dockerfile;')
+    expect(reviewer.prompts[1]).toContain('low (no risk signal)')
+  })
+
   const deletedTests = (n: number) =>
     'M\tsrc/cli.ts\n' + Array.from({ length: n }, (_, i) => `D\tsrc/old${i}.test.ts\n`).join('')
 

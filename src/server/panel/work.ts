@@ -107,10 +107,11 @@ function checksProblem(checks: NonNullable<RepositoryPatch['checks']>): string |
   return undefined
 }
 
-/** The list as it is stored: what `parseRiskPatterns` accepts, or nothing for a list it refuses. */
-function riskPatternsOf(list: string[]): string[] {
+/** The list as it is stored. A list `parseRiskPatterns` refuses throws: `patchProblem` must have refused it first. */
+export function riskPatternsOf(list: string[]): string[] {
   const parsed = parseRiskPatterns(list)
-  return parsed.ok ? parsed.patterns : []
+  if (!parsed.ok) throw new Error(`risk patterns not saved: ${parsed.error}`)
+  return parsed.patterns
 }
 
 /** Fixes take the limits of checks: as many, and each command as long. */

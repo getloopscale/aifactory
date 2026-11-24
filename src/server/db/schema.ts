@@ -586,9 +586,9 @@ export const repository = pgTable('repository', {
   checksProven: jsonb('checks_proven').$type<ProvenCheck[]>().notNull().default([]),
   /** The last proof of proposed checks, running or finished. */
   checksProof: jsonb('checks_proof').$type<StoredProof>(),
-  /** The last completed proof of the checks on each sandbox provider; no entry means never tried there. */
   /** Path globs whose change is `high` risk; empty means the defaults (`DEFAULT_RISK_PATTERNS`). */
   riskPatterns: jsonb('risk_patterns').$type<string[]>().notNull().default([]),
+  /** The last completed proof of the checks on each sandbox provider; no entry means never tried there. */
   checksProofByProvider: jsonb('checks_proof_by_provider')
     .$type<ProviderProofs>()
     .notNull()
