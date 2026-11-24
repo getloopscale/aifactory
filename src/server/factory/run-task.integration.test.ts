@@ -7500,10 +7500,7 @@ describe('the security review of approved work', () => {
   it('never approves when no security agent can start', async () => {
     const id = await seedTask()
 
-    const result = await runTask(
-      deps(touchingSurface(), { security: () => undefined }),
-      id,
-    )
+    const result = await runTask(deps(touchingSurface(), { security: () => undefined }), id)
 
     expect(result.status).toBe('handoff')
     expect(await queuedMerges(id)).toEqual([])
