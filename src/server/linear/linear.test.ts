@@ -182,4 +182,37 @@ describe('toWorkItem', () => {
     expect(stateOf('completed')).toBe('closed')
     expect(stateOf('canceled')).toBe('closed')
   })
+  it('maps the state of each blocker and drops relations that are not blocks', async () => {
+    const rel = (type: string, id: string, state?: string) => ({
+      type,
+      issue: { id, identifier: id, state: state ? { type: state } : undefined },
+    })
+    const source = createLinearSource(
+      'k',
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              issue: {
+                inverseRelations: {
+                  nodes: [
+                    rel('blocks', 'a', 'completed'),
+                    rel('blocks', 'b', 'canceled'),
+                    rel('blocks', 'c', 'started'),
+                    rel('related', 'd', 'started'),
+                  ],
+                  pageInfo: { hasNextPage: false },
+                },
+              },
+            },
+          }),
+        ),
+    )
+    const out = await source.blockers({ source: 'linear', id: 'i' })
+    expect(out.map((b) => [b.display, b.state])).toEqual([
+      ['a', 'closed'],
+      ['b', 'closed'],
+      ['c', 'open'],
+    ])
+  })
 })
