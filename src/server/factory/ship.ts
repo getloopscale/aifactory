@@ -2,7 +2,8 @@ import { and, eq, inArray, isNotNull, like, notExists, notLike, or } from 'drizz
 
 import type { Database } from '../db'
 import { delivery, publication, task } from '../db/schema'
-import { fetchIssue } from '../github/issues'
+import { fetchIssue } from '../work-source/api'
+import { LINEAR_NUMBER_BASE } from '../work-source/contract'
 import type { GithubApi } from '../github/pulls'
 
 import { publishedPackagesChanged } from './changed-packages'
@@ -104,7 +105,7 @@ export async function issueComment(
  * Comments where the fix is and closes the issue. A failure is returned, not thrown: the release already
  * happened, and one issue GitHub refuses must not stop the others.
  */
-async function announce(
+export async function announce(
   api: GithubApi,
   s: Shipment,
   issueNumber: number,
@@ -120,7 +121,7 @@ async function announce(
     await api.closeIssue(s.repository, s.token, issueNumber)
     return undefined
   } catch (error) {
-    return `#${issueNumber}: ${message(error)}`
+    return `${issueNumber >= LINEAR_NUMBER_BASE ? 'Linear item of task ' : '#'}${issueNumber}: ${message(error)}`
   }
 }
 

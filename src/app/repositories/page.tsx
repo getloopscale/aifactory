@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router'
 
 import type { RepositoriesView, RepositoryView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
+import { LinearCard } from '../components/LinearCard'
 import { RecipeCard } from '../components/RecipeCard'
 import { ProveChecks, RepositoryDoctor } from '../components/RepositoryDoctor'
 import { put } from '../lib/api'
@@ -465,6 +466,7 @@ export default function RepositoriesPage() {
           </Button>
         </div>
       </div>
+      <LinearCard />
       {watch ? (
         <p role="status" className="text-sm text-muted-foreground">
           {r.waiting}

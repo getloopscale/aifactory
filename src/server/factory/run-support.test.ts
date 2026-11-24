@@ -161,7 +161,7 @@ describe('pullRequestBody for a Linear item', () => {
         outcome: { verdict: 'approve', summary: 'ok', findings: [] },
       },
     })
-    expect(text.startsWith('For ENG-34.')).toBe(true)
+    expect(text.startsWith('For [ENG-34](https://linear.app/issue/ENG-34).')).toBe(true)
     expect(text).not.toContain('#1000000001')
   })
 })

@@ -5,7 +5,7 @@ import { rerunsAfterConflict } from '../factory/auto-retry'
 import { openAmong, openBlockersOf, type BlockerReads } from '../factory/blocker-check'
 import { BlockedByOpenIssues, nameOf, refOf, type IssueRef } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
-import { fetchIssue } from '../github/issues'
+import { fetchIssue } from '../work-source/api'
 import { ActionRefused, retry, retryAutomatically, type ActionDeps } from './actions'
 import { automaticRunsSincePerson, listTasks } from './queries'
 

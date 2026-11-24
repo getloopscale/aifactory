@@ -686,6 +686,19 @@ export const ptBR: Copy = {
       firstJob: 'Abrir o primeiro trabalho',
     },
   },
+  linear: {
+    title: 'Linear',
+    intro:
+      'O trabalho também pode vir do Linear. Um item só é aceito quando tem este rótulo e o time dele está ligado a um repositório que você ativou abaixo.',
+    label: 'Id do rótulo',
+    team: 'Id do time',
+    repository: 'Repositório (dono/nome)',
+    addTeam: 'Ligar outro time',
+    remove: 'Remover',
+    save: 'Salvar',
+    saved: 'Salvo.',
+    failed: 'Não foi possível salvar.',
+  },
   repositories: {
     title: 'Repositórios',
     refresh: 'Atualizar',

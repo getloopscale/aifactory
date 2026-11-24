@@ -13,7 +13,7 @@ const WITHDRAWN = {
 } as const
 
 /** The issue-change intent narrowed to the kinds that withdraw: `Extract` misses it, its `kind` is a union. */
-type Withdrawal = Extract<RoutedIntent, { actorLogin: string; issueNumber: number }> & {
+type Withdrawal = Extract<RoutedIntent, { actorLogin: string }> & {
   kind: keyof typeof WITHDRAWN
 }
 
@@ -45,7 +45,9 @@ export async function withdrawTask(tx: Database, intent: RoutedIntent): Promise<
     .select({ id: task.id, stage: task.stage })
     .from(task)
     .where(
-      sql`lower(${task.repository}) = lower(${intent.repository}) and ${task.issueNumber} = ${intent.issueNumber}`,
+      'linearItemId' in intent
+        ? sql`${task.source} = 'linear' and ${task.externalId} = ${intent.linearItemId}`
+        : sql`${task.source} = 'github' and lower(${task.repository}) = lower(${intent.repository}) and ${task.issueNumber} = ${intent.issueNumber}`,
     )
     .for('update')
   for (const row of rows) {

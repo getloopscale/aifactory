@@ -319,4 +319,23 @@ describe('a Linear delivery', () => {
     const [row] = await getDb().select().from(task)
     expect(row).toMatchObject({ source: 'github', externalId: 'paulo/app#7' })
   })
+
+  it('cancels the task of an item that was completed, and no other', async () => {
+    await record(linear(), 'l-4')
+    const done = {
+      action: 'update',
+      type: 'Issue',
+      data: {
+        id: 'lin-1',
+        title: 't',
+        teamId: 'T1',
+        labelIds: ['L1'],
+        state: { type: 'completed' },
+      },
+      updatedFrom: { stateId: 's' },
+    }
+    expect(await record(done, 'l-5')).toMatchObject({ status: 'routed', code: 'issue_closed' })
+    const [row] = await getDb().select().from(task)
+    expect(row.stage).toBe('cancelled')
+  })
 })

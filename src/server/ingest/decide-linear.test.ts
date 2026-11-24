@@ -56,3 +56,36 @@ describe('decideIngress for Linear, more', () => {
     })
   })
 })
+
+describe('decideIngress for a Linear item that changes', () => {
+  const routedOf = (extra: object, labelIds = ['L1']) =>
+    decideIngress(
+      LINEAR_EVENT,
+      issue({
+        action: 'update',
+        data: { id: 'i1', title: 't', teamId: 'T1', labelIds, state: { type: 'completed' } },
+        ...extra,
+      }),
+      settings,
+    )
+
+  it('routes an item that lost the label to its cancellation', () => {
+    expect(routedOf({ updatedFrom: { labelIds: ['L1'] } }, [])).toMatchObject({
+      accept: false,
+      code: 'issue_unlabeled',
+      intent: { linearItemId: 'i1', repository: 'o/r' },
+    })
+  })
+  it('routes done, cancelled and removed items as closed', () => {
+    expect(routedOf({ updatedFrom: { stateId: 's' } })).toMatchObject({ code: 'issue_closed' })
+    expect(routedOf({ action: 'remove' }, [])).toMatchObject({ code: 'issue_closed' })
+  })
+  it('routes an item that left a finished state as reopened', () => {
+    const open = issue({
+      action: 'update',
+      data: { id: 'i1', title: 't', teamId: 'T1', labelIds: ['L1'], state: { type: 'started' } },
+      updatedFrom: { stateId: 's', completedAt: '2026-01-01' },
+    })
+    expect(decideIngress(LINEAR_EVENT, open, settings)).toMatchObject({ code: 'issue_reopened' })
+  })
+})

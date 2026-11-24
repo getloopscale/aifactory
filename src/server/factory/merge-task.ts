@@ -6,6 +6,7 @@ import * as schema from '../db/schema'
 import { stageEvent, task } from '../db/schema'
 import { type GithubApi } from '../github/pulls'
 import { createGithubApi } from '../work-source/api'
+import { tellTrackerOfPullRequest } from '../work-source/pull-link'
 
 import { integrationBranch } from './branches'
 import { errorMessage } from './error-message'
@@ -151,6 +152,7 @@ async function openAndIntegrate(
     title: detail.title,
     body: detail.pullRequestBody,
   })
+  await tellTrackerOfPullRequest(api, row, token, pull.url)
   const integrated = await integrate(work, detail.sha, pull)
   if (integrated.awaitingChecks || integrated.heldUntil) {
     return awaitChecks(work, detail, pull.url, integrated)

@@ -3,7 +3,7 @@ import { and, eq, isNotNull, or } from 'drizzle-orm'
 import type { Database } from '../db'
 import { task } from '../db/schema'
 import type { GithubApp } from '../github/app'
-import { fetchIssue as defaultFetchIssue } from '../github/issues'
+import { fetchIssue as defaultFetchIssue } from '../work-source/api'
 import { declaredBlockers, openBlockers, type IssueRef } from './blockers'
 
 export type BlockerReads = {

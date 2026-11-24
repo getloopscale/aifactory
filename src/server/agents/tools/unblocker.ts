@@ -7,7 +7,7 @@ import { repository, review, stageEvent, task } from '../../db/schema'
 import { integrationBranch } from '../../factory/branches'
 import { readEvidence } from '../../factory/check-evidence'
 import { githubAppFromEnv } from '../../factory/deps'
-import { fetchIssue } from '../../github/issues'
+import { fetchIssue } from '../../work-source/api'
 import { createPromotionApi } from '../../github/promotion-api'
 import { createGithubApi } from '../../work-source/api'
 

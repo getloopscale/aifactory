@@ -1,7 +1,8 @@
 import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { question as questionTable, task } from '../db/schema'
-import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
+import { type Issue } from '../github/issues'
+import { fetchIssue as defaultFetchIssue } from '../work-source/api'
 import { openBlockersOf } from './blocker-check'
 import { BlockedByOpenIssues } from './blockers'
 import { errorMessage } from './error-message'

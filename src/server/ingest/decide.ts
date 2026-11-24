@@ -76,6 +76,7 @@ export type RoutedIntent =
       conclusion: string
     }
   | { kind: IssueChange; repository: string; issueNumber: number; actorLogin: string }
+  | { kind: IssueChange; repository: string; linearItemId: string; actorLogin: string }
 
 type IssueChange = 'issue_unlabeled' | 'issue_closed' | 'issue_reopened'
 
@@ -372,6 +373,15 @@ function repositoryOf(payload: unknown): string | null {
 
 function fromLinear(payload: unknown, settings: LinearSettings | undefined): IngressDecision {
   const d = decideLinear(payload, settings)
+  if ('intent' in d) {
+    return {
+      accept: false,
+      code: d.code,
+      reason: d.reason,
+      repository: d.repository,
+      intent: d.intent,
+    }
+  }
   if (!d.accept) return d
   return {
     accept: true,

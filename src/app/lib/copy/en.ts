@@ -431,6 +431,19 @@ export const en = {
       firstJob: 'Open the first job',
     },
   },
+  linear: {
+    title: 'Linear',
+    intro:
+      'Work can also come from Linear. An item is taken only when it carries this label and its team is mapped to a repository you enabled below.',
+    label: 'Label id',
+    team: 'Team id',
+    repository: 'Repository (owner/name)',
+    addTeam: 'Map another team',
+    remove: 'Remove',
+    save: 'Save',
+    saved: 'Saved.',
+    failed: 'Could not save.',
+  },
   repositories: {
     title: 'Repositories',
     refresh: 'Refresh',

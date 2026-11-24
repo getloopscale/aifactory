@@ -162,6 +162,10 @@ export function unestablishedGates(repository: string, rows: StoredCheck[]): str
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 
+/** Where Linear sends a person who asks for an item by its identifier. */
+export const linearUrl = (display: string) =>
+  `https://linear.app/issue/${encodeURIComponent(display)}`
+
 export function pullRequestBody(input: {
   issueNumber: number
   sha: string
@@ -184,7 +188,7 @@ export function pullRequestBody(input: {
     // No closing keyword: where the integration branch is the repository's default one, GitHub would close
     // the issue at integration. The factory closes it when a release ships the change, naming the version.
     input.item
-      ? `For ${input.item.display}. The factory closes the item when a release ships this change.`
+      ? `For [${input.item.display}](${linearUrl(input.item.display)}). The factory closes the item when a release ships this change.`
       : `For #${input.issueNumber}. The factory closes the issue when a release ships this change.`,
     '',
     ...(input.handoff ? [`**This needs a person:** ${input.handoff}.`, ''] : []),
