@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
+import { SECURITY_EFFORT_CEILING } from '../../shared/panel'
 import { agentConfigurationChanged } from './cases'
 import {
   compareWithBaseline,
@@ -229,11 +230,13 @@ export function agentSetup(
   reviewer: string,
   options: (
     env: NodeJS.ProcessEnv,
-    role: 'builder' | 'reviewer' | 'planner' | 'merger',
+    role: 'builder' | 'reviewer' | 'planner' | 'merger' | 'security',
     engine: string,
   ) => { model?: string; effort?: string },
   planner?: string,
   merger?: string,
+  /** The security reviewer's agent, whose effort is pinned at the highest its model offers. */
+  security?: string,
 ): AgentSetup {
   const b = options(env, 'builder', builder)
   const r = options(env, 'reviewer', reviewer)
@@ -251,6 +254,13 @@ export function agentSetup(
       : {}),
     ...(merger && m
       ? { merger, mergerModel: m.model ?? 'default', mergerEffort: m.effort ?? 'default' }
+      : {}),
+    ...(security
+      ? {
+          security,
+          securityModel: options(env, 'security', security).model ?? 'default',
+          securityEffort: `pinned, at most ${SECURITY_EFFORT_CEILING}`,
+        }
       : {}),
   }
 }

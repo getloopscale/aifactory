@@ -4,7 +4,15 @@ import type { AgentRole, AgentSettingChange, AgentSettings, EngineOption } from 
 import type { Database } from '../db'
 import { agentSettingChange, repository, setting } from '../db/schema'
 
-import { EFFORT_ENV, engineModels, isSafeName, MODEL_ENV, tagged, untag } from './engine-models'
+import {
+  EFFORT_ENV,
+  engineModels,
+  isSafeName,
+  MODEL_ENV,
+  securityEffort,
+  tagged,
+  untag,
+} from './engine-models'
 import { withClaudeToken } from './claude-token'
 import { canStart, DEFAULT_HARNESS, defaultPlannerName, harnessRegistry } from './harness-registry'
 
@@ -14,6 +22,7 @@ export const ROLE_ENV: Record<AgentRole, string> = {
   planner: 'FACTORY_PLANNER',
   reviewer: 'FACTORY_REVIEWER',
   merger: 'FACTORY_MERGER',
+  security: 'FACTORY_SECURITY',
 }
 
 const ROLES = Object.keys(ROLE_ENV) as AgentRole[]
@@ -34,7 +43,13 @@ export const SETTINGS_LOCK = 81_001
 export type Chosen = Record<AgentRole, string | null>
 type Stored = { engine: Chosen; model: Chosen; effort: Chosen }
 
-const nobody = (): Chosen => ({ builder: null, planner: null, reviewer: null, merger: null })
+const nobody = (): Chosen => ({
+  builder: null,
+  planner: null,
+  reviewer: null,
+  merger: null,
+  security: null,
+})
 
 /** What the owner saved, the model and the effort still tagged with the agent they were chosen for. */
 async function loadStored(db: Pick<Database, 'select'>): Promise<Stored> {
@@ -90,6 +105,7 @@ export function effectiveOf(
     planner: env.FACTORY_PLANNER || defaultPlannerName(builder, ready),
     reviewer: env.FACTORY_REVIEWER || builder,
     merger: env.FACTORY_MERGER || builder,
+    security: env.FACTORY_SECURITY || builder,
   }
 }
 
@@ -159,6 +175,12 @@ function planWrites(
       const chosenModel = model ?? untag(stored.model[role] ?? undefined, engine)
       const levels = offered.models.find((m) => m.id === chosenModel)?.efforts ?? offered.efforts
       known('effort', effort, levels, engine)
+      // The security role runs at the highest effort its model offers, and nothing lower is saved (#241).
+      if (role === 'security' && effort !== securityEffort(levels)) {
+        throw new SettingRefused(
+          `the security role always runs at the highest effort (${securityEffort(levels) ?? 'none known'}), so "${effort}" is refused`,
+        )
+      }
     }
     if (patch[role] !== undefined)
       writes.push({ key: ENGINE_KEY(role), value: patch[role] ?? null, role, field: 'engine' })
@@ -169,7 +191,7 @@ function planWrites(
         role,
         field: 'model',
       })
-    if (effort !== undefined)
+    if (effort !== undefined && role !== 'security')
       writes.push({
         key: EFFORT_KEY(role),
         value: effort ? tagged(engine, effort) : null,

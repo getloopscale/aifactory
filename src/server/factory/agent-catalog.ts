@@ -1,3 +1,4 @@
+import { securityPrompt } from './security-review'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -206,6 +207,41 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
             baseSha: '‹cabeça da integração›',
             files: ['‹arquivo em conflito›'],
           }),
+        ),
+      ],
+    },
+    {
+      id: 'security',
+      group: 'factory',
+      name: 'Revisor de segurança',
+      role: 'Depois que o revisor aprova, lê a mudança só pela segurança: segredos, dependências vulneráveis, injeção, autorização. Não edita nada. Um achado do piso determinístico bloqueia a tarefa, e nenhum agente pode dispensá-lo.',
+      runsIn: 'sandbox',
+      engine: {
+        value: `${engineValue(env, 'security', env.FACTORY_SECURITY || builder).replace(/ · esforço .*$/, '')} · esforço máximo do modelo (fixo)${env.FACTORY_SECURITY ? '' : ' (o mesmo agente do construtor, numa sessão nova)'}`,
+        change:
+          'Aqui mesmo, na página Agentes, só o agente e o modelo. O esforço é sempre o mais alto que o modelo oferece e não pode ser baixado.',
+      },
+      when: 'Depois de cada aprovação do revisor, antes do merge. O primeiro bloqueio do agente volta ao construtor; um achado repetido vai para uma pessoa.',
+      tools: [
+        {
+          ...SANDBOX_TOOL,
+          description:
+            'Pode ler o código e buscar nele. O prompt proíbe editar, criar ou apagar arquivos e rodar qualquer comando que escreva; o que ele escrever é descartado.',
+        },
+        KNOWLEDGE_TOOL,
+      ],
+      shared: [],
+      source: [
+        'src/server/factory/security-review.ts',
+        'src/server/factory/security-scan.ts',
+        'src/server/factory/security-role.ts',
+      ],
+      prompts: [
+        template(
+          'security',
+          'Instruções da revisão de segurança',
+          'Toda vez que a revisão de segurança entra, com o diff entre o commit base e o commit aprovado.',
+          securityPrompt({ ...issue, baseSha: '‹commit base›' }),
         ),
       ],
     },

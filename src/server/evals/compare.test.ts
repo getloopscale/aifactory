@@ -323,3 +323,22 @@ describe('regressionPValue', () => {
     expect(regressionPValue(0, 4)).toBe(1)
   })
 })
+
+describe('caseOutcome and the security review', () => {
+  const approved = { checksPassed: true, verdict: 'approve' as const, blockingGuards: [] }
+  it('fails an approved case that the security review blocked', () => {
+    const out = caseOutcome({ ...approved, securityBlocked: ['an AWS access key id'] })
+    expect(out.passed).toBe(false)
+    expect(out.reason).toContain('security review')
+  })
+  it('passes a case written to be blocked only when it is', () => {
+    expect(caseOutcome({ ...approved, securityBlocked: ['x'] }, 'block').passed).toBe(true)
+    expect(caseOutcome(approved, 'block')).toEqual({
+      passed: false,
+      reason: 'the security review did not block it',
+    })
+  })
+  it('keeps a stopped case stopped, whatever it was to be', () => {
+    expect(caseOutcome({ stopped: 'out of time' }, 'block').passed).toBe(false)
+  })
+})

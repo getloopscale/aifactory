@@ -32,7 +32,14 @@ import {
   type PreparedInstall,
 } from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
-import { diffFacts } from '../factory/diff-facts'
+import { diffFacts, securityDiff, securityFloor, securitySurfacesOf } from '../factory/diff-facts'
+import {
+  decideSecurity,
+  skippedBecause,
+  findingKey,
+  parseSecurityVerdict,
+  securityPrompt,
+} from '../factory/security-review'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
 import {
   buildPrompt,
@@ -81,6 +88,11 @@ export type EvalDeps = {
   reviewer: CodingHarness
   /** The agent that writes the plan when it is not the builder, as `Run.planChange` uses it. */
   planner?: CodingHarness
+  /**
+   * The security reviewer of approved work, as `Run.secured` uses it. `null` is an agent that could not start,
+   * which blocks every approval; left out, the case has no security step.
+   */
+  security?: CodingHarness | null
   author: { name: string; email: string }
   /** The knowledge base every agent reads; left out, the agents work without one. */
   knowledge?: KnowledgeSource
@@ -113,6 +125,8 @@ class CaseRun {
   /** What the builder said to the last review's findings, kept across a check rework. */
   private reviewAnswer: string | undefined
   cost = 0
+  private reviewerCost = 0
+  private securityCost = 0
   /** A review gave a valid verdict at some point of the case. */
   private verdictSeen = false
   attempts = 1
@@ -137,6 +151,11 @@ class CaseRun {
   /** Whether the checks the case failed fail on its base too, as `Run` asks it. */
   private readonly baseProbe = new BaseProbe()
   private readonly started = Date.now()
+  private readonly securitySeen = new Set<string>()
+  private securityReworks = 0
+  private securityEarlier: Finding[] = []
+  /** What the deterministic floor blocked in any round: a case written to be blocked passes on it. */
+  private readonly floorFound: string[] = []
 
   constructor(
     private readonly deps: EvalDeps,
@@ -424,6 +443,7 @@ class CaseRun {
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
     this.cost += result.costUsd ?? 0
+    this.reviewerCost += result.costUsd ?? 0
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
     await must(this.backend, `${this.git} reset --hard ${sha}`)
     await must(this.backend, `${this.git} clean -fd`)
@@ -432,6 +452,81 @@ class CaseRun {
       : { verdict: 'invalid', summary: result.summary, findings: [] }
     this.reviews.push(verdict)
     return verdict
+  }
+
+  /**
+   * The security review after an approval, as `Run.secured`: the floor on the commit, then the agent, read-only.
+   * A first block sends the builder back; a floor finding, a repeated finding or an unusable answer blocks.
+   */
+  private async secure(sha: string): Promise<'pass' | 'rework' | { blocked: string[] }> {
+    const { security } = this.deps
+    if (security === undefined) return 'pass'
+    const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
+    let verdict: ReviewVerdict
+    let skipped: string | undefined
+    if (floor.some((f) => f.severity !== 'minor')) {
+      verdict = { verdict: 'changes', summary: 'the deterministic floor blocks it', findings: [] }
+    } else if (
+      (skipped = skippedBecause(
+        await securitySurfacesOf(this.backend, this.repoDir, this.c.baseSha),
+      ))
+    ) {
+      verdict = { verdict: 'approve', summary: skipped, findings: [] }
+    } else if (security === null) {
+      verdict = {
+        verdict: 'invalid',
+        summary: 'no security agent could start: its highest effort is not known',
+        findings: [],
+      }
+    } else {
+      const diff = await securityDiff(this.backend, this.repoDir, this.c.baseSha)
+      const result = await this.agentCall(() =>
+        security.run(this.backend, {
+          cwd: this.repoDir,
+          timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
+          prompt: securityPrompt({
+            repo: this.c.repository,
+            issueNumber: this.c.issueNumber,
+            title: this.c.title,
+            body: this.c.body,
+            baseSha: this.c.baseSha,
+            diff,
+            knowledgeDir: this.knowledgeDir,
+            earlier: this.securityEarlier,
+          }),
+        }),
+      )
+      this.cost += result.costUsd ?? 0
+      this.securityCost += result.costUsd ?? 0
+      // The security agent reads and does not write; whatever it wrote anyway is thrown away.
+      await must(this.backend, `${this.git} reset --hard ${sha}`)
+      await must(this.backend, `${this.git} clean -fdx -e node_modules`)
+      verdict = result.ok
+        ? parseSecurityVerdict(result.summary)
+        : { verdict: 'invalid', summary: result.summary, findings: [] }
+    }
+    const decision = decideSecurity({
+      floor,
+      verdict,
+      seen: this.securitySeen,
+      reworks: this.securityReworks,
+      canRework: this.canResume(),
+    })
+    if (decision.kind === 'pass') return 'pass'
+    const findings = [...floor, ...verdict.findings]
+    for (const f of findings.filter((x) => x.severity !== 'minor')) this.securitySeen.add(findingKey(f))
+    this.securityEarlier = findings
+    if (decision.kind === 'rework') {
+      this.securityReworks++
+      if (await this.rework(decision.findings, [], sha)) return 'rework'
+      return { blocked: ['the builder changed nothing in answer to the security review'] }
+    }
+    return { blocked: [decision.reason, ...findings.map((f) => f.issue)] }
+  }
+
+  /** How a case ends once the security review blocked an approved change. */
+  private securityEnd(blocked: string[]): CaseEnd {
+    return { checksPassed: true, verdict: 'approve', blockingGuards: [], securityBlocked: blocked }
   }
 
   private canResume(): boolean {
@@ -497,6 +592,10 @@ class CaseRun {
         checkRuns: this.checkRuns,
       })
       const blocking = guards.filter((g) => g.severity !== 'minor')
+      if (blocking.length > 0 && this.c.expectSecurity === 'block') {
+        const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
+        for (const f of floor) if (!this.floorFound.includes(f.issue)) this.floorFound.push(f.issue)
+      }
       const read = await this.review(sha, unplanned, required)
       // Any valid verdict counts, even when the case ends later without one.
       if (read.verdict !== 'invalid') this.verdictSeen = true
@@ -509,13 +608,19 @@ class CaseRun {
       // The same findings `Run.review` stores, so the rounds are counted as the factory counts them.
       this.blockingCounts.push(blockingCount([...guards, ...outside, ...read.findings]))
       if (read.verdict === 'approve' && blocking.length === 0) {
-        return (
-          (await this.integrationGate(sha)) ?? {
-            checksPassed: true,
-            verdict: 'approve',
-            blockingGuards: [],
-          }
-        )
+        const secured = await this.secure(sha)
+        if (secured === 'pass') {
+          return (
+            (await this.integrationGate(sha)) ?? {
+              checksPassed: true,
+              verdict: 'approve',
+              blockingGuards: [],
+            }
+          )
+        }
+        if (typeof secured === 'object') return this.securityEnd(secured.blocked)
+        sha = await this.applyFixes(await this.commit())
+        continue
       }
       // What the factory hands over: green checks and a review that did not approve.
       const handedOver: CaseEnd = {
@@ -539,13 +644,19 @@ class CaseRun {
       if (!(await this.rework(findings, [], sha))) {
         const judged = await this.review(sha, unplanned, required)
         if (judged.verdict === 'approve' && blocking.length === 0) {
-          return (
-            (await this.integrationGate(sha)) ?? {
-              checksPassed: true,
-              verdict: 'approve',
-              blockingGuards: [],
-            }
-          )
+          const secured = await this.secure(sha)
+          if (secured === 'pass') {
+            return (
+              (await this.integrationGate(sha)) ?? {
+                checksPassed: true,
+                verdict: 'approve',
+                blockingGuards: [],
+              }
+            )
+          }
+          if (typeof secured === 'object') return this.securityEnd(secured.blocked)
+          sha = await this.applyFixes(await this.commit())
+          continue
         }
         return judged.verdict === 'invalid' ? handedOver : { ...handedOver, verdict: judged.verdict }
       }
@@ -553,11 +664,24 @@ class CaseRun {
     }
   }
 
+  /** A case written to be blocked also counts what the floor stopped before the security agent could read it. */
+  private withFloor(end: CaseEnd): CaseEnd {
+    if (this.c.expectSecurity !== 'block' || 'stopped' in end || this.floorFound.length === 0) {
+      return end
+    }
+    return { ...end, securityBlocked: [...(end.securityBlocked ?? []), ...this.floorFound] }
+  }
+
   result(end: CaseEnd): CaseResult {
     return {
       id: this.c.id,
-      ...caseOutcome(end),
+      ...caseOutcome(this.withFloor(end), this.c.expectSecurity),
       costUsd: this.cost,
+      costByRole: {
+        builder: Math.max(0, this.cost - this.reviewerCost - this.securityCost),
+        reviewer: this.reviewerCost,
+        security: this.securityCost,
+      },
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
@@ -583,7 +707,7 @@ const PROCESS_RUN = randomUUID()
 /** The agents a case runs, each once by name: the builder, the reviewer and a planner apart from them (run.ts). */
 function caseAgents(deps: EvalDeps): CodingHarness[] {
   const byName = new Map<string, CodingHarness>()
-  for (const agent of [deps.builder, deps.reviewer, deps.planner]) {
+  for (const agent of [deps.builder, deps.reviewer, deps.planner, deps.security]) {
     if (agent && !byName.has(agent.name)) byName.set(agent.name, agent)
   }
   return [...byName.values()]

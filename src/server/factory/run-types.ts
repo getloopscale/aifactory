@@ -25,6 +25,8 @@ export type HandoffCause =
   | 'checks_unchanged'
   | 'checks_broke_after_review'
   | 'agent_configuration'
+  /** The security review of approved work blocks it and no agent may waive that (`Run.secured`, #457). */
+  | 'security'
   /** Integrated work whose pull request still conflicts with its base after the automatic runs (`ci-wait.ts`). */
   | 'pull_conflict'
   /** The base passes the checks blamed on it again, and the pull request still has to merge it (`ci-wait.ts`). */
@@ -45,6 +47,12 @@ export type RunTaskDeps = {
    * work in a fresh session, which is weaker: set a different agent for a real second opinion.
    */
   reviewer?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
+  /**
+   * The security reviewer of approved work, at the highest effort its engine offers (`securityOptions`). When this
+   * is set the review runs before every merge, and a function that returns nothing means the agent cannot start:
+   * the work goes to a person and is never approved without it. Not set, the step is not part of this run.
+   */
+  security?: (labels: string[]) => CodingHarness | undefined
   /**
    * The agent that resolves the conflicts of merging the integration branch into approved work (#227). Nothing
    * (or no function) means the builder's agent does it in a fresh session.

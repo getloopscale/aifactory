@@ -251,7 +251,7 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'planner' | 'reviewer' | 'merger'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
   harness: string
   /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
@@ -282,7 +282,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'planner' | 'reviewer' | 'merger'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -443,7 +443,10 @@ export type AgentSeen = {
  * reviewing, with the attempt (the round, for a review); or the factory running the checks, with no agent.
  */
 export type AgentStep =
-  | (AgentSeen & { step: 'planning' | 'building' | 'fixing' | 'reviewing'; attempt: number })
+  | (AgentSeen & {
+      step: 'planning' | 'building' | 'fixing' | 'reviewing' | 'securing'
+      attempt: number
+    })
   | { step: 'checks'; checks: string[] }
 
 /** A queued task's place in the line of runs, the reasons for it, and whether its issue is ready to build. */
@@ -492,6 +495,24 @@ export type ReviewView = {
   sha: string
   reviewer: string
   verdict: 'approve' | 'changes' | 'invalid'
+  summary: string
+  findings: { severity: string; file?: string; issue: string }[]
+  at: string
+}
+
+/**
+ * One round of the security review of approved work (#457): the commit it read, what it found and whether the work
+ * went on to `merge`, back to the builder or to a person. It is recorded on the `review` stage.
+ */
+export type SecurityReviewView = {
+  id: number
+  round: number
+  sha: string
+  harness: string | null
+  model: string | null
+  effort: string | null
+  verdict: 'approve' | 'changes' | 'invalid'
+  outcome: 'pass' | 'rework' | 'handoff'
   summary: string
   findings: { severity: string; file?: string; issue: string }[]
   at: string
@@ -552,6 +573,8 @@ export type TaskDetail = {
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
   reviews: ReviewView[]
+  /** The security review of each approval, oldest first. */
+  securityReviews: SecurityReviewView[]
   /** Oldest first. */
   plans: ChangePlanView[]
   questions: QuestionView[]
@@ -893,8 +916,33 @@ export type AgentsView = {
   settings: AgentSettings
 }
 
-/** The roles of a coding agent that the owner can give to one agent or another. */
-export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger'
+/** The roles of a coding agent (the security role's effort is pinned at the highest, never chosen) that the owner can give to one agent or another. */
+export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+
+/** The effort levels from lowest to highest that any engine lists, so the highest of a list can be told. */
+const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
+/**
+ * The most effort the security role is pinned to. The review of #457 reported the review at the engine's maximum
+ * timing out and costing several times the build, and asked for the highest level that keeps the cases inside
+ * their limit. `high` is that level by judgment, not yet by measurement: `pnpm evals:check` with real models
+ * decides it, and this constant is the only place to change if it does not hold.
+ */
+export const SECURITY_EFFORT_CEILING = 'high'
+
+/**
+ * The effort the security role always runs at: the highest its engine offers for the model, up to
+ * `SECURITY_EFFORT_CEILING` (#241, #457). `undefined` when the engine lists no level it knows: the security
+ * review then does not run, it never falls to a default.
+ */
+export function securityEffort(efforts: string[]): string | undefined {
+  const ceiling = EFFORT_RANK.indexOf(SECURITY_EFFORT_CEILING)
+  const known = efforts.filter((e) => {
+    const rank = EFFORT_RANK.indexOf(e)
+    return rank >= 0 && rank <= ceiling
+  })
+  return known.sort((a, b) => EFFORT_RANK.indexOf(b) - EFFORT_RANK.indexOf(a))[0]
+}
 
 export type EngineOption = {
   id: string

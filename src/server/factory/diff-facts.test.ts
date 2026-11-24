@@ -13,7 +13,7 @@ import {
   WEAKENED_TEST,
 } from '../../test/diverged-repository'
 
-import { diffFacts, reviewBase, samePatch } from './diff-facts'
+import { cutPatch, diffFacts, reviewBase, samePatch } from './diff-facts'
 import { FakeBackend } from './fake-sandbox'
 import { changedSinceCommand } from './review'
 
@@ -445,5 +445,29 @@ describe('samePatch', () => {
       }),
     ).rejects.toThrow('not a commit hash')
     expect(backend.commands).toEqual([])
+  })
+})
+
+describe('cutPatch', () => {
+  const file = (name: string, size: number) =>
+    `diff --git a/${name} b/${name}\n+++ b/${name}\n+${'x'.repeat(size)}\n`
+
+  it('leaves a patch under the limit alone', () => {
+    expect(cutPatch(file('a.ts', 5), 1000)).toBe(file('a.ts', 5))
+  })
+
+  it('cuts at a file boundary and names every file left out', () => {
+    const cut = cutPatch(file('a.ts', 50) + file('b.ts', 500) + file('c.ts', 5), 200)
+    expect(cut).toContain('diff --git a/a.ts')
+    expect(cut).not.toContain(
+      'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'.repeat(2),
+    )
+    expect(cut).toContain('read these files with read_file: b.ts, c.ts')
+  })
+
+  it('names a first file that is cut inside', () => {
+    expect(cutPatch(file('big.ts', 500) + file('c.ts', 5), 100)).toContain(
+      'big.ts (cut inside), c.ts',
+    )
   })
 })

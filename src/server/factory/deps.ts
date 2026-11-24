@@ -7,7 +7,8 @@ import { createGithubApp } from '../github/app'
 import { botAuthor } from '../github/bot-author'
 
 import type { ReleaseMode } from './deliver'
-import { optionsFor } from './engine-models'
+import { engineModels, optionsFor } from './engine-models'
+import { securityEfforts, securityOptions } from './security-role'
 import {
   canStart,
   DEFAULT_HARNESS,
@@ -70,6 +71,16 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
           optionsFor(env, 'reviewer', engine),
         )
       : undefined
+  // The security reviewer runs the builder's agent (or FACTORY_SECURITY) at the highest effort its model offers.
+  // When that cannot be established nothing is returned, and the run hands the work to a person.
+  const pickSecurity = () => {
+    const name = env.FACTORY_SECURITY || fallback
+    const build = registry[name]
+    if (!build) return undefined
+    const { model } = optionsFor(env, 'security', name)
+    const options = securityOptions(securityEfforts(engineModels(env)[name], model), { model })
+    return options ? build(options) : undefined
+  }
   const mergerName = env.FACTORY_MERGER
   const pickMerger = (labels: string[]) =>
     mergerName || labels.some((l) => /^merger:/i.test(l))
@@ -93,6 +104,7 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
     releaseMode: releaseModeFromEnv(env),
     reviewer: pickReviewer,
     merger: pickMerger,
+    security: pickSecurity,
     planner: pickPlanner,
     author,
     knowledge: knowledgeSource(getDb(), knowledgeRoot(env)),

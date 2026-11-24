@@ -1303,3 +1303,67 @@ describe('runCase review record', () => {
     expect(result.reviews).toEqual([round(1)])
   })
 })
+
+describe('a case the security floor blocks', () => {
+  const KEY_PATCH = `+++ b/src/aws.js\n@@ -0,0 +1 @@\n+const id = '${'AKIA' + 'ABCDEFGHIJKLMNOP'}'\n`
+  const approving = (n: number): HarnessResult[] =>
+    Array.from({ length: n }, () => ({ ok: true, summary: APPROVE }))
+
+  it('passes a case written to be blocked, though the key stops it before the security agent reads', async () => {
+    const result = await runCase(
+      deps(
+        sandbox({ testPatch: KEY_PATCH }),
+        agent('builder', planned(built(), built(), built(), built())),
+        agent('reviewer', approving(4)),
+      ),
+      { ...evalCase, expectSecurity: 'block' },
+    )
+    expect(result).toMatchObject({ passed: true })
+    expect(result.reason).toContain('an AWS access key id')
+  })
+
+  it('fails a case that was to pass when the key blocks it', async () => {
+    const result = await runCase(
+      deps(
+        sandbox({ testPatch: KEY_PATCH }),
+        agent('builder', planned(built(), built(), built(), built())),
+        agent('reviewer', approving(4)),
+      ),
+      evalCase,
+    )
+    expect(result.passed).toBe(false)
+  })
+})
+
+describe('the security agent in a case', () => {
+  it('has what it wrote thrown away, ignored files included', async () => {
+    const provider = sandbox({ testPatch: '+++ b/src/cli.ts\n@@ -0,0 +1 @@\n+execSync(command)\n' })
+    const security = agent('security', [{ ok: true, summary: APPROVE }])
+    const result = await runCase(
+      {
+        ...deps(provider, agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+        security,
+      },
+      evalCase,
+    )
+    expect(result.passed).toBe(true)
+    expect(security.prompts).toHaveLength(1)
+    expect(result.costByRole?.security).toBeGreaterThanOrEqual(0)
+    expect(provider.backend.commands.some((c) => c.endsWith('clean -fdx -e node_modules'))).toBe(true)
+  })
+
+  it('is not asked about a change that touches no security surface', async () => {
+    const security = agent('security', [{ ok: true, summary: APPROVE }])
+    const result = await runCase(
+      {
+        ...deps(sandbox(), agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+        security,
+      },
+      evalCase,
+    )
+    expect(result.passed).toBe(true)
+    expect(security.prompts).toHaveLength(0)
+    expect(result.costByRole?.security).toBe(0)
+  })
+})
+

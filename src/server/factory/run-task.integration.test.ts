@@ -7421,6 +7421,166 @@ describe('a run whose issue no longer asks for the work', () => {
   })
 })
 
+describe('the security review of approved work', () => {
+  const KEY = `export const id = '${'AKIA' + 'ABCDEFGHIJKLMNOP'}'\n`
+
+  function onHistory(repo: { dir: string; baseSha: string }) {
+    let cloned = false
+    const history = readsHistory(repo.dir, '/vercel/work')
+    return new FakeSandbox(
+      changed((command) => {
+        if (!cloned && command.endsWith('rev-parse HEAD')) {
+          cloned = true
+          return { stdout: `${repo.baseSha}\n` }
+        }
+        return history(command)
+      }),
+    )
+  }
+
+  /** A change that spawns a process, a security surface, so the agent pass runs. */
+  function touchingSurface(extra?: (command: string) => Reply | undefined) {
+    return new FakeSandbox(
+      changed((command) => {
+        if (command.includes('diff --name-only')) return { stdout: 'src/run.js\n' }
+        if (command.includes('diff -U0 --no-color'))
+          return {
+            stdout: '+++ b/src/run.js\n@@ -0,0 +1 @@\n+execSync(command)\n',
+          }
+        return extra?.(command)
+      }),
+    )
+  }
+
+  /** A security reviewer that answers from a script, one answer per round. */
+  function securitySaying(...answers: string[]): CodingHarness & { prompts: string[] } {
+    const prompts: string[] = []
+    return {
+      name: 'fake-security',
+      egress: async () => [],
+      prompts,
+      run: async (_backend, input) => {
+        prompts.push(input.prompt)
+        return { ok: true, summary: answers[Math.min(prompts.length, answers.length) - 1] }
+      },
+    }
+  }
+
+  it('blocks a diff that adds an AWS access key id before merge, with the finding recorded and nothing merged', async () => {
+    const id = await seedTask()
+    const repo = divergedRepository({
+      behind: false,
+      branch: { ...PLANNED_CHANGE, 'src/aws.js': KEY },
+    })
+
+    const result = await runTask(
+      deps(onHistory(repo), { security: () => securitySaying(verdictJson('approve')) }),
+      id,
+    )
+
+    expect(result.status).not.toBe('done')
+    expect(await queuedMerges(id)).toEqual([])
+    expect(seen.merges).toEqual([])
+    const [handoff] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'handoff')))
+    expect(JSON.stringify((handoff.detail as { findings: unknown }).findings)).toContain(
+      'an AWS access key id',
+    )
+  })
+
+  it('passes a clean change through the security step and merges as before', async () => {
+    const id = await seedTask()
+    const security = securitySaying(verdictJson('approve', [], 'nothing found'))
+
+    const result = await runOnly(deps(touchingSurface(), { security: () => security }), id)
+
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(security.prompts).toHaveLength(1)
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const secured = events.filter(
+      (e) => (e.detail as { step?: string } | null)?.step === 'security',
+    )
+    expect(secured.map((e) => (e.detail as { outcome?: string }).outcome)).toEqual([
+      undefined,
+      'pass',
+    ])
+    const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(runs.map((r) => r.role)).toContain('security')
+  })
+
+  it('hands the work to a person, merging nothing, when the security agent blocks and the builder cannot be sent back', async () => {
+    const id = await seedTask()
+    const security = securitySaying(
+      verdictJson('changes', [
+        { severity: 'blocker', file: 'src/a.js', issue: 'builds SQL from input' },
+      ]),
+    )
+
+    const result = await runTask(deps(touchingSurface(), { security: () => security }), id)
+
+    expect(result.status).toBe('handoff')
+    expect(await queuedMerges(id)).toEqual([])
+    const [handoff] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'handoff')))
+    expect(handoff.detail).toMatchObject({ cause: 'security' })
+  })
+
+  it('never approves when no security agent can start', async () => {
+    const id = await seedTask()
+
+    const result = await runTask(deps(touchingSurface(), { security: () => undefined }), id)
+
+    expect(result.status).toBe('handoff')
+    expect(await queuedMerges(id)).toEqual([])
+  })
+
+  it('sends the first security block back to the builder, and hands a repeated finding to a person', async () => {
+    const id = await seedTask()
+    const finding = { severity: 'blocker', file: 'src/a.js', issue: 'builds SQL from input' }
+    const security = securitySaying(verdictJson('changes', [finding]))
+    const builder = resumableBuilder()
+
+    const result = await runTask(
+      deps(touchingSurface(), {
+        harness: builder,
+        reviewer: reviewerSaying(verdictJson('approve')),
+        security: () => security,
+      }),
+      id,
+    )
+
+    expect(builder.resumed).toHaveLength(1)
+    expect(builder.resumed[0]).toContain('builds SQL from input')
+    expect(security.prompts).toHaveLength(2)
+    expect(result.status).toBe('handoff')
+  })
+
+  it('asks no security agent when the change touches no security surface, records why, and merges', async () => {
+    const id = await seedTask()
+    const security = securitySaying(verdictJson('approve'))
+
+    const result = await runOnly(deps(new FakeSandbox(changed()), { security: () => security }), id)
+
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(security.prompts).toEqual([])
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const done = events.find(
+      (e) => (e.detail as { step?: string; outcome?: string } | null)?.outcome === 'pass',
+    )
+    expect(done!.detail).toMatchObject({
+      step: 'security',
+      agentSkipped: true,
+      skippedBecause: expect.stringContaining('touches no security surface'),
+    })
+  })
+})
+
 describe('runTask merging the integration branch before integrating (#227)', () => {
   const base = 'c'.repeat(40)
   const merge = 'b'.repeat(40)

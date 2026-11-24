@@ -11,6 +11,7 @@ import {
   type RequiredByCheck,
 } from './required-files'
 import { must } from './run-support'
+import { securitySurfaces } from './security-review'
 import { auditBlockers, secretsAdded } from './security-scan'
 import { TEST_PATHSPECS } from './test-weakening'
 
@@ -66,10 +67,15 @@ export async function diffFacts(
     tests: { patch: tests.stdout, issue: input.issue },
   })
   // The deterministic floor of the security review: a secret the change adds blocks it, whatever the reviewer says.
-  const added = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
-  guards.push(...secretsAdded(added.stdout))
+  guards.push(
+    ...(await securityFloor(
+      backend,
+      repoDir,
+      base,
+      changes.map((change) => change.path),
+    )),
+  )
   const paths = changes.map((change) => change.path)
-  guards.push(...(await auditBlockers(backend, repoDir, base, paths)))
   const required = await requiredByChecks(backend, git, base, input.checkRuns ?? [])
   const unplanned = input.plan ? unplannedFiles(paths, input.plan) : []
   const touched = nameStatus
@@ -77,6 +83,80 @@ export async function diffFacts(
     .flatMap((line) => line.split('\t').slice(1))
     .filter((path) => path !== '')
   return { guards, unplanned: withoutRequired(unplanned, required), required, touched }
+}
+
+/**
+ * The deterministic floor of the security review (#241) on the change from `base` to HEAD: the secrets it adds
+ * and the audit blockers of the packages it touches. The review reads it as a guard, and the security step
+ * (`Run.secured`) reads it again before an approval can merge, so a kept approval cannot skip it.
+ */
+export async function securityFloor(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+  paths?: string[],
+): Promise<Finding[]> {
+  const git = `git -C ${repoDir}`
+  const added = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
+  const touched =
+    paths ??
+    parseNameStatus((await must(backend, `${git} diff --name-status ${base} HEAD`)).stdout).map(
+      (change) => change.path,
+    )
+  return [...secretsAdded(added.stdout), ...(await auditBlockers(backend, repoDir, base, touched))]
+}
+
+/** The security surfaces the change from `base` to HEAD touches; none means the floor alone decides (#457). */
+export async function securitySurfacesOf(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+): Promise<string[]> {
+  const git = `git -C ${repoDir}`
+  const names = await must(backend, `${git} diff --name-only --no-renames ${base} HEAD`)
+  const patch = await must(backend, `${git} diff -U0 --no-color --no-renames ${base} HEAD`)
+  return securitySurfaces({
+    touched: names.stdout.split('\n').filter((p) => p !== ''),
+    patch: patch.stdout,
+  })
+}
+
+/** The most of the patch the security prompt carries; the rest is left to a read of the file. */
+const SECURITY_DIFF_MAX = 60_000
+
+/**
+ * What the security agent is handed (#457): the files the change touches and its patch, cut at a limit, so it
+ * judges the change instead of exploring the repository.
+ */
+export async function securityDiff(
+  backend: SandboxBackend,
+  repoDir: string,
+  base: string,
+): Promise<string> {
+  const git = `git -C ${repoDir}`
+  const stat = await must(backend, `${git} diff --stat --no-color ${base} HEAD`)
+  const patch = await must(backend, `${git} diff -U3 --no-color --no-renames ${base} HEAD`)
+  return `${stat.stdout.trim()}\n\n${cutPatch(patch.stdout, SECURITY_DIFF_MAX)}`
+}
+
+/**
+ * The patch cut at a file boundary when it exceeds `max`, with every file left out named, so the agent knows what
+ * it did not see and reads it. A first file longer than `max` is cut inside and named too.
+ */
+export function cutPatch(patch: string, max: number): string {
+  if (patch.length <= max) return patch
+  const files = patch.split(/^(?=diff --git )/m)
+  const nameOf = (chunk: string) => /^diff --git a\/(.+?) b\//.exec(chunk)?.[1] ?? '(unnamed file)'
+  let kept = ''
+  const left: string[] = []
+  for (const chunk of files) {
+    if (left.length === 0 && kept.length + chunk.length <= max) kept += chunk
+    else if (left.length === 0 && kept === '') {
+      kept = chunk.slice(0, max)
+      left.push(`${nameOf(chunk)} (cut inside)`)
+    } else left.push(nameOf(chunk))
+  }
+  return `${kept}\n[the patch is cut here; read these files with read_file: ${left.join(', ')}]`
 }
 
 /** A branch name with nothing a shell reads as more than a name. */

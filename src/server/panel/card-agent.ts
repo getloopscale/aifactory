@@ -21,7 +21,10 @@ const attemptOf = (value: unknown): number =>
 function agentOf(event: StepEvent): AgentSeen | null {
   if (event.stage === 'verify') return null
   const detail = detailOf(event)
-  const agent = text(event.stage === 'review' ? detail.reviewer : detail.harness)
+  // The security review is a `review` event of its own kind, which names its agent as the builder's do.
+  const agent = text(
+    event.stage === 'review' && detail.step !== 'security' ? detail.reviewer : detail.harness,
+  )
   return agent ? { agent, model: text(detail.model) } : null
 }
 
@@ -33,7 +36,9 @@ function agentStep(event: StepEvent): AgentStep | null {
     event.stage === 'plan'
       ? 'planning'
       : event.stage === 'review'
-        ? 'reviewing'
+        ? detail.step === 'security'
+          ? 'securing'
+          : 'reviewing'
         : detail.rework === true
           ? 'fixing'
           : 'building'

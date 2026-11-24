@@ -2,7 +2,7 @@ import { Button } from '@usetheo/ui'
 import { useState } from 'react'
 import { Link } from 'react-router'
 
-import type { AgentRole, AgentSettings } from '../../../shared/panel'
+import { securityEffort, type AgentRole, type AgentSettings } from '../../../shared/panel'
 import { put } from '../../lib/api'
 import { useCopy } from '../../lib/copy'
 
@@ -39,7 +39,9 @@ export function EngineChooser({
   const [effort, setEffort] = useState(currentEffort)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<{ ok: boolean; text: string }>()
-  const changed = value !== current || model !== currentModel || effort !== currentEffort
+  const pinned = role === 'security'
+  const changed =
+    value !== current || model !== currentModel || (!pinned && effort !== currentEffort)
   const unavailable = settings.options.filter((o) => !o.ready)
   const own = settings.repositoriesWithOwn.filter((r) =>
     role === 'reviewer' ? r.reviewer : r.builder,
@@ -71,7 +73,8 @@ export function EngineChooser({
       await put('/api/panel/agents/settings', {
         ...(value === current ? {} : { [role]: value === SAME ? null : value }),
         models: { [role]: model === SAME ? null : model },
-        efforts: { [role]: effort === SAME ? null : effort },
+        // The security role's effort is pinned: it is never sent, and the server refuses a lower one.
+        ...(pinned ? {} : { efforts: { [role]: effort === SAME ? null : effort } }),
       })
       setMessage({
         ok: true,
@@ -126,22 +129,33 @@ export function EngineChooser({
             ))}
           </select>
         </label>
-        <label className="block">
-          <span className={caption}>{t.engine.effort}</span>
-          <select
-            aria-label={t.engine.effortOf(ROLE_NAME[role])}
-            className={`${select} min-w-36`}
-            value={effort}
-            onChange={(e) => setEffort(e.target.value)}
-          >
-            <option value={SAME}>{t.engine.default}</option>
-            {levels.map((level) => (
-              <option key={level} value={level}>
-                {level}
-              </option>
-            ))}
-          </select>
-        </label>
+        {pinned ? (
+          <div>
+            <span className={caption}>{t.engine.effort}</span>
+            <p aria-label={t.engine.effortOf(ROLE_NAME[role])} className="h-9 text-sm leading-9">
+              {securityEffort(levels)
+                ? t.engine.pinnedEffort(securityEffort(levels) as string)
+                : t.engine.pinnedUnknown}
+            </p>
+          </div>
+        ) : (
+          <label className="block">
+            <span className={caption}>{t.engine.effort}</span>
+            <select
+              aria-label={t.engine.effortOf(ROLE_NAME[role])}
+              className={`${select} min-w-36`}
+              value={effort}
+              onChange={(e) => setEffort(e.target.value)}
+            >
+              <option value={SAME}>{t.engine.default}</option>
+              {levels.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <Button size="sm" disabled={!changed || busy} onClick={() => void save()}>
           {t.engine.save}
         </Button>

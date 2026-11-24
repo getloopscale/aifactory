@@ -52,11 +52,17 @@ const view: AgentsView = {
       { id: 'claude-code', ready: true },
       { id: 'codex', ready: true },
     ],
-    chosen: { builder: null, planner: null, reviewer: null, merger: null },
-    effective: { builder: 'codex', planner: 'codex', reviewer: 'codex', merger: 'codex' },
+    chosen: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+    effective: {
+      builder: 'codex',
+      planner: 'codex',
+      reviewer: 'codex',
+      merger: 'codex',
+      security: 'codex',
+    },
     repositoriesWithOwn: [],
-    chosenModel: { builder: null, planner: null, reviewer: null, merger: null },
-    chosenEffort: { builder: null, planner: null, reviewer: null, merger: null },
+    chosenModel: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+    chosenEffort: { builder: null, planner: null, reviewer: null, merger: null, security: null },
     engines: {
       'claude-code': {
         models: [

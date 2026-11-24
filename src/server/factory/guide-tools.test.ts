@@ -244,11 +244,17 @@ describe('what the agents guide reads', () => {
         { id: 'claude-code', ready: true },
         { id: 'codex', ready: true },
       ],
-      chosen: { builder: null, planner: null, reviewer: null, merger: null },
-      effective: { builder: 'codex', planner: 'codex', reviewer: 'codex', merger: 'codex' },
+      chosen: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+      effective: {
+        builder: 'codex',
+        planner: 'codex',
+        reviewer: 'codex',
+        merger: 'codex',
+        security: 'codex',
+      },
       repositoriesWithOwn: [],
-      chosenModel: { builder: null, planner: null, reviewer: null, merger: null },
-      chosenEffort: { builder: null, planner: null, reviewer: null, merger: null },
+      chosenModel: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+      chosenEffort: { builder: null, planner: null, reviewer: null, merger: null, security: null },
       engines: {
         'claude-code': {
           models: [
@@ -395,11 +401,29 @@ describe('what the agents guide reads about the coding agents', () => {
           { id: 'claude-code', ready: false, problem: 'CLAUDE_CODE_OAUTH_TOKEN is not set' },
           { id: 'codex', ready: true },
         ],
-        chosen: { builder: 'codex', planner: null, reviewer: null, merger: null },
-        effective: { builder: 'codex', planner: 'codex', reviewer: 'codex', merger: 'codex' },
+        chosen: { builder: 'codex', planner: null, reviewer: null, merger: null, security: null },
+        effective: {
+          builder: 'codex',
+          planner: 'codex',
+          reviewer: 'codex',
+          merger: 'codex',
+          security: 'codex',
+        },
         repositoriesWithOwn: [{ repository: 'o/r', builder: 'codex', reviewer: null }],
-        chosenModel: { builder: 'gpt-6-luna', planner: null, reviewer: null, merger: null },
-        chosenEffort: { builder: 'medium', planner: null, reviewer: null, merger: null },
+        chosenModel: {
+          builder: 'gpt-6-luna',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
+        chosenEffort: {
+          builder: 'medium',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
         engines: {
           'claude-code': {
             models: [
@@ -438,10 +462,34 @@ describe('what the agents guide reads about the coding agents', () => {
         },
       }),
     ).toEqual({
-      inUse: { builder: 'codex', planner: 'codex', reviewer: 'codex', merger: 'codex' },
-      chosenInThePanel: { builder: 'codex', planner: null, reviewer: null, merger: null },
-      modelInUse: { builder: 'gpt-6-luna', planner: null, reviewer: null, merger: null },
-      effortInUse: { builder: 'medium', planner: null, reviewer: null, merger: null },
+      inUse: {
+        builder: 'codex',
+        planner: 'codex',
+        reviewer: 'codex',
+        merger: 'codex',
+        security: 'codex',
+      },
+      chosenInThePanel: {
+        builder: 'codex',
+        planner: null,
+        reviewer: null,
+        merger: null,
+        security: null,
+      },
+      modelInUse: {
+        builder: 'gpt-6-luna',
+        planner: null,
+        reviewer: null,
+        merger: null,
+        security: null,
+      },
+      effortInUse: {
+        builder: 'medium',
+        planner: null,
+        reviewer: null,
+        merger: null,
+        security: null,
+      },
       available: ['claude-code (cannot start: CLAUDE_CODE_OAUTH_TOKEN is not set)', 'codex'],
       modelsOfEachAgent: {
         'claude-code': {
