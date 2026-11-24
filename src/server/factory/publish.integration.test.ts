@@ -594,7 +594,32 @@ describe('publishing a changesets release', () => {
     })
 
     it('publishes with every tag once each versioned package has its release', async () => {
-      await waitingPublication()
+      const waiting = await waitingPublication()
+      const [t] = await getDb().select().from(task).where(eq(task.id, waiting))
+      const sha = t.mergedSha!
+      const dirs = {
+        'packages/gateway': '@theokit/gateway',
+        'packages/slack': '@theokit/gateway-slack',
+        'packages/yuanbao': '@theokit/gateway-yuanbao',
+      }
+      repo()
+        .compare(
+          `${sha}^`,
+          sha,
+          Object.keys(dirs).map((d) => ({
+            path: `${d}/src/index.ts`,
+            status: 'modified' as const,
+          })),
+        )
+        .files(sha, {
+          ...Object.fromEntries(
+            Object.entries(dirs).map(([d, name]) => [
+              `${d}/package.json`,
+              JSON.stringify({ name, version: '1.0.0' }),
+            ]),
+          ),
+          '.changeset/config.json': '{}',
+        })
       releasesAre(...ALL.map(published))
 
       const result = await pollPublications(deps(STILL_RUNNING))
