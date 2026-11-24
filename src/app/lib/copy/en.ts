@@ -116,6 +116,7 @@ export const en = {
       building: 'building',
       fixing: 'fixing findings',
       reviewing: 'reviewing',
+      securing: 'security review',
       checks: 'checks',
     },
     stepAttempt: (n: number) => `attempt ${n}`,
@@ -228,6 +229,10 @@ export const en = {
       `on ${sha} · exit ${exit} · ${secs} s`,
     output: 'Output',
     reviews: 'Reviews',
+    securityReviews: 'Security review',
+    noSecurityReview: 'No security review was recorded for this task.',
+    securityLine: (round: number, verdict: string, outcome: string) =>
+      `Round ${round}: ${verdict}, ${outcome}`,
     notReviewed: 'Not reviewed yet.',
     reviewLine: (round: number, verdict: string) => `Attempt ${round}: ${verdict}`,
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
@@ -702,8 +707,19 @@ export const en = {
       planner: 'Coding agent of the Planner',
       reviewer: 'Coding agent of the Reviewer',
       merger: 'Coding agent of the Merger',
+      security: 'Coding agent of the Security reviewer',
     },
-    roleName: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer', merger: 'Merger' },
+    roleName: {
+      builder: 'Builder',
+      planner: 'Planner',
+      reviewer: 'Reviewer',
+      merger: 'Merger',
+      security: 'Security reviewer',
+    },
+    pinnedEffort: (level: string) =>
+      `Always ${level}, the highest that keeps a review inside its time and cost; it cannot be lowered`,
+    pinnedUnknown:
+      'The highest effort of this model is not known, so the security review will not run',
     choice: (label: string) => `Choice: ${label}`,
     sameAsBuilder: (builder: string) => `Same as the Builder (${builder})`,
     unavailable: ' (unavailable)',
@@ -924,7 +940,13 @@ export const en = {
     },
     updateAgentSettings: {
       title: 'Change the coding agent',
-      roles: { builder: 'Builder', planner: 'Planner', reviewer: 'Reviewer', merger: 'Merger' },
+      roles: {
+        builder: 'Builder',
+        planner: 'Planner',
+        reviewer: 'Reviewer',
+        merger: 'Merger',
+        security: 'Security reviewer',
+      },
       backToDefault: (role: string) =>
         `- ${role}: back to the default (the same agent as the Builder)`,
       chosen: (role: string, value: string) => `- ${role}: ${value}`,

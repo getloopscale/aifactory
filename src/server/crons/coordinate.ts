@@ -3,6 +3,7 @@ import { defineCron } from 'theokit/server/cron'
 import { coordinate } from '../coordinator/coordinate'
 import { modelUnblocker } from '../coordinator/unblocker'
 import { modelScopeDrafter } from '../coordinator/draft'
+import { modelSecurityJudge } from '../coordinator/security-judgement'
 import { evolveLog } from '../coordinator/evolve'
 import { evolve, evolveDeps } from '../coordinator/evolve-apply'
 import { coordinatorModeFromEnv } from '../coordinator/mode'
@@ -38,6 +39,7 @@ export default defineCron('coordinate', {
           listOpenIssues: (repo: string, label: string | null, token: string) =>
             listOpenIssues(repo, label, token),
           drafter: modelScopeDrafter(),
+          judge: modelSecurityJudge(),
           unblocker: modelUnblocker(),
           releaseMode: releaseModeFromEnv(process.env),
           ciChecks: createPromotionApi(),

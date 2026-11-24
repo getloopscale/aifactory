@@ -593,7 +593,9 @@ describe('runTask', () => {
     ])
     const [row] = await getDb().select().from(task).where(eq(task.id, id))
     expect(row.stage).toBe('done')
-    expect(sandbox.backend.commands.some((c) => c.includes('push origin factory/7 '))).toBe(true)
+    expect(
+      sandbox.backend.commands.some((c) => c.includes('push origin HEAD:refs/heads/factory/7 ')),
+    ).toBe(true)
     expect(github.asked).toContain('paulo/app')
     expect(sandbox.stopped).toBe(1)
   })
@@ -1187,6 +1189,31 @@ describe('runTask', () => {
     }
   })
 
+  it('pushes the commit it made even when the agent left HEAD detached from factory/<issue>', async () => {
+    const id = await seedTask()
+    const git = await RealGit.open()
+    try {
+      const detaching: CodingHarness = {
+        name: 'f',
+        egress: agentEgress,
+        run: async (_backend, input) => {
+          // `git checkout <sha> --` with no path detaches HEAD; the next commit lands on no branch.
+          execFileSync('git', ['checkout', '-q', '--detach'], { cwd: input.cwd })
+          await writeFile(join(input.cwd, 'detached.txt'), 'made on a detached HEAD\n')
+          return { ok: true, timedOut: false, summary: 'done' }
+        },
+      }
+
+      await runTask(deps(git.sandbox, { harness: detaching }), id)
+
+      const remote = git.remoteHead('factory/7')
+      expect(remote).toMatch(/^[0-9a-f]{40}$/)
+      expect(git.show(remote, 'detached.txt')).toBe('made on a detached HEAD\n')
+    } finally {
+      await git.close()
+    }
+  })
+
   it('keeps the work of a pass cut at its limit: commits and pushes it, and the failure names the commit', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())
@@ -1654,7 +1681,7 @@ describe('runTask', () => {
     expect(result).toMatchObject({ status: 'done', branch: 'factory/7' })
     const pushes = pushesOf(sandbox)
     expect(pushes).toEqual([
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:dead0001',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:dead0001',
     ])
   })
 
@@ -1665,7 +1692,7 @@ describe('runTask', () => {
     await runTask(deps(sandbox), id)
 
     expect(pushesOf(sandbox)).toEqual([
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:',
     ])
   })
 
@@ -1677,8 +1704,8 @@ describe('runTask', () => {
     await runTask(deps(sandbox, { harness: resumableBuilder(), reviewer }), id)
 
     expect(pushesOf(sandbox)).toEqual([
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:',
-      'push origin factory/7 --force-with-lease=refs/heads/factory/7:abc123def',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:',
+      'push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:abc123def',
     ])
   })
 
@@ -3356,7 +3383,9 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(commands.some((c) => c.includes('commit -F'))).toBe(false)
     expect(
       commands.some((c) =>
-        c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${approved}`),
+        c.includes(
+          `push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:${approved}`,
+        ),
       ),
     ).toBe(true)
     const stages = await stagesOf(id)
@@ -3848,7 +3877,9 @@ describe('runTask merging an integration branch that passes the checks again', (
     const commands = sandbox.backend.commands
     const merging = commands.findIndex((c) => c.includes(`merge --no-edit ${base}`))
     const pushing = commands.findIndex((c) =>
-      c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
+      c.includes(
+        `push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:${verified}`,
+      ),
     )
     expect(merging).toBeGreaterThan(-1)
     expect(pushing).toBeGreaterThan(merging)
@@ -4063,7 +4094,9 @@ describe('runTask merging an integration branch that passes the checks again', (
     ])
     expect(
       world.sandbox.backend.commands.some((c) =>
-        c.includes(`push origin factory/7 --force-with-lease=refs/heads/factory/7:${verified}`),
+        c.includes(
+          `push origin HEAD:refs/heads/factory/7 --force-with-lease=refs/heads/factory/7:${verified}`,
+        ),
       ),
     ).toBe(true)
   })
@@ -7385,6 +7418,166 @@ describe('a run whose issue no longer asks for the work', () => {
       'cancelled',
     ])
     expect(await stageNow(id)).toBe('cancelled')
+  })
+})
+
+describe('the security review of approved work', () => {
+  const KEY = `export const id = '${'AKIA' + 'ABCDEFGHIJKLMNOP'}'\n`
+
+  function onHistory(repo: { dir: string; baseSha: string }) {
+    let cloned = false
+    const history = readsHistory(repo.dir, '/vercel/work')
+    return new FakeSandbox(
+      changed((command) => {
+        if (!cloned && command.endsWith('rev-parse HEAD')) {
+          cloned = true
+          return { stdout: `${repo.baseSha}\n` }
+        }
+        return history(command)
+      }),
+    )
+  }
+
+  /** A change that spawns a process, a security surface, so the agent pass runs. */
+  function touchingSurface(extra?: (command: string) => Reply | undefined) {
+    return new FakeSandbox(
+      changed((command) => {
+        if (command.includes('diff --name-only')) return { stdout: 'src/run.js\n' }
+        if (command.includes('diff -U0 --no-color'))
+          return {
+            stdout: '+++ b/src/run.js\n@@ -0,0 +1 @@\n+execSync(command)\n',
+          }
+        return extra?.(command)
+      }),
+    )
+  }
+
+  /** A security reviewer that answers from a script, one answer per round. */
+  function securitySaying(...answers: string[]): CodingHarness & { prompts: string[] } {
+    const prompts: string[] = []
+    return {
+      name: 'fake-security',
+      egress: async () => [],
+      prompts,
+      run: async (_backend, input) => {
+        prompts.push(input.prompt)
+        return { ok: true, summary: answers[Math.min(prompts.length, answers.length) - 1] }
+      },
+    }
+  }
+
+  it('blocks a diff that adds an AWS access key id before merge, with the finding recorded and nothing merged', async () => {
+    const id = await seedTask()
+    const repo = divergedRepository({
+      behind: false,
+      branch: { ...PLANNED_CHANGE, 'src/aws.js': KEY },
+    })
+
+    const result = await runTask(
+      deps(onHistory(repo), { security: () => securitySaying(verdictJson('approve')) }),
+      id,
+    )
+
+    expect(result.status).not.toBe('done')
+    expect(await queuedMerges(id)).toEqual([])
+    expect(seen.merges).toEqual([])
+    const [handoff] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'handoff')))
+    expect(JSON.stringify((handoff.detail as { findings: unknown }).findings)).toContain(
+      'an AWS access key id',
+    )
+  })
+
+  it('passes a clean change through the security step and merges as before', async () => {
+    const id = await seedTask()
+    const security = securitySaying(verdictJson('approve', [], 'nothing found'))
+
+    const result = await runOnly(deps(touchingSurface(), { security: () => security }), id)
+
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(security.prompts).toHaveLength(1)
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const secured = events.filter(
+      (e) => (e.detail as { step?: string } | null)?.step === 'security',
+    )
+    expect(secured.map((e) => (e.detail as { outcome?: string }).outcome)).toEqual([
+      undefined,
+      'pass',
+    ])
+    const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(runs.map((r) => r.role)).toContain('security')
+  })
+
+  it('hands the work to a person, merging nothing, when the security agent blocks and the builder cannot be sent back', async () => {
+    const id = await seedTask()
+    const security = securitySaying(
+      verdictJson('changes', [
+        { severity: 'blocker', file: 'src/a.js', issue: 'builds SQL from input' },
+      ]),
+    )
+
+    const result = await runTask(deps(touchingSurface(), { security: () => security }), id)
+
+    expect(result.status).toBe('handoff')
+    expect(await queuedMerges(id)).toEqual([])
+    const [handoff] = await getDb()
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, id), eq(stageEvent.stage, 'handoff')))
+    expect(handoff.detail).toMatchObject({ cause: 'security' })
+  })
+
+  it('never approves when no security agent can start', async () => {
+    const id = await seedTask()
+
+    const result = await runTask(deps(touchingSurface(), { security: () => undefined }), id)
+
+    expect(result.status).toBe('handoff')
+    expect(await queuedMerges(id)).toEqual([])
+  })
+
+  it('sends the first security block back to the builder, and hands a repeated finding to a person', async () => {
+    const id = await seedTask()
+    const finding = { severity: 'blocker', file: 'src/a.js', issue: 'builds SQL from input' }
+    const security = securitySaying(verdictJson('changes', [finding]))
+    const builder = resumableBuilder()
+
+    const result = await runTask(
+      deps(touchingSurface(), {
+        harness: builder,
+        reviewer: reviewerSaying(verdictJson('approve')),
+        security: () => security,
+      }),
+      id,
+    )
+
+    expect(builder.resumed).toHaveLength(1)
+    expect(builder.resumed[0]).toContain('builds SQL from input')
+    expect(security.prompts).toHaveLength(2)
+    expect(result.status).toBe('handoff')
+  })
+
+  it('asks no security agent when the change touches no security surface, records why, and merges', async () => {
+    const id = await seedTask()
+    const security = securitySaying(verdictJson('approve'))
+
+    const result = await runOnly(deps(new FakeSandbox(changed()), { security: () => security }), id)
+
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(security.prompts).toEqual([])
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const done = events.find(
+      (e) => (e.detail as { step?: string; outcome?: string } | null)?.outcome === 'pass',
+    )
+    expect(done!.detail).toMatchObject({
+      step: 'security',
+      agentSkipped: true,
+      skippedBecause: expect.stringContaining('touches no security surface'),
+    })
   })
 })
 

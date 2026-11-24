@@ -141,6 +141,7 @@ const CAUSES = [
   'pull_conflict',
   'base_fixed',
   'ci_red',
+  'security',
 ] as const satisfies readonly HandoffCause[]
 
 /** How a handoff recorded before it carried a `cause` says why, at the start of its reason (`Run`). */
@@ -359,6 +360,18 @@ function checksBroke(evidence: string, facts: TaskFacts): Found {
 /** The integration branch of the task, when its repository is known. */
 const integrationOf = (facts: TaskFacts) => facts.repository?.integrationBranch
 
+/** The security review's blocking findings after the reason it blocked, for the judge and for a person. */
+function withFindings(reason: string, detail: Record<string, unknown> | null): string {
+  const findings = Array.isArray(detail?.findings) ? (detail.findings as unknown[]) : []
+  const lines = findings.flatMap((f) => {
+    const found = f as { severity?: unknown; file?: unknown; issue?: unknown }
+    return typeof found.issue === 'string' && found.severity !== 'minor'
+      ? [`- ${typeof found.file === 'string' ? found.file : '(no file)'}: ${found.issue}`]
+      : []
+  })
+  return lines.length > 0 ? `${reason}\n${lines.join('\n')}` : reason
+}
+
 function byCause(last: LastEvent, facts: TaskFacts): Found {
   const kind = causeOf(last.detail)
   const reason = text(last.detail?.reason)
@@ -367,6 +380,7 @@ function byCause(last: LastEvent, facts: TaskFacts): Found {
   if (kind === 'checks_unchanged') return checksUnchanged(reason, facts)
   if (kind === 'ci_red') return ciRed(reason, facts)
   if (kind === 'checks_broke_after_review') return checksBroke(evidence, facts)
+  if (kind === 'security') return { kind, evidence: withFindings(evidence, last.detail) }
   if (kind === 'pull_conflict' && base) return { kind, evidence, conflictsWith: base }
   if (kind === 'base_fixed' && base) return { kind, evidence, mergeFrom: base }
   return { kind, evidence }

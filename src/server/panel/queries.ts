@@ -50,6 +50,7 @@ import {
   type InboxItem,
   type QuestionView,
   type ReviewView,
+  type SecurityReviewView,
   type Stage,
   type TaskCard,
   type TaskDetail,
@@ -457,6 +458,32 @@ export async function coordinatorActions(
   }
 }
 
+const OUTCOMES = ['pass', 'rework', 'handoff'] as const
+const VERDICTS = ['approve', 'changes', 'invalid'] as const
+const str = (value: unknown): string | null =>
+  typeof value === 'string' && value !== '' ? value : null
+
+/** The security review a `review` stage event records once it ended (it has a verdict), or nothing. */
+function securityReviewOf(e: typeof stageEvent.$inferSelect): SecurityReviewView | undefined {
+  const d = (e.detail ?? {}) as Record<string, unknown>
+  const verdict = VERDICTS.find((v) => v === d.verdict)
+  const outcome = OUTCOMES.find((o) => o === d.outcome)
+  if (e.stage !== 'review' || d.step !== 'security' || !verdict || !outcome) return undefined
+  return {
+    id: e.id,
+    round: typeof d.attempt === 'number' ? d.attempt : 1,
+    sha: str(d.sha) ?? '',
+    harness: str(d.harness),
+    model: str(d.model),
+    effort: str(d.effort),
+    verdict,
+    outcome,
+    summary: str(d.summary) ?? '',
+    findings: Array.isArray(d.findings) ? (d.findings as SecurityReviewView['findings']) : [],
+    at: iso(e.at),
+  }
+}
+
 export async function taskDetail(db: Database, id: number): Promise<TaskDetail | undefined> {
   const [row] = await db.select().from(task).where(eq(task.id, id))
   if (!row) return undefined
@@ -510,6 +537,10 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       findings: r.findings as ReviewView['findings'],
       at: iso(r.at),
     })),
+    securityReviews: events.flatMap((e): SecurityReviewView[] => {
+      const found = securityReviewOf(e)
+      return found ? [found] : []
+    }),
     plans: plans.map((p): ChangePlanView => ({
       id: p.id,
       baseSha: p.baseSha,

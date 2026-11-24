@@ -187,9 +187,10 @@ describe('what a role tells the agent it ends up running', () => {
 })
 
 describe('securityEffort', () => {
-  it('is the highest level the engine lists', () => {
-    expect(securityEffort(['low', 'high', 'xhigh', 'medium'])).toBe('xhigh')
-    expect(securityEffort(['low', 'medium', 'high', 'xhigh', 'max'])).toBe('max')
+  it('is the highest level the engine lists up to high, which keeps the review inside its limit', () => {
+    expect(securityEffort(['low', 'high', 'xhigh', 'medium'])).toBe('high')
+    expect(securityEffort(['low', 'medium', 'high', 'xhigh', 'max'])).toBe('high')
+    expect(securityEffort(['low', 'medium', 'xhigh'])).toBe('medium')
   })
   it('is nothing when no level is known, so the review never runs on a default', () => {
     expect(securityEffort([])).toBeUndefined()

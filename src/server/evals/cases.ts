@@ -47,6 +47,8 @@ export type EvalCase = {
     attempts: number
     mergedSha: string
   }
+  /** Written to be blocked by the security review (`block`), or to pass it (the default, `pass`). */
+  expectSecurity?: 'block' | 'pass'
   /** Part of the small set run before a deploy. */
   quick?: boolean
 }
@@ -126,6 +128,8 @@ export const AGENT_CONFIGURATION = [
   'src/server/factory/security-scan.ts',
   'src/server/factory/security-role.ts',
   'src/server/coordinator/security-judge.ts',
+  'src/server/factory/security-review.ts',
+  'src/server/coordinator/security-judgement.ts',
   'src/server/factory/required-files.ts',
   'src/server/factory/evidence.ts',
   'src/server/factory/e2b-template.ts',

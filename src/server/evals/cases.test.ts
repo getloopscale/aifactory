@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -212,5 +214,28 @@ describe('the change the factory holds for the owner to review', () => {
 
   it('is nothing in another repository, whose gates are its own to change', () => {
     expect(heldForReview('usetheokit/theokit-sdk', ['stryker.config.json'])).toEqual([])
+  })
+})
+
+describe('the security cases of the suite', () => {
+  const all = JSON.parse(readFileSync('evals/cases.json', 'utf8')) as EvalCase[]
+  const security = all.filter((c) => c.expectSecurity !== undefined)
+
+  it('has a secret, a vulnerable dependency, an injection and a clean change', () => {
+    expect(security.map((c) => c.expectSecurity)).toEqual(['block', 'block', 'block', 'pass'])
+    expect(new Set(all.map((c) => c.id)).size).toBe(all.length)
+  })
+
+  it('never holds a secret in a case, which the factory would block in its own diff', () => {
+    expect(JSON.stringify(all)).not.toMatch(/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/)
+  })
+
+  it('protects the security files as agent configuration', () => {
+    for (const file of [
+      'src/server/factory/security-review.ts',
+      'src/server/coordinator/security-judgement.ts',
+    ]) {
+      expect(AGENT_CONFIGURATION).toContain(file)
+    }
   })
 })

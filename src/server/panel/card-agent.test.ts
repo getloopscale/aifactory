@@ -90,3 +90,18 @@ describe('cardAgent', () => {
     expect(cardAgent('review', events).working).toBeNull()
   })
 })
+
+describe('the security review on a card', () => {
+  it('shows the security agent and its own step while it reads an approved commit', () => {
+    const events = [
+      event(8, 'review', { reviewer: 'codex', model: 'gpt-6.1-terra', attempt: 1 }),
+      event(9, 'review', { step: 'security', harness: 'claude-code', model: 'opus', attempt: 1 }),
+    ]
+    expect(cardAgent('review', events).working).toEqual({
+      step: 'securing',
+      agent: 'claude-code',
+      model: 'opus',
+      attempt: 1,
+    })
+  })
+})

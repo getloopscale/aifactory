@@ -181,7 +181,9 @@ export const agentPromptTool = tool('agent_prompt')
   .build()
 
 const engine = z.string().max(40).nullable().optional()
-const perRole = z.object({ builder: engine, planner: engine, reviewer: engine }).optional()
+const perRole = z
+  .object({ builder: engine, planner: engine, reviewer: engine, security: engine })
+  .optional()
 
 export const updateAgentSettingsTool = tool('update_agent_settings')
   .describe(
@@ -192,6 +194,7 @@ export const updateAgentSettingsTool = tool('update_agent_settings')
       builder: engine,
       planner: engine,
       reviewer: engine,
+      security: engine,
       models: perRole,
       efforts: perRole,
     }),
