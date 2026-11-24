@@ -52,3 +52,27 @@ Nenhum mecanismo está escolhido. O desenho do M13 permanece o do plano, **como 
 Rodar o roteiro para os dois CLIs com credenciais válidas, preencher a tabela com a saída (sem segredos nem
 conteúdo de sessão), escolher os mecanismos e reescrever o M13 se algo contradisser. A implementação do M13
 não começa antes disso.
+
+## Superfície dos CLIs verificada sem credenciais (2026-11-24)
+
+Claude Code 2.1.319 e `codex-cli` 0.166.0, só `--help`, sem chamar o modelo. Isto diz que os caminhos
+existem, não que funcionam:
+
+- Claude: `--input-format stream-json` existe e só vale com `--print`; `--replay-user-messages` existe;
+  `--resume <id>`, `--session-id <uuid>`, `--fork-session`, `--no-session-persistence`; `--permission-mode`
+  aceita `plan`.
+- Codex: `codex exec resume [SESSION_ID] [PROMPT]` existe e lê o prompt do stdin com `-`; `--sandbox <modo>`
+  existe. Não há opção de entrada em fluxo para um `codex exec` já iniciado.
+
+## Outras variantes a provar
+
+- Caixa de correio lida por hook (`PostToolUse` / `UserPromptSubmit`) dentro do sandbox (Claude; n/a no Codex).
+- Perguntar: pedir uma escrita por todos os meios (editor, `sed -i`, redirecionamento, `git`) e comparar SHA e
+  `git status` antes e depois. Se algo escrever, a garantia vira a checagem do SHA da branch depois da resposta.
+- Sessão: o Claude deriva o diretório da sessão do `cwd`, que precisa ser idêntico na restauração; medir o
+  tamanho do arquivo e checar se contém segredo antes de guardá-lo.
+
+| Spike                      | Claude     | Codex      | Evidência |
+| -------------------------- | ---------- | ---------- | --------- |
+| S2 caixa de correio        | não rodado | n/a        | —         |
+| S2 interromper e retomar   | não rodado | não rodado | —         |

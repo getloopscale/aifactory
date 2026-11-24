@@ -25,7 +25,14 @@ import {
   type MetricName,
   type MetricSpec,
 } from './config'
-import { observe, personDecisions, type DecisionRow, type TaskHistory } from './history'
+import {
+  deliveriesOf,
+  observe,
+  personDecisions,
+  type DecisionRow,
+  type TaskHistory,
+} from './history'
+import { REPEAT_DAYS, repeatTouches } from './repeat-touch'
 import { ALL_REPOSITORIES, dailySeries, type Series } from './series'
 
 const DAY_MS = 86_400_000
@@ -342,12 +349,15 @@ export async function measure(deps: MeasureDeps): Promise<MeasureResult> {
   const now = (deps.now ?? (() => new Date()))()
   const since = firstDay(now, config)
   const [histories, decisions] = await Promise.all([
-    loadHistories(deps.db, since),
+    // The repeat touches look back past the window, so the histories start earlier than the points do.
+    loadHistories(deps.db, new Date(since.getTime() - REPEAT_DAYS * DAY_MS)),
     loadDecisions(deps.db, since),
   ])
-  const observations = [...histories.flatMap(observe), ...personDecisions(decisions)].filter(
-    (o) => o.at >= since && o.at <= now,
-  )
+  const observations = [
+    ...histories.flatMap(observe),
+    ...repeatTouches(histories.flatMap(deliveriesOf)),
+    ...personDecisions(decisions),
+  ].filter((o) => o.at >= since && o.at <= now)
   const series = dailySeries(observations, metrics)
   const points = await savePoints(deps.db, series)
   const result: MeasureResult = {

@@ -110,6 +110,8 @@ const ROUTED: {
       commentId: 9001,
       actorLogin: 'alice',
       actorAssociation: 'MEMBER',
+      actorIsBot: false,
+      text: '',
     },
   },
   {
@@ -127,6 +129,8 @@ const ROUTED: {
       commentId: 9001,
       actorLogin: 'alice',
       actorAssociation: 'MEMBER',
+      actorIsBot: false,
+      text: '',
     },
   },
   {
@@ -142,9 +146,12 @@ const ROUTED: {
       repository: 'paulo/app',
       pullRequestNumber: 12,
       reviewId: 77,
+      reviewState: '',
       headSha: 'abc1234',
       actorLogin: 'alice',
       actorAssociation: 'OWNER',
+      actorIsBot: false,
+      text: '',
     },
   },
   {
@@ -158,6 +165,8 @@ const ROUTED: {
       headSha: 'abc1234',
       actorLogin: 'alice',
       actorAssociation: 'MEMBER',
+      actorIsBot: false,
+      text: '',
     },
   },
   {
@@ -226,6 +235,42 @@ const ROUTED: {
     },
   },
 ]
+
+describe('what is written on a pull request', () => {
+  const review = (user: Record<string, unknown>, body: string | null) =>
+    decideIngress('pull_request_review', {
+      action: 'submitted',
+      review: { id: 77, user, author_association: 'OWNER', body },
+      pull_request: pullRequest,
+      repository,
+    })
+
+  it('carries the trimmed text, empty when the review has none', () => {
+    expect(review(actor, '  misses the empty case \n')).toMatchObject({
+      intent: { text: 'misses the empty case', actorIsBot: false },
+    })
+    expect(review(actor, null)).toMatchObject({ intent: { text: '' } })
+  })
+
+  it('carries the state of the review in lower case', () => {
+    const state = (value: string) =>
+      decideIngress('pull_request_review', {
+        action: 'submitted',
+        review: { id: 77, user: actor, author_association: 'OWNER', body: 'x', state: value },
+        pull_request: pullRequest,
+        repository,
+      })
+    expect(state('APPROVED')).toMatchObject({ intent: { reviewState: 'approved' } })
+    expect(state('changes_requested')).toMatchObject({
+      intent: { reviewState: 'changes_requested' },
+    })
+  })
+
+  it('marks a bot by its type or its login', () => {
+    expect(review({ login: 'x', type: 'Bot' }, 'a')).toMatchObject({ intent: { actorIsBot: true } })
+    expect(review({ login: 'app[bot]' }, 'a')).toMatchObject({ intent: { actorIsBot: true } })
+  })
+})
 
 describe('deliveries the factory routes without taking work', () => {
   it.each(ROUTED)('reads $event as $intent.kind', ({ event, payload, intent }) => {
