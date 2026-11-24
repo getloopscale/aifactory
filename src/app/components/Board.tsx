@@ -51,7 +51,9 @@ export function queueWords(
   const verdict = queue.readiness
     ? queue.readiness.verdict === 'ready'
       ? board.ready
-      : board.needsRefinement(queue.readiness.missing)
+      : queue.readiness.verdict === 'blocked'
+        ? board.blocked(queue.readiness.missing)
+        : board.needsRefinement(queue.readiness.missing)
     : null
   return { place: [place, ...why].join(' · '), verdict }
 }

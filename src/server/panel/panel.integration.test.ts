@@ -1413,6 +1413,27 @@ describe('actions', () => {
       })
     })
 
+    it('stays failed while a blocker it recorded is open, though its issue does not declare it', async () => {
+      const id = await blocked(87)
+      const reads = {
+        ...deps(),
+        fetchIssue: async (_repo: string, number: number) => ({
+          number,
+          title: 't',
+          body: number === 5 ? '' : 'No blockers declared here.',
+          labels: [],
+          state: 'open' as const,
+        }),
+      }
+      expect(await runDueRetries(reads, { limit: 3, now: later() })).toEqual({
+        started: 0,
+        skipped: 0,
+        waiting: 1,
+      })
+      expect(queued).toEqual([])
+      expect((await failureOf(id))?.detail).toMatchObject({ blockedBy: ['paulo/app#5'] })
+    })
+
     it('runs again once its blocker is closed', async () => {
       const id = await blocked(82)
       expect(await runDueRetries(issues('closed'), { limit: 3, now: later() })).toEqual({
