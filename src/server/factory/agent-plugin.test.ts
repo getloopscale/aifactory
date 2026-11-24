@@ -34,7 +34,13 @@ describe('the guard of a role', () => {
   })
 
   it('lets the builder merge the base, as the conflict note tells it', () => {
-    for (const command of ['git fetch origin workspace && git merge origin/workspace', 'git add -A', 'git stash', 'git pull', 'git rebase main']) {
+    for (const command of [
+      'git fetch origin workspace && git merge origin/workspace',
+      'git add -A',
+      'git stash',
+      'git pull',
+      'git rebase main',
+    ]) {
       expect(decide('builder', 'Bash', { command })).toBeUndefined()
     }
   })
