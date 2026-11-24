@@ -190,6 +190,10 @@ describe('pullRequestBody', () => {
       'Size of the change: +50 −5 lines in 2 files (10 added in tests).',
     )
     expect(pullRequestBody(input)).not.toContain('Size of the change')
+    expect(pullRequestBody(input)).not.toContain('Risk:')
+    expect(
+      pullRequestBody({ ...input, risk: { sha: 's', level: 'high', reasons: ['a matches b'] } }),
+    ).toContain('Risk: high\n- a matches b')
   })
 })
 

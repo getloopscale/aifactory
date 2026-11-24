@@ -100,6 +100,21 @@ describe('prompts', () => {
     expect(prompt).toContain('Do not edit, create or delete files')
     expect(prompt).toContain('"verdict"')
     expect(prompt).not.toContain("# The builder's plan")
+    expect(prompt).not.toContain('risk, without a model')
+  })
+
+  it('names the risk level and its reasons when the factory rated the change', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      risk: { sha: 's', level: 'high', reasons: ['drizzle/1.sql matches high: drizzle/**'] },
+    })
+    expect(prompt).toContain('rated this change high risk')
+    expect(prompt).toContain('- drizzle/1.sql matches high: drizzle/**')
   })
 
   it('in a later round, gives the reviewer its earlier findings and limits new blockers to what changed', () => {

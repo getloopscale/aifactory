@@ -19,6 +19,7 @@ import { errorMessage } from './error-message'
 import { PRE_RELEASE_BRANCH, releaseBranchOf } from './branches'
 import { changesetsWaiting, publishedPackagesChanged } from './changed-packages'
 import { usesChangesets } from './changesets'
+import type { RiskAssessment } from '../../shared/panel'
 import { highestVersion, nextVersion, preReleaseNotes, preReleaseTag, type Bump } from './release'
 import { CONFLICT_REFUSAL } from './release-wait'
 import { shipContained } from './ship'
@@ -71,6 +72,8 @@ export async function createPreRelease(
     attempts: number
     costUsd: number
     agentSummary: string
+    /** The risk of the change at `sha` (#470); work from before it was recorded has none. */
+    risk?: RiskAssessment | undefined
   },
 ): Promise<{ tag: string; url: string }> {
   const checks = await latestChecks(deps.db, input.taskId, input.sha)
@@ -98,6 +101,7 @@ export async function createPreRelease(
     attempts: input.attempts,
     costUsd: input.costUsd,
     agentSummary: input.agentSummary,
+    risk: input.risk,
   })
   const created = await deps.api.createRelease(input.repository, input.token, {
     tag: preReleaseTag(input.issueNumber, input.tagSha ?? input.sha),

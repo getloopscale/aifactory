@@ -5,6 +5,7 @@ import { plan, planItem, repository } from '../db/schema'
 import { ensureBranches, integrationBranch } from '../factory/branches'
 import { proofView, provenAfter, unprovenChecks } from '../factory/prove-checks'
 import { DOMAIN, validBranch } from '../factory/repo-config'
+import { riskPatternsProblem } from '../factory/risk'
 import { loadKnowledgeConfig } from '../knowledge/store'
 import type { AppRepos, GithubApp, ReachableRepository } from '../github/app'
 import type { IssuesApi } from '../github/issues-api'
@@ -61,6 +62,8 @@ export type RepositoryPatch = {
   integrationChecks?: { name: string; command: string }[]
   /** The commands that rewrite files before each round of checks; empty clears them. */
   fixes?: string[]
+  /** Lines `high: <glob>` or `medium: <glob>` that mark risky paths; empty clears them, so the defaults apply. */
+  riskPatterns?: string[]
   egress?: string[]
   /** `null` clears it, so the default branch applies. */
   baseBranch?: string | null
@@ -116,7 +119,8 @@ export function patchProblem(patch: RepositoryPatch, agents: string[]): string |
   const listed =
     (patch.checks ? checksProblem(patch.checks) : undefined) ??
     (patch.integrationChecks ? checksProblem(patch.integrationChecks) : undefined) ??
-    (patch.fixes ? fixesProblem(patch.fixes) : undefined)
+    (patch.fixes ? fixesProblem(patch.fixes) : undefined) ??
+    (patch.riskPatterns ? riskPatternsProblem(patch.riskPatterns) : undefined)
   if (listed) return listed
   const minutes = patch.runLimitMinutes
   if (minutes != null && (minutes < MIN_RUN_MINUTES || minutes > MAX_RUN_MINUTES)) {
@@ -178,6 +182,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       enabled: row?.enabled ?? false,
       checks: row?.checks ?? null,
       fixes: row?.fixes ?? [],
+      riskPatterns: row?.riskPatterns ?? [],
       egress: row?.egress ?? [],
       baseBranch: row?.baseBranch ?? null,
       releaseBranch: row?.releaseBranch ?? null,
@@ -334,6 +339,9 @@ export async function saveRepository(
     ...checks.values,
     ...integration.values,
     ...(patch.fixes === undefined ? {} : { fixes: patch.fixes.map((f) => f.trim()) }),
+    ...(patch.riskPatterns === undefined
+      ? {}
+      : { riskPatterns: patch.riskPatterns.map((p) => p.trim()) }),
     ...(patch.egress === undefined
       ? {}
       : { egress: [...new Set(patch.egress.map((d) => d.toLowerCase()))] }),

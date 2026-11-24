@@ -34,8 +34,10 @@ import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
 import { freshGithubCredential, githubEgress, renewGithubCredential } from './credential-renewal'
 import { deliverPreRelease, describeDelivery, type Handed } from './integration'
-import type { ChangeFacts } from './change-size'
+import type { ChangeFacts, ChangeSize } from './change-size'
 import { enterMerge } from './merge-task'
+import { assessmentFor, assessRisk } from './risk'
+import type { RiskAssessment } from '../../shared/panel'
 import { heldForEvaluation, heldForReview } from '../evals/cases'
 import {
   DEFAULT_CHECKS,
@@ -258,6 +260,9 @@ export class Run {
   private touched: string[] = []
   /** The size of the change at the commit last reviewed (#474), kept for the pull request and the delivery. */
   private changeFacts: ChangeFacts | undefined
+  /** The risk of the change on the reviewed commit (#470): recorded and shown, and nothing acts on it. */
+  private risk: RiskAssessment | undefined
+  private readonly risks = new Map<string, RiskAssessment>()
   /** Whether the checks the run failed fail on the base too, asking each check at most once (#219). */
   private readonly baseProbe = new BaseProbe()
   /** The last review of this run that asked for changes: the next round starts from its findings. */
@@ -2012,6 +2017,7 @@ export class Run {
         checkRuns: await this.checkRuns(),
       },
     )
+    this.risk = this.assess(sha, { touched, size, unplanned })
     const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent) =>
       this.reviewer.run(this.backend, {
         onEvent,
@@ -2036,6 +2042,7 @@ export class Run {
               baseSha: base,
               knowledgeDir: this.feed?.dir,
               required,
+              risk: this.risk,
               ...(this.earlier ? { earlier: this.earlier } : {}),
               builderSummary: this.reviewAnswer ?? this.summary,
               ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
@@ -2077,6 +2084,26 @@ export class Run {
     return merged
   }
 
+  /** The risk of the change on `sha` from the facts of its diff and the owner's patterns (#470). */
+  private assess(
+    sha: string,
+    facts: { touched: string[]; size: ChangeSize; unplanned: string[] },
+  ): RiskAssessment {
+    const assessed = assessmentFor(
+      sha,
+      assessRisk({
+        paths: facts.touched,
+        lines: facts.size.added + facts.size.removed,
+        files: facts.size.files,
+        labels: this.c.issue.labels,
+        unplanned: facts.unplanned,
+        patterns: this.c.repo.riskPatterns,
+      }),
+    )
+    this.risks.set(sha, assessed)
+    return assessed
+  }
+
   /** Whether this run only merges the integration branch into the work: no agent was asked to change it. */
   private mergesOnly(): boolean {
     const continuation = this.c.continuation
@@ -2116,7 +2143,7 @@ export class Run {
       baseSha: this.baseSha,
       integration,
     })
-    const { guards, touched, size } = await diffFacts(this.backend, this.repoDir, {
+    const { guards, touched, size, unplanned } = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,
       issue: this.c.issue,
@@ -2124,6 +2151,7 @@ export class Run {
     if (guards.some((g) => g.severity !== 'minor')) return undefined
     this.touched = touched
     this.changeFacts = { ...size, sha }
+    this.risk = this.assess(sha, { touched, size, unplanned })
     this.c.state.current = 'review'
     await enterRunStage(deps.db, taskId, 'review', { sha, attempt, approvalOf: last.sha })
     const kept: ReviewVerdict = {
@@ -2208,8 +2236,10 @@ export class Run {
         plan: this.renderedPlan,
         repository: row.repository,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
+        ...(this.risk ? { risk: this.risk } : {}),
       }),
       ...(this.changeFacts ? { change: this.changeFacts } : {}),
+      ...(this.risk ? { risk: this.risk } : {}),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
   }
@@ -2350,6 +2380,9 @@ export class Run {
       `Restore ${short}, the last commit that passed the checks`,
       { attempt: attempt + 1, restoredFrom: kept.sha },
     )
+    // The restored tree is the reviewed one, so it has the reviewed commit's level (#470).
+    const reviewedRisk = this.risks.get(kept.sha)
+    if (reviewedRisk) this.risk = { ...reviewedRisk, sha }
     const checked = await this.verify(sha, attempt + 1, { publish: true })
     if (!checked.verdict.open) {
       throw new StageFailure(
@@ -2432,6 +2465,7 @@ export class Run {
         plan: this.renderedPlan,
         repository: row.repository,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
+        ...(this.risk ? { risk: this.risk } : {}),
       }),
     })
     await api.commentOnIssue(
@@ -2466,6 +2500,7 @@ export class Run {
         findings: outcome.findings,
         costUsd: this.cost,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
+        ...(this.risk ? { risk: this.risk } : {}),
         attempts: attempt,
         ...describeDelivery(handed),
       },

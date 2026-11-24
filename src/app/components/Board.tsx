@@ -287,6 +287,14 @@ export function Card({ task }: { task: TaskCard }) {
             +{task.change.added} −{task.change.removed}
           </div>
         ) : null}
+        {task.risk ? (
+          <div
+            className={`mt-1 text-xs ${task.risk.level === 'high' ? 'font-medium text-destructive' : 'text-muted-foreground'}`}
+            title={t.board.riskReasons(task.risk.reasons)}
+          >
+            {t.board.risk[task.risk.level]}
+          </div>
+        ) : null}
         {task.waitingOnBase ? (
           <div className="mt-1 text-xs font-medium text-destructive">
             {t.board.waitingOnBase(task.waitingOnBase.checks.join(', '), task.waitingOnBase.branch)}

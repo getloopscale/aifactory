@@ -537,6 +537,8 @@ export const repository = pgTable('repository', {
   checks: jsonb('checks').$type<{ name: string; command: string }[]>(),
   /** Commands that rewrite files (a formatter) and decide nothing, run before each round of checks. */
   fixes: jsonb('fixes').$type<string[]>().notNull().default([]),
+  /** `high: <glob>` / `medium: <glob>` lines that mark risky paths (#470); empty means the defaults. */
+  riskPatterns: jsonb('risk_patterns').$type<string[]>().notNull().default([]),
   /** Domains the sandbox may reach besides GitHub, the agent and the npm registry. */
   egress: jsonb('egress').$type<string[]>().notNull().default([]),
   /** The domains of the project's `.factory/setup.json` the owner approved; only these reach the firewall. */

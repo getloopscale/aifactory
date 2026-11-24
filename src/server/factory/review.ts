@@ -1,5 +1,6 @@
 import { personaPreamble } from '../agents/prompts/personas'
 import { knowledgeRules } from '../knowledge/prompt'
+import type { RiskAssessment } from '../../shared/panel'
 import type { CheckSpec } from './evidence'
 import { checksRule, forbiddenPathsRule, FORBIDDEN_PATHS, isForbiddenPath } from './harness'
 import type { RequiredByCheck } from './required-files'
@@ -65,6 +66,11 @@ export function roundsNote(attempt: number, counts: number[]): string {
     : ` (the review is not converging; ${per})`
 }
 
+/** The level the factory gave the change and why, so a `high` one is read knowing the reason (#470). */
+function riskSection(risk: RiskAssessment): string {
+  return `\nThe factory rated this change ${risk.level} risk, without a model, because:\n${risk.reasons.map((r) => `- ${r}`).join('\n')}\nRead the parts it names with that in mind. The rating does not change what you must find.\n`
+}
+
 export function reviewPrompt(input: {
   repo: string
   issueNumber: number
@@ -84,6 +90,8 @@ export function reviewPrompt(input: {
   required?: RequiredByCheck[]
   /** The review this one follows in the same run, when it asked for changes. */
   earlier?: EarlierReview
+  /** The risk level of this change and why, found without a model (#470). */
+  risk?: RiskAssessment
 }): string {
   const required = input.required ?? []
   return `${personaPreamble('reviewer')}
@@ -92,7 +100,7 @@ You are an independent code reviewer for the repository ${input.repo}. Another a
 # ${input.title} (#${input.issueNumber})
 
 ${input.body || '(the issue has no description)'}
-${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
+${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}${input.risk ? riskSection(input.risk) : ''}
 Review the work:
 - Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches.
 - Decide whether it does what the issue asks, no more and no less.

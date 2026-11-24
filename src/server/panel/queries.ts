@@ -25,6 +25,7 @@ import {
   type LeadTimeLimits,
 } from '../../shared/lead-time'
 import { readFacts, totalAdded, totalRemoved } from '../factory/change-size'
+import { readRisk } from '../factory/risk'
 import { retryAt } from '../factory/auto-retry'
 import { CONFLICT_NOTE_OPENING } from '../factory/merge-base'
 import { FREE_BASE_RUNS } from '../factory/transitions'
@@ -51,6 +52,7 @@ import {
   type InboxItem,
   type QuestionView,
   type ReviewView,
+  type RiskAssessment,
   type SecurityReviewView,
   type Stage,
   type TaskCard,
@@ -188,6 +190,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   )
   const steps = await stepEvents(db, ids)
   const changes = await changeSizes(db, ids)
+  const risks = await latestRisks(db, ids)
   const limits = await leadTimeLimits(db, rows)
   const now = new Date()
   return rows.map((r) => {
@@ -217,6 +220,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       waitingForChecks: r.awaitingCiSha !== null,
       waitingOnBase: holds.get(r.id) ?? null,
       change: changes.get(r.id) ?? null,
+      risk: risks.get(r.id) ?? null,
       returned: returns.get(r.id) ?? null,
       queue: r.stage === 'intake' ? (queues.get(r.id) ?? EMPTY_QUEUE) : null,
       resolved: r.resolvedSha !== null,
@@ -260,6 +264,30 @@ async function changeSizes(
         files: facts.files,
       })
     }
+  }
+  return out
+}
+
+/**
+ * The risk of each task's change at its latest approved commit (#470), from the `merge` or `done` event that
+ * carries it. A task from before it was recorded has none.
+ */
+async function latestRisks(db: Database, ids: number[]): Promise<Map<number, RiskAssessment>> {
+  const events = await db
+    .selectDistinctOn([stageEvent.taskId], { taskId: stageEvent.taskId, detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(
+      and(
+        inArray(stageEvent.taskId, ids),
+        inArray(stageEvent.stage, ['merge', 'done']),
+        sql`${stageEvent.detail} -> 'risk' is not null`,
+      ),
+    )
+    .orderBy(stageEvent.taskId, desc(stageEvent.id))
+  const out = new Map<number, RiskAssessment>()
+  for (const e of events) {
+    const risk = readRisk((e.detail as Record<string, unknown> | null)?.risk)
+    if (risk) out.set(e.taskId, risk)
   }
   return out
 }
