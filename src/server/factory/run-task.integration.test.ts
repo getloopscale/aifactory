@@ -7405,6 +7405,20 @@ describe('the security review of approved work', () => {
     )
   }
 
+  /** A change that spawns a process, a security surface, so the agent pass runs. */
+  function touchingSurface(extra?: (command: string) => Reply | undefined) {
+    return new FakeSandbox(
+      changed((command) => {
+        if (command.includes('diff --name-only')) return { stdout: 'src/run.js\n' }
+        if (command.includes('diff -U0 --no-color'))
+          return {
+            stdout: '+++ b/src/run.js\n@@ -0,0 +1 @@\n+execSync(command)\n',
+          }
+        return extra?.(command)
+      }),
+    )
+  }
+
   /** A security reviewer that answers from a script, one answer per round. */
   function securitySaying(...answers: string[]): CodingHarness & { prompts: string[] } {
     const prompts: string[] = []
@@ -7447,7 +7461,7 @@ describe('the security review of approved work', () => {
     const id = await seedTask()
     const security = securitySaying(verdictJson('approve', [], 'nothing found'))
 
-    const result = await runOnly(deps(new FakeSandbox(changed()), { security: () => security }), id)
+    const result = await runOnly(deps(touchingSurface(), { security: () => security }), id)
 
     expect(result).toMatchObject({ status: 'merging' })
     expect(security.prompts).toHaveLength(1)
@@ -7472,7 +7486,7 @@ describe('the security review of approved work', () => {
       ]),
     )
 
-    const result = await runTask(deps(new FakeSandbox(changed()), { security: () => security }), id)
+    const result = await runTask(deps(touchingSurface(), { security: () => security }), id)
 
     expect(result.status).toBe('handoff')
     expect(await queuedMerges(id)).toEqual([])
@@ -7487,7 +7501,7 @@ describe('the security review of approved work', () => {
     const id = await seedTask()
 
     const result = await runTask(
-      deps(new FakeSandbox(changed()), { security: () => undefined }),
+      deps(touchingSurface(), { security: () => undefined }),
       id,
     )
 
@@ -7502,7 +7516,7 @@ describe('the security review of approved work', () => {
     const builder = resumableBuilder()
 
     const result = await runTask(
-      deps(new FakeSandbox(changed()), {
+      deps(touchingSurface(), {
         harness: builder,
         reviewer: reviewerSaying(verdictJson('approve')),
         security: () => security,
@@ -7514,6 +7528,26 @@ describe('the security review of approved work', () => {
     expect(builder.resumed[0]).toContain('builds SQL from input')
     expect(security.prompts).toHaveLength(2)
     expect(result.status).toBe('handoff')
+  })
+
+  it('asks no security agent when the change touches no security surface, records why, and merges', async () => {
+    const id = await seedTask()
+    const security = securitySaying(verdictJson('approve'))
+
+    const result = await runOnly(deps(new FakeSandbox(changed()), { security: () => security }), id)
+
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(security.prompts).toEqual([])
+    expect(await queuedMerges(id)).toEqual(['abc123def'])
+    const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))
+    const done = events.find(
+      (e) => (e.detail as { step?: string; outcome?: string } | null)?.outcome === 'pass',
+    )
+    expect(done!.detail).toMatchObject({
+      step: 'security',
+      agentSkipped: true,
+      skippedBecause: expect.stringContaining('touches no security surface'),
+    })
   })
 })
 
