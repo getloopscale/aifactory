@@ -157,6 +157,48 @@ export function releasesRead(
   }
 }
 
+/**
+ * The Version Packages pull request the release workflow opens when the run on a Version Packages merge finds
+ * changesets still pending: it versions again instead of publishing. It is the same publication's, so it is
+ * the open one from the version branch of the release branch, in the repository itself, other than the one
+ * already recorded. The caller still checks that its head holds the recorded merge.
+ */
+export function pickVersionSuccessor(
+  open: OpenPullRequest[],
+  branches: { repo: string; release: string },
+  recorded: number,
+): OpenPullRequest | undefined {
+  return open
+    .filter(
+      (pr) =>
+        pr.number !== recorded &&
+        pr.headRef === versionBranchFor(branches.release) &&
+        pr.baseRef === branches.release &&
+        pr.headRepo === branches.repo,
+    )
+    .sort((a, b) => b.number - a.number)[0]
+}
+
+/**
+ * What a publication does while no release exists after its last Version Packages merge: waits, or, past
+ * `VERSION_RELEASES_WAIT_MS`, ends as failed with the reason, so it never waits in silence.
+ */
+export type NoReleasesRead = { wait: string } | { failed: string }
+
+export function noReleasesRead(
+  mergedAt: Date,
+  now: Date,
+  versionPullRequest: number,
+): NoReleasesRead {
+  if (now.getTime() - mergedAt.getTime() < VERSION_RELEASES_WAIT_MS) {
+    return { wait: 'waiting for the release workflow to publish' }
+  }
+  const minutes = VERSION_RELEASES_WAIT_MS / 60_000
+  return {
+    failed: `no release appeared ${minutes} minutes after the merge of Version Packages #${versionPullRequest}: the release workflow published nothing`,
+  }
+}
+
 /** The packages `.changeset/config.json` tells changesets to leave alone. */
 export function changesetIgnore(text: string): string[] {
   const ignore = parseJson(text, '.changeset/config.json').ignore
