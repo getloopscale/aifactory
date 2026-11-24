@@ -146,6 +146,7 @@ const ROUTED: {
       repository: 'paulo/app',
       pullRequestNumber: 12,
       reviewId: 77,
+      reviewState: '',
       headSha: 'abc1234',
       actorLogin: 'alice',
       actorAssociation: 'OWNER',
@@ -249,6 +250,20 @@ describe('what is written on a pull request', () => {
       intent: { text: 'misses the empty case', actorIsBot: false },
     })
     expect(review(actor, null)).toMatchObject({ intent: { text: '' } })
+  })
+
+  it('carries the state of the review in lower case', () => {
+    const state = (value: string) =>
+      decideIngress('pull_request_review', {
+        action: 'submitted',
+        review: { id: 77, user: actor, author_association: 'OWNER', body: 'x', state: value },
+        pull_request: pullRequest,
+        repository,
+      })
+    expect(state('APPROVED')).toMatchObject({ intent: { reviewState: 'approved' } })
+    expect(state('changes_requested')).toMatchObject({
+      intent: { reviewState: 'changes_requested' },
+    })
   })
 
   it('marks a bot by its type or its login', () => {

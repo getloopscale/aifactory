@@ -64,6 +64,8 @@ export type RoutedIntent =
       repository: string
       pullRequestNumber: number
       reviewId: number
+      /** `approved`, `changes_requested` or `commented`, as the webhook names it (lower case). */
+      reviewState: string
       headSha: string
     } & Written)
   | ({
@@ -144,7 +146,7 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
       action: 'submitted',
       payload: z
         .object({
-          review: commentPayload,
+          review: commentPayload.extend({ state: z.string().default('') }),
           pull_request: pullRequestPayload,
           repository: repositoryPayload,
         })
@@ -154,6 +156,7 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
             repository: repository.full_name,
             pullRequestNumber: pull_request.number,
             reviewId: review.id,
+            reviewState: review.state.toLowerCase(),
             headSha: pull_request.head.sha,
             ...written(review),
           },

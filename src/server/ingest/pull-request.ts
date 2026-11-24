@@ -54,6 +54,10 @@ export async function actOnWriting(
   })
   if (intent.actorIsBot) return ignored('a bot wrote it')
   if (intent.text === '') return ignored('it has no text')
+  // An approval is not a request, whatever it says ("LGTM, thanks").
+  if (intent.kind === 'pull_request_review_submitted' && intent.reviewState === 'approved') {
+    return ignored('the review approves the pull request')
+  }
 
   // The exact number: `/pull/12` is never `/pull/112`.
   const [row] = await tx

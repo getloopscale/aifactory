@@ -27,6 +27,7 @@ const review = (over: Record<string, unknown> = {}): RoutedIntent =>
     repository: 'paulo/app',
     pullRequestNumber: 12,
     reviewId: 77,
+    reviewState: 'commented',
     headSha: 'abc',
     actorLogin: 'alice',
     actorAssociation: 'OWNER',
@@ -60,6 +61,31 @@ describe('what is written on a pull request', () => {
     const result = await actOnWriting(database(open), review(over), reactions({ sendBack }))
     expect(result?.done).toBe('ignored')
     expect(sendBack).not.toHaveBeenCalled()
+  })
+
+  it('starts nothing for an approval with text, on open and on merged work', async () => {
+    const sendBack = vi.fn()
+    const followUp = vi.fn()
+    for (const mergedSha of [null, 'm']) {
+      const result = await actOnWriting(
+        database({ ...open, mergedSha }),
+        review({ reviewState: 'approved', text: 'LGTM, thanks' }),
+        reactions({ sendBack, followUp }),
+      )
+      expect(result?.done).toBe('ignored')
+    }
+    expect(sendBack).not.toHaveBeenCalled()
+    expect(followUp).not.toHaveBeenCalled()
+  })
+
+  it('still acts on a review that requests changes', async () => {
+    const sendBack = vi.fn(async () => undefined)
+    const result = await actOnWriting(
+      database(open),
+      review({ reviewState: 'changes_requested' }),
+      reactions({ sendBack }),
+    )
+    expect(result?.done).toBe('sent_back')
   })
 
   it('starts nothing and files nothing in a repository the owner disabled', async () => {

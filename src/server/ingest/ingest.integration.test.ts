@@ -281,7 +281,7 @@ describe('which repositories may start work', () => {
 
 describe('what is written on the factory pull request', () => {
   const written = (
-    over: { user?: object; association?: string; body?: string; id?: number } = {},
+    over: { user?: object; association?: string; body?: string; id?: number; state?: string } = {},
   ) => ({
     action: 'submitted',
     review: {
@@ -289,6 +289,7 @@ describe('what is written on the factory pull request', () => {
       user: over.user ?? { login: 'alice', type: 'User' },
       author_association: over.association ?? 'OWNER',
       body: over.body ?? 'this misses the empty-input case',
+      state: over.state ?? 'commented',
     },
     pull_request: { number: 12, head: { sha: 'abc' } },
     repository: { full_name: 'paulo/app' },
@@ -360,6 +361,16 @@ describe('what is written on the factory pull request', () => {
     await send(written(), 'r-1')
     await getPool().query("update task set merged_sha = 'm'")
     await send(written({ id: 78 }), 'r-2')
+
+    expect(await jobs()).toEqual([])
+    expect(followUps).toEqual([])
+  })
+
+  it('queues nothing and files nothing for an approving review with text', async () => {
+    await taskIn('done')
+    await send(written({ state: 'approved', body: 'LGTM, thanks' }), 'r-1')
+    await getPool().query("update task set merged_sha = 'm'")
+    await send(written({ state: 'approved', body: 'LGTM, thanks', id: 78 }), 'r-2')
 
     expect(await jobs()).toEqual([])
     expect(followUps).toEqual([])
