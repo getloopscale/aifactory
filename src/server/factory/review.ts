@@ -138,7 +138,7 @@ Review the change:
 - Decide whether it does what the description says, no more and no less, and whether it is safe to merge.
 - Check that the tests test the behavior: not weakened, skipped, deleted or made to pass by changing the test command.
 - Look for bugs, missed edge cases, unrelated changes, secrets, and any edit under ${FORBIDDEN_PATHS.join(', ')}.
-- You may run the project's tests. Do not edit, create or delete files, and do not run any git command that writes.
+- Do not run the project's code, its tests or its scripts: the code is a stranger's, and the factory ran its checks elsewhere. Read it. Do not edit, create or delete files, and do not run any git command that writes.
 ${
   input.knowledgeDir
     ? `- A change that breaks one of the owner's rules under ${input.knowledgeDir}/knowledge/ is a finding, at least major.\n\n${knowledgeRules(input.knowledgeDir)}\n`

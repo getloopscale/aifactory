@@ -167,7 +167,7 @@ type ToReview = Extract<RoutedIntent, { kind: 'pull_request_to_review' }>
  * contributor) is never reviewed on their own: an open repository would let strangers spend the factory's
  * money. The association is GitHub's approximation of permission, read from the delivery.
  */
-export const WRITE_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
+export const WRITE_ASSOCIATIONS: ReadonlySet<string> = new Set(['OWNER', 'COLLABORATOR'])
 
 /** The branch of a pull request the factory opened: `factory/<issue number>`, in the repository itself. */
 const FACTORY_BRANCH = /^factory\/\d+$/

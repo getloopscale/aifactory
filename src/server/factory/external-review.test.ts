@@ -145,14 +145,19 @@ function setup(
       return { ok: opts.ok ?? true, summary: opts.answer ?? GOOD, costUsd: 0.42 }
     },
   }
+  const asked: string[] = []
   const posted: { number: number; sha: string; body: string }[] = []
   const deps: ExternalReviewDeps = {
     store,
+    botLogin: 'factory[bot]',
     github: { installationToken: async () => ({ token: 'tok' }) } as never,
     api: {
       readPullRequest: async () =>
         ({ number: 12, ...(opts.pull ?? { state: 'open', headSha: SHA }) }) as never,
-      reviewedCommits: async () => opts.prior ?? [],
+      reviewedCommits: async (_r, _t, _n, _m, author) => {
+        asked.push(author)
+        return opts.prior ?? []
+      },
       postPullRequestReview: async (_r, _t, number, input) => {
         posted.push({ number, ...input })
         return '1'
@@ -167,7 +172,7 @@ function setup(
       keep: async () => {},
     } as never,
   }
-  return { deps, sandbox, log, posted, settled, runs, prompts }
+  return { deps, sandbox, log, asked, posted, settled, runs, prompts }
 }
 
 describe('reviewExternalPull', () => {
@@ -181,21 +186,30 @@ describe('reviewExternalPull', () => {
     expect(t.posted[0].body).toContain(REVIEW_MARKER)
     expect(t.posted[0].body).toContain(SHA)
     expect(t.settled.at(-1)).toMatchObject({ status: 'posted' })
-    expect(t.sandbox.stopped).toBe(1)
+    expect(t.sandbox.stopped).toBe(2)
+    expect(t.asked).toEqual(['factory[bot]'])
   })
 
-  it('takes the GitHub credential out before the checks, and gives the agent its rules only after', async () => {
+  it('runs the checks where no agent credential or knowledge exists, and the reviewer where no code runs', async () => {
     const t = setup()
     await reviewExternalPull(t.deps, 1)
+    expect(t.sandbox.specs).toHaveLength(2)
+    const agent = 'api.agent.example'
+    for (const spec of t.sandbox.specs) {
+      expect(spec.egress.map((r) => r.domain)).not.toContain(agent)
+    }
     const domains = t.sandbox.egressUpdates.map((rules) => rules.map((r) => r.domain))
+    // The agent's rules come once, last, in the sandbox that never ran the checks.
+    expect(domains.filter((d) => d.includes(agent))).toHaveLength(1)
+    expect(domains.at(-1)).toContain(agent)
+    // GitHub's credential is in the firewall only for the two fresh tokens, before each clone.
+    expect(domains.filter((d) => d.includes('github.com'))).toHaveLength(2)
     const checksAt = t.log.findIndex((c) => c.includes('npm test'))
     expect(checksAt).toBeGreaterThan(-1)
-    // The first update is the fresh token for the clone; the next removes it, and none after brings it back.
-    expect(domains[0]).toContain('github.com')
-    expect(domains.slice(1).every((d) => !d.includes('github.com'))).toBe(true)
-    expect(domains.at(-1)).toContain('api.agent.example')
-    expect(domains[1]).not.toContain('api.agent.example')
+    expect(t.log.filter((c) => c.includes('npm test'))).toHaveLength(1)
     expect(t.log.indexOf('reviewer')).toBeGreaterThan(checksAt)
+    expect(t.log.indexOf('prepare')).toBeGreaterThan(checksAt)
+    expect(t.prompts[0].prompt).toContain('Do not run the project')
   })
 
   it("shares no cache with the factory's other sandboxes", async () => {
@@ -276,6 +290,24 @@ describe('reviewExternalPull', () => {
     await expect(reviewExternalPull(failed.deps, 1)).rejects.toThrow('reviewer failed')
     expect(failed.posted).toEqual([])
     expect(failed.runs).toHaveLength(1)
-    expect(failed.sandbox.stopped).toBe(1)
+    expect(failed.sandbox.stopped).toBe(2)
+  })
+})
+
+describe('reviewBody from untrusted text', () => {
+  it('neutralises mentions, HTML and a spoofed marker', () => {
+    const body = reviewBody({
+      sha: SHA,
+      verdict: {
+        verdict: 'changes',
+        summary: `ping @owner ${REVIEW_MARKER}`,
+        findings: [{ severity: 'major', file: 'a`b<c', issue: '<img src=x> @team please' }],
+      },
+      checks: [],
+    })
+    expect(body.match(/<!-- aifactory-external-review -->/g)).toHaveLength(1)
+    expect(body).not.toMatch(/@(?!\u200b)\w/)
+    expect(body).not.toContain('<img')
+    expect(body).toContain('&lt;img')
   })
 })

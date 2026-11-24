@@ -289,8 +289,14 @@ export type GithubApi = {
     number: number,
     input: { sha: string; body: string },
   ): Promise<string>
-  /** The commits a review whose text holds `marker` was posted for on a pull request. */
-  reviewedCommits(repo: string, token: string, number: number, marker: string): Promise<string[]>
+  /** The commits a review by `author` whose text holds `marker` was posted for on a pull request: anyone can write the marker, so only the App's own reviews count. */
+  reviewedCommits(
+    repo: string,
+    token: string,
+    number: number,
+    marker: string,
+    author: string,
+  ): Promise<string[]>
   /**
    * Has GitHub merge the pull request (a merge commit) once the base's required checks pass, and only if
    * its head is still `sha`. Throws `AutoMergeRefused` when GitHub will not.
@@ -1159,7 +1165,7 @@ export function createGithubApi(
       return String(((await response.json()) as { id: number }).id)
     },
 
-    async reviewedCommits(repo, token, number, marker) {
+    async reviewedCommits(repo, token, number, marker, author) {
       const found: string[] = []
       // Every page: a pull request with many reviews must still show the one this factory posted.
       for (let page = 1; ; page++) {
@@ -1168,9 +1174,15 @@ export function createGithubApi(
           `listing the reviews of ${repo}#${number}`,
           [200],
         )
-        const reviews = (await response.json()) as { body?: string | null; commit_id?: string }[]
+        const reviews = (await response.json()) as {
+          body?: string | null
+          commit_id?: string
+          user?: { login?: string } | null
+        }[]
         for (const review of reviews) {
-          if (review.body?.includes(marker) && review.commit_id) found.push(review.commit_id)
+          if (review.user?.login === author && review.body?.includes(marker) && review.commit_id) {
+            found.push(review.commit_id)
+          }
         }
         if (reviews.length < 100) return found
       }

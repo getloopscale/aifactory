@@ -6,6 +6,7 @@ import { factoryDeps, githubAppFromEnv } from '../factory/deps'
 import { drizzleStore, reviewExternalPull } from '../factory/external-review'
 import { withLeaseHeartbeat } from '../factory/lease'
 import { effectiveEnv } from '../factory/settings'
+import { botAuthor } from '../github/bot-author'
 import { createGithubApi } from '../github/pulls'
 
 export default defineJob('review-pull-request', {
@@ -25,6 +26,7 @@ export default defineJob('review-pull-request', {
           store: drizzleStore(getDb()),
           github: githubAppFromEnv(env),
           api: createGithubApi(),
+          botLogin: botAuthor(env).name,
           sandbox: run.sandbox,
           reviewer: pick,
           knowledge: run.knowledge,

@@ -1,3 +1,4 @@
+import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { eq, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -19,7 +20,12 @@ import { withRecipe, type Recipe } from './recipe'
 import { labelsWithRepoChoice, loadRepoConfig, type RepoConfig } from './repo-config'
 import { parseVerdict, pullRequestReviewPrompt, type Finding, type ReviewVerdict } from './review'
 import { mergeEgress, must } from './run-support'
-import { createIsolatedSandbox, type EgressRule, type IsolatedSandboxProvider } from './sandbox'
+import {
+  createIsolatedSandbox,
+  type EgressRule,
+  type IsolatedSandbox,
+  type IsolatedSandboxProvider,
+} from './sandbox'
 import { effectiveChecks } from './prove-checks'
 
 /**
@@ -32,6 +38,8 @@ import { effectiveChecks } from './prove-checks'
 export type ExternalReviewDeps = {
   store: ExternalReviewStore
   github: Pick<GithubApp, 'installationToken'>
+  /** The login the App's own reviews are posted under (`<slug>[bot]`): only its reviews count as the factory's. */
+  botLogin: string
   api: Pick<GithubApi, 'readPullRequest' | 'postPullRequestReview' | 'reviewedCommits'>
   sandbox: IsolatedSandboxProvider
   /** The agent that reviews, chosen from the labels the repository's settings give. */
@@ -91,6 +99,13 @@ const SANDBOX_MS = 60 * 60_000
 
 class Skipped extends Error {}
 
+/**
+ * Text that came from an agent, a pull request or a repository, made safe to put in a comment: no mention
+ * notifies anybody, and no HTML (the marker included) is read as such.
+ */
+export const plain = (text: string): string =>
+  text.replace(/</g, '&lt;').replace(/@/g, '@\u200b').slice(0, 2_000)
+
 /** The text of the review: the commit it read, the verdict, the checks and the findings. Never an approval. */
 export function reviewBody(input: {
   sha: string
@@ -101,18 +116,23 @@ export function reviewBody(input: {
   const word = verdict.verdict === 'approve' ? 'no blocking findings' : 'changes suggested'
   const checks = input.checks.length
     ? input.checks
-        .map((c) => `- ${c.passed ? 'passed' : c.timedOut ? 'timed out' : 'failed'}: ${c.name}`)
+        .map(
+          (c) => `- ${c.passed ? 'passed' : c.timedOut ? 'timed out' : 'failed'}: ${plain(c.name)}`,
+        )
         .join('\n')
     : '- none ran'
   const findings = verdict.findings.length
     ? verdict.findings
-        .map((f: Finding) => `- **${f.severity}**${f.file ? ` \`${f.file}\`` : ''}: ${f.issue}`)
+        .map(
+          (f: Finding) =>
+            `- **${f.severity}**${f.file ? ` \`${plain(f.file).replace(/`/g, "'")}\`` : ''}: ${plain(f.issue)}`,
+        )
         .join('\n')
     : '- none'
   return `${REVIEW_MARKER}
 Automated review of \`${input.sha}\`: ${word}.
 
-${verdict.summary}
+${plain(verdict.summary)}
 
 **Checks**
 ${checks}
@@ -164,68 +184,27 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     }
   }
   await current()
-  const done = await api.reviewedCommits(repo, token, row.pullNumber, REVIEW_MARKER)
+  const done = await api.reviewedCommits(repo, token, row.pullNumber, REVIEW_MARKER, deps.botLogin)
   if (done.includes(row.headSha)) return { status: 'posted' as const, detail: 'already reviewed' }
 
   const config = withRecipe(await store.config(repo), await deps.fetchRecipe?.(repo, token))
   const reviewer = deps.reviewer(labelsWithRepoChoice([], config))
   const agentEgress = mergeEgress([await reviewer.egress()])
-  // The token is in the firewall for the clone and the fetch only; the agent's rules come after the checks.
-  const cloning: EgressRule[] = [
-    githubEgress(token),
-    REGISTRY,
-    ...config.egress.map((domain) => ({ domain })),
-  ]
-  const running = cloning.filter((rule) => rule.domain !== 'github.com')
-  const sandbox = await createIsolatedSandbox(deps.sandbox, {
-    owner: { owner: 'review-pull-request', repository: repo, pull: row.pullNumber },
-    timeoutMs: fitToSession({ sandboxMs: deps.sandboxMs ?? SANDBOX_MS }, deps.sandbox.maxSessionMs)
-      .sandboxMs,
-    // No cache key: the checks run a stranger's code, and a package store it wrote would be read by the next trusted run.
-    egress: cloning,
-  })
+
+  // Two sandboxes, because the code of a pull request is a stranger's. The first runs its checks and holds
+  // nothing but the registry and the owner's domains: no agent credential, no knowledge. The second never
+  // runs the code: the reviewer reads it, and only there the agent's credential and the knowledge exist.
+  const checks = await runChecksOfPull(deps, row, token, config)
+  const reading = await checkedOut(deps, row, token, [REGISTRY])
+  const { backend, repoDir, baseSha } = reading
   let feed: KnowledgeFeed | undefined
   try {
-    const { backend } = sandbox
-    if (!sandbox.updateEgress)
-      throw new Error(
-        'this sandbox cannot change its firewall, so code of a pull request cannot run in it',
-      )
-    await freshGithubCredential(sandbox, cloning, {
-      mint: async () => (await deps.github.installationToken(repo)).token,
-      onToken: () => {},
-    })
-    const { repoDir } = await cloneRepository(backend, {
-      repoUrl: `https://github.com/${repo}.git`,
-      ref: row.baseRef,
-      instanceId: INSTANCE,
-    })
-    const git = `git -C ${repoDir}`
-    const baseSha = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
-    // The head of a fork is read through the pull request's ref: only numbers and a checked commit reach the shell.
-    await must(backend, `${git} fetch origin refs/pull/${row.pullNumber}/head`)
-    await must(backend, `${git} checkout --detach ${row.headSha}`)
-    const at = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
-    if (at !== row.headSha) throw new Error(`checked out ${at}, not ${row.headSha}`)
-
-    // Read before the repository's code has run, so what its checks leave behind cannot change the facts.
     const facts = await diffFacts(backend, repoDir, {
       baseSha,
       plan: undefined,
       issue: { labels: [], title: row.title, body: row.body },
     })
-
-    // From here the sandbox holds no GitHub credential, whatever the code that runs in it does.
-    await sandbox.updateEgress(running)
-    await prepareDeclaredPackageManager(backend, repoDir)
-    const checks = await runChecks(
-      backend,
-      repoDir,
-      effectiveChecks(config),
-      deps.checkMs ?? DEFAULT_CHECK_MS,
-    )
-
-    await sandbox.updateEgress([...running, ...agentEgress])
+    await reading.sandbox.updateEgress!([REGISTRY, ...agentEgress])
     await reviewer.prepare?.(backend)
     feed = await KnowledgeFeed.open(deps.knowledge, backend, repo, {})
     await backend.uploadFile(DESCRIPTION_FILE, `# ${row.title}\n\n${row.body}\n`)
@@ -270,7 +249,89 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     return { status: 'posted' as const, detail: verdict.verdict }
   } finally {
     feed?.stop()
+    await reading.sandbox.stop()
+  }
+}
+
+type Checkout = {
+  sandbox: IsolatedSandbox
+  backend: SandboxBackend
+  repoDir: string
+  baseSha: string
+}
+
+/**
+ * A sandbox with the pull request's head checked out at exactly its commit. The GitHub token signs the
+ * clone and the fetch and is taken out of the firewall before this returns: nothing that runs afterwards
+ * can use it. `extra` is every other domain the sandbox may reach. Stops the sandbox when it cannot finish.
+ */
+async function checkedOut(
+  deps: ExternalReviewDeps,
+  row: typeof externalReview.$inferSelect,
+  token: string,
+  extra: EgressRule[],
+): Promise<Checkout> {
+  const repo = row.repository
+  const cloning: EgressRule[] = [githubEgress(token), ...extra]
+  const sandbox = await createIsolatedSandbox(deps.sandbox, {
+    owner: { owner: 'review-pull-request', repository: repo, pull: row.pullNumber },
+    timeoutMs: fitToSession({ sandboxMs: deps.sandboxMs ?? SANDBOX_MS }, deps.sandbox.maxSessionMs)
+      .sandboxMs,
+    // No cache key: a stranger's code may write a package store that the next trusted run would read.
+    egress: cloning,
+  })
+  try {
+    if (!sandbox.updateEgress) {
+      throw new Error(
+        'this sandbox cannot change its firewall, so code of a pull request cannot run in it',
+      )
+    }
+    await freshGithubCredential(sandbox, cloning, {
+      mint: async () => (await deps.github.installationToken(repo)).token,
+      onToken: () => {},
+    })
+    const { backend } = sandbox
+    const { repoDir } = await cloneRepository(backend, {
+      repoUrl: `https://github.com/${repo}.git`,
+      ref: row.baseRef,
+      instanceId: INSTANCE,
+    })
+    const git = `git -C ${repoDir}`
+    const baseSha = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
+    // The head of a fork is read through the pull request's ref: only numbers and a checked commit reach the shell.
+    await must(backend, `${git} fetch origin refs/pull/${row.pullNumber}/head`)
+    await must(backend, `${git} checkout --detach ${row.headSha}`)
+    const at = (await must(backend, `${git} rev-parse HEAD`)).stdout.trim()
+    if (at !== row.headSha) throw new Error(`checked out ${at}, not ${row.headSha}`)
+    await sandbox.updateEgress(extra)
+    return { sandbox, backend, repoDir, baseSha }
+  } catch (error) {
     await sandbox.stop()
+    throw error
+  }
+}
+
+/** Runs the repository's checks on the head, in a sandbox of their own that is stopped when they end. */
+async function runChecksOfPull(
+  deps: ExternalReviewDeps,
+  row: typeof externalReview.$inferSelect,
+  token: string,
+  config: RepoConfig,
+): Promise<CheckResult[]> {
+  const run = await checkedOut(deps, row, token, [
+    REGISTRY,
+    ...config.egress.map((domain) => ({ domain })),
+  ])
+  try {
+    await prepareDeclaredPackageManager(run.backend, run.repoDir)
+    return await runChecks(
+      run.backend,
+      run.repoDir,
+      effectiveChecks(config),
+      deps.checkMs ?? DEFAULT_CHECK_MS,
+    )
+  } finally {
+    await run.sandbox.stop()
   }
 }
 

@@ -466,7 +466,7 @@ describe('notReviewed', () => {
     notReviewed(intentOf(payload(over, head)))
 
   it('lets a collaborator, a member and an owner through, from a fork or not', () => {
-    for (const author_association of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
+    for (const author_association of ['OWNER', 'COLLABORATOR']) {
       expect(why({ author_association })).toBeUndefined()
     }
     expect(why({}, { repo: { full_name: 'paulo/app' } })).toBeUndefined()
@@ -492,5 +492,47 @@ describe('notReviewed', () => {
 
   it('refuses a head that is not a commit', () => {
     expect(why({}, { sha: '--upload-pack=x' })).toContain('not a commit')
+  })
+})
+
+describe('notReviewed: an organisation member is not someone with write access', () => {
+  it('refuses MEMBER, which only says the author belongs to the owning organisation', () => {
+    const intent = decideIngress('pull_request', {
+      action: 'opened',
+      number: 3,
+      pull_request: {
+        title: 't',
+        user: { login: 'bob', type: 'User' },
+        author_association: 'MEMBER',
+        head: { sha: 'a'.repeat(40), ref: 'bob/x', repo: { full_name: 'bob/app' } },
+        base: { ref: 'main' },
+      },
+      repository: { full_name: 'paulo/app' },
+    })
+    if (intent.accept || !('intent' in intent) || intent.intent.kind !== 'pull_request_to_review') {
+      throw new Error('not routed')
+    }
+    expect(notReviewed(intent.intent)).toContain('write access')
+  })
+})
+
+describe('notReviewed: an organisation member is not someone with write access', () => {
+  it('refuses MEMBER, which only says the author belongs to the owning organisation', () => {
+    const decision = decideIngress('pull_request', {
+      action: 'opened',
+      number: 3,
+      pull_request: {
+        title: 't',
+        user: { login: 'bob', type: 'User' },
+        author_association: 'MEMBER',
+        head: { sha: 'a'.repeat(40), ref: 'bob/x', repo: { full_name: 'bob/app' } },
+        base: { ref: 'main' },
+      },
+      repository: { full_name: 'paulo/app' },
+    })
+    if (decision.accept || !('intent' in decision)) throw new Error('not routed')
+    expect(
+      notReviewed(decision.intent as Extract<RoutedIntent, { kind: 'pull_request_to_review' }>),
+    ).toContain('write access')
   })
 })

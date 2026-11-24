@@ -1700,11 +1700,32 @@ describe('reviews of a pull request', () => {
       const reviews =
         page === 1
           ? Array.from({ length: 100 }, () => ({ body: 'someone else', commit_id: 'x' }))
-          : [{ body: 'MARK', commit_id: 'abc' }]
+          : [{ body: 'MARK', commit_id: 'abc', user: { login: 'app[bot]' } }]
       return new Response(JSON.stringify(reviews), { status: 200 })
     }
-    const found = await createGithubApi(fetch, noWait).reviewedCommits('o/r', 't', 5, 'MARK')
+    const found = await createGithubApi(fetch, noWait).reviewedCommits(
+      'o/r',
+      't',
+      5,
+      'MARK',
+      'app[bot]',
+    )
     expect(found).toEqual(['abc'])
     expect(pages).toHaveLength(2)
+  })
+
+  it('ignores a review that holds the marker but was not written by the App', async () => {
+    const fetch = async () =>
+      new Response(
+        JSON.stringify([
+          { body: 'MARK', commit_id: 'evil', user: { login: 'stranger' } },
+          { body: 'MARK', commit_id: 'noauthor', user: null },
+          { body: 'MARK', commit_id: 'ours', user: { login: 'app[bot]' } },
+        ]),
+        { status: 200 },
+      )
+    expect(
+      await createGithubApi(fetch, noWait).reviewedCommits('o/r', 't', 5, 'MARK', 'app[bot]'),
+    ).toEqual(['ours'])
   })
 })

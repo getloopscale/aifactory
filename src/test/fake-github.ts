@@ -901,9 +901,15 @@ export class FakeGithub implements GithubApi {
     )
   }
 
-  async reviewedCommits(repo: string, token: string, number: number, marker: string) {
+  async reviewedCommits(
+    repo: string,
+    token: string,
+    number: number,
+    marker: string,
+    author: string,
+  ) {
     return this.call(
-      { method: 'reviewedCommits', repo, token, args: [number, marker], failed: false },
+      { method: 'reviewedCommits', repo, token, args: [number, marker, author], failed: false },
       () =>
         this.reviews
           .filter((r) => r.repo === repo && r.number === number && r.body.includes(marker))
