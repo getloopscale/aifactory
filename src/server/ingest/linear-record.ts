@@ -83,7 +83,8 @@ export async function recordLinearDelivery(
         repository: decision.repository,
         payload: delivery.payload,
         outcome: withdrawn ? 'routed' : decision.accept ? 'task_created' : 'ignored',
-        code: decision.code,
+        // A withdrawn item is stored under why it was routed, not under the decision it would have had.
+        code: withdrawn ? withdrawn.kind : decision.code,
         reason: decision.reason,
       })
       .onConflictDoNothing({ target: ingress.deliveryId })
@@ -142,6 +143,10 @@ export async function recordLinearDelivery(
   })
 }
 
+/** The queue's key for a run: a task that starts over already used its first key, which the queue would take as a duplicate. */
+export const runJobKey = (taskId: number, restartedBy?: string) =>
+  restartedBy ? `task-${taskId}-${restartedBy}` : `task-${taskId}`
+
 /** Stores the delivery and queues the run in the same transaction, as `recordAndQueue` does for GitHub. */
 export async function recordLinearAndQueue(delivery: LinearDelivery, queue: QueueClient) {
   const client = await getPool().connect()
@@ -150,13 +155,13 @@ export async function recordLinearAndQueue(delivery: LinearDelivery, queue: Queu
       drizzle(client, { schema }),
       delivery,
       (itemId) => readLinearFacts(linearQueryFromEnv(), itemId),
-      (taskId) =>
+      (taskId, restartedBy) =>
         queue
           .enqueueInTransaction(
             client,
             'run-task',
             { taskId },
-            { idempotencyKey: `task-${taskId}` },
+            { idempotencyKey: runJobKey(taskId, restartedBy) },
           )
           .then(() => holdNewJob(drizzle(client, { schema }), taskId)),
     )

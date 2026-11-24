@@ -145,4 +145,36 @@ describe('recordLinearDelivery', () => {
     )
     expect(never).toMatchObject({ status: 'ignored', code: 'item_closed' })
   })
+
+  it('starts a cancelled task over when the item is labelled again, and routes a withdrawal under its own code', async () => {
+    await recordLinearDelivery(
+      getDb(),
+      { deliveryId: 'linear:r1', payload: payload('team-1') },
+      nothingToRead,
+    )
+    const unlabeled = {
+      ...payload('team-1'),
+      action: 'update',
+      data: { ...payload('team-1').data, labels: [] },
+    }
+    await recordLinearDelivery(
+      getDb(),
+      { deliveryId: 'linear:r2', payload: unlabeled },
+      nothingToRead,
+    )
+    const [withdrawn] = await getDb()
+      .select()
+      .from(ingress)
+      .where(eq(ingress.deliveryId, 'linear:r2'))
+    expect(withdrawn).toMatchObject({ outcome: 'routed', code: 'issue_unlabeled' })
+    const queued: [number, string | undefined][] = []
+    const again = await recordLinearDelivery(
+      getDb(),
+      { deliveryId: 'linear:r3', payload: payload('team-1') },
+      nothingToRead,
+      async (taskId, restartedBy) => void queued.push([taskId, restartedBy]),
+    )
+    expect(again.status).toBe('task_restarted')
+    expect(queued).toEqual([[expect.any(Number), 'linear:r3']])
+  })
 })

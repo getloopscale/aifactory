@@ -2,7 +2,7 @@ import { Link } from 'react-router'
 
 import type { CoordinatorActionView } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
-import { ago } from '../lib/format'
+import { ago, itemName } from '../lib/format'
 
 /** The coordinator's decisions, in the order they come; `withTask` adds the link to each task. */
 export function CoordinatorActions({
@@ -31,7 +31,7 @@ export function CoordinatorActions({
               to={`/tasks/${a.taskId}`}
               className="mt-1 block text-xs text-muted-foreground underline underline-offset-2"
             >
-              {a.repository} #{a.issueNumber} · {a.title}
+              {a.repository} {itemName(a)} · {a.title}
             </Link>
           ) : null}
           <p className="mt-2 whitespace-pre-wrap">

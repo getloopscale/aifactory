@@ -369,6 +369,8 @@ export type TaskCard = {
   id: number
   repository: string
   issueNumber: number
+  /** What a person reads for an item that is not a GitHub issue (`ENG-12`); its `issueNumber` is a local ordinal. */
+  displayIdentifier?: string | null
   title: string
   stage: Stage
   column: Column
@@ -558,6 +560,7 @@ export type CoordinatorActionView = {
   /** The task it belongs to, for the list across tasks. */
   repository: string
   issueNumber: number
+  displayIdentifier?: string | null
   title: string
   exceptionKind: string
   action: string

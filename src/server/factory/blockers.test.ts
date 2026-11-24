@@ -117,3 +117,11 @@ describe('what a builder says it waits for', () => {
     expect(refOf('release 2.0')).toBeUndefined()
   })
 })
+
+describe('a Linear blocker recorded on a failed task', () => {
+  it('is not a GitHub issue: the retry reads only owner/repo#n, and the run checks the relation again', async () => {
+    const { refOf } = await import('./blockers')
+    expect(refOf('ENG-2')).toBeUndefined()
+    expect(refOf('o/r#2')).toEqual({ repository: 'o/r', number: 2 })
+  })
+})
