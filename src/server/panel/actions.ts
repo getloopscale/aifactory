@@ -428,7 +428,14 @@ async function mergesTheBase(
     .from(repository)
     .where(eq(repository.fullName, row.repository))
   const base = integrationBranch(config ?? {})
-  await requeue(deps, row.id, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
+  // The factory merges the base itself first, keeping both sides of an append-only file with no agent; a
+  // conflict that needs judgement fails the run with its files and the coordinator sends it back.
+  const note = conflictNote(base)
+  await requeue(deps, row.id, ['done'], 'automatic_changes', note, row.headSha, {
+    note,
+    mergeBase: true,
+    preAgent: false,
+  })
   return true
 }
 
@@ -462,7 +469,12 @@ export async function sendBackConflictAutomatically(
     await requeue(deps, taskId, ['done'], 'automatic_retry', '', row.headSha)
     return
   }
-  await requeue(deps, taskId, ['done'], 'automatic_changes', conflictNote(base), row.headSha)
+  const note = conflictNote(base)
+  await requeue(deps, taskId, ['done'], 'automatic_changes', note, row.headSha, {
+    note,
+    mergeBase: true,
+    preAgent: false,
+  })
 }
 
 /**

@@ -75,13 +75,31 @@ describe('mergeIntegration', () => {
   })
 
   it('names the files that conflict, and leaves the branch as it was', async () => {
-    commit('CHANGELOG.md', '# Changelog\n\nthe work\n', 'the work changes the changelog')
+    commit('CHANGELOG.md', 'the work\n', 'the work changes the changelog')
     const head = run('rev-parse HEAD')
-    const base = baseMoves('# Changelog\n\nthe base\n')
+    const base = baseMoves('the base\n')
 
     expect(await mergeIntegration(local, git(), base)).toEqual({ conflicts: ['CHANGELOG.md'] })
 
     expect(run('rev-parse HEAD')).toBe(head)
+    expect(run('status --porcelain')).toBe('')
+  })
+
+  it('keeps both entries when two tasks append to the same Unreleased section', async () => {
+    const shape = '# Changelog\n\n## Unreleased\n\n## 1.0.0\n'
+    run('switch -q workspace')
+    commit('CHANGELOG.md', shape, 'shape')
+    run('switch -q factory/7')
+    run('merge -q workspace')
+    commit('CHANGELOG.md', shape.replace('\n\n## 1.0.0', '\n- the work\n\n## 1.0.0'), 'work')
+    const base = baseMoves(shape.replace('\n\n## 1.0.0', '\n- the base\n\n## 1.0.0'))
+
+    expect(await mergeIntegration(local, git(), base)).toEqual({ merged: true })
+
+    const text = execSync(`cat ${dir}/CHANGELOG.md`, { encoding: 'utf8' })
+    expect(text).toContain('- the work')
+    expect(text).toContain('- the base')
+    expect(text).not.toContain('<<<<<<<')
     expect(run('status --porcelain')).toBe('')
   })
 
