@@ -279,6 +279,39 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
           </ul>
         )}
       </section>
+
+      <section aria-label={t.task.securityReviews}>
+        <h2 className="mb-2 text-sm font-semibold">{t.task.securityReviews}</h2>
+        {detail.securityReviews.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t.task.noSecurityReview}</p>
+        ) : (
+          <ul className="space-y-2">
+            {detail.securityReviews.map((r) => (
+              <li key={r.id} className="rounded border border-border bg-card p-3 text-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-medium">
+                    {t.task.securityLine(r.round, r.verdict, r.outcome)}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {[r.harness, r.model, r.effort, shortSha(r.sha)].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+                <p className="mt-1 text-foreground">{r.summary}</p>
+                {r.findings.length > 0 ? (
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
+                    {r.findings.map((f, i) => (
+                      <li key={i}>
+                        <strong>{f.severity}</strong>
+                        {f.file ? <code> {f.file}</code> : null}: {f.issue}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   )
 }

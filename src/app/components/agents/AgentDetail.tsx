@@ -7,7 +7,13 @@ import { useCopy } from '../../lib/copy'
 import { EngineChooser } from './EngineChooser'
 import { PromptBlock } from './PromptBlock'
 
-const ROLES = ['builder', 'planner', 'reviewer', 'merger'] as const satisfies readonly AgentRole[]
+const ROLES = [
+  'builder',
+  'planner',
+  'reviewer',
+  'merger',
+  'security',
+] as const satisfies readonly AgentRole[]
 const roleOf = (id: string): AgentRole | undefined => ROLES.find((r) => r === id)
 
 const TONE = { reads: 'default', asks: 'warning', sandbox: 'primary' } as const

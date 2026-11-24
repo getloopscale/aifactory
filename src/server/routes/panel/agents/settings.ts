@@ -8,7 +8,7 @@ import { ownerOnly } from '../../../panel/policy'
 
 const agent = z.string().max(40).nullable().optional()
 const perRole = z
-  .object({ builder: agent, planner: agent, reviewer: agent, merger: agent })
+  .object({ builder: agent, planner: agent, reviewer: agent, merger: agent, security: agent })
   .optional()
 
 /** Which coding agent builds, plans and reviews. A null goes back to the default. */
@@ -20,6 +20,7 @@ export const PUT = route()
       planner: agent,
       reviewer: agent,
       merger: agent,
+      security: agent,
       models: perRole,
       efforts: perRole,
     }),

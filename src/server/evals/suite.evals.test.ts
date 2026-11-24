@@ -67,6 +67,8 @@ async function evalDeps(repository: string, issueLabels: string[]) {
   const builder = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
   const chosen = typeof deps.reviewer === 'function' ? deps.reviewer(labels) : deps.reviewer
   const planner = deps.planner?.(labels, builder.name)
+  // `null` is a security agent that could not start: every approval is then blocked, as in `Run`.
+  const security = deps.security ? (deps.security(labels) ?? null) : undefined
   const knowledge: KnowledgeSource | undefined = deps.knowledge && {
     ...deps.knowledge,
     delivered: async () => {},
@@ -76,6 +78,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
     builder,
     reviewer: chosen ?? builder,
     ...(planner ? { planner } : {}),
+    ...(security !== undefined ? { security } : {}),
     author: deps.author,
     knowledge,
     // The time a task of this repository gets: the owner's limit, else the default.
@@ -87,7 +90,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
 async function currentSetup(cases: EvalCase[]) {
   const setup: Record<string, string> = {}
   for (const repository of [...new Set(cases.map((c) => c.repository))].sort()) {
-    const { builder, reviewer, planner } = await evalDeps(repository, [])
+    const { builder, reviewer, planner, security } = await evalDeps(repository, [])
     const effective = await effectiveEnv(getDb(), env)
     const merger = effective.FACTORY_MERGER
     const one = agentSetup(
@@ -97,6 +100,7 @@ async function currentSetup(cases: EvalCase[]) {
       optionsFor,
       planner?.name,
       merger && merger !== builder.name ? merger : undefined,
+      security?.name,
     )
     for (const [key, value] of Object.entries(one)) setup[`${repository} ${key}`] = value
   }

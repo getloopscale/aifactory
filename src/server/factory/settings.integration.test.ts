@@ -45,6 +45,7 @@ describe('the choice of agent, kept in the panel', () => {
       planner: null,
       reviewer: null,
       merger: null,
+      security: null,
     })
     const env = await effectiveEnv(getDb(), { FACTORY_HARNESS: 'codex' })
     expect(env.FACTORY_HARNESS).toBe('codex')
@@ -71,6 +72,7 @@ describe('the choice of agent, kept in the panel', () => {
       planner: null,
       reviewer: 'claude-code',
       merger: null,
+      security: null,
     })
     await saveChosen(getDb(), { reviewer: null }, ready)
     expect(await loadChosen(getDb())).toEqual({
@@ -78,6 +80,7 @@ describe('the choice of agent, kept in the panel', () => {
       planner: null,
       reviewer: null,
       merger: null,
+      security: null,
     })
     await saveChosen(getDb(), {}, ready)
     expect((await loadChosen(getDb())).builder).toBe('claude-code')
@@ -104,6 +107,7 @@ describe('the choice of agent, kept in the panel', () => {
       planner: null,
       reviewer: null,
       merger: null,
+      security: null,
     })
   })
 
@@ -132,12 +136,14 @@ describe('the choice of agent, kept in the panel', () => {
       planner: null,
       reviewer: 'codex',
       merger: null,
+      security: null,
     })
     expect(settings.effective).toEqual({
       builder: 'claude-code',
       planner: 'codex',
       reviewer: 'codex',
       merger: 'claude-code',
+      security: 'claude-code',
     })
     expect(settings.repositoriesWithOwn).toEqual([
       { repository: 'o/own', builder: 'codex', reviewer: null },
@@ -173,6 +179,35 @@ const cache = JSON.stringify({
   ],
 })
 const read = () => cache
+
+describe("the security role's effort", () => {
+  it('refuses an effort below the highest the agent offers, and stores none', async () => {
+    await expect(
+      saveChosen(getDb(), { efforts: { security: 'low' } }, ready, read),
+    ).rejects.toBeInstanceOf(SettingRefused)
+    await expect(
+      changeAgentSettings(getDb(), { efforts: { security: 'medium' } }, ready, read),
+    ).rejects.toBeInstanceOf(ActionRefused)
+    expect(await getDb().select().from(setting)).toEqual([])
+  })
+
+  it('takes the highest effort as it is, without storing a choice for it', async () => {
+    await saveChosen(getDb(), { efforts: { security: 'high' } }, ready, read)
+    const settings = await agentSettings(getDb(), ready, read)
+    expect(settings.chosenEffort.security).toBeNull()
+    expect(settings.effective.security).toBe(settings.effective.builder)
+  })
+
+  it('is never told an effort from an environment, so it cannot be lowered there either', () => {
+    expect(
+      optionsFor(
+        { FACTORY_EFFORT_SECURITY: 'claude-code:low', FACTORY_EFFORT_BUILDER: 'claude-code:low' },
+        'security',
+        'claude-code',
+      ),
+    ).toEqual({})
+  })
+})
 
 describe('the model and the effort, kept in the panel', () => {
   it('saves a model and an effort for a role, and a run is told them for that agent', async () => {
@@ -210,6 +245,7 @@ describe('the model and the effort, kept in the panel', () => {
       planner: null,
       reviewer: null,
       merger: null,
+      security: null,
     })
   })
 
@@ -300,6 +336,7 @@ describe('the model and the effort, kept in the panel', () => {
       planner: null,
       reviewer: null,
       merger: null,
+      security: null,
     })
   })
 
