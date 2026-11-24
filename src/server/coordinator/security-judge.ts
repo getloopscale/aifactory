@@ -55,3 +55,41 @@ export function parseSecurityJudgement(answer: string): SecurityJudgement {
       return escalate(`"${String(json.action)}" is not an action a security judgement may take`)
   }
 }
+
+/**
+ * The coordinator's decision for a `security` exception, from what the security agent judged. Every branch
+ * is an action of the closed set the coordinator already has: a fix or a replacement is scoped, an upstream
+ * fix is waited for (the exception ends on its own once the registry lists a patched version, and the next pass
+ * resumes the tasks it held), and anything else, or no judgement, goes to a person.
+ */
+export function securityDecision(exception: { evidence: string; security?: SecurityJudgement }): {
+  action: 'scope' | 'wait' | 'escalate'
+  reason: string
+} {
+  const { evidence, security } = exception
+  if (!security) {
+    return {
+      action: 'escalate',
+      reason: `${evidence}: no security judgement was made, so a person decides; nothing is ignored`,
+    }
+  }
+  switch (security.action) {
+    case 'fix':
+      return {
+        action: 'scope',
+        reason: `${evidence}: a patched version exists, upgrade or override to ${security.version}. ${security.reason}`,
+      }
+    case 'replace':
+      return {
+        action: 'scope',
+        reason: `${evidence}: remove or replace the dependency. ${security.reason}`,
+      }
+    case 'wait_upstream':
+      return {
+        action: 'wait',
+        reason: `${evidence}: no patched version of ${security.advisory} is published, the fix is tracked at ${security.tracked}; the tasks it holds wait and resume when the registry lists one`,
+      }
+    case 'escalate':
+      return { action: 'escalate', reason: `${evidence}: ${security.reason}` }
+  }
+}

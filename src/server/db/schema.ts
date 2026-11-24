@@ -834,7 +834,8 @@ export const metricSignal = pgTable(
  * changed nothing (`no_change`) and a merge of the integration branch with no agent that conflicted
  * (`base_conflict`); any other is a `failure`. A handoff of integrated work after its automatic runs is its own kind
  * too: a pull request that still conflicts with its base (`pull_conflict`), a base that passes the checks blamed on
- * it again (`base_fixed`) and required checks that still fail (`ci_red`).
+ * it again (`base_fixed`) and required checks that still fail (`ci_red`). A red security check, or anything that
+ * would ignore an advisory, lower a level or skip a check, is a `security` exception (#241).
  */
 export const EXCEPTION_KINDS = [
   'checks_unchanged',
@@ -860,6 +861,7 @@ export const EXCEPTION_KINDS = [
   'ci_red',
   'checks_broke_after_review',
   'publication_stalled',
+  'security',
 ] as const
 
 /**
