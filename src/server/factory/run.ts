@@ -1354,6 +1354,29 @@ export class Run {
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
+    // `done` means integrated, or waiting for CI to integrate: any other work waits for a person.
+    if (!(row.mergedSha || row.resolvedSha || row.awaitingCiSha)) {
+      const held = await this.previousHandoff()
+      const reason = `the rework changed nothing, so the work still waits for a person${held.reason ? `: ${held.reason}` : ''}`
+      await enterRunStage(deps.db, taskId, 'handoff', {
+        branch,
+        sha: row.headSha,
+        reason,
+        heldReason: held.reason ?? null,
+        ...(held.cause ? { cause: held.cause } : {}),
+        pullRequestUrl: row.pullRequestUrl,
+        unchanged: true,
+        agentSummary: first.summary.slice(0, 4_000),
+        costUsd: this.cost,
+      })
+      return {
+        status: 'handoff',
+        branch,
+        sha: row.headSha,
+        pullRequestUrl: row.pullRequestUrl,
+        reason,
+      }
+    }
     await enterRunStage(deps.db, taskId, 'done', {
       branch,
       sha: row.headSha,
@@ -1368,6 +1391,29 @@ export class Run {
       sha: row.headSha,
       pullRequestUrl: row.pullRequestUrl,
       summary: first.summary,
+    }
+  }
+
+  /**
+   * The handoff the run was sent back from, with its cause and the reason it was first held for (never the
+   * reason of an unchanged send-back, so repeated ones do not stack their prefix). Empty when the last
+   * ending was not a handoff; an older handoff has no cause and none is invented.
+   */
+  private async previousHandoff(): Promise<{ cause?: HandoffCause; reason?: string }> {
+    const { deps, taskId } = this.c
+    const [ended] = await deps.db
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, taskId), inArray(stageEvent.stage, ENDING_STAGES)))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    if (!ended || ended.stage !== 'handoff') return {}
+    const detail = (ended.detail ?? {}) as Record<string, unknown>
+    const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
+    return {
+      cause: text(detail.cause) as HandoffCause | undefined,
+      // `heldReason` is there, null when nothing held it, on every handoff of an unchanged send-back.
+      reason: 'heldReason' in detail ? text(detail.heldReason) : text(detail.reason),
     }
   }
 
