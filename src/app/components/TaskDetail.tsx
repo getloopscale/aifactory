@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import {
+  columnOf,
   type ReviewView,
   type RunView,
   type TaskDetail,
@@ -12,7 +13,7 @@ import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
 import { Conversation } from './Conversation'
 import { TaskActions } from './TaskActions'
-import { useTranscript } from './Transcript'
+import { Transcript } from './Transcript'
 import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
@@ -26,7 +27,6 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
   const { t } = useCopy()
   const resource = useResource<TaskDetail>(`/api/panel/tasks/${id}`, { only: id })
   const detail = resource.data
-  const transcript = useTranscript(id)
 
   if (resource.error) return <p className="text-sm text-destructive">{resource.error}</p>
   if (!detail) return <p className="text-sm text-muted-foreground">{t.task.loading}</p>
@@ -85,12 +85,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
       </div>
 
       <TaskActions detail={detail} onDone={resource.reload} />
-      <Conversation
-        detail={detail}
-        events={transcript.events}
-        error={transcript.error}
-        onDone={resource.reload}
-      />
+      <Conversation detail={detail} onDone={resource.reload} />
 
       <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
@@ -163,6 +158,11 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
             </li>
           ))}
         </ol>
+      </section>
+
+      <section aria-label={t.task.transcript}>
+        <h2 className="mb-2 text-sm font-semibold">{t.task.transcript}</h2>
+        <Transcript taskId={task.id} live={columnOf(task.stage) === 'working'} />
       </section>
 
       {detail.runs.length > 0 ? (
