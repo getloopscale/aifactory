@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 
 import type { PushDevice, PushSubscribeBody } from '../../shared/push'
 import type { Database } from '../db'
@@ -73,12 +73,25 @@ export async function listDevices(db: Database): Promise<PushDevice[]> {
   }))
 }
 
+/** The identities this device was sent and that have not left the inbox since. */
 export const deliveredTo = (db: Database, subscriptionId: number) =>
   db
-    .select({ identity: pushSent.identity, at: pushSent.itemAt })
+    .select({ identity: pushSent.identity })
     .from(pushSent)
     .where(eq(pushSent.subscriptionId, subscriptionId))
-    .then((rows) => rows.map((r) => ({ identity: r.identity, at: r.at.toISOString() })))
+    .then((rows) => rows.map((r) => r.identity))
+
+/** Forgets items that left the inbox, so one that comes back is sent again. */
+export async function forgetDelivered(
+  db: Database,
+  subscriptionId: number,
+  identities: string[],
+): Promise<void> {
+  if (identities.length === 0) return
+  await db
+    .delete(pushSent)
+    .where(and(eq(pushSent.subscriptionId, subscriptionId), inArray(pushSent.identity, identities)))
+}
 
 export async function recordDelivery(
   db: Database,

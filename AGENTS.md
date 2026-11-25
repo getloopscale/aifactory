@@ -436,8 +436,9 @@ reads that file, not a convention.
   after the factory's own merge, and the release train or a person releases it and closes its issue. It starts no
   release itself.
 - **A push is sent once per item and device.** `push-attention` reads the inbox and sends each new item
-  (`<task id>:<kind>`, with the time it appeared) to every subscription in `push_subscription`, recording it in
-  `push_sent`; a 404 or 410 deletes the device, any other failure is retried next pass. `push/send.ts` is the only
+  (`<task id>:<kind>`) to every subscription in `push_subscription`, recording it in `push_sent` until the item leaves
+  the inbox (its time moves with every event of its task, so it never makes an item new; one that leaves and comes
+  back is sent again); a 404 or 410 deletes the device, any other failure is retried next pass. `push/send.ts` is the only
   module that calls the network and uses the `web-push` package because TheoKit ships no push sender (to be filed on
   `usetheokit/theokit`). The private VAPID key is never logged or returned. A crash between the push service
   accepting a message and its `push_sent` row can send it twice.

@@ -1,9 +1,6 @@
 import type { PushPayload } from '../../shared/push'
 import type { InboxItem } from '../../shared/panel'
 
-/** An item already pushed to one device: its identity and the time it appeared. */
-export type Delivered = { identity: string; at: string }
-
 export type PushMessage = { identity: string; at: string; payload: PushPayload }
 
 export const identityOf = (item: Pick<InboxItem, 'kind'> & { task: { id: number } }) =>
@@ -18,22 +15,21 @@ const TITLES: Record<InboxItem['kind'], string> = {
 }
 
 /**
- * The messages to send for one device, from the inbox now and what that device already got: one per new
- * identity. An item is new when its identity and time were never sent, so an item that left the inbox
- * and came back (with a later time) is sent again, and one that stayed is not.
+ * The messages to send for one device, from the inbox now and the identities that device already got: one per
+ * new identity. An item's time (`at`, the latest stage event of its task) moves while the item stays, so it is
+ * never what makes an item new: an item is new when its identity is not among those the device holds.
  */
 export function newMessages(
   inbox: InboxItem[],
-  delivered: Delivered[],
+  delivered: string[],
   origin: string,
 ): PushMessage[] {
-  const seen = new Set(delivered.map((d) => `${d.identity}@${Date.parse(d.at)}`))
+  const seen = new Set(delivered)
   const out = new Map<string, PushMessage>()
   for (const item of inbox) {
     const identity = identityOf(item)
-    const key = `${identity}@${Date.parse(item.at)}`
-    if (seen.has(key) || out.has(key)) continue
-    out.set(key, {
+    if (seen.has(identity) || out.has(identity)) continue
+    out.set(identity, {
       identity,
       at: item.at,
       payload: {
@@ -45,4 +41,10 @@ export function newMessages(
     })
   }
   return [...out.values()]
+}
+
+/** The identities a device got that are no longer in the inbox: forgetting them makes a return a new item. */
+export function departed(inbox: InboxItem[], delivered: string[]): string[] {
+  const present = new Set(inbox.map(identityOf))
+  return delivered.filter((identity) => !present.has(identity))
 }

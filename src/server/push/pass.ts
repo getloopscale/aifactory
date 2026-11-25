@@ -4,10 +4,16 @@ import type { Database } from '../db'
 import { inbox } from '../panel/queries'
 
 import type { PushConfig } from './config'
-import { newMessages } from './notify'
+import { departed, newMessages } from './notify'
 import type { PushSender } from './send'
 import { isGone } from './send'
-import { deliveredTo, listSubscriptions, recordDelivery, removeSubscriptionById } from './store'
+import {
+  deliveredTo,
+  forgetDelivered,
+  listSubscriptions,
+  recordDelivery,
+  removeSubscriptionById,
+} from './store'
 
 const PUSH_LOCK = 'push-attention'
 
@@ -22,8 +28,8 @@ export type PushPassDeps = {
 export type PushPassResult = { sent: number; removed: number; failed: number }
 
 /**
- * One pass: every new inbox item goes once to every device. A device is sent only items that appeared
- * after it subscribed. A gone endpoint is deleted; any other failure is logged and tried again next pass.
+ * One pass: every new inbox item goes once to every device. An item is the same while its identity stays in the
+ * inbox, whatever new events its task gets; one that left and came back is sent again. A gone endpoint is deleted; any other failure is logged and tried again next pass.
  * One pass runs at a time on any process (an advisory lock), so two never send the same message.
  */
 export async function pushPass(deps: PushPassDeps): Promise<PushPassResult | undefined> {
@@ -43,9 +49,9 @@ export async function pushPass(deps: PushPassDeps): Promise<PushPassResult | und
       if (subscriptions.length === 0) return result
       const items = await inbox(db)
       for (const sub of subscriptions) {
-        const since = sub.createdAt.getTime()
-        const mine = items.filter((i) => Date.parse(i.at) >= since)
-        const messages = newMessages(mine, await deliveredTo(db, sub.id), config.origin)
+        const delivered = await deliveredTo(db, sub.id)
+        await forgetDelivered(db, sub.id, departed(items, delivered))
+        const messages = newMessages(items, delivered, config.origin)
         for (const message of messages) {
           const outcome = await sender(sub, message.payload)
           if (outcome.ok) {
