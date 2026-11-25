@@ -92,6 +92,8 @@ export const ptBR: Copy = {
     setup: 'Configuração',
   },
   menu: {
+    setupNeedsAttention: (n: number) =>
+      n === 1 ? '1 item da configuração pede atenção' : `${n} itens da configuração pedem atenção`,
     label: 'Menu',
     folded: 'Menu recolhido',
     main: 'Principal',

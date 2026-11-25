@@ -17,6 +17,8 @@ export const en = {
     setup: 'Setup',
   },
   menu: {
+    setupNeedsAttention: (n: number) =>
+      n === 1 ? '1 setup item needs attention' : `${n} setup items need attention`,
     label: 'Menu',
     folded: 'Folded menu',
     main: 'Main',
