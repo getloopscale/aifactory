@@ -7,14 +7,14 @@ import { get } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { ago } from '../lib/format'
 import { subscribe } from '../lib/live'
-import { mergeSteps, transcriptRows } from '../lib/transcript'
+import { mergeSteps, transcriptRows, type TranscriptRow } from '../lib/transcript'
 
 /**
  * Every step of a task's agents: the stored ones a page at a time, and the new ones from the page's one
  * event stream as they happen. The stream is listened to before the first page is asked for, and what it
  * brings meanwhile is kept, so a step written between the two is not lost.
  */
-function useTranscript(taskId: number) {
+export function useTranscript(taskId: number) {
   const [events, setEvents] = useState<TranscriptEvent[]>([])
   const [error, setError] = useState<string>()
 
@@ -60,6 +60,33 @@ function useTranscript(taskId: number) {
   return { events, error }
 }
 
+/** One step of an agent: a text, a tool call with what came back, or a note. */
+export function StepRow({ row }: { row: TranscriptRow }) {
+  const { t } = useCopy()
+  return row.type === 'tool' ? (
+    <ToolCallCard
+      tool={row.tool}
+      target={row.target}
+      status={row.status}
+      timestamp={ago(row.at, Date.now(), t.time)}
+      output={
+        row.output ? (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap">{row.output}</pre>
+        ) : undefined
+      }
+    />
+  ) : row.type === 'say' ? (
+    <p className="whitespace-pre-wrap">
+      <span className="mr-2 text-xs font-medium text-muted-foreground">
+        {t.transcript[row.role]} · {PERSONAS[row.role].name}
+      </span>
+      {row.text}
+    </p>
+  ) : (
+    <p className={row.failed ? 'text-destructive' : 'text-xs text-muted-foreground'}>{row.text}</p>
+  )
+}
+
 export function Transcript({ taskId, live }: { taskId: number; live: boolean }) {
   const { events, error } = useTranscript(taskId)
   const { t } = useCopy()
@@ -75,30 +102,7 @@ export function Transcript({ taskId, live }: { taskId: number; live: boolean }) 
     <ol className="space-y-2">
       {transcriptRows(events, live).map((row) => (
         <li key={row.seq} className="text-sm">
-          {row.type === 'tool' ? (
-            <ToolCallCard
-              tool={row.tool}
-              target={row.target}
-              status={row.status}
-              timestamp={ago(row.at, Date.now(), t.time)}
-              output={
-                row.output ? (
-                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap">{row.output}</pre>
-                ) : undefined
-              }
-            />
-          ) : row.type === 'say' ? (
-            <p className="whitespace-pre-wrap">
-              <span className="mr-2 text-xs font-medium text-muted-foreground">
-                {t.transcript[row.role]} · {PERSONAS[row.role].name}
-              </span>
-              {row.text}
-            </p>
-          ) : (
-            <p className={row.failed ? 'text-destructive' : 'text-xs text-muted-foreground'}>
-              {row.text}
-            </p>
-          )}
+          <StepRow row={row} />
         </li>
       ))}
     </ol>
