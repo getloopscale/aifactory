@@ -45,17 +45,16 @@ describe('an E2B sandbox', () => {
   })
 
   // theocode's english-only check reads these paths, so the image must hold exactly what theokit's CI runner holds
-  // (ci.yml prints its inventory). The listing is in the failure message, with sizes and link targets.
+  // (ci.yml prints its inventory). The failure message carries the listing, with sizes and link targets.
   it('holds, of the dictionary paths the checker reads, exactly the ones the CI runner holds', async () => {
     const probe = CHECKER_DICTIONARY_PATHS.map((p) => `test -e ${p} && echo ${p}`).join('; ')
     const found = (await sh(`${probe}; true`)).stdout.trim().split('\n').filter(Boolean)
     const listing = (
       await sh('ls -lL /usr/share/dict /usr/share/hunspell 2>&1; ls -l /usr/share/dict')
     ).stdout
-    expect({ found, listing }).toEqual({
-      found: SANDBOX_DICTIONARY_PRESENT,
-      listing: expect.any(String),
-    })
+    expect(found, `dictionary inventory of the image:\n${listing}`).toEqual(
+      SANDBOX_DICTIONARY_PRESENT,
+    )
   })
 
   it('runs the declared package manager, whatever its version, in a child with only PATH and HOME and no network', async () => {

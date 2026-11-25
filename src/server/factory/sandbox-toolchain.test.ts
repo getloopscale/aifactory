@@ -20,10 +20,9 @@ describe('the sandbox toolchain', () => {
     expect(SANDBOX_TOOLCHAIN.nodeHeaders).toBe(SANDBOX_TOOLCHAIN.node)
   })
 
-  // A repository check that reads /usr/share/dict (theokit's TheoCode english-only lint) fails closed without them.
   // A repository check that reads /usr/share/dict (theokit's TheoCode english-only lint) fails closed without them,
   // and reads a different lexicon when the image adds a list: the packages are exactly the CI runner's pair.
-  it('installs exactly the word-list packages the CI runner installs', () => {
+  it('installs only the word-list packages named in SANDBOX_DICTIONARY_PACKAGES', () => {
     const installed = /apt-get install -y --no-install-recommends ([^\\\n]+)/
       .exec(dockerfile)?.[1]
       .split(' ')
@@ -41,9 +40,13 @@ describe('the sandbox toolchain', () => {
     )
   })
 
-  it('expects, of the six paths the checker reads, only those the two packages provide', () => {
-    expect(SANDBOX_DICTIONARY_PRESENT.every((p) => CHECKER_DICTIONARY_PATHS.includes(p))).toBe(true)
+  it('expects present, of the six paths the checker reads, exactly the ones its packages provide', () => {
     expect(CHECKER_DICTIONARY_PATHS).toHaveLength(6)
+    expect(SANDBOX_DICTIONARY_PRESENT).toEqual([
+      '/usr/share/dict/american-english',
+      '/usr/share/dict/words',
+      '/usr/share/dict/brazilian',
+    ])
   })
 
   it('names the pnpm the factory itself declares', () => {
