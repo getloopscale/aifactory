@@ -348,6 +348,11 @@ export const ptBR: Copy = {
     sendBackWaiting: 'Uma devolução espera a execução começar. Retire-a para corrigir a nota.',
     withdraw: 'Retirar devolução',
     confirmWithdraw: 'Retirar esta devolução? A execução não começa e a tarefa volta.',
+    mergeBase: 'Fazer merge da branch de integração',
+    mergeBaseHelp:
+      'Faz o merge da branch de integração na branch da tarefa. A fábrica faz o merge e um conflito vai para o agente de merge, não para o construtor.',
+    confirmMergeBase: 'Fazer merge da branch de integração na branch desta tarefa?',
+    mergeBaseQueued: 'Merge da branch de integração na fila.',
     withdrawn: 'Devolução retirada.',
     changesContext: (title: string, n: number, repository: string) =>
       `Pull request da issue "${title}" (#${n}) em ${repository}`,
