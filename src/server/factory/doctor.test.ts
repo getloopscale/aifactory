@@ -121,6 +121,20 @@ describe('app_access', () => {
     expect(item.link).toBe('https://github.com/o/r/settings/installations')
   })
 
+  it('names actions: write as missing when the installation did not grant it', () => {
+    const item = appAccessItem(
+      REPO,
+      readOf({
+        reachable: true,
+        granted: { contents: 'write', issues: 'write' },
+        needed: { ...needed, actions: 'write' },
+      }),
+    )
+    expect(item.status).toBe('blocked')
+    expect(item.cause).toContain('actions: write')
+    expect(item.link).toBe('https://github.com/o/r/settings/installations')
+  })
+
   it('takes a write permission for a read one, and an admin one for a write one', () => {
     const item = appAccessItem(
       REPO,
