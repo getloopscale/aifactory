@@ -772,6 +772,8 @@ export const ptBR: Copy = {
       linearLabel: 'Rótulo que pede trabalho no Linear',
       linearLabelDefault: 'factory (o padrão)',
       ask: 'Deixar o agente me fazer perguntas na issue quando algo não estiver claro',
+      reviewPulls:
+        'Revisar pull requests que a fábrica não abriu, quando o autor pode escrever no repositório (um comentário, nunca uma aprovação)',
       builder: 'Construtor',
       reviewer: 'Revisor',
       release: 'Versão final',

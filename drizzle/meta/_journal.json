@@ -365,6 +365,13 @@
       "when": 1795780000001,
       "tag": "0054_review_pattern",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795866378100,
+      "tag": "0055_external_pull_reviews",
+      "breakpoints": true
     }
   ]
 }

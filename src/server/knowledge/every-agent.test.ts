@@ -35,6 +35,14 @@ function sources(dir = 'src/server'): { path: string; text: string }[] {
 const NO_AGENT = ['src/server/factory/prove-checks.ts']
 
 /**
+ * Agents whose output is public and whose input is untrusted: the review of a pull request the factory did
+ * not open reads a stranger's diff and description, and its answer is a public comment. An injection in the
+ * diff could make it quote the owner's knowledge, so private context has no safe use there: these files
+ * open no knowledge feed and give no knowledge tool. Only the external reviewer belongs here.
+ */
+const PUBLIC_UNTRUSTED = ['src/server/factory/external-review.ts']
+
+/**
  * The knowledge base is part of what an agent is, not something each one may opt into: whatever agent the
  * factory runs, in a sandbox or in the panel, reads the same base. These tests fail when an agent is added
  * that would not.
@@ -67,6 +75,7 @@ describe('every agent of the factory reads the knowledge base', () => {
       (f) =>
         !f.path.endsWith('factory/sandbox.ts') &&
         !NO_AGENT.includes(f.path) &&
+        !PUBLIC_UNTRUSTED.includes(f.path) &&
         /\b(createIsolatedSandbox|restoreIsolatedSandbox)\(/.test(f.text),
     )
     expect(starters.length).toBeGreaterThan(0)
@@ -86,6 +95,21 @@ describe('every agent of the factory reads the knowledge base', () => {
         file: file.path,
         agent: /harness|\.prepare\?\.\(|agent\.run\(/i.test(file.text),
       }).toEqual({ file: file.path, agent: false })
+    }
+  })
+
+  it('in a sandbox: an agent of public output and untrusted input never opens a feed or reads the base', () => {
+    const listed = sources().filter((f) => PUBLIC_UNTRUSTED.includes(f.path))
+    expect(listed.map((f) => f.path)).toEqual(PUBLIC_UNTRUSTED)
+    expect(PUBLIC_UNTRUSTED).toEqual(['src/server/factory/external-review.ts'])
+    const opening = sources()
+      .filter((f) => f.text.includes('KnowledgeFeed.open('))
+      .map((f) => f.path)
+    expect(opening.filter((p) => PUBLIC_UNTRUSTED.includes(p))).toEqual([])
+    for (const file of listed) {
+      expect(
+        /knowledge/i.test(file.text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')),
+      ).toBe(false)
     }
   })
 

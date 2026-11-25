@@ -25,6 +25,8 @@ declare module 'theokit/server/jobs' {
     'resume-task': { taskId: number; questionId: number }
     /** Has an agent read a repository and split a goal into issues. */
     'plan-run': { planId: number }
+    /** Reviews a pull request the factory did not open, at one head commit, and posts one review. */
+    'review-pull-request': { reviewId: number }
     /**
      * Runs the checks proposed for a repository in a sandbox and saves the ones that pass, as its checks
      * or its integration checks.

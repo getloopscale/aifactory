@@ -75,6 +75,23 @@ export type RoutedIntent =
       commentId: number
       headSha: string
     } & Written)
+  | {
+      /** A pull request was opened, got a new head commit or left draft: the reviewer may read it. */
+      kind: 'pull_request_to_review'
+      repository: string
+      pullNumber: number
+      headSha: string
+      /** The branch it targets, and the head's branch and repository (a fork is told apart by the latter). */
+      baseRef: string
+      headRef: string
+      headRepository: string
+      title: string
+      body: string
+      draft: boolean
+      authorLogin: string
+      authorAssociation: string
+      authorIsBot: boolean
+    }
   | { kind: 'check_suite_completed'; repository: string; headSha: string; conclusion: string }
   | {
       kind: 'check_run_completed'
@@ -106,11 +123,11 @@ const written = (by: {
  * The deliveries that are not `issues` and still mean something: the action that counts, and the
  * schema that turns its payload into the intent. Any other action of the same event is ignored.
  */
-const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
+const ROUTES = new Map<string, { actions: string[]; payload: z.ZodType<Routed> }>([
   [
     'issue_comment',
     {
-      action: 'created',
+      actions: ['created'],
       payload: z
         .object({
           // GitHub sends a comment on a pull request as an issue comment, and marks the issue.
@@ -143,7 +160,7 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
   [
     'pull_request_review',
     {
-      action: 'submitted',
+      actions: ['submitted'],
       payload: z
         .object({
           review: commentPayload.extend({ state: z.string().default('') }),
@@ -167,7 +184,7 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
   [
     'pull_request_review_comment',
     {
-      action: 'created',
+      actions: ['created'],
       payload: z
         .object({
           comment: commentPayload,
@@ -190,7 +207,7 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
   [
     'check_suite',
     {
-      action: 'completed',
+      actions: ['completed'],
       payload: z
         .object({
           check_suite: z.object({ head_sha: z.string(), conclusion: z.string() }),
@@ -210,7 +227,7 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
   [
     'check_run',
     {
-      action: 'completed',
+      actions: ['completed'],
       payload: z
         .object({
           check_run: z.object({ name: z.string(), head_sha: z.string(), conclusion: z.string() }),
@@ -225,6 +242,49 @@ const ROUTES = new Map<string, { action: string; payload: z.ZodType<Routed> }>([
             conclusion: check_run.conclusion,
           },
           reason: `check "${check_run.name}" on ${check_run.head_sha} completed: ${check_run.conclusion}`,
+        })),
+    },
+  ],
+  [
+    'pull_request',
+    {
+      actions: ['opened', 'synchronize', 'ready_for_review'],
+      payload: z
+        .object({
+          number: z.number().int(),
+          pull_request: z.object({
+            title: z.string(),
+            body: z.string().nullish(),
+            draft: z.boolean().default(false),
+            user: actorPayload,
+            author_association: z.string(),
+            head: z.object({
+              sha: z.string(),
+              ref: z.string(),
+              // A fork that was deleted has no repository.
+              repo: z.object({ full_name: z.string() }).nullable(),
+            }),
+            base: z.object({ ref: z.string() }),
+          }),
+          repository: repositoryPayload,
+        })
+        .transform(({ number, pull_request: pr, repository }): Routed => ({
+          intent: {
+            kind: 'pull_request_to_review',
+            repository: repository.full_name,
+            pullNumber: number,
+            headSha: pr.head.sha,
+            baseRef: pr.base.ref,
+            headRef: pr.head.ref,
+            headRepository: pr.head.repo?.full_name ?? '',
+            title: pr.title,
+            body: pr.body ?? '',
+            draft: pr.draft,
+            authorLogin: pr.user.login,
+            authorAssociation: pr.author_association,
+            authorIsBot: pr.user.type === 'Bot' || pr.user.login.endsWith('[bot]'),
+          },
+          reason: `pull request #${number} of ${pr.user.login} is at ${pr.head.sha}`,
         })),
     },
   ],
@@ -276,7 +336,7 @@ export function decideIngress(event: string, payload: unknown): IngressDecision 
   if (event === 'issues') return decideIssues(payload)
 
   const route = ROUTES.get(event)
-  if (!route || route.action !== actionOf(payload)) {
+  if (!route || !route.actions.includes(actionOf(payload) ?? '')) {
     return {
       accept: false,
       code: 'event_not_issues',

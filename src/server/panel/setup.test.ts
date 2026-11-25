@@ -484,7 +484,7 @@ describe('the events the App subscribes to', () => {
       label: 'Webhook events',
       status: 'warn',
       detail:
-        'The App does not subscribe to issue_comment, pull_request_review, pull_request_review_comment, check_suite, check_run, so GitHub never tells the factory about them. Turn them on under "Subscribe to events".',
+        'The App does not subscribe to issue_comment, pull_request_review, pull_request_review_comment, check_suite, check_run, pull_request, so GitHub never tells the factory about them. Turn them on under "Subscribe to events".',
       link: { label: 'Open the App settings', href: SETTINGS },
     })
   })
@@ -498,7 +498,7 @@ describe('the events the App subscribes to', () => {
     })
     const found = await eventsItem(most)
     expect(found.status).toBe('warn')
-    expect(found.detail).toContain('subscribe to pull_request_review_comment, so')
+    expect(found.detail).toContain('subscribe to pull_request_review_comment, pull_request, so')
   })
 
   it('warns with what GitHub answered when the App cannot be read', async () => {

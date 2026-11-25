@@ -517,6 +517,8 @@ export const en = {
       linearLabel: 'Label that asks for work in Linear',
       linearLabelDefault: 'factory (the default)',
       ask: 'Let the agent ask me questions on the issue when something is unclear',
+      reviewPulls:
+        'Review pull requests the factory did not open, when their author can write to the repository (a comment, never an approval)',
       builder: 'Builder',
       reviewer: 'Reviewer',
       release: 'Release',

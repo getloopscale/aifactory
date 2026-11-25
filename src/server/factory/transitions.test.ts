@@ -96,7 +96,7 @@ describe('the transition table', () => {
   })
 
   it('has an event for every intent the event router gives', () => {
-    const routed: Record<RoutedCode, true> = {
+    const routed: Record<Exclude<RoutedCode, 'pull_request_to_review'>, true> = {
       issue_comment_created: true,
       pull_request_comment_created: true,
       pull_request_review_submitted: true,
