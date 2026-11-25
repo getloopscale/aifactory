@@ -11,6 +11,7 @@ import { Pass, StageBadge } from './Badges'
 import { CoordinatorActions } from './CoordinatorActions'
 import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
+import { Conversation } from './Conversation'
 import { TaskActions } from './TaskActions'
 import { Transcript } from './Transcript'
 import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
@@ -84,6 +85,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
       </div>
 
       <TaskActions detail={detail} onDone={resource.reload} />
+      <Conversation detail={detail} onDone={resource.reload} />
 
       <WatchPanel watches={detail.watches} onDone={resource.reload} />
 

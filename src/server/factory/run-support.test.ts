@@ -9,6 +9,7 @@ import {
   pullRequestBody,
   pushWithRetry,
   resolvedComment,
+  guidePrompt,
   runContinuation,
 } from './run-support'
 
@@ -89,6 +90,23 @@ describe('resolvedComment', () => {
     const text = resolvedComment({ ...input, claim: 'x'.repeat(5_000) })
     expect(text).toContain('x'.repeat(3_000))
     expect(text).not.toContain('x'.repeat(3_001))
+  })
+})
+
+describe('runContinuation for the owner guidance', () => {
+  it('carries the conversation flag only with a request for changes, with the note as feedback', () => {
+    const decided = { kind: 'request_changes', note: 'use a Set' }
+    expect(runContinuation(decided, undefined, undefined, undefined, undefined, true)).toEqual({
+      feedback: 'use a Set',
+      conversation: true,
+    })
+    expect(runContinuation(decided, undefined)).toEqual({ feedback: 'use a Set' })
+  })
+
+  it('tells the agent to change what is asked and never to write to git', () => {
+    const prompt = guidePrompt('use a Set')
+    expect(prompt).toContain('use a Set')
+    expect(prompt).toContain('Do not run git commit, git push')
   })
 })
 
