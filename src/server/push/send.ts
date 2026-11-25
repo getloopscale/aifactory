@@ -1,4 +1,4 @@
-import webpush from 'web-push'
+import { sendNotification } from 'web-push'
 
 import type { PushPayload } from '../../shared/push'
 
@@ -18,7 +18,7 @@ export type PushSender = (target: PushTarget, payload: PushPayload) => Promise<S
 export function webPushSender(config: PushConfig): PushSender {
   return async (target, payload) => {
     try {
-      await webpush.sendNotification(
+      await sendNotification(
         { endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } },
         JSON.stringify(payload),
         {

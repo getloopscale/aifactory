@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const sendNotification = vi.fn()
 vi.mock('web-push', () => ({
-  default: { sendNotification: (...a: unknown[]) => sendNotification(...a) },
+  sendNotification: (...a: unknown[]) => sendNotification(...a),
 }))
 
 import { pushConfig } from './config'
