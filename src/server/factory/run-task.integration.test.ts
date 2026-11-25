@@ -8202,11 +8202,15 @@ describe('the docs lens over approved work', () => {
     expect(reviewer.prompts).toHaveLength(2)
     const rows = await lensRows(id)
     expect(rows).toHaveLength(1)
-    expect(rows[0].reviewer).toContain('lens:docs')
+    expect(rows[0].reviewer).toBe('lens:docs (fake-reviewer)')
     expect(rows[0].verdict).toBe('changes')
+    expect(JSON.stringify(rows[0].findings)).toContain('the command table says npm')
     const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
     expect(runs.filter((r) => r.role === 'lens')).toHaveLength(1)
     expect(runs.filter((r) => r.role === 'reviewer')).toHaveLength(1)
+    // The lens is booked apart from the code review: each has its own agent_run row and cost.
+    expect(runs.find((r) => r.role === 'lens')?.costUsd).toBe(0.01)
+    expect(runs.find((r) => r.role === 'reviewer')?.costUsd).toBe(0.01)
   })
 
   it('sends the work back once in auto and carries the second finding in the pull request body', async () => {
@@ -8218,7 +8222,10 @@ describe('the docs lens over approved work', () => {
     expect(result).toMatchObject({ status: 'merging' })
     expect(builder.resumed).toHaveLength(1)
     expect(builder.resumed[0]).toContain('the command table says npm')
-    expect(await lensRows(id)).toHaveLength(2)
+    const rows = await lensRows(id)
+    expect(rows).toHaveLength(2)
+    expect(rows.every((r) => r.reviewer === 'lens:docs (fake-reviewer)')).toBe(true)
+    expect(rows.map((r) => r.verdict)).toEqual(['changes', 'changes'])
   })
 
   it('records an answer that does not parse and goes on to merge', async () => {
@@ -8229,5 +8236,7 @@ describe('the docs lens over approved work', () => {
     expect(result).toMatchObject({ status: 'merging' })
     const rows = await lensRows(id)
     expect(rows.map((r) => r.verdict)).toEqual(['invalid'])
+    expect(rows[0].reviewer).toBe('lens:docs (fake-reviewer)')
+    expect(rows[0].findings).toEqual([])
   })
 })

@@ -2529,13 +2529,13 @@ export class Run {
     if (mode === 'off') return undefined
     const { deps, taskId, row, issue } = this.c
     for (const lens of LENSES) {
-      const base = await reviewBase(this.backend, this.repoDir, {
-        baseSha: this.baseSha,
-        integration: integrationBranch(this.c.repo),
-      })
       let documents: string[] = []
       let verdict: ReviewVerdict
       try {
+        const base = await reviewBase(this.backend, this.repoDir, {
+          baseSha: this.baseSha,
+          integration: integrationBranch(this.c.repo),
+        })
         documents = await documentPaths(this.backend, this.repoDir)
         if (documents.length === 0) continue
         this.c.state.current = 'review'
