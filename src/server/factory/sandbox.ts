@@ -19,6 +19,9 @@ export type SandboxOwner =
 /** A sandbox as the provider lists it: what it was created with, and when. */
 export type ListedSandbox = { id: string; startedAt: Date; metadata: Record<string, string> }
 
+/** The images a repository may choose between. */
+export type SandboxImage = 'default' | 'browser'
+
 export type SandboxSpec = {
   /** Recorded on the sandbox when the provider can, so a listing says who owns it. */
   owner?: SandboxOwner
@@ -30,6 +33,8 @@ export type SandboxSpec = {
    * downloads, so the next sandbox does not fetch them again. A provider that cannot keeps nothing.
    */
   cacheKey?: string
+  /** The image the sandbox starts from. Absent is `default`; `browser` has a headless browser preinstalled. */
+  image?: SandboxImage
 }
 
 export type ExecuteResult = Awaited<ReturnType<SandboxBackend['execute']>>
@@ -106,6 +111,16 @@ export interface IsolatedSandboxProvider {
   killSandbox?(id: string): Promise<void>
   /** How many sandboxes the account may have up at once, when the plan says. */
   readonly maxSandboxes?: number
+}
+
+/** Thrown when a provider is asked for an image it does not have. */
+export class ImageRefused extends Error {
+  constructor(provider: string, image: SandboxImage) {
+    super(
+      `the ${provider} sandbox has no "${image}" image: choose another provider or the default image`,
+    )
+    this.name = 'ImageRefused'
+  }
 }
 
 /** Thrown when a run is asked for without the isolation the factory requires. */

@@ -21,7 +21,7 @@ import {
   waitAfterDrop,
   wrapCommand,
 } from './e2b-reattach'
-import { E2B_TEMPLATE } from './e2b-template'
+import { E2B_BROWSER_TEMPLATE, E2B_TEMPLATE } from './e2b-template'
 import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
 import type {
   ExecuteResult,
@@ -325,7 +325,13 @@ export function e2bSandboxProvider(env: NodeJS.ProcessEnv = process.env): Isolat
       await Sandbox.kill(id, { apiKey: env.E2B_API_KEY })
     },
     async create(spec) {
-      return wrap(await Sandbox.create(E2B_TEMPLATE, options(spec)), spec)
+      return wrap(
+        await Sandbox.create(
+          spec.image === 'browser' ? E2B_BROWSER_TEMPLATE : E2B_TEMPLATE,
+          options(spec),
+        ),
+        spec,
+      )
     },
     async restore(snapshotId, spec) {
       const sandbox = await Sandbox.create(snapshotId, options(spec))

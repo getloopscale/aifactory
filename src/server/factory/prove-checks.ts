@@ -171,6 +171,7 @@ export async function proveChecks(
       deps.sandbox.maxSessionMs,
     ).sandboxMs,
     cacheKey: fullName,
+    ...(config.sandboxImage ? { image: config.sandboxImage } : {}),
     egress,
   })
   let sandbox = started

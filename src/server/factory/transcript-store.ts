@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import { agentEvent } from '../db/schema'
 import type { TranscriptEvent } from '../../shared/panel'
 
+import { pruneArtifacts } from './artifacts'
 import { toStored, type AgentEvent } from './transcript'
 
 export type Role = 'builder' | 'reviewer' | 'merger'
@@ -109,4 +110,17 @@ export async function pruneTranscripts(db: Database, now = new Date()): Promise<
     .where(lt(agentEvent.at, before))
     .returning({ id: agentEvent.id })
   return gone.length
+}
+
+/** Prunes the steps and the files the checks wrote, which are kept as long as the steps are. */
+export async function pruneRetained(
+  db: Database,
+  now = new Date(),
+): Promise<{ steps: number; artifacts: number }> {
+  const steps = await pruneTranscripts(db, now)
+  const artifacts = await pruneArtifacts(
+    db,
+    new Date(now.getTime() - TRANSCRIPT_RETENTION_DAYS * 86_400_000),
+  )
+  return { steps, artifacts }
 }

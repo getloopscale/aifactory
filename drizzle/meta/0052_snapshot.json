@@ -1,5 +1,5 @@
 {
-  "id": "a1920975-be6f-4b42-9111-3a10fd3381c7",
+  "id": "8f6d0ccd-41a6-4182-af14-c7fafc7e8bc9",
   "prevId": "2ebbb329-cfe8-4c79-b7fd-247766bf4cd7",
   "version": "7",
   "dialect": "postgresql",
@@ -777,6 +777,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "omitted": {
+          "name": "omitted",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
+        },
         "at": {
           "name": "at",
           "type": "timestamp with time zone",
@@ -1375,13 +1382,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "source_tasks": {
-          "name": "source_tasks",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2444,6 +2444,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "sandbox_image": {
+          "name": "sandbox_image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'default'"
+        },
         "fixes": {
           "name": "fixes",
           "type": "jsonb",
@@ -3474,8 +3481,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.review_pattern": {
-      "name": "review_pattern",
+    "public.evidence_artifact": {
+      "name": "evidence_artifact",
       "schema": "",
       "columns": {
         "id": {
@@ -3484,94 +3491,99 @@
           "primaryKey": true,
           "notNull": true
         },
-        "repository": {
-          "name": "repository",
+        "evidence_id": {
+          "name": "evidence_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sha": {
+          "name": "sha",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "class_key": {
-          "name": "class_key",
+        "path": {
+          "name": "path",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "class_name": {
-          "name": "class_name",
+        "content_type": {
+          "name": "content_type",
           "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "invariant": {
-          "name": "invariant",
-          "type": "text",
+        "size_bytes": {
+          "name": "size_bytes",
+          "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "task_ids": {
-          "name": "task_ids",
-          "type": "jsonb",
+        "content": {
+          "name": "content",
+          "type": "bytea",
           "primaryKey": false,
           "notNull": true
         },
-        "first_seen_at": {
-          "name": "first_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recorded_at": {
-          "name": "recorded_at",
+        "at": {
+          "name": "at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "note_id": {
-          "name": "note_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "proposal_url": {
-          "name": "proposal_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "count_before": {
-          "name": "count_before",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "count_after": {
-          "name": "count_after",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "measured_at": {
-          "name": "measured_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
         }
       },
-      "indexes": {},
+      "indexes": {
+        "evidence_artifact_task_id": {
+          "name": "evidence_artifact_task_id",
+          "columns": [
+            {
+              "expression": "task_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
-        "review_pattern_note_id_knowledge_note_id_fk": {
-          "name": "review_pattern_note_id_knowledge_note_id_fk",
-          "tableFrom": "review_pattern",
-          "tableTo": "knowledge_note",
+        "evidence_artifact_evidence_id_evidence_id_fk": {
+          "name": "evidence_artifact_evidence_id_evidence_id_fk",
+          "tableFrom": "evidence_artifact",
+          "tableTo": "evidence",
           "columnsFrom": [
-            "note_id"
+            "evidence_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "evidence_artifact_task_id_task_id_fk": {
+          "name": "evidence_artifact_task_id_task_id_fk",
+          "tableFrom": "evidence_artifact",
+          "tableTo": "task",
+          "columnsFrom": [
+            "task_id"
           ],
           "columnsTo": [
             "id"
@@ -3581,16 +3593,7 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "review_pattern_once": {
-          "name": "review_pattern_once",
-          "nullsNotDistinct": false,
-          "columns": [
-            "repository",
-            "class_key"
-          ]
-        }
-      },
+      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
