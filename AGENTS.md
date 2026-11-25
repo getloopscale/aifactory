@@ -212,9 +212,10 @@ reads that file, not a convention.
   another task). A task whose publication failed is `released` and asks for no release itself.
 - **A repository that publishes with changesets tags its own releases.** When `.changeset/config.json` is on
   `develop` and a changeset waits, `release()` makes no tag: it promotes and records a `publication`. A changeset
-  waits only when the comparison of `develop` with the release branch lists it as added since their merge base
-  and it names a package (`changesetsWaiting`); one a past release consumed on the release branch but `develop`
-  still holds does not, and neither does an empty one, which releases nothing.
+  waits when it names a package (`changesetsWaiting`) and either the comparison of `develop` with the release
+  branch lists it as added since their merge base, or it is still in `.changeset/` on the release branch (a failed
+  publication left it unconsumed); one a past release consumed, gone from the release branch but still on `develop`,
+  does not, and neither does an empty one, which releases nothing.
   With no changeset waiting, it reads what that comparison lists (`changed-packages.ts`):
   when a package changesets publishes changed, it refuses and names the package; when every change is in a
   private package, an ignored one (`ignore` in `.changeset/config.json`) or no package, the release is the

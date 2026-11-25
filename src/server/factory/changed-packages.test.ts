@@ -60,6 +60,25 @@ describe('changesetsWaiting', () => {
     expect(reads()).toEqual([])
   })
 
+  it('counts a changeset still on the release branch, listed or not; one the release branch removed is not', async () => {
+    const { api, reads } = repository({
+      ...theokit,
+      '.changeset/left.md': NAMED,
+      '.changeset/consumed.md': NAMED,
+    })
+    api.repo('o/r').files('main', {
+      '.changeset/config.json': '{}',
+      '.changeset/README.md': 'readme',
+      '.changeset/left.md': NAMED,
+      '.changeset/empty.md': '---\n---\n',
+    })
+
+    expect(
+      await changesetsWaiting(api, 'o/r', 't', { head: 'develop', files: [] }, 'main'),
+    ).toEqual(['.changeset/left.md'])
+    expect(reads().sort()).toEqual(['main:.changeset/empty.md', 'main:.changeset/left.md'])
+  })
+
   it('fails, naming the file, when an added changeset cannot be read', async () => {
     const { api } = repository(theokit)
 

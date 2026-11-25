@@ -22,7 +22,7 @@ const CHANGESET_FILE = /^\.changeset\/[^/]+\.md$/
  * not enough: a release whose Version Packages pull request consumed changesets deletes them on the release
  * branch only, and with no back-merge the pre-release branch keeps them (theokit-plugins after #250). Being
  * added is not enough either: `changesetsWaiting` in `changed-packages.ts` reads each one and leaves out
- * those that name no package.
+ * those that name no package, and adds those still on the release branch, which a failed publication left.
  */
 export function addedChangesets(files: ChangedFile[]): string[] {
   return files

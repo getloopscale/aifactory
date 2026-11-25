@@ -498,7 +498,7 @@ export async function completeRelease(
 /**
  * Whether the release is left to changesets: true when the repository publishes with changesets and a
  * changeset waits, which is one the pre-release branch added since its merge base with the release branch
- * and that names a package (`changesetsWaiting`); an empty one releases nothing. With none waiting, what the same comparison lists decides. A change only to packages changesets never publishes (private, ignored,
+ * and that names a package, or one still in `.changeset/` on the release branch, which a failed publication left unconsumed (`changesetsWaiting`); an empty one releases nothing. With none waiting, what the same comparison lists decides. A change only to packages changesets never publishes (private, ignored,
  * or no package at all) is the factory's own release, since no changeset can exist for them and reaching the
  * release branch is what makes them available. A change to a published package is refused, naming it: the
  * promotion would land and the package would not be published.
@@ -516,7 +516,7 @@ async function changesetsToShip(
   }
   const files = await deps.api.changedFiles(repo, token, target, PRE_RELEASE_BRANCH)
   const compared = { head: PRE_RELEASE_BRANCH, files }
-  if ((await changesetsWaiting(deps.api, repo, token, compared)).length > 0) return true
+  if ((await changesetsWaiting(deps.api, repo, token, compared, target)).length > 0) return true
   const published = await publishedPackagesChanged(deps.api, repo, token, compared)
   if (published.length > 0) {
     throw new ReleaseRefused(
