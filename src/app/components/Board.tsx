@@ -1,5 +1,5 @@
 import { Card as Surface, Table } from '@usetheo/ui'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 
 import {
@@ -14,6 +14,7 @@ import {
   type TaskCard,
 } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
+import { useWidth } from '../lib/media'
 import type { Copy } from '../lib/copy/en'
 import {
   agentName,
@@ -393,6 +394,41 @@ function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: Task
  */
 export function Board({ tasks }: { tasks: TaskCard[] }) {
   const { t } = useCopy()
+  const compact = useWidth() === 'compact'
+  const [picked, pick] = useState<ColumnId>('waiting')
+  if (compact) {
+    const inColumn = (id: ColumnId) =>
+      ordered(
+        id,
+        tasks.filter((task) => task.column === id),
+      )
+    return (
+      <div>
+        <div
+          role="tablist"
+          aria-label={t.board.stages}
+          className="-mx-4 mb-3 flex gap-1 overflow-x-auto px-4"
+        >
+          {COLUMNS.map((column) => (
+            <button
+              key={column.id}
+              type="button"
+              role="tab"
+              aria-selected={column.id === picked}
+              onClick={() => pick(column.id)}
+              className={`shrink-0 rounded-full px-3 text-sm ${column.id === picked ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
+            >
+              {t.columns[column.id]}{' '}
+              <span className="tabular-nums">
+                {tasks.filter((task) => task.column === column.id).length}
+              </span>
+            </button>
+          ))}
+        </div>
+        <Column id={picked} title={t.columns[picked]} tasks={inColumn(picked)} />
+      </div>
+    )
+  }
   return (
     <div className="max-h-[calc(100vh-170px)] overflow-auto pb-2">
       {/* The columns are as tall as the tallest: a title sticks only inside its own column, so a short one would let it go. */}
