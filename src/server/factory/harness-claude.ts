@@ -23,6 +23,8 @@ import { claudeEvents } from './transcript'
  * image is plain Node, and a run there found no `claude` at all (paulohenriquevn/aifactory#1).
  */
 export const CLAUDE_CODE_VERSION = '2.1.319'
+/** Claude Code's sessions, under `$HOME`; its login is not here. */
+export const CLAUDE_SESSION_FOLDER = '.claude/projects'
 const CLAUDE = '$HOME/.local/bin/claude'
 /** The exit code of a command the factory's timeout killed. */
 const TIMED_OUT = 124
@@ -104,6 +106,7 @@ export function claudeCodeHarness(
 
   return {
     name: 'claude-code',
+    sessionFolder: CLAUDE_SESSION_FOLDER,
     ...(options.model ? { model: options.model } : {}),
     ...(options.effort ? { effort: options.effort } : {}),
     egress: async () => [anthropicEgress(credential)],

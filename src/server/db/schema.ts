@@ -192,6 +192,27 @@ export const evidenceArtifact = pgTable(
 )
 
 /**
+ * An agent's CLI session, as the tar.gz of the harness's session folder, so a task whose sandbox is gone can
+ * resume it in a new one. One row per task and role, replaced by each run. Never holds a login.
+ */
+export const agentSession = pgTable(
+  'agent_session',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    harness: text('harness').notNull(),
+    sessionId: text('session_id').notNull(),
+    archive: bytea('archive').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique('agent_session_task_role').on(table.taskId, table.role)],
+)
+
+/**
  * What an independent reviewer decided about one commit. `invalid` is an answer the factory could
  * not read as a verdict, which counts as no approval.
  */

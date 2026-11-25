@@ -16,6 +16,10 @@ export type Reply = { stdout?: string; stderr?: string; exitCode?: number }
 export class FakeBackend extends SandboxBackend {
   commands: string[] = []
   files = new Map<string, string>()
+  /** The bytes of a file as uploaded, for the tests of what moves by file. */
+  binary = new Map<string, Buffer>()
+  /** What `downloadFile` hands back, by path. */
+  downloads = new Map<string, Buffer>()
 
   constructor(private readonly answer: (command: string) => Reply | undefined) {
     super()
@@ -29,6 +33,13 @@ export class FakeBackend extends SandboxBackend {
 
   async uploadFile(path: string, content: string | Buffer) {
     this.files.set(path, String(content))
+    this.binary.set(path, typeof content === 'string' ? Buffer.from(content) : content)
+  }
+
+  async downloadFile(path: string): Promise<Buffer> {
+    const bytes = this.downloads.get(path)
+    if (!bytes) throw new Error(`no such file ${path}`)
+    return bytes
   }
 }
 
