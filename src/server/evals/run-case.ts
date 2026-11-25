@@ -69,6 +69,14 @@ import {
 } from '../factory/review'
 import { DEFAULT_TIMEOUTS, PLAN_MS } from '../factory/run'
 import {
+  addsProofFinding,
+  blockedByProof,
+  proveTests,
+  provedOnce,
+  testProofModeFromEnv,
+  type TestProof,
+} from '../factory/test-proof'
+import {
   COMMIT_MESSAGE,
   GITCONFIG,
   INSTANCE,
@@ -162,6 +170,8 @@ class CaseRun {
   private readonly checkRuns: CheckRun[] = []
   /** Whether the checks the case failed fail on its base too, as `Run` asks it. */
   private readonly baseProbe = new BaseProbe()
+  /** What the tests of each head proved, once per head, as `Run.provesTests` keeps it (#550). */
+  private readonly proofs = new Map<string, TestProof>()
   private readonly started = Date.now()
   private readonly securitySeen = new Set<string>()
   private securityReworks = 0
@@ -411,6 +421,37 @@ class CaseRun {
     const names = red.map((name) => `"${name}"`).join(', ')
     return {
       stopped: `${names} failed on the case's base ${this.c.baseSha.slice(0, 7)} too, ${MEASURED_ITS_BASE}`,
+    }
+  }
+
+  /**
+   * The review, with the finding `Run.review` adds in `auto` when the tests this commit adds pass on the base
+   * (#550): the verdict cannot be `approve`, and the finding reaches the rework. The step runs once per head.
+   */
+  private async reviewedWithProof(
+    sha: string,
+    unplanned: string[],
+    required: Parameters<CaseRun['review']>[2],
+  ): Promise<ReviewVerdict> {
+    const mode = testProofModeFromEnv(process.env)
+    const proof = await provedOnce(
+      { mode, sha, known: this.proofs, store: { load: async () => undefined, save: async () => {} } },
+      () =>
+        proveTests(this.backend, {
+          repoDir: this.repoDir,
+          baseSha: this.c.baseSha,
+          headSha: sha,
+          checks: this.c.checks,
+          timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
+        }),
+    )
+    const proved = addsProofFinding(mode, proof)
+    const read = await this.review(sha, unplanned, required)
+    if (proved.length === 0) return read
+    return {
+      ...read,
+      verdict: blockedByProof(read.verdict, proved),
+      findings: [...proved, ...read.findings],
     }
   }
 
@@ -698,7 +739,7 @@ class CaseRun {
         const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
         for (const f of floor) if (!this.floorFound.includes(f.issue)) this.floorFound.push(f.issue)
       }
-      const read = await this.review(sha, unplanned, required)
+      const read = await this.reviewedWithProof(sha, unplanned, required)
       // Any valid verdict counts, even when the case ends later without one.
       if (read.verdict !== 'invalid') this.verdictSeen = true
       // A file outside the plan is on record; whether it was needed is the reviewer's call.
@@ -735,7 +776,7 @@ class CaseRun {
       // A rework that changed nothing has the reviewer judge the builder's reasons on the same commit, once, as
       // `Run.arbitrate` does; a review that still blocks ends the case as the factory hands it over.
       if (!(await this.rework(findings, [], sha))) {
-        const judged = await this.review(sha, unplanned, required)
+        const judged = await this.reviewedWithProof(sha, unplanned, required)
         if (judged.verdict === 'approve' && blocking.length === 0) {
           const end = await this.afterApproval(sha)
           if (end !== 'again') return end
