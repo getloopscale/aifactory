@@ -3,7 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { e2bSandboxProvider } from './e2b-sandbox'
 import { prepareDeclaredPackageManager } from './package-manager'
-import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
+import {
+  CHECKER_DICTIONARY_PATHS,
+  SANDBOX_DICTIONARY_PRESENT,
+  SANDBOX_TOOLCHAIN,
+} from './sandbox-toolchain'
 import { createIsolatedSandbox, restoreIsolatedSandbox, type IsolatedSandbox } from './sandbox'
 
 // Runs real E2B sandboxes: needs E2B_API_KEY and the template from scripts/build-e2b-template.mts. httpbin.org
@@ -38,6 +42,19 @@ describe('an E2B sandbox', () => {
   it('has the tools a project test suite calls, such as the seccomp tests of theokit-sdk', async () => {
     // bwrap runs here, so theokit-sdk's sandbox tests run too, and they trace a process with strace.
     expect((await sh('command -v bwrap strace')).stdout.trim().split('\n')).toHaveLength(2)
+  })
+
+  // theocode's english-only check reads these paths, so the image must hold exactly what theokit's CI runner holds
+  // (ci.yml prints its inventory). The failure message carries the listing, with sizes and link targets.
+  it('holds, of the dictionary paths the checker reads, exactly the ones the CI runner holds', async () => {
+    const probe = CHECKER_DICTIONARY_PATHS.map((p) => `test -e ${p} && echo ${p}`).join('; ')
+    const found = (await sh(`${probe}; true`)).stdout.trim().split('\n').filter(Boolean)
+    const listing = (
+      await sh('ls -lL /usr/share/dict /usr/share/hunspell 2>&1; ls -l /usr/share/dict')
+    ).stdout
+    expect(found, `dictionary inventory of the image:\n${listing}`).toEqual(
+      SANDBOX_DICTIONARY_PRESENT,
+    )
   })
 
   it('runs the declared package manager, whatever its version, in a child with only PATH and HOME and no network', async () => {
