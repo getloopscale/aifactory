@@ -1403,27 +1403,34 @@ describe('runTask', () => {
     expect(failed.detail).toMatchObject({ failedAt: 'sandbox' })
   })
 
-  it('defers a run the provider refuses for credit, whatever started it, and pauses the provider for every process', async () => {
-    for (const continuation of [undefined, { mergeBase: true }, { feedback: 'fix the checks' }]) {
-      const id = await seedTask()
-      const sandbox = new FakeSandbox(changed())
-      sandbox.create = async () => {
-        throw new Error('403: team is blocked: credit_exhausted')
+  it.each([
+    ['a first run', undefined],
+    ['a merge-only run', { mergeBase: true }],
+    ['a send-back run', { feedback: 'fix the checks' }],
+  ])(
+    'defers %s the provider refuses for credit, and pauses the provider for every process',
+    async (_name, continuation) => {
+      {
+        const id = await seedTask()
+        const sandbox = new FakeSandbox(changed())
+        sandbox.create = async () => {
+          throw new Error('403: team is blocked: credit_exhausted')
+        }
+
+        const result = await runTask(deps(sandbox), id, undefined, continuation as never)
+
+        expect(result).toMatchObject({ status: 'deferred', stage: 'sandbox' })
+        expect(await readPause(getDb())).toMatchObject({
+          reason: '403: team is blocked: credit_exhausted',
+        })
+        const failed = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+        expect(failed).toHaveLength(0)
+        // Queued again, not running: a task left in `sandbox` would read as stalled while its job waits.
+        const [row] = await getDb().select().from(task).where(eq(task.id, id))
+        expect(row.stage).toBe('intake')
       }
-
-      const result = await runTask(deps(sandbox), id, undefined, continuation as never)
-
-      expect(result).toMatchObject({ status: 'deferred', stage: 'sandbox' })
-      expect(await readPause(getDb())).toMatchObject({
-        reason: '403: team is blocked: credit_exhausted',
-      })
-      const failed = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
-      expect(failed).toHaveLength(0)
-      // Queued again, not running: a task left in `sandbox` would read as stalled while its job waits.
-      const [row] = await getDb().select().from(task).where(eq(task.id, id))
-      expect(row.stage).toBe('intake')
-    }
-  })
+    },
+  )
 
   it('gives back the answer a refused resume claimed, and leaves the task waiting', async () => {
     const id = await seedTask()
@@ -4470,7 +4477,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
   const blocked = () => {
     const sandbox = new FakeSandbox(changed())
     sandbox.create = async () => {
-      throw new Error('403: team is blocked: spend_limit')
+      throw new Error('fetch failed')
     }
     return sandbox
   }
