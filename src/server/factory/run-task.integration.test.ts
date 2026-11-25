@@ -6059,6 +6059,22 @@ describe('release', () => {
     ])
   })
 
+  it('counts a changeset a failed publication left on the release branch: a publication waits and no tag is made', async () => {
+    const id = await delivered()
+    onDevelop({ changesets: ['config.json', 'README.md', 'brave-fox.md'] })
+    repo().files('main', { '.changeset/brave-fox.md': NAMED_CHANGESET })
+    repo().compare('main', 'develop', [])
+    repo().tags.add('v1.2.3')
+
+    const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })
+
+    expect(result).toMatchObject({ tag: undefined, publishing: 'changesets' })
+    expect(seen.releases.filter((r) => !r.prerelease)).toEqual([])
+    expect(await getDb().select().from(publication)).toMatchObject([
+      { taskId: id, status: 'waiting' },
+    ])
+  })
+
   it('in a repository that publishes from the tag, pushes it and releases nothing: a tag publication waits for the workflow', async () => {
     const id = await delivered()
     const contained = await integrated(8, 'inside01')

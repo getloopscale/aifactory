@@ -5,6 +5,7 @@ import {
   changesetIgnore,
   changesetPackages,
   enclosingPackages,
+  isChangesetFile,
   packageDirs,
   parseManifest,
   publishedTouched,
@@ -30,19 +31,31 @@ async function mustRead(
 }
 
 /**
- * The changesets that wait to ship: those a comparison lists as added (`addedChangesets`) that name a
- * package, each read from GitHub on the comparison's `head`. An empty one releases nothing, so a promotion
- * that carries only empty ones is not left to the repository's release workflow, which would fail on them.
+ * The changesets that wait to ship: those a comparison lists as added (`addedChangesets`), each read on the
+ * comparison's `head`, and those still in `.changeset/` on the head of the release branch (`release`): a
+ * publication that failed left them there unconsumed, whatever the comparison lists. Only a changeset gone
+ * from the release branch and still on `head` is a consumed one. Each must name a package: an empty one
+ * releases nothing, so a promotion that carries only empty ones is not left to the repository's release
+ * workflow, which would fail on them.
  */
 export async function changesetsWaiting(
   api: GithubApi,
   repo: string,
   token: string,
   compared: { head: string; files: ChangedFile[] },
+  release?: string,
 ): Promise<string[]> {
   const waiting: string[] = []
-  for (const path of addedChangesets(compared.files)) {
+  const added = addedChangesets(compared.files)
+  for (const path of added) {
     const text = await mustRead(api, repo, token, path, compared.head)
+    if (changesetPackages(text).length > 0) waiting.push(path)
+  }
+  if (release === undefined) return waiting
+  const names = (await api.listDirectory(repo, token, '.changeset', release)) ?? []
+  for (const path of names.map((name) => `.changeset/${name}`)) {
+    if (!isChangesetFile(path) || added.includes(path)) continue
+    const text = await mustRead(api, repo, token, path, release)
     if (changesetPackages(text).length > 0) waiting.push(path)
   }
   return waiting
