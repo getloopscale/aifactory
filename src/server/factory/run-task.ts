@@ -18,6 +18,7 @@ import {
   quotaDetail,
   type Continuation,
 } from './run-support'
+import { SANDBOX_PROVIDER_BLOCKED } from '../../shared/panel'
 import { endPause, pauseOnRefusal } from './provider-pause-store'
 import { loadRepoConfig } from './repo-config'
 import { untilSlotFree } from './sandbox-slot'
@@ -144,10 +145,36 @@ async function execute(
   } catch (error) {
     // A preparation that failed is logged with its step; one that ended was logged already.
     preparation?.log()
-    return fail(deps, taskId, state, error, signal)
+    const deferred = await deferOnRefusal(deps, taskId, state, error, resuming)
+    return deferred ?? (await fail(deps, taskId, state, error, signal))
   } finally {
     await state.sandbox?.stop().catch(() => {})
   }
+}
+
+/**
+ * A refusal of the provider for credit or spending while the sandbox starts is not a failure of the run: the pause
+ * is recorded, the answer a resume claimed is given back, and the job queues itself again for after the pause.
+ */
+async function deferOnRefusal(
+  deps: RunTaskDeps,
+  taskId: number,
+  state: RunState,
+  error: unknown,
+  resuming: Parked | undefined,
+): Promise<RunResult | undefined> {
+  if (state.sandbox || state.current !== 'sandbox') return undefined
+  if (error instanceof Asked || error instanceof TaskCancelled) return undefined
+  const message = errorMessage(error)
+  if (!SANDBOX_PROVIDER_BLOCKED.test(message)) return undefined
+  await pauseOnRefusal(deps.db, message)
+  if (resuming) {
+    await deps.db
+      .update(questionTable)
+      .set({ resumedAt: null })
+      .where(eq(questionTable.id, resuming.id))
+  }
+  return { status: 'deferred', stage: 'sandbox', reason: message }
 }
 
 /** Waits while every sandbox the account allows is up, and says in the log how long it waited. */

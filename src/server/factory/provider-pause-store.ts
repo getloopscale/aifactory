@@ -11,6 +11,7 @@ import {
   deferSeconds,
   parsePause,
   pauseAfter,
+  PROVIDER_PAUSE_MS,
   type Admission,
   type ProviderPause,
 } from './provider-pause'
@@ -131,4 +132,15 @@ export async function deferWhilePaused(
 /** `deferWhilePaused` for a job handler: the factory's database and TheoKit's queue. */
 export function deferJobWhilePaused(job: DeferredJob): Promise<boolean> {
   return deferWhilePaused(getDb(), job, { enqueue: (queued) => jobBackend().enqueue(queued) })
+}
+
+/** Queues the job again for after the pause a refusal just recorded, or after one `PROVIDER_PAUSE_MS` when none is read. */
+export async function deferAfterRefusal(job: DeferredJob): Promise<void> {
+  if (await deferJobWhilePaused(job)) return
+  await jobBackend().enqueue({
+    name: job.name,
+    input: job.input,
+    idempotencyKey: `${job.name}-${job.taskId}-refused-${Date.now()}`,
+    delaySeconds: Math.ceil(PROVIDER_PAUSE_MS / 1000),
+  })
 }

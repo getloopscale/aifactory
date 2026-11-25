@@ -1403,21 +1403,23 @@ describe('runTask', () => {
     expect(failed.detail).toMatchObject({ failedAt: 'sandbox' })
   })
 
-  it('pauses the sandbox provider for every process when it refuses a sandbox for credit', async () => {
-    const id = await seedTask()
-    const sandbox = new FakeSandbox(changed())
-    sandbox.create = async () => {
-      throw new Error('403: team is blocked: credit_exhausted')
+  it('pauses the sandbox provider for every process and defers the run, whatever started it', async () => {
+    for (const continuation of [undefined, { mergeBase: true }, { feedback: 'fix the checks' }]) {
+      const id = await seedTask()
+      const sandbox = new FakeSandbox(changed())
+      sandbox.create = async () => {
+        throw new Error('403: team is blocked: credit_exhausted')
+      }
+
+      const result = await runTask(deps(sandbox), id, undefined, continuation as never)
+
+      expect(result).toMatchObject({ status: 'deferred', stage: 'sandbox' })
+      expect(await readPause(getDb())).toMatchObject({
+        reason: '403: team is blocked: credit_exhausted',
+      })
+      const failed = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+      expect(failed).toHaveLength(0)
     }
-
-    const result = await runTask(deps(sandbox), id)
-
-    expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
-    expect(await readPause(getDb())).toMatchObject({
-      reason: '403: team is blocked: credit_exhausted',
-    })
-    const [failed] = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
-    expect(retryableFailure(failed.detail as Record<string, unknown>)).toBe('environment')
   })
 
   it('ends the pause of the sandbox provider once a run started a sandbox', async () => {

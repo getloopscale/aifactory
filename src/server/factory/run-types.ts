@@ -131,6 +131,8 @@ export type RunResult =
   | { status: 'failed'; stage: string; error: string }
   /** The task was cancelled while the run went on: it stopped at `stage` and recorded nothing more. */
   | { status: 'cancelled'; stage: string; reason: string }
+  /** The provider refused the sandbox for credit or spending: nothing failed, the job queues itself again. */
+  | { status: 'deferred'; stage: string; reason: string }
 
 type QuestionRow = typeof questionTable.$inferSelect
 
