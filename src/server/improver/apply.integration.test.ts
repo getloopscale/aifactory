@@ -90,6 +90,22 @@ describe('improve', () => {
     expect(all.at(-1)).toMatchObject({ outcome: 'skipped' })
   })
 
+  it('rotates to the next kind when the scout found a signature that was filed before', async () => {
+    const fake = new Fake()
+    await improve(fake.deps(), 'auto')
+    fake.state = 'closed'
+    fake.at = new Date('2026-11-26T05:00:00Z')
+    await getPool().query("update improver_decision set outcome = 'skipped'")
+    await improve(fake.deps(), 'auto')
+    fake.at = new Date('2026-11-27T05:00:00Z')
+    await improve(fake.deps(), 'auto')
+    expect((await rows()).map((r) => r.kind)).toEqual([
+      'duplicate_code',
+      'missing_test',
+      'stale_doc',
+    ])
+  })
+
   it('records an error for an answer that is not the JSON, and files nothing', async () => {
     const fake = new Fake()
     fake.answer = { status: 'error', reason: 'the answer was not the JSON asked for', costUsd: 0 }

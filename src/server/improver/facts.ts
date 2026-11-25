@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNotNull, like, notInArray, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNotNull, like, ne, notInArray, or, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -132,7 +132,8 @@ export async function readFacts(
       .where(
         and(
           inArray(improverDecision.repository, repos),
-          inArray(improverDecision.outcome, ['proposed', 'nothing_found']),
+          // Any row where a scout ran: a skip of the pass has no signature, one after a scout does.
+          or(ne(improverDecision.outcome, 'skipped'), isNotNull(improverDecision.signature)),
         ),
       )
       .groupBy(improverDecision.repository, improverDecision.kind),
