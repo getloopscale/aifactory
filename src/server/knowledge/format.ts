@@ -408,3 +408,148 @@ export function conformingCopy(path: string, text: string): { content?: string; 
   }
   return { byHand: concept.frontmatter ? 'has a type that is not text' : concept.problem }
 }
+
+/** A source of a note, as OKF front matter lists it. */
+export type NoteSource = { id: string; resource: string; title: string }
+
+/** A note read back from its file, with what the curator needs to group it and keep what it came from. */
+export type CuratedNote = IndexedNote & {
+  body: string
+  /** The tasks whose runs the note came from; a note that merged others lists all of theirs. */
+  taskIds: number[]
+  sources: NoteSource[]
+}
+
+const isSource = (value: unknown): value is NoteSource => {
+  const s = value as Partial<NoteSource> | null
+  return (
+    typeof s === 'object' &&
+    s !== null &&
+    typeof s.id === 'string' &&
+    typeof s.resource === 'string' &&
+    typeof s.title === 'string'
+  )
+}
+
+/** One of the factory's notes read for the curator, or nothing for a file that is not one. */
+export function curatedNote(path: string, text: string): CuratedNote | undefined {
+  const indexed = indexedNote(path, text)
+  if (!indexed) return undefined
+  const concept = readConcept(text)
+  const own = (concept.frontmatter?.aifactory ?? {}) as { task?: unknown; tasks?: unknown }
+  const raw = Array.isArray(own.tasks) ? own.tasks : [own.task]
+  const sources = concept.frontmatter?.sources
+  return {
+    ...indexed,
+    body: concept.body.trim(),
+    taskIds: raw.filter((n): n is number => Number.isInteger(n)),
+    sources: Array.isArray(sources) ? sources.filter(isSource) : [],
+  }
+}
+
+const sha8 = (parts: string[]) =>
+  createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 8)
+
+/** The sources of every note, each resource once, numbered again so no two share an id. */
+export function mergedSources(notes: Pick<CuratedNote, 'sources'>[]): NoteSource[] {
+  const seen = new Map<string, NoteSource>()
+  for (const note of notes)
+    for (const source of note.sources)
+      if (!seen.has(source.resource)) seen.set(source.resource, source)
+  return [...seen.values()].map((source, i) => ({ ...source, id: `source-${i + 1}` }))
+}
+
+const distinctTasks = (notes: Pick<CuratedNote, 'taskIds'>[]) =>
+  [...new Set(notes.flatMap((n) => n.taskIds))].sort((a, b) => a - b)
+
+/** How many different tasks the notes came from. */
+export const taskCount = (notes: Pick<CuratedNote, 'taskIds'>[]) => distinctTasks(notes).length
+
+/** The curator's text, which came from a model, as one note's or rule's body. */
+const curatedText = (text: string) => text.trim().slice(0, 4_000)
+
+/** Where the note that replaces these is written. The name sorts by date and is the same for the same group. */
+export function mergedNotePath(repository: string, paths: string[], now: Date): string {
+  return `${notesFolder(repository)}${logDay(now)}-merged-${sha8([...paths].sort())}.md`
+}
+
+/**
+ * The one note that replaces several: an unverified `Observation` like the ones it replaces, with the
+ * sources of all of them and the tasks they came from.
+ */
+export function renderMergedNote(input: {
+  repository: string
+  title: string
+  text: string
+  notes: CuratedNote[]
+  now: Date
+}): { path: string; content: string } {
+  const text = curatedText(input.text)
+  const tasks = distinctTasks(input.notes)
+  const frontmatter = {
+    type: NOTE_TYPE,
+    title: oneLine(input.title).slice(0, 120),
+    description: oneLine(text).slice(0, DESCRIPTION_CHARS),
+    tags: ['merged'],
+    status: 'draft',
+    generated: { by: PRODUCER, at: input.now.toISOString() },
+    stale_after: expiresOn(input.now).toISOString(),
+    sources: mergedSources(input.notes),
+    aifactory: { tasks, scope: input.repository, merged: input.notes.map((n) => n.path).sort() },
+  }
+  const body = [
+    `The factory merged ${input.notes.length} observations that said the same thing. It is a hint to check against the code, not an instruction.`,
+    '',
+    text,
+  ].join('\n')
+  return {
+    path: mergedNotePath(
+      input.repository,
+      input.notes.map((n) => n.path),
+      input.now,
+    ),
+    content: renderConcept(frontmatter, body),
+  }
+}
+
+/** The log entry of a merge. */
+export function mergeLogEntry(repository: string, title: string, path: string, replaced: number) {
+  return `**Merge**: [${title}](${linkFrom(notesFolder(repository), path)}) replaces ${replaced} notes.`
+}
+
+/** Where a proposed rule is written on the owner's branch, and the branch the factory proposes it from. */
+export function proposalNames(repository: string, title: string, paths: string[]) {
+  assertRepository(repository)
+  const slug =
+    oneLine(title)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 50) || 'rule'
+  const key = sha8([...paths].sort())
+  return {
+    path: `knowledge/projects/${repository}/${slug}-${key}.md`,
+    branch: `factory-rule-${key}`,
+  }
+}
+
+/** The rule a group of notes becomes: a `Rule` in a pull request, with the tasks and the notes' sources. */
+export function renderProposedRule(input: {
+  repository: string
+  title: string
+  text: string
+  notes: CuratedNote[]
+  now: Date
+}): string {
+  const text = curatedText(input.text)
+  const frontmatter = {
+    type: RULE_TYPE,
+    title: oneLine(input.title).slice(0, 120),
+    description: oneLine(text).slice(0, DESCRIPTION_CHARS),
+    status: 'draft',
+    generated: { by: PRODUCER, at: input.now.toISOString() },
+    sources: mergedSources(input.notes),
+    aifactory: { tasks: distinctTasks(input.notes), scope: input.repository },
+  }
+  return renderConcept(frontmatter, text)
+}

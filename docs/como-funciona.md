@@ -1512,5 +1512,6 @@ memory limit`, e é tratada como falha do ambiente (a fábrica repete sozinha), 
 - O supervisor só reporta; não corrige nada sozinho.
 - Uma aprovação do revisor não é prova de que o código está certo. A evidência continua sendo os checks.
 - A sessão do Vercel Sandbox no plano Hobby termina em 45 minutos.
-- A base de conhecimento ainda não tem curador: nenhuma nota é deduplicada por sentido nem proposta como
-  regra sozinha. Só a mesma nota, palavra por palavra, é guardada uma vez.
+- O curador da base de conhecimento (`knowledge-curator`) começa em `trial`: agrupa as notas que dizem a mesma
+  coisa e só registra o que faria. Em `auto` (`FACTORY_KNOWLEDGE_CURATOR_MODE`) funde as notas num commit em
+  `factory-memory` e abre um pull request com uma regra quando notas de três tarefas concordam; nunca o funde.
