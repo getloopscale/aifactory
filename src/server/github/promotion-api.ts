@@ -1,4 +1,5 @@
 import type { FetchLike } from './app'
+import { trackerFor } from '../work-source/tracker'
 import { gated } from './rate-limit'
 
 /** An open promotion pull request and the commit its checks run on. */
@@ -250,6 +251,8 @@ export function createPromotionApi(
     },
 
     async issueOpen(repo, token, issueNumber) {
+      const tracked = await trackerFor(repo, issueNumber)
+      if (tracked) return (await tracked.source.read(tracked.id)).state === 'open'
       const issue = (await (
         await call(repo, token, `/issues/${issueNumber}`, `reading issue #${issueNumber}`, [200])
       ).json()) as { state: string }

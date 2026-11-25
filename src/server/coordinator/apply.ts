@@ -206,6 +206,15 @@ async function gapOfTask(
   return found ? Number(found.slice(repo.length + 1)) : undefined
 }
 
+/** The coordinator edits GitHub issues only: a Linear item is escalated to a person instead of half-edited. */
+function refuseLinear(row: { source: string; displayIdentifier: string | null }, action: string) {
+  if (row.source === 'linear') {
+    throw new ActionRefused(
+      `the coordinator cannot ${action} ${row.displayIdentifier ?? 'a Linear item'}: it only edits GitHub issues`,
+    )
+  }
+}
+
 /**
  * Scopes the task: asks the transition table before anything reaches GitHub, files the follow-up, appends
  * the decision to the issue body and sends the task back on its branch with the note. Returns the number
@@ -216,6 +225,7 @@ async function scope(deps: ApplyDeps, taskId: number, draft: ScopeDraft): Promis
   if (!row) throw new ActionRefused(`task ${taskId} does not exist`)
   const allowed = transition(row, 'coordinator_send_back')
   if (allowed.kind !== 'action') throw new ActionRefused(allowed.reason)
+  refuseLinear(row, 'scope')
   const { token } = await deps.github.installationToken(row.repository)
   if (draft.gap) return fileGap(deps, row, draft)
   const { body } = await deps.readIssue(row.repository, row.issueNumber, token)
@@ -309,6 +319,7 @@ async function blockedBy(deps: ApplyDeps, taskId: number, blocker: number): Prom
   // Only a task in `intake` has its `Blocked by` lines read, and a task that waits for an answer never goes there.
   if (row.stage === 'waiting')
     throw new ActionRefused('a task that waits for an answer is not blocked by an issue')
+  refuseLinear(row, 'declare a blocker on')
   if (blocker === row.issueNumber) throw new ActionRefused('an issue cannot block itself')
   const { token } = await deps.github.installationToken(row.repository)
   const named = await deps.readIssue(row.repository, blocker, token)

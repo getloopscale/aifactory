@@ -483,3 +483,12 @@ describe('describeEvent in the language of the owner', () => {
     expect(describeEvent(sandbox(false))).toBe('e2b')
   })
 })
+
+describe('itemName', () => {
+  it('names a Linear item by its identifier, never by its local ordinal', async () => {
+    const { itemName } = await import('./format')
+    expect(itemName({ issueNumber: -3, displayIdentifier: 'ENG-12' })).toBe('ENG-12')
+    expect(itemName({ issueNumber: 7 })).toBe('#7')
+    expect(itemName({ issueNumber: 7, displayIdentifier: null })).toBe('#7')
+  })
+})
