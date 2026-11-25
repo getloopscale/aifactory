@@ -2752,6 +2752,7 @@ describe('runTask review loop', () => {
 
 describe('runTask planning before it builds', () => {
   const plan = {
+    acceptance: [{ id: 'A1', statement: 'it truncates', evidence: 'truncate.test.js' }],
     files: [{ path: 'src/truncate.js', why: 'the function' }],
     order: ['write the test', 'make it pass'],
     risks: [],

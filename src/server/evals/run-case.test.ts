@@ -30,10 +30,12 @@ const evalCase: EvalCase = {
   original: { taskId: 1, costUsd: 0.4, durationMs: 600_000, attempts: 1, mergedSha: 'm' },
 }
 
-const APPROVE = '{"verdict":"approve","summary":"good","findings":[]}'
+const APPROVE =
+  '{"verdict":"approve","summary":"good","findings":[],"acceptance":[{"id":"A1","met":true,"where":"src/cli.test.ts"}]}'
 const CHANGES =
   '{"verdict":"changes","summary":"no test","findings":[{"severity":"major","issue":"add a test"}]}'
 const PLAN = JSON.stringify({
+  acceptance: [{ id: 'A1', statement: 'the flag works', evidence: 'src/cli.test.ts' }],
   files: [{ path: 'src/cli.ts', why: 'the flag' }],
   order: ['add the flag'],
   risks: [],
@@ -1273,7 +1275,10 @@ describe('runCase review record', () => {
     summary: `round ${n}`,
     findings: [{ severity: n === 2 ? 'minor' : 'major', file: `src/f${n}.ts`, issue: `problem ${n}` }],
   })
-  const answer = (n: number): HarnessResult => ({ ok: true, summary: JSON.stringify(round(n)) })
+  const answer = (n: number): HarnessResult => ({
+    ok: true,
+    summary: JSON.stringify({ ...round(n), acceptance: [{ id: 'A1', met: true, where: 'x' }] }),
+  })
 
   it('keeps the distinct verdict of every review round in the run file', async () => {
     const builder = agent('builder', planned(built(), built(), built()))
@@ -1386,3 +1391,19 @@ describe('the security agent in a case', () => {
   })
 })
 
+
+describe('runCase acceptance', () => {
+  it('gives the reviewer the plan acceptance and turns an unmet id into a major finding', async () => {
+    const builder = agent('builder', planned(built(), built(), built(), built()))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+    ])
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(reviewer.prompts[0]).toContain('A1: the flag works')
+    expect(result.reviews?.[0]?.verdict).toBe('changes')
+    expect(result.reviews?.[0]?.findings[0]?.issue).toContain('A1')
+  })
+})

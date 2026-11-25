@@ -560,6 +560,8 @@ export type ChangePlanView = {
   id: number
   baseSha: string
   harness: string
+  /** Absent in a plan stored before the acceptance list existed. */
+  acceptance?: { id: string; statement: string; evidence: string }[]
   files: { path: string; why: string }[]
   order: string[]
   risks: string[]

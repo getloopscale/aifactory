@@ -233,6 +233,7 @@ describe('approved work the factory holds for its owner', () => {
 describe('the install before the builder', () => {
   class Stop extends Error {}
   const PLAN = JSON.stringify({
+    acceptance: [{ id: 'A1', statement: 'it works', evidence: 'a.test.ts' }],
     files: [{ path: 'a.ts', why: 'x' }],
     order: [],
     risks: [],

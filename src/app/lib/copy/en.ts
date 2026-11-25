@@ -1104,6 +1104,7 @@ export const en = {
     none: 'No plan was written for this task.',
     by: (harness: string, sha: string) => `by ${harness} on ${sha}`,
     latestOf: (n: number) => ` · the latest of ${n}`,
+    acceptance: 'Acceptance',
     files: 'Files',
     noFile: 'No file: the builder expected the code to already do what the issue asks.',
     order: 'Order',
