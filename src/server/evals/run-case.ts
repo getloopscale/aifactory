@@ -42,6 +42,13 @@ import {
   parseSecurityVerdict,
   securityPrompt,
 } from '../factory/security-review'
+import {
+  LENSES,
+  decideLens,
+  documentPaths,
+  lensModeFromEnv,
+  parseLensVerdict,
+} from '../factory/lens-review'
 import type { CheckRun, RequiredByCheck } from '../factory/required-files'
 import {
   buildPrompt,
@@ -129,6 +136,9 @@ class CaseRun {
   cost = 0
   private reviewerCost = 0
   private securityCost = 0
+  private lensCost = 0
+  private lensReworks = 0
+  private lensEarlier: Finding[] = []
   /** A review gave a valid verdict at some point of the case. */
   private verdictSeen = false
   attempts = 1
@@ -529,6 +539,82 @@ class CaseRun {
     return { blocked: [decision.reason, ...findings.map((f) => f.issue)] }
   }
 
+  /**
+   * What follows an approval, as `Run.approved` does it: the security review, then the lenses, then the integration
+   * gate. `'again'` is a send-back that changed the work, which the loop checks and reviews.
+   */
+  private async afterApproval(sha: string): Promise<CaseEnd | 'again'> {
+    const secured = await this.secure(sha)
+    if (typeof secured === 'object') return this.securityEnd(secured.blocked)
+    if (secured === 'rework') return 'again'
+    if ((await this.lens(sha)) === 'rework') return 'again'
+    return (
+      (await this.integrationGate(sha)) ?? {
+        checksPassed: true,
+        verdict: 'approve',
+        blockingGuards: [],
+      }
+    )
+  }
+
+  /**
+   * The lenses over approved work, as `Run.lensed`: read-only, the reviewer's agent in a fresh session. In `auto` a
+   * blocking finding sends the builder back once; an answer that does not parse, or a lens that cannot run, is
+   * recorded as such and the case goes on. A lens never ends a case.
+   */
+  private async lens(sha: string): Promise<'pass' | 'rework'> {
+    const mode = lensModeFromEnv(process.env)
+    if (mode === 'off') return 'pass'
+    for (const lens of LENSES) {
+      let verdict: ReviewVerdict
+      try {
+        const documents = await documentPaths(this.backend, this.repoDir)
+        if (documents.length === 0) continue
+        const diff = await securityDiff(this.backend, this.repoDir, this.c.baseSha)
+        const result = await this.agentCall(() =>
+          this.deps.reviewer.run(this.backend, {
+            cwd: this.repoDir,
+            timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
+            role: 'reviewer',
+            prompt: lens.prompt({
+              repo: this.c.repository,
+              issueNumber: this.c.issueNumber,
+              title: this.c.title,
+              body: this.c.body,
+              baseSha: this.c.baseSha,
+              diff,
+              documents,
+              knowledgeDir: this.knowledgeDir,
+              earlier: this.lensEarlier,
+            }),
+          }),
+        )
+        this.cost += result.costUsd ?? 0
+        this.lensCost += result.costUsd ?? 0
+        await must(this.backend, `${this.git} reset --hard ${sha}`)
+        await must(this.backend, `${this.git} clean -fdx -e node_modules`)
+        verdict = result.ok
+          ? parseLensVerdict(result.summary)
+          : { verdict: 'invalid', summary: result.summary, findings: [] }
+      } catch (error) {
+        if (error instanceof Stopped) throw error
+        verdict = { verdict: 'invalid', summary: String(error), findings: [] }
+      }
+      const decision = decideLens({
+        mode,
+        verdict,
+        reworks: this.lensReworks,
+        canRework: this.canResume(),
+      })
+      this.lensEarlier = verdict.findings
+      if (decision.kind === 'rework') {
+        this.lensReworks++
+        if (await this.rework(decision.findings, [], sha)) return 'rework'
+      }
+    }
+    return 'pass'
+  }
+
   /** How a case ends once the security review blocked an approved change. */
   private securityEnd(blocked: string[]): CaseEnd {
     return { checksPassed: true, verdict: 'approve', blockingGuards: [], securityBlocked: blocked }
@@ -624,17 +710,8 @@ class CaseRun {
       // The same findings `Run.review` stores, so the rounds are counted as the factory counts them.
       this.blockingCounts.push(blockingCount([...guards, ...outside, ...read.findings]))
       if (read.verdict === 'approve' && blocking.length === 0) {
-        const secured = await this.secure(sha)
-        if (secured === 'pass') {
-          return (
-            (await this.integrationGate(sha)) ?? {
-              checksPassed: true,
-              verdict: 'approve',
-              blockingGuards: [],
-            }
-          )
-        }
-        if (typeof secured === 'object') return this.securityEnd(secured.blocked)
+        const end = await this.afterApproval(sha)
+        if (end !== 'again') return end
         sha = await this.applyFixes(await this.commit())
         continue
       }
@@ -660,17 +737,8 @@ class CaseRun {
       if (!(await this.rework(findings, [], sha))) {
         const judged = await this.review(sha, unplanned, required)
         if (judged.verdict === 'approve' && blocking.length === 0) {
-          const secured = await this.secure(sha)
-          if (secured === 'pass') {
-            return (
-              (await this.integrationGate(sha)) ?? {
-                checksPassed: true,
-                verdict: 'approve',
-                blockingGuards: [],
-              }
-            )
-          }
-          if (typeof secured === 'object') return this.securityEnd(secured.blocked)
+          const end = await this.afterApproval(sha)
+          if (end !== 'again') return end
           sha = await this.applyFixes(await this.commit())
           continue
         }
@@ -694,9 +762,10 @@ class CaseRun {
       ...caseOutcome(this.withFloor(end), this.c.expectSecurity),
       costUsd: this.cost,
       costByRole: {
-        builder: Math.max(0, this.cost - this.reviewerCost - this.securityCost),
+        builder: Math.max(0, this.cost - this.reviewerCost - this.securityCost - this.lensCost),
         reviewer: this.reviewerCost,
         security: this.securityCost,
+        lens: this.lensCost,
       },
       durationMs: Date.now() - this.started,
       attempts: this.attempts,
