@@ -1,5 +1,5 @@
 {
-  "id": "7f771c23-d9a6-4a31-b524-6987c62dd953",
+  "id": "b3185bda-69eb-4291-8a73-3d3bed222eff",
   "prevId": "8f6d0ccd-41a6-4182-af14-c7fafc7e8bc9",
   "version": "7",
   "dialect": "postgresql",
@@ -1382,13 +1382,6 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "source_tasks": {
-          "name": "source_tasks",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2611,6 +2604,13 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "risk_patterns": {
+          "name": "risk_patterns",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -3601,127 +3601,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.review_pattern": {
-      "name": "review_pattern",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "repository": {
-          "name": "repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "class_key": {
-          "name": "class_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "class_name": {
-          "name": "class_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "invariant": {
-          "name": "invariant",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_ids": {
-          "name": "task_ids",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "first_seen_at": {
-          "name": "first_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "last_seen_at": {
-          "name": "last_seen_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "recorded_at": {
-          "name": "recorded_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "note_id": {
-          "name": "note_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "proposal_url": {
-          "name": "proposal_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "count_before": {
-          "name": "count_before",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "count_after": {
-          "name": "count_after",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "measured_at": {
-          "name": "measured_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "review_pattern_note_id_knowledge_note_id_fk": {
-          "name": "review_pattern_note_id_knowledge_note_id_fk",
-          "tableFrom": "review_pattern",
-          "tableTo": "knowledge_note",
-          "columnsFrom": [
-            "note_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "review_pattern_once": {
-          "name": "review_pattern_once",
-          "nullsNotDistinct": false,
-          "columns": [
-            "repository",
-            "class_key"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

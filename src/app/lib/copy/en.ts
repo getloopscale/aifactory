@@ -78,6 +78,8 @@ export const en = {
     mainRed: 'main is red',
     changeSize: (added: number, removed: number, files: number) =>
       `${added} lines added, ${removed} removed, in ${files} ${files === 1 ? 'file' : 'files'}`,
+    risk: { low: 'Risk: low', medium: 'Risk: medium', high: 'Risk: high' },
+    riskReasons: (reasons: string[]) => reasons.join('; '),
     waitingOnBase: (checks: string, branch: string) => `waits for ${checks} to pass on ${branch}`,
     returned: {
       base_conflict: 'Returned: conflicts with base',
@@ -491,6 +493,12 @@ export const en = {
       fixesAssistContext:
         'Only the fix commands: one shell command per line that rewrites files and decides nothing (a formatter, a lint autofix), with no name before it. Not checks.',
       fixesPlaceholder: 'Empty runs none. For example: pnpm prettier --write .',
+      riskPatterns: 'Risky paths, one per line, as high: or medium: and a glob',
+      riskPatternsAssistContext:
+        'Only path patterns: one per line as high: <glob> or medium: <glob>, for the files whose change is riskier than most (migrations, authentication, payment, public API, infrastructure). No commands. A Markdown file is never rated by its path, so a pattern for one has no effect.',
+      riskPatternsHelp:
+        'A Markdown file is never rated by its path, so a pattern for one has no effect.',
+      riskPatternsPlaceholder: 'Empty uses the defaults. For example: high: src/server/auth/**',
       domains: 'Extra domains the sandbox may reach',
       domainsPlaceholder:
         'GitHub, the agent and the npm registry are always open. For Python: pypi.org, files.pythonhosted.org',

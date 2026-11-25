@@ -320,6 +320,16 @@ describe('listTasks and the lead time', () => {
     expect(card.leadTime).toEqual({ minutes: 60, status: 'on_track', running: false })
   })
 
+  it('shows the risk of a handed-over task, from its handoff event', async () => {
+    const id = await seed('handoff')
+    const risk = { sha: 'abc', level: 'high', reasons: ['src/auth/x.ts matches high: **/auth/**'] }
+    await getDb().insert(stageEvent).values({ taskId: id, stage: 'handoff', detail: { risk } })
+
+    const card = (await listTasks(getDb())).find((c) => c.id === id)!
+
+    expect(card.risk).toEqual(risk)
+  })
+
   it("uses the repository's own limits where it set them", async () => {
     await getDb()
       .insert(repository)

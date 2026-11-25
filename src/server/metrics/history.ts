@@ -2,6 +2,7 @@ import { isMergeConflict } from '../factory/auto-retry'
 import { isFixedBaseNote } from '../factory/ci-wait'
 import type { decision, TaskStage } from '../db/schema'
 
+import { readRisk } from '../factory/risk'
 import { readFacts, totalAdded, type ChangeFacts } from '../factory/change-size'
 
 import type { MetricName } from './config'
@@ -127,6 +128,9 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     const cameBack = next !== undefined && !isFixedBaseNote(next.events[0]?.detail?.note)
     const failed = cameBack || after.some((e) => CAME_BACK.includes(e.stage)) || h.releaseWentRed
     values.change_failure = failed ? 1 : 0
+    // The same observation, in the series of the level recorded for the delivery; none for an older one.
+    const risk = readRisk(done.detail?.risk)
+    if (risk) values[`change_failure_${risk.level}`] = failed ? 1 : 0
     const cause = failed
       ? causeOfReturn(done, next, h.releaseWentRed && next === undefined)
       : undefined

@@ -32,6 +32,8 @@ import {
   type PreparedInstall,
 } from '../factory/evidence'
 import { FIX_COMMIT_MESSAGE, runFixes } from '../factory/fixes'
+import type { RiskAssessment } from '../../shared/panel'
+import { assessmentFor, assessRisk } from '../factory/risk'
 import { diffFacts, securityDiff, securityFloor, securitySurfacesOf } from '../factory/diff-facts'
 import {
   decideSecurity,
@@ -416,6 +418,8 @@ class CaseRun {
     return failingChecks(results)
   }
 
+  private risk: RiskAssessment | undefined
+
   private async review(
     sha: string,
     unplanned: string[],
@@ -436,6 +440,7 @@ class CaseRun {
         baseSha: c.baseSha,
         knowledgeDir: this.knowledgeDir,
         required,
+        ...(this.risk ? { risk: this.risk } : {}),
         ...(this.earlier ? { earlier: this.earlier } : {}),
         builderSummary: this.reviewAnswer ?? this.summary,
         ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
@@ -585,12 +590,23 @@ class CaseRun {
         continue
       }
       failedBefore = undefined
-      const { guards, unplanned, required } = await diffFacts(this.backend, this.repoDir, {
+      const { guards, unplanned, required, touched, size } = await diffFacts(this.backend, this.repoDir, {
         baseSha: this.c.baseSha,
         plan: this.plan,
         issue: { labels: this.c.labels, title: this.c.title, body: this.c.body },
         checkRuns: this.checkRuns,
       })
+      // The same rating `Run.review` gives the commit, so the reviewer reads what it reads in the factory (#470).
+      this.risk = assessmentFor(
+        sha,
+        assessRisk({
+          paths: touched,
+          lines: size.added + size.removed,
+          files: size.files,
+          labels: this.c.labels,
+          unplanned,
+        }),
+      )
       const blocking = guards.filter((g) => g.severity !== 'minor')
       if (blocking.length > 0 && this.c.expectSecurity === 'block') {
         const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)

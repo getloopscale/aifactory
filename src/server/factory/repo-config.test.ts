@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { DOMAIN, validBranch, labelsWithRepoChoice, NO_CONFIG } from './repo-config'
+import type { Database } from '../db'
+
+import { DOMAIN, validBranch, labelsWithRepoChoice, loadRepoConfig, NO_CONFIG } from './repo-config'
 
 describe('labelsWithRepoChoice', () => {
   it('adds the repository agents when the issue names none', () => {
@@ -95,5 +97,86 @@ describe('validBranch', () => {
     ]) {
       expect(validBranch(bad), JSON.stringify(bad)).toBe(false)
     }
+  })
+})
+
+function fakeDb(rows: unknown[]): Database {
+  return {
+    select: () => ({ from: () => ({ where: async () => rows }) }),
+  } as unknown as Database
+}
+
+describe('loadRepoConfig', () => {
+  const full = {
+    checks: [{ name: 'test', command: 'pnpm test' }],
+    integrationChecks: [{ name: 'int', command: 'pnpm int' }],
+    fixes: ['pnpm format'],
+    riskPatterns: ['high: src/a.ts'],
+    egress: ['pypi.org'],
+    approvedRecipeEgress: ['npmjs.org'],
+    baseBranch: 'workspace',
+    releaseBranch: 'main',
+    askQuestions: false,
+    harness: 'codex',
+    reviewer: 'claude-code',
+    releaseMode: 'auto',
+    runLimitMinutes: 30,
+  }
+
+  it('is NO_CONFIG when the repository is unknown', async () => {
+    expect(await loadRepoConfig(fakeDb([]), 'a/b')).toBe(NO_CONFIG)
+  })
+
+  it('carries what the owner set', async () => {
+    expect(await loadRepoConfig(fakeDb([full]), 'a/b')).toEqual({
+      ...full,
+      runLimitMinutes: undefined,
+      runLimitMs: 1_800_000,
+    })
+  })
+
+  it('turns empty lists and nulls into nothing', async () => {
+    const config = await loadRepoConfig(
+      fakeDb([
+        {
+          checks: [],
+          integrationChecks: [],
+          fixes: [],
+          riskPatterns: [],
+          egress: [],
+          approvedRecipeEgress: [],
+          baseBranch: null,
+          releaseBranch: null,
+          askQuestions: true,
+          harness: null,
+          reviewer: null,
+          releaseMode: null,
+          runLimitMinutes: null,
+        },
+      ]),
+      'a/b',
+    )
+    expect(config.checks).toBeUndefined()
+    expect(config.integrationChecks).toBeUndefined()
+    expect(config.fixes).toBeUndefined()
+    expect(config.riskPatterns).toBeUndefined()
+    expect(config.baseBranch).toBeUndefined()
+    expect(config.releaseBranch).toBeUndefined()
+    expect(config.harness).toBeUndefined()
+    expect(config.reviewer).toBeUndefined()
+    expect(config.releaseMode).toBeUndefined()
+    expect(config.runLimitMs).toBeUndefined()
+    expect(config.askQuestions).toBe(true)
+  })
+
+  it('keeps null checks as nothing', async () => {
+    const config = await loadRepoConfig(
+      fakeDb([{ ...full, checks: null, integrationChecks: null, fixes: null, riskPatterns: null }]),
+      'a/b',
+    )
+    expect(config.checks).toBeUndefined()
+    expect(config.integrationChecks).toBeUndefined()
+    expect(config.fixes).toBeUndefined()
+    expect(config.riskPatterns).toBeUndefined()
   })
 })

@@ -153,6 +153,8 @@ export const ptBR: Copy = {
     mainRed: 'main quebrada',
     changeSize: (added: number, removed: number, files: number) =>
       `${added} linhas adicionadas, ${removed} removidas, em ${files} ${files === 1 ? 'arquivo' : 'arquivos'}`,
+    risk: { low: 'Risco: baixo', medium: 'Risco: médio', high: 'Risco: alto' },
+    riskReasons: (reasons: string[]) => reasons.join('; '),
     waitingOnBase: (checks: string, branch: string) => `espera ${checks} passar em ${branch}`,
     returned: {
       base_conflict: 'Voltou: conflito com a base',
@@ -746,6 +748,12 @@ export const ptBR: Copy = {
       fixesAssistContext:
         'Só os comandos de correção: um comando de shell por linha que reescreve arquivos e não decide nada (um formatador, um autofix de lint), sem nome na frente. Não são verificações.',
       fixesPlaceholder: 'Vazio não roda nenhuma. Por exemplo: pnpm prettier --write .',
+      riskPatterns: 'Caminhos de risco, um por linha, como high: ou medium: e um glob',
+      riskPatternsAssistContext:
+        'Só padrões de caminho: um por linha como high: <glob> ou medium: <glob>, para os arquivos cuja mudança é mais arriscada que a maioria (migrações, autenticação, pagamento, API pública, infraestrutura). Sem comandos. Um arquivo Markdown nunca é avaliado pelo caminho, então um padrão para ele não tem efeito.',
+      riskPatternsHelp:
+        'Um arquivo Markdown nunca é avaliado pelo caminho, então um padrão para ele não tem efeito.',
+      riskPatternsPlaceholder: 'Vazio usa os padrões. Por exemplo: high: src/server/auth/**',
       domains: 'Domínios extras que o sandbox pode acessar',
       domainsPlaceholder:
         'GitHub, o agente e o registro do npm ficam sempre abertos. Para Python: pypi.org, files.pythonhosted.org',

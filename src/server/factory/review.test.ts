@@ -119,6 +119,32 @@ describe('prompts', () => {
     expect(prompt).toContain('Do not edit, create or delete files')
     expect(prompt).toContain('"verdict"')
     expect(prompt).not.toContain("# The builder's plan")
+    expect(prompt).not.toContain('risk, without a model')
+  })
+
+  it('names the risk level and its reasons in the review of a resolved merge too', () => {
+    const base = { repo: 'o/r', issueNumber: 3, title: 'T', branch: 'factory/3', mergeSha: 'abc' }
+    expect(resolutionReviewPrompt(base)).not.toContain('risk, without a model')
+    const prompt = resolutionReviewPrompt({
+      ...base,
+      risk: { sha: 's', level: 'high', reasons: ['src/auth/x.ts matches high: **/auth/**'] },
+    })
+    expect(prompt).toContain('rated this change high risk')
+    expect(prompt).toContain('- src/auth/x.ts matches high: **/auth/**')
+  })
+
+  it('names the risk level and its reasons when the factory rated the change', () => {
+    const prompt = reviewPrompt({
+      repo: 'o/r',
+      issueNumber: 3,
+      title: 'T',
+      body: 'B',
+      branch: 'factory/3',
+      baseSha: 'abc',
+      risk: { sha: 's', level: 'high', reasons: ['drizzle/1.sql matches high: drizzle/**'] },
+    })
+    expect(prompt).toContain('rated this change high risk')
+    expect(prompt).toContain('- drizzle/1.sql matches high: drizzle/**')
   })
 
   it('in a later round, gives the reviewer its earlier findings and limits new blockers to what changed', () => {
