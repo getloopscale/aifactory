@@ -267,7 +267,15 @@ describe('a Linear task’s negative ordinal', () => {
     const { body } = followUpIssue(draft(), 'o/r', -3)!
     expect(body).not.toContain('-3')
     expect(followUpOrigin(body)).toEqual({ repo: 'o/r', issue: 0 })
-    const input = { repo: 'o/r', issueNumber: -3, title: 'T', body: 'b', reviews: [], findings: [], roundsNote: '' }
+    const input = {
+      repo: 'o/r',
+      issueNumber: -3,
+      title: 'T',
+      body: 'b',
+      reviews: [],
+      findings: [],
+      roundsNote: '',
+    }
     expect(scopeMessage(input as never)).not.toContain('-3')
   })
 })
