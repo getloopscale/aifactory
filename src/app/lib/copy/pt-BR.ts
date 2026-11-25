@@ -1546,6 +1546,18 @@ export const ptBR: Copy = {
       queue_blocked: 'Correção esperando na fila',
     } as Record<string, string>,
   },
+  attention: {
+    one: (summary) => `Esperando por você: ${summary}`,
+    many: (count, summary) => `${count} itens esperam por você. O primeiro: ${summary}`,
+    notificationTitle: 'aifactory',
+    openTask: 'Abrir a tarefa',
+    dismiss: 'Dispensar',
+    notify: 'Me avise',
+    notifyOn: 'Os avisos estão ligados',
+    notifyDenied:
+      'Os avisos estão desligados. O navegador os recusou: permita-os para este site nas configurações do navegador (o cadeado ao lado do endereço) e recarregue.',
+    notifyUnsupported: 'Este navegador não mostra avisos.',
+  },
   inbox: {
     heading: 'Caixa de entrada',
     nothing: 'Nada espera por você.',

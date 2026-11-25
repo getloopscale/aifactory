@@ -1244,6 +1244,18 @@ export const en = {
       queue_blocked: 'Fix waiting in the queue',
     } as Record<string, string>,
   },
+  attention: {
+    one: (summary: string) => `Waiting for you: ${summary}`,
+    many: (count: number, summary: string) => `${count} things wait for you. First: ${summary}`,
+    notificationTitle: 'aifactory',
+    openTask: 'Open the task',
+    dismiss: 'Dismiss',
+    notify: 'Notify me',
+    notifyOn: 'Notifications are on',
+    notifyDenied:
+      'Notifications are off. Your browser refused them: allow them for this site in the browser settings (the lock next to the address), then reload.',
+    notifyUnsupported: 'This browser cannot show notifications.',
+  },
   inbox: {
     heading: 'Inbox',
     nothing: 'Nothing waits for you.',
