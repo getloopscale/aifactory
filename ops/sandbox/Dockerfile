@@ -2,15 +2,9 @@
 # the build tools, and bubblewrap and strace for the projects whose tests need them. It has no network of its own:
 # everything goes through the egress proxy of its sandbox (see docker-sandbox.ts).
 FROM node:22.23.5-bookworm
-# theocode's english-only check (tools/english-only-detectors.mjs) builds its lexicons from whichever of
-# /usr/share/dict/{american-english,words,brazilian,portuguese} and /usr/share/hunspell/{en_US,pt_BR}.dic exist, so
-# its verdict depends on this image. Installing wbrazilian next to wamerican lets dictionaries-common choose what
-# `words` is; it is pinned to American English here, as on theokit's CI runner, and nothing else is added.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends bubblewrap jq strace unzip wamerican wbrazilian \
  && rm -rf /var/lib/apt/lists/* \
- && ln -sf /usr/share/dict/american-english /etc/dictionaries-common/words \
- && ln -sf /etc/dictionaries-common/words /usr/share/dict/words \
  && corepack enable \
  && mkdir -p /work /cache \
  && chown node:node /work /cache /usr/local/bin

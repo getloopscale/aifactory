@@ -2,7 +2,12 @@ import { readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
+import {
+  CHECKER_DICTIONARY_PATHS,
+  SANDBOX_DICTIONARY_PACKAGES,
+  SANDBOX_DICTIONARY_PRESENT,
+  SANDBOX_TOOLCHAIN,
+} from './sandbox-toolchain'
 
 const dockerfile = readFileSync(new URL('../../../ops/sandbox/Dockerfile', import.meta.url), 'utf8')
 
@@ -16,19 +21,29 @@ describe('the sandbox toolchain', () => {
   })
 
   // A repository check that reads /usr/share/dict (theokit's TheoCode english-only lint) fails closed without them.
-  it('installs the American English and Brazilian Portuguese word lists', () => {
+  // A repository check that reads /usr/share/dict (theokit's TheoCode english-only lint) fails closed without them,
+  // and reads a different lexicon when the image adds a list: the packages are exactly the CI runner's pair.
+  it('installs exactly the word-list packages the CI runner installs', () => {
     const installed = /apt-get install -y --no-install-recommends ([^\\\n]+)/
       .exec(dockerfile)?.[1]
       .split(' ')
-    expect(installed).toEqual(expect.arrayContaining(['wamerican', 'wbrazilian']))
+    const dictionaries = (installed ?? []).filter((p) =>
+      /^(w[a-z]+|hunspell.*|dict.*|myspell.*)$/.test(p),
+    )
+    expect(dictionaries.filter((p) => p !== 'wget').sort()).toEqual(
+      [...SANDBOX_DICTIONARY_PACKAGES].sort(),
+    )
   })
 
-  it('pins the `words` list to American English, as the CI runner has it', () => {
-    expect(dockerfile).toContain(
-      'ln -sf /usr/share/dict/american-english /etc/dictionaries-common/words',
+  it('has no Dockerfile step, outside comments, that adds or links a word list of its own', () => {
+    expect(dockerfile.replace(/^#.*$/gm, '')).not.toMatch(
+      /hunspell|\/usr\/share\/dict|\/etc\/dictionaries-common/,
     )
-    expect(dockerfile).toContain('ln -sf /etc/dictionaries-common/words /usr/share/dict/words')
-    expect(dockerfile.replace(/^#.*$/gm, '')).not.toMatch(/hunspell|dict-pt|wportuguese/)
+  })
+
+  it('expects, of the six paths the checker reads, only those the two packages provide', () => {
+    expect(SANDBOX_DICTIONARY_PRESENT.every((p) => CHECKER_DICTIONARY_PATHS.includes(p))).toBe(true)
+    expect(CHECKER_DICTIONARY_PATHS).toHaveLength(6)
   })
 
   it('names the pnpm the factory itself declares', () => {

@@ -3,7 +3,11 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { e2bSandboxProvider } from './e2b-sandbox'
 import { prepareDeclaredPackageManager } from './package-manager'
-import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
+import {
+  CHECKER_DICTIONARY_PATHS,
+  SANDBOX_DICTIONARY_PRESENT,
+  SANDBOX_TOOLCHAIN,
+} from './sandbox-toolchain'
 import { createIsolatedSandbox, restoreIsolatedSandbox, type IsolatedSandbox } from './sandbox'
 
 // Runs real E2B sandboxes: needs E2B_API_KEY and the template from scripts/build-e2b-template.mts. httpbin.org
@@ -40,25 +44,18 @@ describe('an E2B sandbox', () => {
     expect((await sh('command -v bwrap strace')).stdout.trim().split('\n')).toHaveLength(2)
   })
 
-  // theocode's english-only check reads exactly these six paths; the image must hold what theokit's CI runner holds.
-  it('has the same dictionary paths as the CI runner: American English and Brazilian only', async () => {
-    const paths = [
-      '/usr/share/dict/american-english',
-      '/usr/share/dict/words',
-      '/usr/share/hunspell/en_US.dic',
-      '/usr/share/dict/brazilian',
-      '/usr/share/dict/portuguese',
-      '/usr/share/hunspell/pt_BR.dic',
-    ]
-    const found = await sh(paths.map((p) => `test -e ${p} && echo ${p}`).join('; '))
-    expect(found.stdout.trim().split('\n')).toEqual([
-      '/usr/share/dict/american-english',
-      '/usr/share/dict/words',
-      '/usr/share/dict/brazilian',
-    ])
-    expect((await sh('readlink -f /usr/share/dict/words')).stdout.trim()).toBe(
-      '/usr/share/dict/american-english',
-    )
+  // theocode's english-only check reads these paths, so the image must hold exactly what theokit's CI runner holds
+  // (ci.yml prints its inventory). The listing is in the failure message, with sizes and link targets.
+  it('holds, of the dictionary paths the checker reads, exactly the ones the CI runner holds', async () => {
+    const probe = CHECKER_DICTIONARY_PATHS.map((p) => `test -e ${p} && echo ${p}`).join('; ')
+    const found = (await sh(`${probe}; true`)).stdout.trim().split('\n').filter(Boolean)
+    const listing = (
+      await sh('ls -lL /usr/share/dict /usr/share/hunspell 2>&1; ls -l /usr/share/dict')
+    ).stdout
+    expect({ found, listing }).toEqual({
+      found: SANDBOX_DICTIONARY_PRESENT,
+      listing: expect.any(String),
+    })
   })
 
   it('runs the declared package manager, whatever its version, in a child with only PATH and HOME and no network', async () => {
