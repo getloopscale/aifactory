@@ -4,6 +4,10 @@ import { ptBR } from '../../app/lib/copy/pt-BR'
 import { DOCTOR_SAY_CODES, DOCTOR_SAY_EN, DOCTOR_TRIED_CODES } from '../../shared/doctor-say'
 
 import {
+  agentGuideItem,
+  fileTried,
+  lockfileItem,
+  testEntryItem,
   appAccessItem,
   appEventsItem,
   autoMergeItem,
@@ -29,6 +33,7 @@ import {
   triedText,
   unread,
   type DoctorFacts,
+  type Read,
   type PublishFacts,
 } from './doctor'
 import { parseRecipe, type RecipeError } from './recipe'
@@ -836,6 +841,11 @@ describe('the report', () => {
       docker: { at: '', sha: 'a', passed: ['test'], failed: [] },
       e2b: { at: '', sha: 'a', passed: ['test'], failed: [] },
     }),
+    guide: readOf('AGENTS.md'),
+    manifest: readOf('{"scripts":{"test":"vitest"}}'),
+    lockfile: readOf('pnpm-lock.yaml'),
+    recipeChecks: readOf(false),
+    savedChecks: false,
   }
 
   it('has one item for each diagnosis, in the order they are declared, all fine for a healthy repository', () => {
@@ -854,6 +864,15 @@ describe('the report', () => {
       'recipe',
       'sandbox',
       'provider_checks',
+      'agent_guide',
+      'lockfile',
+      'test_entry',
+    ])
+    expect(items.filter((i) => i.family === 'operation')).toHaveLength(12)
+    expect(items.filter((i) => i.family === 'codebase').map((i) => i.id)).toEqual([
+      'agent_guide',
+      'lockfile',
+      'test_entry',
     ])
     expect(items.map((i) => i.status)).toEqual(items.map(() => 'ok'))
     // The sentence of a fine item has a code too, and the code makes the same English sentence.
@@ -888,6 +907,9 @@ describe('the report', () => {
       recipe: 'ok',
       sandbox: 'ok',
       provider_checks: 'ok',
+      agent_guide: 'ok',
+      lockfile: 'ok',
+      test_entry: 'ok',
     })
     expect(items.find((i) => i.id === 'auto_merge')?.cause).toContain('staging requires')
     expect(items.find((i) => i.id === 'ci_silent')?.cause).toContain('staging requires lint')
@@ -909,6 +931,10 @@ describe('the report', () => {
       recipe: down,
       sandbox: down,
       providerProofs: down,
+      guide: down,
+      manifest: down,
+      lockfile: down,
+      recipeChecks: down,
     })
     expect(items.map((i) => i.status)).toEqual(items.map(() => 'unknown'))
   })
@@ -951,6 +977,75 @@ describe('providerChecksItem', () => {
   it('is fine only when every provider passed', () => {
     const all = { vercel: proof(['t']), docker: proof(['t']), e2b: proof(['t']) }
     expect(providerChecksItem(readOf(all)).status).toBe('ok')
+  })
+})
+
+describe('the codebase items', () => {
+  const base = { repo: REPO, integration: 'workspace' }
+  const tried = (path: string) =>
+    unread(
+      triedText(fileTried(REPO, path, 'workspace')),
+      'GitHub answered 502',
+      fileTried(REPO, path, 'workspace'),
+    )
+  const tests = (manifest: Read<string | undefined>) => ({
+    ...base,
+    manifest,
+    recipeChecks: readOf(false),
+    savedChecks: false,
+  })
+
+  it('agent_guide: ok with a guide, warn with none, unknown naming the path and ref', () => {
+    expect(agentGuideItem({ ...base, guide: readOf('CLAUDE.md') }).status).toBe('ok')
+    expect(agentGuideItem({ ...base, guide: readOf(undefined) }).status).toBe('warn')
+    const item = agentGuideItem({ ...base, guide: tried('AGENTS.md') })
+    expect(item.status).toBe('unknown')
+    expect(item.cause).toContain('reading AGENTS.md on workspace of o/r')
+  })
+
+  it('lockfile: ok, warn, unknown, and ok as not applicable with no package.json', () => {
+    const manifest = readOf<string | undefined>('{}')
+    expect(lockfileItem({ ...base, manifest, lockfile: readOf('yarn.lock') }).status).toBe('ok')
+    expect(lockfileItem({ ...base, manifest, lockfile: readOf(undefined) }).status).toBe('warn')
+    const unknown = lockfileItem({ ...base, manifest, lockfile: tried('yarn.lock') })
+    expect(unknown.status).toBe('unknown')
+    expect(unknown.cause).toContain('reading yarn.lock on workspace')
+    const none = lockfileItem({ ...base, manifest: readOf(undefined), lockfile: readOf(undefined) })
+    expect(none.status).toBe('ok')
+    expect(none.cause).toContain('Does not apply')
+    expect(
+      lockfileItem({ ...base, manifest: tried('package.json'), lockfile: readOf('x') }).status,
+    ).toBe('unknown')
+  })
+
+  it('test_entry: ok from a saved check, the recipe or a test script', () => {
+    const bare = readOf<string | undefined>('{"scripts":{}}')
+    expect(testEntryItem({ ...tests(bare), savedChecks: true }).status).toBe('ok')
+    expect(testEntryItem({ ...tests(bare), recipeChecks: readOf(true) }).status).toBe('ok')
+    expect(testEntryItem(tests(readOf('{"scripts":{"test":"vitest"}}'))).status).toBe('ok')
+  })
+
+  it('test_entry: warn with none of the three, unknown when a source could not be read', () => {
+    expect(testEntryItem(tests(readOf('{"scripts":{}}'))).status).toBe('warn')
+    const noManifest = testEntryItem(tests(tried('package.json')))
+    expect(noManifest.status).toBe('unknown')
+    expect(noManifest.cause).toContain('reading package.json on workspace of o/r')
+    const noRecipe = testEntryItem({
+      ...tests(readOf('{}')),
+      recipeChecks: tried('.factory/setup.json'),
+    })
+    expect(noRecipe.cause).toContain('reading .factory/setup.json on workspace')
+    const broken = testEntryItem(tests(readOf('{not json')))
+    expect(broken.status).toBe('unknown')
+    expect(broken.cause).toContain('package.json')
+    // What is known settles the item even when another source was not read.
+    expect(testEntryItem({ ...tests(tried('package.json')), savedChecks: true }).status).toBe('ok')
+  })
+
+  it('test_entry: ok as not applicable with no package.json', () => {
+    const item = testEntryItem(tests(readOf(undefined)))
+    expect(item.status).toBe('ok')
+    expect(item.cause).toContain('Does not apply')
   })
 })
 
