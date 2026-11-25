@@ -30,7 +30,14 @@ const payload = (teamId: string, id = 'item-1') => ({
   type: 'Issue',
   action: 'create',
   url: 'https://linear.app/x/issue/ENG-1',
-  data: { id, identifier: 'ENG-1', title: 'Fix it', teamId, labels: [{ name: 'factory' }] },
+  data: {
+    id,
+    identifier: 'ENG-1',
+    title: 'Fix it',
+    teamId,
+    labels: [{ name: 'factory' }],
+    state: { type: 'started' },
+  },
 })
 const nothingToRead = async (): Promise<LinearFacts> => {
   throw new Error('the payload is complete: nothing to read')
