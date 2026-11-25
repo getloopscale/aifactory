@@ -8,6 +8,7 @@ import RootLayout from './layout'
 import WorkPage from './work/page'
 import { en } from './lib/copy/en'
 import { ptBR } from './lib/copy/pt-BR'
+import { announceChange } from './lib/live'
 
 // The expected text comes from the dictionary of the language the test runs in.
 let t = ptBR
@@ -361,6 +362,105 @@ describe('the language of the panel', () => {
     )
     expect(board(calls)).toBe(before)
   })
+})
+
+describe('the owner is told when something waits', () => {
+  const entry = (id: number, summary = `pergunta ${id}`) => ({
+    task: { id, repository: 'o/r', issueNumber: id, title: 'T', stage: 'waiting', costUsd: 0 },
+    kind: 'question',
+    summary,
+    at: '2026-11-05T10:00:00Z',
+  })
+
+  class FakeNotification {
+    static permission: NotificationPermission = 'granted'
+    static made: FakeNotification[] = []
+    static requestPermission = vi.fn()
+    onclick: (() => void) | null = null
+    constructor(
+      public title: string,
+      public options?: NotificationOptions,
+    ) {
+      FakeNotification.made.push(this)
+    }
+  }
+
+  function setup(focused: boolean, permission: NotificationPermission) {
+    FakeNotification.made = []
+    FakeNotification.permission = permission
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    vi.stubGlobal('Notification', FakeNotification)
+    vi.spyOn(document, 'hasFocus').mockReturnValue(focused)
+    const routes: Record<string, unknown> = { ...signedIn, 'GET /api/panel/inbox': { items: [] } }
+    serve(routes)
+    return (items: unknown[]) => {
+      routes['GET /api/panel/inbox'] = { items }
+      act(() => announceChange())
+    }
+  }
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it('puts the count in the title and a dot on the favicon', async () => {
+    serve({ ...signedIn, 'GET /api/panel/inbox': { items: [entry(1), entry(2)] } })
+    renderAt('/')
+    await waitFor(() => expect(document.title).toBe('(2) aifactory'))
+    expect(document.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe(
+      '/favicon-attention.svg',
+    )
+    cleanup()
+    serve({ ...signedIn, 'GET /api/panel/inbox': { items: [] } })
+    renderAt('/')
+    await waitFor(() => expect(document.title).toBe('aifactory'))
+    expect(document.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe('/favicon.svg')
+  })
+
+  it('holds the announcement in a live region outside the menu', async () => {
+    const give = setup(true, 'default')
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    give([entry(1)])
+    const live = await screen.findByTestId('attention-live')
+    await waitFor(() => expect(live.textContent).toBe(ptBR.attention.one('pergunta 1')))
+    expect(live.getAttribute('aria-live')).toBe('polite')
+    expect(live.closest('nav, aside')).toBeNull()
+  })
+
+  it('notifies without focus when allowed, and a click opens the task', async () => {
+    const give = setup(false, 'granted')
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    give([entry(1)])
+    await waitFor(() => expect(FakeNotification.made).toHaveLength(1))
+    expect(FakeNotification.made[0]?.options?.body).toBe('pergunta 1')
+    give([entry(1)])
+    expect(FakeNotification.made).toHaveLength(1)
+    act(() => FakeNotification.made[0]?.onclick?.())
+    await waitFor(() => expect(screen.getByText('a task')).toBeDefined())
+  })
+
+  it('shows a toast with a link instead, when the window has focus', async () => {
+    const give = setup(true, 'granted')
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    give([entry(3)])
+    const link = await screen.findByRole('link', { name: ptBR.attention.openTask })
+    expect(link.getAttribute('href')).toBe('/tasks/3')
+    expect(FakeNotification.made).toHaveLength(0)
+  })
+
+  it.each(['default', 'denied'] as const)(
+    'makes no notification when permission is %s',
+    async (permission) => {
+      const give = setup(false, permission)
+      renderAt('/')
+      await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+      give([entry(1)])
+      await waitFor(() => expect(document.title).toBe('(1) aifactory'))
+      expect(FakeNotification.made).toHaveLength(0)
+      expect(FakeNotification.requestPermission).not.toHaveBeenCalled()
+    },
+  )
 })
 
 function widthOf(px: number) {
