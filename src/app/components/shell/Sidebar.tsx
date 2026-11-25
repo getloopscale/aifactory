@@ -27,6 +27,7 @@ import { chatApi, groupChats } from '../../lib/chat'
 import { useChats } from '../../lib/chats'
 
 import { ACTIVE, useOnNewChat, usePlace } from './active'
+import { SetupCount, type SetupAttention } from './SetupCount'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -40,13 +41,16 @@ function Place({
   icon: Icon,
   label,
   count,
+  attention,
 }: {
   id: GuideId | 'onboarding'
   to: string
   icon: Icon
   label: string
   count?: number
+  attention?: SetupAttention
 }) {
+  const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
   const active = id === 'onboarding' ? pathname === to : place === id
@@ -54,6 +58,9 @@ function Place({
     <Link
       to={to}
       aria-current={active ? 'page' : undefined}
+      aria-label={
+        attention ? `${label}, ${t.menu.setupNeedsAttention(attention.count)}` : undefined
+      }
       className={`${row} ${active ? ACTIVE : ''}`}
     >
       <Icon className={`size-[18px] shrink-0 ${active ? '' : 'opacity-90'}`} />
@@ -63,6 +70,7 @@ function Place({
           {count}
         </span>
       ) : null}
+      {attention ? <SetupCount attention={attention} className="ml-auto" /> : null}
     </Link>
   )
 }
@@ -179,6 +187,7 @@ export function Sidebar({
   onSignOut,
   startSearching = false,
   showOnboarding = false,
+  setup,
 }: {
   onToggle: () => void
   waiting: number
@@ -190,6 +199,8 @@ export function Sidebar({
   startSearching?: boolean
   /** True while no repository is enabled: the guided start is offered. */
   showOnboarding?: boolean
+  /** The setup items that are not ok, when the report is known. */
+  setup?: SetupAttention
 }) {
   const { chats } = useChats()
   const { t } = useCopy()
@@ -254,7 +265,7 @@ export function Sidebar({
           <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} count={waiting} />
           <Place id="health" to="/health" icon={HeartPulse} label={t.places.health} count={wrong} />
           <Place id="agents" to="/agents" icon={Bot} label={t.places.agents} />
-          <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} />
+          <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} attention={setup} />
         </div>
       </nav>
 
