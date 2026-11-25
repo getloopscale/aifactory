@@ -1,5 +1,6 @@
-import { eq, gte } from 'drizzle-orm'
+import { and, eq, gte, notLike } from 'drizzle-orm'
 
+import { LENS_PREFIX } from '../factory/lens-review'
 import type { Database } from '../db'
 import { review, reviewPattern, task } from '../db/schema'
 import { OUTSIDE_THE_PLAN, type Finding } from '../factory/review'
@@ -63,7 +64,7 @@ export async function readClassedFindings(
     })
     .from(review)
     .innerJoin(task, eq(task.id, review.taskId))
-    .where(gte(review.at, from))
+    .where(and(gte(review.at, from), notLike(review.reviewer, `${LENS_PREFIX}%`)))
   return classedFindings(rows)
 }
 

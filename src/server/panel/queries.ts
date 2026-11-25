@@ -10,6 +10,7 @@ import {
   delivery,
   evidence,
   evidenceArtifact,
+  testProof,
   finding,
   question,
   releaseWait,
@@ -49,6 +50,7 @@ import {
   type ReleaseWaitView,
   type CostGroup,
   type EvidenceView,
+  type TestProofView,
   type FindingView,
   type HealthReport,
   type MessageView,
@@ -581,6 +583,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
     plans,
     actions,
     messages,
+    proofs,
   ] = await Promise.all([
     db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
     db.select().from(evidence).where(eq(evidence.taskId, id)).orderBy(asc(evidence.id)),
@@ -597,6 +600,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       .where(eq(coordinatorAction.taskId, id))
       .orderBy(desc(coordinatorAction.id)),
     db.select().from(agentMessage).where(eq(agentMessage.taskId, id)).orderBy(asc(agentMessage.id)),
+    db.select().from(testProof).where(eq(testProof.taskId, id)).orderBy(asc(testProof.id)),
   ])
   const withdrawable = row.stage === 'intake' && (await pendingSendBack(db, id)) !== undefined
   const shown = ofLatestVerification(checks, stored)
@@ -622,6 +626,14 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       durationMs: e.durationMs,
       output: e.output,
       at: iso(e.at),
+    })),
+    testProofs: proofs.map((p): TestProofView => ({
+      id: p.id,
+      sha: p.sha,
+      outcome: p.outcome as TestProofView['outcome'],
+      detail: p.detail,
+      files: p.files,
+      at: iso(p.at),
     })),
     reviews: reviews.map((r): ReviewView => ({
       id: r.id,

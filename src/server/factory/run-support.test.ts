@@ -179,6 +179,27 @@ describe('pullRequestBody', () => {
       },
     })
 
+  it('carries what the documentation lens still found as notes, and nothing when it found none', () => {
+    const input = {
+      issueNumber: 1,
+      sha: 'abc1234def',
+      rows: [],
+      agentSummary: 'x',
+      review: {
+        reviewer: 'codex',
+        attempt: 1,
+        outcome: { verdict: 'approve' as const, summary: 'Fine.', findings: [] },
+      },
+    }
+    const noted = pullRequestBody({
+      ...input,
+      lensNotes: [{ severity: 'major', file: 'AGENTS.md', issue: 'says npm' }],
+    })
+    expect(noted).toContain('documentation review')
+    expect(noted).toContain('says npm')
+    expect(pullRequestBody({ ...input, lensNotes: [] })).not.toContain('documentation review')
+  })
+
   it('ends with the neutral signature', () => {
     expect(body().trimEnd().endsWith(FACTORY_SIGNATURE)).toBe(true)
   })
