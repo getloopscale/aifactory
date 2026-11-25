@@ -13,7 +13,7 @@ import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
 import { TaskActions } from './TaskActions'
 import { Transcript } from './Transcript'
-import { ago, describeEvent, money, shortSha } from '../lib/format'
+import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 
@@ -38,7 +38,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
         <h1 className="mt-1 text-xl font-semibold">{task.title}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
           <span>
-            {task.repository} #{task.issueNumber}
+            {task.repository} {itemName(task)}
           </span>
           <StageBadge
             stage={task.stage}

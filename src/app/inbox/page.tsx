@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import type { InboxItem } from '../../shared/panel'
 import { StageBadge } from '../components/Badges'
 import { useCopy } from '../lib/copy'
-import { ago, money } from '../lib/format'
+import { ago, itemName, money } from '../lib/format'
 import { useResource } from '../lib/live'
 
 export default function InboxPage() {
@@ -37,7 +37,7 @@ export default function InboxPage() {
                     </span>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {task.repository} #{task.issueNumber} · {task.title}
+                    {task.repository} {itemName(task)} · {task.title}
                   </div>
                   <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{summary}</p>
                   {coordinatorReason ? (

@@ -1,3 +1,4 @@
+import { issueRef } from '../../factory/item-ref'
 import { knowledgeRules } from '../../knowledge/prompt'
 
 /**
@@ -22,7 +23,7 @@ export function mergerPrompt(input: {
 }): string {
   return `You merge the integration branch into an approved work branch for the repository ${input.repo}. The work on ${input.branch} was written and reviewed for the issue below. You do not change what it does.
 
-# ${input.title} (#${input.issueNumber})
+# ${input.title} (${issueRef(input.issueNumber)})
 
 ${input.body || '(the issue has no description)'}
 

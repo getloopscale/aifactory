@@ -1,6 +1,4 @@
 {
-  "id": "2ebbb329-cfe8-4c79-b7fd-247766bf4cd7",
-  "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1050,166 +1048,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.knowledge_curation": {
-      "name": "knowledge_curation",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "knowledge_repository": {
-          "name": "knowledge_repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "repository": {
-          "name": "repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "action": {
-          "name": "action",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mode": {
-          "name": "mode",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "group_key": {
-          "name": "group_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "memory_sha": {
-          "name": "memory_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "detail": {
-          "name": "detail",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "commit_sha": {
-          "name": "commit_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pull_number": {
-          "name": "pull_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "pull_url": {
-          "name": "pull_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "knowledge_curation_once": {
-          "name": "knowledge_curation_once",
-          "columns": [
-            {
-              "expression": "knowledge_repository",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "repository",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "mode",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "action",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "group_key",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "knowledge_curation_status": {
-          "name": "knowledge_curation_status",
-          "columns": [
-            {
-              "expression": "status",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.knowledge_delivery": {
       "name": "knowledge_delivery",
       "schema": "",
@@ -1301,164 +1139,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.knowledge_gap": {
-      "name": "knowledge_gap",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "repository": {
-          "name": "repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question": {
-          "name": "question",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "question_hash": {
-          "name": "question_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'open'"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "resolved_at": {
-          "name": "resolved_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "knowledge_gap_once": {
-          "name": "knowledge_gap_once",
-          "nullsNotDistinct": false,
-          "columns": [
-            "repository",
-            "question_hash"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.knowledge_gap_task": {
-      "name": "knowledge_gap_task",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "gap_id": {
-          "name": "gap_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "issue_number": {
-          "name": "issue_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "base_sha": {
-          "name": "base_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "knowledge_gap_task_gap_id_knowledge_gap_id_fk": {
-          "name": "knowledge_gap_task_gap_id_knowledge_gap_id_fk",
-          "tableFrom": "knowledge_gap_task",
-          "tableTo": "knowledge_gap",
-          "columnsFrom": [
-            "gap_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "knowledge_gap_task_task_id_task_id_fk": {
-          "name": "knowledge_gap_task_task_id_task_id_fk",
-          "tableFrom": "knowledge_gap_task",
-          "tableTo": "task",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "knowledge_gap_task_once": {
-          "name": "knowledge_gap_task_once",
-          "nullsNotDistinct": false,
-          "columns": [
-            "gap_id",
-            "task_id"
-          ]
-        }
-      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
@@ -2577,6 +2257,18 @@
           "notNull": true,
           "default": false
         },
+        "linear_team_id": {
+          "name": "linear_team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linear_label": {
+          "name": "linear_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "checks": {
           "name": "checks",
           "type": "jsonb",
@@ -2690,6 +2382,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "checks_proof_by_provider": {
+          "name": "checks_proof_by_provider",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
         "integration_checks": {
           "name": "integration_checks",
           "type": "jsonb",
@@ -2729,13 +2428,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "checks_proof_by_provider": {
-          "name": "checks_proof_by_provider",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
         }
       },
       "indexes": {},
@@ -2747,6 +2439,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "full_name"
+          ]
+        },
+        "repository_linear_team_id_unique": {
+          "name": "repository_linear_team_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "linear_team_id"
           ]
         }
       },
@@ -3178,6 +2877,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'github'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_identifier": {
+          "name": "display_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_url": {
+          "name": "item_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "issue_title": {
           "name": "issue_title",
           "type": "text",
@@ -3273,6 +2997,15 @@
           "columns": [
             "repository",
             "issue_number"
+          ]
+        },
+        "task_source_item_unique": {
+          "name": "task_source_item_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "source",
+            "external_id"
           ]
         }
       },
@@ -3413,6 +3146,164 @@
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false
+    },
+    "public.knowledge_gap": {
+      "name": "knowledge_gap",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "repository": {
+          "name": "repository",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_hash": {
+          "name": "question_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "knowledge_gap_once": {
+          "name": "knowledge_gap_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "question_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.knowledge_gap_task": {
+      "name": "knowledge_gap_task",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "gap_id": {
+          "name": "gap_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "issue_number": {
+          "name": "issue_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "base_sha": {
+          "name": "base_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "knowledge_gap_task_gap_id_knowledge_gap_id_fk": {
+          "name": "knowledge_gap_task_gap_id_knowledge_gap_id_fk",
+          "tableFrom": "knowledge_gap_task",
+          "tableTo": "knowledge_gap",
+          "columnsFrom": [
+            "gap_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "knowledge_gap_task_task_id_task_id_fk": {
+          "name": "knowledge_gap_task_task_id_task_id_fk",
+          "tableFrom": "knowledge_gap_task",
+          "tableTo": "task",
+          "columnsFrom": [
+            "task_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "knowledge_gap_task_once": {
+          "name": "knowledge_gap_task_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "gap_id",
+            "task_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
     }
   },
   "enums": {},
@@ -3425,5 +3316,7 @@
     "columns": {},
     "schemas": {},
     "tables": {}
-  }
+  },
+  "id": "5b0d9f65-c63c-41ce-8305-f0d756afd3d6",
+  "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658"
 }

@@ -233,3 +233,7 @@ export function describeEvent(event: TimelineEvent, t: Events = en.events): stri
   const describe = DESCRIBE[event.stage]
   return describe ? describe((event.detail ?? {}) as Detail, t) : ''
 }
+
+/** The item of a task as a person reads it: `ENG-12` for a Linear item, `#12` for a GitHub issue. */
+export const itemName = (item: { issueNumber: number; displayIdentifier?: string | null }) =>
+  item.displayIdentifier ?? `#${item.issueNumber}`

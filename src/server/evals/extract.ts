@@ -1,3 +1,4 @@
+import { repoItemRef } from '../factory/item-ref'
 import { sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -87,7 +88,7 @@ export async function toCase(candidate: Candidate, sources: CaseSources): Promis
   const issue = await sources.issue(repository, issueNumber)
   const config = await sources.config(repository)
   return {
-    id: `${repository}#${issueNumber}`,
+    id: repoItemRef(repository, issueNumber),
     repository,
     issueNumber,
     title: issue.title,
