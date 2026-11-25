@@ -47,6 +47,7 @@ describe('the transition table', () => {
     const events: Record<TransitionEvent, true> = {
       approve: true,
       request_changes: true,
+      merge_base_by_owner: true,
       withdraw_send_back: true,
       retry: true,
       retry_from_finding: true,
@@ -79,7 +80,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(31 * 15)
+    expect(pairs).toHaveLength(32 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -115,9 +116,6 @@ describe('the transition table', () => {
         'hand_over',
         'integrate',
         'issue_comment_created',
-        'pull_request_comment_created',
-        'pull_request_review_submitted',
-        'pull_request_review_comment_created',
         'check_suite_completed',
         'check_run_completed',
         'issue_reopened',
@@ -385,6 +383,26 @@ describe('what the factory does on its own', () => {
     expect(elsewhere('coordinator_merge_base')).toEqual([
       refused(
         'the coordinator merges the integration branch only into the branch of a handed-over task',
+      ),
+    ])
+  })
+
+  it('lets the owner merge the integration branch into a handed-over or never-merged done task', () => {
+    expect(acting('merge_base_by_owner')).toEqual({ handoff: 'merge_base', done: 'merge_base' })
+    for (const stage of ['handoff', 'done'] as const) {
+      expect(outcome({ stage, branchGone: true }, 'merge_base_by_owner')).toEqual(
+        refused('the task has no branch on GitHub to merge the integration branch into'),
+      )
+      expect(outcome({ stage, mergedSha: 'm' }, 'merge_base_by_owner')).toMatchObject({
+        kind: 'refused',
+      })
+      expect(outcome({ stage, resolvedSha: 'r' }, 'merge_base_by_owner')).toMatchObject({
+        kind: 'refused',
+      })
+    }
+    expect(elsewhere('merge_base_by_owner')).toEqual([
+      refused(
+        'the integration branch can be merged only into the branch of a handed-over task, or of one never merged',
       ),
     ])
   })

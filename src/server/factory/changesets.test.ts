@@ -15,6 +15,8 @@ import {
   touchedPaths,
   usesChangesets,
   pickBackMerge,
+  pickVersionSuccessor,
+  noReleasesRead,
   RELEASE_RUN_GRACE_MS,
   releasesRead,
   VERSION_RELEASES_WAIT_MS,
@@ -530,5 +532,42 @@ describe('publishedTouched', () => {
 
   it('is nothing for a file in no package', () => {
     expect(publishedTouched(['docs/a.md'], new Map(), [])).toEqual([])
+  })
+})
+
+describe('pickVersionSuccessor', () => {
+  const pr = (over: Record<string, unknown> = {}) => ({
+    number: 190,
+    url: 'u',
+    headSha: 's',
+    headRef: 'changeset-release/main',
+    headRepo: 'o/r',
+    baseRef: 'main',
+    draft: false,
+    ...over,
+  })
+  const branches = { repo: 'o/r', release: 'main' }
+
+  it('takes the open pull request from the version branch of the release branch, in the repository', () => {
+    expect(pickVersionSuccessor([pr()], branches, 180)?.number).toBe(190)
+  })
+
+  it('ignores the recorded one, a fork, another base and another head', () => {
+    expect(pickVersionSuccessor([pr({ number: 180 })], branches, 180)).toBeUndefined()
+    expect(pickVersionSuccessor([pr({ headRepo: 'x/r' })], branches, 180)).toBeUndefined()
+    expect(pickVersionSuccessor([pr({ baseRef: 'develop' })], branches, 180)).toBeUndefined()
+    expect(pickVersionSuccessor([pr({ headRef: 'feature' })], branches, 180)).toBeUndefined()
+  })
+})
+
+describe('noReleasesRead', () => {
+  const merged = new Date('2026-11-11T12:00:00Z')
+
+  it('waits inside the window and fails past it, naming the pull request', () => {
+    expect(noReleasesRead(merged, new Date(merged.getTime() + 60_000), 180)).toEqual({
+      wait: 'waiting for the release workflow to publish',
+    })
+    const end = noReleasesRead(merged, new Date(merged.getTime() + VERSION_RELEASES_WAIT_MS), 180)
+    expect(end).toMatchObject({ failed: expect.stringContaining('#180') })
   })
 })

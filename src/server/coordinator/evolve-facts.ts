@@ -59,6 +59,11 @@ export async function readFiledSignatures(db: Database) {
   return db
     .select()
     .from(failureSignature)
-    .where(notLike(failureSignature.signature, 'base_red:%'))
+    .where(
+      and(
+        notLike(failureSignature.signature, 'base_red:%'),
+        notLike(failureSignature.signature, 'knowledge_gap:%'),
+      ),
+    )
     .orderBy(failureSignature.id)
 }
