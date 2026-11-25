@@ -24,6 +24,9 @@ const MAX_OUTPUT = 20 * 1024 * 1024
 /** Everything this provider creates carries this label, so what a crash left behind can be found. */
 const LABEL = 'aifactory.sandbox'
 const IMAGE = 'aifactory-sandbox:5'
+const BROWSER_IMAGE = 'aifactory-sandbox-browser:5'
+
+const imageOf = (image: SandboxSpec['image']) => (image === 'browser' ? BROWSER_IMAGE : IMAGE)
 const PROXY_IMAGE = 'mitmproxy/mitmproxy:11'
 const CA_VOLUME = 'aifactory-mitm-ca'
 const WORKDIR = '/work'
@@ -357,6 +360,22 @@ async function buildImageIfMissing(docker: Docker): Promise<void> {
   await must(docker, ['build', '-t', IMAGE, resolve(process.cwd(), 'ops/sandbox')])
 }
 
+/** The browser image, built on the default one the first time a repository that chose it needs it. */
+async function buildBrowserImageIfMissing(docker: Docker): Promise<void> {
+  if ((await docker(['image', 'inspect', BROWSER_IMAGE])).code === 0) return
+  const dir = resolve(process.cwd(), 'ops/sandbox')
+  await must(docker, [
+    'build',
+    '-t',
+    BROWSER_IMAGE,
+    '--build-arg',
+    `BASE=${IMAGE}`,
+    '-f',
+    resolve(dir, 'Dockerfile.browser'),
+    dir,
+  ])
+}
+
 /** The rules go in a directory of their own on the host, which the proxy mounts and the sandbox never sees. */
 function writeRules(spec: SandboxSpec): string {
   const dir = mkdtempSync(join(tmpdir(), 'factory-rules-'))
@@ -426,6 +445,7 @@ export function sandboxArgs(
   net: string,
   env: NodeJS.ProcessEnv,
   cacheKey?: string,
+  image?: SandboxSpec['image'],
 ): string[] {
   const memory = env.FACTORY_SANDBOX_MEMORY ?? '5g'
   return [
@@ -454,7 +474,7 @@ export function sandboxArgs(
     'no-new-privileges',
     ...(cacheKey ? ['-v', `${cacheVolume(cacheKey)}:/cache`] : []),
     ...Object.entries(sandboxEnv('http://proxy:8080')).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
-    IMAGE,
+    imageOf(image),
   ]
 }
 
@@ -540,7 +560,16 @@ export function dockerSandboxProvider(deps: DockerProviderDeps = {}): IsolatedSa
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))
   let image: Promise<void> | undefined
   let ca: Promise<string> | undefined
-  const prepared = () => {
+  let browser: Promise<void> | undefined
+  const prepared = (wanted: SandboxSpec['image']) => {
+    if (wanted === 'browser') {
+      browser ??= buildImageIfMissing(docker)
+        .then(() => buildBrowserImageIfMissing(docker))
+        .catch((error) => {
+          browser = undefined
+          throw error
+        })
+    }
     image ??= buildImageIfMissing(docker).catch((error) => {
       image = undefined
       throw error
@@ -549,13 +578,15 @@ export function dockerSandboxProvider(deps: DockerProviderDeps = {}): IsolatedSa
       ca = undefined
       throw error
     })
-    return Promise.all([image, ca]).then(([, cert]) => cert)
+    return Promise.all([image, ca, wanted === 'browser' ? browser : undefined]).then(
+      ([, cert]) => cert,
+    )
   }
 
   return {
     name: 'docker',
     async create(spec: SandboxSpec): Promise<IsolatedSandbox> {
-      const cert = await prepared()
+      const cert = await prepared(spec.image)
       // Sweeping what an earlier process left must not stop this run, but a sweep that keeps failing
       // leaves containers running, so it is said out loud. The age is the longest a run may last, not this
       // run's own limit: another run with a longer limit may be alive.
@@ -578,7 +609,7 @@ export function dockerSandboxProvider(deps: DockerProviderDeps = {}): IsolatedSa
         await must(docker, ['network', 'create', '--internal', '--label', `${LABEL}=1`, net])
         await must(docker, proxyArgs(proxy, rulesDir))
         await must(docker, ['network', 'connect', '--alias', 'proxy', net, proxy])
-        await must(docker, sandboxArgs(name, net, env, spec.cacheKey))
+        await must(docker, sandboxArgs(name, net, env, spec.cacheKey, spec.image))
         await pinLocalhost(docker, name)
         const backend = new DockerBackend(docker, name)
         await trustProxy(docker, backend, name, cert)

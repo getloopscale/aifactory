@@ -10,3 +10,6 @@ export const E2B_TEMPLATE = 'aifactory-sandbox:6'
  * provider gives a container (3 CPUs, 5 GB); E2B's free plan allows up to 8 vCPUs and 8 GiB.
  */
 export const E2B_TEMPLATE_RESOURCES = { cpuCount: 4, memoryMB: 8192 }
+
+/** The same template with a headless browser, built from ops/sandbox/Dockerfile.browser, for the repositories that chose it. */
+export const E2B_BROWSER_TEMPLATE = 'aifactory-sandbox-browser:1'

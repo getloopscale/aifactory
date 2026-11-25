@@ -8,6 +8,7 @@ import {
   decision,
   delivery,
   evidence,
+  evidenceArtifact,
   finding,
   question,
   releaseWait,
@@ -24,6 +25,7 @@ import {
   type LeadTime,
   type LeadTimeLimits,
 } from '../../shared/lead-time'
+import { ofLatestVerification } from '../factory/artifacts'
 import { readFacts, totalAdded, totalRemoved } from '../factory/change-size'
 import { retryAt } from '../factory/auto-retry'
 import { CONFLICT_NOTE_OPENING } from '../factory/merge-base'
@@ -526,6 +528,17 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
   const [row] = await db.select().from(task).where(eq(task.id, id))
   if (!row) return undefined
   const [card] = await cards(db, [row])
+  const stored = await db
+    .select({
+      id: evidenceArtifact.id,
+      evidenceId: evidenceArtifact.evidenceId,
+      path: evidenceArtifact.path,
+      contentType: evidenceArtifact.contentType,
+      sizeBytes: evidenceArtifact.sizeBytes,
+    })
+    .from(evidenceArtifact)
+    .where(eq(evidenceArtifact.taskId, id))
+    .orderBy(asc(evidenceArtifact.id))
   const [events, checks, reviews, questions, decisions, deliveries, watches, runs, plans, actions] =
     await Promise.all([
       db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
@@ -544,6 +557,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
         .orderBy(desc(coordinatorAction.id)),
     ])
   const withdrawable = row.stage === 'intake' && (await pendingSendBack(db, id)) !== undefined
+  const shown = ofLatestVerification(checks, stored)
   return {
     task: card,
     sendBackPending: withdrawable,
@@ -554,6 +568,8 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       detail: (e.detail ?? null) as Record<string, unknown> | null,
     })),
     evidence: checks.map((e): EvidenceView => ({
+      omitted: e.omitted,
+      artifacts: shown.filter((f) => f.evidenceId === e.id).map(({ evidenceId: _, ...f }) => f),
       id: e.id,
       name: e.name,
       command: e.command,

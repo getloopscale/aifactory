@@ -341,8 +341,22 @@
     {
       "idx": 48,
       "version": "7",
-      "when": 1795563300000,
-      "tag": "0051_external_pull_reviews",
+      "when": 1795608578100,
+      "tag": "0051_knowledge_curator",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795694978100,
+      "tag": "0052_artifacts",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795694978101,
+      "tag": "0053_external_pull_reviews",
       "breakpoints": true
     }
   ]

@@ -490,7 +490,18 @@ export type EvidenceView = {
   timedOut: boolean
   durationMs: number
   output: string
+  /** Declared files that were not stored, and why. */
+  omitted: string[]
+  /** The files the check wrote at its declared paths, kept for the commit; each is served only as an inert file. */
+  artifacts: ArtifactView[]
   at: string
+}
+
+export type ArtifactView = {
+  id: number
+  path: string
+  contentType: string
+  sizeBytes: number
 }
 
 export type ReviewView = {
@@ -629,7 +640,7 @@ export type RepositoryView = {
   /** False for a repository the owner enabled that the GitHub App no longer reaches. */
   reachable: boolean
   enabled: boolean
-  checks: { name: string; command: string }[] | null
+  checks: { name: string; command: string; artifacts?: string[] }[] | null
   /** Commands that rewrite files before each round of checks. */
   fixes: string[]
   egress: string[]
@@ -649,6 +660,8 @@ export type RepositoryView = {
   releaseMode: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; null means the factory's default. */
   runLimitMinutes: number | null
+  /** The sandbox image the repository's runs start from. */
+  sandboxImage: 'default' | 'browser'
   /** From this many minutes of lead time a task is at risk; null means the factory's default. */
   leadTimeAtRiskMinutes: number | null
   /** From this many minutes of lead time a task is overdue; null means the factory's default. */
@@ -663,7 +676,7 @@ export type RepositoryView = {
    * The checks run on the merge of the work with the integration branch, after the checks above. Empty
    * means none: the merge is held to the development checks only.
    */
-  integrationChecks: { name: string; command: string }[]
+  integrationChecks: { name: string; command: string; artifacts?: string[] }[]
   /** The commit of the integration branch the proven integration checks passed on; null when none was. */
   integrationChecksProvenSha: string | null
   /** The names of the saved integration checks that no proof ran. */

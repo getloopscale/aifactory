@@ -300,6 +300,9 @@ export const ptBR: Copy = {
     outOfQuota: 'sem cota',
     finished: 'terminou',
     failed: 'falhou',
+    artifacts: 'Arquivos que a verificação gerou (guardados pelo mesmo prazo das transcrições)',
+    artifactSize: (kib: number) => `${kib} KiB`,
+    artifactOmitted: (reason: string) => `Não guardado: ${reason}`,
     evidence: 'Evidências',
     noChecks: 'Nenhuma verificação rodou ainda.',
     evidenceMeta: (sha: string, exit: number, secs: string) =>
@@ -727,6 +730,11 @@ export const ptBR: Copy = {
     settings: {
       saved: 'Salvo.',
       checks: 'Verificações, uma por linha no formato nome: comando',
+      sandboxImage: 'Imagem do sandbox',
+      imageDefault: 'Padrão',
+      imageBrowser: 'Com navegador headless',
+      sandboxImageHelp:
+        'A imagem com navegador traz o Chromium em /usr/bin/chromium. Acrescente ` @artifacts dir/` ao fim da linha de uma verificação para guardar os arquivos que ela gera ali.',
       checksPlaceholder: 'Vazio roda npm test. Por exemplo: unit: pnpm test',
       integrationChecks: 'Checks de integração, um por linha no formato nome: comando',
       integrationChecksPlaceholder: 'Vazio não roda nenhum. Por exemplo: e2e: pnpm test:e2e',

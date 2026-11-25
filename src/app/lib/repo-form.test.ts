@@ -85,3 +85,12 @@ describe('checks as text, at their edges', () => {
     expect(parseChecks(':rest')).toEqual([{ name: 'rest', command: ':rest' }])
   })
 })
+
+describe('artifact declarations', () => {
+  it('round-trips the paths a check writes files to', async () => {
+    const { formatChecks, parseChecks } = await import('./repo-form')
+    const checks = [{ name: 'e2e', command: 'pnpm e2e', artifacts: ['screenshots/', 'trace.zip'] }]
+    expect(formatChecks(checks)).toBe('e2e: pnpm e2e @artifacts screenshots/ trace.zip')
+    expect(parseChecks(formatChecks(checks))).toEqual(checks)
+  })
+})

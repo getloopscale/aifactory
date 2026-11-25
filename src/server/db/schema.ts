@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import {
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -15,6 +16,11 @@ import {
 } from 'drizzle-orm/pg-core'
 
 import type { DoctorReport, ProvenCheck, ProviderProofs, StoredProof } from '../../shared/panel'
+
+/** Raw bytes: a file a check wrote. */
+const bytea = customType<{ data: Buffer }>({
+  dataType: () => 'bytea',
+})
 
 /**
  * The stages of a task, in the order a successful run passes through them, then the ways a run ends
@@ -156,8 +162,34 @@ export const evidence = pgTable('evidence', {
   /** The tail of stdout and stderr. */
   output: text('output').notNull(),
   durationMs: integer('duration_ms').notNull(),
+  /** Declared files of the check that were not stored, and why. */
+  omitted: jsonb('omitted').$type<string[]>().notNull().default([]),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * A file a check wrote at a declared path, copied out of the sandbox for the commit it ran on. It is data made
+ * by code the agent wrote: the panel serves it only as an inert file, to the owner.
+ */
+export const evidenceArtifact = pgTable(
+  'evidence_artifact',
+  {
+    id: serial('id').primaryKey(),
+    evidenceId: integer('evidence_id')
+      .notNull()
+      .references(() => evidence.id, { onDelete: 'cascade' }),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    sha: text('sha').notNull(),
+    path: text('path').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    content: bytea('content').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [index('evidence_artifact_task_id').on(table.taskId, table.id)],
+)
 
 /**
  * What an independent reviewer decided about one commit. `invalid` is an answer the factory could
@@ -554,7 +586,11 @@ export const repository = pgTable('repository', {
   /** The label a Linear item carries to ask for work; absent means `factory`. */
   linearLabel: text('linear_label'),
   /** The checks a commit must pass: `[{ name, command }]`. Empty means `npm test`. */
-  checks: jsonb('checks').$type<{ name: string; command: string }[]>(),
+  checks: jsonb('checks').$type<{ name: string; command: string; artifacts?: string[] }[]>(),
+  /** The sandbox image: `browser` has a headless browser preinstalled; `default` is the plain one. */
+  sandboxImage: text('sandbox_image', { enum: ['default', 'browser'] })
+    .notNull()
+    .default('default'),
   /** Commands that rewrite files (a formatter) and decide nothing, run before each round of checks. */
   fixes: jsonb('fixes').$type<string[]>().notNull().default([]),
   /** Domains the sandbox may reach besides GitHub, the agent and the npm registry. */
@@ -599,7 +635,7 @@ export const repository = pgTable('repository', {
    * `[{ name, command }]`. Empty means none.
    */
   integrationChecks: jsonb('integration_checks')
-    .$type<{ name: string; command: string }[]>()
+    .$type<{ name: string; command: string; artifacts?: string[] }[]>()
     .notNull()
     .default([]),
   /** The commit of the integration branch the checks in `integrationChecksProven` passed on. */
@@ -731,6 +767,47 @@ export const knowledgeNote = pgTable(
     committedAt: timestamp('committed_at', { withTimezone: true }),
   },
   (table) => [unique('knowledge_note_once').on(table.repository, table.bodyHash)],
+)
+
+/**
+ * What the knowledge curator decided about a group of a project's notes (`knowledge/curator.ts`), one row per
+ * group and mode. `trial` rows only record. An `auto` row of `merge` or `promote` starts `pending`: only
+ * `knowledge-sync` applies it, so there is one writer. A promotion is proposed once per group of notes and
+ * knowledge repository: the unique key keeps a group whose pull request was closed unmerged from being proposed again.
+ */
+export const knowledgeCuration = pgTable(
+  'knowledge_curation',
+  {
+    id: serial('id').primaryKey(),
+    knowledgeRepository: text('knowledge_repository').notNull(),
+    /** The project the notes are about, owner/name. */
+    repository: text('repository').notNull(),
+    action: text('action', { enum: ['merge', 'promote', 'keep', 'error'] }).notNull(),
+    mode: text('mode', { enum: ['trial', 'auto'] }).notNull(),
+    /** What identifies the group: a hash of the action and the sorted paths of its notes. */
+    groupKey: text('group_key').notNull(),
+    status: text('status', {
+      enum: ['recorded', 'pending', 'applied', 'stale', 'proposed', 'closed', 'merged'],
+    }).notNull(),
+    /** The memory commit the decision was read from. */
+    memorySha: text('memory_sha'),
+    detail: jsonb('detail').notNull(),
+    commitSha: text('commit_sha'),
+    pullNumber: integer('pull_number'),
+    pullUrl: text('pull_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('knowledge_curation_once').on(
+      t.knowledgeRepository,
+      t.repository,
+      t.mode,
+      t.action,
+      t.groupKey,
+    ),
+    index('knowledge_curation_status').on(t.status, t.id),
+  ],
 )
 
 /**

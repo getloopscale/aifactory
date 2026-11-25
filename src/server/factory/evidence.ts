@@ -1,8 +1,14 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
+import { collectArtifacts, type CapturedArtifact } from './artifacts'
 import { must } from './run-support'
 
-export type CheckSpec = { name: string; command: string }
+export type CheckSpec = {
+  name: string
+  command: string
+  /** Paths in the checkout the check writes files to (screenshots, traces) that are copied out after it runs. */
+  artifacts?: string[]
+}
 
 export type CheckResult = {
   name: string
@@ -13,6 +19,10 @@ export type CheckResult = {
   /** The tail of stdout and stderr, enough to see why it failed. */
   output: string
   durationMs: number
+  /** Files the check wrote at its declared paths, copied out of the sandbox for the commit. */
+  artifacts?: CapturedArtifact[]
+  /** What was declared and not copied, and why. */
+  omitted?: string[]
 }
 
 /** What the gate reads from a stored row. */
@@ -140,6 +150,10 @@ async function runCheck(
 ): Promise<CheckResult> {
   const started = Date.now()
   const run = await backend.execute(`cd ${repoDir} && ${check.command}`, { timeoutMs })
+  const durationMs = Date.now() - started
+  const captured = check.artifacts?.length
+    ? await collectArtifacts(backend, repoDir, check.artifacts)
+    : undefined
   return {
     name: check.name,
     command: check.command,
@@ -147,7 +161,8 @@ async function runCheck(
     timedOut: run.timedOut ?? false,
     passed: run.exitCode === 0 && !run.timedOut,
     output: `${run.stdout}${run.stderr}`.slice(-OUTPUT_TAIL),
-    durationMs: Date.now() - started,
+    durationMs,
+    ...(captured ? { artifacts: captured.artifacts, omitted: captured.omitted } : {}),
   }
 }
 
