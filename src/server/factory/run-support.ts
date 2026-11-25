@@ -161,6 +161,36 @@ export function unestablishedGates(repository: string, rows: StoredCheck[]): str
   return CI_QUALITY_GATES.filter((g) => !ran(g))
 }
 
+/** The panel's origin from `FACTORY_PANEL_URL`, or nothing when it is unset or not an http(s) address. */
+function panelOrigin(): string | undefined {
+  const raw = process.env.FACTORY_PANEL_URL?.trim()
+  if (!raw) return undefined
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.origin : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * One markdown bullet for each stored file, its name as inline code: the name came from the sandbox, so it is never
+ * link text of its own. With `FACTORY_PANEL_URL` set the code span is linked to the file on the panel (the address
+ * is built from the numbers, never from the name).
+ */
+export function artifactLinks(files: { id?: number; path: string }[], taskId?: number): string[] {
+  const origin = panelOrigin()
+  return files.map((f) => {
+    const name = f.path.replace(/\s+/g, ' ')
+    const longest = Math.max(0, ...(name.match(/`+/g) ?? []).map((r) => r.length))
+    const fence = '`'.repeat(longest + 1)
+    const code = `${fence} ${name} ${fence}`
+    return origin && taskId !== undefined && f.id !== undefined
+      ? `- [${code}](${origin}/api/panel/tasks/${taskId}/artifacts/${f.id})`
+      : `- ${code}`
+  })
+}
+
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 
 export function pullRequestBody(input: {
@@ -175,6 +205,10 @@ export function pullRequestBody(input: {
   /** The plan the builder wrote before it changed anything, as markdown. */
   plan?: string
   repository?: string
+  /** The files the checks wrote for this commit, named; the panel's address is never written here. */
+  artifacts?: string[]
+  /** The task whose page on the panel holds them. */
+  taskId?: number
   /** The size of the change at the reviewed commit. */
   change?: ChangeSize
 }): string {
@@ -193,6 +227,14 @@ export function pullRequestBody(input: {
     '',
     checkSummary(input.rows, input.repository),
     '',
+    ...(input.artifacts && input.artifacts.length > 0
+      ? [
+          `Files the checks wrote, in the page of task #${input.taskId ?? '?'} on the panel (owner-only, kept as long as the transcripts):`,
+          '',
+          ...input.artifacts,
+          '',
+        ]
+      : []),
     ...(input.change ? [`Size of the change: ${describeSize(input.change)}.`, ''] : []),
     `Independent review by ${review.reviewer}, attempt ${review.attempt}: ${review.outcome.verdict}. ${review.outcome.summary}`,
     ...(remaining.length > 0 ? ['', renderFindings(remaining)] : []),

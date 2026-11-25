@@ -252,3 +252,44 @@ describe('unestablishedGates', () => {
     expect(resolvedComment({ ...input, repository: own })).toContain('Not run by the factory')
   })
 })
+
+describe('the files the checks wrote, named in the pull request', () => {
+  it('names each file as inline code, never as a link', async () => {
+    const { artifactLinks } = await import('./run-support')
+    expect(artifactLinks([{ path: 'shots/home.png' }])).toEqual(['- ` shots/home.png `'])
+  })
+
+  it('writes no link or image for a hostile name', async () => {
+    const { artifactLinks } = await import('./run-support')
+    const lines = artifactLinks([
+      { path: 'shots/a](https://evil.example)[b.png' },
+      { path: 'shots/![x](https://t/p.png).png' },
+      { path: 'a``b`.png' },
+    ])
+    expect(lines[0]).toBe('- ` shots/a](https://evil.example)[b.png `')
+    expect(lines[1]).toBe('- ` shots/![x](https://t/p.png).png `')
+    expect(lines[2]).toBe('- ``` a``b`.png ```')
+  })
+
+  it('links the code span to the file on the panel when its address is set', async () => {
+    const { artifactLinks } = await import('./run-support')
+    process.env.FACTORY_PANEL_URL = 'https://panel.example/ignored/path'
+    try {
+      expect(artifactLinks([{ id: 5, path: 'shots/a](https://evil.example)[b.png' }], 7)).toEqual([
+        '- [` shots/a](https://evil.example)[b.png `](https://panel.example/api/panel/tasks/7/artifacts/5)',
+      ])
+    } finally {
+      delete process.env.FACTORY_PANEL_URL
+    }
+  })
+
+  it('writes no link when the address is not an http(s) one', async () => {
+    const { artifactLinks } = await import('./run-support')
+    process.env.FACTORY_PANEL_URL = 'javascript:alert(1)'
+    try {
+      expect(artifactLinks([{ id: 5, path: 'a.png' }], 7)).toEqual(['- ` a.png `'])
+    } finally {
+      delete process.env.FACTORY_PANEL_URL
+    }
+  })
+})

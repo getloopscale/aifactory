@@ -3,7 +3,11 @@ import { z } from 'zod'
 import { MAX_LEAD_TIME_MINUTES, MIN_LEAD_TIME_MINUTES } from '../../shared/lead-time'
 import { MAX_RUN_MINUTES, MIN_RUN_MINUTES } from '../../shared/panel'
 
-const check = z.object({ name: z.string().max(40), command: z.string().max(600) })
+const check = z.object({
+  name: z.string().max(40),
+  command: z.string().max(600),
+  artifacts: z.array(z.string().max(200)).max(10).optional(),
+})
 
 /** A list of checks as a request may carry it; `patchProblem` says which ones can be saved. */
 export const checksSchema = z.array(check).max(20)
@@ -26,6 +30,7 @@ export const repositoryPatchSchema = z.object({
   harness: z.string().max(40).nullable().optional(),
   reviewer: z.string().max(40).nullable().optional(),
   releaseMode: z.enum(['manual', 'trial', 'auto']).nullable().optional(),
+  sandboxImage: z.enum(['default', 'browser']).optional(),
   runLimitMinutes: z.number().int().min(MIN_RUN_MINUTES).max(MAX_RUN_MINUTES).nullable().optional(),
   leadTimeAtRiskMinutes: z
     .number()
