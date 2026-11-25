@@ -116,6 +116,8 @@ export class Mirror {
   async commit(input: {
     parent?: string
     files: { path: string; content: string }[]
+    /** Paths taken out of the tree, in the same commit. */
+    remove?: string[]
     message: string
     author: { name: string; email: string }
     date: Date
@@ -140,6 +142,7 @@ export class Mirror {
           .trim()
         lines.push(`100644 blob ${blob}\t${file.path}`)
       }
+      for (const path of input.remove ?? []) lines.push(`0 ${'0'.repeat(40)}\t${path}`)
       await this.run(['update-index', '--index-info'], { env, input: `${lines.join('\n')}\n` })
       const tree = (await this.run(['write-tree'], { env })).toString().trim()
       const parents = input.parent ? ['-p', input.parent] : []
