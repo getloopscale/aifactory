@@ -34,6 +34,8 @@ import type { EgressRule } from './sandbox'
 /** Pinned so a new release cannot change what a run does. */
 export const CODEX_VERSION = '0.166.0'
 
+/** Codex's sessions, under `$HOME`; its login (`.codex/auth.json`) is outside it. */
+export const CODEX_SESSION_FOLDER = '.codex/sessions'
 const CODEX = '$HOME/.local/bin/codex'
 const AUTH_FILE = '$HOME/.codex/auth.json'
 
@@ -147,6 +149,7 @@ export function codexHarness(
 
   return {
     name: 'codex',
+    sessionFolder: CODEX_SESSION_FOLDER,
     ...(options.model ? { model: options.model } : {}),
     ...(options.effort ? { effort: options.effort } : {}),
 
