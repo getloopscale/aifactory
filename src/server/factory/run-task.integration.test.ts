@@ -1403,7 +1403,7 @@ describe('runTask', () => {
     expect(failed.detail).toMatchObject({ failedAt: 'sandbox' })
   })
 
-  it('pauses the sandbox provider for every process and defers the run, whatever started it', async () => {
+  it('defers a run the provider refuses for credit, whatever started it, and pauses the provider for every process', async () => {
     for (const continuation of [undefined, { mergeBase: true }, { feedback: 'fix the checks' }]) {
       const id = await seedTask()
       const sandbox = new FakeSandbox(changed())
@@ -1419,7 +1419,34 @@ describe('runTask', () => {
       })
       const failed = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
       expect(failed).toHaveLength(0)
+      // Queued again, not running: a task left in `sandbox` would read as stalled while its job waits.
+      const [row] = await getDb().select().from(task).where(eq(task.id, id))
+      expect(row.stage).toBe('intake')
     }
+  })
+
+  it('gives back the answer a refused resume claimed, and leaves the task waiting', async () => {
+    const id = await seedTask()
+    const sandbox = new FakeSandbox(changed())
+    const builder = askingBuilder()
+    await runTask(deps(sandbox, { harness: builder }), id)
+    replies(owner())
+    await poll(sandbox)
+    const refusing = Object.assign(new FakeSandbox(changed()), {
+      create: async () => {
+        throw new Error('403: team is blocked: credit_exhausted')
+      },
+    })
+
+    const result = await resumeTask(deps(refusing, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'deferred' })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('waiting')
+    const [stored] = await getDb().select().from(question).where(eq(question.taskId, id))
+    expect(stored.resumedAt).toBeNull()
+    const again = await resumeTask(deps(sandbox, { harness: builder }), id)
+    expect(again.status).toBe('done')
   })
 
   it('ends the pause of the sandbox provider once a run started a sandbox', async () => {

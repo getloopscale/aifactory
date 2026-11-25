@@ -168,6 +168,14 @@ async function deferOnRefusal(
   const message = errorMessage(error)
   if (!SANDBOX_PROVIDER_BLOCKED.test(message)) return undefined
   await pauseOnRefusal(deps.db, message)
+  // Back where the task was queued: a task left in `sandbox` would read as running, and then as stalled, while
+  // its job waits for the pause. A cancelled task records nothing and stays cancelled.
+  try {
+    await enterRunStage(deps.db, taskId, resuming ? 'waiting' : 'intake', { deferred: message })
+  } catch (refused) {
+    if (refused instanceof TaskCancelled) return cancelled(taskId, state, refused)
+    throw refused
+  }
   if (resuming) {
     await deps.db
       .update(questionTable)

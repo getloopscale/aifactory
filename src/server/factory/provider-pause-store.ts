@@ -134,13 +134,26 @@ export function deferJobWhilePaused(job: DeferredJob): Promise<boolean> {
   return deferWhilePaused(getDb(), job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }
 
-/** Queues the job again for after the pause a refusal just recorded, or after one `PROVIDER_PAUSE_MS` when none is read. */
-export async function deferAfterRefusal(job: DeferredJob): Promise<void> {
-  if (await deferJobWhilePaused(job)) return
-  await jobBackend().enqueue({
+/**
+ * Queues the job again, with the same input, for after the pause a refusal just recorded. When no pause is in
+ * force any more (it ended meanwhile), the job waits one `PROVIDER_PAUSE_MS` instead of starting at once.
+ */
+export async function deferAfterRefusal(
+  db: Database,
+  job: DeferredJob,
+  deps: DeferDeps,
+): Promise<void> {
+  if (await deferWhilePaused(db, job, deps)) return
+  const now = deps.now ?? new Date()
+  await deps.enqueue({
     name: job.name,
     input: job.input,
-    idempotencyKey: `${job.name}-${job.taskId}-refused-${Date.now()}`,
+    idempotencyKey: `${job.name}-${job.taskId}-refused-${now.getTime()}`,
     delaySeconds: Math.ceil(PROVIDER_PAUSE_MS / 1000),
   })
+}
+
+/** `deferAfterRefusal` for a job handler: the factory's database and TheoKit's queue. */
+export function deferJobAfterRefusal(job: DeferredJob): Promise<void> {
+  return deferAfterRefusal(getDb(), job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }

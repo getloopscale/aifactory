@@ -10,6 +10,7 @@ import { setting } from '../db/schema'
 import { PROVIDER_PAUSE_MS } from './provider-pause'
 import {
   admitSandbox,
+  deferAfterRefusal,
   deferWhilePaused,
   endPause,
   pauseOnRefusal,
@@ -138,5 +139,36 @@ describe('a job taken while the provider is paused', () => {
     expect(await deferWhilePaused(getDb(), job, { enqueue, now: NOW, spreadMs: 0 })).toBe(false)
     const [row] = await getDb().select().from(setting).where(eq(setting.key, PROVIDER_PAUSE_KEY))
     expect(row.value).toBe('garbage')
+  })
+})
+
+describe('a job whose sandbox the provider refused', () => {
+  const job: DeferredJob = { name: 'run-task', input: { taskId: 41, mergeBase: true }, taskId: 41 }
+
+  it('is queued again with its input for after the pause the refusal recorded', async () => {
+    await pauseOnRefusal(getDb(), REFUSED, NOW)
+    const enqueue = vi.fn(async () => {})
+
+    await deferAfterRefusal(getDb(), job, { enqueue, now: NOW, spreadMs: 0 })
+
+    expect(enqueue).toHaveBeenCalledWith({
+      name: 'run-task',
+      input: { taskId: 41, mergeBase: true },
+      idempotencyKey: `run-task-41-paused-${at(PROVIDER_PAUSE_MS).getTime()}`,
+      delaySeconds: PROVIDER_PAUSE_MS / 1000,
+    })
+  })
+
+  it('waits one pause when none is in force any more, instead of starting at once', async () => {
+    const enqueue = vi.fn(async () => {})
+
+    await deferAfterRefusal(getDb(), job, { enqueue, now: NOW, spreadMs: 0 })
+
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: { taskId: 41, mergeBase: true },
+        delaySeconds: PROVIDER_PAUSE_MS / 1000,
+      }),
+    )
   })
 })
