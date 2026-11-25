@@ -14,6 +14,8 @@ export type RepoConfig = {
   integrationChecks?: CheckSpec[]
   /** Commands that rewrite files and decide nothing, run before each round of checks. */
   fixes?: string[]
+  /** `high: <glob>` / `medium: <glob>` lines; absent means the factory's default patterns (#470). */
+  riskPatterns?: string[]
   /** Domains the sandbox may reach besides GitHub, the agent and the npm registry. */
   egress: string[]
   /** Domains of the project's recipe (`.factory/setup.json`) the owner approved in the panel. */
@@ -64,6 +66,7 @@ export async function loadRepoConfig(db: Database, fullName: string): Promise<Re
     integrationChecks:
       row.integrationChecks && row.integrationChecks.length > 0 ? row.integrationChecks : undefined,
     fixes: row.fixes && row.fixes.length > 0 ? row.fixes : undefined,
+    riskPatterns: row.riskPatterns && row.riskPatterns.length > 0 ? row.riskPatterns : undefined,
     egress: row.egress,
     approvedRecipeEgress: row.approvedRecipeEgress,
     baseBranch: row.baseBranch ?? undefined,

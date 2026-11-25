@@ -19,6 +19,7 @@ import {
   type WaitingStep,
 } from './ci-wait'
 import { createPreRelease, type ReleaseMode } from './deliver'
+import { readRisk } from './risk'
 import {
   advancePreRelease,
   describeDelivery,
@@ -152,6 +153,7 @@ async function completeIntegration(
         attempts: Number(w.done.attempts ?? 1),
         costUsd: row.costUsd,
         agentSummary: String(w.done.agentSummary ?? ''),
+        risk: readRisk(w.done.risk),
       },
     )
   } catch (error) {
@@ -164,6 +166,7 @@ async function completeIntegration(
       sha: verifiedSha,
       pullRequestUrl: row.pullRequestUrl,
       integratedBy,
+      ...(readRisk(w.done.risk) ? { risk: readRisk(w.done.risk) } : {}),
       ...describeIntegration({ mergedSha, ...advanced }),
       ...describeDelivery(handed),
     },

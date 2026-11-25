@@ -403,6 +403,8 @@ export type TaskCard = {
   waitingOnBase: { branch: string; checks: string[]; since: string } | null
   /** The size of the change at the reviewed commit; absent for a task whose change was not measured (#474). */
   change?: { added: number; removed: number; files: number } | null
+  /** The risk of the change at the reviewed commit, with the reasons; absent for a task from before it was recorded (#470). */
+  risk?: RiskAssessment | null
   /**
    * The task went back from `done` to an earlier stage and has not reached `done` again: why, when and the note
    * the run was given. Null for a task that never left `done`, or that reached it again.
@@ -633,6 +635,11 @@ export type StreamEvent =
   | { type: 'stage'; taskId: number; stage: Stage; at: string }
   | { type: 'agent'; taskId: number; event: TranscriptEvent }
 
+export type RiskLevel = 'low' | 'medium' | 'high'
+
+/** The risk of the change on one reviewed commit (#470), with the reasons. Recorded and shown; nothing acts on it. */
+export type RiskAssessment = { sha: string; level: RiskLevel; reasons: string[] }
+
 export type RepositoryView = {
   fullName: string
   private: boolean
@@ -643,6 +650,8 @@ export type RepositoryView = {
   checks: { name: string; command: string; artifacts?: string[] }[] | null
   /** Commands that rewrite files before each round of checks. */
   fixes: string[]
+  /** The lines `high: <glob>` / `medium: <glob>` that mark risky paths; empty means the defaults. */
+  riskPatterns: string[]
   egress: string[]
   /** The branch work starts from and pull requests target; null means the default branch. */
   baseBranch: string | null

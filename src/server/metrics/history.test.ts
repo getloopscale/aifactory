@@ -263,6 +263,24 @@ describe('observe', () => {
     expect(causes(held)).toEqual({ total: [0], checks: [0], conflict: [0], red: [0], other: [0] })
   })
 
+  it('splits change_failure by the risk level recorded for the delivery, and leaves older ones out', () => {
+    const risk = (level: string) => ({ sha: 's', level, reasons: ['r'] })
+    const h = history({
+      events: [
+        ev(0, 'intake'),
+        ev(30, 'done', { risk: risk('high') }),
+        ev(60, 'intake'),
+        ev(90, 'done', { risk: risk('low') }),
+        ev(120, 'intake'),
+        ev(150, 'done', {}),
+      ],
+    })
+    expect(value(h, 'change_failure')).toEqual([1, 1, 0])
+    expect(value(h, 'change_failure_high')).toEqual([1])
+    expect(value(h, 'change_failure_low')).toEqual([1])
+    expect(value(h, 'change_failure_medium')).toEqual([])
+  })
+
   it('does not say a delivery failed when the next run only merged the base its checks failed on', () => {
     const h = history({
       events: [
