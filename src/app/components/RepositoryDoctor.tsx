@@ -102,6 +102,13 @@ export function RepositoryDoctor({
   useEffect(() => setLoading(false), [resource.data, resource.error])
 
   const rows = report?.items.filter((i) => i.status !== 'ok') ?? []
+  // A report stored before families existed has none: its items are the operation ones.
+  const groups = (['operation', 'codebase'] as const).flatMap((family) => {
+    const all = report?.items.filter((i) => (i.family ?? 'operation') === family) ?? []
+    return all.length === 0
+      ? []
+      : [{ family, passing: all.filter((i) => i.status === 'ok').length, total: all.length }]
+  })
   const error = message ?? resource.error
   return (
     <section aria-label={t.doctor.title} className="mt-3 space-y-2 text-sm">
@@ -123,11 +130,30 @@ export function RepositoryDoctor({
         </p>
       ) : null}
       {rows.length > 0 ? (
-        <ul className="space-y-2">
-          {rows.map((item) => (
-            <Row key={item.id} item={item} busy={fixing === item.id} onFix={(id) => void fix(id)} />
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <div key={group.family} className="space-y-2" data-group={group.family}>
+              <p className="font-medium text-foreground">
+                {t.doctor.groups[group.family]}{' '}
+                <span className="text-muted-foreground">
+                  {t.doctor.passing(group.passing, group.total)}
+                </span>
+              </p>
+              <ul className="space-y-2">
+                {rows
+                  .filter((item) => (item.family ?? 'operation') === group.family)
+                  .map((item) => (
+                    <Row
+                      key={item.id}
+                      item={item}
+                      busy={fixing === item.id}
+                      onFix={(id) => void fix(id)}
+                    />
+                  ))}
+              </ul>
+            </div>
           ))}
-        </ul>
+        </div>
       ) : null}
     </section>
   )
