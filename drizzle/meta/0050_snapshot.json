@@ -1,6 +1,4 @@
 {
-  "id": "993889d1-27d0-4358-882d-a66b0cc47d4c",
-  "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -109,13 +107,7 @@
           "name": "task_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
-        },
-        "external_review_id": {
-          "name": "external_review_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "role": {
           "name": "role",
@@ -807,141 +799,6 @@
           "onUpdate": "no action"
         }
       },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.external_review": {
-      "name": "external_review",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "repository": {
-          "name": "repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "pull_number": {
-          "name": "pull_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "head_sha": {
-          "name": "head_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "base_ref": {
-          "name": "base_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "head_repository": {
-          "name": "head_repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "author": {
-          "name": "author",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "author_association": {
-          "name": "author_association",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "detail": {
-          "name": "detail",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cost_usd": {
-          "name": "cost_usd",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "external_review_pull_sha": {
-          "name": "external_review_pull_sha",
-          "columns": [
-            {
-              "expression": "repository",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pull_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "head_sha",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
@@ -2047,6 +1904,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "kind": {
           "name": "kind",
           "type": "text",
@@ -2063,19 +1933,6 @@
         "tag_url": {
           "name": "tag_url",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "started_at": {
-          "name": "started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "published_at": {
-          "name": "published_at",
-          "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
         }
@@ -2400,6 +2257,18 @@
           "notNull": true,
           "default": false
         },
+        "linear_team_id": {
+          "name": "linear_team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linear_label": {
+          "name": "linear_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "checks": {
           "name": "checks",
           "type": "jsonb",
@@ -2463,13 +2332,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "review_external_pulls": {
-          "name": "review_external_pulls",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
         },
         "run_limit_minutes": {
           "name": "run_limit_minutes",
@@ -2577,6 +2439,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "full_name"
+          ]
+        },
+        "repository_linear_team_id_unique": {
+          "name": "repository_linear_team_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "linear_team_id"
           ]
         }
       },
@@ -3008,6 +2877,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'github'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_identifier": {
+          "name": "display_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_url": {
+          "name": "item_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "issue_title": {
           "name": "issue_title",
           "type": "text",
@@ -3103,6 +2997,15 @@
           "columns": [
             "repository",
             "issue_number"
+          ]
+        },
+        "task_source_item_unique": {
+          "name": "task_source_item_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "source",
+            "external_id"
           ]
         }
       },
@@ -3413,5 +3316,7 @@
     "columns": {},
     "schemas": {},
     "tables": {}
-  }
+  },
+  "id": "5b0d9f65-c63c-41ce-8305-f0d756afd3d6",
+  "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658"
 }

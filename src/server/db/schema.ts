@@ -68,7 +68,19 @@ export const task = pgTable(
       .notNull()
       .references(() => ingress.id),
     repository: text('repository').notNull(),
+    /**
+     * The task's number in its repository. A GitHub task holds the issue's own number. A Linear task holds
+     * a negative local ordinal (`linear_task_ordinal`), never a number GitHub could assign.
+     */
     issueNumber: integer('issue_number').notNull(),
+    /** Where the work came from, and the tracker's own key for the item (the issue number, the Linear id). */
+    source: text('source', { enum: ['github', 'linear'] })
+      .notNull()
+      .default('github'),
+    externalId: text('external_id'),
+    /** What a person reads for the item (`owner/repo#4`, `ENG-12`), and where it lives. */
+    displayIdentifier: text('display_identifier'),
+    itemUrl: text('item_url'),
     issueTitle: text('issue_title').notNull(),
     stage: text('stage', { enum: TASK_STAGES }).notNull().default('intake'),
     /** The commit the factory pushed. Evidence counts only when it names this SHA. */
@@ -99,7 +111,10 @@ export const task = pgTable(
     costUsd: real('cost_usd').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique('task_issue_unique').on(table.repository, table.issueNumber)],
+  (table) => [
+    unique('task_issue_unique').on(table.repository, table.issueNumber),
+    unique('task_source_item_unique').on(table.repository, table.source, table.externalId),
+  ],
 )
 
 /** Every stage a task entered, in order. `task.stage` is only the latest of these. */
@@ -534,6 +549,10 @@ export const repository = pgTable('repository', {
   id: serial('id').primaryKey(),
   fullName: text('full_name').notNull().unique(),
   enabled: boolean('enabled').notNull().default(false),
+  /** The Linear team whose labelled items become this repository's tasks; one repository per team. */
+  linearTeamId: text('linear_team_id').unique(),
+  /** The label a Linear item carries to ask for work; absent means `factory`. */
+  linearLabel: text('linear_label'),
   /** The checks a commit must pass: `[{ name, command }]`. Empty means `npm test`. */
   checks: jsonb('checks').$type<{ name: string; command: string }[]>(),
   /** Commands that rewrite files (a formatter) and decide nothing, run before each round of checks. */

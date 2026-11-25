@@ -1,6 +1,7 @@
 import type { FetchLike } from './app'
 import { gated } from './rate-limit'
 import { retryRead } from './retry-read'
+import { trackerFor } from '../work-source/tracker'
 
 export type CheckRun = {
   name: string
@@ -1189,6 +1190,8 @@ export function createGithubApi(
     },
 
     async commentOnIssue(repo, token, issueNumber, body) {
+      const tracked = await trackerFor(repo, issueNumber)
+      if (tracked) return tracked.source.comment(tracked.id, body)
       const response = await ensure(
         await call(repo, token, `/issues/${issueNumber}/comments`, {
           method: 'POST',
@@ -1212,6 +1215,8 @@ export function createGithubApi(
     },
 
     async closeIssue(repo, token, issueNumber) {
+      const tracked = await trackerFor(repo, issueNumber)
+      if (tracked) return tracked.source.close(tracked.id)
       await ensure(
         await call(repo, token, `/issues/${issueNumber}`, {
           method: 'PATCH',
@@ -1223,6 +1228,18 @@ export function createGithubApi(
     },
 
     async listIssueComments(repo, token, issueNumber, since) {
+      const tracked = await trackerFor(repo, issueNumber)
+      if (tracked) {
+        // A workspace member who is not the factory is the Linear counterpart of a repository member.
+        return (await tracked.source.listComments(tracked.id, since)).map((c) => ({
+          id: c.id,
+          body: c.body,
+          author: c.author,
+          authorType: c.trusted ? 'User' : 'Bot',
+          association: c.trusted ? 'MEMBER' : 'NONE',
+          createdAt: c.createdAt,
+        }))
+      }
       const response = await ensure(
         await call(
           repo,
