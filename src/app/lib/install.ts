@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
+import { standaloneQuery } from './media'
+
 /** The event Chromium fires when the page can be installed; it is not in the DOM types. */
 type InstallEvent = Event & {
   prompt: () => Promise<void>
@@ -13,7 +15,7 @@ export type Install = {
 }
 
 const standalone = () =>
-  window.matchMedia?.('(display-mode: standalone)').matches === true ||
+  standaloneQuery()?.matches === true ||
   (navigator as Navigator & { standalone?: boolean }).standalone === true
 
 const onIos = () =>
@@ -41,7 +43,7 @@ export function useInstall(): Install {
       setInstalled(true)
       setEvent(null)
     }
-    const media = window.matchMedia?.('(display-mode: standalone)')
+    const media = standaloneQuery()
     const onMedia = () => setInstalled(standalone())
     window.addEventListener('beforeinstallprompt', onPrompt)
     window.addEventListener('appinstalled', onInstalled)

@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { TaskCard, TaskDetail } from '../shared/panel'
 
+import { Board } from './components/Board'
+import { CopyProvider } from './lib/copy'
 import { en } from './lib/copy/en'
+import { WidthContext } from './lib/media'
 import Page from './work/page'
 
 const card = (id: number, over: Partial<TaskCard> = {}): TaskCard => ({
@@ -253,5 +256,41 @@ describe('the risk of a task on its card', () => {
     at('/work')
     await waitFor(() => expect(screen.getByText('Task 2')).toBeDefined())
     for (const label of Object.values(en.board.risk)) expect(screen.queryByText(label)).toBeNull()
+  })
+})
+
+describe('the board on a phone', () => {
+  const compact = () =>
+    render(
+      <CopyProvider>
+        <WidthContext.Provider value="compact">
+          <MemoryRouter>
+            <Board
+              tasks={[
+                card(1, { column: 'working' }),
+                card(2, { column: 'waiting', stage: 'waiting' }),
+                card(3, { column: 'waiting', stage: 'waiting' }),
+              ]}
+            />
+          </MemoryRouter>
+        </WidthContext.Provider>
+      </CopyProvider>,
+    )
+
+  it('shows one stage at a time, the one that waits for the owner first, and a count on every tab', () => {
+    window.localStorage.setItem('aifactory.language', 'en')
+    compact()
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs).toHaveLength(9)
+    expect(screen.getByRole('tab', { name: `${en.columns.waiting} 2` })).toBeDefined()
+    expect(screen.getByRole('tab', { name: `${en.columns.working} 1` })).toBeDefined()
+    expect(
+      screen.getByRole('tab', { name: `${en.columns.waiting} 2` }).getAttribute('aria-selected'),
+    ).toBe('true')
+    expect(screen.getByText('Task 2')).toBeDefined()
+    expect(screen.queryByText('Task 1')).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: `${en.columns.working} 1` }))
+    expect(screen.getByText('Task 1')).toBeDefined()
+    expect(screen.queryByText('Task 2')).toBeNull()
   })
 })
