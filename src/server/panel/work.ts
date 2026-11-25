@@ -285,6 +285,67 @@ function savedIntegrationChecks(patch: RepositoryPatch, existing: RepositoryRow 
   }
 }
 
+async function canonicalName(
+  deps: WorkDeps,
+  fullName: string,
+  existing: RepositoryRow | undefined,
+  patch: RepositoryPatch,
+): Promise<string> {
+  if (existing && !patch.enabled) return existing.fullName
+  const found = await reachable(deps)
+  if (found instanceof Error) throw new ActionRefused(`GitHub could not be asked: ${found.message}`)
+  const match = found.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase())
+  if (!match) {
+    throw new ActionRefused(
+      `${fullName} is not one of the repositories the GitHub App can reach: give the App access to it first`,
+    )
+  }
+  return match.fullName
+}
+
+async function prepareBranches(
+  deps: WorkDeps,
+  canonical: string,
+  existing: RepositoryRow | undefined,
+  patch: RepositoryPatch,
+) {
+  if (!(patch.enabled ?? existing?.enabled ?? false)) return
+  await refuseKnowledgeRepository(deps.db, canonical)
+  const base = patch.baseBranch === undefined ? existing?.baseBranch : patch.baseBranch
+  try {
+    const { token } = await deps.github.installationToken(canonical)
+    const release =
+      patch.releaseBranch === undefined ? existing?.releaseBranch : patch.releaseBranch
+    await ensureBranches(deps.api, canonical, token, {
+      integration: integrationBranch({ baseBranch: base }),
+      release,
+    })
+  } catch (error) {
+    throw new ActionRefused(
+      `${canonical} could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
+    )
+  }
+}
+
+async function refuseTakenLinearTeam(deps: WorkDeps, canonical: string, patch: RepositoryPatch) {
+  const team = patch.linearTeamId?.trim()
+  if (!team) return
+  const [taken] = await deps.db
+    .select({ fullName: repository.fullName })
+    .from(repository)
+    .where(
+      and(
+        eq(repository.linearTeamId, team),
+        sql`lower(${repository.fullName}) <> lower(${canonical})`,
+      ),
+    )
+  if (taken) {
+    throw new ActionRefused(
+      `that Linear team already feeds ${taken.fullName}: a team maps to one repository`,
+    )
+  }
+}
+
 /**
  * Saves what the owner set for a repository. A repository the App does not reach cannot be created or
  * enabled, so the list is also the limit of what the factory can be pointed at. Enabling one runs the
@@ -302,53 +363,9 @@ export async function saveRepository(
     .select()
     .from(repository)
     .where(sql`lower(${repository.fullName}) = lower(${fullName})`)
-  let canonical = existing?.fullName
-  if (!existing || patch.enabled) {
-    const found = await reachable(deps)
-    if (found instanceof Error)
-      throw new ActionRefused(`GitHub could not be asked: ${found.message}`)
-    const match = found.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase())
-    if (!match) {
-      throw new ActionRefused(
-        `${fullName} is not one of the repositories the GitHub App can reach: give the App access to it first`,
-      )
-    }
-    canonical = match.fullName
-  }
-  const enabledAfter = patch.enabled ?? existing?.enabled ?? false
-  if (enabledAfter) {
-    await refuseKnowledgeRepository(deps.db, canonical!)
-    const base = patch.baseBranch === undefined ? existing?.baseBranch : patch.baseBranch
-    try {
-      const { token } = await deps.github.installationToken(canonical!)
-      const release =
-        patch.releaseBranch === undefined ? existing?.releaseBranch : patch.releaseBranch
-      await ensureBranches(deps.api, canonical!, token, {
-        integration: integrationBranch({ baseBranch: base }),
-        release,
-      })
-    } catch (error) {
-      throw new ActionRefused(
-        `${canonical} could not be prepared: ${error instanceof Error ? error.message : String(error)}`,
-      )
-    }
-  }
-  if (patch.linearTeamId?.trim()) {
-    const [taken] = await deps.db
-      .select({ fullName: repository.fullName })
-      .from(repository)
-      .where(
-        and(
-          eq(repository.linearTeamId, patch.linearTeamId.trim()),
-          sql`lower(${repository.fullName}) <> lower(${canonical!})`,
-        ),
-      )
-    if (taken) {
-      throw new ActionRefused(
-        `that Linear team already feeds ${taken.fullName}: a team maps to one repository`,
-      )
-    }
-  }
+  const canonical = await canonicalName(deps, fullName, existing, patch)
+  await prepareBranches(deps, canonical, existing, patch)
+  await refuseTakenLinearTeam(deps, canonical, patch)
   const checks = savedChecks(patch, existing)
   const integration = savedIntegrationChecks(patch, existing)
   const values = {
@@ -380,14 +397,14 @@ export async function saveRepository(
   }
   await deps.db
     .insert(repository)
-    .values({ fullName: canonical!, ...values })
+    .values({ fullName: canonical, ...values })
     .onConflictDoUpdate({ target: repository.fullName, set: values })
   const saved = {
-    fullName: canonical!,
+    fullName: canonical,
     unprovenChecks: checks.unprovenChecks,
     unprovenIntegrationChecks: integration.unproven,
   }
-  return patch.enabled ? { ...saved, doctor: await deps.diagnose(canonical!) } : saved
+  return patch.enabled ? { ...saved, doctor: await deps.diagnose(canonical) } : saved
 }
 
 /** The repository's row when it is enabled, or the reason the owner has to fix first. */
