@@ -9,6 +9,8 @@ import {
   expiresOn,
   indexedNote,
   knowledgePaths,
+  GAP_MAX,
+  gapHash,
   LEARNED_MAX,
   memoryPaths,
   NOTE_LIFETIME_DAYS,
@@ -18,6 +20,7 @@ import {
   notePath,
   notesFolder,
   noteTitle,
+  parseGaps,
   parseLearned,
   PRODUCER,
   renderMemoryRoot,
@@ -515,5 +518,33 @@ describe('what the factory proposes for a file of the rules', () => {
     ].map((path) => ({ path, text: readFileSync(`templates/knowledge/${path}`, 'utf8') }))
     expect(conformance(files[0].text, files)).toEqual([])
     for (const f of files) expect(conformingCopy(f.path, f.text), f.path).toEqual({})
+  })
+})
+
+describe('parseGaps', () => {
+  it('is the lines that start with KNOWLEDGE_GAP:, in one line each', () => {
+    expect(
+      parseGaps('Done.\nKNOWLEDGE_GAP: does this project use   named\tor default exports?\n'),
+    ).toEqual(['does this project use named or default exports?'])
+  })
+
+  it('keeps at most three, drops repeats and short ones', () => {
+    const many = Array.from({ length: 6 }, (_, i) => `KNOWLEDGE_GAP: question number ${i} here?`)
+    expect(parseGaps(many.join('\n'))).toHaveLength(GAP_MAX)
+    expect(
+      parseGaps('KNOWLEDGE_GAP: same question twice\nKNOWLEDGE_GAP: same question twice'),
+    ).toHaveLength(1)
+    expect(parseGaps('KNOWLEDGE_GAP: why?')).toEqual([])
+  })
+
+  it('leaves the lines out of the text a question is read from', () => {
+    expect(
+      withoutLearned('a\nKNOWLEDGE_GAP: what is the rule here?\nLEARNED: something long enough\nb'),
+    ).toBe('a\nb')
+  })
+
+  it('hashes the same question in the same project the same, whatever the spacing', () => {
+    expect(gapHash('o/r', 'a  b')).toBe(gapHash('o/r', 'a b'))
+    expect(gapHash('o/r', 'a b')).not.toBe(gapHash('o/x', 'a b'))
   })
 })

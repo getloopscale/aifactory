@@ -888,6 +888,16 @@ export const ptBR: Copy = {
     propose: 'Propor a estrutura',
     opened: 'Pull request aberto:',
     afterMerge: 'Depois do merge, a fábrica lê a estrutura nova em até um minuto.',
+    gapsTitle: 'Regras que os agentes não encontraram',
+    gapsAbout:
+      'Perguntas sobre este projeto que a base de conhecimento não respondeu. Escreva a regra e marque a pergunta como respondida; uma pergunta feita por três tarefas também vira uma issue no repositório de conhecimento.',
+    askedBy: (count: number) =>
+      count === 1 ? 'Perguntada por 1 tarefa:' : `Perguntada por ${count} tarefas:`,
+    markAnswered: 'Marcar como respondida',
+    dismiss: 'Descartar',
+    candidatesTitle: 'Respostas que podem ser regras',
+    candidatesAbout:
+      'Perguntas que uma tarefa fez a você e que você já respondeu. Uma resposta que vale para o projeto inteiro pertence à base de conhecimento.',
   },
   account: {
     tryAgain: 'Tentar de novo',
