@@ -342,7 +342,14 @@
       "idx": 48,
       "version": "7",
       "when": 1795608578100,
-      "tag": "0051_risk_patterns",
+      "tag": "0051_knowledge_curator",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795650000000,
+      "tag": "0052_risk_patterns",
       "breakpoints": true
     }
   ]

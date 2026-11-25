@@ -733,6 +733,47 @@ export const knowledgeNote = pgTable(
 )
 
 /**
+ * What the knowledge curator decided about a group of a project's notes (`knowledge/curator.ts`), one row per
+ * group and mode. `trial` rows only record. An `auto` row of `merge` or `promote` starts `pending`: only
+ * `knowledge-sync` applies it, so there is one writer. A promotion is proposed once per group of notes and
+ * knowledge repository: the unique key keeps a group whose pull request was closed unmerged from being proposed again.
+ */
+export const knowledgeCuration = pgTable(
+  'knowledge_curation',
+  {
+    id: serial('id').primaryKey(),
+    knowledgeRepository: text('knowledge_repository').notNull(),
+    /** The project the notes are about, owner/name. */
+    repository: text('repository').notNull(),
+    action: text('action', { enum: ['merge', 'promote', 'keep', 'error'] }).notNull(),
+    mode: text('mode', { enum: ['trial', 'auto'] }).notNull(),
+    /** What identifies the group: a hash of the action and the sorted paths of its notes. */
+    groupKey: text('group_key').notNull(),
+    status: text('status', {
+      enum: ['recorded', 'pending', 'applied', 'stale', 'proposed', 'closed', 'merged'],
+    }).notNull(),
+    /** The memory commit the decision was read from. */
+    memorySha: text('memory_sha'),
+    detail: jsonb('detail').notNull(),
+    commitSha: text('commit_sha'),
+    pullNumber: integer('pull_number'),
+    pullUrl: text('pull_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('knowledge_curation_once').on(
+      t.knowledgeRepository,
+      t.repository,
+      t.mode,
+      t.action,
+      t.groupKey,
+    ),
+    index('knowledge_curation_status').on(t.status, t.id),
+  ],
+)
+
+/**
  * A question an agent needed answered and the knowledge base did not: the same question (by whitespace-normalised
  * text) in the same project is one row, and `knowledge_gap_task` says which tasks asked it. `open` until the owner
  * marks it `answered` or `dismissed`.
