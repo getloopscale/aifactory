@@ -4,19 +4,15 @@ import type { AddressInfo } from 'node:net'
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { getStorageManager } from 'theokit/server/storage'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { agentEvent, agentRun, ingress, task } from '../db/schema'
-import { exportTrace } from './export'
-import { loadPass, recordPass } from './record'
-import { passToOtlp } from './spans'
+import { recordPass } from './record'
 
-const queued: number[] = []
-const enqueue = async (id: number) => {
-  queued.push(id)
-}
+const enqueue = vi.fn(async (..._args: unknown[]) => {})
+vi.mock('../factory/job-backend', () => ({ jobBackend: () => ({ enqueue }) }))
 
 let server: Server
 let received: { url: string; body: string }[]
@@ -30,7 +26,9 @@ beforeAll(async () => {
 afterAll(() => getStorageManager().dispose())
 
 beforeEach(async () => {
-  queued.length = 0
+  enqueue.mockClear()
+  delete process.env.FACTORY_TRACE_ENDPOINT
+  delete process.env.FACTORY_TRACE_TOKEN
   received = []
   status = 200
   await getPool().query(
@@ -87,47 +85,66 @@ const pass = (taskId: number) => ({
   ok: true,
 })
 
-describe('trace export', () => {
-  it('queues a pass when the endpoint is set, and the export posts it', async () => {
-    const db = getDb()
-    const t = await aTask()
-    await db.insert(agentEvent).values({
-      taskId: t.id,
-      role: 'builder',
+// The job as the queue runs it: what `recordPass` queued, handed to the `export-trace` handler.
+const runQueued = async () => {
+  const job = (await import('../jobs/export-trace')).default
+  const calls = enqueue.mock.calls as unknown as [{ name: string; input: { runId: number } }][]
+  for (const [queuedJob] of calls) {
+    await job.handler({
+      input: queuedJob.input,
+      traceId: 't',
       attempt: 1,
-      seq: 1,
-      kind: 'message',
-      content: 'hi',
+      signal: new AbortController().signal,
+      extendLease: async () => {},
     })
-    const id = await recordPass(
-      db,
-      { ...pass(t.id), eventFrom: 1, eventTo: 1 },
-      { FACTORY_TRACE_ENDPOINT: endpoint },
-      enqueue,
-    )
-    expect(queued).toEqual([id])
-    const loaded = (await loadPass(db, id))!
-    await exportTrace(passToOtlp(loaded.run, loaded.task, loaded.events), {
-      FACTORY_TRACE_ENDPOINT: endpoint,
-    })
+  }
+}
+
+const withEvent = (taskId: number) =>
+  getDb().insert(agentEvent).values({
+    taskId,
+    role: 'builder',
+    attempt: 1,
+    seq: 1,
+    kind: 'message',
+    content: 'hi',
+  })
+
+describe('trace export', () => {
+  it('queues a recorded pass when the endpoint is set, and the job posts it', async () => {
+    process.env.FACTORY_TRACE_ENDPOINT = endpoint
+    const t = await aTask()
+    await withEvent(t.id)
+    const id = await recordPass(getDb(), { ...pass(t.id), eventFrom: 1, eventTo: 1 })
+    expect(enqueue).toHaveBeenCalledTimes(1)
+    expect(enqueue.mock.calls[0]![0]).toMatchObject({ name: 'export-trace', input: { runId: id } })
+    await runQueued()
     expect(received).toHaveLength(1)
     expect(received[0]!.url).toBe('/v1/traces')
     expect(received[0]!.body).toContain('task:' + t.id)
+    expect(received[0]!.body).toContain('"hi"')
   })
 
-  it('queues nothing without an endpoint', async () => {
+  it('records the pass and queues no job without an endpoint', async () => {
     const t = await aTask()
-    await recordPass(getDb(), pass(t.id), {}, enqueue)
-    expect(queued).toEqual([])
+    const id = await recordPass(getDb(), pass(t.id))
+    expect(enqueue).not.toHaveBeenCalled()
+    expect(await getDb().select().from(agentRun).where(eq(agentRun.id, id))).toHaveLength(1)
+    expect(received).toEqual([])
   })
 
-  it('leaves the task and the pass as they are when the server answers 500', async () => {
+  it('fails the job and leaves the task and the pass as they are when the server answers 500', async () => {
+    process.env.FACTORY_TRACE_ENDPOINT = endpoint
     const db = getDb()
     const t = await aTask()
-    const id = await recordPass(db, pass(t.id), {}, enqueue)
+    await withEvent(t.id)
+    const id = await recordPass(db, { ...pass(t.id), eventFrom: 1, eventTo: 1 })
     const before = await db.select().from(agentRun).where(eq(agentRun.id, id))
     status = 500
-    await expect(exportTrace({}, { FACTORY_TRACE_ENDPOINT: endpoint })).rejects.toThrow('500')
+    // A job that throws is retried by the queue, up to its `maxAttempts`.
+    await expect(runQueued()).rejects.toThrow('500')
+    expect((await import('../jobs/export-trace')).default.maxAttempts).toBeGreaterThan(1)
+    expect(received).toHaveLength(1)
     expect(await db.select().from(agentRun).where(eq(agentRun.id, id))).toEqual(before)
     const [after] = await db.select().from(task).where(eq(task.id, t.id))
     expect(after!.stage).toBe(t.stage)

@@ -11,7 +11,11 @@ type NewRun = typeof agentRun.$inferInsert
 
 export type EnqueueTrace = (runId: number) => Promise<unknown>
 
-/** The one key of a pass's export: recording or backfilling it twice queues it once. */
+/**
+ * The one key of a pass's export: recording or backfilling it twice queues it once while the queue holds the key.
+ * After it is released a second backfill queues the pass again, which sends the same trace and span ids; that
+ * Looptrace replaces them rather than duplicating them is assumed, not verified (its source was not reachable).
+ */
 export const traceKey = (runId: number) => `trace-${runId}`
 
 export const queueTrace: EnqueueTrace = (runId) =>
