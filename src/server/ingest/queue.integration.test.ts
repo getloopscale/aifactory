@@ -21,7 +21,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table stage_event, task, ingress, theokit_jobs, repository restart identity cascade',
+    'truncate table stage_event, task, ingress, external_review, theokit_jobs, repository restart identity cascade',
   )
   await getPool().query("insert into repository (full_name, enabled) values ('paulo/app', true)")
 })
