@@ -6,7 +6,7 @@ import { describeSize, type ChangeSize } from './change-size'
 import { renderRisk } from './risk'
 import type { EgressRule } from './sandbox'
 import type { CheckResult } from './evidence'
-import { MAX_ATTEMPTS, renderFindings, type ReviewVerdict } from './review'
+import { MAX_ATTEMPTS, renderFindings, type Finding, type ReviewVerdict } from './review'
 import type { RunResult } from './run-types'
 import { quotaResumesAt } from './quota-reset'
 
@@ -215,6 +215,8 @@ export function pullRequestBody(input: {
   change?: ChangeSize
   /** The risk of the change at the reviewed commit, with its reasons (#470). */
   risk?: RiskAssessment
+  /** What a read-only lens still found after its one send-back (`Run.lensed`): notes, never a block. */
+  lensNotes?: Finding[]
 }): string {
   const { review } = input
   const remaining = review.outcome.findings
@@ -243,6 +245,14 @@ export function pullRequestBody(input: {
     ...(input.risk ? [renderRisk(input.risk), ''] : []),
     `Independent review by ${review.reviewer}, attempt ${review.attempt}: ${review.outcome.verdict}. ${review.outcome.summary}`,
     ...(remaining.length > 0 ? ['', renderFindings(remaining)] : []),
+    ...(input.lensNotes && input.lensNotes.length > 0
+      ? [
+          '',
+          'Notes from the documentation review, which the work did not settle:',
+          '',
+          renderFindings(input.lensNotes),
+        ]
+      : []),
     '',
     ...plan,
     '<details><summary>What the agent said</summary>',

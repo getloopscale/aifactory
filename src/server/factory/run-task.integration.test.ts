@@ -8164,3 +8164,70 @@ describe('runTask merging real git before integrating (#227)', () => {
     }
   })
 })
+
+describe('the docs lens over approved work', () => {
+  const MAJOR = verdictJson('changes', [
+    { severity: 'major', file: 'AGENTS.md', issue: 'the command table says npm' },
+  ])
+  const withDocuments = () =>
+    new FakeSandbox(
+      changed((command) =>
+        command.includes('ls-files -z') ? { stdout: 'AGENTS.md\0src/truncate.js\0' } : undefined,
+      ),
+    )
+  afterEach(() => vi.unstubAllEnvs())
+
+  const lensRows = async (id: number) =>
+    (await getDb().select().from(review).where(eq(review.taskId, id))).filter((r) =>
+      r.reviewer.startsWith('lens:'),
+    )
+
+  it('makes no lens session when the mode is off', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'off')
+    const id = await seedTask()
+    const reviewer = reviewerSaying(verdictJson('approve'), MAJOR)
+    const result = await runOnly(deps(withDocuments(), { reviewer }), id)
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(reviewer.prompts).toHaveLength(1)
+    const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(runs.map((r) => r.role)).not.toContain('lens')
+  })
+
+  it('records a major finding by name in trial and merges without a rework', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'trial')
+    const id = await seedTask()
+    const reviewer = reviewerSaying(verdictJson('approve'), MAJOR)
+    const result = await runOnly(deps(withDocuments(), { reviewer }), id)
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(reviewer.prompts).toHaveLength(2)
+    const rows = await lensRows(id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].reviewer).toContain('lens:docs')
+    expect(rows[0].verdict).toBe('changes')
+    const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(runs.filter((r) => r.role === 'lens')).toHaveLength(1)
+    expect(runs.filter((r) => r.role === 'reviewer')).toHaveLength(1)
+  })
+
+  it('sends the work back once in auto and carries the second finding in the pull request body', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'auto')
+    const id = await seedTask()
+    const builder = resumableBuilder()
+    const reviewer = reviewerSaying(verdictJson('approve'), MAJOR, verdictJson('approve'), MAJOR)
+    const result = await runOnly(deps(withDocuments(), { harness: builder, reviewer }), id)
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(builder.resumed).toHaveLength(1)
+    expect(builder.resumed[0]).toContain('the command table says npm')
+    expect(await lensRows(id)).toHaveLength(2)
+  })
+
+  it('records an answer that does not parse and goes on to merge', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'auto')
+    const id = await seedTask()
+    const reviewer = reviewerSaying(verdictJson('approve'), 'no json here')
+    const result = await runOnly(deps(withDocuments(), { reviewer }), id)
+    expect(result).toMatchObject({ status: 'merging' })
+    const rows = await lensRows(id)
+    expect(rows.map((r) => r.verdict)).toEqual(['invalid'])
+  })
+})

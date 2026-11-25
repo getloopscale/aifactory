@@ -497,7 +497,9 @@ export const agentRun = pgTable('agent_run', {
   taskId: integer('task_id').references(() => task.id),
   /** The review of a pull request the pass was for, when it was not for a task. */
   externalReviewId: integer('external_review_id'),
-  role: text('role', { enum: ['builder', 'planner', 'reviewer', 'merger', 'security'] }).notNull(),
+  role: text('role', {
+    enum: ['builder', 'planner', 'reviewer', 'merger', 'security', 'lens'],
+  }).notNull(),
   harness: text('harness').notNull(),
   /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
   model: text('model'),

@@ -360,6 +360,15 @@ reads that file, not a convention.
   only once its verdicts are compared with what became of the tasks. The panel's queued card shows its place, why and the
   verdict (`panel/queue-view.ts`).
 - **The readiness judge asks whether the work can be done here, now.** A `blocked` verdict names what is missing (a file under `.github/`, a release, an issue, a branch, another repository). In `auto` a blocker that is open issues (`blockedBy`, read on GitHub first) fails the task blocked at `intake`, and `retry-due` reads it again, the issues it recorded as well as those the body declares; any other blocker asks the owner. A builder that changes nothing and says it waits for an open issue ends the run blocked by it (`refuseWhenBlocked` in `run.ts`), and one that names a release or branch that does not exist ends it as `BLOCKED_NO_CHANGE`, which the coordinator does not send back.
+- **A lens is a read-only review of approved work, one entry of `LENSES`.** `factory/lens-review.ts` holds the closed
+  list (now `docs`: it reports only a statement in a document the change makes false, or a file, command or symbol the
+  change adds that a document's index lists its siblings of). `Run.lensed` runs each lens after the security review and
+  before `merge`, as the reviewer's agent in a fresh session with no edits, and stores its answer as a `review` row
+  whose `reviewer` starts with `lens:` (reads of "the last review" skip those rows); its cost is an `agent_run` of role
+  `lens`. `FACTORY_LENS_MODE` is `off`, `trial` (the default: run and record, send nothing back) or `auto`: a blocking
+  finding then sends the builder back once (`MAX_LENS_REWORKS`), and what it still finds goes into the pull request body
+  as notes. A lens never hands work over and never fails a task; an answer that does not parse is recorded `invalid`.
+  `evals/run-case.ts` takes the same step. A new lens is a new entry, and its prompt is agent configuration.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

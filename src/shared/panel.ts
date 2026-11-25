@@ -251,7 +251,7 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
   harness: string
   /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
@@ -302,7 +302,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
