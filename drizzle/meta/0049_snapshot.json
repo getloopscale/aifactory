@@ -1,5 +1,5 @@
 {
-  "id": "6732604f-a486-4157-8fec-9d8c0ac975d5",
+  "id": "8172ee4b-e5ff-4245-8780-2ae53cb3f658",
   "prevId": "fc5e1d53-24e4-4189-bb93-4341ab04bec6",
   "version": "7",
   "dialect": "postgresql",
@@ -783,13 +783,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "omitted": {
-          "name": "omitted",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2425,13 +2418,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "'{}'::jsonb"
-        },
-        "sandbox_image": {
-          "name": "sandbox_image",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'default'"
         }
       },
       "indexes": {},
@@ -3110,8 +3096,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.evidence_artifact": {
-      "name": "evidence_artifact",
+    "public.knowledge_gap": {
+      "name": "knowledge_gap",
       "schema": "",
       "columns": {
         "id": {
@@ -3120,8 +3106,74 @@
           "primaryKey": true,
           "notNull": true
         },
-        "evidence_id": {
-          "name": "evidence_id",
+        "repository": {
+          "name": "repository",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question": {
+          "name": "question",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "question_hash": {
+          "name": "question_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "knowledge_gap_once": {
+          "name": "knowledge_gap_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "question_hash"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.knowledge_gap_task": {
+      "name": "knowledge_gap_task",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "serial",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "gap_id": {
+          "name": "gap_id",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
@@ -3132,74 +3184,40 @@
           "primaryKey": false,
           "notNull": true
         },
-        "sha": {
-          "name": "sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
+        "issue_number": {
+          "name": "issue_number",
           "type": "integer",
           "primaryKey": false,
           "notNull": true
         },
-        "content": {
-          "name": "content",
-          "type": "bytea",
+        "role": {
+          "name": "role",
+          "type": "text",
           "primaryKey": false,
           "notNull": true
         },
-        "at": {
-          "name": "at",
+        "base_sha": {
+          "name": "base_sha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
         }
       },
-      "indexes": {
-        "evidence_artifact_task_id": {
-          "name": "evidence_artifact_task_id",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
-        "evidence_artifact_evidence_id_evidence_id_fk": {
-          "name": "evidence_artifact_evidence_id_evidence_id_fk",
-          "tableFrom": "evidence_artifact",
-          "tableTo": "evidence",
+        "knowledge_gap_task_gap_id_knowledge_gap_id_fk": {
+          "name": "knowledge_gap_task_gap_id_knowledge_gap_id_fk",
+          "tableFrom": "knowledge_gap_task",
+          "tableTo": "knowledge_gap",
           "columnsFrom": [
-            "evidence_id"
+            "gap_id"
           ],
           "columnsTo": [
             "id"
@@ -3207,9 +3225,9 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
-        "evidence_artifact_task_id_task_id_fk": {
-          "name": "evidence_artifact_task_id_task_id_fk",
-          "tableFrom": "evidence_artifact",
+        "knowledge_gap_task_task_id_task_id_fk": {
+          "name": "knowledge_gap_task_task_id_task_id_fk",
+          "tableFrom": "knowledge_gap_task",
           "tableTo": "task",
           "columnsFrom": [
             "task_id"
@@ -3222,7 +3240,16 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "knowledge_gap_task_once": {
+          "name": "knowledge_gap_task_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "gap_id",
+            "task_id"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

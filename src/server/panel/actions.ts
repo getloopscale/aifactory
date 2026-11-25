@@ -67,6 +67,8 @@ async function requeue(
   note: string,
   sha: string | null,
   rework?: Rework,
+  /** The task must still be unmerged and unresolved when its stage changes (the owner's merge of the base). */
+  unmerged = false,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
     // What a person's send-back clears is kept on its intake, so withdrawing it can give it back. It is read
@@ -85,7 +87,13 @@ async function requeue(
     const moved = await tx
       .update(task)
       .set({ stage: 'intake', awaitingCiSha: null, integrationHeld: false, resolvedSha: null })
-      .where(and(eq(task.id, taskId), inArray(task.stage, from as never)))
+      .where(
+        and(
+          eq(task.id, taskId),
+          inArray(task.stage, from as never),
+          ...(unmerged ? [isNull(task.mergedSha), isNull(task.resolvedSha)] : []),
+        ),
+      )
       .returning({ id: task.id })
     if (moved.length === 0) {
       throw new ActionRefused(
@@ -547,6 +555,33 @@ export async function mergeBaseByCoordinator(deps: ActionDeps, taskId: number, n
     mergeBase: true,
     preAgent: false,
   })
+}
+
+/**
+ * The owner asks for the integration branch to be merged into a handed-over (or never merged) task's branch.
+ * It queues the run the coordinator does (`mergeBase: true`: the factory merges, a conflict goes to the merge
+ * agent, no builder session starts). The note is only the record of why; no agent is given it. The stage and
+ * the absence of a merge are checked by the same statement that changes them.
+ */
+export async function mergeBaseByOwner(deps: ActionDeps, taskId: number) {
+  const row = await load(deps.db, taskId)
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  const facts = { ...row, branchGone: !head }
+  mustAllow(facts, 'merge_base_by_owner')
+  const note = 'The owner asked for the integration branch to be merged.'
+  const from = stagesWhere('merge_base_by_owner', facts)
+  await requeue(
+    deps,
+    taskId,
+    from,
+    'automatic_changes',
+    note,
+    row.headSha,
+    { note, mergeBase: true, preAgent: false },
+    true,
+  )
+  return { queued: true }
 }
 
 /** What the rerun of a task's checks needs from GitHub. */

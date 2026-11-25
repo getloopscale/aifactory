@@ -1,7 +1,7 @@
 import { Button, Input } from '@usetheo/ui'
 import { useEffect, useState } from 'react'
 
-import type { KnowledgeChoice, KnowledgeStatus } from '../../shared/knowledge'
+import type { GapsView, KnowledgeChoice, KnowledgeStatus } from '../../shared/knowledge'
 import type { RepositoriesView } from '../../shared/panel'
 import { get, post, put } from '../lib/api'
 import { useCopy } from '../lib/copy'
@@ -25,6 +25,7 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string>()
   const [proposed, setProposed] = useState<string>()
+  const [gaps, setGaps] = useState<GapsView>({ gaps: [], candidates: [] })
 
   useEffect(() => {
     let alive = true
@@ -39,6 +40,9 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
         (error: unknown) =>
           alive && setProblem(String(error instanceof Error ? error.message : error)),
       )
+    get<GapsView>('/api/panel/knowledge/gaps')
+      .then((view) => alive && setGaps(view))
+      .catch(() => undefined)
     get<RepositoriesView>('/api/panel/repositories')
       .then(
         (view) =>
@@ -57,6 +61,19 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
       const next = await run()
       if (next) setStatus(next)
       onChanged()
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function settle(id: number, next: 'answered' | 'dismissed') {
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await post('/api/panel/knowledge/gaps', { id, status: next })
+      setGaps((now) => ({ ...now, gaps: now.gaps.filter((g) => g.id !== id) }))
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -183,6 +200,70 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
           </a>
           . {k.afterMerge}
         </p>
+      ) : null}
+      {gaps.gaps.length > 0 ? (
+        <div>
+          <p className="font-medium">{k.gapsTitle}</p>
+          <p className="text-muted-foreground">{k.gapsAbout}</p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {gaps.gaps.map((gap) => (
+              <li key={gap.id} className="flex flex-wrap items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <p>
+                    <span className="font-mono">{gap.repository}</span>: {gap.question}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {k.askedBy(gap.tasks.length)}{' '}
+                    {gap.tasks.map((t) => (
+                      <a
+                        key={t.taskId}
+                        href={`/tasks/${t.taskId}`}
+                        className="mr-2 underline underline-offset-2"
+                      >
+                        #{t.issueNumber}
+                      </a>
+                    ))}
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void settle(gap.id, 'answered')}
+                >
+                  {k.markAnswered}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void settle(gap.id, 'dismissed')}
+                >
+                  {k.dismiss}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {gaps.candidates.length > 0 ? (
+        <div>
+          <p className="font-medium">{k.candidatesTitle}</p>
+          <p className="text-muted-foreground">{k.candidatesAbout}</p>
+          <ul className="mt-2 flex flex-col gap-2">
+            {gaps.candidates.map((c) => (
+              <li key={c.id}>
+                <p>
+                  <span className="font-mono">
+                    {c.repository}#{c.issueNumber}
+                  </span>
+                  : {c.question}
+                </p>
+                <p className="text-muted-foreground">{c.answer}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
     </section>
   )

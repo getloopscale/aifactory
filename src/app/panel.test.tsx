@@ -230,6 +230,24 @@ describe('task actions', () => {
     expect(onDone).toHaveBeenCalled()
   })
 
+  it('asks for the integration branch to be merged, only where the server allows it', async () => {
+    const calls = serve({ 'POST /api/panel/tasks/5/merge-base': { queued: true } })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    render(<TaskActions detail={detail()} onDone={noop} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Merge the integration branch' }))
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        'Merge of the integration branch queued.',
+      ),
+    )
+    expect(calls).toEqual([{ url: '/api/panel/tasks/5/merge-base', method: 'POST', csrf: '1' }])
+  })
+
+  it('does not offer the merge of the integration branch for integrated work', () => {
+    render(<TaskActions detail={detail({ task: { ...base, integrated: true } })} onDone={noop} />)
+    expect(screen.queryByRole('button', { name: 'Merge the integration branch' })).toBeNull()
+  })
+
   it('shows an approved commit as approved and does not offer it again', () => {
     render(<TaskActions detail={detail({ task: { ...base, approved: true } })} onDone={noop} />)
     expect((screen.getByRole('button', { name: 'Approved' }) as HTMLButtonElement).disabled).toBe(

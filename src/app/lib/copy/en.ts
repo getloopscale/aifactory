@@ -276,6 +276,11 @@ export const en = {
     sendBackWaiting: 'A send-back waits for its run to start. Withdraw it to correct the note.',
     withdraw: 'Withdraw send-back',
     confirmWithdraw: 'Withdraw this send-back? The run does not start and the task goes back.',
+    mergeBase: 'Merge the integration branch',
+    mergeBaseHelp:
+      "Merges the integration branch into the task's branch. The factory merges it and a conflict goes to the merge agent, not the builder.",
+    confirmMergeBase: "Merge the integration branch into this task's branch?",
+    mergeBaseQueued: 'Merge of the integration branch queued.',
     withdrawn: 'Send-back withdrawn.',
     changesContext: (title: string, n: number, repository: string) =>
       `Pull request for the issue "${title}" (#${n}) in ${repository}`,
@@ -635,6 +640,15 @@ export const en = {
     propose: 'Propose the structure',
     opened: 'Pull request opened:',
     afterMerge: 'After the merge, the factory reads the new structure within a minute.',
+    gapsTitle: 'Rules the agents missed',
+    gapsAbout:
+      'Questions about this project that the knowledge base did not answer. Write the rule, then mark the question answered; a question three tasks asked is also opened as an issue on the knowledge repository.',
+    askedBy: (count: number) => (count === 1 ? 'Asked by 1 task:' : `Asked by ${count} tasks:`),
+    markAnswered: 'Mark answered',
+    dismiss: 'Dismiss',
+    candidatesTitle: 'Answers that may be rules',
+    candidatesAbout:
+      'Questions a task asked you that you already answered. An answer that holds for the whole project belongs in the knowledge base.',
   },
   account: {
     tryAgain: 'Try again',
