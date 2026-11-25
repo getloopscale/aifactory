@@ -1479,6 +1479,30 @@ describe('writing to the agent of a stopped task', () => {
     expect(screen.getByText('Waiting for the agent to read it…')).toBeTruthy()
   })
 
+  it('offers no way to write to an agent that is planning, and says why', () => {
+    const planning = detail({ task: { ...base, stage: 'plan', column: 'working' } })
+    render(<Conversation detail={planning} onDone={noop} />)
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.getByText(/takes no message while the task is in plan/)).toBeTruthy()
+  })
+
+  it('shows what the answer to a message cost', () => {
+    const m = {
+      id: 1,
+      author: 'owner',
+      mode: 'ask' as const,
+      text: 'Why?',
+      delivery: 'delivered' as const,
+      reason: null,
+      answer: 'Because.',
+      costUsd: 0.42,
+      at: '2026-11-25T10:00:00Z',
+      answeredAt: null,
+    }
+    render(<Conversation detail={detail({ messages: [m] })} onDone={noop} />)
+    expect(screen.getByText('cost $0.42')).toBeTruthy()
+  })
+
   it('shows the box disabled, with the reason, in a stage that takes no message', () => {
     const merging = detail({ task: { ...base, stage: 'merge', column: 'working' } })
     render(<Conversation detail={merging} onDone={noop} />)

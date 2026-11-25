@@ -18,6 +18,8 @@ export type ThreadRow =
       mode: 'ask' | 'guide'
       delivery: 'pending' | 'delivered' | 'failed'
       reason: string | null
+      /** What the agent's answer to it cost. */
+      costUsd: number | null
     }
   | { type: 'said'; key: string; role: ThreadRole; at: string; text: string }
   | {
@@ -104,6 +106,10 @@ function passesOf(events: TranscriptEvent[]): Pass[] {
 const foldable = (s: TranscriptRow) =>
   s.type === 'tool' ? s.status !== 'failed' : s.type === 'note' ? !s.failed : false
 
+/**
+ * A message names no agent, so it takes the role of the pass it was written in; it may have been meant for
+ * another agent (the composer says the server decides).
+ */
 function ownerRows(m: MessageView, role: ThreadRole): ThreadRow[] {
   const rows: ThreadRow[] = [
     {
@@ -115,6 +121,7 @@ function ownerRows(m: MessageView, role: ThreadRole): ThreadRow[] {
       mode: m.mode,
       delivery: m.delivery,
       reason: m.reason,
+      costUsd: m.costUsd,
     },
   ]
   if (m.answer)

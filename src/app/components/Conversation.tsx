@@ -68,6 +68,11 @@ function Row({ row }: { row: ThreadRow }) {
         {row.delivery === 'failed' ? (
           <p className="mt-1 text-foreground">{t.conversation.failed(row.reason ?? '')}</p>
         ) : null}
+        {row.costUsd ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t.conversation.cost(`$${row.costUsd.toFixed(2)}`)}
+          </p>
+        ) : null}
       </div>
     )
   if (row.type === 'said')
