@@ -1,3 +1,4 @@
+import { itemRef } from '../factory/item-ref'
 import { sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -89,6 +90,7 @@ export async function actOnWriting(
       taskId: row.id,
       repository: row.repository,
       issueNumber: row.issueNumber,
+      item: itemRef(row),
       signature: `written:${row.repository.toLowerCase()}:${intent.kind}:${writtenId(intent)}`,
       by: intent.actorLogin,
       text: intent.text,

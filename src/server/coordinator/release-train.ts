@@ -1,3 +1,4 @@
+import { itemRef } from '../factory/item-ref'
 import type { Read } from '../factory/doctor'
 import type { ReleaseMode } from '../factory/deliver'
 import type { Bump } from '../factory/release'
@@ -305,7 +306,7 @@ export function recogniseRelease(f: RepositoryReleaseFacts): TaskException | und
   if (!kind) return undefined
   if (!f.labels?.read) return unknown(taskId, head, notRead(f.labels, 'the labels of the issues'))
   const tasks = eligibleTasks(f)
-  const issues = tasks.map((t) => `#${t.issueNumber}`).join(', ')
+  const issues = tasks.map((t) => itemRef(t)).join(', ')
   const kinds = tasks.length === integratedCount(f) ? 'integrated issues' : 'issues'
   return {
     kind,

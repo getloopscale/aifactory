@@ -574,3 +574,12 @@ describe('parseGaps', () => {
     expect(gapHash('o/r', 'a b')).not.toBe(gapHash('o/x', 'a b'))
   })
 })
+
+describe('a note of a Linear task', () => {
+  it('has no issue source and no footnote that points at one', () => {
+    const text = renderNote({ ...note(), issueNumber: -4 })
+    expect(text).not.toContain('-4')
+    expect(text).not.toContain('[^issue]')
+    expect(readConcept(text).problem).toBeUndefined()
+  })
+})

@@ -4,6 +4,7 @@ import { question as questionTable, task } from '../db/schema'
 import { fetchIssue as defaultFetchIssue, type Issue } from '../github/issues'
 import { openBlockersOf } from './blocker-check'
 import { BlockedByOpenIssues } from './blockers'
+import { trackerFor } from '../work-source/tracker'
 import { errorMessage } from './error-message'
 import type { Clarification } from './harness'
 import { withRecipe } from './recipe'
@@ -169,7 +170,12 @@ async function refuseWhileBlocked(
   readIssue: NonNullable<RunTaskDeps['fetchIssue']>,
 ): Promise<void> {
   const open = await openBlockersOf({ ...deps, fetchIssue: readIssue }, repository, issue.body)
-  if (open.length > 0) throw new BlockedByOpenIssues(open)
+  // A Linear item's blockers are its relations, read from Linear: its identifiers are not GitHub numbers.
+  const tracked = await trackerFor(repository, issue.number)
+  const relations = tracked
+    ? await tracked.source.openBlockers(await tracked.source.read(tracked.id))
+    : []
+  if (open.length + relations.length > 0) throw new BlockedByOpenIssues([...open, ...relations])
 }
 
 /** The answers the owner gave to the scheduler's readiness questions on this task, oldest first. */

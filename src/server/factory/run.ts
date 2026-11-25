@@ -1,3 +1,4 @@
+import { itemRef } from './item-ref'
 import { randomUUID } from 'node:crypto'
 
 import { type SandboxBackend } from '@theokit/agents/sandbox'
@@ -107,6 +108,8 @@ import {
   MAX_CHECK_REWORKS,
   oneLine,
   squashTitle,
+  itemIdentifier,
+  itemLink,
   pullRequestBody,
   pushWithRetry,
   resolvedComment,
@@ -472,7 +475,7 @@ export class Run {
     })
   }
   private get title() {
-    return squashTitle(this.c.issue.title, this.c.row.issueNumber)
+    return squashTitle(this.c.issue.title, this.c.row.issueNumber, itemIdentifier(this.c.row))
   }
   private get fixes(): string[] {
     return this.c.repo.fixes ?? []
@@ -878,7 +881,7 @@ export class Run {
       {
         repository: row.repository,
         kind: 'no-change',
-        body: `Issue #${row.issueNumber} (${oneLine(issue.title)}): a run starting from ${this.baseSha} found nothing to change.${said}`,
+        body: `Issue ${itemRef(row)} (${oneLine(issue.title)}): a run starting from ${this.baseSha} found nothing to change.${said}`,
         taskId,
         issueNumber: row.issueNumber,
         baseSha: this.baseSha,
@@ -2217,6 +2220,7 @@ export class Run {
         repository: row.repository,
         token: this.c.token,
         issueNumber: row.issueNumber,
+        item: itemRef(row),
         title: issue.title,
         sha,
         pullRequestUrl,
@@ -2266,6 +2270,7 @@ export class Run {
       issueTitle: this.c.issue.title,
       pullRequestBody: pullRequestBody({
         issueNumber: row.issueNumber,
+        item: itemLink(row),
         sha,
         rows: here,
         agentSummary: this.summary,

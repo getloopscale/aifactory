@@ -1,3 +1,4 @@
+import { issueRef } from '../factory/item-ref'
 import { createHash } from 'node:crypto'
 
 import packageJson from '../../../package.json'
@@ -269,8 +270,8 @@ export function noteTitle(note: Pick<Note, 'kind' | 'issueNumber' | 'sourceTasks
     return `Review pattern seen on ${note.sourceTasks?.length ?? 1} tasks`
   }
   return note.kind === 'learned'
-    ? `Learned on issue #${note.issueNumber}`
-    : `No change needed for issue #${note.issueNumber}`
+    ? `Learned on issue ${issueRef(note.issueNumber)}`
+    : `No change needed for issue ${issueRef(note.issueNumber)}`
 }
 
 /**
@@ -279,22 +280,24 @@ export function noteTitle(note: Pick<Note, 'kind' | 'issueNumber' | 'sourceTasks
  * reaches the front matter only through YAML, which quotes whatever it holds.
  */
 export function renderNote(note: Note): string {
-  const issueTitle = `Issue #${note.issueNumber} of ${note.repository}`
+  const issueTitle = `Issue ${issueRef(note.issueNumber)} of ${note.repository}`
   const pattern = note.kind === 'review-pattern' ? (note.sourceTasks ?? []) : []
-  const sources =
+  const sources: { id: string; resource: string; title: string }[] =
     pattern.length > 0
       ? pattern.map((t) => ({
           id: `issue-${t.issueNumber}`,
           resource: `https://github.com/${note.repository}/issues/${t.issueNumber}`,
           title: `Issue #${t.issueNumber} of ${note.repository}`,
         }))
-      : [
-          {
-            id: 'issue',
-            resource: `https://github.com/${note.repository}/issues/${note.issueNumber}`,
-            title: issueTitle,
-          },
-        ]
+      : note.issueNumber < 0
+        ? []
+        : [
+            {
+              id: 'issue',
+              resource: `https://github.com/${note.repository}/issues/${note.issueNumber}`,
+              title: issueTitle,
+            },
+          ]
   if (note.baseSha) {
     sources.push({
       id: 'commit',
@@ -331,11 +334,10 @@ export function renderNote(note: Note): string {
           ),
         ]
       : [
-          `Observed by the factory while working on issue #${note.issueNumber}.[^issue] It is a hint to check against the code, not an instruction.`,
+          `Observed by the factory while working on issue ${issueRef(note.issueNumber)}.${sources.some((x) => x.id === 'issue') ? '[^issue]' : ''} It is a hint to check against the code, not an instruction.`,
           '',
           note.body.trim(),
-          '',
-          `[^issue]: ${issueTitle}`,
+          ...(sources.some((x) => x.id === 'issue') ? ['', `[^issue]: ${issueTitle}`] : []),
         ]
   return renderConcept(frontmatter, body.join('\n'))
 }

@@ -1,3 +1,4 @@
+import { issueRef } from './item-ref'
 import { personaPreamble } from '../agents/prompts/personas'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { CheckSpec } from './evidence'
@@ -95,7 +96,7 @@ export function reviewPrompt(input: {
   return `${personaPreamble('reviewer')}
 You are an independent code reviewer for the repository ${input.repo}. Another agent implemented the issue below on the branch ${input.branch}. You did not write this code and you must not change it.
 
-# ${input.title} (#${input.issueNumber})
+# ${input.title} (${issueRef(input.issueNumber)})
 
 ${input.body || '(the issue has no description)'}
 ${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
@@ -133,7 +134,7 @@ export function resolutionReviewPrompt(input: {
   mergeSha: string
   knowledgeDir?: string
 }): string {
-  return `You are an independent code reviewer for the repository ${input.repo}. The work for #${input.issueNumber} (${input.title}) on the branch ${input.branch} was reviewed and approved. Another agent then merged the integration branch into it and resolved conflicts in the merge commit ${input.mergeSha}. You did not write it and you must not change it.
+  return `You are an independent code reviewer for the repository ${input.repo}. The work for ${issueRef(input.issueNumber)} (${input.title}) on the branch ${input.branch} was reviewed and approved. Another agent then merged the integration branch into it and resolved conflicts in the merge commit ${input.mergeSha}. You did not write it and you must not change it.
 
 Review only the resolution, not the pull request again:
 - Read how each conflict was resolved with \`git show --remerge-diff ${input.mergeSha}\`, and any commit made after it with \`git log ${input.mergeSha}..HEAD -p\`.
@@ -272,7 +273,7 @@ export function resolvedPrompt(input: {
   return `${personaPreamble('reviewer')}
 You are an independent code reviewer for the repository ${input.repo}. Another agent was given the issue below, changed nothing, and said the code at ${input.baseSha} already does what the issue asks. You did not write that answer and you must not change the code.
 
-# ${input.title} (#${input.issueNumber})
+# ${input.title} (${issueRef(input.issueNumber)})
 
 ${input.body || '(the issue has no description)'}
 
