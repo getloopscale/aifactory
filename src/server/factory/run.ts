@@ -16,7 +16,7 @@ import type { Issue } from '../github/issues'
 import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
 import { mergerPrompt } from '../agents/prompts/merger'
-import { parseLearned, withoutLearned } from '../knowledge/format'
+import { parseGaps, parseLearned, withoutLearned } from '../knowledge/format'
 
 import { cloneRepository } from './clone'
 import {
@@ -851,6 +851,23 @@ export class Run {
     )
   }
 
+  /** The questions the builder left with `KNOWLEDGE_GAP:`, kept for the owner to answer with a rule. */
+  private async keepGaps(summary: string): Promise<void> {
+    const questions = parseGaps(summary)
+    if (questions.length === 0 || !this.feed?.delivered) return
+    const { deps, taskId, row } = this.c
+    await deps.knowledge?.keepGaps(
+      questions.map((question) => ({
+        repository: row.repository,
+        question,
+        taskId,
+        issueNumber: row.issueNumber,
+        role: 'builder' as const,
+        baseSha: this.baseSha,
+      })),
+    )
+  }
+
   /**
    * A run that found nothing to change in an issue is worth remembering: the next run on the same issue
    * starts from what this one found, instead of finding it again.
@@ -1495,6 +1512,7 @@ export class Run {
     )
     if (!result.ok) await this.failUnfinished(result, 'the agent did not finish')
     await this.keepLearned(result.summary)
+    await this.keepGaps(result.summary)
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(withoutLearned(result.summary))
     if (asked) await this.ask(asked, 1)
@@ -1573,6 +1591,7 @@ export class Run {
     const first = await this.firstPass()
     if (!first.ok) await this.failUnfinished(first, 'the agent did not finish')
     await this.keepLearned(first.summary)
+    await this.keepGaps(first.summary)
     // A fact the agent left is not part of its question, wherever it put it.
     const asked = parseQuestion(withoutLearned(first.summary))
     this.sessionId = first.sessionId ?? this.sessionId
