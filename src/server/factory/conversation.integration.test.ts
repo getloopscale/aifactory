@@ -134,10 +134,11 @@ describe('keeping the session after an ask', () => {
 })
 
 describe('a message to a running pass', () => {
-  const pending = async (taskId: number, text: string) => {
+  const pending = async (taskId: number, text: string, createdAt = new Date()) => {
+    // The time is set here, not by the database's clock, so a skew between the two cannot reorder it.
     const [row] = await getDb()
       .insert(agentMessage)
-      .values({ taskId, author: 'owner', text, mode: 'ask' })
+      .values({ taskId, author: 'owner', text, mode: 'ask', createdAt })
       .returning()
     return row
   }
@@ -147,7 +148,7 @@ describe('a message to a running pass', () => {
 
   it('settles a message as delivered only when the pass has it, and leaves one written before the pass', async () => {
     const taskId = await seedTask()
-    const before = await pending(taskId, 'old')
+    const before = await pending(taskId, 'old', new Date(Date.now() - 60_000))
     const since = new Date()
     const sent: string[] = []
     const pass: ActivePass = {
