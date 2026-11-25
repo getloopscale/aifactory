@@ -31,6 +31,7 @@ describe('the guide of a page', () => {
     expect(at('/plans')).toBe('plans')
     expect(at('/plans/4')).toBe('plans')
     expect(at('/repositories')).toBe('repositories')
+    expect(at('/repositories/paulo/app')).toBe('repositories')
     expect(at('/inbox')).toBe('inbox')
     expect(at('/health')).toBe('health')
     expect(at('/agents')).toBe('agents')

@@ -69,4 +69,25 @@ describe('the repositories page in two languages', () => {
       expect(await screen.findByText(t.repositories.noneTitle)).toBeTruthy()
     })
   }
+
+  it('links an enabled repository to its own page', async () => {
+    show(
+      'en',
+      view([
+        {
+          ...repo,
+          enabled: true,
+          checks: null,
+          integrationChecks: [],
+          fixes: [],
+          riskPatterns: [],
+          egress: [],
+          unprovenChecks: [],
+          unprovenIntegrationChecks: [],
+        } as unknown as RepositoriesView['repositories'][number],
+      ]),
+    )
+    const link = await screen.findByRole('link', { name: /paulo\/app/ })
+    expect(link.getAttribute('href')).toBe('/repositories/paulo/app')
+  })
 })
