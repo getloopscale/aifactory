@@ -16,6 +16,7 @@
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration --no-file-parallelism",
     "coverage": "vitest run --project unit --project integration --no-file-parallelism --coverage",
+    "trace:backfill": "node --env-file=.env.local scripts/trace-backfill.mjs",
     "crap": "node scripts/crap.mjs",
     "dup": "jscpd",
     "mutation": "stryker run",

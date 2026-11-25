@@ -434,6 +434,11 @@ reads that file, not a convention.
   merge (`adoptMergedHandoffs` in `factory/await-ci.ts`, the `merged_by_person` event): the pre-release is made as
   after the factory's own merge, and the release train or a person releases it and closes its issue. It starts no
   release itself.
+- **A finished agent pass is exported to Looptrace by the `export-trace` job, never by the run.** `recordPass`
+  (`trace/record.ts`) stores the `agent_run` row and, only when `FACTORY_TRACE_ENDPOINT` is set, queues the job under
+  `trace-<run id>`; `trace/spans.ts` turns the stored, redacted steps into OTLP JSON with ids derived from the run and
+  `seq`, and only the job calls `trace/export.ts` (a test fails if `factory/` imports it). `pnpm trace:backfill`
+  queues the retained passes again. Looptrace is never reachable through the tunnel: the spans hold private code.
 - **Commits carry no co-author trailer.**
 - **Validate at the boundary.** A route validates input with Zod once, then trusts it.
 - **Side effects get a human.** A tool that touches the real world is gated with `.approval(...)`

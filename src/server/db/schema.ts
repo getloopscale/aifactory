@@ -537,6 +537,9 @@ export const agentRun = pgTable('agent_run', {
   /** The agent stopped because its account's quota ran out. */
   quota: boolean('quota').notNull().default(false),
   sessionId: text('session_id'),
+  /** The `agent_event.seq` range of the task the pass wrote (inclusive); null for a pass recorded before this. */
+  eventFrom: integer('event_from'),
+  eventTo: integer('event_to'),
   /** The pass answered a message of the owner (`agent_message`), it did not work on the task's issue. */
   conversation: boolean('conversation').notNull().default(false),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
