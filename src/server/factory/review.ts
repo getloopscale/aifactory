@@ -1,6 +1,7 @@
 import { issueRef } from './item-ref'
 import { personaPreamble } from '../agents/prompts/personas'
 import { knowledgeRules } from '../knowledge/prompt'
+import type { RiskAssessment } from '../../shared/panel'
 import type { CheckSpec } from './evidence'
 import { checksRule, forbiddenPathsRule, FORBIDDEN_PATHS, isForbiddenPath } from './harness'
 import type { RequiredByCheck } from './required-files'
@@ -66,6 +67,11 @@ export function roundsNote(attempt: number, counts: number[]): string {
     : ` (the review is not converging; ${per})`
 }
 
+/** The level the factory gave the change and why, so a `high` one is read knowing the reason (#470). */
+function riskSection(risk: RiskAssessment): string {
+  return `\nThe factory rated this change ${risk.level} risk, without a model, because:\n${risk.reasons.map((r) => `- ${r}`).join('\n')}\nRead the parts it names with that in mind. The rating does not change what you must find.\n`
+}
+
 export function reviewPrompt(input: {
   repo: string
   issueNumber: number
@@ -85,6 +91,8 @@ export function reviewPrompt(input: {
   required?: RequiredByCheck[]
   /** The review this one follows in the same run, when it asked for changes. */
   earlier?: EarlierReview
+  /** The risk level of this change and why, found without a model (#470). */
+  risk?: RiskAssessment
 }): string {
   const required = input.required ?? []
   return `${personaPreamble('reviewer')}
@@ -93,7 +101,7 @@ You are an independent code reviewer for the repository ${input.repo}. Another a
 # ${input.title} (${issueRef(input.issueNumber)})
 
 ${input.body || '(the issue has no description)'}
-${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}
+${input.plan === undefined ? saidSection(input.builderSummary) : planSection(input.plan, input.unplanned ?? [], input.builderSummary, required)}${requiredSection(required)}${input.risk ? riskSection(input.risk) : ''}
 Review the work:
 - Read the change with \`git diff ${input.baseSha}...HEAD\` and the files it touches.
 - Decide whether it does what the issue asks, no more and no less.
@@ -169,6 +177,8 @@ export function resolutionReviewPrompt(input: {
   branch: string
   mergeSha: string
   knowledgeDir?: string
+  /** The risk level of the work and why (#470). */
+  risk?: RiskAssessment
 }): string {
   return `You are an independent code reviewer for the repository ${input.repo}. The work for ${issueRef(input.issueNumber)} (${input.title}) on the branch ${input.branch} was reviewed and approved. Another agent then merged the integration branch into it and resolved conflicts in the merge commit ${input.mergeSha}. You did not write it and you must not change it.
 
@@ -183,7 +193,7 @@ ${
 ${knowledgeRules(input.knowledgeDir)}
 `
     : ''
-}
+}${input.risk ? riskSection(input.risk) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
 {"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","issue":"what is wrong and what to do"}]}

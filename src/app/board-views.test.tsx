@@ -231,3 +231,26 @@ describe('a task in full', () => {
     expect(screen.queryByRole('dialog')).toBeNull()
   })
 })
+
+describe('the risk of a task on its card', () => {
+  const tasks = (...cards: TaskCard[]) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ tasks: cards }), { status: 200 })),
+    )
+
+  it('shows the level, with the reasons naming the file and the pattern', async () => {
+    const reason = 'drizzle/0049_x.sql matches high: drizzle/**'
+    tasks(card(1, { risk: { sha: 'a', level: 'high', reasons: [reason] } }))
+    at('/work')
+    await waitFor(() => expect(screen.getByText(en.board.risk.high)).toBeDefined())
+    expect(screen.getByText(en.board.risk.high).getAttribute('title')).toBe(reason)
+  })
+
+  it('shows no level for a task from before it was recorded, or with none', async () => {
+    tasks(card(1), card(2, { risk: null }))
+    at('/work')
+    await waitFor(() => expect(screen.getByText('Task 2')).toBeDefined())
+    for (const label of Object.values(en.board.risk)) expect(screen.queryByText(label)).toBeNull()
+  })
+})
