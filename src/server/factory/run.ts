@@ -2,7 +2,7 @@ import { itemRef } from './item-ref'
 import { randomUUID } from 'node:crypto'
 
 import { type SandboxBackend } from '@theokit/agents/sandbox'
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, notLike } from 'drizzle-orm'
 
 import {
   agentRun,
@@ -75,6 +75,16 @@ import {
   securityPrompt,
 } from './security-review'
 import {
+  LENSES,
+  LENS_PREFIX,
+  decideLens,
+  documentPaths,
+  lensModeFromEnv,
+  lensReviewer,
+  noteFindings,
+  parseLensVerdict,
+} from './lens-review'
+import {
   changePlanPrompt,
   givenPlanPrompt,
   implementPlanPrompt,
@@ -145,7 +155,7 @@ import {
   type SandboxSpec,
 } from './sandbox'
 import { Preparation } from './sandbox-prepared'
-import { enterRunStage } from './stages'
+import { enterRunStage, TaskCancelled } from './stages'
 import { Transcript } from './transcript-store'
 import { answerPrompt, parseQuestion, questionComment } from './waiting'
 import { endLive, liveFor, type PassCall } from './live-conversation'
@@ -290,6 +300,10 @@ export class Run {
   private readonly securitySeen = new Set<string>()
   private securityReworks = 0
   private securityEarlier: Finding[] = []
+  /** The lenses' send-backs so far, what they found before, and the blocking findings left for the pull request (#548). */
+  private lensReworks = 0
+  private lensEarlier: Finding[] = []
+  private lensNotes: Finding[] = []
 
   /** The merge commit the merge agent resolved: the review reads only that resolution (#227). */
   private resolvedMerge: string | undefined
@@ -691,7 +705,7 @@ export class Run {
   /** Runs the agent, books its cost and session, and turns a quota stop into its own error. */
   private async settle(
     who: CodingHarness,
-    role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
+    role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens',
     attempt: number,
     call: PassCall,
   ): Promise<HarnessResult> {
@@ -784,7 +798,7 @@ export class Run {
    */
   private async afterRefusal(
     who: CodingHarness,
-    role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
+    role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens',
     attempt: number,
     call: PassCall,
   ): Promise<HarnessResult> {
@@ -2269,7 +2283,7 @@ export class Run {
     const [last] = await deps.db
       .select()
       .from(reviewTable)
-      .where(eq(reviewTable.taskId, taskId))
+      .where(and(eq(reviewTable.taskId, taskId), notLike(reviewTable.reviewer, `${LENS_PREFIX}%`)))
       .orderBy(desc(reviewTable.id))
       .limit(1)
     if (last?.verdict !== 'approve' || last.sha === sha) return undefined
@@ -2349,6 +2363,8 @@ export class Run {
     const { deps, taskId, row, branch, state } = this.c
     const secured = await this.secured(sha, attempt, here)
     if (secured) return secured
+    const lensed = await this.lensed(sha, attempt)
+    if (lensed) return lensed
     const held = heldFor(
       heldForEvaluation(row.repository, this.touched, deps.ownRepository),
       heldForReview(row.repository, this.touched, deps.ownRepository),
@@ -2378,6 +2394,7 @@ export class Run {
         rows: here,
         agentSummary: this.summary,
         review: { reviewer: this.reviewer.name, attempt, outcome },
+        lensNotes: this.lensNotes,
         plan: this.renderedPlan,
         repository: row.repository,
         artifacts: await this.artifactLinksAt(sha),
@@ -2499,6 +2516,100 @@ export class Run {
       [],
       { headline: 'The security review blocks this', reason, cause: 'security' },
     )
+  }
+
+  /**
+   * The lenses over approved work (#548), read-only, after the security review and before `merge`. Each lens is the
+   * reviewer's agent in a fresh session. In `auto` a blocking finding sends the builder back once (`MAX_LENS_REWORKS`);
+   * what a lens still finds is kept for the pull request body. A lens never hands work over and never fails a task:
+   * an answer or a read that fails is recorded and the work goes on.
+   */
+  private async lensed(sha: string, attempt: number): Promise<Reworked | undefined> {
+    const mode = lensModeFromEnv(process.env)
+    if (mode === 'off') return undefined
+    const { deps, taskId, row, issue } = this.c
+    for (const lens of LENSES) {
+      let documents: string[] = []
+      let verdict: ReviewVerdict
+      try {
+        const base = await reviewBase(this.backend, this.repoDir, {
+          baseSha: this.baseSha,
+          integration: integrationBranch(this.c.repo),
+        })
+        documents = await documentPaths(this.backend, this.repoDir)
+        if (documents.length === 0) continue
+        this.c.state.current = 'review'
+        await enterRunStage(deps.db, taskId, 'review', {
+          step: 'lens',
+          lens: lens.name,
+          sha,
+          attempt,
+          ...agentFacts(this.reviewer),
+        })
+        const diff = await securityDiff(this.backend, this.repoDir, base)
+        const result = await this.settle(this.reviewer, 'lens', attempt, (onEvent) =>
+          this.reviewer.run(this.backend, {
+            onEvent,
+            cwd: this.repoDir,
+            timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+            role: 'reviewer',
+            prompt: lens.prompt({
+              repo: row.repository,
+              issueNumber: row.issueNumber,
+              title: issue.title,
+              body: issue.body,
+              baseSha: base,
+              diff,
+              documents,
+              knowledgeDir: this.feed?.dir,
+              earlier: this.lensEarlier,
+            }),
+          }),
+        )
+        // The lens reads and does not write. If it wrote anyway, none of it counts.
+        await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
+        await must(this.backend, `git -C ${this.repoDir} clean -fdx -e node_modules`)
+        verdict = result.ok
+          ? parseLensVerdict(result.summary)
+          : {
+              verdict: 'invalid',
+              summary: `the ${lens.name} lens failed: ${result.summary}`,
+              findings: [],
+            }
+      } catch (error) {
+        // A stop, a quota or a cancelled task is the run's, not the lens's.
+        if (error instanceof QuotaStop || error instanceof TaskCancelled) throw error
+        verdict = {
+          verdict: 'invalid',
+          summary: `the ${lens.name} lens could not run: ${error instanceof Error ? error.message : String(error)}`,
+          findings: [],
+        }
+      }
+      await deps.db.insert(reviewTable).values({
+        taskId,
+        round: attempt,
+        sha,
+        reviewer: lensReviewer(lens.name, this.reviewer.name),
+        verdict: verdict.verdict,
+        summary: verdict.summary,
+        findings: verdict.findings,
+      })
+      const decision = decideLens({
+        mode,
+        verdict,
+        reworks: this.lensReworks,
+        canRework: this.builder.resume !== undefined && !!this.sessionId,
+      })
+      this.lensEarlier = verdict.findings
+      if (decision.kind === 'pass') continue
+      if (decision.kind === 'rework') {
+        this.lensReworks += 1
+        const reworked = await this.rework(attempt + 1, decision.findings, [], sha)
+        if (reworked) return { reworked }
+      }
+      this.lensNotes = noteFindings([...this.lensNotes, ...decision.findings])
+    }
+    return undefined
   }
 
   /**
@@ -2688,7 +2799,7 @@ export class Run {
     const rows = await deps.db
       .select()
       .from(reviewTable)
-      .where(eq(reviewTable.taskId, taskId))
+      .where(and(eq(reviewTable.taskId, taskId), notLike(reviewTable.reviewer, `${LENS_PREFIX}%`)))
       .orderBy(asc(reviewTable.id))
     const byRound = new Map<number, number>()
     for (const r of rows) {
@@ -2787,9 +2898,9 @@ export class Run {
 
 /** The transcript keeps three roles: the planner is read as the builder, the security reviewer as the reviewer. */
 function transcriptRole(
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens',
 ): 'builder' | 'reviewer' | 'merger' {
-  return role === 'planner' ? 'builder' : role === 'security' ? 'reviewer' : role
+  return role === 'planner' ? 'builder' : role === 'security' || role === 'lens' ? 'reviewer' : role
 }
 
 /** What a stage records about the agent working in it, so the panel can say who it is and on which model. */

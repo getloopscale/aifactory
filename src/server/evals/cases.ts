@@ -119,6 +119,7 @@ export const AGENT_CONFIGURATION = [
   'src/server/factory/agent-plugin.ts',
   'src/shared/personas.ts',
   'src/server/factory/review.ts',
+  'src/server/factory/lens-review.ts',
   'src/server/factory/change-plan.ts',
   'src/server/factory/plan.ts',
   'src/server/factory/waiting.ts',
