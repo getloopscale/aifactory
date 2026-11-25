@@ -253,20 +253,46 @@ describe('unestablishedGates', () => {
   })
 })
 
-describe('the links to the files the checks wrote', () => {
-  it('reads the panel address only from an http(s) URL', async () => {
-    const { panelBaseUrl } = await import('./run-support')
-    expect(panelBaseUrl({ FACTORY_PANEL_URL: 'https://panel.example/' })).toBe(
-      'https://panel.example',
-    )
-    expect(panelBaseUrl({ FACTORY_PANEL_URL: 'javascript:alert(1)' })).toBeUndefined()
-    expect(panelBaseUrl({})).toBeUndefined()
+describe('the files the checks wrote, named in the pull request', () => {
+  it('names each file as inline code, never as a link', async () => {
+    const { artifactLinks } = await import('./run-support')
+    expect(artifactLinks([{ path: 'shots/home.png' }])).toEqual(['- ` shots/home.png `'])
   })
 
-  it('links each file to its owner-only download', async () => {
+  it('writes no link or image for a hostile name', async () => {
     const { artifactLinks } = await import('./run-support')
-    expect(artifactLinks('https://p.example', 7, [{ id: 3, path: 'shots/home.png' }])).toEqual([
-      '- [shots/home.png](https://p.example/api/panel/tasks/7/artifacts/3)',
+    const lines = artifactLinks([
+      { path: 'shots/a](https://evil.example)[b.png' },
+      { path: 'shots/![x](https://t/p.png).png' },
+      { path: 'a``b`.png' },
     ])
+    expect(lines[0]).toBe('- ` shots/a](https://evil.example)[b.png `')
+    expect(lines[1]).toBe('- ` shots/![x](https://t/p.png).png `')
+    expect(lines[2]).toBe('- ``` a``b`.png ```')
+  })
+
+  it('does not write the panel address into the body', async () => {
+    const { pullRequestBody, artifactLinks } = await import('./run-support')
+    process.env.FACTORY_PANEL_URL = 'https://panel.example'
+    try {
+      const body = pullRequestBody({
+        issueNumber: 1,
+        sha: 'abc1234def',
+        rows: [],
+        agentSummary: 'x',
+        review: {
+          reviewer: 'r',
+          attempt: 1,
+          outcome: { verdict: 'approve', summary: 'ok', findings: [] } as never,
+        },
+        artifacts: artifactLinks([{ path: 'shots/home.png' }]),
+        taskId: 7,
+      })
+      expect(body).not.toContain('panel.example')
+      expect(body).toContain('task #7')
+      expect(body).not.toMatch(/\]\(/)
+    } finally {
+      delete process.env.FACTORY_PANEL_URL
+    }
   })
 })

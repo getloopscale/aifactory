@@ -117,7 +117,6 @@ import {
   StageFailure,
   type Continuation,
   type StoredCheck,
-  panelBaseUrl,
   artifactLinks,
 } from './run-support'
 import {
@@ -2277,6 +2276,7 @@ export class Run {
         plan: this.renderedPlan,
         repository: row.repository,
         artifacts: await this.artifactLinksAt(sha),
+        taskId: this.c.taskId,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
       }),
       ...(this.changeFacts ? { change: this.changeFacts } : {}),
@@ -2470,12 +2470,9 @@ export class Run {
     })
   }
 
-  /** Links to the files the checks wrote on this commit, when the panel has an address to link to. */
+  /** Links to the files the checks wrote on this commit, named, with no address. */
   private async artifactLinksAt(sha: string): Promise<string[]> {
-    const base = panelBaseUrl()
-    if (!base) return []
-    const files = await artifactsAt(this.c.deps.db, this.c.taskId, sha)
-    return artifactLinks(base, this.c.taskId, files)
+    return artifactLinks(await artifactsAt(this.c.deps.db, this.c.taskId, sha))
   }
 
   private async handOver(
@@ -2510,6 +2507,7 @@ export class Run {
         plan: this.renderedPlan,
         repository: row.repository,
         artifacts: await this.artifactLinksAt(sha),
+        taskId: this.c.taskId,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
       }),
     })

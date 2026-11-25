@@ -161,27 +161,14 @@ export function unestablishedGates(repository: string, rows: StoredCheck[]): str
   return CI_QUALITY_GATES.filter((g) => !ran(g))
 }
 
-/** The panel's address from `FACTORY_PANEL_URL`, when it is an http(s) URL; the panel never goes through the tunnel, so there is no default. */
-export function panelBaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const raw = env.FACTORY_PANEL_URL?.trim()
-  if (!raw) return undefined
-  try {
-    const url = new URL(raw)
-    return url.protocol === 'http:' || url.protocol === 'https:'
-      ? url.origin + url.pathname.replace(/\/$/, '')
-      : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/** One markdown bullet for each stored file, linking its owner-only download. */
-export function artifactLinks(
-  base: string,
-  taskId: number,
-  files: { id: number; path: string }[],
-): string[] {
-  return files.map((f) => `- [${f.path}](${base}/api/panel/tasks/${taskId}/artifacts/${f.id})`)
+/** One markdown bullet for each stored file, its name as inline code: the name came from the sandbox, so it is never link text. */
+export function artifactLinks(files: { path: string }[]): string[] {
+  return files.map((f) => {
+    const name = f.path.replace(/\s+/g, ' ')
+    const longest = Math.max(0, ...(name.match(/`+/g) ?? []).map((r) => r.length))
+    const fence = '`'.repeat(longest + 1)
+    return `- ${fence} ${name} ${fence}`
+  })
 }
 
 const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
@@ -196,8 +183,10 @@ export function pullRequestBody(input: {
   /** The plan the builder wrote before it changed anything, as markdown. */
   plan?: string
   repository?: string
-  /** Links to the files the checks wrote for this commit, when the panel has an address. */
+  /** The files the checks wrote for this commit, named; the panel's address is never written here. */
   artifacts?: string[]
+  /** The task whose page on the panel holds them. */
+  taskId?: number
   /** The size of the change at the reviewed commit. */
   change?: ChangeSize
 }): string {
@@ -218,7 +207,7 @@ export function pullRequestBody(input: {
     '',
     ...(input.artifacts && input.artifacts.length > 0
       ? [
-          'Files the checks wrote (owner-only, kept as long as the transcripts):',
+          `Files the checks wrote, in the page of task #${input.taskId ?? '?'} on the panel (owner-only, kept as long as the transcripts):`,
           '',
           ...input.artifacts,
           '',
