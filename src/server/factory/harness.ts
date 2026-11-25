@@ -33,6 +33,23 @@ export type HarnessInput = {
   role?: CodingRole
   /** A conversation turn that may only read: the agent runs in its CLI's read-only mode and the factory pushes nothing. */
   ask?: boolean
+  /**
+   * When given and the run is watched, the harness hands over the means to write to the pass while it works
+   * (see `ActivePass`). A harness that cannot simply never attaches.
+   */
+  live?: { attach(pass: ActivePass): void }
+}
+
+/**
+ * A pass that is running and can be written to. `send` answers `delivered` when the agent has the message, and
+ * `ended` when the pass is already over (nothing was written, the message is still the caller's). It never
+ * starts a second writer on the session: Claude Code reads the message from its input, and Codex is stopped
+ * and resumed.
+ */
+export type ActivePass = {
+  /** Delivering stops the step that is running (Codex), so the composer says so before sending. */
+  readonly interrupts: boolean
+  send(text: string): Promise<'delivered' | 'ended'>
 }
 
 const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
