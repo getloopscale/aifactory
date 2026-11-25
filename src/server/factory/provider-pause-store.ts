@@ -1,6 +1,6 @@
 // The pause of the sandbox provider (`provider-pause.ts`), kept in `setting` so every process of the factory,
 // the main one and each worker, reads the same one.
-import { and, eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import { getDb, type Database } from '../db'
 import { setting } from '../db/schema'
@@ -36,14 +36,20 @@ export async function readPause(db: Database): Promise<ProviderPause | null> {
  * log. A refusal of the probe keeps when the pause first started.
  */
 export async function pauseOnRefusal(db: Database, error: string, now = new Date()): Promise<void> {
-  const pause = pauseAfter(error, now, await readPause(db))
-  if (!pause) return
-  const value = JSON.stringify(pause)
-  await db
-    .insert(setting)
-    .values({ key: PROVIDER_PAUSE_KEY, value, updatedAt: now })
-    .onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: now } })
-  console.log(JSON.stringify({ event: 'sandbox_provider_paused', ...pause }))
+  // Runs refused within seconds of each other write one after the other: the read and the write are one
+  // transaction under a lock, so none starts from a pause another is about to replace.
+  const pause = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${PROVIDER_PAUSE_KEY}))`)
+    const next = pauseAfter(error, now, await readPause(tx as unknown as Database))
+    if (!next) return null
+    const value = JSON.stringify(next)
+    await tx
+      .insert(setting)
+      .values({ key: PROVIDER_PAUSE_KEY, value, updatedAt: now })
+      .onConflictDoUpdate({ target: setting.key, set: { value, updatedAt: now } })
+    return next
+  })
+  if (pause) console.log(JSON.stringify({ event: 'sandbox_provider_paused', ...pause }))
 }
 
 /** Ends the pause once a sandbox started: the provider accepts again. Nothing is written when none was in force. */
@@ -143,14 +149,26 @@ export async function deferAfterRefusal(
   job: DeferredJob,
   deps: DeferDeps,
 ): Promise<void> {
-  if (await deferWhilePaused(db, job, deps)) return
   const now = deps.now ?? new Date()
+  // Read only: claiming the probe here would hold other runs for a cool-down for a run that does not start.
+  const pause = await readPause(db)
+  const end = pause ? Date.parse(pause.until) : Number.NaN
+  const until = end > now.getTime() ? end : now.getTime() + PROVIDER_PAUSE_MS
+  const spread = Math.floor(Math.random() * (deps.spreadMs ?? DEFER_SPREAD_MS))
   await deps.enqueue({
     name: job.name,
     input: job.input,
-    idempotencyKey: `${job.name}-${job.taskId}-refused-${now.getTime()}`,
-    delaySeconds: Math.ceil(PROVIDER_PAUSE_MS / 1000),
+    idempotencyKey: `${job.name}-${job.taskId}-paused-${until}`,
+    delaySeconds: deferSeconds(new Date(until), now, spread),
   })
+  console.log(
+    JSON.stringify({
+      event: 'run_deferred',
+      job: job.name,
+      taskId: job.taskId,
+      until: new Date(until).toISOString(),
+    }),
+  )
 }
 
 /** `deferAfterRefusal` for a job handler: the factory's database and TheoKit's queue. */

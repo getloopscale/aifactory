@@ -31,8 +31,14 @@ export function pauseAfter(
   previous: ProviderPause | null,
 ): ProviderPause | null {
   if (!SANDBOX_PROVIDER_BLOCKED.test(error)) return null
+  // A refusal never shortens a pause in force: runs refused moments apart, in any order, leave the latest end.
+  const previousEnd = previous ? Date.parse(previous.until) : Number.NaN
+  const end = Math.max(
+    now.getTime() + PROVIDER_PAUSE_MS,
+    Number.isNaN(previousEnd) ? 0 : previousEnd,
+  )
   return {
-    until: new Date(now.getTime() + PROVIDER_PAUSE_MS).toISOString(),
+    until: new Date(end).toISOString(),
     since: previous?.since ?? now.toISOString(),
     reason: error.slice(0, REASON_LENGTH),
   }
