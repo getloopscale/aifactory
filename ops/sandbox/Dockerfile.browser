@@ -1,0 +1,17 @@
+# The default sandbox image plus a headless browser, for the repositories whose checks drive one. It is built
+# on top of the default image (docker-sandbox.ts passes it as BASE), so everything else is the same and the
+# egress rules are the same: the browser is installed here, at build time, and a test loads local pages.
+# The system Chromium is at /usr/bin/chromium; the usual runners find it through the variables below. A
+# container with no capabilities cannot use Chromium's own sandbox, so a runner passes `--no-sandbox`.
+ARG BASE=aifactory-sandbox:5
+FROM ${BASE}
+USER root
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends chromium fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
+ENV CHROME_BIN=/usr/bin/chromium \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium \
+    PUPPETEER_SKIP_DOWNLOAD=1 \
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
+    PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
+USER node
