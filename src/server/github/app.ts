@@ -7,7 +7,15 @@ import { retryRead } from './retry-read'
 
 export type FetchLike = (url: string, init?: RequestInit) => Promise<Response>
 
-export type InstallationToken = { token: string; expiresAt: Date }
+export type InstallationToken = {
+  token: string
+  expiresAt: Date
+  /**
+   * Whether the token carries `actions: write`, which rerunning a workflow needs. Only an installation that
+   * granted it gets one; a token without this field is taken as not having it.
+   */
+  actionsWrite?: boolean
+}
 
 /** One try by GitHub to deliver a webhook to us, as the App's delivery log lists it. */
 export type HookDelivery = {
@@ -95,6 +103,9 @@ export const APP_PERMISSIONS = {
   // repository's CI is often exactly that. Every installation must have accepted it, or the mint fails.
   workflows: 'write',
 } as const
+
+/** The permission a rerun of failed jobs needs, asked only of an installation that granted it. */
+export const ACTIONS_PERMISSION = { actions: 'write' } as const
 
 /** How long the list of reachable repositories is kept. */
 const LIST_TTL_MS = 15_000
@@ -317,17 +328,31 @@ export function createGithubApp(
           `GitHub answered ${installation.status} looking up the installation of ${repo}`,
         )
       }
-      const { id } = (await installation.json()) as { id: number }
+      const { id, permissions } = (await installation.json()) as {
+        id: number
+        permissions?: Record<string, string>
+      }
+      // Never asked unconditionally: an installation that has not accepted it would fail every mint.
+      const actionsWrite = permissions?.actions === 'write'
 
       const minted = await call(`/app/installations/${id}/access_tokens`, {
         method: 'POST',
-        body: JSON.stringify({ repositories: [name], permissions: APP_PERMISSIONS }),
+        body: JSON.stringify({
+          repositories: [name],
+          permissions: actionsWrite
+            ? { ...APP_PERMISSIONS, ...ACTIONS_PERMISSION }
+            : APP_PERMISSIONS,
+        }),
       })
       if (minted.status !== 201) {
         throw new Error(`GitHub answered ${minted.status} minting a token for ${repo}`)
       }
       const body = (await minted.json()) as { token: string; expires_at: string }
-      const token = { token: body.token, expiresAt: new Date(body.expires_at) }
+      const token: InstallationToken = {
+        token: body.token,
+        expiresAt: new Date(body.expires_at),
+        actionsWrite,
+      }
       cache.set(repo, token)
       return token
     },

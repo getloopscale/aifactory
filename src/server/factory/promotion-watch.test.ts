@@ -38,6 +38,15 @@ describe('passLog', () => {
     }
   })
 
+  it('tells why a rerun was skipped as information, never as a failure', () => {
+    const lines = passLog({ ...quiet, notes: ['o/r: no actions: write'] })
+    expect(lines.map((l) => l.level)).toEqual(['log'])
+    expect(JSON.parse(lines[0].line)).toEqual({
+      event: 'watch_promotions_rerun_skipped',
+      notes: ['o/r: no actions: write'],
+    })
+  })
+
   it('reports the errors as errors, apart from what was done', () => {
     const lines = passLog({ ...quiet, opened: ['u'], errors: ['o/r: refused'] })
     expect(lines.map((l) => l.level)).toEqual(['error', 'log'])

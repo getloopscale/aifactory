@@ -10,7 +10,7 @@ import type { GithubApp } from '../github/app'
 import type { NewIssue } from '../github/issues-api'
 import type { FailedRun, PromotionApi } from '../github/promotion-api'
 
-import { pollPromotions, type PromotionWatchDeps } from './promotion-watch'
+import { passLog, pollPromotions, type PromotionWatchDeps } from './promotion-watch'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -86,7 +86,9 @@ const api: PromotionApi = {
   issueOpen: async () => world.issueOpen,
 }
 
-const app: GithubApp = { installationToken: async () => ({ token: 't', expiresAt: new Date() }) }
+const app: GithubApp = {
+  installationToken: async () => ({ token: 't', expiresAt: new Date(), actionsWrite: true }),
+}
 
 function deps(overrides: Partial<PromotionWatchDeps> = {}): PromotionWatchDeps {
   return {
@@ -156,6 +158,22 @@ describe('the promotion watch', () => {
       expect(created[0].body).toContain('### `validate`')
       expect(created[0].body).toContain('### `unit`')
       expect(result.errors).toHaveLength(1)
+    })
+  })
+
+  describe('when the installation lacks actions: write', () => {
+    const lacking = () =>
+      deps({ app: { installationToken: async () => ({ token: 't', expiresAt: new Date() }) } })
+
+    it('makes no rerun call, files the failure, and records no error', async () => {
+      world.attempts = { 1: 1 }
+      const result = await pollPromotions(lacking())
+      expect(reruns).toEqual([])
+      expect(created).toHaveLength(1)
+      expect(created[0].body).toContain('has not granted `actions: write`')
+      expect(result.errors).toEqual([])
+      expect(result.notes).toHaveLength(1)
+      expect(passLog(result).map((l) => l.level)).not.toContain('error')
     })
   })
 

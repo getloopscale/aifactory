@@ -2,7 +2,13 @@ import { and, desc, eq, inArray, max, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { repository, stageEvent, task } from '../db/schema'
-import { APP_PERMISSIONS, type AppAccess, type AppEvents, type GithubApp } from '../github/app'
+import {
+  ACTIONS_PERMISSION,
+  APP_PERMISSIONS,
+  type AppAccess,
+  type AppEvents,
+  type GithubApp,
+} from '../github/app'
 import type { GithubApi } from '../github/pulls'
 import { FACTORY_LABEL } from '../ingest/decide'
 
@@ -106,7 +112,11 @@ type Reader = {
 
 async function readAccess(github: AppAccess, name: string): Promise<AccessFacts> {
   const granted = await github.installationPermissions(name)
-  return { reachable: granted !== undefined, granted: granted ?? {}, needed: APP_PERMISSIONS }
+  return {
+    reachable: granted !== undefined,
+    granted: granted ?? {},
+    needed: { ...APP_PERMISSIONS, ...ACTIONS_PERMISSION },
+  }
 }
 
 /** The latest run the sandbox provider refused, among the last failures, and when a sandbox last started. */

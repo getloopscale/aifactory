@@ -16,7 +16,13 @@ const { privateKey, publicKey } = generateKeyPairSync('rsa', {
 type Call = { url: string; method: string; headers: Record<string, string>; body: unknown }
 
 /** A fake GitHub: records every call and answers the two endpoints the app auth uses. */
-function fakeGithub(options: { expiresInMs?: number; installationStatus?: number } = {}) {
+function fakeGithub(
+  options: {
+    expiresInMs?: number
+    installationStatus?: number
+    permissions?: Record<string, string>
+  } = {},
+) {
   const calls: Call[] = []
   let minted = 0
   const fetch: FetchLike = async (url, init) => {
@@ -25,7 +31,9 @@ function fakeGithub(options: { expiresInMs?: number; installationStatus?: number
     calls.push({ url, method: init?.method ?? 'GET', headers, body })
     if (url.endsWith('/installation')) {
       return Response.json(
-        options.installationStatus === 404 ? { message: 'Not Found' } : { id: 4242 },
+        options.installationStatus === 404
+          ? { message: 'Not Found' }
+          : { id: 4242, permissions: options.permissions },
         { status: options.installationStatus ?? 200 },
       )
     }
@@ -121,6 +129,23 @@ describe('GitHub App installation tokens', () => {
         workflows: 'write',
       },
     })
+  })
+
+  it('asks for actions: write only from an installation that granted it', async () => {
+    const granted = fakeGithub({ permissions: { actions: 'write' } })
+    const token = await app(granted.fetch).installationToken('o/r')
+    const body = (calls: { url: string; body?: unknown }[]) =>
+      (calls.find((x) => x.url.endsWith('/access_tokens'))?.body as { permissions: object })
+        .permissions
+    expect(body(granted.calls)).toMatchObject({ actions: 'write', contents: 'write' })
+    expect(token.actionsWrite).toBe(true)
+
+    for (const permissions of [undefined, { actions: 'read' }]) {
+      const lacking = fakeGithub({ permissions })
+      const minted = await app(lacking.fetch).installationToken('o/r')
+      expect(body(lacking.calls)).not.toHaveProperty('actions')
+      expect(minted.actionsWrite).toBe(false)
+    }
   })
 
   it('asks for the workflows permission, without which GitHub refuses a push that touches .github/workflows', async () => {

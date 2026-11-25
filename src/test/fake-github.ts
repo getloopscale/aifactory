@@ -515,6 +515,7 @@ export class FakeGithub implements GithubApi {
       pull_requests: 'write',
       checks: 'write',
       workflows: 'write',
+      actions: 'write',
       statuses: 'read',
     },
     events: ['issues'],
