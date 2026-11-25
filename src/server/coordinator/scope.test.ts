@@ -266,7 +266,9 @@ describe('a Linear task’s negative ordinal', () => {
   it('is never written as a GitHub reference, and what is written still parses', () => {
     const { body } = followUpIssue(draft(), 'o/r', -3)!
     expect(body).not.toContain('-3')
-    expect(followUpOrigin(body)).toEqual({ repo: 'o/r', issue: 0 })
+    expect(followUpOrigin(body)).toEqual({ repo: 'o/r', issue: -3 })
+    expect(sameFollowUp({ title: 'x', body }, 'o/r', -3, 'other title')).toBe(true)
+    expect(sameFollowUp({ title: 'x', body }, 'o/r', -4, 'other title')).toBe(false)
     const input = {
       repo: 'o/r',
       issueNumber: -3,

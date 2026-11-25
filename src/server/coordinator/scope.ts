@@ -132,11 +132,10 @@ export function scopeSection(draft: ScopeDraft, date: string, followUp: number |
 }
 
 const FOLLOW_UP_OF = 'Follow-up of'
-const LINEAR_ITEM = '(a Linear item)'
 
 /** `owner/name#4` for a GitHub issue; a Linear task's negative local ordinal is never written as a number. */
 const referenceTo = (repo: string, issueNumber: number) =>
-  issueNumber < 0 ? `${repo} ${LINEAR_ITEM}` : `${repo}#${issueNumber}`
+  issueNumber < 0 ? `${repo} (a Linear item L${-issueNumber})` : `${repo}#${issueNumber}`
 
 /** The follow-up issue the draft files, its body ending with a line linking the original issue. */
 export function followUpIssue(draft: ScopeDraft, repo: string, issueNumber: number) {
@@ -148,15 +147,16 @@ export function followUpIssue(draft: ScopeDraft, repo: string, issueNumber: numb
 }
 
 const ORIGIN = new RegExp(
-  `^${FOLLOW_UP_OF} ([\\w.-]+/[\\w.-]+)(?:#(\\d+)| \\(a Linear item\\))\\.$`,
+  `^${FOLLOW_UP_OF} ([\\w.-]+/[\\w.-]+)(?:#(\\d+)| \\(a Linear item L(\\d+)\\))\\.$`,
   'm',
 )
 
 /** The issue a follow-up was filed for, read from the line `followUpIssue` ends its body with; nothing for any other issue. */
 export function followUpOrigin(body: string): { repo: string; issue: number } | undefined {
   const found = ORIGIN.exec(body)
-  // A Linear item has no GitHub number: 0 is no issue, so it names none but still marks a follow-up.
-  return found ? { repo: found[1], issue: Number(found[2] ?? 0) } : undefined
+  // A Linear item keeps its negative local ordinal, so a follow-up of it is told from any other.
+  if (!found) return undefined
+  return { repo: found[1], issue: found[2] ? Number(found[2]) : -Number(found[3]) }
 }
 
 /** A title as two people would write it: its case, spacing and punctuation set aside. */
