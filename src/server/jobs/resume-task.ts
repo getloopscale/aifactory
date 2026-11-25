@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
-import { deferJobWhilePaused } from '../factory/provider-pause-store'
+import { deferJobAfterRefusal, deferJobWhilePaused } from '../factory/provider-pause-store'
 import { resumeTask } from '../factory/run-task'
 
 export default defineJob('resume-task', {
@@ -20,6 +20,10 @@ export default defineJob('resume-task', {
 
     await withLeaseHeartbeat(extendLease, async () => {
       const result = await resumeTask(deps, input.taskId, signal)
+      if (result.status === 'deferred') {
+        await deferJobAfterRefusal({ name: 'resume-task', input, taskId: input.taskId })
+        return
+      }
       console.log(
         JSON.stringify({
           event: 'task_resumed',

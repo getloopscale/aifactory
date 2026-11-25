@@ -137,6 +137,27 @@ describe('the mirror of a knowledge repository', () => {
     expect(log).toBe(`factory[bot]|Record a note|${commit}`)
   })
 
+  it('removes files in the same commit that writes their replacement', async () => {
+    const { remote, commit } = await remoteWith([
+      { path: 'a.md', content: '1' },
+      { path: 'b.md', content: '2' },
+    ])
+    const mirror = new Mirror(join(scratch(), 'm.git'))
+    await mirror.ensure()
+    await mirror.fetch(remote, 'main')
+
+    const next = await mirror.commit({
+      parent: commit,
+      files: [{ path: 'c.md', content: '3' }],
+      remove: ['a.md', 'b.md'],
+      message: 'Merge',
+      author,
+      date: at,
+    })
+
+    expect((await mirror.list(next, ['.'])).map((f) => f.path)).toEqual(['c.md'])
+  })
+
   it('refuses to push over a branch that moved, and says so as a rejection', async () => {
     const { remote, commit, writer } = await remoteWith([{ path: 'a.md', content: '1' }])
     const mirror = new Mirror(join(scratch(), 'm.git'))

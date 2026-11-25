@@ -342,7 +342,14 @@
       "idx": 48,
       "version": "7",
       "when": 1795608578100,
-      "tag": "0051_review_pattern",
+      "tag": "0051_knowledge_curator",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795608578101,
+      "tag": "0052_review_pattern",
       "breakpoints": true
     }
   ]
