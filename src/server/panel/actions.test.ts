@@ -87,3 +87,15 @@ describe('bareSha', () => {
     expect(bareSha('abcdef1')).toBe('abcdef1')
   })
 })
+
+describe('the follow-up of a pull request review', () => {
+  it('names a Linear task by its identifier, never by its negative ordinal', async () => {
+    const { followUpText } = await import('./actions')
+    const base = { taskId: 1, repository: 'o/r', signature: 's', by: 'p', text: 'fix' }
+    const linear = followUpText({ ...base, issueNumber: -3, item: 'ENG-12' })
+    expect(linear.title + linear.body).toContain('ENG-12')
+    expect(linear.title + linear.body).not.toContain('-3')
+    expect(followUpText({ ...base, issueNumber: -3 }).body).not.toContain('-3')
+    expect(followUpText({ ...base, issueNumber: 7 }).title).toContain('#7')
+  })
+})

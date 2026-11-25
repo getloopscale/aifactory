@@ -1,3 +1,4 @@
+import { issueRef } from '../factory/item-ref'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -765,10 +766,25 @@ export type FollowUpRequest = {
   taskId: number
   repository: string
   issueNumber: number
+  /** How the task's item is named (`itemRef`); `#<issueNumber>` when absent. */
+  item?: string
   /** Names the review or comment, so one that is delivered twice files one issue. */
   signature: string
   by: string
   text: string
+}
+
+/** The follow-up's title and body: a Linear task is named by its identifier, never by its negative ordinal. */
+export function followUpText(request: FollowUpRequest) {
+  const item = request.item ?? issueRef(request.issueNumber)
+  return {
+    title: `Follow-up of ${item}: a review on its pull request`,
+    body: [
+      `${request.by} wrote this on the pull request of ${item}, after its work was integrated:`,
+      request.text.slice(0, NOTE_MAX).replace(/^/gm, '> '),
+      `Follow-up of ${item}.`,
+    ].join('\n\n'),
+  }
 }
 
 /**
@@ -786,12 +802,7 @@ export async function openFollowUpIssue(
     { signature: request.signature, repository: request.repository, now: new Date() },
     () =>
       deps.issues.createIssue(request.repository, token, {
-        title: `Follow-up of #${request.issueNumber}: a review on its pull request`,
-        body: [
-          `${request.by} wrote this on the pull request of #${request.issueNumber}, after its work was integrated:`,
-          request.text.slice(0, NOTE_MAX).replace(/^/gm, '> '),
-          `Follow-up of #${request.issueNumber}.`,
-        ].join('\n\n'),
+        ...followUpText(request),
         labels: ['follow-up'],
       }),
   )

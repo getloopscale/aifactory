@@ -20,6 +20,7 @@ import {
   ago,
   duration,
   inQueueOrder,
+  itemName,
   lastAgentLine,
   money,
   runsAgain,
@@ -247,11 +248,8 @@ export function Card({ task }: { task: TaskCard }) {
       >
         <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
           <Rank queue={task.queue} />
-          <span
-            className="min-w-0 flex-1 truncate"
-            title={`${task.repository} #${task.issueNumber}`}
-          >
-            {task.repository.split('/').pop()} #{task.issueNumber}
+          <span className="min-w-0 flex-1 truncate" title={`${task.repository} ${itemName(task)}`}>
+            {task.repository.split('/').pop()} {itemName(task)}
           </span>
           <span className="shrink-0 tabular-nums">
             {task.costUsd >= 0.005 ? `${money(task.costUsd)} · ` : ''}
@@ -436,7 +434,7 @@ export function TaskList({ tasks }: { tasks: TaskCard[] }) {
               ) : null}
             </Table.Cell>
             <Table.Cell>
-              {task.repository} #{task.issueNumber}
+              {task.repository} {itemName(task)}
             </Table.Cell>
             <Table.Cell>
               <StageBadge

@@ -38,8 +38,8 @@ export async function openBlockers(
 export class BlockedByOpenIssues extends Error {
   readonly blockedBy: string[]
 
-  constructor(open: IssueRef[]) {
-    const names = open.map(nameOf)
+  constructor(open: (IssueRef | string)[]) {
+    const names = open.map((b) => (typeof b === 'string' ? b : nameOf(b)))
     super(
       `blocked by ${names.join(', ')}, still open; the task runs again on its own once they are closed`,
     )

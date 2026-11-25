@@ -1,3 +1,4 @@
+import { issueRef } from './item-ref'
 import { knowledgeRules } from '../knowledge/prompt'
 
 import { parseVerdict, type Finding, type ReviewVerdict } from './review'
@@ -26,7 +27,7 @@ export function securityPrompt(input: {
   const earlier = (input.earlier ?? []).filter((f) => f.severity !== 'minor')
   return `You are an independent security reviewer for the repository ${input.repo}. Another agent implemented the issue below, and a code reviewer approved it. You did not write this code and you must not change it.
 
-# ${input.title} (#${input.issueNumber})
+# ${input.title} (${issueRef(input.issueNumber)})
 
 ${input.body || '(the issue has no description)'}
 
