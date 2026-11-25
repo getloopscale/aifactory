@@ -124,23 +124,15 @@ ${text}
 `
 }
 
-/** Books the pass on the task and on `agent_run`, marked as conversation. */
-async function bookCost(
-  db: Database,
+/** The `agent_run` row of a conversation pass. */
+export function conversationRun(
   taskId: number,
   harness: CodingHarness,
   result: HarnessResult,
   durationMs: number,
   ok: boolean,
-): Promise<void> {
-  const cost = result.costUsd ?? 0
-  if (cost > 0) {
-    await db
-      .update(task)
-      .set({ costUsd: sql`${task.costUsd} + ${cost}` })
-      .where(eq(task.id, taskId))
-  }
-  await db.insert(agentRun).values({
+): typeof agentRun.$inferInsert {
+  return {
     taskId,
     role: 'builder',
     harness: harness.name,
@@ -155,7 +147,26 @@ async function bookCost(
     quota: result.quota !== undefined,
     sessionId: result.sessionId ?? null,
     conversation: true,
-  })
+  }
+}
+
+/** Books the pass on the task and on `agent_run`, marked as conversation. */
+export async function bookCost(
+  db: Database,
+  taskId: number,
+  harness: CodingHarness,
+  result: HarnessResult,
+  durationMs: number,
+  ok: boolean,
+): Promise<void> {
+  const cost = result.costUsd ?? 0
+  if (cost > 0) {
+    await db
+      .update(task)
+      .set({ costUsd: sql`${task.costUsd} + ${cost}` })
+      .where(eq(task.id, taskId))
+  }
+  await db.insert(agentRun).values(conversationRun(taskId, harness, result, durationMs, ok))
 }
 
 /** Saves the session only while the task's agent is still stopped; answers why not when it is not. */
@@ -201,22 +212,19 @@ export async function deliverMessage(
   return ended
 }
 
-async function attempt(
-  deps: RunTaskDeps,
-  message: Message,
-  signal: AbortSignal | undefined,
-): Promise<Ended> {
+type Repo = Awaited<ReturnType<typeof loadRepoConfig>>
+type Ready = { row: typeof task.$inferSelect; harness: CodingHarness; token: string; repo: Repo }
+
+/** The task, its stored session and the harness of that session, or why the message cannot be delivered. */
+export async function readyToDeliver(deps: RunTaskDeps, message: Message): Promise<Ready | Ended> {
   const { db } = deps
   const [row] = await db.select().from(task).where(eq(task.id, message.taskId))
   if (!row) return { delivery: 'failed', reason: `task ${message.taskId} does not exist` }
   // The task may have gone back to work since the message was written: one writer per session.
   const allowed = outcome({ ...row, conversation: 'ask' }, 'conversation')
-  if (allowed.kind !== 'action') {
-    return { delivery: 'failed', reason: allowed.reason }
-  }
+  if (allowed.kind !== 'action') return { delivery: 'failed', reason: allowed.reason }
   const stored = await storedSession(db, { taskId: row.id, role: 'builder' })
   if (!stored) return { delivery: 'failed', reason: 'the task kept no session of its agent' }
-
   const { token } = await deps.github.installationToken(row.repository)
   const issue = await (deps.fetchIssue ?? defaultFetchIssue)(row.repository, row.issueNumber, token)
   const repo = await loadRepoConfig(db, row.repository)
@@ -228,19 +236,62 @@ async function attempt(
       reason: `the session of this task is ${stored.harness}'s, not ${harness.name}'s`,
     }
   }
+  return { row, harness, token, repo }
+}
+
+/** What a finished turn comes to; the session is kept first so the next message continues from this answer. */
+export async function settleTurn(
+  db: Database,
+  backend: SandboxBackend,
+  ready: Ready,
+  turn: AskTurn,
+  durationMs: number,
+): Promise<Ended> {
+  const { row, harness } = ready
+  const { result } = turn
+  const costUsd = result.costUsd
+  if (turn.changed) {
+    await bookCost(db, row.id, harness, result, durationMs, false)
+    return { delivery: 'failed', reason: CHANGED_IN_ASK, costUsd }
+  }
+  await bookCost(db, row.id, harness, result, durationMs, result.ok)
+  if (!result.ok) return { delivery: 'failed', reason: result.summary.slice(0, 500), costUsd }
+  // The task's row is locked while the session is written and the stage read again: a run that began
+  // meanwhile (a guide, a send-back, a retry) is the session's writer now, and an answer must not overwrite it.
+  const moved = result.sessionId
+    ? await keepSessionIfStopped(db, backend, harness, row.id, result.sessionId)
+    : undefined
+  if (moved) return { delivery: 'failed', reason: moved, answer: result.summary, costUsd }
+  return { delivery: 'delivered', answer: result.summary, costUsd }
+}
+
+async function sandboxSpecFor(deps: RunTaskDeps, ready: Ready): Promise<SandboxSpec> {
+  const { repo, token } = ready
   // The same limits as a run: the message widens neither the egress nor the time.
   const timeouts = resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, repo.runLimitMs)
-  const spec: SandboxSpec = {
+  return {
     timeoutMs: timeouts.sandboxMs,
-    cacheKey: row.repository,
+    cacheKey: ready.row.repository,
     ...(repo.sandboxImage ? { image: repo.sandboxImage } : {}),
     egress: [
       githubEgress(token),
-      ...mergeEgress([await harness.egress()]),
+      ...mergeEgress([await ready.harness.egress()]),
       { domain: 'registry.npmjs.org' },
       ...repo.egress.map((domain) => ({ domain })),
     ],
   }
+}
+
+async function attempt(
+  deps: RunTaskDeps,
+  message: Message,
+  signal: AbortSignal | undefined,
+): Promise<Ended> {
+  const { db } = deps
+  const ready = await readyToDeliver(deps, message)
+  if (!('row' in ready)) return ready
+  const { row, harness, token, repo } = ready
+  const spec = await sandboxSpecFor(deps, ready)
   const branch = `factory/${row.issueNumber}`
   const api = deps.githubApi ?? createGithubApi()
   const onBranch = (await api.branchHead(row.repository, token, branch)) !== undefined
@@ -269,26 +320,9 @@ async function attempt(
       repoDir,
       sessionId,
       prompt: askPrompt(message.text, feed.dir),
-      timeoutMs: timeouts.agentMs,
+      timeoutMs: resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, repo.runLimitMs).agentMs,
     })
-    if (turn.changed) {
-      await bookCost(db, row.id, harness, turn.result, Date.now() - started, false)
-      return { delivery: 'failed', reason: CHANGED_IN_ASK, costUsd: turn.result.costUsd }
-    }
-    const result = turn.result
-    const costUsd = result.costUsd
-    await bookCost(db, row.id, harness, result, Date.now() - started, result.ok)
-    if (!result.ok) {
-      return { delivery: 'failed', reason: result.summary.slice(0, 500), costUsd }
-    }
-    // The next message continues from this answer, so the session is kept before it can start. The task's
-    // row is locked while it is written and the stage read again: a run that began meanwhile (a guide, a
-    // send-back, a retry) is the session's writer now, and an answer must not overwrite what it writes.
-    if (result.sessionId) {
-      const moved = await keepSessionIfStopped(db, backend, harness, row.id, result.sessionId)
-      if (moved) return { delivery: 'failed', reason: moved, answer: result.summary, costUsd }
-    }
-    return { delivery: 'delivered', answer: result.summary, costUsd }
+    return await settleTurn(db, backend, ready, turn, Date.now() - started)
   } finally {
     await running.stop().catch(() => undefined)
   }
