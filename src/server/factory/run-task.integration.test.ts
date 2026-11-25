@@ -1403,21 +1403,57 @@ describe('runTask', () => {
     expect(failed.detail).toMatchObject({ failedAt: 'sandbox' })
   })
 
-  it('pauses the sandbox provider for every process when it refuses a sandbox for credit', async () => {
+  it.each([
+    ['a first run', undefined],
+    ['a merge-only run', { mergeBase: true }],
+    ['a send-back run', { feedback: 'fix the checks' }],
+  ])(
+    'defers %s the provider refuses for credit, and pauses the provider for every process',
+    async (_name, continuation) => {
+      {
+        const id = await seedTask()
+        const sandbox = new FakeSandbox(changed())
+        sandbox.create = async () => {
+          throw new Error('403: team is blocked: credit_exhausted')
+        }
+
+        const result = await runTask(deps(sandbox), id, undefined, continuation as never)
+
+        expect(result).toMatchObject({ status: 'deferred', stage: 'sandbox' })
+        expect(await readPause(getDb())).toMatchObject({
+          reason: '403: team is blocked: credit_exhausted',
+        })
+        const failed = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
+        expect(failed).toHaveLength(0)
+        // Queued again, not running: a task left in `sandbox` would read as stalled while its job waits.
+        const [row] = await getDb().select().from(task).where(eq(task.id, id))
+        expect(row.stage).toBe('intake')
+      }
+    },
+  )
+
+  it('gives back the answer a refused resume claimed, and leaves the task waiting', async () => {
     const id = await seedTask()
     const sandbox = new FakeSandbox(changed())
-    sandbox.create = async () => {
-      throw new Error('403: team is blocked: credit_exhausted')
-    }
-
-    const result = await runTask(deps(sandbox), id)
-
-    expect(result).toMatchObject({ status: 'failed', stage: 'sandbox' })
-    expect(await readPause(getDb())).toMatchObject({
-      reason: '403: team is blocked: credit_exhausted',
+    const builder = askingBuilder()
+    await runTask(deps(sandbox, { harness: builder }), id)
+    replies(owner())
+    await poll(sandbox)
+    const refusing = Object.assign(new FakeSandbox(changed()), {
+      create: async () => {
+        throw new Error('403: team is blocked: credit_exhausted')
+      },
     })
-    const [failed] = await getDb().select().from(stageEvent).where(eq(stageEvent.stage, 'failed'))
-    expect(retryableFailure(failed.detail as Record<string, unknown>)).toBe('environment')
+
+    const result = await resumeTask(deps(refusing, { harness: builder }), id)
+
+    expect(result).toMatchObject({ status: 'deferred' })
+    const [row] = await getDb().select().from(task).where(eq(task.id, id))
+    expect(row.stage).toBe('waiting')
+    const [stored] = await getDb().select().from(question).where(eq(question.taskId, id))
+    expect(stored.resumedAt).toBeNull()
+    const again = await resumeTask(deps(sandbox, { harness: builder }), id)
+    expect(again.status).toBe('done')
   })
 
   it('ends the pause of the sandbox provider once a run started a sandbox', async () => {
@@ -4441,7 +4477,7 @@ describe('an automatic retry of a run that failed creating its sandbox', () => {
   const blocked = () => {
     const sandbox = new FakeSandbox(changed())
     sandbox.create = async () => {
-      throw new Error('403: team is blocked: spend_limit')
+      throw new Error('fetch failed')
     }
     return sandbox
   }
