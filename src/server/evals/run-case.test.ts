@@ -522,6 +522,28 @@ describe('runCase', () => {
     expect(result).toMatchObject({ passed: false, reason: 'the agent wrote no plan: Still reading.' })
   })
 
+  it('asks again for a plan with no acceptance, and fails when the second has none either', async () => {
+    const bare = JSON.stringify({ ...JSON.parse(PLAN), acceptance: [] })
+    const once = agent('builder', [
+      { ok: true, summary: bare, sessionId: 's1' },
+      { ok: true, summary: PLAN, sessionId: 's1' },
+      built(),
+    ])
+    const ok = await runCase(
+      deps(sandbox(), once, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    expect(ok.passed).toBe(true)
+    expect(once.prompts[1]).toContain('Your answer had no plan that could be read')
+
+    const twice = agent('builder', [
+      { ok: true, summary: bare, sessionId: 's1' },
+      { ok: true, summary: bare, sessionId: 's1' },
+    ])
+    const result = await runCase(deps(sandbox(), twice, agent('reviewer', [])), evalCase)
+    expect(result.reason).toContain('the agent wrote no plan')
+  })
+
   it('shows the reviewer the plan and the files the diff changed outside it', async () => {
     const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
 

@@ -298,7 +298,11 @@ export function acceptanceFinding(entry: Acceptance): Finding {
   return {
     severity: 'major',
     class: 'acceptance',
-    issue: `acceptance ${entry.id} not met: ${entry.statement}`.slice(0, 600),
+    issue:
+      `acceptance ${entry.id} not met, or not answered by the review: ${entry.statement}`.slice(
+        0,
+        600,
+      ),
   }
 }
 

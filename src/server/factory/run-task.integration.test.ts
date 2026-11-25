@@ -2751,6 +2751,12 @@ describe('runTask review loop', () => {
 })
 
 describe('runTask planning before it builds', () => {
+  /** An approval that answers for the one acceptance entry of the plan below. */
+  const approvingPlan = () =>
+    reviewerSaying(
+      `Looked at it.\n${JSON.stringify({ verdict: 'approve', summary: 'ok', findings: [], acceptance: [{ id: 'A1', met: true, where: 'x' }] })}`,
+    )
+
   const plan = {
     acceptance: [{ id: 'A1', statement: 'it truncates', evidence: 'truncate.test.js' }],
     files: [{ path: 'src/truncate.js', why: 'the function' }],
@@ -2893,7 +2899,7 @@ describe('runTask planning before it builds', () => {
 
   it('gives the reviewer the plan and records a file changed outside it', async () => {
     const id = await seedTask()
-    const reviewer = approving()
+    const reviewer = approvingPlan()
 
     await runTask(
       deps(twoFiles(), {
@@ -2920,7 +2926,7 @@ describe('runTask planning before it builds', () => {
 
   it('tells the reviewer what a failed check required and does not record that file as outside the plan', async () => {
     const id = await seedTask()
-    const reviewer = approving()
+    const reviewer = approvingPlan()
     let runs = 0
     const sandbox = new FakeSandbox(
       changed((c) => {
@@ -2984,7 +2990,7 @@ describe('runTask planning before it builds', () => {
       const builder = resumableBuilder()
       const sandbox = onHistory(divergedRepository({ behind: true }))
 
-      await runTask(deps(sandbox, { harness: builder, reviewer: approving() }), id, undefined, {
+      await runTask(deps(sandbox, { harness: builder, reviewer: approvingPlan() }), id, undefined, {
         feedback: 'Rename the helper to cut.',
       })
 
@@ -3023,7 +3029,7 @@ describe('runTask planning before it builds', () => {
       const builder = planningBuilder([JSON.stringify(plan)])
 
       await runTask(
-        deps(onHistory(repo), { harness: builder, reviewer: approving(), planFirst: true }),
+        deps(onHistory(repo), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
         id,
       )
 
@@ -3068,6 +3074,56 @@ describe('runTask planning before it builds', () => {
     expect(await getDb().select().from(changePlan).where(eq(changePlan.taskId, id))).toEqual([])
   })
 
+  it('asks again for a plan with no acceptance, and fails at the plan when the second has none either', async () => {
+    const id = await seedTask()
+    const bare = JSON.stringify({ ...plan, acceptance: [] })
+    const builder = planningBuilder([bare, bare])
+
+    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+
+    expect(result).toMatchObject({ status: 'failed', stage: 'plan' })
+    expect(result.status === 'failed' && result.error).toContain('the agent wrote no plan')
+    expect(result.status === 'failed' && result.error).toContain('acceptance')
+    expect(builder.resumed).toHaveLength(1)
+  })
+
+  it('takes a plan with acceptance from the second turn when the first had none', async () => {
+    const id = await seedTask()
+    const builder = planningBuilder([
+      JSON.stringify({ ...plan, acceptance: [] }),
+      JSON.stringify(plan),
+    ])
+
+    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(builder.resumed).toHaveLength(2)
+  })
+
+  it('reviews a plan stored before acceptance existed with no acceptance finding', async () => {
+    const id = await seedTask()
+    branchPushed()
+    const { acceptance: _none, ...legacy } = plan
+    await getDb()
+      .insert(changePlan)
+      .values({ taskId: id, baseSha: 'old', harness: 'codex', plan: legacy })
+    const reviewer = approving()
+
+    const result = await runTask(
+      deps(twoFiles(), { harness: planningBuilder([]), reviewer, planFirst: true }),
+      id,
+      undefined,
+      { feedback: 'Rename the helper to cut.' },
+    )
+
+    expect(result).toMatchObject({ status: 'done' })
+    expect(reviewer.prompts[0]).not.toContain('"acceptance"')
+    const stored = await reviewsOf(id)
+    expect(stored.flatMap((r) => r.findings as { class?: string }[])).not.toContainEqual(
+      expect.objectContaining({ class: 'acceptance' }),
+    )
+  })
+
   it('takes the plan from the second answer when the first had none', async () => {
     const id = await seedTask()
     const builder = planningBuilder(['I will look around.', JSON.stringify(plan)])
@@ -3093,7 +3149,7 @@ describe('runTask planning before it builds', () => {
     branchPushed()
     await getDb().insert(changePlan).values({ taskId: id, baseSha: 'old', harness: 'codex', plan })
     const builder = planningBuilder([])
-    const reviewer = approving()
+    const reviewer = approvingPlan()
 
     const result = await runTask(
       deps(twoFiles(), { harness: builder, reviewer, planFirst: true }),
@@ -3114,7 +3170,7 @@ describe('runTask planning before it builds', () => {
     const builder = planningBuilder([JSON.stringify(plan)])
 
     const result = await runTask(
-      deps(twoFiles(), { harness: builder, reviewer: approving(), planFirst: true }),
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
       id,
       undefined,
       { feedback: 'Rename the helper to cut.' },
