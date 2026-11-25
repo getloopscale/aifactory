@@ -309,6 +309,14 @@ export const ptBR: Copy = {
     noChecks: 'Nenhuma verificação rodou ainda.',
     evidenceMeta: (sha: string, exit: number, secs: string) =>
       `em ${sha} · saída ${exit} · ${secs} s`,
+    testProof: 'Prova dos testes',
+    testProofOutcome: {
+      proven: 'Provado: os testes falham na base',
+      unproven: 'Não provado: os testes passam sem a mudança',
+      no_tests: 'Nenhum arquivo de teste mudou',
+      not_run: 'Não executado',
+    },
+    testProofMeta: (sha: string, files: number) => `em ${sha} · ${files} arquivos de teste`,
     output: 'Saída',
     reviews: 'Revisões',
     securityReviews: 'Revisão de segurança',

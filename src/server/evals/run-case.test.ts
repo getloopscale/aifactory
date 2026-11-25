@@ -337,6 +337,54 @@ describe('runCase', () => {
     expect(provider.stopped).toBe(1)
   })
 
+  describe('the proof of the tests (#550)', () => {
+    afterEach(() => vi.unstubAllEnvs())
+
+    const withTests = (provider: FakeSandbox) => {
+      const execute = provider.backend.execute.bind(provider.backend)
+      provider.backend.execute = async (command: string) =>
+        command.includes(' diff -z ')
+          ? { stdout: 'src/a.test.ts\0', stderr: '', exitCode: 0, timedOut: false }
+          : execute(command)
+      return provider
+    }
+
+    it('does not approve in auto when the tests the case adds pass on its base', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(result.passed).toBe(false)
+      expect(provider.backend.commands.some((c) => c.includes('worktree add --detach /tmp/aifactory-proof'))).toBe(true)
+      expect(provider.backend.commands.some((c) => c.includes('worktree remove --force /tmp/aifactory-proof'))).toBe(true)
+    })
+
+    it('records and adds nothing in trial, the default', async () => {
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(result.passed).toBe(true)
+      expect(provider.backend.commands.some((c) => c.includes('/tmp/aifactory-proof'))).toBe(true)
+    })
+
+    it('runs nothing in off', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'off')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(provider.backend.commands.some((c) => c.includes('/tmp/aifactory-proof'))).toBe(false)
+    })
+  })
+
   it("runs the repository's fixes before the checks and commits what they changed as its own commit", async () => {
     const provider = sandbox()
     const builder = agent('builder', planned(built()))

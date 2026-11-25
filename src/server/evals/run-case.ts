@@ -62,6 +62,12 @@ import {
 } from '../factory/review'
 import { DEFAULT_TIMEOUTS, PLAN_MS } from '../factory/run'
 import {
+  addsProofFinding,
+  proveTests,
+  testProofModeFromEnv,
+  type TestProof,
+} from '../factory/test-proof'
+import {
   COMMIT_MESSAGE,
   GITCONFIG,
   INSTANCE,
@@ -152,6 +158,8 @@ class CaseRun {
   private readonly checkRuns: CheckRun[] = []
   /** Whether the checks the case failed fail on its base too, as `Run` asks it. */
   private readonly baseProbe = new BaseProbe()
+  /** What the tests of each head proved, once per head, as `Run.provesTests` keeps it (#550). */
+  private readonly proofs = new Map<string, TestProof>()
   private readonly started = Date.now()
   private readonly securitySeen = new Set<string>()
   private securityReworks = 0
@@ -404,6 +412,38 @@ class CaseRun {
     }
   }
 
+  /**
+   * The review, with the finding `Run.review` adds in `auto` when the tests this commit adds pass on the base
+   * (#550): the verdict cannot be `approve`, and the finding reaches the rework. The step runs once per head.
+   */
+  private async reviewedWithProof(
+    sha: string,
+    unplanned: string[],
+    required: Parameters<CaseRun['review']>[2],
+  ): Promise<ReviewVerdict> {
+    const mode = testProofModeFromEnv(process.env)
+    if (mode === 'off') return this.review(sha, unplanned, required)
+    let proof = this.proofs.get(sha)
+    if (!proof) {
+      proof = await proveTests(this.backend, {
+        repoDir: this.repoDir,
+        baseSha: this.c.baseSha,
+        headSha: sha,
+        checks: this.c.checks,
+        timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
+      })
+      this.proofs.set(sha, proof)
+    }
+    const proved = addsProofFinding(mode, proof)
+    const read = await this.review(sha, unplanned, required)
+    if (proved.length === 0) return read
+    return {
+      ...read,
+      verdict: read.verdict === 'approve' ? 'changes' : read.verdict,
+      findings: [...proved, ...read.findings],
+    }
+  }
+
   /** Runs the checks on the commit and keeps every result, as the factory keeps its evidence. */
   private async check(sha: string): Promise<CheckResult[]> {
     await must(this.backend, `git -C ${this.repoDir} clean -fdxq`)
@@ -612,7 +652,7 @@ class CaseRun {
         const floor = await securityFloor(this.backend, this.repoDir, this.c.baseSha)
         for (const f of floor) if (!this.floorFound.includes(f.issue)) this.floorFound.push(f.issue)
       }
-      const read = await this.review(sha, unplanned, required)
+      const read = await this.reviewedWithProof(sha, unplanned, required)
       // Any valid verdict counts, even when the case ends later without one.
       if (read.verdict !== 'invalid') this.verdictSeen = true
       // A file outside the plan is on record; whether it was needed is the reviewer's call.
@@ -658,7 +698,7 @@ class CaseRun {
       // A rework that changed nothing has the reviewer judge the builder's reasons on the same commit, once, as
       // `Run.arbitrate` does; a review that still blocks ends the case as the factory hands it over.
       if (!(await this.rework(findings, [], sha))) {
-        const judged = await this.review(sha, unplanned, required)
+        const judged = await this.reviewedWithProof(sha, unplanned, required)
         if (judged.verdict === 'approve' && blocking.length === 0) {
           const secured = await this.secure(sha)
           if (secured === 'pass') {

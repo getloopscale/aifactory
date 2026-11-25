@@ -13,6 +13,7 @@ import {
   review as reviewTable,
   stageEvent,
   task,
+  testProof,
 } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
@@ -31,6 +32,7 @@ import {
 import { artifactsAt, storeEvidence } from './artifacts'
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
+import { addsProofFinding, proveTests, testProofModeFromEnv, type TestProof } from './test-proof'
 import { ensureBranches, integrationBranch } from './branches'
 import { prepareDeclaredPackageManager } from './package-manager'
 import { uploadChangesetCheck } from './changeset-check'
@@ -273,6 +275,8 @@ export class Run {
   private readonly risks = new Map<string, RiskAssessment>()
   /** Whether the checks the run failed fail on the base too, asking each check at most once (#219). */
   private readonly baseProbe = new BaseProbe()
+  /** What the tests of each head proved (#550), so a second review of the head does not run the step again. */
+  private readonly proofs = new Map<string, TestProof>()
   /** The last review of this run that asked for changes: the next round starts from its findings. */
   private earlier: EarlierReview | undefined
   /** What the agents of this task do, written while they work. Opened by the first agent run. */
@@ -2157,6 +2161,10 @@ export class Run {
       },
     )
     this.risk = this.assess(sha, { touched, size, unplanned })
+    // A resolved conflict is reviewed alone: its tests were proven with the work.
+    const proved = this.resolvedMerge
+      ? []
+      : addsProofFinding(this.testProofMode(), await this.provesTests(sha))
     const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent, live) =>
       this.reviewer.run(this.backend, {
         onEvent,
@@ -2200,7 +2208,8 @@ export class Run {
       ? parseVerdict(result.summary)
       : { verdict: 'invalid', summary: `the reviewer failed: ${result.summary}`, findings: [] }
     // A fact about the diff that an agent could bend outranks an approval.
-    const blocked = read.verdict === 'approve' && guards.some((g) => g.severity !== 'minor')
+    const blocked =
+      read.verdict === 'approve' && [...guards, ...proved].some((g) => g.severity !== 'minor')
     // A file outside the plan is on record; whether it was needed is the reviewer's call.
     const outside: Finding[] = unplanned.map((file) => ({
       severity: 'minor',
@@ -2210,7 +2219,7 @@ export class Run {
     const merged: ReviewVerdict = {
       verdict: blocked ? 'changes' : read.verdict,
       summary: read.summary,
-      findings: [...guards, ...outside, ...read.findings],
+      findings: [...guards, ...outside, ...proved, ...read.findings],
     }
     await deps.db.insert(reviewTable).values({
       taskId,
@@ -2223,6 +2232,54 @@ export class Run {
     })
     this.earlier = merged.verdict === 'changes' ? { sha, findings: merged.findings } : undefined
     return merged
+  }
+
+  private testProofMode() {
+    return this.c.deps.testProofMode ?? testProofModeFromEnv(process.env)
+  }
+
+  /**
+   * Runs the tests the head adds on the commit the run started from and records what that proved, once per head
+   * (#550). Nothing in `off`. The result is stored, so a resumed run does not repeat it either.
+   */
+  private async provesTests(sha: string): Promise<TestProof | undefined> {
+    const mode = this.testProofMode()
+    if (mode === 'off') return undefined
+    const known = this.proofs.get(sha)
+    if (known) return known
+    const { deps, taskId } = this.c
+    const [stored] = await deps.db
+      .select()
+      .from(testProof)
+      .where(and(eq(testProof.taskId, taskId), eq(testProof.sha, sha)))
+    const proof: TestProof = stored
+      ? {
+          outcome: stored.outcome as TestProof['outcome'],
+          files: stored.files,
+          ...(stored.detail ? { detail: stored.detail } : {}),
+        }
+      : await proveTests(this.backend, {
+          repoDir: this.repoDir,
+          baseSha: this.baseSha,
+          headSha: sha,
+          checks: this.checks,
+          timeoutMs: this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
+        })
+    if (!stored) {
+      await deps.db
+        .insert(testProof)
+        .values({
+          taskId,
+          sha,
+          outcome: proof.outcome,
+          detail: proof.detail ?? null,
+          files: proof.files,
+          mode,
+        })
+        .onConflictDoNothing()
+    }
+    this.proofs.set(sha, proof)
+    return proof
   }
 
   /** The risk of the change on `sha` from the facts of its diff and the owner's patterns (#470). */
