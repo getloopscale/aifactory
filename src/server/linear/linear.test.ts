@@ -114,6 +114,29 @@ describe('handleLinearDelivery', () => {
     const res = await handleLinearDelivery(request(raw, sign(raw)), { secret: 's', record })
     expect(res.status).toBe(502)
   })
+  it('answers 401 and records nothing for a signed delivery older than a minute', async () => {
+    const old = JSON.stringify({
+      type: 'Issue',
+      action: 'create',
+      data: { id: 'i1' },
+      webhookTimestamp: Date.now() - 120_000,
+    })
+    const record = vi.fn()
+    const res = await handleLinearDelivery(request(old, sign(old)), { secret: 's', record })
+    expect(res.status).toBe(401)
+    expect(record).not.toHaveBeenCalled()
+    const fresh = JSON.stringify({
+      type: 'Issue',
+      action: 'create',
+      data: { id: 'i1' },
+      webhookTimestamp: Date.now(),
+    })
+    const ok = await handleLinearDelivery(request(fresh, sign(fresh)), {
+      secret: 's',
+      record: vi.fn(async () => ({})),
+    })
+    expect(ok.status).toBe(200)
+  })
   it('refuses everything without a secret', async () => {
     const res = await handleLinearDelivery(request(raw, sign(raw)), {
       secret: undefined,
@@ -202,5 +225,16 @@ describe('linearWorkSource', () => {
     })
     await source.close('i1')
     expect(calls[1]).toEqual({ id: 'i1', state: 's1' })
+  })
+})
+
+describe('labelsChanged', () => {
+  it('is true only for an update that changed the labels', async () => {
+    const { labelsChanged } = await import('./ingress')
+    expect(labelsChanged({ action: 'update', updatedFrom: { labelIds: [] } })).toBe(true)
+    expect(labelsChanged({ action: 'update', updatedFrom: { priority: 1 } })).toBe(false)
+    expect(labelsChanged({ action: 'update' })).toBe(false)
+    expect(labelsChanged({ action: 'create', updatedFrom: { labelIds: [] } })).toBe(false)
+    expect(labelsChanged('nope')).toBe(false)
   })
 })

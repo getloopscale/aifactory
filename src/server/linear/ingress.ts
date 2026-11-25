@@ -157,6 +157,14 @@ export type LinearWebhookDeps = {
   record: (delivery: { deliveryId: string; payload: unknown }) => Promise<unknown>
 }
 
+/** Linear advises refusing a signed delivery older than a minute: a captured one cannot be replayed later. */
+export const STALE_MS = 60_000
+
+function isStale(body: unknown, now = Date.now()): boolean {
+  const stamp = (body as { webhookTimestamp?: unknown } | null)?.webhookTimestamp
+  return typeof stamp === 'number' && Math.abs(now - stamp) > STALE_MS
+}
+
 /**
  * Verifies the signature over the raw bytes first: an invalid one answers 401 and records nothing. A delivery
  * whose facts could not be read answers 502 and records nothing, so Linear sends it again.
@@ -178,10 +186,28 @@ export async function handleLinearDelivery(
   } catch {
     return Response.json({ error: 'invalid_json' }, { status: 400 })
   }
+  if (isStale(body)) return Response.json({ error: 'stale_delivery' }, { status: 401 })
   try {
     return Response.json(await record({ deliveryId: `linear:${deliveryId}`, payload: body }))
   } catch (error) {
     console.error(JSON.stringify({ event: 'linear_delivery_failed', error: String(error) }))
     return Response.json({ error: 'delivery_not_recorded' }, { status: 502 })
   }
+}
+
+/**
+ * Whether the delivery is an update that changed the item's labels (Linear lists the previous values of what an
+ * update changed in `updatedFrom`). Only that may start a finished task over, as GitHub's `labeled` does: an edit of
+ * the state, the assignee or the title is not the owner asking again.
+ */
+export function labelsChanged(body: unknown): boolean {
+  const parsed = z
+    .object({ action: z.string(), updatedFrom: z.record(z.string(), z.unknown()).optional() })
+    .safeParse(body)
+  return (
+    parsed.success &&
+    parsed.data.action === 'update' &&
+    !!parsed.data.updatedFrom &&
+    'labelIds' in parsed.data.updatedFrom
+  )
 }

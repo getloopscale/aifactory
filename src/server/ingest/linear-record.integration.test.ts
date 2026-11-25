@@ -175,9 +175,23 @@ describe('recordLinearDelivery', () => {
       .where(eq(ingress.deliveryId, 'linear:r2'))
     expect(withdrawn).toMatchObject({ outcome: 'routed', code: 'issue_unlabeled' })
     const queued: [number, string | undefined][] = []
+    const edited = await recordLinearDelivery(
+      getDb(),
+      {
+        deliveryId: 'linear:r4',
+        payload: { ...payload('team-1'), action: 'update', updatedFrom: { priority: 0 } },
+      },
+      nothingToRead,
+      async (taskId, restartedBy) => void queued.push([taskId, restartedBy]),
+    )
+    expect(edited.status).toBe('task_exists')
+    expect(queued).toEqual([])
     const again = await recordLinearDelivery(
       getDb(),
-      { deliveryId: 'linear:r3', payload: payload('team-1') },
+      {
+        deliveryId: 'linear:r3',
+        payload: { ...payload('team-1'), action: 'update', updatedFrom: { labelIds: [] } },
+      },
       nothingToRead,
       async (taskId, restartedBy) => void queued.push([taskId, restartedBy]),
     )

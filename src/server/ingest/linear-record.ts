@@ -11,6 +11,7 @@ import {
   asksForWork,
   decideLinearItem,
   isComplete,
+  labelsChanged,
   prefilterLinear,
   type LinearDecision,
   type LinearFacts,
@@ -135,7 +136,7 @@ export async function recordLinearDelivery(
       )
     await tx.update(ingress).set({ outcome: 'task_exists' }).where(eq(ingress.id, row.id))
     // An item labelled again starts its cancelled, failed or handed-over task over.
-    if (await startOverOnLabel(tx, existing.id, 'linear')) {
+    if (labelsChanged(delivery.payload) && (await startOverOnLabel(tx, existing.id, 'linear'))) {
       await onTaskCreated?.(existing.id, delivery.deliveryId)
       return { status: 'task_restarted', taskId: existing.id }
     }
