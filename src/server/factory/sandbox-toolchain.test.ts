@@ -23,6 +23,14 @@ describe('the sandbox toolchain', () => {
     expect(installed).toEqual(expect.arrayContaining(['wamerican', 'wbrazilian']))
   })
 
+  it('pins the `words` list to American English, as the CI runner has it', () => {
+    expect(dockerfile).toContain(
+      'ln -sf /usr/share/dict/american-english /etc/dictionaries-common/words',
+    )
+    expect(dockerfile).toContain('ln -sf /etc/dictionaries-common/words /usr/share/dict/words')
+    expect(dockerfile.replace(/^#.*$/gm, '')).not.toMatch(/hunspell|dict-pt|wportuguese/)
+  })
+
   it('names the pnpm the factory itself declares', () => {
     const pkg = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'))
     expect(pkg.packageManager).toBe(`pnpm@${SANDBOX_TOOLCHAIN.pnpm}`)

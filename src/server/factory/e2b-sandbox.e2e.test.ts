@@ -40,6 +40,27 @@ describe('an E2B sandbox', () => {
     expect((await sh('command -v bwrap strace')).stdout.trim().split('\n')).toHaveLength(2)
   })
 
+  // theocode's english-only check reads exactly these six paths; the image must hold what theokit's CI runner holds.
+  it('has the same dictionary paths as the CI runner: American English and Brazilian only', async () => {
+    const paths = [
+      '/usr/share/dict/american-english',
+      '/usr/share/dict/words',
+      '/usr/share/hunspell/en_US.dic',
+      '/usr/share/dict/brazilian',
+      '/usr/share/dict/portuguese',
+      '/usr/share/hunspell/pt_BR.dic',
+    ]
+    const found = await sh(paths.map((p) => `test -e ${p} && echo ${p}`).join('; '))
+    expect(found.stdout.trim().split('\n')).toEqual([
+      '/usr/share/dict/american-english',
+      '/usr/share/dict/words',
+      '/usr/share/dict/brazilian',
+    ])
+    expect((await sh('readlink -f /usr/share/dict/words')).stdout.trim()).toBe(
+      '/usr/share/dict/american-english',
+    )
+  })
+
   it('runs the declared package manager, whatever its version, in a child with only PATH and HOME and no network', async () => {
     // A version the image does not carry: the run prepares it before the checks, with the registry reachable.
     const version = '10.34.1'
