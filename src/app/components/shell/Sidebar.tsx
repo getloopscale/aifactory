@@ -1,6 +1,7 @@
 import { Avatar, DropdownMenu, ScrollArea } from '@usetheo/ui'
 import {
   Bot,
+  Download,
   FolderGit2,
   HeartPulse,
   Inbox,
@@ -23,6 +24,7 @@ import { Link, NavLink, useLocation, useNavigate, useParams } from 'react-router
 import type { GuideId } from '../../../shared/guides'
 import type { ChatSummary } from '../../../shared/panel'
 import { useCopy } from '../../lib/copy'
+import type { Install } from '../../lib/install'
 import { chatApi, groupChats } from '../../lib/chat'
 import { useChats } from '../../lib/chats'
 
@@ -179,6 +181,7 @@ export function Sidebar({
   onSignOut,
   startSearching = false,
   showOnboarding = false,
+  install,
 }: {
   onToggle: () => void
   waiting: number
@@ -190,6 +193,8 @@ export function Sidebar({
   startSearching?: boolean
   /** True while no repository is enabled: the guided start is offered. */
   showOnboarding?: boolean
+  /** Whether the panel can be installed, and how. */
+  install?: Install
 }) {
   const { chats } = useChats()
   const { t } = useCopy()
@@ -197,6 +202,7 @@ export function Sidebar({
   const onNewChat = useOnNewChat()
   const [searching, setSearching] = useState(startSearching)
   const [filter, setFilter] = useState('')
+  const [iosHelp, setIosHelp] = useState(false)
   const { pinned, recent } = groupChats(chats, filter, t.menu.newChat)
 
   return (
@@ -285,6 +291,23 @@ export function Sidebar({
       </ScrollArea>
 
       <div className="border-t border-border p-2">
+        {install?.kind ? (
+          <>
+            <button
+              type="button"
+              onClick={install.kind === 'prompt' ? install.prompt : () => setIosHelp((on) => !on)}
+              className={row}
+            >
+              <Download className="size-[18px] shrink-0" />
+              {t.menu.install}
+            </button>
+            {install.kind === 'ios' && iosHelp ? (
+              <p role="note" className="px-3 pb-2 text-xs text-foreground/70">
+                {t.menu.installIos}
+              </p>
+            ) : null}
+          </>
+        ) : null}
         <DropdownMenu>
           <DropdownMenu.Trigger asChild>
             <button type="button" aria-label={t.menu.account} className={`${row} gap-3 py-2`}>

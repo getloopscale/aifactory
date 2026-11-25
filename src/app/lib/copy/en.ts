@@ -32,6 +32,8 @@ export const en = {
     noneYet: 'No chat yet',
     account: 'Account',
     signOut: 'Sign out',
+    install: 'Install app',
+    installIos: 'To install: tap the Share button, then "Add to Home Screen".',
   },
   chatRow: {
     name: 'Chat name',
