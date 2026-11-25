@@ -1,0 +1,299 @@
+import type { SandboxBackend } from '@theokit/agents/sandbox'
+import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm'
+
+import type { Database } from '../db'
+import { agentMessage, agentRun, task } from '../db/schema'
+import { KnowledgeFeed } from '../knowledge/feed'
+import { knowledgeRules } from '../knowledge/prompt'
+import { fetchIssue as defaultFetchIssue } from '../github/issues'
+import { createGithubApi } from '../github/pulls'
+import { integrationBranch } from './branches'
+import { cloneRepository } from './clone'
+import { githubEgress } from './credential-renewal'
+import { errorMessage } from './error-message'
+import type { CodingHarness, HarnessResult } from './harness'
+import { INSTANCE, mergeEgress } from './run-support'
+import { DEFAULT_TIMEOUTS } from './run'
+import { labelsWithRepoChoice, loadRepoConfig } from './repo-config'
+import { MAX_RUN_MS, resolveTimeouts } from './run-limit'
+import type { RunTaskDeps } from './run-types'
+import { pauseOnRefusal } from './provider-pause-store'
+import { createIsolatedSandbox, type SandboxSpec } from './sandbox'
+import { untilSlotFree } from './sandbox-slot'
+import { restoreSession, saveSession, storedSession } from './agent-session'
+import { outcome } from './transitions'
+import { SANDBOX_PROVIDER_BLOCKED } from '../../shared/panel'
+
+/** What a failed ask says when the agent touched the repository. */
+export const CHANGED_IN_ASK = 'the agent changed the repository in ask mode'
+
+/** A claim older than this is the claim of a worker that died: the message is taken again. */
+export const CLAIM_STALE_MS = MAX_RUN_MS + 10 * 60_000
+
+type Message = typeof agentMessage.$inferSelect
+
+/**
+ * Takes the oldest pending message of the task, and only when nobody holds it. Messages of one task are
+ * delivered one at a time, oldest first: a worker that finds the oldest claimed gets nothing, and the one that
+ * holds it goes on to the next when it is done.
+ */
+export async function claimNext(
+  db: Database,
+  taskId: number,
+  now = new Date(),
+): Promise<Message | undefined> {
+  const oldest = sql`(select id from agent_message where task_id = ${taskId} and delivery = 'pending' order by id limit 1)`
+  const [claimed] = await db
+    .update(agentMessage)
+    .set({ claimedAt: now })
+    .where(
+      and(
+        eq(agentMessage.id, oldest as never),
+        or(
+          isNull(agentMessage.claimedAt),
+          lt(agentMessage.claimedAt, new Date(now.getTime() - CLAIM_STALE_MS)),
+        ),
+      ),
+    )
+    .returning()
+  return claimed
+}
+
+type Ended = {
+  delivery: 'delivered' | 'failed'
+  reason?: string
+  answer?: string
+  costUsd?: number
+}
+
+async function finish(db: Database, id: number, ended: Ended): Promise<void> {
+  await db
+    .update(agentMessage)
+    .set({
+      delivery: ended.delivery,
+      reason: ended.reason ?? null,
+      answer: ended.answer ?? null,
+      answeredAt: new Date(),
+      costUsd: ended.costUsd ?? null,
+    })
+    .where(eq(agentMessage.id, id))
+}
+
+/** The repository's state a read-only turn must leave as it found it. */
+async function repositoryState(backend: SandboxBackend, repoDir: string): Promise<string> {
+  const status = await backend.execute(`git -C ${repoDir} status --porcelain`)
+  const head = await backend.execute(`git -C ${repoDir} rev-parse HEAD`)
+  if (status.exitCode !== 0 || head.exitCode !== 0) {
+    throw new Error(`cannot read the repository state: ${(status.stderr || head.stderr).trim()}`)
+  }
+  return `${head.stdout.trim()}\n${status.stdout}`
+}
+
+export type AskTurn = { changed: boolean; result: HarnessResult }
+
+/**
+ * One read-only turn: resumes the session with the prompt in ask mode, then reads `git status --porcelain` and
+ * HEAD. A change to either is the answer's end: nothing is pushed here, ever, and the caller fails the message.
+ */
+export async function askTurn(
+  backend: SandboxBackend,
+  harness: CodingHarness,
+  turn: { repoDir: string; sessionId: string; prompt: string; timeoutMs: number },
+): Promise<AskTurn> {
+  if (!harness.resume) throw new Error(`${harness.name} cannot resume a session`)
+  const before = await repositoryState(backend, turn.repoDir)
+  const result = await harness.resume(backend, turn.sessionId, {
+    prompt: turn.prompt,
+    cwd: turn.repoDir,
+    timeoutMs: turn.timeoutMs,
+    ask: true,
+  })
+  const after = await repositoryState(backend, turn.repoDir)
+  return { changed: before !== after, result }
+}
+
+/** What the agent is told with the owner's words. */
+export function askPrompt(text: string, knowledgeDir?: string): string {
+  return `The owner of the factory writes to you about the work of this task, in a session you already have.
+Answer from what you know of it and from reading the repository. Do not change any file and do not run a
+command that writes: this is a question, and anything you change is thrown away.
+${knowledgeDir ? `\n${knowledgeRules(knowledgeDir)}\n` : ''}
+The owner writes:
+
+${text}
+`
+}
+
+/** Books the pass on the task and on `agent_run`, marked as conversation. */
+async function bookCost(
+  db: Database,
+  taskId: number,
+  harness: CodingHarness,
+  result: HarnessResult,
+  durationMs: number,
+  ok: boolean,
+): Promise<void> {
+  const cost = result.costUsd ?? 0
+  if (cost > 0) {
+    await db
+      .update(task)
+      .set({ costUsd: sql`${task.costUsd} + ${cost}` })
+      .where(eq(task.id, taskId))
+  }
+  await db.insert(agentRun).values({
+    taskId,
+    role: 'builder',
+    harness: harness.name,
+    model: result.model === undefined ? (harness.model ?? null) : result.model,
+    effort: harness.effort ?? null,
+    tokensIn: result.tokensIn ?? null,
+    tokensOut: result.tokensOut ?? null,
+    attempt: 0,
+    costUsd: result.costUsd ?? null,
+    durationMs,
+    ok,
+    quota: result.quota !== undefined,
+    sessionId: result.sessionId ?? null,
+    conversation: true,
+  })
+}
+
+/**
+ * Delivers one claimed ask message: a sandbox cloned from the task's branch, the stored session restored and
+ * resumed with the message as its prompt, read-only. The answer, or why there is none, is stored on the message.
+ * It never throws for a failed delivery: the message says what happened.
+ */
+export async function deliverMessage(
+  deps: RunTaskDeps,
+  message: Message,
+  signal?: AbortSignal,
+): Promise<Ended> {
+  const ended = await attempt(deps, message, signal).catch((error): Ended => ({
+    delivery: 'failed',
+    reason: signal?.aborted
+      ? 'the job lease expired before the delivery finished'
+      : errorMessage(error),
+  }))
+  await finish(deps.db, message.id, ended)
+  if (ended.reason && SANDBOX_PROVIDER_BLOCKED.test(ended.reason)) {
+    await pauseOnRefusal(deps.db, ended.reason).catch(() => undefined)
+  }
+  return ended
+}
+
+async function attempt(
+  deps: RunTaskDeps,
+  message: Message,
+  signal: AbortSignal | undefined,
+): Promise<Ended> {
+  const { db } = deps
+  const [row] = await db.select().from(task).where(eq(task.id, message.taskId))
+  if (!row) return { delivery: 'failed', reason: `task ${message.taskId} does not exist` }
+  // The task may have gone back to work since the message was written: one writer per session.
+  const allowed = outcome({ ...row, conversation: 'ask' }, 'conversation')
+  if (allowed.kind !== 'action') {
+    return { delivery: 'failed', reason: allowed.reason }
+  }
+  const stored = await storedSession(db, { taskId: row.id, role: 'builder' })
+  if (!stored) return { delivery: 'failed', reason: 'the task kept no session of its agent' }
+
+  const { token } = await deps.github.installationToken(row.repository)
+  const issue = await (deps.fetchIssue ?? defaultFetchIssue)(row.repository, row.issueNumber, token)
+  const repo = await loadRepoConfig(db, row.repository)
+  const labels = labelsWithRepoChoice(issue.labels ?? [], repo)
+  const harness = typeof deps.harness === 'function' ? deps.harness(labels) : deps.harness
+  if (stored.harness !== harness.name) {
+    return {
+      delivery: 'failed',
+      reason: `the session of this task is ${stored.harness}'s, not ${harness.name}'s`,
+    }
+  }
+  // The same limits as a run: the message widens neither the egress nor the time.
+  const timeouts = resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, repo.runLimitMs)
+  const spec: SandboxSpec = {
+    timeoutMs: timeouts.sandboxMs,
+    cacheKey: row.repository,
+    ...(repo.sandboxImage ? { image: repo.sandboxImage } : {}),
+    egress: [
+      githubEgress(token),
+      ...mergeEgress([await harness.egress()]),
+      { domain: 'registry.npmjs.org' },
+      ...repo.egress.map((domain) => ({ domain })),
+    ],
+  }
+  const branch = `factory/${row.issueNumber}`
+  const api = deps.githubApi ?? createGithubApi()
+  const onBranch = (await api.branchHead(row.repository, token, branch)) !== undefined
+  await untilSlotFree(deps.sandbox, { ...deps.slotWait, signal })
+  const started = Date.now()
+  const sandbox = await createIsolatedSandbox(deps.sandbox, spec, { limitMs: Infinity, signal })
+  let running = sandbox
+  try {
+    const { backend } = sandbox
+    const { repoDir } = await cloneRepository(backend, {
+      repoUrl: `https://github.com/${row.repository}.git`,
+      ref: onBranch ? branch : integrationBranch(repo),
+      instanceId: INSTANCE,
+    })
+    await harness.prepare?.(backend)
+    const feed = await KnowledgeFeed.open(deps.knowledge, backend, row.repository, {
+      taskId: row.id,
+    })
+    // Stopping the sandbox stops the feed first, so no copy goes into a sandbox that is gone.
+    running = feed.attachTo(sandbox)
+    const sessionId = await restoreSession(db, backend, harness, {
+      taskId: row.id,
+      role: 'builder',
+    })
+    const turn = await askTurn(backend, harness, {
+      repoDir,
+      sessionId,
+      prompt: askPrompt(message.text, feed.dir),
+      timeoutMs: timeouts.agentMs,
+    })
+    if (turn.changed) {
+      await bookCost(db, row.id, harness, turn.result, Date.now() - started, false)
+      return { delivery: 'failed', reason: CHANGED_IN_ASK, costUsd: turn.result.costUsd }
+    }
+    const result = turn.result
+    const costUsd = result.costUsd
+    await bookCost(db, row.id, harness, result, Date.now() - started, result.ok)
+    if (!result.ok) {
+      return { delivery: 'failed', reason: result.summary.slice(0, 500), costUsd }
+    }
+    // The next message continues from this answer, so the session is kept before it can start.
+    if (result.sessionId) {
+      await saveSession(db, backend, harness, {
+        taskId: row.id,
+        role: 'builder',
+        sessionId: result.sessionId,
+      })
+    }
+    return { delivery: 'delivered', answer: result.summary, costUsd }
+  } finally {
+    await running.stop().catch(() => undefined)
+  }
+}
+
+/** Delivers the task's pending messages, oldest first, until none is left that this worker may take. */
+export async function deliverPending(
+  deps: RunTaskDeps,
+  taskId: number,
+  signal?: AbortSignal,
+): Promise<Ended[]> {
+  const done: Ended[] = []
+  for (;;) {
+    if (signal?.aborted) return done
+    const claimed = await claimNext(deps.db, taskId)
+    if (!claimed) return done
+    done.push(await deliverMessage(deps, claimed, signal))
+  }
+}
+
+/** The messages of a task, oldest first. */
+export const messagesOf = (db: Database, taskId: number) =>
+  db
+    .select()
+    .from(agentMessage)
+    .where(eq(agentMessage.taskId, taskId))
+    .orderBy(asc(agentMessage.id))

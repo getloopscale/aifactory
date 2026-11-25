@@ -53,6 +53,7 @@ const detailOf = (id: number): TaskDetail => ({
   deliveries: [],
   watches: [],
   runs: [],
+  messages: [],
 })
 
 beforeEach(() => {
