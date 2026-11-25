@@ -1119,3 +1119,55 @@ export type StoppedLine = {
    */
   scope: 'hold' | 'fix_first'
 }
+
+/** What the page of one repository shows (`/repositories/<owner>/<name>`). A cost or a value that is unknown is null, never zero. */
+export type RepositoryDetail = {
+  repository: string
+  /** The repository's tasks, one entry per stage that has any. */
+  tasks: { stage: string; count: number }[]
+  /** The last 30 agent passes of its tasks, newest first. */
+  passes: {
+    id: number
+    taskId: number
+    issueNumber: number
+    role: string
+    harness: string
+    model: string | null
+    durationMs: number
+    costUsd: number | null
+    ok: boolean
+    at: string
+  }[]
+  /** Open findings of the repository or of one of its tasks, newest first. */
+  findings: {
+    id: number
+    kind: string
+    subject: string
+    taskId: number | null
+    detail: string
+    firstSeenAt: string
+  }[]
+  patterns: {
+    id: number
+    className: string
+    invariant: string
+    taskIds: number[]
+    lastSeenAt: string
+  }[]
+  /** Each indicator with points for the repository: 14 days, oldest first, a day with no point has a null value. */
+  indicators: {
+    metric: string
+    label: string
+    unit: string
+    days: { day: string; value: number | null; samples: number | null }[]
+  }[]
+  /** The last 14 days of passes by role; `costUsd` leaves out the passes whose cost is unknown. */
+  costByRole: { role: string; passes: number; costUsd: number; unknownShare: number }[]
+  /** The last 14 days of reviews by reviewer harness. */
+  reviewRounds: {
+    reviewer: string
+    tasks: number
+    plateauShare: number
+    changesPerTask: number
+  }[]
+}
