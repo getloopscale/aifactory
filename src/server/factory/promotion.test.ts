@@ -404,6 +404,12 @@ describe('the issue', () => {
     expect(body).not.toContain('after a rerun')
   })
 
+  it('says a job whose installation lacks actions: write was not rerun', () => {
+    const body = issueBody(check, { ...at, rerun: 'skipped' })
+    expect(body).toContain('has not granted `actions: write`, so it was not rerun')
+    expect(body).not.toContain('after a rerun')
+  })
+
   it('says a job GitHub would not rerun could not be rerun, and failed on its first attempt', () => {
     const body = issueBody(check, { ...at, rerun: 'refused' })
     expect(body).toContain(

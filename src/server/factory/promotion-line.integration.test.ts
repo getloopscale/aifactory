@@ -68,7 +68,9 @@ const api: PromotionApi = {
   issueOpen: async (_repo, _token, n) => world.open.has(n),
 }
 
-const app: GithubApp = { installationToken: async () => ({ token: 't', expiresAt: new Date() }) }
+const app: GithubApp = {
+  installationToken: async () => ({ token: 't', expiresAt: new Date(), actionsWrite: true }),
+}
 
 const deps = (lineMode: CoordinatorMode = 'auto'): PromotionWatchDeps => ({
   db: getDb(),
