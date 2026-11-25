@@ -160,6 +160,23 @@ describe('gatedLinear', () => {
   })
 })
 
+describe('gatedLinear, a spent budget on a call that ran', () => {
+  it('returns the answer and closes the gate for the next call', async () => {
+    const gate = createLinearGate(() => 0)
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('{"data":{}}', {
+          status: 200,
+          headers: { 'x-ratelimit-requests-remaining': '0', 'x-ratelimit-requests-reset': '5000' },
+        }),
+    )
+    const call = gatedLinear(fetchImpl, gate, () => 0)
+    expect((await call('u')).status).toBe(200)
+    await expect(call('u')).rejects.toBeInstanceOf(LinearRateLimited)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('linearWorkSource', () => {
   const answer = (data: unknown) => new Response(JSON.stringify({ data }), { status: 200 })
   it('never treats the factory’s own comment as an answer, and reads every page', async () => {

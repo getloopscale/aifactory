@@ -32,6 +32,7 @@ import { conflictTurnHolds } from './conflict-turn'
 import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
 import { outcome } from './transitions'
+import { itemRef } from './item-ref'
 import { itemIdentifier, squashTitle } from './run-support'
 import { selfCiRefusal } from './self-ci'
 
@@ -143,6 +144,7 @@ async function completeIntegration(
         repository: row.repository,
         token,
         issueNumber: row.issueNumber,
+        item: itemRef(row),
         title: row.issueTitle,
         sha: verifiedSha,
         tagSha: advanced.developSha ?? mergedSha,

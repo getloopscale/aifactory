@@ -1,3 +1,4 @@
+import { issueRef } from './item-ref'
 import { and, eq, inArray, isNotNull, like, notExists, notLike, or } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -120,7 +121,7 @@ async function announce(
     await api.closeIssue(s.repository, s.token, issueNumber)
     return undefined
   } catch (error) {
-    return `#${issueNumber}: ${message(error)}`
+    return `${issueRef(issueNumber)}: ${message(error)}`
   }
 }
 

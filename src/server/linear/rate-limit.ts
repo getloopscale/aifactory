@@ -47,8 +47,7 @@ export function gatedLinear(
     const closed = gate.waitUntil()
     if (closed) throw new LinearRateLimited(closed)
     const response = await fetchImpl(url, init)
-    const remaining = response.headers?.get?.('x-ratelimit-requests-remaining')
-    let limited = response.status === 429 || remaining === '0'
+    let limited = response.status === 429
     if (!limited && response.status === 400) {
       const body = await response
         .clone()
@@ -56,7 +55,14 @@ export function gatedLinear(
         .catch(() => '')
       limited = /RATELIMITED/.test(body)
     }
-    if (!limited) return response
+    if (!limited) {
+      // The call ran. A spent budget closes the gate for the next one; this response is still the answer, so a
+      // write that applied is never thrown away and retried.
+      if (response.headers?.get?.('x-ratelimit-requests-remaining') === '0') {
+        gate.observe(resetOf(response, now()))
+      }
+      return response
+    }
     const resetAt = resetOf(response, now())
     gate.observe(resetAt)
     throw new LinearRateLimited(resetAt)

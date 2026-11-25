@@ -1,3 +1,5 @@
+import { issueRef } from './item-ref'
+import { itemRef } from './item-ref'
 import { randomUUID } from 'node:crypto'
 
 import { type SandboxBackend } from '@theokit/agents/sandbox'
@@ -880,7 +882,7 @@ export class Run {
       {
         repository: row.repository,
         kind: 'no-change',
-        body: `Issue #${row.issueNumber} (${oneLine(issue.title)}): a run starting from ${this.baseSha} found nothing to change.${said}`,
+        body: `Issue ${issueRef(row.issueNumber)} (${oneLine(issue.title)}): a run starting from ${this.baseSha} found nothing to change.${said}`,
         taskId,
         issueNumber: row.issueNumber,
         baseSha: this.baseSha,
@@ -2219,6 +2221,7 @@ export class Run {
         repository: row.repository,
         token: this.c.token,
         issueNumber: row.issueNumber,
+        item: itemRef(row),
         title: issue.title,
         sha,
         pullRequestUrl,

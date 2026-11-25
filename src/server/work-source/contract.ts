@@ -1,7 +1,8 @@
 /**
- * What the factory asks of the tracker its work comes from (#471). GitHub issues is the first
- * implementation (`github.ts`), Linear the second (`../linear/source.ts`). Everything here runs on the
- * host: a sandbox never receives a tracker credential.
+ * What the factory asks of a tracker that is not GitHub (#471), implemented by Linear (`../linear/source.ts`).
+ * GitHub issues stays behind the functions of `src/server/github/` that already carry every call; they hand a
+ * task whose `issueNumber` is negative (a Linear item's local ordinal) to `trackerFor`, which returns its source.
+ * Everything here runs on the host: a sandbox never receives a tracker credential.
  */
 
 export type WorkSourceKind = 'github' | 'linear'

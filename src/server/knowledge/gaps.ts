@@ -30,7 +30,11 @@ export const gapSignature = (
  */
 export function issueForGap(gap: GapRow): NewIssue {
   const tasks = gap.tasks
-    .map((t) => `- https://github.com/${gap.repository}/issues/${t.issueNumber} (${t.role})`)
+    .map((t) =>
+      t.issueNumber < 0
+        ? `- a Linear item (${t.role})`
+        : `- https://github.com/${gap.repository}/issues/${t.issueNumber} (${t.role})`,
+    )
     .join('\n')
   return {
     title: `Rule needed in ${gap.repository}: ${gap.question.slice(0, 80)}`,

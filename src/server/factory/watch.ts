@@ -1,3 +1,4 @@
+import { issueRef } from './item-ref'
 import { and, eq } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -100,7 +101,7 @@ function revertBody(input: {
   failing: string[]
 }): string {
   return [
-    `The default branch went red after ${input.tag ? `the release ${input.tag}` : 'a release'} of #${input.issueNumber} (${input.title}).`,
+    `The default branch went red after ${input.tag ? `the release ${input.tag}` : 'a release'} of ${issueRef(input.issueNumber)} (${input.title}).`,
     '',
     `The checks on the merge commit \`${input.sha.slice(0, 7)}\` failed: ${input.failing.map((f) => `\`${f}\``).join(', ')}.`,
     '',
@@ -158,7 +159,7 @@ export async function pollWatches(deps: WatchDeps): Promise<WatchResult> {
       let detail = failingDetail(seen)
       try {
         const revert = await deps.api.revertPullRequest(w.repository, token, w.pullRequestNumber, {
-          title: `Revert: ${title} (#${issueNumber})`,
+          title: `Revert: ${title} (${issueRef(issueNumber)})`,
           body: revertBody({
             title,
             issueNumber,

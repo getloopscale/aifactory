@@ -6,6 +6,9 @@ import type { WorkSource } from './contract'
 export type TrackedItem = { source: WorkSource; id: string }
 
 /**
+ * The factory's identity is the API key's `viewer`: the key must belong to a dedicated user or app, since a
+ * personal key makes that person's own answers read as the factory's and ignored. It is read again every hour.
+ *
  * The tracker of a task that does not live on GitHub. A Linear task holds a negative local ordinal in
  * `task.issueNumber`, so a call that carries a repository and an issue number reaches this one place and every
  * caller (the run, the release, the answers, the panel) goes through the task's own source. A GitHub task is
@@ -16,7 +19,14 @@ export type TrackerLookup = (
   issueNumber: number,
 ) => Promise<TrackedItem | undefined>
 
+const VIEWER_TTL_MS = 60 * 60 * 1000
 let viewer: Promise<string> | undefined
+let viewerAt = 0
+
+/** Forgets who the API key belongs to, so the next call reads it again (a rotated key, a renamed user). */
+export function refreshLinearViewer(): void {
+  viewer = undefined
+}
 
 /** The Linear query of the host, with the key from the environment. The key goes nowhere else. */
 export function linearQueryFromEnv(env: NodeJS.ProcessEnv = process.env): LinearQuery {
@@ -43,8 +53,12 @@ export async function trackerFor(
     throw new Error(`${repository}#${issueNumber} is not a Linear task the factory knows`)
   }
   const query = linearQueryFromEnv()
+  if (Date.now() - viewerAt > VIEWER_TTL_MS) viewer = undefined
   viewer ??= query<{ viewer: { id: string } }>('query { viewer { id } }')
-    .then((data) => data.viewer.id)
+    .then((data) => {
+      viewerAt = Date.now()
+      return data.viewer.id
+    })
     .catch((error) => {
       viewer = undefined
       throw error
