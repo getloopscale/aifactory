@@ -3,6 +3,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { plan, planItem, repository } from '../db/schema'
 import { ensureBranches, integrationBranch } from '../factory/branches'
+import { safeArtifactPath } from '../factory/artifacts'
 import { proofView, provenAfter, unprovenChecks } from '../factory/prove-checks'
 import { DOMAIN, validBranch } from '../factory/repo-config'
 import { loadKnowledgeConfig } from '../knowledge/store'
@@ -56,9 +57,9 @@ const iso = (date: Date) => date.toISOString()
 export type RepositoryPatch = {
   enabled?: boolean
   /** `null` clears the owner's checks, so the default (`npm test`) applies. */
-  checks?: { name: string; command: string }[] | null
+  checks?: { name: string; command: string; artifacts?: string[] }[] | null
   /** The checks run on the merge of the work with the integration branch; empty clears them. */
-  integrationChecks?: { name: string; command: string }[]
+  integrationChecks?: { name: string; command: string; artifacts?: string[] }[]
   /** The commands that rewrite files before each round of checks; empty clears them. */
   fixes?: string[]
   egress?: string[]
@@ -76,6 +77,8 @@ export type RepositoryPatch = {
   releaseMode?: 'manual' | 'trial' | 'auto' | null
   /** How long a run may last, in minutes; `null` clears it, so the factory's default applies. */
   runLimitMinutes?: number | null
+  /** The sandbox image: `browser` has a headless browser preinstalled. */
+  sandboxImage?: 'default' | 'browser'
   /** From this many minutes of lead time a task is at risk; `null` clears it, so the default applies. */
   leadTimeAtRiskMinutes?: number | null
   /** From this many minutes of lead time a task is overdue; `null` clears it, so the default applies. */
@@ -85,6 +88,7 @@ export type RepositoryPatch = {
 const CHECK_NAME = /^[a-z0-9][a-z0-9_-]{0,30}$/
 const MAX_CHECKS = 8
 const MAX_DOMAINS = 20
+const MAX_ARTIFACT_PATHS = 10
 
 /** A command the sandbox runs as the owner typed it: one line, not empty, at most 500 characters. */
 function oneLineCommand(command: string): boolean {
@@ -103,6 +107,10 @@ function checksProblem(checks: NonNullable<RepositoryPatch['checks']>): string |
     names.add(check.name)
     if (!oneLineCommand(check.command)) {
       return `the command of "${check.name}" must be one line of at most 500 characters`
+    }
+    const declared = check.artifacts ?? []
+    if (declared.length > MAX_ARTIFACT_PATHS || !declared.every(safeArtifactPath)) {
+      return `the artifact paths of "${check.name}" must be at most ${MAX_ARTIFACT_PATHS} paths inside the repository`
     }
   }
   return undefined
@@ -192,6 +200,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
       runLimitMinutes: row?.runLimitMinutes ?? null,
+      sandboxImage: row?.sandboxImage ?? 'default',
       leadTimeAtRiskMinutes: row?.leadTimeAtRiskMinutes ?? null,
       leadTimeOverdueMinutes: row?.leadTimeOverdueMinutes ?? null,
       checksProvenSha: row?.checksProvenSha ?? null,
@@ -387,6 +396,7 @@ export async function saveRepository(
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),
     ...(patch.runLimitMinutes === undefined ? {} : { runLimitMinutes: patch.runLimitMinutes }),
+    ...(patch.sandboxImage === undefined ? {} : { sandboxImage: patch.sandboxImage }),
     ...(patch.leadTimeAtRiskMinutes === undefined
       ? {}
       : { leadTimeAtRiskMinutes: patch.leadTimeAtRiskMinutes }),
