@@ -502,6 +502,17 @@ export type TimelineEvent = {
   detail: Record<string, unknown> | null
 }
 
+/** Whether the tests a head adds depend on the change, as the factory found it by running them on the base (#550). */
+export type TestProofView = {
+  id: number
+  sha: string
+  outcome: 'proven' | 'unproven' | 'no_tests' | 'not_run'
+  /** The check that failed on the base, or why the step could not run. */
+  detail: string | null
+  files: string[]
+  at: string
+}
+
 export type EvidenceView = {
   id: number
   name: string
@@ -610,6 +621,8 @@ export type TaskDetail = {
   sendBackPending?: boolean
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
+  /** The outcome of the test proof of each head, oldest first; none when the step is off. */
+  testProofs?: TestProofView[]
   reviews: ReviewView[]
   /** The security review of each approval, oldest first. */
   securityReviews: SecurityReviewView[]
