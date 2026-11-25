@@ -1,5 +1,5 @@
 import { personaPreamble, type PersonaRole } from '../agents/prompts/personas'
-import { GAP_RULE, knowledgeRules, LEARNED_RULE } from '../knowledge/prompt'
+import { knowledgeRules, LEARNED_RULE } from '../knowledge/prompt'
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
 import { streams, type EgressRule, type ExecuteResult } from './sandbox'
@@ -214,7 +214,7 @@ ${checksRule(input.checks)}${installFailureRule(input.installFailed)}${
       ? '- Nobody is there to answer a question, so do not ask one. When a decision is missing, choose the most reasonable option, say in your final message what you assumed, and go on.'
       : '- If you cannot go on without a decision only a person can make, do not guess. Leave the repository as it is and end your final message with a line that starts with `QUESTION:`, followed by one specific question (offer the options you see).'
   }
-${input.knowledgeDir ? `${LEARNED_RULE}\n${GAP_RULE}\n` : ''}- Finish with a short summary of what you changed.
+${input.knowledgeDir ? `${LEARNED_RULE}\n` : ''}- Finish with a short summary of what you changed.
 ${input.knowledgeDir ? `\n${knowledgeRules(input.knowledgeDir)}\n` : ''}${
     input.feedback
       ? `\n${sentBackBy(input)}\n\n${input.feedback}\n\n${input.startsOver ? 'The branch of that run no longer exists, so none of its work is here. Start from what the repository holds now.' : 'The branch already holds your earlier work. Build on it.'}\n`
