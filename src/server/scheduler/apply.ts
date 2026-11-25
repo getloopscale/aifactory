@@ -8,10 +8,11 @@ import { enterStage } from '../factory/stages'
 import { outcome } from '../factory/transitions'
 import { questionComment } from '../factory/waiting'
 import type { GithubApp } from '../github/app'
+import type { IssuesApi } from '../github/issues-api'
 import type { GithubApi } from '../github/pulls'
 
 import type { Placement } from './order'
-import type { Readiness } from './readiness'
+import { ACCEPTANCE_HEADING, acceptanceSection, bodyHash, type Readiness } from './readiness'
 
 /**
  * The scheduler's only side effects: its decisions recorded, the order written to `available_at`, and the
@@ -182,4 +183,53 @@ export async function blockTask(
     })
     return { blocked: true } as const
   })
+}
+
+export type DraftDeps = Pick<AskDeps, 'db' | 'github'> & {
+  issues: Pick<IssuesApi, 'updateIssueBody'>
+}
+
+export type Drafted = { drafted: true } | { drafted: false; reason: string }
+
+/**
+ * Writes drafted acceptance criteria into the issue and records a `ready` verdict for the new body, leaving the
+ * queued run and the task's stage as they are. The transition and the run are checked first; a body that already
+ * holds the section (an earlier pass wrote it and failed to record) is not written twice.
+ */
+export async function applyAcceptance(
+  deps: DraftDeps,
+  run: AskedRun,
+  issue: { title: string; body: string },
+  criteria: string[],
+): Promise<Drafted> {
+  const [row] = await deps.db
+    .select({ stage: task.stage })
+    .from(task)
+    .where(eq(task.id, run.taskId))
+  const allowed = outcome({ stage: row?.stage ?? 'cancelled' }, 'needs_refinement')
+  if (allowed.kind !== 'action') return { drafted: false, reason: allowed.reason }
+  const queued = await deps.db.execute(
+    sql`select 1 from theokit_jobs where theokit_jobs.id = ${run.jobId} and ${MOVABLE}`,
+  )
+  if ((queued.rowCount ?? 0) === 0) {
+    return { drafted: false, reason: 'its queued run was taken, held or withdrawn first' }
+  }
+  const body = issue.body.includes(ACCEPTANCE_HEADING)
+    ? issue.body
+    : [issue.body.trimEnd(), acceptanceSection(criteria)].filter((p) => p !== '').join('\n\n')
+  if (body === issue.body && !issue.body.includes(ACCEPTANCE_HEADING)) {
+    return { drafted: false, reason: 'the draft holds no usable criterion' }
+  }
+  if (body !== issue.body) {
+    const { token } = await deps.github.installationToken(run.repository)
+    await deps.issues.updateIssueBody(run.repository, token, run.issueNumber, body)
+  }
+  await recordDecision(deps.db, {
+    taskId: run.taskId,
+    kind: 'readiness',
+    mode: 'auto',
+    head: bodyHash(issue.title, body),
+    detail: { verdict: 'ready', missing: '', question: '', drafted: true },
+  })
+  return { drafted: true }
 }
