@@ -29,6 +29,10 @@ function actionsOf(detail: TaskDetail) {
     canWithdraw: task.stage === 'intake' && detail.sendBackPending === true,
     // A failed task can be sent back too, which is how a withdrawn note is corrected.
     canSendBack: (hasPullRequest || task.stage === 'failed') && !task.integrated,
+    // The same cases the server allows: a handed-over task, or a done one never merged nor settled.
+    canMergeBase:
+      (task.stage === 'handoff' || (task.stage === 'done' && !task.integrated && !task.resolved)) &&
+      !!task.headSha,
     releaseWaiting,
     releaseRefused: task.releaseWait?.status === 'refused' ? task.releaseWait.reason : null,
     canRelease: task.stage === 'done' && task.preRelease !== null && !releaseWaiting,
@@ -77,6 +81,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
     releaseWaiting,
     releaseRefused,
     canRelease,
+    canMergeBase,
   } = actionsOf(detail)
 
   async function run(path: string, body?: unknown, done?: string | ((answer: unknown) => string)) {
@@ -169,6 +174,21 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
               {t.taskActions.release}
             </Button>
           </span>
+        ) : null}
+        {canMergeBase ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={busy}
+            title={t.taskActions.mergeBaseHelp}
+            onClick={() => {
+              if (window.confirm(t.taskActions.confirmMergeBase)) {
+                void run('merge-base', undefined, t.taskActions.mergeBaseQueued)
+              }
+            }}
+          >
+            {t.taskActions.mergeBase}
+          </Button>
         ) : null}
         {canRetry ? (
           <Button

@@ -8,7 +8,9 @@ import { isReserved } from './okf'
 import {
   currentPin,
   recordDelivery,
+  recordGaps,
   recordNotes,
+  type NewGap,
   type NewNote,
   type Pin,
   type Recipient,
@@ -33,6 +35,8 @@ export type KnowledgeSource = {
     files: number
   }): Promise<void>
   keep(notes: NewNote[]): Promise<void>
+  /** The questions an agent could not find answered in the base. */
+  keepGaps(gaps: NewGap[]): Promise<void>
 }
 
 /** Where the mirrors are kept on the host: `FACTORY_KNOWLEDGE_DIR`, or `.state/knowledge` in the checkout. */
@@ -82,5 +86,6 @@ export function knowledgeSource(db: Database, root: string = knowledgeRoot()): K
     async keep(notes) {
       await recordNotes(db, notes)
     },
+    keepGaps: (gaps) => recordGaps(db, gaps),
   }
 }

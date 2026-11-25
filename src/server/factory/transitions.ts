@@ -11,6 +11,7 @@ import type { RoutedCode } from '../ingest/decide'
 type PanelEvent =
   | 'approve'
   | 'request_changes'
+  | 'merge_base_by_owner'
   | 'withdraw_send_back'
   | 'retry'
   | 'retry_from_finding'
@@ -232,6 +233,13 @@ const mergeBase: Rule = (task) => {
   return act('merge_base')
 }
 
+const NOT_OWNER_MERGEABLE = refuse(
+  'the integration branch can be merged only into the branch of a handed-over task, or of one never merged',
+)
+/** The owner's merge: a handed-over task, or a `done` one whose pull request was never merged nor settled. */
+const ownerMergeBase: Rule = (task) =>
+  task.mergedSha || task.resolvedSha ? ALREADY_INTEGRATED : mergeBase(task)
+
 const NOBODY_WORKING = ignore(
   'no run is working on this task and nothing of it waits for the repository checks',
 )
@@ -300,6 +308,14 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     // A run that failed after pushing (out of time, a question the sandbox could not wait for) has work
     // on its branch, which a retry would delete.
     failed: sendBack,
+  },
+  merge_base_by_owner: {
+    ...each(
+      ['intake', ...WORKING, 'waiting', 'released', 'failed', 'cancelled'],
+      NOT_OWNER_MERGEABLE,
+    ),
+    done: ownerMergeBase,
+    handoff: ownerMergeBase,
   },
   withdraw_send_back: {
     ...each(

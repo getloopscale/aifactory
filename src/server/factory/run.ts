@@ -16,7 +16,7 @@ import type { Issue } from '../github/issues'
 import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
 import { mergerPrompt } from '../agents/prompts/merger'
-import { parseLearned, withoutLearned } from '../knowledge/format'
+import { parseGaps, parseLearned, withoutLearned } from '../knowledge/format'
 
 import { cloneRepository } from './clone'
 import {
@@ -849,6 +849,23 @@ export class Run {
     )
   }
 
+  /** The questions the builder left with `KNOWLEDGE_GAP:`, kept for the owner to answer with a rule. */
+  private async keepGaps(summary: string): Promise<void> {
+    const questions = parseGaps(summary)
+    if (questions.length === 0 || !this.feed?.delivered) return
+    const { deps, taskId, row } = this.c
+    await deps.knowledge?.keepGaps(
+      questions.map((question) => ({
+        repository: row.repository,
+        question,
+        taskId,
+        issueNumber: row.issueNumber,
+        role: 'builder' as const,
+        baseSha: this.baseSha,
+      })),
+    )
+  }
+
   /**
    * A run that found nothing to change in an issue is worth remembering: the next run on the same issue
    * starts from what this one found, instead of finding it again.
@@ -1335,6 +1352,29 @@ export class Run {
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
+    // `done` means integrated, or waiting for CI to integrate: any other work waits for a person.
+    if (!(row.mergedSha || row.resolvedSha || row.awaitingCiSha)) {
+      const held = await this.previousHandoff()
+      const reason = `the rework changed nothing, so the work still waits for a person${held.reason ? `: ${held.reason}` : ''}`
+      await enterRunStage(deps.db, taskId, 'handoff', {
+        branch,
+        sha: row.headSha,
+        reason,
+        heldReason: held.reason ?? null,
+        ...(held.cause ? { cause: held.cause } : {}),
+        pullRequestUrl: row.pullRequestUrl,
+        unchanged: true,
+        agentSummary: first.summary.slice(0, 4_000),
+        costUsd: this.cost,
+      })
+      return {
+        status: 'handoff',
+        branch,
+        sha: row.headSha,
+        pullRequestUrl: row.pullRequestUrl,
+        reason,
+      }
+    }
     await enterRunStage(deps.db, taskId, 'done', {
       branch,
       sha: row.headSha,
@@ -1349,6 +1389,29 @@ export class Run {
       sha: row.headSha,
       pullRequestUrl: row.pullRequestUrl,
       summary: first.summary,
+    }
+  }
+
+  /**
+   * The handoff the run was sent back from, with its cause and the reason it was first held for (never the
+   * reason of an unchanged send-back, so repeated ones do not stack their prefix). Empty when the last
+   * ending was not a handoff; an older handoff has no cause and none is invented.
+   */
+  private async previousHandoff(): Promise<{ cause?: HandoffCause; reason?: string }> {
+    const { deps, taskId } = this.c
+    const [ended] = await deps.db
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, taskId), inArray(stageEvent.stage, ENDING_STAGES)))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    if (!ended || ended.stage !== 'handoff') return {}
+    const detail = (ended.detail ?? {}) as Record<string, unknown>
+    const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
+    return {
+      cause: text(detail.cause) as HandoffCause | undefined,
+      // `heldReason` is there, null when nothing held it, on every handoff of an unchanged send-back.
+      reason: 'heldReason' in detail ? text(detail.heldReason) : text(detail.reason),
     }
   }
 
@@ -1493,6 +1556,7 @@ export class Run {
     )
     if (!result.ok) await this.failUnfinished(result, 'the agent did not finish')
     await this.keepLearned(result.summary)
+    await this.keepGaps(result.summary)
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(withoutLearned(result.summary))
     if (asked) await this.ask(asked, 1)
@@ -1571,6 +1635,7 @@ export class Run {
     const first = await this.firstPass()
     if (!first.ok) await this.failUnfinished(first, 'the agent did not finish')
     await this.keepLearned(first.summary)
+    await this.keepGaps(first.summary)
     // A fact the agent left is not part of its question, wherever it put it.
     const asked = parseQuestion(withoutLearned(first.summary))
     this.sessionId = first.sessionId ?? this.sessionId
