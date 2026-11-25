@@ -331,7 +331,7 @@ export const ptBR: Copy = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} em ${sha}`,
   },
   conversation: {
-    heading: 'Fale com o agente',
+    heading: 'Conversa',
     mode: 'Como falar',
     ask: 'Perguntar',
     guide: 'Orientar',
@@ -354,6 +354,40 @@ export const ptBR: Copy = {
     cost: (usd: string) => `custo ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `Uma mensagem do dono para o agente que trabalhou em "${title}" (issue #${issue} de ${repository}).`,
+  },
+  thread: {
+    tabs: 'Agentes',
+    empty: 'Nada foi dito ou feito ainda.',
+    waitingFirst: 'Esperando o primeiro passo do agente…',
+    closed: (stage: string) => `O agente não recebe mensagens enquanto a tarefa está em ${stage}.`,
+    recipient:
+      'Sua mensagem vai para o agente de que a tarefa depende, qualquer que seja a aba aberta.',
+    summary: (c: {
+      read?: number
+      search?: number
+      edit?: number
+      command?: number
+      other?: number
+    }) =>
+      [
+        c.read ? `leu ${c.read} ${c.read === 1 ? 'arquivo' : 'arquivos'}` : '',
+        c.search ? `buscou ${c.search} ${c.search === 1 ? 'vez' : 'vezes'}` : '',
+        c.edit ? `editou ${c.edit} ${c.edit === 1 ? 'arquivo' : 'arquivos'}` : '',
+        c.command ? `rodou ${c.command} ${c.command === 1 ? 'comando' : 'comandos'}` : '',
+        c.other ? `${c.other} ${c.other === 1 ? 'outro passo' : 'outros passos'}` : '',
+      ]
+        .filter(Boolean)
+        .join(', '),
+    failedSteps: (n: number) => `${n} ${n === 1 ? 'falhou' : 'falharam'}`,
+    worked: (time: string) => `trabalhou por ${time}`,
+    pass: (who: string, engine: string | null) =>
+      engine ? `${who} começou · ${engine}` : `${who} começou`,
+    doing: (what: string, time: string) => `${what} · ${time}`,
+    working: 'trabalhando',
+    running: (tool: string, target: string) =>
+      target ? `rodando ${tool} ${target}` : `rodando ${tool}`,
+    openSteps: 'Mostrar os passos',
+    closeSteps: 'Esconder os passos',
   },
   taskActions: {
     title: 'Ações',
