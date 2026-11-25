@@ -85,15 +85,6 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
       </div>
 
       <TaskActions detail={detail} onDone={resource.reload} />
-      <Conversation
-        detail={detail}
-        events={transcript.events}
-        error={transcript.error}
-        onDone={resource.reload}
-      />
-
-      <WatchPanel watches={detail.watches} onDone={resource.reload} />
-
       {detail.questions.length > 0 ? (
         <section aria-label={t.task.questions}>
           <h2 className="mb-2 text-sm font-semibold">{t.task.questions}</h2>
@@ -112,6 +103,15 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
           </ul>
         </section>
       ) : null}
+
+      <Conversation
+        detail={detail}
+        events={transcript.events}
+        error={transcript.error}
+        onDone={resource.reload}
+      />
+
+      <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
       {detail.coordinatorActions.length > 0 ? (
         <section aria-label={t.coordinator.sectionTitle}>
