@@ -41,7 +41,7 @@ src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
-                    `catch-up`, `retry-due`, `knowledge-sync`, `prune-transcripts`, `coordinate`, `schedule`)
+                    `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`)
   metrics/          the factory's own indicators, their daily points and control bands (`config.ts`)
   knowledge/        the owner's knowledge repository: mirror, sync, the slice each agent gets, notes
   db/               Postgres config, pool, Drizzle schema, health probe
@@ -116,6 +116,14 @@ reads that file, not a convention.
   `KnowledgeFeed` on it, which copies the project's slice to `/tmp/knowledge` and replaces it when the base
   moves. Only the `knowledge-sync` cron fetches or pushes, and only to `factory-memory`, never to the
   owner's branch. `src/server/knowledge/every-agent.test.ts` fails for an agent without it.
+- **The curator groups notes and never writes.** `knowledge-curator` (`FACTORY_KNOWLEDGE_CURATOR_MODE`: `off`,
+  `trial` by default, `auto`) asks an assistant built by `buildAssistant` (`knowledge/curator-agent.ts`) to group a
+  project's notes; `curator-answer.ts` parses a closed set (`merge`, `promote`, `keep`) and an answer that does not
+  parse is an `error` decision that changes nothing. Every decision is a `knowledge_curation` row, one per group and
+  mode. In `auto`, `knowledge-sync` applies a `pending` merge as one fast-forward commit on `factory-memory` (the
+  merged note keeps every source, the replaced files are removed with the index regenerated) and opens one pull
+  request on the owner's branch for a `promote` of notes from three tasks. Nothing in the curator merges it
+  (`curator-answer.test.ts` fails if it does), and a group whose pull request was closed unmerged is never proposed again.
 - **The knowledge repository is never a project.** Its rules change only through a pull request the owner
   merges, so `saveRepository` refuses to enable it and `saveKnowledge` refuses a repository that is enabled.
 - **The knowledge base is an Open Knowledge Format 0.2 bundle.** `knowledge/okf.ts` holds the specification and
