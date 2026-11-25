@@ -25,6 +25,8 @@ export default defineJob('run-task', {
     mergeBase: z.boolean().optional(),
     /** The feedback is the coordinator's decision on a review that did not converge, not a failure of the checks. */
     fromReview: z.boolean().optional(),
+    /** The note is the owner's guidance: the run resumes the builder's stored session with it. */
+    conversation: z.boolean().optional(),
   }),
   // A run that fails is recorded as the `failed` stage and goes to a person. Retrying it on its
   // own would spend the agent's budget again on the same issue.
@@ -50,6 +52,7 @@ export default defineJob('run-task', {
         input.resume,
         input.mergeBase,
         input.fromReview,
+        input.conversation,
       )
       const result = await runTask(deps, input.taskId, signal, continuation)
       // The provider refused the sandbox for credit: the same input runs again after the pause.

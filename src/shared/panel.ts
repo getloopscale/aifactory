@@ -265,8 +265,28 @@ export type RunView = {
   durationMs: number
   ok: boolean
   quota: boolean
+  /** The pass answered a message of the owner. */
+  conversation?: boolean
   at: string
 }
+
+/** What the owner wrote to a task's agent, and what came back. */
+export type MessageView = {
+  id: number
+  author: string
+  mode: 'ask' | 'guide'
+  text: string
+  delivery: 'pending' | 'delivered' | 'failed'
+  /** Why the delivery failed. */
+  reason: string | null
+  answer: string | null
+  costUsd: number | null
+  at: string
+  answeredAt: string | null
+}
+
+/** Longest message the owner may send to an agent. */
+export const MESSAGE_MAX = 4000
 
 export type FindingView = {
   id: number
@@ -602,6 +622,8 @@ export type TaskDetail = {
   deliveries: DeliveryView[]
   watches: WatchView[]
   runs: RunView[]
+  /** What the owner wrote to the task's agent, oldest first. */
+  messages: MessageView[]
 }
 
 /** What the inbox lists: a task that waits for a person, and why. */

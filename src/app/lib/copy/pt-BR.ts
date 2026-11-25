@@ -319,6 +319,27 @@ export const ptBR: Copy = {
     reviewLine: (round: number, verdict: string) => `Tentativa ${round}: ${verdict}`,
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} em ${sha}`,
   },
+  conversation: {
+    heading: 'Fale com o agente',
+    mode: 'Como falar',
+    ask: 'Perguntar',
+    guide: 'Orientar',
+    askHelp: 'O agente só lê e responde. Nada do que ele fizer é mantido.',
+    guideHelp:
+      'O agente trabalha no que você escrever, e as verificações e a revisão rodam no resultado.',
+    label: 'Sua mensagem para o agente',
+    placeholder: 'O que você quer saber, ou mudar?',
+    send: 'Enviar',
+    sent: 'Enviada.',
+    you: 'Você',
+    agent: 'Agente',
+    pending: 'Esperando o agente ler…',
+    failed: (reason: string) => `Não entregue: ${reason}`,
+    guided: 'Enviada ao agente como uma mudança. A tarefa roda de novo.',
+    cost: (usd: string) => `custo ${usd}`,
+    context: (title: string, issue: number, repository: string) =>
+      `Uma mensagem do dono para o agente que trabalhou em "${title}" (issue #${issue} de ${repository}).`,
+  },
   taskActions: {
     title: 'Ações',
     heading: 'O que você quer fazer?',

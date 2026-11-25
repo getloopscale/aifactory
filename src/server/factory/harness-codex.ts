@@ -140,7 +140,7 @@ export function codexHarness(
     // `cwd` is a path the factory built, and `resume` was checked to be a UUID.
     const result = await executeAgent(
       backend,
-      `cd ${input.cwd} && ${env}${CODEX} exec${resume ? ` resume ${resume}` : ''}${model}${effort} --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json - < ${PROMPT_FILE}`,
+      `cd ${input.cwd} && ${env}${CODEX} exec${resume ? ` resume ${resume}` : ''}${model}${effort} --skip-git-repo-check ${input.ask ? '--sandbox read-only' : '--dangerously-bypass-approvals-and-sandbox'} --json - < ${PROMPT_FILE}`,
       input,
       codexEvents,
     )

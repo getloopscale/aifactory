@@ -97,7 +97,7 @@ export function claudeCodeHarness(
     // `cwd` is a path the factory built (see run-task), never text from the issue.
     const result = await executeAgent(
       backend,
-      `cd ${input.cwd} && ${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p --output-format ${format} --dangerously-skip-permissions${model}${effort}${plugin}${flags} < ${PROMPT_FILE}`,
+      `cd ${input.cwd} && ${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p --output-format ${format} ${input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'}${model}${effort}${plugin}${flags} < ${PROMPT_FILE}`,
       input,
       claudeEvents,
     )
