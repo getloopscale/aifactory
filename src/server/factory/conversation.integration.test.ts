@@ -148,7 +148,9 @@ describe('a message to a running pass', () => {
   it('settles a message as delivered only when the pass has it, and leaves one written before the pass', async () => {
     const taskId = await seedTask()
     const before = await pending(taskId, 'old')
-    const since = new Date()
+    // Taken from the database's own clock, with a gap on each side, so the two messages never share a millisecond with it.
+    const since = new Date(before.createdAt.getTime() + 5)
+    await new Promise((r) => setTimeout(r, 20))
     const sent: string[] = []
     const pass: ActivePass = {
       interrupts: false,

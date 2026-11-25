@@ -45,4 +45,14 @@ describe('the inbox', () => {
     render(<Page />)
     expect(await screen.findByText(/no way on/)).toBeTruthy()
   })
+
+  it('offers the notification button', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ items: [] })),
+    )
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission: vi.fn() })
+    render(<Page />)
+    expect(screen.getByRole('button', { name: 'Notify me' })).toBeDefined()
+  })
 })
