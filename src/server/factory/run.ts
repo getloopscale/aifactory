@@ -146,9 +146,9 @@ import {
 } from './sandbox'
 import { Preparation } from './sandbox-prepared'
 import { enterRunStage } from './stages'
-import type { AgentEvent } from './transcript'
 import { Transcript } from './transcript-store'
 import { answerPrompt, parseQuestion, questionComment } from './waiting'
+import { endLive, liveFor, type PassCall } from './live-conversation'
 
 /** Where a run is, kept outside it so a failure before the run exists is still reported at a stage. */
 export type RunState = { current: string; sandbox: IsolatedSandbox | undefined }
@@ -693,7 +693,7 @@ export class Run {
     who: CodingHarness,
     role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
     attempt: number,
-    call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
+    call: PassCall,
   ): Promise<HarnessResult> {
     const { db } = this.c.deps
     const { taskId } = this.c
@@ -701,12 +701,16 @@ export class Run {
     const started = Date.now()
     let result: HarnessResult
     try {
-      result = await call(this.transcript.sink(transcriptRole(role), attempt))
+      result = await call(
+        this.transcript.sink(transcriptRole(role), attempt),
+        liveFor(taskId, role),
+      )
       if (result.unauthorized && who.reauthorize) {
         await this.transcript.drain()
         result = await this.afterRefusal(who, role, attempt, call)
       }
     } catch (error) {
+      endLive(taskId)
       await this.transcript.drain()
       // The agent did not come back (the sandbox died, say, or its login could not be renewed). It still ran,
       // and that is on record.
@@ -722,6 +726,7 @@ export class Run {
       })
       throw error
     }
+    endLive(taskId)
     await this.transcript.flush()
     this.cost += result.costUsd ?? 0
     await db.update(task).set({ costUsd: this.cost }).where(eq(task.id, taskId))
@@ -781,7 +786,7 @@ export class Run {
     who: CodingHarness,
     role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
     attempt: number,
-    call: (onEvent: (event: AgentEvent) => void) => Promise<HarnessResult>,
+    call: PassCall,
   ): Promise<HarnessResult> {
     const refused = `the ${who.name} login was refused by the provider`
     const rules = this.spec.egress
@@ -805,7 +810,10 @@ export class Run {
         `Codex login was refused and could not be renewed (${error instanceof Error ? error.message : String(error)}): connect Codex again from the Setup page`,
       )
     }
-    const again = await call(this.transcript!.sink(transcriptRole(role), attempt))
+    const again = await call(
+      this.transcript!.sink(transcriptRole(role), attempt),
+      liveFor(this.c.taskId, role),
+    )
     if (again.unauthorized) {
       const now = rules[at]?.headers?.authorization?.replace(/^Bearer /, '')
       if (now) await who.markRefused?.(now).catch(() => {})
@@ -1079,9 +1087,10 @@ export class Run {
         resuming.answer ?? '',
         resuming.answeredBy ?? 'a person',
       )
-      return this.settle(builder, 'builder', resuming.attempt, (onEvent) =>
+      return this.settle(builder, 'builder', resuming.attempt, (onEvent, live) =>
         builder.resume!(backend, resuming.sessionId, {
           onEvent,
+          live,
           cwd: repoDir,
           timeoutMs,
           prompt,
@@ -1098,16 +1107,17 @@ export class Run {
     })
     if (this.plan && this.plannedBy) {
       const prompt = givenPlanPrompt(this.buildInput(), this.plan, this.plannedBy)
-      return this.settle(builder, 'builder', 1, (onEvent) =>
-        builder.run(backend, { onEvent, cwd: repoDir, timeoutMs, prompt, role: 'builder' }),
+      return this.settle(builder, 'builder', 1, (onEvent, live) =>
+        builder.run(backend, { onEvent, live, cwd: repoDir, timeoutMs, prompt, role: 'builder' }),
       )
     }
     if (this.planned && this.sessionId) {
       const prompt = implementPlanPrompt(this.planned)
       const sessionId = this.sessionId
-      return this.settle(builder, 'builder', 1, (onEvent) =>
+      return this.settle(builder, 'builder', 1, (onEvent, live) =>
         builder.resume!(backend, sessionId, {
           onEvent,
+          live,
           cwd: repoDir,
           timeoutMs,
           prompt,
@@ -1115,9 +1125,10 @@ export class Run {
         }),
       )
     }
-    return this.settle(builder, 'builder', 1, (onEvent) =>
+    return this.settle(builder, 'builder', 1, (onEvent, live) =>
       builder.run(backend, {
         onEvent,
+        live,
         cwd: repoDir,
         timeoutMs,
         prompt: buildPrompt(this.buildInput()),
@@ -1143,9 +1154,10 @@ export class Run {
       conversation: true,
     })
     const prompt = guidePrompt(text)
-    return this.settle(builder, 'builder', 1, (onEvent) =>
+    return this.settle(builder, 'builder', 1, (onEvent, live) =>
       builder.resume!(backend, sessionId, {
         onEvent,
+        live,
         cwd: repoDir,
         timeoutMs,
         prompt,
@@ -1604,9 +1616,10 @@ export class Run {
       attempt: 1,
       refuted: true,
     })
-    const result = await this.settle(this.builder, 'builder', 1, (onEvent) =>
+    const result = await this.settle(this.builder, 'builder', 1, (onEvent, live) =>
       this.builder.resume!(this.backend, this.sessionId!, {
         onEvent,
+        live,
         cwd: this.repoDir,
         timeoutMs,
         role: 'builder',
@@ -1637,9 +1650,10 @@ export class Run {
       reviewer: this.reviewer.name,
       resolved: true,
     })
-    const result = await this.settle(this.reviewer, 'reviewer', 1, (onEvent) =>
+    const result = await this.settle(this.reviewer, 'reviewer', 1, (onEvent, live) =>
       this.reviewer.run(this.backend, {
         onEvent,
+        live,
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
         role: 'reviewer',
@@ -1798,9 +1812,10 @@ export class Run {
       merger: true,
       files: files.slice(0, 50),
     })
-    const result = await this.settle(merger, 'merger', attempt, (onEvent) =>
+    const result = await this.settle(merger, 'merger', attempt, (onEvent, live) =>
       merger.run(backend, {
         onEvent,
+        live,
         cwd: this.repoDir,
         timeoutMs,
         prompt: mergerPrompt({
@@ -1994,9 +2009,10 @@ export class Run {
       attempt,
       rework: true,
     })
-    const result = await this.settle(this.builder, 'builder', attempt, (onEvent) =>
+    const result = await this.settle(this.builder, 'builder', attempt, (onEvent, live) =>
       this.builder.resume!(this.backend, this.sessionId!, {
         onEvent,
+        live,
         cwd: this.repoDir,
         timeoutMs,
         role: 'builder',
@@ -2141,9 +2157,10 @@ export class Run {
       },
     )
     this.risk = this.assess(sha, { touched, size, unplanned })
-    const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent) =>
+    const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent, live) =>
       this.reviewer.run(this.backend, {
         onEvent,
+        live,
         cwd: this.repoDir,
         timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
         role: 'reviewer',
