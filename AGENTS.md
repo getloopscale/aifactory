@@ -115,7 +115,10 @@ reads that file, not a convention.
   which gives it `knowledge_search` and `knowledge_read`; a file that starts a sandbox opens a
   `KnowledgeFeed` on it, which copies the project's slice to `/tmp/knowledge` and replaces it when the base
   moves. Only the `knowledge-sync` cron fetches or pushes, and only to `factory-memory`, never to the
-  owner's branch. `src/server/knowledge/every-agent.test.ts` fails for an agent without it.
+  owner's branch. `src/server/knowledge/every-agent.test.ts` fails for an agent without it. One exception, listed there as
+  `PUBLIC_UNTRUSTED`: the review of a pull request the factory did not open (`factory/external-review.ts`) reads a stranger's
+  diff and its answer is a public comment, so it gets no knowledge (no feed, no tool), and `plain()` makes what it
+  posts inert text, with no image, link, autolink or HTML.
 - **The curator groups notes and never writes.** `knowledge-curator` (`FACTORY_KNOWLEDGE_CURATOR_MODE`: `off`,
   `trial` by default, `auto`) asks an assistant built by `buildAssistant` (`knowledge/curator-agent.ts`) to group a
   project's notes; `curator-answer.ts` parses a closed set (`merge`, `promote`, `keep`) and an answer that does not

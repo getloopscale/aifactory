@@ -883,6 +883,40 @@ export class FakeGithub implements GithubApi {
     )
   }
 
+  /** The reviews posted on pull requests, in order. */
+  readonly reviews: { repo: string; number: number; sha: string; body: string }[] = []
+
+  async postPullRequestReview(
+    repo: string,
+    token: string,
+    number: number,
+    input: { sha: string; body: string },
+  ) {
+    return this.call(
+      { method: 'postPullRequestReview', repo, token, args: [number, input], failed: false },
+      () => {
+        this.reviews.push({ repo, number, ...input })
+        return String(this.reviews.length)
+      },
+    )
+  }
+
+  async reviewedCommits(
+    repo: string,
+    token: string,
+    number: number,
+    marker: string,
+    author: string,
+  ) {
+    return this.call(
+      { method: 'reviewedCommits', repo, token, args: [number, marker, author], failed: false },
+      () =>
+        this.reviews
+          .filter((r) => r.repo === repo && r.number === number && r.body.includes(marker))
+          .map((r) => r.sha),
+    )
+  }
+
   async enableAutoMerge(repo: string, token: string, number: number, sha: string): Promise<void> {
     return this.call(
       { method: 'enableAutoMerge', repo, token, args: [number, sha], failed: false },

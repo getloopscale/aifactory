@@ -37,6 +37,7 @@ beforeEach(async () => {
   fake = new FakeGithub()
   fake.app.events.push(
     'issue_comment',
+    'pull_request',
     'pull_request_review',
     'pull_request_review_comment',
     'check_suite',

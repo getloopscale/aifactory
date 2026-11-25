@@ -75,6 +75,7 @@ export type RepositoryPatch = {
   /** The label a Linear item carries to ask for work; `null` means `factory`. */
   linearLabel?: string | null
   askQuestions?: boolean
+  reviewExternalPulls?: boolean
   harness?: string | null
   reviewer?: string | null
   releaseMode?: 'manual' | 'trial' | 'auto' | null
@@ -201,6 +202,7 @@ export async function listRepositories(deps: WorkDeps): Promise<RepositoriesView
       linearTeamId: row?.linearTeamId ?? null,
       linearLabel: row?.linearLabel ?? null,
       askQuestions: row?.askQuestions ?? true,
+      reviewExternalPulls: row?.reviewExternalPulls ?? false,
       harness: row?.harness ?? null,
       reviewer: row?.reviewer ?? null,
       releaseMode: row?.releaseMode ?? null,
@@ -400,6 +402,9 @@ export async function saveRepository(
       : { linearTeamId: patch.linearTeamId?.trim() || null }),
     ...(patch.linearLabel === undefined ? {} : { linearLabel: patch.linearLabel?.trim() || null }),
     ...(patch.askQuestions === undefined ? {} : { askQuestions: patch.askQuestions }),
+    ...(patch.reviewExternalPulls === undefined
+      ? {}
+      : { reviewExternalPulls: patch.reviewExternalPulls }),
     ...(patch.harness === undefined ? {} : { harness: patch.harness }),
     ...(patch.reviewer === undefined ? {} : { reviewer: patch.reviewer }),
     ...(patch.releaseMode === undefined ? {} : { releaseMode: patch.releaseMode }),

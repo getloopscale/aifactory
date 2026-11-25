@@ -14,6 +14,7 @@ export type SandboxOwner =
   | { owner: 'task'; taskId: number; run: string }
   | { owner: 'eval'; caseId: string; runId: string }
   | { owner: 'prove-checks'; repository: string }
+  | { owner: 'review-pull-request'; repository: string; pull: number }
   | { owner: 'plan'; planId: number }
 
 /** A sandbox as the provider lists it: what it was created with, and when. */
