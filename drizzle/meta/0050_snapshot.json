@@ -1,6 +1,4 @@
 {
-  "id": "743667a5-233e-4a70-ae5c-e1c5673cbb19",
-  "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2259,6 +2257,18 @@
           "notNull": true,
           "default": false
         },
+        "linear_team_id": {
+          "name": "linear_team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linear_label": {
+          "name": "linear_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "checks": {
           "name": "checks",
           "type": "jsonb",
@@ -2372,6 +2382,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "checks_proof_by_provider": {
+          "name": "checks_proof_by_provider",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
         "integration_checks": {
           "name": "integration_checks",
           "type": "jsonb",
@@ -2411,20 +2428,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "checks_proof_by_provider": {
-          "name": "checks_proof_by_provider",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "risk_patterns": {
-          "name": "risk_patterns",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2436,6 +2439,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "full_name"
+          ]
+        },
+        "repository_linear_team_id_unique": {
+          "name": "repository_linear_team_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "linear_team_id"
           ]
         }
       },
@@ -2867,6 +2877,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'github'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_identifier": {
+          "name": "display_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_url": {
+          "name": "item_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "issue_title": {
           "name": "issue_title",
           "type": "text",
@@ -2962,6 +2997,15 @@
           "columns": [
             "repository",
             "issue_number"
+          ]
+        },
+        "task_source_item_unique": {
+          "name": "task_source_item_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "source",
+            "external_id"
           ]
         }
       },
@@ -3272,5 +3316,7 @@
     "columns": {},
     "schemas": {},
     "tables": {}
-  }
+  },
+  "id": "5b0d9f65-c63c-41ce-8305-f0d756afd3d6",
+  "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658"
 }

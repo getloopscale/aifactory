@@ -1,3 +1,4 @@
+import { itemRef } from './item-ref'
 import { and, desc, eq } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 
@@ -225,6 +226,7 @@ async function delivered(
       repository: row.repository,
       token: work.token,
       issueNumber: row.issueNumber,
+      item: itemRef(row),
       title: detail.issueTitle,
       sha,
       pullRequestUrl,

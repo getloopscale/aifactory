@@ -1,3 +1,4 @@
+import { itemRef } from './item-ref'
 import { and, asc, eq, like, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
@@ -63,6 +64,8 @@ export async function createPreRelease(
     repository: string
     token: string
     issueNumber: number
+    /** How the item is named in text (`itemRef`); `#<issueNumber>` when absent. */
+    item?: string
     title: string
     /** The commit that was verified and reviewed: the evidence is keyed by it. */
     sha: string
@@ -86,6 +89,7 @@ export async function createPreRelease(
   ).slice(-1)
   const { name, body } = preReleaseNotes({
     issueNumber: input.issueNumber,
+    item: input.item,
     title: input.title,
     sha: input.sha,
     pullRequestUrl: input.pullRequestUrl,
@@ -231,7 +235,7 @@ export async function release(
       base: target,
       title: `Release: ${row.issueTitle}`,
       body: [
-        `Promotes \`${PRE_RELEASE_BRANCH}\` to \`${target}\`, with #${row.issueNumber}: ${row.issueTitle}.`,
+        `Promotes \`${PRE_RELEASE_BRANCH}\` to \`${target}\`, with ${itemRef(row)}: ${row.issueTitle}.`,
         '',
         pre
           ? `Pre-release: \`${pre.tag}\` (${pre.url}). Everything on \`${PRE_RELEASE_BRANCH}\` is released with it.`
@@ -677,7 +681,7 @@ export async function createOwnTag(
     sha: input.mergeSha,
     name: `${tag}: ${row.issueTitle}`,
     body: [
-      `Release of #${row.issueNumber}: ${row.issueTitle}.`,
+      `Release of ${itemRef(row)}: ${row.issueTitle}.`,
       '',
       pre
         ? `Promoted from the pre-release \`${pre.tag}\` (${pre.url}) by ${input.actor}.`

@@ -98,6 +98,8 @@ function Settings({
   const [domains, setDomains] = useState(formatDomains(repo.egress))
   const [baseBranch, setBaseBranch] = useState(repo.baseBranch ?? '')
   const [releaseBranch, setReleaseBranch] = useState(repo.releaseBranch ?? '')
+  const [linearTeam, setLinearTeam] = useState(repo.linearTeamId ?? '')
+  const [linearLabel, setLinearLabel] = useState(repo.linearLabel ?? '')
   const [ask, setAsk] = useState(repo.askQuestions)
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
@@ -137,6 +139,8 @@ function Settings({
         egress: parseDomains(domains),
         baseBranch: baseBranch.trim() || null,
         releaseBranch: releaseBranch.trim() || null,
+        linearTeamId: linearTeam.trim() || null,
+        linearLabel: linearLabel.trim() || null,
         askQuestions: ask,
         harness: harness || null,
         reviewer: reviewer || null,
@@ -230,6 +234,26 @@ function Settings({
           className="mt-1 w-full"
         />
         <span className="text-muted-foreground">{s.releaseBranchHelp}</span>
+      </label>
+      <label className="block">
+        <span className="text-foreground">{s.linearTeam}</span>
+        <Input
+          aria-label={s.linearTeam}
+          value={linearTeam}
+          onChange={(e) => setLinearTeam(e.target.value)}
+          className="mt-1 w-full"
+        />
+        <span className="text-muted-foreground">{s.linearTeamHelp}</span>
+      </label>
+      <label className="block">
+        <span className="text-foreground">{s.linearLabel}</span>
+        <Input
+          aria-label={s.linearLabel}
+          value={linearLabel}
+          placeholder={s.linearLabelDefault}
+          onChange={(e) => setLinearLabel(e.target.value)}
+          className="mt-1 w-full"
+        />
       </label>
       <label className="block">
         <span className="text-foreground">{t.runLimit.label}</span>

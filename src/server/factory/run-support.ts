@@ -167,6 +167,8 @@ const seconds = (ms: number) => `${(ms / 1000).toFixed(1)} s`
 
 export function pullRequestBody(input: {
   issueNumber: number
+  /** How the body names the item when it is not a GitHub issue: a link to the tracker. */
+  item?: string
   sha: string
   rows: StoredCheck[]
   agentSummary: string
@@ -188,7 +190,7 @@ export function pullRequestBody(input: {
   return [
     // No closing keyword: where the integration branch is the repository's default one, GitHub would close
     // the issue at integration. The factory closes it when a release ships the change, naming the version.
-    `For #${input.issueNumber}. The factory closes the issue when a release ships this change.`,
+    `For ${input.item ?? `#${input.issueNumber}`}. The factory closes the issue when a release ships this change.`,
     '',
     ...(input.handoff ? [`**This needs a person:** ${input.handoff}.`, ''] : []),
     `Checks the factory ran on \`${input.sha.slice(0, 7)}\`:`,
@@ -247,8 +249,24 @@ export function resolvedComment(input: {
 export const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim()
 
 /** The title of the squash commit that integrates an issue's work: the issue's title on one line, and its number. */
-export const squashTitle = (issueTitle: string, issueNumber: number) =>
-  `${oneLine(issueTitle)} (#${issueNumber})`
+export const squashTitle = (issueTitle: string, issueNumber: number, identifier?: string) =>
+  `${oneLine(issueTitle)} (${identifier ?? `#${issueNumber}`})`
+
+/** The task's item as a person reads it: `#4` for a GitHub issue, `ENG-12` for a Linear one. */
+export const itemIdentifier = (row: { source: string; displayIdentifier: string | null }) =>
+  row.source === 'linear' ? (row.displayIdentifier ?? undefined) : undefined
+
+/** The item as the pull request body links it: a Linear item links to the tracker, a GitHub issue is `#4`. */
+export const itemLink = (row: {
+  source: string
+  displayIdentifier: string | null
+  itemUrl: string | null
+}): string | undefined =>
+  row.source === 'linear' && row.displayIdentifier
+    ? row.itemUrl
+      ? `[${row.displayIdentifier}](${row.itemUrl})`
+      : row.displayIdentifier
+    : undefined
 
 /** The commit identity as a git config file. Newlines would start a new setting, so refuse them. */
 export function gitConfig(author: { name: string; email: string }): string {

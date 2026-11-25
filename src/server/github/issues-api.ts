@@ -29,6 +29,8 @@ export type IssuesApi = {
   updateIssueBody(repo: string, token: string, issueNumber: number, body: string): Promise<void>
 }
 
+import { refuseTracked } from '../work-source/tracker'
+
 /** Runs on the factory host with an installation token for one repository. */
 export function createIssuesApi(
   plainFetch: FetchLike = (url, init) => fetch(url, init),
@@ -84,6 +86,7 @@ export function createIssuesApi(
     },
 
     async addLabels(repo, token, issueNumber, labels) {
+      refuseTracked(repo, issueNumber, 'labelling')
       await expect(
         await call(repo, token, `/issues/${issueNumber}/labels`, { labels }),
         `labelling ${repo}#${issueNumber}`,
@@ -92,6 +95,7 @@ export function createIssuesApi(
     },
 
     async updateIssueBody(repo, token, issueNumber, body) {
+      refuseTracked(repo, issueNumber, 'editing the body of')
       await expect(
         await call(repo, token, `/issues/${issueNumber}`, { body }, 'PATCH'),
         `updating the body of ${repo}#${issueNumber}`,

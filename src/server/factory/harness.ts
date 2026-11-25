@@ -1,3 +1,4 @@
+import { issueRef } from './item-ref'
 import { personaPreamble, type PersonaRole } from '../agents/prompts/personas'
 import { knowledgeRules, LEARNED_RULE } from '../knowledge/prompt'
 import type { SandboxBackend } from '@theokit/agents/sandbox'
@@ -199,7 +200,7 @@ You are working on the repository ${input.repo}, on the branch ${input.branch}.
 
 Implement this issue.
 
-# ${input.title} (#${input.issueNumber})
+# ${input.title} (${issueRef(input.issueNumber)})
 
 ${input.body || '(the issue has no description)'}
 ${clarificationsOf(input.clarifications)}

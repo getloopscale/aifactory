@@ -33,7 +33,8 @@ import { conflictTurnHolds } from './conflict-turn'
 import { heldRepositories } from './promotion-merge'
 import { loadRepoConfig } from './repo-config'
 import { outcome } from './transitions'
-import { squashTitle } from './run-support'
+import { itemRef } from './item-ref'
+import { itemIdentifier, squashTitle } from './run-support'
 import { selfCiRefusal } from './self-ci'
 
 export type AwaitCiDeps = {
@@ -144,6 +145,7 @@ async function completeIntegration(
         repository: row.repository,
         token,
         issueNumber: row.issueNumber,
+        item: itemRef(row),
         title: row.issueTitle,
         sha: verifiedSha,
         tagSha: advanced.developSha ?? mergedSha,
@@ -267,7 +269,7 @@ async function integrateHeld(deps: AwaitCiDeps, w: Waiting, required: string[]):
   }
   const merged = await deps.api.mergePullRequest(row.repository, token, number, verifiedSha, {
     method: 'squash',
-    title: squashTitle(row.issueTitle, row.issueNumber),
+    title: squashTitle(row.issueTitle, row.issueNumber, itemIdentifier(row)),
   })
   return finish(deps, w, merged.sha)
 }

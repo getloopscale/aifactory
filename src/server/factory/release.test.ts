@@ -9,6 +9,27 @@ describe('preReleaseTag', () => {
   })
 })
 
+describe('a Linear item in a release', () => {
+  it('never puts its negative ordinal in a tag or in the notes', () => {
+    expect(preReleaseTag(-3, 'abcdef1234567890')).toBe('pre/L3-abcdef1')
+    const { name, body } = preReleaseNotes({
+      issueNumber: -3,
+      item: 'ENG-12',
+      title: 'T',
+      sha: 'abcdef1234567890',
+      pullRequestUrl: undefined,
+      checks: [],
+      review: undefined,
+      attempts: 1,
+      costUsd: 0,
+      agentSummary: '',
+    })
+    expect(name).toBe('ENG-12 T')
+    expect(body).toContain('work on ENG-12,')
+    expect(body).not.toContain('-3')
+  })
+})
+
 describe('highestVersion', () => {
   it('takes the highest version by number, not by name or by order', () => {
     expect(highestVersion(['v1.2.0', 'v1.10.0', 'v1.9.3', 'v0.9.0'])).toBe('v1.10.0')
