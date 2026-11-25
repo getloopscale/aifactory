@@ -269,7 +269,7 @@ export function withEvidence<T extends FailedCheck>(checks: T[]): T[] {
  * rerun; the job failed again after the watch reran it; or GitHub refused the rerun, so the evidence is
  * the first attempt.
  */
-export type Rerun = 'not-actions' | 'failed-again' | 'refused'
+export type Rerun = 'not-actions' | 'failed-again' | 'refused' | 'skipped'
 
 /** Where a failure was seen, and what became of its rerun. */
 export type FailureAt = {
@@ -285,6 +285,8 @@ const RERUN_TOLD: Record<Rerun, string> = {
   'failed-again': ', and again after a rerun.',
   refused:
     '. GitHub refused to rerun it, so it could not be rerun: the evidence is from its first attempt.',
+  skipped:
+    '. The App installation has not granted `actions: write`, so it was not rerun: the evidence is from its first attempt.',
 }
 
 /** An issue on the tracker, as a new issue links it. */

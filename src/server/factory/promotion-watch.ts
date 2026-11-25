@@ -61,6 +61,8 @@ export type PromotionWatchResult = {
   /** What the stopped line did (`promotion-line.ts`). */
   line: string[]
   errors: string[]
+  /** Why a step was left out, one per repository per pass: information, never an error. */
+  notes?: string[]
 }
 
 /**
@@ -76,10 +78,22 @@ export function passLog(result: PromotionWatchResult): { level: 'log' | 'error';
       line: JSON.stringify({ event: 'watch_promotions_failed', errors }),
     })
   }
+  if (done.notes && done.notes.length > 0) {
+    lines.push({
+      level: 'log',
+      line: JSON.stringify({ event: 'watch_promotions_rerun_skipped', notes: done.notes }),
+    })
+  }
+  const { notes: _notes, ...counted } = done
   const acted =
-    done.reruns + done.opened.length + done.commented.length + done.capped + done.line.length > 0
+    counted.reruns +
+      counted.opened.length +
+      counted.commented.length +
+      counted.capped +
+      counted.line.length >
+    0
   if (acted)
-    lines.push({ level: 'log', line: JSON.stringify({ event: 'watch_promotions', ...done }) })
+    lines.push({ level: 'log', line: JSON.stringify({ event: 'watch_promotions', ...counted }) })
   return lines
 }
 
@@ -96,6 +110,8 @@ type Pass = {
   deps: PromotionWatchDeps
   repo: string
   token: string
+  /** Whether the token carries `actions: write`, which a rerun needs. */
+  canRerun: boolean
   result: PromotionWatchResult
   opened: number
 }
@@ -137,9 +153,16 @@ async function watchRepository(
   row: { fullName: string; releaseBranch: string | null },
   result: PromotionWatchResult,
 ) {
-  const { token } = await deps.app.installationToken(row.fullName)
+  const { token, actionsWrite } = await deps.app.installationToken(row.fullName)
   const release = row.releaseBranch ?? (await deps.github.defaultBranch(row.fullName, token))
-  const pass: Pass = { deps, repo: row.fullName, token, result, opened: 0 }
+  const pass: Pass = {
+    deps,
+    repo: row.fullName,
+    token,
+    result,
+    opened: 0,
+    canRerun: actionsWrite === true,
+  }
   for (const promotion of promotionPullRequests(release)) {
     const pull = await deps.api.openPullRequest(row.fullName, token, promotion.head, promotion.base)
     if (!pull) {
@@ -249,13 +272,23 @@ async function jobFailure(
   const { api } = pass.deps
   const job = await api.jobAttempt(pass.repo, pass.token, run.id)
   let rerun: Rerun = 'failed-again'
-  if (job.attempt < 2) {
+  if (job.attempt < 2 && !pass.canRerun) {
+    skipRerun(pass)
+    rerun = 'skipped'
+  } else if (job.attempt < 2) {
     const answer = reruns.get(job.runId) ?? (await rerunOnce(pass, job.runId, reruns))
     if (answer.started) return undefined
     rerun = 'refused'
   }
   const evidence = await readEvidence(api, pass.repo, pass.token, run)
   return { name: run.name, url: run.url, evidence, rerun }
+}
+
+/** Said once per repository per pass, as information. */
+function skipRerun(pass: Pass) {
+  const note = `${pass.repo}: the installation has not granted actions: write, so failed jobs are not rerun; grant it in the App's installation settings`
+  const notes = (pass.result.notes ??= [])
+  if (!notes.includes(note)) notes.push(note)
 }
 
 async function rerunOnce(pass: Pass, runId: number, reruns: Map<number, RerunAnswer>) {
