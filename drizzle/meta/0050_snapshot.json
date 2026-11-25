@@ -1,5 +1,5 @@
 {
-  "id": "6732604f-a486-4157-8fec-9d8c0ac975d5",
+  "id": "5b0d9f65-c63c-41ce-8305-f0d756afd3d6",
   "prevId": "8172ee4b-e5ff-4245-8780-2ae53cb3f658",
   "version": "7",
   "dialect": "postgresql",
@@ -783,13 +783,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "omitted": {
-          "name": "omitted",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2266,6 +2259,18 @@
           "notNull": true,
           "default": false
         },
+        "linear_team_id": {
+          "name": "linear_team_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "linear_label": {
+          "name": "linear_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "checks": {
           "name": "checks",
           "type": "jsonb",
@@ -2379,6 +2384,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "checks_proof_by_provider": {
+          "name": "checks_proof_by_provider",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
         "integration_checks": {
           "name": "integration_checks",
           "type": "jsonb",
@@ -2418,20 +2430,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "checks_proof_by_provider": {
-          "name": "checks_proof_by_provider",
-          "type": "jsonb",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'{}'::jsonb"
-        },
-        "sandbox_image": {
-          "name": "sandbox_image",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'default'"
         }
       },
       "indexes": {},
@@ -2443,6 +2441,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "full_name"
+          ]
+        },
+        "repository_linear_team_id_unique": {
+          "name": "repository_linear_team_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "linear_team_id"
           ]
         }
       },
@@ -2874,6 +2879,31 @@
           "primaryKey": false,
           "notNull": true
         },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'github'"
+        },
+        "external_id": {
+          "name": "external_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "display_identifier": {
+          "name": "display_identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "item_url": {
+          "name": "item_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "issue_title": {
           "name": "issue_title",
           "type": "text",
@@ -2969,6 +2999,15 @@
           "columns": [
             "repository",
             "issue_number"
+          ]
+        },
+        "task_source_item_unique": {
+          "name": "task_source_item_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "source",
+            "external_id"
           ]
         }
       },
@@ -3264,123 +3303,6 @@
           ]
         }
       },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.evidence_artifact": {
-      "name": "evidence_artifact",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "serial",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "evidence_id": {
-          "name": "evidence_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "task_id": {
-          "name": "task_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha": {
-          "name": "sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "path": {
-          "name": "path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content_type": {
-          "name": "content_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "size_bytes": {
-          "name": "size_bytes",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "content": {
-          "name": "content",
-          "type": "bytea",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "at": {
-          "name": "at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "evidence_artifact_task_id": {
-          "name": "evidence_artifact_task_id",
-          "columns": [
-            {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "evidence_artifact_evidence_id_evidence_id_fk": {
-          "name": "evidence_artifact_evidence_id_evidence_id_fk",
-          "tableFrom": "evidence_artifact",
-          "tableTo": "evidence",
-          "columnsFrom": [
-            "evidence_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "evidence_artifact_task_id_task_id_fk": {
-          "name": "evidence_artifact_task_id_task_id_fk",
-          "tableFrom": "evidence_artifact",
-          "tableTo": "task",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

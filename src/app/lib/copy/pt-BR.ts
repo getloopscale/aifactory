@@ -758,6 +758,11 @@ export const ptBR: Copy = {
       releaseBranchDefault: (defaultBranch: string) => `${defaultBranch} (o padrão)`,
       releaseBranchHelp:
         'Só é preciso quando a branch padrão é develop, onde fica a pré-versão: informe main, ou a branch que suas versões finais usam.',
+      linearTeam: 'Time do Linear que alimenta este repositório',
+      linearTeamHelp:
+        'O id de um time do Linear. Os itens desse time que levam o rótulo abaixo viram tarefas aqui, depois que o repositório for habilitado. Um time alimenta um repositório. Deixe vazio para não receber nada do Linear.',
+      linearLabel: 'Rótulo que pede trabalho no Linear',
+      linearLabelDefault: 'factory (o padrão)',
       ask: 'Deixar o agente me fazer perguntas na issue quando algo não estiver claro',
       builder: 'Construtor',
       reviewer: 'Revisor',

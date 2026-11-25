@@ -201,6 +201,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       id: r.id,
       repository: r.repository,
       issueNumber: r.issueNumber,
+      displayIdentifier: r.source === 'linear' ? r.displayIdentifier : null,
       title: r.issueTitle,
       stage: r.stage as Stage,
       column: columnOf(r.stage as Stage, again?.retryable ?? null, {
@@ -455,6 +456,7 @@ const actionView = (a: ActionRow, owner: TaskRow): CoordinatorActionView => ({
   taskId: a.taskId,
   repository: owner.repository,
   issueNumber: owner.issueNumber,
+  displayIdentifier: owner.source === 'linear' ? owner.displayIdentifier : null,
   title: owner.issueTitle,
   exceptionKind: a.exceptionKind,
   action: a.action,

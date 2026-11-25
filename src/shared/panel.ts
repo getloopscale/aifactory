@@ -369,6 +369,8 @@ export type TaskCard = {
   id: number
   repository: string
   issueNumber: number
+  /** What a person reads for an item that is not a GitHub issue (`ENG-12`); its `issueNumber` is a local ordinal. */
+  displayIdentifier?: string | null
   title: string
   stage: Stage
   column: Column
@@ -569,6 +571,7 @@ export type CoordinatorActionView = {
   /** The task it belongs to, for the list across tasks. */
   repository: string
   issueNumber: number
+  displayIdentifier?: string | null
   title: string
   exceptionKind: string
   action: string
@@ -645,6 +648,9 @@ export type RepositoryView = {
   baseBranch: string | null
   /** The branch a release lands on; null means the default branch. */
   releaseBranch: string | null
+  /** The Linear team whose labelled items become this repository's tasks, and the label that asks for work. */
+  linearTeamId: string | null
+  linearLabel: string | null
   /** False when the agent decides what is unclear instead of asking on the issue. */
   askQuestions: boolean
   harness: string | null

@@ -1,3 +1,4 @@
+import { issueRef } from '../factory/item-ref'
 import type { Read } from '../factory/doctor'
 
 import type { TaskException } from './exceptions'
@@ -163,7 +164,7 @@ export function recogniseQueue(facts: RepositoryQueueFacts): TaskException | und
         kind: 'queue_blocked',
         taskId: fix.taskId,
         head: headOf(test, fix.jobId),
-        evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and #${fix.issueNumber}, which carries it, ${where}`,
+        evidence: `the test "${test}" failed on tasks ${[...failed].join(', ')} of ${facts.repository}, and ${issueRef(fix.issueNumber)}, which carries it, ${where}`,
       }
     }
   }
