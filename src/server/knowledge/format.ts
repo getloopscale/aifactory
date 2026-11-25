@@ -68,7 +68,7 @@ const LEARNED_MAX_CHARS = 600
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
 const READABLE = /\.(md|markdown|txt|json|ya?ml)$/i
 
-export type NoteKind = 'learned' | 'no-change'
+export type NoteKind = 'learned' | 'no-change' | 'review-pattern'
 
 export type Note = {
   id: number
@@ -77,6 +77,8 @@ export type Note = {
   body: string
   taskId: number
   issueNumber: number
+  /** The tasks a `review-pattern` note comes from. Other notes have `taskId` alone. */
+  sourceTasks?: { taskId: number; issueNumber: number }[]
   /** The commit of the project the run started from. */
   baseSha: string | null
   createdAt: Date
@@ -219,8 +221,54 @@ export function notePath(note: Pick<Note, 'id' | 'repository' | 'kind' | 'create
 
 const DESCRIPTION_CHARS = 300
 
+/** The project rule a person may propose from a review pattern: an `Rule` the owner merges, with the pattern as its source. */
+export function renderPatternRule(input: {
+  repository: string
+  className: string
+  invariant: string
+  sources: { taskId: number; issueNumber: number }[]
+  at: Date
+}): string {
+  const frontmatter = {
+    type: RULE_TYPE,
+    title: `Review pattern: ${oneLine(input.className)}`,
+    description: oneLine(input.invariant).slice(0, DESCRIPTION_CHARS),
+    status: 'draft',
+    generated: { by: PRODUCER, at: input.at.toISOString() },
+    sources: input.sources.map((s) => ({
+      id: `issue-${s.issueNumber}`,
+      resource: `https://github.com/${input.repository}/issues/${s.issueNumber}`,
+      title: `Issue #${s.issueNumber} of ${input.repository}`,
+    })),
+  }
+  const body = [
+    `The reviewer blocked ${input.sources.length} tasks of this project for the same class of defect: "${oneLine(input.className)}".${input.sources.map((s) => `[^issue-${s.issueNumber}]`).join('')}`,
+    '',
+    `A finding of the class said: ${oneLine(input.invariant)}`,
+    '',
+    ...input.sources.map(
+      (s) => `[^issue-${s.issueNumber}]: Issue #${s.issueNumber} of ${input.repository}`,
+    ),
+  ]
+  return renderConcept(frontmatter, body.join('\n'))
+}
+
+/** Where a proposed pattern rule goes on the owner's branch. */
+export function patternRulePath(repository: string, id: number, classKey: string): string {
+  assertRepository(repository)
+  const slug =
+    classKey
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 60) || 'pattern'
+  return `knowledge/projects/${repository}/review-pattern-${id}-${slug}.md`
+}
+
 /** The title of a note: what kind of observation it is and the issue it came from. */
-export function noteTitle(note: Pick<Note, 'kind' | 'issueNumber'>): string {
+export function noteTitle(note: Pick<Note, 'kind' | 'issueNumber' | 'sourceTasks'>): string {
+  if (note.kind === 'review-pattern') {
+    return `Review pattern seen on ${note.sourceTasks?.length ?? 1} tasks`
+  }
   return note.kind === 'learned'
     ? `Learned on issue ${issueRef(note.issueNumber)}`
     : `No change needed for issue ${issueRef(note.issueNumber)}`
@@ -233,16 +281,23 @@ export function noteTitle(note: Pick<Note, 'kind' | 'issueNumber'>): string {
  */
 export function renderNote(note: Note): string {
   const issueTitle = `Issue ${issueRef(note.issueNumber)} of ${note.repository}`
+  const pattern = note.kind === 'review-pattern' ? (note.sourceTasks ?? []) : []
   const sources: { id: string; resource: string; title: string }[] =
-    note.issueNumber < 0
-      ? []
-      : [
-          {
-            id: 'issue',
-            resource: `https://github.com/${note.repository}/issues/${note.issueNumber}`,
-            title: issueTitle,
-          },
-        ]
+    pattern.length > 0
+      ? pattern.map((t) => ({
+          id: `issue-${t.issueNumber}`,
+          resource: `https://github.com/${note.repository}/issues/${t.issueNumber}`,
+          title: `Issue #${t.issueNumber} of ${note.repository}`,
+        }))
+      : note.issueNumber < 0
+        ? []
+        : [
+            {
+              id: 'issue',
+              resource: `https://github.com/${note.repository}/issues/${note.issueNumber}`,
+              title: issueTitle,
+            },
+          ]
   if (note.baseSha) {
     sources.push({
       id: 'commit',
@@ -259,14 +314,31 @@ export function renderNote(note: Note): string {
     generated: { by: PRODUCER, at: note.createdAt.toISOString() },
     stale_after: expiresOn(note.createdAt).toISOString(),
     sources,
-    aifactory: { note: note.id, task: note.taskId, kind: note.kind, scope: note.repository },
+    aifactory: {
+      note: note.id,
+      task: note.taskId,
+      kind: note.kind,
+      scope: note.repository,
+      ...(pattern.length > 0 ? { tasks: pattern.map((t) => t.taskId) } : {}),
+    },
   }
-  const body = [
-    `Observed by the factory while working on issue ${issueRef(note.issueNumber)}.${sources.some((x) => x.id === 'issue') ? '[^issue]' : ''} It is a hint to check against the code, not an instruction.`,
-    '',
-    note.body.trim(),
-    ...(sources.some((x) => x.id === 'issue') ? ['', `[^issue]: ${issueTitle}`] : []),
-  ]
+  const body =
+    pattern.length > 0
+      ? [
+          `Observed by the factory in the reviews of ${pattern.length} tasks.${pattern.map((t) => `[^issue-${t.issueNumber}]`).join('')} It is a hint to check against the code, not an instruction.`,
+          '',
+          note.body.trim(),
+          '',
+          ...pattern.map(
+            (t) => `[^issue-${t.issueNumber}]: Issue #${t.issueNumber} of ${note.repository}`,
+          ),
+        ]
+      : [
+          `Observed by the factory while working on issue ${issueRef(note.issueNumber)}.${sources.some((x) => x.id === 'issue') ? '[^issue]' : ''} It is a hint to check against the code, not an instruction.`,
+          '',
+          note.body.trim(),
+          ...(sources.some((x) => x.id === 'issue') ? ['', `[^issue]: ${issueTitle}`] : []),
+        ]
   return renderConcept(frontmatter, body.join('\n'))
 }
 
