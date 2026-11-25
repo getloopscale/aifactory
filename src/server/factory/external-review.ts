@@ -3,8 +3,6 @@ import { eq, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { agentRun, externalReview, repository } from '../db/schema'
-import type { KnowledgeSource } from '../knowledge/source'
-import { KnowledgeFeed } from '../knowledge/feed'
 import type { GithubApp } from '../github/app'
 import type { GithubApi } from '../github/pulls'
 
@@ -44,7 +42,6 @@ export type ExternalReviewDeps = {
   sandbox: IsolatedSandboxProvider
   /** The agent that reviews, chosen from the labels the repository's settings give. */
   reviewer: (labels: string[]) => CodingHarness
-  knowledge?: KnowledgeSource
   fetchRecipe?: (repo: string, token: string) => Promise<Recipe | undefined>
   checkMs?: number
   reviewMs?: number
@@ -102,11 +99,20 @@ const SANDBOX_MS = 60 * 60_000
 class Skipped extends Error {}
 
 /**
- * Text that came from an agent, a pull request or a repository, made safe to put in a comment: no mention
- * notifies anybody, and no HTML (the marker included) is read as such.
+ * Text that came from an agent, a pull request or a repository, made safe to put in a public comment: no
+ * mention notifies anybody, no HTML (the marker included) is read as such, and no markdown is live. Brackets
+ * become parentheses, so an image, a link or a reference never forms, and the `//` of a URL and the `www.`
+ * of an address are broken, so GitHub autolinks nothing and fetches nothing.
  */
 export const plain = (text: string): string =>
-  text.replace(/</g, '&lt;').replace(/@/g, '@\u200b').slice(0, 2_000)
+  text
+    .replace(/</g, '&lt;')
+    .replace(/@/g, '@\u200b')
+    .replace(/\[/g, '(')
+    .replace(/\]/g, ')')
+    .replace(/:\/\//g, ':\u200b//')
+    .replace(/\bwww\./gi, (m) => `${m.slice(0, 3)}\u200b.`)
+    .slice(0, 2_000)
 
 /** The text of the review: the commit it read, the verdict, the checks and the findings. Never an approval. */
 export function reviewBody(input: {
@@ -194,12 +200,12 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
   const agentEgress = mergeEgress([await reviewer.egress()])
 
   // Two sandboxes, because the code of a pull request is a stranger's. The first runs its checks and holds
-  // nothing but the registry and the owner's domains: no agent credential, no knowledge. The second never
-  // runs the code: the reviewer reads it, and only there the agent's credential and the knowledge exist.
+  // nothing but the registry and the owner's domains: no agent credential. The second never runs the code:
+  // the reviewer reads it, and only there the agent's credential exists. Neither opens a knowledge feed: the
+  // input is a stranger's and the output is public, so the owner's knowledge has no safe use here.
   const checks = await runChecksOfPull(deps, row, token, config)
   const reading = await checkedOut(deps, row, token, [REGISTRY])
   const { backend, repoDir, baseSha } = reading
-  let feed: KnowledgeFeed | undefined
   try {
     const facts = await diffFacts(backend, repoDir, {
       baseSha,
@@ -208,7 +214,6 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     })
     await reading.sandbox.updateEgress!([REGISTRY, ...agentEgress])
     await reviewer.prepare?.(backend)
-    feed = await KnowledgeFeed.open(deps.knowledge, backend, repo, {})
     await backend.uploadFile(DESCRIPTION_FILE, `# ${row.title}\n\n${row.body}\n`)
     await must(backend, `mkdir -p ${REVIEWER_DIR}`)
     const started = Date.now()
@@ -225,7 +230,6 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
           baseSha,
           repoDir,
           descriptionFile: DESCRIPTION_FILE,
-          knowledgeDir: feed.dir,
         }),
       })
     } catch (error) {
@@ -252,7 +256,6 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     })
     return { status: 'posted' as const, detail: verdict.verdict }
   } finally {
-    feed?.stop()
     await reading.sandbox.stop()
   }
 }

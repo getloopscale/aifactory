@@ -29,7 +29,6 @@ export default defineJob('review-pull-request', {
           botLogin: botAuthor(env).name,
           sandbox: run.sandbox,
           reviewer: pick,
-          knowledge: run.knowledge,
           fetchRecipe: run.fetchRecipe,
         },
         input.reviewId,
