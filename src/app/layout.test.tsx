@@ -9,7 +9,6 @@ import WorkPage from './work/page'
 import { en } from './lib/copy/en'
 import { ptBR } from './lib/copy/pt-BR'
 import { announceChange } from './lib/live'
-import { act } from '@testing-library/react'
 
 // The expected text comes from the dictionary of the language the test runs in.
 let t = ptBR
