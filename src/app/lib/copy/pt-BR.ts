@@ -371,13 +371,16 @@ export const ptBR: Copy = {
       command?: number
       other?: number
     }) =>
-      [
-        c.read ? `leu ${c.read} ${c.read === 1 ? 'arquivo' : 'arquivos'}` : '',
-        c.search ? `buscou ${c.search} ${c.search === 1 ? 'vez' : 'vezes'}` : '',
-        c.edit ? `editou ${c.edit} ${c.edit === 1 ? 'arquivo' : 'arquivos'}` : '',
-        c.command ? `rodou ${c.command} ${c.command === 1 ? 'comando' : 'comandos'}` : '',
-        c.other ? `${c.other} ${c.other === 1 ? 'outro passo' : 'outros passos'}` : '',
-      ]
+      (
+        [
+          ['read', 'leu', 'arquivo', 'arquivos'],
+          ['search', 'buscou', 'vez', 'vezes'],
+          ['edit', 'editou', 'arquivo', 'arquivos'],
+          ['command', 'rodou', 'comando', 'comandos'],
+        ] as const
+      )
+        .map(([k, verb, one, many]) => (c[k] ? `${verb} ${c[k]} ${c[k] === 1 ? one : many}` : ''))
+        .concat(c.other ? `${c.other} ${c.other === 1 ? 'outro passo' : 'outros passos'}` : '')
         .filter(Boolean)
         .join(', '),
     failedSteps: (n: number) => `${n} ${n === 1 ? 'falhou' : 'falharam'}`,
