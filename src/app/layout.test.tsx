@@ -101,6 +101,24 @@ describe('the layout', () => {
     expect(screen.getByRole('link', { name: `${t.places.health} 3` })).toBeDefined()
   })
 
+  it('counts the setup items that are not ok on the Setup entry, and nothing while the report is not there', async () => {
+    const item = (status: string) => ({ id: status, label: status, status, detail: '' })
+    serve({
+      ...signedIn,
+      'GET /api/panel/setup': { ready: false, items: [item('ok'), item('warn'), item('missing')] },
+    })
+    renderAt('/')
+    const name = `${t.places.setup}, ${t.menu.setupNeedsAttention(2)}`
+    const link = await screen.findByRole('link', { name })
+    expect(link.querySelector('[data-tone="destructive"]')?.textContent).toBe('2')
+    cleanup()
+    vi.unstubAllGlobals()
+    serve(signedIn)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.getByRole('link', { name: t.places.setup }).textContent).toBe(t.places.setup)
+  })
+
   it('marks the item of the menu the owner is in, and "Novo chat" only on the empty conversation', async () => {
     serve(signedIn)
     renderAt('/')

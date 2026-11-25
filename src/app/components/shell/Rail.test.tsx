@@ -8,6 +8,7 @@ import { en } from '../../lib/copy/en'
 import { ptBR } from '../../lib/copy/pt-BR'
 
 import { Rail } from './Rail'
+import type { SetupAttention } from './SetupCount'
 
 // The tests read their expected text from the dictionary of the language they run in.
 let t = ptBR
@@ -23,7 +24,10 @@ const Where = () => {
   return <p aria-label="where">{pathname + (state ? ' fresh' : '')}</p>
 }
 
-function mount(path = '/inbox', over: { waiting?: number; wrong?: number } = {}) {
+function mount(
+  path = '/inbox',
+  over: { waiting?: number; wrong?: number; setup?: SetupAttention } = {},
+) {
   const props = {
     onExpand: vi.fn(),
     waiting: 0,
@@ -159,5 +163,27 @@ describe('the folded menu', () => {
     for (const name of Object.values(t.places))
       expect(screen.getByRole('link', { name })).toBeDefined()
     expect(screen.queryByRole('link', { name: ptBR.places.board })).toBeNull()
+  })
+})
+
+describe('the setup icon of the folded menu', () => {
+  it('shows no count when nothing needs attention', () => {
+    mount('/inbox')
+    const link = screen.getByRole('link', { name: t.places.setup })
+    expect(link.textContent).toBe('')
+  })
+
+  it('shows the count and tone, and names it in words', () => {
+    mount('/inbox', { setup: { count: 2, tone: 'destructive' } })
+    const link = screen.getByRole('link', {
+      name: `${t.places.setup}, ${t.menu.setupNeedsAttention(2)}`,
+    })
+    expect(link.textContent).toBe('2')
+    expect(link.querySelector('[data-tone="destructive"]')).not.toBeNull()
+  })
+
+  it('uses the warning tone for a warning', () => {
+    mount('/inbox', { setup: { count: 1, tone: 'warning' } })
+    expect(document.querySelector('[data-tone="warning"]')).not.toBeNull()
   })
 })
