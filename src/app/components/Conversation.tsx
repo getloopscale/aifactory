@@ -10,6 +10,8 @@ import { Assist } from './Assist'
 
 /** The stages where the agent has stopped and the owner may write to it. The server decides again. */
 export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed']
+/** The stages where a pass takes a message while it works, and the role whose pass it is. */
+export const LIVE = { build: 'builder', review: 'reviewer' } as const
 
 function Thread({ messages }: { messages: MessageView[] }) {
   const { t } = useCopy()
@@ -56,14 +58,21 @@ export function Conversation({ detail, onDone }: { detail: TaskDetail; onDone: (
   const [mode, setMode] = useState<'ask' | 'guide'>('ask')
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
-  const canWrite = CONVERSABLE.includes(task.stage)
+  const liveRole = LIVE[task.stage as keyof typeof LIVE] as 'builder' | 'reviewer' | undefined
+  const canWrite = liveRole !== undefined || CONVERSABLE.includes(task.stage)
+  // The harness of the last pass of that role: Codex cannot read while it runs, so a message stops its step.
+  const harness = [...detail.runs].reverse().find((r) => r.role === liveRole)?.harness
+  const stopsStep = liveRole !== undefined && harness === 'codex'
   if (!canWrite && messages.length === 0) return null
 
   async function send() {
     setBusy(true)
     setNotice(undefined)
     try {
-      await post(`/api/panel/tasks/${task.id}/messages`, { text, mode })
+      await post(`/api/panel/tasks/${task.id}/messages`, {
+        text,
+        mode: liveRole ? 'ask' : mode,
+      })
       setNotice(mode === 'guide' ? t.conversation.guided : t.conversation.sent)
       setText('')
       onDone()
@@ -83,20 +92,27 @@ export function Conversation({ detail, onDone }: { detail: TaskDetail; onDone: (
       <Thread messages={messages} />
       {canWrite ? (
         <div>
-          <div className="mb-2 flex items-center gap-2">
-            <select
-              aria-label={t.conversation.mode}
-              value={mode}
-              onChange={(e) => setMode(e.target.value as typeof mode)}
-              className="h-8 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
-            >
-              <option value="ask">{t.conversation.ask}</option>
-              <option value="guide">{t.conversation.guide}</option>
-            </select>
-            <span className="text-sm text-muted-foreground">
-              {mode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
-            </span>
-          </div>
+          {liveRole ? (
+            <p className="mb-2 text-sm text-muted-foreground">
+              {t.conversation.runningHelp}
+              {stopsStep ? <> {t.conversation.stopsStep}</> : null}
+            </p>
+          ) : (
+            <div className="mb-2 flex items-center gap-2">
+              <select
+                aria-label={t.conversation.mode}
+                value={mode}
+                onChange={(e) => setMode(e.target.value as typeof mode)}
+                className="h-8 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
+              >
+                <option value="ask">{t.conversation.ask}</option>
+                <option value="guide">{t.conversation.guide}</option>
+              </select>
+              <span className="text-sm text-muted-foreground">
+                {mode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
+              </span>
+            </div>
+          )}
           <label className="block text-sm">
             <span className="text-foreground">{t.conversation.label}</span>
             <Textarea

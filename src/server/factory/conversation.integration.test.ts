@@ -15,7 +15,8 @@ import {
   UNTAKEN_MS,
 } from './conversation'
 import { FakeSandbox } from './fake-sandbox'
-import type { CodingHarness } from './harness'
+import type { ActivePass, CodingHarness } from './harness'
+import { watchMessages } from './live-conversation'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -129,5 +130,59 @@ describe('keeping the session after an ask', () => {
     const kept = await keepSessionIfStopped(getDb(), await sandbox(), harness, taskId, 's-new')
     expect(kept).toMatch(/moved on while the agent answered/)
     expect(await getDb().select().from(agentSession)).toEqual([])
+  })
+})
+
+describe('a message to a running pass', () => {
+  const pending = async (taskId: number, text: string) => {
+    const [row] = await getDb()
+      .insert(agentMessage)
+      .values({ taskId, author: 'owner', text, mode: 'ask' })
+      .returning()
+    return row
+  }
+  const until = async (done: () => Promise<boolean>) => {
+    for (let i = 0; i < 100 && !(await done()); i += 1) await new Promise((r) => setTimeout(r, 20))
+  }
+
+  it('settles a message as delivered only when the pass has it, and leaves one written before the pass', async () => {
+    const taskId = await seedTask()
+    const before = await pending(taskId, 'old')
+    const since = new Date()
+    const sent: string[] = []
+    const pass: ActivePass = {
+      interrupts: false,
+      send: async (text) => (sent.push(text), 'delivered'),
+    }
+    const watch = watchMessages(getDb(), taskId, pass, since, 10)
+    const mine = await pending(taskId, 'new')
+    await until(
+      async () =>
+        (await getDb().select().from(agentMessage).where(eq(agentMessage.id, mine.id)))[0]
+          .delivery === 'delivered',
+    )
+    await watch.stop()
+    expect(sent).toEqual(['new'])
+    const [old] = await getDb().select().from(agentMessage).where(eq(agentMessage.id, before.id))
+    expect(old).toMatchObject({ delivery: 'pending', claimedAt: null })
+  })
+
+  it('gives the claim back when the pass is over, so the message is not lost', async () => {
+    const taskId = await seedTask()
+    const watch = watchMessages(
+      getDb(),
+      taskId,
+      { interrupts: false, send: async () => 'ended' },
+      new Date(Date.now() - 1000),
+      10,
+    )
+    const m = await pending(taskId, 'late')
+    await until(async () => {
+      const [row] = await getDb().select().from(agentMessage).where(eq(agentMessage.id, m.id))
+      return row.claimedAt === null && (await new Promise((r) => setTimeout(r, 50)), true)
+    })
+    await watch.stop()
+    const [row] = await getDb().select().from(agentMessage).where(eq(agentMessage.id, m.id))
+    expect(row).toMatchObject({ delivery: 'pending', claimedAt: null })
   })
 })

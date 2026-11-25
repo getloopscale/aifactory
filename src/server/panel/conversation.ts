@@ -37,6 +37,26 @@ export async function sendMessage(
   const decided = outcome({ ...row, conversation: input.mode }, 'conversation')
   if (decided.kind !== 'action') throw new ActionRefused(decided.reason)
 
+  if (decided.action === 'message_running_agent') {
+    // Stored for the pass that is running, with no job: the process that holds the pass takes it from here
+    // (`watchMessages`), and one the pass never took is queued by `stuckConversations` for the stopped agent.
+    return deps.inTransaction(async (tx) => {
+      const [locked] = await tx.select().from(task).where(eq(task.id, taskId)).for('update')
+      const again = outcome({ ...locked, conversation: input.mode }, 'conversation')
+      if (again.kind !== 'action' || again.action !== 'message_running_agent') {
+        throw new ActionRefused(
+          again.kind === 'action'
+            ? 'the agent stopped while you wrote: send it again'
+            : again.reason,
+        )
+      }
+      const [made] = await tx
+        .insert(agentMessage)
+        .values({ taskId, author: 'owner', text, mode: input.mode })
+        .returning({ id: agentMessage.id })
+      return { messageId: made.id, delivery: 'pending' as const }
+    })
+  }
   if (decided.action === 'guide_agent') {
     // The run is queued and the message recorded in one transaction, under the task's lock.
     const { messageId } = await deps.guide(taskId, text)
@@ -47,6 +67,9 @@ export async function sendMessage(
     const [locked] = await tx.select().from(task).where(eq(task.id, taskId)).for('update')
     const again = outcome({ ...locked, conversation: 'ask' }, 'conversation')
     if (again.kind !== 'action') throw new ActionRefused(again.reason)
+    if (again.action !== 'ask_agent') {
+      throw new ActionRefused('the agent started working while you wrote: send it again')
+    }
     const [made] = await tx
       .insert(agentMessage)
       .values({ taskId, author: 'owner', text, mode: 'ask' })

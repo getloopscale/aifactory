@@ -99,13 +99,18 @@ export function claudeCodeHarness(
     const format = watched(backend, input) ? 'stream-json --verbose' : 'json'
     const inbox = live ? await openInbox(backend, input.prompt, live) : undefined
     // `cwd` is a path the factory built (see run-task), never text from the issue.
-    const result = await executeAgent(
-      backend,
-      `cd ${input.cwd} && ${inbox ? `${inbox.reader} | ` : ''}${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p ${inbox ? '--input-format stream-json ' : ''}--output-format ${format} ${input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'}${model}${effort}${plugin}${flags}${inbox ? '' : ` < ${PROMPT_FILE}`}`,
-      input,
-      inbox ? (line) => inbox.seen(line) : claudeEvents,
-    )
-    inbox?.end()
+    let result: Awaited<ReturnType<typeof executeAgent>>
+    try {
+      result = await executeAgent(
+        backend,
+        `cd ${input.cwd} && ${inbox ? `${inbox.reader} | ` : ''}${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p ${inbox ? '--input-format stream-json ' : ''}--output-format ${format} ${input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'}${model}${effort}${plugin}${flags}${inbox ? '' : ` < ${PROMPT_FILE}`}`,
+        input,
+        inbox ? (line) => inbox.seen(line) : claudeEvents,
+      )
+    } finally {
+      // Whatever ended the pass (a timeout, a dead sandbox), the `tail` and the inbox files do not outlive it.
+      inbox?.end()
+    }
     return parseClaudeResult(result.exitCode, resultLine(result.stdout), result.stderr)
   }
 
@@ -161,7 +166,9 @@ async function openInbox(
     if (closed) return
     closed = true
     // Anchored, so it matches the `tail` process and not the shell whose command line holds the same words.
-    void backend.execute(`pkill -f '^${reader.replace('+', '\\+')}$'`).catch(() => undefined)
+    void backend
+      .execute(`pkill -f '^${reader.replace('+', '\\+')}$'; rm -f ${path} ${path}.*`)
+      .catch(() => undefined)
   }
   live.attach({
     interrupts: false,

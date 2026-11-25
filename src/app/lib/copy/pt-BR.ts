@@ -336,6 +336,10 @@ export const ptBR: Copy = {
     pending: 'Esperando o agente ler…',
     failed: (reason: string) => `Não entregue: ${reason}`,
     guided: 'Enviada ao agente como uma mudança. A tarefa roda de novo.',
+    runningHelp:
+      'O agente está trabalhando. Ele lê sua mensagem enquanto trabalha e responde na transcrição.',
+    stopsStep:
+      'Este agente é o Codex: uma mensagem interrompe o passo em andamento e continua a mesma sessão com as suas palavras.',
     cost: (usd: string) => `custo ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `Uma mensagem do dono para o agente que trabalhou em "${title}" (issue #${issue} de ${repository}).`,

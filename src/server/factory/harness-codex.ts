@@ -196,26 +196,31 @@ export function codexHarness(
     })
     let prompt = input.prompt
     let total: HarnessResult | undefined
-    for (;;) {
-      const run = await once(backend, input, prompt, session, (line) => {
-        const id = threadOf(line)
-        if (id) session = id
-      })
-      const parsed = parseCodexResult(run.exitCode, run.stdout, run.stderr)
-      session = parsed.sessionId ?? session
-      const message = waiting
-      waiting = undefined
-      if (message === undefined) {
-        over = true
-        return total ? merged(total, parsed, session) : parsed
+    try {
+      for (;;) {
+        const run = await once(backend, input, prompt, session, (line) => {
+          const id = threadOf(line)
+          if (id) session = id
+        })
+        const parsed = parseCodexResult(run.exitCode, run.stdout, run.stderr)
+        session = parsed.sessionId ?? session
+        const message = waiting
+        waiting = undefined
+        if (message === undefined) {
+          over = true
+          return total ? merged(total, parsed, session) : parsed
+        }
+        // The stopped process is not a result; what it spent still counts.
+        total = merged(
+          total,
+          { ok: true, summary: '', tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut },
+          session,
+        )
+        prompt = message
       }
-      // The stopped process is not a result; what it spent still counts.
-      total = merged(
-        total,
-        { ok: true, summary: '', tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut },
-        session,
-      )
-      prompt = message
+    } finally {
+      // However the pass ended, a message that comes later is not ours to resume.
+      over = true
     }
   }
 

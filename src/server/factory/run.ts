@@ -703,14 +703,14 @@ export class Run {
     try {
       result = await call(
         this.transcript.sink(transcriptRole(role), attempt),
-        liveFor(taskId, role),
+        liveFor(db, taskId, role),
       )
       if (result.unauthorized && who.reauthorize) {
         await this.transcript.drain()
         result = await this.afterRefusal(who, role, attempt, call)
       }
     } catch (error) {
-      endLive(taskId)
+      await endLive(taskId)
       await this.transcript.drain()
       // The agent did not come back (the sandbox died, say, or its login could not be renewed). It still ran,
       // and that is on record.
@@ -726,7 +726,7 @@ export class Run {
       })
       throw error
     }
-    endLive(taskId)
+    await endLive(taskId)
     await this.transcript.flush()
     this.cost += result.costUsd ?? 0
     await db.update(task).set({ costUsd: this.cost }).where(eq(task.id, taskId))
@@ -812,7 +812,7 @@ export class Run {
     }
     const again = await call(
       this.transcript!.sink(transcriptRole(role), attempt),
-      liveFor(this.c.taskId, role),
+      liveFor(this.c.deps.db, this.c.taskId, role),
     )
     if (again.unauthorized) {
       const now = rules[at]?.headers?.authorization?.replace(/^Bearer /, '')

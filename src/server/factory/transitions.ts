@@ -92,6 +92,7 @@ export type Action =
   | 'block'
   /** The agent's session is resumed in a new sandbox to answer, read-only: nothing it does is pushed. */
   | 'ask_agent'
+  | 'message_running_agent'
   /** The message goes to the agent as a send-back: the task returns to `build` through the loop's checks and review. */
   | 'guide_agent'
 
@@ -188,6 +189,8 @@ const NOT_CONVERSABLE = refuse(
 const AGENT_RUNNING = refuse(
   'the agent of this task is working: wait until it stops, then write to it',
 )
+/** The builder and the reviewer take a message while they work: it is stored and handed to the pass that runs. */
+const LIVE_STAGES = ['build', 'review'] as const
 const NOT_GUIDABLE = refuse(
   'a message can guide the agent only of a task that is done or was handed over: ask instead, or answer its question',
 )
@@ -343,7 +346,16 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     failed: sendBack,
   },
   conversation: {
-    ...each(['intake', ...WORKING.filter((stage) => stage !== 'merge')], AGENT_RUNNING),
+    ...each(
+      [
+        'intake',
+        ...WORKING.filter(
+          (stage) => stage !== 'merge' && !(LIVE_STAGES as readonly string[]).includes(stage),
+        ),
+      ],
+      AGENT_RUNNING,
+    ),
+    ...each([...LIVE_STAGES], act('message_running_agent')),
     merge: MERGING,
     ...each(['released', 'cancelled'], NOT_CONVERSABLE),
     waiting: converse(false),
@@ -548,9 +560,16 @@ export function outcome(task: Facts, event: TransitionEvent): Outcome {
   return typeof rule === 'function' ? rule(task) : rule
 }
 
-/** Every stage in which `event` leads to an action for a task with these facts. */
-export function stagesWhere(event: TransitionEvent, task: Omit<Facts, 'stage'>): TaskStage[] {
-  return TASK_STAGES.filter((stage) => outcome({ ...task, stage }, event).kind === 'action')
+/** Every stage in which `event` leads to an action (the given one, when named) for a task with these facts. */
+export function stagesWhere(
+  event: TransitionEvent,
+  task: Omit<Facts, 'stage'>,
+  only?: Action,
+): TaskStage[] {
+  return TASK_STAGES.filter((stage) => {
+    const decided = outcome({ ...task, stage }, event)
+    return decided.kind === 'action' && (only === undefined || decided.action === only)
+  })
 }
 
 /**

@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { StreamingFakeBackend } from './fake-sandbox'
 import { claudeCodeHarness, userLine } from './harness-claude'
 import { codexHarness } from './harness-codex'
 import { PROMPT_FILE, type ActivePass, type HarnessInput } from './harness'
-import { activePass, deliverLive, endLive, liveFor } from './live-conversation'
+import * as claim from './message-claim'
+import { endLive, liveFor, watchMessages } from './live-conversation'
 
 const THREAD = '11111111-2222-3333-4444-555555555555'
 const result = (text: string) => JSON.stringify({ type: 'result', is_error: false, result: text })
@@ -52,6 +53,8 @@ function attached(): { live: NonNullable<HarnessInput['live']>; pass: () => Acti
     pass: () => pass!,
   }
 }
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('a message to a running Claude Code pass', () => {
   it('reads its input from an inbox and appends a message as one JSON line, by file', async () => {
@@ -111,6 +114,26 @@ describe('a message to a running Claude Code pass', () => {
     })
     expect(done.summary).toBe('only')
     expect(backend.commands.filter((c) => c.includes('pkill'))).toHaveLength(1)
+  })
+
+  it('stops the tail and removes the inbox when the pass throws', async () => {
+    const backend = new StreamingFakeBackend(() => ({}))
+    backend.executeStreaming = async () => {
+      throw new Error('sandbox died')
+    }
+    const { live } = attached()
+    await expect(
+      claudeCodeHarness({ kind: 'api-key', secret: 'k' }).run(backend, {
+        prompt: 'P',
+        cwd: '/work',
+        timeoutMs: 5,
+        onEvent: () => {},
+        live,
+      }),
+    ).rejects.toThrow('sandbox died')
+    const stop = backend.commands.filter((c) => c.includes('pkill'))
+    expect(stop).toHaveLength(1)
+    expect(stop[0]).toContain('rm -f /tmp/factory-inbox-')
   })
 
   it('answers ended once the input is closed', async () => {
@@ -186,20 +209,90 @@ describe('a message to a running Codex pass', () => {
   })
 })
 
-describe('the registry of running passes', () => {
-  it('reaches only the passes that write the work, and forgets an ended one', async () => {
-    expect(liveFor(900, 'planner')).toBeUndefined()
-    expect(await deliverLive(900, 'x')).toBe('none')
-    liveFor(900, 'builder')!.attach({ interrupts: true, send: async () => 'delivered' })
-    expect(activePass(900)).toEqual({ role: 'builder', interrupts: true })
-    expect(await deliverLive(900, 'x')).toBe('delivered')
-    endLive(900)
-    expect(activePass(900)).toBeUndefined()
+describe('the messages a running pass takes from the database', () => {
+  const message = (id: number, text: string) => ({ id, text }) as never
+
+  function fakeDb() {
+    const updates: Record<string, unknown>[] = []
+    const db = {
+      update: () => ({
+        set: (values: Record<string, unknown>) => ({
+          where: async () => void updates.push(values),
+        }),
+      }),
+    }
+    return { db: db as never, updates }
+  }
+  const until = async (done: () => boolean) => {
+    for (let i = 0; i < 100 && !done(); i += 1) await new Promise((r) => setTimeout(r, 5))
+  }
+
+  it('settles a message as delivered once the pass has it', async () => {
+    const queue = [message(1, 'a'), undefined]
+    vi.spyOn(claim, 'claimNext').mockImplementation(async () => queue.shift())
+    const { db, updates } = fakeDb()
+    const sent: string[] = []
+    const watch = watchMessages(
+      db,
+      1,
+      { interrupts: false, send: async (t) => (sent.push(t), 'delivered') },
+      new Date(),
+      5,
+    )
+    await until(() => updates.length > 0)
+    await watch.stop()
+    expect(sent).toEqual(['a'])
+    expect(updates[0]).toMatchObject({ delivery: 'delivered' })
   })
 
-  it('drops a pass that says it ended', async () => {
-    liveFor(901, 'reviewer')!.attach({ interrupts: false, send: async () => 'ended' })
-    expect(await deliverLive(901, 'x')).toBe('ended')
-    expect(activePass(901)).toBeUndefined()
+  it('fails a message the pass could not take, with the reason, and goes on', async () => {
+    const queue = [message(1, 'a'), undefined]
+    vi.spyOn(claim, 'claimNext').mockImplementation(async () => queue.shift())
+    const { db, updates } = fakeDb()
+    const watch = watchMessages(
+      db,
+      1,
+      {
+        interrupts: true,
+        send: async () => {
+          throw new Error('no session')
+        },
+      },
+      new Date(),
+      5,
+    )
+    await until(() => updates.length > 0)
+    await watch.stop()
+    expect(updates[0]).toMatchObject({ delivery: 'failed', reason: 'no session' })
+  })
+
+  it('gives the claim back when the pass is over and takes nothing more', async () => {
+    const queue = [message(1, 'a'), message(2, 'b')]
+    vi.spyOn(claim, 'claimNext').mockImplementation(async () => queue.shift())
+    const release = vi.spyOn(claim, 'releaseClaim').mockResolvedValue()
+    const { db, updates } = fakeDb()
+    const watch = watchMessages(
+      db,
+      1,
+      { interrupts: false, send: async () => 'ended' },
+      new Date(),
+      5,
+    )
+    await until(() => release.mock.calls.length > 0)
+    await new Promise((r) => setTimeout(r, 20))
+    await watch.stop()
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(release.mock.calls[0][1]).toBe(1)
+    expect(queue).toHaveLength(1)
+    expect(updates).toEqual([])
+  })
+
+  it('reaches only the passes that write the work, and stops watching when the pass ends', async () => {
+    const { db } = fakeDb()
+    expect(liveFor(db, 900, 'planner')).toBeUndefined()
+    vi.spyOn(claim, 'claimNext').mockResolvedValue(undefined)
+    liveFor(db, 900, 'builder')!.attach({ interrupts: false, send: async () => 'delivered' })
+    await endLive(900)
+    await endLive(900)
   })
 })
