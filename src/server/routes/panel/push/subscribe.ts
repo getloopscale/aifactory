@@ -5,7 +5,8 @@ import { getDb } from '../../../db'
 import { ownerOnly } from '../../../panel/policy'
 import { PushEndpoint } from '../../../push/endpoint'
 import { pushConfig } from '../../../push/config'
-import { saveSubscription } from '../../../push/store'
+import { baselineSubscription } from '../../../push/pass'
+import { isSubscribed, saveSubscription } from '../../../push/store'
 
 export const SubscribeBody = z.object({
   endpoint: PushEndpoint,
@@ -18,11 +19,10 @@ export const POST = route()
   .body(SubscribeBody)
   .handler(async ({ body, request }) => {
     if (!pushConfig()) return Response.json({ configured: false }, { status: 409 })
-    const row = await saveSubscription(
-      getDb(),
-      body,
-      request.headers.get('user-agent') ?? undefined,
-    )
+    const db = getDb()
+    const known = await isSubscribed(db, body.endpoint)
+    const row = await saveSubscription(db, body, request.headers.get('user-agent') ?? undefined)
+    if (!known) await baselineSubscription(db, row.id)
     return { configured: true, id: row.id }
   })
   .build()

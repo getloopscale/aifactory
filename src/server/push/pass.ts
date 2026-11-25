@@ -4,7 +4,7 @@ import type { Database } from '../db'
 import { inbox } from '../panel/queries'
 
 import type { PushConfig } from './config'
-import { departed, newMessages } from './notify'
+import { departed, identityOf, newMessages } from './notify'
 import type { PushSender } from './send'
 import { isGone } from './send'
 import {
@@ -38,6 +38,7 @@ export async function pushPass(deps: PushPassDeps): Promise<PushPassResult | und
   const result: PushPassResult = { sent: 0, removed: 0, failed: 0 }
   if (!config) return result
   const client = await deps.pool.connect()
+  let unlockFailed = false
   try {
     const taken = await client.query<{ taken: boolean }>(
       'select pg_try_advisory_lock(hashtext($1)) as taken',
@@ -74,10 +75,20 @@ export async function pushPass(deps: PushPassDeps): Promise<PushPassResult | und
       }
       return result
     } finally {
-      await client.query('select pg_advisory_unlock(hashtext($1))', [PUSH_LOCK])
+      await client.query('select pg_advisory_unlock(hashtext($1))', [PUSH_LOCK]).catch(() => {
+        unlockFailed = true
+      })
     }
   } finally {
-    client.release()
+    // A client that may still hold the lock is destroyed, not returned to the pool.
+    client.release(unlockFailed ? true : undefined)
+  }
+}
+
+/** A device that just subscribed holds what the inbox has now as already told: it hears only what is new. */
+export async function baselineSubscription(db: Database, subscriptionId: number): Promise<void> {
+  for (const item of await inbox(db)) {
+    await recordDelivery(db, subscriptionId, identityOf(item), item.at)
   }
 }
 

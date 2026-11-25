@@ -7,7 +7,7 @@ import { storageFromUrl } from '../db/config'
 import { ingress, pushSubscription, stageEvent, task } from '../db/schema'
 
 import { pushConfig } from './config'
-import { pushPass } from './pass'
+import { baselineSubscription, pushPass } from './pass'
 import type { PushSender } from './send'
 import { saveSubscription } from './store'
 
@@ -146,5 +146,26 @@ describe('pushPass', () => {
       .values({ taskId: id, stage: 'waiting', detail: { question: 'Again?' } })
     await pushPass({ db: getDb(), pool: pool(), config, sender })
     expect(sender).toHaveBeenCalledTimes(2)
+  })
+
+  it('a device that subscribes after an item hears only what is new', async () => {
+    await waitingTask()
+    const late = await subscribe(9)
+    await baselineSubscription(getDb(), late.id)
+    const sender = vi.fn(ok)
+    await pushPass({ db: getDb(), pool: pool(), config, sender })
+    expect(sender).not.toHaveBeenCalled()
+  })
+
+  it('destroys the client when the unlock fails', async () => {
+    await subscribe(1)
+    const release = vi.fn()
+    const query = vi.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_unlock')) throw new Error('connection lost')
+      return { rows: [{ taken: true }] }
+    })
+    const fake = { connect: async () => ({ query, release }) } as never
+    await pushPass({ db: getDb(), pool: fake, config, sender: ok })
+    expect(release).toHaveBeenCalledWith(true)
   })
 })
