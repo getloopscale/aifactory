@@ -263,6 +263,19 @@ describe('codexHarness', () => {
 
     await expect(harness.resume?.(backend, 'x; rm -rf /', input)).rejects.toThrow(/UUID/)
   })
+
+  it('resumes an ask turn read-only, with no bypass, the prompt by file', async () => {
+    const harness = codexHarness({ kind: 'api-key', secret: 'k' })
+    const sandbox = new FakeSandbox(() => ({ stdout: done }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    const id = '019a0000-0000-7000-8000-000000000001'
+
+    await harness.resume?.(backend, id, { ...input, ask: true })
+    const command = sandbox.backend.commands.at(-1)!
+    expect(command).toContain('--sandbox read-only')
+    expect(command).not.toContain('--dangerously-bypass-approvals-and-sandbox')
+    expect(command).toContain('< /tmp/factory-prompt.md')
+  })
 })
 
 describe('codexHarness model and effort', () => {

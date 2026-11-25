@@ -15,6 +15,7 @@ declare module 'theokit/server/jobs' {
       resume?: boolean
       mergeBase?: boolean
       fromReview?: boolean
+      conversation?: boolean
     }
     /**
      * Takes work the review approved, waiting in `merge`, to its pull request and the integration branch, at
@@ -23,6 +24,8 @@ declare module 'theokit/server/jobs' {
     'merge-task': { taskId: number; sha: string }
     /** Continues a task whose question was answered, from the snapshot taken when it was asked. */
     'resume-task': { taskId: number; questionId: number }
+    /** Delivers the owner's pending messages to a stopped task's agent, oldest first, one writer per task. */
+    conversation: { taskId: number }
     /** Has an agent read a repository and split a goal into issues. */
     'plan-run': { planId: number }
     /** Reviews a pull request the factory did not open, at one head commit, and posts one review. */

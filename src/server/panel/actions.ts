@@ -2,7 +2,16 @@ import { issueRef } from '../factory/item-ref'
 import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { decision, finding, question, repository, stageEvent, task, watch } from '../db/schema'
+import {
+  agentMessage,
+  decision,
+  finding,
+  question,
+  repository,
+  stageEvent,
+  task,
+  watch,
+} from '../db/schema'
 import type { GithubApp } from '../github/app'
 import { integrationBranch } from '../factory/branches'
 import { CONFLICT_NOTE_OPENING, withConflictFiles } from '../factory/merge-base'
@@ -12,6 +21,7 @@ import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
 import { answerMarker } from '../factory/waiting'
 import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
+import { storedSession } from '../factory/agent-session'
 import { fileOnce } from '../coordinator/file-once'
 import type { IssuesApi } from '../github/issues-api'
 import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
@@ -44,6 +54,8 @@ export type ActionDeps = {
           resume?: boolean
           mergeBase?: boolean
           fromReview?: boolean
+          /** The note is the owner's guidance, and the run resumes the builder's stored session with it. */
+          conversation?: boolean
         },
         key: string,
       ) => Promise<void>,
@@ -70,6 +82,11 @@ async function requeue(
   rework?: Rework,
   /** The task must still be unmerged and unresolved when its stage changes (the owner's merge of the base). */
   unmerged = false,
+  /**
+   * The send-back is the owner's guidance to the agent (`conversation` event), not a request for changes: its
+   * message is recorded in the same transaction, after checking under the task's lock that none waits for delivery.
+   */
+  conversation?: { text: string; messageId?: number },
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
     // What a person's send-back clears is kept on its intake, so withdrawing it can give it back. It is read
@@ -80,7 +97,21 @@ async function requeue(
         : []
     // The integration may have finished between the panel's read and this lock: a merged task is not sent back,
     // so no run starts on work already integrated and the cron's `done` never lands after the intake.
-    if (locked) mustAllow(locked, 'request_changes')
+    if (locked) {
+      if (conversation) {
+        mustAllow({ ...locked, conversation: 'guide' }, 'conversation')
+        const [waiting] = await tx
+          .select({ id: agentMessage.id })
+          .from(agentMessage)
+          .where(and(eq(agentMessage.taskId, taskId), eq(agentMessage.delivery, 'pending')))
+          .limit(1)
+        if (waiting) {
+          throw new ActionRefused(
+            'a message to the agent is still being delivered: wait until it ends',
+          )
+        }
+      } else mustAllow(locked, 'request_changes')
+    }
     const before = locked
       ? { resolvedSha: locked.resolvedSha, awaitingCiSha: locked.awaitingCiSha }
       : undefined
@@ -138,7 +169,24 @@ async function requeue(
         ...(kind === 'request_changes' ? { decisionId: made.id, restore: before } : {}),
       },
     })
-    await enqueueRun({ taskId, decisionId: made.id }, `task-${taskId}-d${made.id}`)
+    if (conversation) {
+      const [written] = await tx
+        .insert(agentMessage)
+        .values({
+          taskId,
+          author: 'owner',
+          text: conversation.text,
+          mode: 'guide',
+          delivery: 'delivered',
+          answeredAt: new Date(),
+        })
+        .returning({ id: agentMessage.id })
+      conversation.messageId = written.id
+    }
+    await enqueueRun(
+      { taskId, decisionId: made.id, ...(conversation ? { conversation: true } : {}) },
+      `task-${taskId}-d${made.id}`,
+    )
     return made.id
   })
 }
@@ -268,6 +316,36 @@ export async function requestChanges(
     row.headSha,
   )
   return { decisionId }
+}
+
+/**
+ * The owner's guidance to the agent of a done or handed-over task (`conversation` event, `guide` mode): the task
+ * goes back through `intake` to `build` like a send-back, with the message as its note, and the run resumes the
+ * builder's stored session with it. The checks and the review run on the result. A message that waits for its
+ * delivery holds the session, so no guidance starts beside it.
+ */
+export async function guideTask(deps: ActionDeps, taskId: number, text: string) {
+  const note = text.trim()
+  if (note === '') throw new ActionRefused('say what the agent should do')
+  const row = await load(deps.db, taskId)
+  const facts: Facts = { ...row, conversation: 'guide' }
+  mustAllow(facts, 'conversation')
+  if (!(await storedSession(deps.db, { taskId, role: 'builder' }))) {
+    throw new ActionRefused('the task kept no session of its agent to guide: ask instead')
+  }
+  const message: { text: string; messageId?: number } = { text: note.slice(0, NOTE_MAX) }
+  const decisionId = await requeue(
+    deps,
+    taskId,
+    stagesWhere('conversation', facts),
+    'request_changes',
+    note.slice(0, NOTE_MAX),
+    row.headSha,
+    undefined,
+    false,
+    message,
+  )
+  return { decisionId: decisionId!, messageId: message.messageId! }
 }
 
 /**

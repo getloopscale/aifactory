@@ -17,6 +17,8 @@ type PanelEvent =
   | 'retry_from_finding'
   | 'resolve'
   | 'release'
+  /** The owner writes to the task's agent, in `ask` or `guide` mode (`Facts.conversation`). */
+  | 'conversation'
 
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
@@ -88,6 +90,10 @@ export type Action =
   | 'answer'
   /** A `Blocked by` line goes on the issue, naming the open issue the work waits for. */
   | 'block'
+  /** The agent's session is resumed in a new sandbox to answer, read-only: nothing it does is pushed. */
+  | 'ask_agent'
+  /** The message goes to the agent as a send-back: the task returns to `build` through the loop's checks and review. */
+  | 'guide_agent'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -118,6 +124,8 @@ export type Facts = {
   trusted?: boolean
   /** The task waits in `intake` for a run a person asked for with a note, and no run has taken it. */
   sendBackPending?: boolean
+  /** How the owner's message is meant: `ask` only reads, `guide` may change the work. No mode counts as `ask`. */
+  conversation?: 'ask' | 'guide'
 }
 
 type Rule = Outcome | ((task: Facts) => Outcome)
@@ -173,6 +181,31 @@ const ALREADY_INTEGRATED = refuse(
 const onBranch = (task: Facts) =>
   act(task.branchGone ? 'start_from_integration_branch' : 'continue_on_branch')
 const sendBack: Rule = (task) => (task.mergedSha ? ALREADY_INTEGRATED : onBranch(task))
+
+const NOT_CONVERSABLE = refuse(
+  'the owner can write only to the agent of a task that waits for an answer, was handed over, is done or failed',
+)
+const AGENT_RUNNING = refuse(
+  'the agent of this task is working: wait until it stops, then write to it',
+)
+const NOT_GUIDABLE = refuse(
+  'a message can guide the agent only of a task that is done or was handed over: ask instead, or answer its question',
+)
+const GUIDE_MERGED = refuse(
+  'this work is already integrated, so guiding the agent would change work that was delivered: ask instead, or open a new job',
+)
+const GUIDE_NO_BRANCH = refuse(
+  'the task has no branch on GitHub to continue: ask instead, or retry the task',
+)
+/** A question changes nothing, so it is allowed wherever the agent has stopped; guiding sends the work back. */
+const converse =
+  (guidable: boolean): Rule =>
+  (task) => {
+    if (task.conversation !== 'guide') return act('ask_agent')
+    if (!guidable) return NOT_GUIDABLE
+    if (task.mergedSha || task.resolvedSha) return GUIDE_MERGED
+    return task.branchGone ? GUIDE_NO_BRANCH : act('guide_agent')
+  }
 
 const NOT_WITHDRAWABLE = refuse('only a send-back that has not started can be withdrawn')
 const withdraw: Rule = (task) =>
@@ -308,6 +341,15 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     // A run that failed after pushing (out of time, a question the sandbox could not wait for) has work
     // on its branch, which a retry would delete.
     failed: sendBack,
+  },
+  conversation: {
+    ...each(['intake', ...WORKING.filter((stage) => stage !== 'merge')], AGENT_RUNNING),
+    merge: MERGING,
+    ...each(['released', 'cancelled'], NOT_CONVERSABLE),
+    waiting: converse(false),
+    failed: converse(false),
+    done: converse(true),
+    handoff: converse(true),
   },
   merge_base_by_owner: {
     ...each(

@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-or
 
 import type { Database } from '../db'
 import {
+  agentMessage,
   agentRun,
   changePlan,
   coordinatorAction,
@@ -50,6 +51,7 @@ import {
   type EvidenceView,
   type FindingView,
   type HealthReport,
+  type MessageView,
   type RunView,
   type InboxItem,
   type QuestionView,
@@ -567,23 +569,35 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
     .from(evidenceArtifact)
     .where(eq(evidenceArtifact.taskId, id))
     .orderBy(asc(evidenceArtifact.id))
-  const [events, checks, reviews, questions, decisions, deliveries, watches, runs, plans, actions] =
-    await Promise.all([
-      db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
-      db.select().from(evidence).where(eq(evidence.taskId, id)).orderBy(asc(evidence.id)),
-      db.select().from(review).where(eq(review.taskId, id)).orderBy(asc(review.id)),
-      db.select().from(question).where(eq(question.taskId, id)).orderBy(asc(question.id)),
-      db.select().from(decision).where(eq(decision.taskId, id)).orderBy(asc(decision.id)),
-      db.select().from(delivery).where(eq(delivery.taskId, id)).orderBy(asc(delivery.id)),
-      db.select().from(watch).where(eq(watch.taskId, id)).orderBy(asc(watch.id)),
-      db.select().from(agentRun).where(eq(agentRun.taskId, id)).orderBy(asc(agentRun.id)),
-      db.select().from(changePlan).where(eq(changePlan.taskId, id)).orderBy(asc(changePlan.id)),
-      db
-        .select()
-        .from(coordinatorAction)
-        .where(eq(coordinatorAction.taskId, id))
-        .orderBy(desc(coordinatorAction.id)),
-    ])
+  const [
+    events,
+    checks,
+    reviews,
+    questions,
+    decisions,
+    deliveries,
+    watches,
+    runs,
+    plans,
+    actions,
+    messages,
+  ] = await Promise.all([
+    db.select().from(stageEvent).where(eq(stageEvent.taskId, id)).orderBy(asc(stageEvent.id)),
+    db.select().from(evidence).where(eq(evidence.taskId, id)).orderBy(asc(evidence.id)),
+    db.select().from(review).where(eq(review.taskId, id)).orderBy(asc(review.id)),
+    db.select().from(question).where(eq(question.taskId, id)).orderBy(asc(question.id)),
+    db.select().from(decision).where(eq(decision.taskId, id)).orderBy(asc(decision.id)),
+    db.select().from(delivery).where(eq(delivery.taskId, id)).orderBy(asc(delivery.id)),
+    db.select().from(watch).where(eq(watch.taskId, id)).orderBy(asc(watch.id)),
+    db.select().from(agentRun).where(eq(agentRun.taskId, id)).orderBy(asc(agentRun.id)),
+    db.select().from(changePlan).where(eq(changePlan.taskId, id)).orderBy(asc(changePlan.id)),
+    db
+      .select()
+      .from(coordinatorAction)
+      .where(eq(coordinatorAction.taskId, id))
+      .orderBy(desc(coordinatorAction.id)),
+    db.select().from(agentMessage).where(eq(agentMessage.taskId, id)).orderBy(asc(agentMessage.id)),
+  ])
   const withdrawable = row.stage === 'intake' && (await pendingSendBack(db, id)) !== undefined
   const shown = ofLatestVerification(checks, stored)
   return {
@@ -659,7 +673,20 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       durationMs: r.durationMs,
       ok: r.ok,
       quota: r.quota,
+      conversation: r.conversation,
       at: iso(r.at),
+    })),
+    messages: messages.map((m): MessageView => ({
+      id: m.id,
+      author: m.author,
+      mode: m.mode,
+      text: m.text,
+      delivery: m.delivery,
+      reason: m.reason,
+      answer: m.answer,
+      costUsd: m.costUsd,
+      at: iso(m.createdAt),
+      answeredAt: m.answeredAt ? iso(m.answeredAt) : null,
     })),
     watches: watches.map((w): WatchView => ({
       id: w.id,

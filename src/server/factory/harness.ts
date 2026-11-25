@@ -31,6 +31,8 @@ export type HarnessInput = {
   onEvent?: (event: AgentEvent) => void
   /** The role this pass plays: its persona's plugin is loaded when the agent supports one. */
   role?: CodingRole
+  /** A conversation turn that may only read: the agent runs in its CLI's read-only mode and the factory pushes nothing. */
+  ask?: boolean
 }
 
 const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0

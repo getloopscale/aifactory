@@ -512,8 +512,42 @@ export const agentRun = pgTable('agent_run', {
   /** The agent stopped because its account's quota ran out. */
   quota: boolean('quota').notNull().default(false),
   sessionId: text('session_id'),
+  /** The pass answered a message of the owner (`agent_message`), it did not work on the task's issue. */
+  conversation: boolean('conversation').notNull().default(false),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * What the owner wrote to a task's agent from the panel, and what it answered. Messages of one task are
+ * delivered one at a time, oldest first (`factory/conversation.ts`). `claimedAt` is the delivery's claim: a
+ * claim older than the lease is taken again.
+ */
+export const agentMessage = pgTable(
+  'agent_message',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'cascade' }),
+    role: text('role', { enum: ['builder'] })
+      .notNull()
+      .default('builder'),
+    author: text('author').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    text: text('text').notNull(),
+    mode: text('mode', { enum: ['ask', 'guide'] }).notNull(),
+    delivery: text('delivery', { enum: ['pending', 'delivered', 'failed'] })
+      .notNull()
+      .default('pending'),
+    /** Why the delivery failed. */
+    reason: text('reason'),
+    answer: text('answer'),
+    answeredAt: timestamp('answered_at', { withTimezone: true }),
+    claimedAt: timestamp('claimed_at', { withTimezone: true }),
+    costUsd: real('cost_usd'),
+  },
+  (t) => [index('agent_message_task_delivery').on(t.taskId, t.delivery, t.id)],
+)
 
 /**
  * What an agent did while it worked, step by step: what it said, each tool it called and what came back.
