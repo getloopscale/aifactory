@@ -4,10 +4,11 @@ import { ThemeProvider, builtinThemes } from '@theokit/ui'
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 
-import type { HealthReport, InboxItem, RepositoriesView } from '../shared/panel'
+import type { HealthReport, InboxItem, RepositoriesView, SetupReport } from '../shared/panel'
 
 import { GuidePanel } from './components/guide/GuidePanel'
 import { Rail } from './components/shell/Rail'
+import { setupAttention } from './components/shell/SetupCount'
 import { Sidebar } from './components/shell/Sidebar'
 import { inWork, TopBar } from './components/shell/TopBar'
 import { post } from './lib/api'
@@ -63,6 +64,13 @@ function Shell() {
     everyMs: 60_000,
     stream: false,
   })
+  const setupReport = useResource<SetupReport>('/api/panel/setup', {
+    everyMs: 30_000,
+    stream: false,
+  })
+  // A report that failed to load, even after one that loaded, shows no count.
+  const setup =
+    setupReport.error || setupReport.signedOut ? undefined : setupAttention(setupReport.data)
   const [menuHidden, setMenuHidden] = useMenuHidden()
   const [searchOnOpen, setSearchOnOpen] = useState(false)
 
@@ -96,6 +104,7 @@ function Shell() {
                   wrong={health.data?.findings.length ?? 0}
                   name={me.data?.name ?? t.layout.ownerName}
                   onSignOut={signOut}
+                  setup={setup}
                 />
               ) : (
                 <Sidebar
@@ -110,6 +119,7 @@ function Shell() {
                   name={me.data?.name ?? t.layout.ownerName}
                   plan={t.layout.ownerRole}
                   onSignOut={signOut}
+                  setup={setup}
                 />
               )
             ) : null}
