@@ -24,6 +24,9 @@ export const DOCTOR_SAY_CODES = [
   'sandbox_refused',
   'provider_checks_failed',
   'provider_checks_untried',
+  'agent_guide_missing',
+  'lockfile_missing',
+  'test_entry_missing',
   'ok_issues',
   'ok_app_access',
   'ok_app_events',
@@ -41,6 +44,10 @@ export const DOCTOR_SAY_CODES = [
   'ok_sandbox',
   'ok_sandbox_slots',
   'ok_provider_checks',
+  'ok_agent_guide',
+  'ok_lockfile',
+  'ok_test_entry',
+  'ok_not_applicable',
 ] as const
 
 /** Every thing the doctor tries to read; an item it could not read says which, so the panel can name it. */
@@ -59,6 +66,7 @@ export const DOCTOR_TRIED_CODES = [
   'token',
   'merge_settings',
   'proofs',
+  'file',
 ] as const
 
 export type DoctorTriedCode = (typeof DOCTOR_TRIED_CODES)[number]
@@ -83,6 +91,7 @@ export const DOCTOR_TRIED_EN: DoctorTriedSentences = {
   token: (v) => `minting a token for ${v.repo}`,
   merge_settings: (v) => `reading the merge settings of ${v.repo}`,
   proofs: (v) => `reading the proofs of the checks of ${v.repo}`,
+  file: (v) => `reading ${v.path} on ${v.ref} of ${v.repo}`,
 }
 
 /** Why a recipe cannot be used, as the three ways `RecipeError` has of saying it. */
@@ -249,6 +258,24 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
         : `The checks have not passed on any sandbox provider (not proven on ${v.providers}).`,
     repair: (v) => `Prove the checks of the repository with the factory running on ${v.providers}.`,
   },
+  agent_guide_missing: {
+    cause: (v) =>
+      `${v.repo} has no AGENTS.md or CLAUDE.md on ${v.ref}, so an agent starts without knowing its commands or conventions.`,
+    repair: () =>
+      'Add an AGENTS.md at the root with the commands to build and test, the layout and the conventions.',
+  },
+  lockfile_missing: {
+    cause: (v) =>
+      `${v.repo} has a package.json on ${v.ref} and no lockfile beside it, so an install in the sandbox is not reproducible.`,
+    repair: () =>
+      'Commit the lockfile of the package manager (pnpm-lock.yaml, package-lock.json, yarn.lock or bun.lockb).',
+  },
+  test_entry_missing: {
+    cause: (v) =>
+      `${v.repo} has no saved checks, its recipe declares none and package.json on ${v.ref} has no test script, so the default check npm test has nothing to run.`,
+    repair: () =>
+      'Add a "test" script to package.json, or save the checks in the panel or in .factory/setup.json.',
+  },
   ok_issues: { cause: () => 'Issues are on.', repair: () => '' },
   ok_app_access: {
     cause: (v) => `The GitHub App reaches ${v.repo} with every permission it needs.`,
@@ -310,6 +337,23 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   },
   ok_provider_checks: {
     cause: (v) => `The checks passed on every sandbox provider: ${v.providers}.`,
+    repair: () => '',
+  },
+  ok_agent_guide: {
+    cause: (v) => `${v.file} on ${v.ref} gives an agent the guide to the repository.`,
+    repair: () => '',
+  },
+  ok_lockfile: {
+    cause: (v) => `${v.file} sits beside package.json on ${v.ref}.`,
+    repair: () => '',
+  },
+  ok_test_entry: {
+    cause: (v) => `The checks come from ${v.source}.`,
+    repair: () => '',
+  },
+  ok_not_applicable: {
+    cause: (v) =>
+      `Does not apply: ${v.repo} has no package.json on ${v.ref}, and the factory knows no other ecosystem's files yet.`,
     repair: () => '',
   },
   ok_sandbox_slots: {

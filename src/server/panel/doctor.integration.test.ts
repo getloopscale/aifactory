@@ -44,6 +44,7 @@ beforeEach(async () => {
     'check_run',
   )
   repo().prepare().labels.add('factory')
+  repo().files('workspace', { 'AGENTS.md': '# guide' })
 })
 afterAll(() => getStorageManager().dispose())
 
@@ -100,6 +101,9 @@ describe('the doctor of a repository', () => {
       ['recipe', 'ok'],
       ['sandbox', 'ok'],
       ['provider_checks', 'unknown'],
+      ['agent_guide', 'ok'],
+      ['lockfile', 'ok'],
+      ['test_entry', 'ok'],
     ])
     expect(report.publishMode).toBe('none')
     const row = await saved()
