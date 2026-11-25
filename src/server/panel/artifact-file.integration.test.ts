@@ -7,7 +7,7 @@ import { storageFromUrl } from '../db/config'
 import { evidence, evidenceArtifact, ingress, task } from '../db/schema'
 import { artifactsAt, storeEvidence } from '../factory/artifacts'
 import type { CheckResult } from '../factory/evidence'
-import { pruneTranscripts, TRANSCRIPT_RETENTION_DAYS } from '../factory/transcript-store'
+import { pruneRetained, TRANSCRIPT_RETENTION_DAYS } from '../factory/transcript-store'
 
 import { serveArtifact } from './artifact-file'
 import { taskDetail } from './queries'
@@ -132,7 +132,7 @@ describe('retention', () => {
     await getPool().query(`update evidence_artifact set at = $1 where path = 'old.png'`, [
       days(TRANSCRIPT_RETENTION_DAYS + 1),
     ])
-    await pruneTranscripts(getDb(), now)
+    await pruneRetained(getDb(), now)
     expect((await artifactsAt(getDb(), id, 's')).map((f) => f.path)).toEqual(['new.png'])
   })
 })

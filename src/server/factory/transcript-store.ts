@@ -109,7 +109,18 @@ export async function pruneTranscripts(db: Database, now = new Date()): Promise<
     .delete(agentEvent)
     .where(lt(agentEvent.at, before))
     .returning({ id: agentEvent.id })
-  // The files checks wrote are kept as long as the steps are.
-  await pruneArtifacts(db, before)
   return gone.length
+}
+
+/** Prunes the steps and the files the checks wrote, which are kept as long as the steps are. */
+export async function pruneRetained(
+  db: Database,
+  now = new Date(),
+): Promise<{ steps: number; artifacts: number }> {
+  const steps = await pruneTranscripts(db, now)
+  const artifacts = await pruneArtifacts(
+    db,
+    new Date(now.getTime() - TRANSCRIPT_RETENTION_DAYS * 86_400_000),
+  )
+  return { steps, artifacts }
 }

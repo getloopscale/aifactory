@@ -2475,9 +2475,9 @@ export class Run {
     })
   }
 
-  /** Links to the files the checks wrote on this commit, named, with no address. */
+  /** The files the checks wrote on this commit, linked to the panel when its address is configured. */
   private async artifactLinksAt(sha: string): Promise<string[]> {
-    return artifactLinks(await artifactsAt(this.c.deps.db, this.c.taskId, sha))
+    return artifactLinks(await artifactsAt(this.c.deps.db, this.c.taskId, sha), this.c.taskId)
   }
 
   private async handOver(

@@ -271,26 +271,23 @@ describe('the files the checks wrote, named in the pull request', () => {
     expect(lines[2]).toBe('- ``` a``b`.png ```')
   })
 
-  it('does not write the panel address into the body', async () => {
-    const { pullRequestBody, artifactLinks } = await import('./run-support')
-    process.env.FACTORY_PANEL_URL = 'https://panel.example'
+  it('links the code span to the file on the panel when its address is set', async () => {
+    const { artifactLinks } = await import('./run-support')
+    process.env.FACTORY_PANEL_URL = 'https://panel.example/ignored/path'
     try {
-      const body = pullRequestBody({
-        issueNumber: 1,
-        sha: 'abc1234def',
-        rows: [],
-        agentSummary: 'x',
-        review: {
-          reviewer: 'r',
-          attempt: 1,
-          outcome: { verdict: 'approve', summary: 'ok', findings: [] } as never,
-        },
-        artifacts: artifactLinks([{ path: 'shots/home.png' }]),
-        taskId: 7,
-      })
-      expect(body).not.toContain('panel.example')
-      expect(body).toContain('task #7')
-      expect(body).not.toMatch(/\]\(/)
+      expect(artifactLinks([{ id: 5, path: 'shots/a](https://evil.example)[b.png' }], 7)).toEqual([
+        '- [` shots/a](https://evil.example)[b.png `](https://panel.example/api/panel/tasks/7/artifacts/5)',
+      ])
+    } finally {
+      delete process.env.FACTORY_PANEL_URL
+    }
+  })
+
+  it('writes no link when the address is not an http(s) one', async () => {
+    const { artifactLinks } = await import('./run-support')
+    process.env.FACTORY_PANEL_URL = 'javascript:alert(1)'
+    try {
+      expect(artifactLinks([{ id: 5, path: 'a.png' }], 7)).toEqual(['- ` a.png `'])
     } finally {
       delete process.env.FACTORY_PANEL_URL
     }
