@@ -1,5 +1,6 @@
-import { and, between, eq, gte, inArray, isNotNull, or, sql } from 'drizzle-orm'
+import { and, between, eq, gte, inArray, isNotNull, notLike, or, sql } from 'drizzle-orm'
 
+import { LENS_PREFIX } from '../factory/lens-review'
 import type { Database } from '../db'
 import {
   decision,
@@ -95,7 +96,7 @@ export async function loadHistories(db: Database, since: Date): Promise<TaskHist
     db
       .select({ taskId: review.taskId, verdict: review.verdict, at: review.at })
       .from(review)
-      .where(inArray(review.taskId, ids))
+      .where(and(inArray(review.taskId, ids), notLike(review.reviewer, `${LENS_PREFIX}%`)))
       .orderBy(review.id),
     db
       .select({

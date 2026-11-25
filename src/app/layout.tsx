@@ -15,6 +15,7 @@ import { post } from './lib/api'
 import { ChatsProvider } from './lib/chats'
 import { CopyProvider, useCopy } from './lib/copy'
 import { GuideProvider } from './lib/guide-state'
+import { useInstall } from './lib/install'
 import { useResource } from './lib/live'
 import { useWidthClass, WidthContext } from './lib/media'
 import { useEscape } from './lib/keys'
@@ -86,6 +87,7 @@ function Shell() {
   useEffect(() => {
     if (width === 'expanded') setOverlay(false)
   }, [width])
+  const install = useInstall()
 
   const savedLanguage = me.data?.language
   useEffect(() => adopt(savedLanguage), [savedLanguage, adopt])
@@ -115,6 +117,7 @@ function Shell() {
       name={me.data?.name ?? t.layout.ownerName}
       plan={t.layout.ownerRole}
       onSignOut={signOut}
+      install={install}
       setup={setup}
     />
   )

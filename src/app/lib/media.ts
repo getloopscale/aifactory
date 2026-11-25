@@ -33,3 +33,10 @@ export function useWidthClass(): WidthClass {
 export const WidthContext = createContext<WidthClass>('expanded')
 
 export const useWidth = (): WidthClass => useContext(WidthContext)
+
+/** Whether the page runs as an installed app; it lives here because this file is the one that asks the window. */
+export function standaloneQuery(): MediaQueryList | undefined {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(display-mode: standalone)')
+    : undefined
+}

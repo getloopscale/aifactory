@@ -1,5 +1,6 @@
-import { and, desc, eq, isNotNull } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, notLike } from 'drizzle-orm'
 
+import { LENS_PREFIX } from './lens-review'
 import type { Database } from '../db'
 import { review, stageEvent, task } from '../db/schema'
 import type { GithubApp } from '../github/app'
@@ -176,7 +177,7 @@ async function completeIntegration(
     const [reviewed] = await deps.db
       .select({ reviewer: review.reviewer })
       .from(review)
-      .where(eq(review.taskId, row.id))
+      .where(and(eq(review.taskId, row.id), notLike(review.reviewer, `${LENS_PREFIX}%`)))
       .orderBy(desc(review.id))
       .limit(1)
     await releaseByMode(

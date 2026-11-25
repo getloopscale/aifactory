@@ -251,7 +251,7 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
   harness: string
   /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
@@ -302,7 +302,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -502,6 +502,17 @@ export type TimelineEvent = {
   detail: Record<string, unknown> | null
 }
 
+/** Whether the tests a head adds depend on the change, as the factory found it by running them on the base (#550). */
+export type TestProofView = {
+  id: number
+  sha: string
+  outcome: 'proven' | 'unproven' | 'no_tests' | 'not_run'
+  /** The check that failed on the base, or why the step could not run. */
+  detail: string | null
+  files: string[]
+  at: string
+}
+
 export type EvidenceView = {
   id: number
   name: string
@@ -610,6 +621,8 @@ export type TaskDetail = {
   sendBackPending?: boolean
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
+  /** The outcome of the test proof of each head, oldest first; none when the step is off. */
+  testProofs?: TestProofView[]
   reviews: ReviewView[]
   /** The security review of each approval, oldest first. */
   securityReviews: SecurityReviewView[]

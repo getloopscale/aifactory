@@ -178,6 +178,39 @@ describe('task page', () => {
     )
   })
 
+  it('shows the outcome of the test proof beside the checks', async () => {
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        testProofs: [
+          {
+            id: 1,
+            sha: 'abcdef1234',
+            outcome: 'proven',
+            detail: 'unit',
+            files: ['a.test.ts'],
+            at: '2026-11-25T10:00:00Z',
+          },
+          {
+            id: 2,
+            sha: '1234567abc',
+            outcome: 'not_run',
+            detail: 'no such commit',
+            files: [],
+            at: '2026-11-25T10:00:00Z',
+          },
+        ],
+      }),
+    })
+    renderTask()
+
+    await waitFor(() =>
+      expect(screen.getByText('Proven: the tests fail on the base')).toBeDefined(),
+    )
+    expect(screen.getByText('unit')).toBeDefined()
+    expect(screen.getByText('Not run')).toBeDefined()
+    expect(screen.getByText('no such commit')).toBeDefined()
+  })
+
   it('shows a question and what to do about it, then the answer when there is one', async () => {
     serve({
       'GET /api/panel/tasks/5': detail({

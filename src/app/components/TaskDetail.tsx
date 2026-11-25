@@ -276,6 +276,19 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
             ))}
           </ul>
         )}
+        {(detail.testProofs ?? []).length > 0 ? (
+          <ul aria-label={t.task.testProof} className="mt-2 space-y-1">
+            {(detail.testProofs ?? []).map((p) => (
+              <li key={p.id} className="rounded border border-border bg-card p-3 text-sm">
+                <span className="font-medium">{t.task.testProofOutcome[p.outcome]}</span>{' '}
+                <span className="text-xs text-muted-foreground">
+                  {t.task.testProofMeta(shortSha(p.sha), p.files.length)}
+                </span>
+                {p.detail ? <code className="ml-2 text-xs">{p.detail}</code> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <PlanSection plans={detail.plans} />

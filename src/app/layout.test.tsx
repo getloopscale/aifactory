@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -409,5 +409,68 @@ describe('the layout on a phone', () => {
     await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
     expect(screen.queryByRole('button', { name: t.topBar.openMenu })).toBeNull()
     expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+  })
+})
+
+describe('installing the panel', () => {
+  const stubMedia = (standalone: boolean) =>
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        // A desk-wide window, so the menu is beside the page; only the display mode varies.
+        matches: query.includes('min-width') || standalone,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+  const firePrompt = () => {
+    const prompt = vi.fn(async () => undefined)
+    const event = Object.assign(new Event('beforeinstallprompt', { cancelable: true }), { prompt })
+    window.dispatchEvent(event)
+    return { prompt, event }
+  }
+
+  it('offers the entry after beforeinstallprompt and calls the prompt', async () => {
+    serve(signedIn)
+    stubMedia(false)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.queryByRole('button', { name: t.menu.install })).toBeNull()
+    let fired!: ReturnType<typeof firePrompt>
+    act(() => {
+      fired = firePrompt()
+    })
+    expect(fired.event.defaultPrevented).toBe(true)
+    fireEvent.click(await screen.findByRole('button', { name: t.menu.install }))
+    expect(fired.prompt).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: t.menu.install })).toBeNull()
+  })
+
+  it('shows no entry in standalone mode', async () => {
+    serve(signedIn)
+    stubMedia(true)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    act(() => {
+      firePrompt()
+    })
+    expect(screen.queryByRole('button', { name: t.menu.install })).toBeNull()
+  })
+
+  it('registers the worker only in a secure context that has one', async () => {
+    serve(signedIn)
+    stubMedia(false)
+    const register = vi.fn(async () => undefined)
+    vi.stubGlobal('isSecureContext', true)
+    Object.defineProperty(navigator, 'serviceWorker', { value: { register }, configurable: true })
+    renderAt('/')
+    await waitFor(() => expect(register).toHaveBeenCalledWith('/sw.js'))
+    cleanup()
+    register.mockClear()
+    vi.stubGlobal('isSecureContext', false)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(register).not.toHaveBeenCalled()
+    Reflect.deleteProperty(navigator, 'serviceWorker')
   })
 })
