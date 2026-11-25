@@ -6,6 +6,7 @@ import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
 import {
   agentRun,
+  agentSession,
   changePlan,
   evidence,
   question as questionTable,
@@ -82,6 +83,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from './change-plan'
+import { saveSession, SESSION_ROLES, type SessionRole } from './agent-session'
 import { buildPrompt, type Clarification, type CodingHarness, type HarnessResult } from './harness'
 import {
   blockingCount,
@@ -738,9 +740,26 @@ export class Run {
       quota: result.quota !== undefined,
       sessionId: result.sessionId ?? null,
     })
+    await this.keepSession(who, role, result)
     // A builder cut at its limit goes on to `failUnfinished`, which keeps what it wrote before the quota is told.
     if (result.quota && !(role === 'builder' && result.timedOut)) throw this.quotaStop(who, result)
     return result
+  }
+
+  /** Keeps the pass's CLI session in the database, so a new sandbox can resume it. A failure is logged, never the run's. */
+  private async keepSession(who: CodingHarness, role: string, result: HarnessResult) {
+    if (!result.sessionId || !who.sessionFolder || !SESSION_ROLES.includes(role)) return
+    const key = { taskId: this.c.taskId, role: role as SessionRole }
+    try {
+      await saveSession(this.c.deps.db, this.backend, who, { ...key, sessionId: result.sessionId })
+    } catch (error) {
+      console.warn(`agent_session_not_kept task=${key.taskId} role=${role}: ${String(error)}`)
+      // The old archive is of an earlier pass: it must not pass for this one.
+      await this.c.deps.db
+        .delete(agentSession)
+        .where(and(eq(agentSession.taskId, key.taskId), eq(agentSession.role, role)))
+        .catch(() => undefined)
+    }
   }
 
   private quotaStop(who: CodingHarness, result: HarnessResult): QuotaStop {

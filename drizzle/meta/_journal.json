@@ -372,6 +372,13 @@
       "when": 1795866378100,
       "tag": "0055_external_pull_reviews",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1795952778100,
+      "tag": "0056_agent_session",
+      "breakpoints": true
     }
   ]
 }

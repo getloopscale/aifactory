@@ -556,3 +556,22 @@ describe('installFailureRule', () => {
     expect(prompt).toContain('boom')
   })
 })
+
+describe('session folders', () => {
+  it('are the ones of each CLI and never hold the Codex login', async () => {
+    const { CODEX_SESSION_FOLDER } = await import('./harness-codex')
+    const { CLAUDE_SESSION_FOLDER } = await import('./harness-claude')
+    expect(CLAUDE_SESSION_FOLDER).toBe('.claude/projects')
+    expect(CODEX_SESSION_FOLDER).toBe('.codex/sessions')
+    const login = '.codex/auth.json'
+    for (const folder of [CLAUDE_SESSION_FOLDER, CODEX_SESSION_FOLDER]) {
+      expect(login === folder || login.startsWith(`${folder}/`)).toBe(false)
+    }
+  })
+
+  it('are declared by the harnesses', async () => {
+    expect(claudeCodeHarness({ kind: 'api-key', secret: 'x' }).sessionFolder).toBe(
+      '.claude/projects',
+    )
+  })
+})
