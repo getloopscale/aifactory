@@ -225,7 +225,7 @@ describe('the layout', () => {
     })
     renderAt('/')
     await waitFor(() => expect(screen.getByText('the login')).toBeDefined())
-    expect(screen.queryByRole('link', { name: t.places.board })).toBeNull()
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
     expect(screen.queryByRole('button', { name: t.menu.account })).toBeNull()
   })
 
@@ -342,5 +342,54 @@ describe('the language of the panel', () => {
       ),
     )
     expect(board(calls)).toBe(before)
+  })
+})
+
+function widthOf(px: number) {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      matches: px >= Number(/min-width: (\d+)px/.exec(query)?.[1]),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })),
+  )
+}
+
+describe('the layout on a phone', () => {
+  it('shows no menu until the button is pressed, and closes it after a navigation', async () => {
+    serve(signedIn)
+    widthOf(390)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: t.menu.main })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.openMenu }))
+    expect(screen.getByRole('complementary', { name: t.menu.label })).toBeDefined()
+    fireEvent.click(screen.getByRole('link', { name: t.places.board }))
+    await waitFor(() => expect(screen.getByText('the board')).toBeDefined())
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+  })
+
+  it('closes the menu on Escape and on a tap outside it', async () => {
+    serve(signedIn)
+    widthOf(390)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.openMenu }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.openMenu }))
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.closeMenu }))
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+  })
+
+  it('keeps the rail on a tablet and the menu beside the page on a desk', async () => {
+    serve(signedIn)
+    widthOf(800)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.queryByRole('button', { name: t.topBar.openMenu })).toBeNull()
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
   })
 })

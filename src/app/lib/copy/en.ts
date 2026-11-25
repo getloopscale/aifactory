@@ -44,6 +44,8 @@ export const en = {
   },
   topBar: {
     part: 'Part of the app',
+    openMenu: 'Open the menu',
+    closeMenu: 'Close the menu',
     chat: 'Chat',
     work: 'Work',
     guide: 'Guide',
@@ -74,6 +76,7 @@ export const en = {
   },
   board: {
     nothingHere: 'Nothing here.',
+    stages: 'Stages',
     mainRedAfterRelease: 'main is red after the release',
     mainRed: 'main is red',
     changeSize: (added: number, removed: number, files: number) =>

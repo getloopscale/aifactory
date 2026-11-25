@@ -2,44 +2,61 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { useMinWidth } from './media'
+import { useWidthClass } from './media'
 
 afterEach(() => vi.unstubAllGlobals())
 
-function screenOf(matches: boolean) {
+function screenOf(px: number) {
   const listeners = new Set<() => void>()
-  const list = {
-    matches,
-    addEventListener: (_: string, fn: () => void) => listeners.add(fn),
-    removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
-  }
+  let width = px
   vi.stubGlobal(
     'matchMedia',
-    vi.fn(() => list),
+    vi.fn((query: string) => {
+      const min = Number(/min-width: (\d+)px/.exec(query)?.[1])
+      return {
+        get matches() {
+          return width >= min
+        },
+        addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+        removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+      }
+    }),
   )
   return {
-    resize(next: boolean) {
-      list.matches = next
+    resize(next: number) {
+      width = next
       for (const fn of listeners) fn()
     },
     listeners,
   }
 }
 
-describe('useMinWidth', () => {
-  it('says whether the screen is wide enough, and follows it when it changes', () => {
-    const screen = screenOf(false)
-    const { result, unmount } = renderHook(() => useMinWidth(1100))
-    expect(result.current).toBe(false)
-    expect(window.matchMedia).toHaveBeenCalledWith('(min-width: 1100px)')
-    act(() => screen.resize(true))
-    expect(result.current).toBe(true)
+describe('useWidthClass', () => {
+  it.each([
+    [390, 'compact'],
+    [639, 'compact'],
+    [640, 'medium'],
+    [1023, 'medium'],
+    [1024, 'expanded'],
+    [1600, 'expanded'],
+  ])('is %i pixels wide: %s', (px, expected) => {
+    screenOf(px)
+    expect(renderHook(() => useWidthClass()).result.current).toBe(expected)
+  })
+
+  it('follows the screen when it changes and lets go of it', () => {
+    const screen = screenOf(390)
+    const { result, unmount } = renderHook(() => useWidthClass())
+    act(() => screen.resize(800))
+    expect(result.current).toBe('medium')
+    act(() => screen.resize(1200))
+    expect(result.current).toBe('expanded')
     unmount()
     expect(screen.listeners.size).toBe(0)
   })
 
   it('takes a browser that cannot be asked as wide', () => {
     vi.stubGlobal('matchMedia', undefined)
-    expect(renderHook(() => useMinWidth(1100)).result.current).toBe(true)
+    expect(renderHook(() => useWidthClass()).result.current).toBe('expanded')
   })
 })

@@ -119,6 +119,8 @@ export const ptBR: Copy = {
   },
   topBar: {
     part: 'Parte do app',
+    openMenu: 'Abrir o menu',
+    closeMenu: 'Fechar o menu',
     chat: 'Chat',
     work: 'Trabalho',
     guide: 'Guia',
@@ -149,6 +151,7 @@ export const ptBR: Copy = {
   },
   board: {
     nothingHere: 'Nada aqui.',
+    stages: 'Etapas',
     mainRedAfterRelease: 'a main quebrou depois da versão',
     mainRed: 'main quebrada',
     changeSize: (added: number, removed: number, files: number) =>

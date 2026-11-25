@@ -168,48 +168,52 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
       {detail.runs.length > 0 ? (
         <section aria-label={t.task.executions}>
           <h2 className="mb-2 text-sm font-semibold">{t.task.executions}</h2>
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                <th className="py-1 pr-3">{t.task.role}</th>
-                <th className="py-1 pr-3">{t.task.agent}</th>
-                <th className="py-1 pr-3">{t.task.model}</th>
-                <th className="py-1 pr-3">{t.task.attempt}</th>
-                <th className="py-1 pr-3">{t.task.tokens}</th>
-                <th className="py-1 pr-3">{t.task.cost}</th>
-                <th className="py-1 pr-3">{t.task.time}</th>
-                <th className="py-1 pr-3">{t.task.result}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.runs.map((r) => (
-                <tr key={r.id} className="border-t border-border">
-                  <td className="py-1 pr-3">{r.role}</td>
-                  <td className="py-1 pr-3">{r.harness}</td>
-                  <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
-                  <td className="py-1 pr-3">{r.attempt}</td>
-                  <td className="py-1 pr-3">
-                    {r.tokensIn === null && r.tokensOut === null ? (
-                      <span className="text-muted-foreground">{t.task.notReported}</span>
-                    ) : (
-                      `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
-                    )}
-                  </td>
-                  <td className="py-1 pr-3">
-                    {r.costUsd === null ? (
-                      <span className="text-muted-foreground">{t.task.notReported}</span>
-                    ) : (
-                      money(r.costUsd)
-                    )}
-                  </td>
-                  <td className="py-1 pr-3">{t.task.seconds((r.durationMs / 1000).toFixed(1))}</td>
-                  <td className="py-1 pr-3">
-                    {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-3">{t.task.role}</th>
+                  <th className="py-1 pr-3">{t.task.agent}</th>
+                  <th className="py-1 pr-3">{t.task.model}</th>
+                  <th className="py-1 pr-3">{t.task.attempt}</th>
+                  <th className="py-1 pr-3">{t.task.tokens}</th>
+                  <th className="py-1 pr-3">{t.task.cost}</th>
+                  <th className="py-1 pr-3">{t.task.time}</th>
+                  <th className="py-1 pr-3">{t.task.result}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {detail.runs.map((r) => (
+                  <tr key={r.id} className="border-t border-border">
+                    <td className="py-1 pr-3">{r.role}</td>
+                    <td className="py-1 pr-3">{r.harness}</td>
+                    <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
+                    <td className="py-1 pr-3">{r.attempt}</td>
+                    <td className="py-1 pr-3">
+                      {r.tokensIn === null && r.tokensOut === null ? (
+                        <span className="text-muted-foreground">{t.task.notReported}</span>
+                      ) : (
+                        `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
+                      )}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {r.costUsd === null ? (
+                        <span className="text-muted-foreground">{t.task.notReported}</span>
+                      ) : (
+                        money(r.costUsd)
+                      )}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {t.task.seconds((r.durationMs / 1000).toFixed(1))}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 

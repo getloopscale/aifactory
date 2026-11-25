@@ -208,6 +208,30 @@ describe('task page', () => {
     expect(screen.getByText('paulo answered: Yes')).toBeDefined()
   })
 
+  it('puts the question before the transcript', async () => {
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        task: { ...base, stage: 'waiting', column: 'waiting', headSha: null },
+        questions: [
+          {
+            id: 1,
+            body: 'A or B?',
+            askedAt: '2026-11-04T10:00:00Z',
+            answer: null,
+            answeredBy: null,
+            answeredAt: null,
+          },
+        ],
+      }),
+    })
+    renderTask()
+    const question = await screen.findByText('A or B?')
+    const transcript = screen.getByRole('region', { name: 'What the agents did' })
+    expect(
+      question.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
   it('says it could not load a task that is not there', async () => {
     serve({})
     renderTask(99)
