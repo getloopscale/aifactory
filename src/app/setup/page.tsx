@@ -6,6 +6,7 @@ import type { SetupItem, SetupReport } from '../../shared/panel'
 import { ClaudeAccount } from '../components/ClaudeAccount'
 import { CodexAccount } from '../components/CodexAccount'
 import { KnowledgeRepository } from '../components/KnowledgeRepository'
+import { PushNotifications } from '../components/PushNotifications'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 
@@ -105,6 +106,9 @@ export default function SetupPage() {
                 ) : null}
               </Fragment>
             ))}
+            <li>
+              <PushNotifications />
+            </li>
           </ul>
         </>
       ) : (

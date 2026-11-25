@@ -870,6 +870,24 @@ export const ptBR: Copy = {
     planTheWork: 'Planejar o trabalho',
     notReadyTitle: 'Ainda não está pronto',
     notReadyDescription: 'Resolva as linhas marcadas como necessário e confira de novo.',
+    push: {
+      label: 'Notificações neste dispositivo',
+      off: 'desligadas',
+      on: 'ligadas',
+      notConfigured: 'não configurado',
+      unsupported: 'Este navegador não recebe notificações. Instale o painel e abra-o por HTTPS.',
+      notConfiguredHelp:
+        'Defina antes as chaves de push e a origem do painel no servidor (veja o README).',
+      denied: 'As notificações estão bloqueadas para este site no navegador.',
+      turnOn: 'Ligar',
+      turnOff: 'Desligar',
+      sendTest: 'Enviar um teste',
+      devices: 'Dispositivos',
+      noDevices: 'Nenhum dispositivo ainda.',
+      remove: 'Remover',
+      testResult: (sent: number) =>
+        sent === 1 ? 'Enviado para 1 dispositivo.' : `Enviado para ${sent} dispositivos.`,
+    },
   },
   login: {
     title: 'Entrar',
