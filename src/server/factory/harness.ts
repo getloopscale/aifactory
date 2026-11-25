@@ -84,6 +84,11 @@ export interface CodingHarness {
    * and the sandbox only ever gets a placeholder, so this is the one place a credential is read.
    */
   egress(): Promise<EgressRule[]>
+  /**
+   * Where the agent's CLI keeps its sessions, relative to `$HOME`, and nothing else: never the login. Only this
+   * folder is archived. A session is found again only from the same working directory it was recorded in.
+   */
+  readonly sessionFolder?: string
   /** Installs and configures the agent in a fresh sandbox, when it is not already there. */
   prepare?(backend: SandboxBackend): Promise<void>
   /**

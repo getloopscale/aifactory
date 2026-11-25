@@ -46,6 +46,12 @@ class VercelBackend extends SandboxBackend {
       { path, content: typeof content === 'string' ? Buffer.from(content) : content },
     ])
   }
+
+  async downloadFile(path: string): Promise<Buffer> {
+    const bytes = await this.sandbox.readFileToBuffer({ path })
+    if (bytes === null) throw new Error(`${path} is not in the sandbox`)
+    return bytes
+  }
 }
 
 /**

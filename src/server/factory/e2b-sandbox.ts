@@ -138,6 +138,12 @@ export class E2BBackend extends SandboxBackend {
     await this.sandbox.files.write(path, uploadData(content), { user: USER })
   }
 
+  /** The bytes of a file in the sandbox, read through the provider's file API, never through a command's output. */
+  async downloadFile(path: string): Promise<Buffer> {
+    const bytes = await this.sandbox.files.read(path, { format: 'bytes', user: USER })
+    return Buffer.from(bytes)
+  }
+
   /**
    * Writes files that do not exist yet, as the image user, `UPLOAD_BATCH` at a time: each batch is one request,
    * where `uploadFile` is a command and a request per file.
