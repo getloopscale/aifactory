@@ -7,7 +7,7 @@ import { useCopy } from '../../lib/copy'
 import { guideIdFor, guideIn } from '../../lib/guides'
 import { useGuideState } from '../../lib/guide-state'
 import { useEscape } from '../../lib/keys'
-import { useMinWidth } from '../../lib/media'
+import { useWidth } from '../../lib/media'
 
 import { GuideThread } from './GuideThread'
 
@@ -24,8 +24,9 @@ export function GuidePanel() {
   const guide = guideId ? guideIn(guideId, t) : undefined
   const [started, setStarted] = useState<GuideId[]>([])
   const shown = open && guide !== undefined
-  // Beside the page when there is room, over it when there is not.
-  const wide = useMinWidth(1100)
+  // Beside the page when there is room, a sheet over it when there is not; the shell decides.
+  const wide = useWidth() === 'expanded'
+  const compact = useWidth() === 'compact'
 
   useEffect(() => {
     if (!shown || !guideId) return
@@ -41,7 +42,8 @@ export function GuidePanel() {
   return (
     <aside
       aria-label={guide.name}
-      className={`flex flex-col border-l border-border bg-card ${wide ? 'relative w-[400px] shrink-0' : 'fixed inset-y-0 right-0 z-40 w-[min(420px,100vw)] shadow-2xl'}`}
+      data-sheet={wide ? undefined : ''}
+      className={`flex flex-col border-l border-border bg-card ${wide ? 'relative w-[400px] shrink-0' : `fixed inset-y-0 right-0 z-40 shadow-2xl ${compact ? 'w-full' : 'w-[min(420px,100vw)]'}`}`}
     >
       <header className="flex items-center gap-3 border-b border-border px-4 py-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted">

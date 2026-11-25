@@ -1,7 +1,7 @@
 import './globals.css'
 
 import { ThemeProvider, builtinThemes } from '@theokit/ui'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 
 import type { HealthReport, InboxItem, RepositoriesView, SetupReport } from '../shared/panel'
@@ -17,6 +17,8 @@ import { CopyProvider, useCopy } from './lib/copy'
 import { GuideProvider } from './lib/guide-state'
 import { useInstall } from './lib/install'
 import { useResource } from './lib/live'
+import { useWidthClass, WidthContext } from './lib/media'
+import { useEscape } from './lib/keys'
 
 const HIDDEN_KEY = 'aifactory.menu.hidden'
 
@@ -74,6 +76,17 @@ function Shell() {
     setupReport.error || setupReport.signedOut ? undefined : setupAttention(setupReport.data)
   const [menuHidden, setMenuHidden] = useMenuHidden()
   const [searchOnOpen, setSearchOnOpen] = useState(false)
+  const width = useWidthClass()
+  const compact = width === 'compact'
+  // The menu over the page: on a phone, and on a tablet when the rail asks to be opened.
+  const [overlay, setOverlay] = useState(false)
+  const closeOverlay = useCallback(() => setOverlay(false), [])
+  useEscape(closeOverlay)
+  // A choice in the menu is a navigation, and a navigation closes it.
+  useEffect(() => setOverlay(false), [location.pathname, location.search])
+  useEffect(() => {
+    if (width === 'expanded') setOverlay(false)
+  }, [width])
   const install = useInstall()
 
   const savedLanguage = me.data?.language
@@ -90,60 +103,86 @@ function Shell() {
       void navigate('/login')
     })
 
+  const menu = (
+    <Sidebar
+      onToggle={() => {
+        setSearchOnOpen(false)
+        if (width === 'expanded') setMenuHidden(true)
+        else setOverlay(false)
+      }}
+      startSearching={searchOnOpen}
+      showOnboarding={repositories.data?.repositories.some((r) => r.enabled) === false}
+      waiting={inbox.data?.items.length ?? 0}
+      wrong={health.data?.findings.length ?? 0}
+      name={me.data?.name ?? t.layout.ownerName}
+      plan={t.layout.ownerRole}
+      onSignOut={signOut}
+      install={install}
+      setup={setup}
+    />
+  )
+
   return (
-    <ThemeProvider themes={builtinThemes} defaultTheme="violet-forge" defaultMode="dark">
-      <ChatsProvider enabled={signedIn}>
-        <GuideProvider>
-          <div className="flex h-screen bg-background text-foreground">
-            {signedIn ? (
-              menuHidden ? (
-                <Rail
-                  onExpand={(search = false) => {
-                    setSearchOnOpen(search)
-                    setMenuHidden(false)
-                  }}
-                  waiting={inbox.data?.items.length ?? 0}
-                  wrong={health.data?.findings.length ?? 0}
-                  name={me.data?.name ?? t.layout.ownerName}
-                  onSignOut={signOut}
-                  setup={setup}
-                />
-              ) : (
-                <Sidebar
-                  onToggle={() => {
-                    setSearchOnOpen(false)
-                    setMenuHidden(true)
-                  }}
-                  startSearching={searchOnOpen}
-                  showOnboarding={repositories.data?.repositories.some((r) => r.enabled) === false}
-                  waiting={inbox.data?.items.length ?? 0}
-                  wrong={health.data?.findings.length ?? 0}
-                  name={me.data?.name ?? t.layout.ownerName}
-                  plan={t.layout.ownerRole}
-                  onSignOut={signOut}
-                  install={install}
-                  setup={setup}
-                />
-              )
-            ) : null}
-            <div className="flex min-w-0 flex-1 flex-col">
-              {signedIn ? <TopBar /> : null}
-              <main className="min-h-0 flex-1 overflow-y-auto">
-                {signedIn && inWork(location.pathname) ? (
-                  <div className="mx-auto max-w-[1800px] px-6 pb-10 pt-2">
-                    <Outlet />
-                  </div>
-                ) : signedIn || onLogin ? (
-                  <Outlet />
+    <WidthContext.Provider value={width}>
+      <ThemeProvider themes={builtinThemes} defaultTheme="violet-forge" defaultMode="dark">
+        <ChatsProvider enabled={signedIn}>
+          <GuideProvider>
+            <div
+              data-width={width}
+              className="flex h-screen overflow-x-hidden bg-background text-foreground"
+            >
+              {signedIn ? (
+                compact ? null : menuHidden || width === 'medium' ? (
+                  <Rail
+                    onExpand={(search = false) => {
+                      setSearchOnOpen(search)
+                      if (width === 'medium') setOverlay(true)
+                      else setMenuHidden(false)
+                    }}
+                    waiting={inbox.data?.items.length ?? 0}
+                    wrong={health.data?.findings.length ?? 0}
+                    name={me.data?.name ?? t.layout.ownerName}
+                    onSignOut={signOut}
+                    setup={setup}
+                  />
                 ) : (
-                  <p className="p-6 text-sm text-muted-foreground">{t.layout.loading}</p>
-                )}
-              </main>
+                  menu
+                )
+              ) : null}
+              {signedIn && width !== 'expanded' && overlay ? (
+                <div className="fixed inset-0 z-50 flex">
+                  <div className="relative z-10 h-full w-[min(338px,100vw)] [&>aside]:w-full [&>aside]:max-w-none">
+                    {menu}
+                  </div>
+                  <button
+                    type="button"
+                    aria-label={t.topBar.closeMenu}
+                    onClick={closeOverlay}
+                    className="flex-1 bg-background/80"
+                  />
+                </div>
+              ) : null}
+              <div className="flex min-w-0 flex-1 flex-col">
+                {signedIn ? <TopBar onMenu={() => setOverlay(true)} /> : null}
+                <main className="min-h-0 flex-1 overflow-y-auto">
+                  {signedIn && inWork(location.pathname) ? (
+                    <div
+                      className={`mx-auto max-w-[1800px] pb-10 pt-2 ${compact ? 'px-4' : 'px-6'}`}
+                    >
+                      <Outlet />
+                    </div>
+                  ) : signedIn || onLogin ? (
+                    <Outlet />
+                  ) : (
+                    <p className="p-6 text-sm text-muted-foreground">{t.layout.loading}</p>
+                  )}
+                </main>
+              </div>
+              {signedIn ? <GuidePanel /> : null}
             </div>
-            {signedIn ? <GuidePanel /> : null}
-          </div>
-        </GuideProvider>
-      </ChatsProvider>
-    </ThemeProvider>
+          </GuideProvider>
+        </ChatsProvider>
+      </ThemeProvider>
+    </WidthContext.Provider>
   )
 }
