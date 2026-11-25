@@ -630,6 +630,20 @@ export const en = {
     alsoReach: (domains: string) => `The next run would also reach ${domains}.`,
     approve: (count: number) => `Approve ${count === 1 ? 'this domain' : `these ${count} domains`}`,
   },
+  reviewPatterns: {
+    label: 'Review patterns',
+    about:
+      'A class of defect the reviewer blocked on three or more tasks of this repository in 30 days. The factory writes a note for the next builder; you can also propose it as a rule, which opens a pull request on the knowledge repository for you to merge.',
+    none: 'No pattern yet.',
+    tasks: (count: number) => `${count} tasks`,
+    noted: 'note written',
+    notNoted: 'no note (trial)',
+    before: 'Tasks it blocked in the 30 days before the note',
+    after: 'and in the 30 days after',
+    measuring: 'Measured 30 days after the note.',
+    propose: 'Propose as a rule',
+    opened: 'Pull request opened:',
+  },
   knowledge: {
     label: 'Knowledge base',
     about: (branch: string) =>

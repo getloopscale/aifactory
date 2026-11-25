@@ -1,5 +1,5 @@
 {
-  "id": "a3c1f7e2-5b8d-4c19-9e64-2d7f0b1a8c35",
+  "id": "b3c1d6e2-5a47-4f0e-9d18-2c6a7e41f905",
   "prevId": "b3185bda-69eb-4291-8a73-3d3bed222eff",
   "version": "7",
   "dialect": "postgresql",
@@ -109,7 +109,7 @@
           "name": "task_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "role": {
           "name": "role",
@@ -190,12 +190,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
-        },
-        "external_review_id": {
-          "name": "external_review_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
         }
       },
       "indexes": {},
@@ -1388,6 +1382,13 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
+        },
+        "source_tasks": {
+          "name": "source_tasks",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'[]'::jsonb"
         }
       },
       "indexes": {},
@@ -2611,13 +2612,6 @@
           "notNull": true,
           "default": "now()"
         },
-        "review_external_pulls": {
-          "name": "review_external_pulls",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "risk_patterns": {
           "name": "risk_patterns",
           "type": "jsonb",
@@ -3618,8 +3612,8 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.external_review": {
-      "name": "external_review",
+    "public.review_pattern": {
+      "name": "review_pattern",
       "schema": "",
       "columns": {
         "id": {
@@ -3634,121 +3628,107 @@
           "primaryKey": false,
           "notNull": true
         },
-        "pull_number": {
-          "name": "pull_number",
+        "class_key": {
+          "name": "class_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "class_name": {
+          "name": "class_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invariant": {
+          "name": "invariant",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_ids": {
+          "name": "task_ids",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recorded_at": {
+          "name": "recorded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "note_id": {
+          "name": "note_id",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
-        "head_sha": {
-          "name": "head_sha",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "base_ref": {
-          "name": "base_ref",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "head_repository": {
-          "name": "head_repository",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "author": {
-          "name": "author",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "author_association": {
-          "name": "author_association",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "title": {
-          "name": "title",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "body": {
-          "name": "body",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "''"
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "detail": {
-          "name": "detail",
+        "proposal_url": {
+          "name": "proposal_url",
           "type": "text",
           "primaryKey": false,
           "notNull": false
         },
-        "cost_usd": {
-          "name": "cost_usd",
-          "type": "real",
+        "count_before": {
+          "name": "count_before",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false
         },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
+        "count_after": {
+          "name": "count_after",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         },
-        "updated_at": {
-          "name": "updated_at",
+        "measured_at": {
+          "name": "measured_at",
           "type": "timestamp with time zone",
           "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
+          "notNull": false
         }
       },
-      "indexes": {
-        "external_review_pull_sha": {
-          "name": "external_review_pull_sha",
-          "columns": [
-            {
-              "expression": "repository",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "pull_number",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "head_sha",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
+      "indexes": {},
+      "foreignKeys": {
+        "review_pattern_note_id_knowledge_note_id_fk": {
+          "name": "review_pattern_note_id_knowledge_note_id_fk",
+          "tableFrom": "review_pattern",
+          "tableTo": "knowledge_note",
+          "columnsFrom": [
+            "note_id"
           ],
-          "isUnique": true,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
-      "foreignKeys": {},
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
+      "uniqueConstraints": {
+        "review_pattern_once": {
+          "name": "review_pattern_once",
+          "nullsNotDistinct": false,
+          "columns": [
+            "repository",
+            "class_key"
+          ]
+        }
+      },
       "policies": {},
       "checkConstraints": {},
       "isRLSEnabled": false

@@ -83,7 +83,7 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 /** Where the template ships: `templates/knowledge` beside the factory's code. */
 export const defaultTemplateDir = () => resolve(process.cwd(), 'templates/knowledge')
 
-type Context = {
+export type Context = {
   deps: KnowledgeDeps
   config: KnowledgeConfig
   token: string
@@ -92,7 +92,7 @@ type Context = {
   now: Date
 }
 
-async function context(deps: KnowledgeDeps, config: KnowledgeConfig): Promise<Context> {
+export async function context(deps: KnowledgeDeps, config: KnowledgeConfig): Promise<Context> {
   const { token } = await deps.github.installationToken(config.repository)
   const mirror = new Mirror(mirrorDir(deps.root, config.repository))
   await mirror.ensure()
