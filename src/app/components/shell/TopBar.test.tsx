@@ -2,12 +2,13 @@
 import { ThemeProvider, builtinThemes } from '@theokit/ui'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CopyProvider } from '../../lib/copy'
 import { en } from '../../lib/copy/en'
 import { ptBR } from '../../lib/copy/pt-BR'
 import { GuideProvider } from '../../lib/guide-state'
+import { WidthContext } from '../../lib/media'
 
 import { inWork, TopBar } from './TopBar'
 
@@ -137,5 +138,30 @@ describe('the way to the guide', () => {
     cleanup()
     withGuide('/setup')
     expect(dot()).toBeNull()
+  })
+})
+
+describe('the bar on a phone', () => {
+  it('has a menu button that asks the shell to open the menu, and has none when wide', () => {
+    const onMenu = vi.fn()
+    const bar = (width: 'compact' | 'expanded') => (
+      <CopyProvider>
+        <ThemeProvider themes={builtinThemes} defaultTheme="violet-forge" defaultMode="dark">
+          <WidthContext.Provider value={width}>
+            <MemoryRouter>
+              <GuideProvider>
+                <TopBar onMenu={onMenu} />
+              </GuideProvider>
+            </MemoryRouter>
+          </WidthContext.Provider>
+        </ThemeProvider>
+      </CopyProvider>
+    )
+    const wide = render(bar('expanded'))
+    expect(screen.queryByRole('button', { name: ptBR.topBar.openMenu })).toBeNull()
+    wide.unmount()
+    render(bar('compact'))
+    fireEvent.click(screen.getByRole('button', { name: ptBR.topBar.openMenu }))
+    expect(onMenu).toHaveBeenCalled()
   })
 })

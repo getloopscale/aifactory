@@ -134,7 +134,7 @@ export default function HealthPage() {
 
           <section aria-label={h.cost.title}>
             <h2 className="mb-2 text-sm font-semibold">{h.cost.title}</h2>
-            <dl className="grid grid-cols-4 gap-3 text-sm">
+            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
               {[
                 [h.cost.last24, money(data.cost.last24HoursUsd)],
                 [h.cost.last7, money(data.cost.last7DaysUsd)],
@@ -148,44 +148,46 @@ export default function HealthPage() {
               ))}
             </dl>
             {data.cost.groups.length > 0 ? (
-              <table className="mt-4 w-full text-left text-sm">
-                <thead className="text-xs text-muted-foreground">
-                  <tr>
-                    <th className="py-1 pr-3">{h.cost.agent}</th>
-                    <th className="py-1 pr-3">{h.cost.role}</th>
-                    <th className="py-1 pr-3">{h.cost.runs}</th>
-                    <th className="py-1 pr-3">{h.cost.cost}</th>
-                    <th className="py-1 pr-3">{h.cost.averageTime}</th>
-                    <th className="py-1 pr-3">{h.cost.failed}</th>
-                    <th className="py-1 pr-3">{h.cost.quota}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.cost.groups.map((g) => (
-                    <tr key={`${g.harness}-${g.role}`} className="border-t border-border">
-                      <td className="py-1 pr-3 font-medium">{g.harness}</td>
-                      <td className="py-1 pr-3">{g.role}</td>
-                      <td className="py-1 pr-3">{g.runs}</td>
-                      <td className="py-1 pr-3">
-                        {g.reportedRuns === 0 ? (
-                          <span className="text-muted-foreground">{h.cost.notReported}</span>
-                        ) : (
-                          money(g.costUsd)
-                        )}
-                        {partlyReported(g) ? (
-                          <span className="text-xs text-muted-foreground">
-                            {' '}
-                            {h.cost.partlyReported(g.reportedRuns, g.runs)}
-                          </span>
-                        ) : null}
-                      </td>
-                      <td className="py-1 pr-3">{seconds(g.avgDurationMs)}</td>
-                      <td className="py-1 pr-3">{g.failed}</td>
-                      <td className="py-1 pr-3">{g.quota}</td>
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="text-xs text-muted-foreground">
+                    <tr>
+                      <th className="py-1 pr-3">{h.cost.agent}</th>
+                      <th className="py-1 pr-3">{h.cost.role}</th>
+                      <th className="py-1 pr-3">{h.cost.runs}</th>
+                      <th className="py-1 pr-3">{h.cost.cost}</th>
+                      <th className="py-1 pr-3">{h.cost.averageTime}</th>
+                      <th className="py-1 pr-3">{h.cost.failed}</th>
+                      <th className="py-1 pr-3">{h.cost.quota}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {data.cost.groups.map((g) => (
+                      <tr key={`${g.harness}-${g.role}`} className="border-t border-border">
+                        <td className="py-1 pr-3 font-medium">{g.harness}</td>
+                        <td className="py-1 pr-3">{g.role}</td>
+                        <td className="py-1 pr-3">{g.runs}</td>
+                        <td className="py-1 pr-3">
+                          {g.reportedRuns === 0 ? (
+                            <span className="text-muted-foreground">{h.cost.notReported}</span>
+                          ) : (
+                            money(g.costUsd)
+                          )}
+                          {partlyReported(g) ? (
+                            <span className="text-xs text-muted-foreground">
+                              {' '}
+                              {h.cost.partlyReported(g.reportedRuns, g.runs)}
+                            </span>
+                          ) : null}
+                        </td>
+                        <td className="py-1 pr-3">{seconds(g.avgDurationMs)}</td>
+                        <td className="py-1 pr-3">{g.failed}</td>
+                        <td className="py-1 pr-3">{g.quota}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <p className="mt-3 text-sm text-muted-foreground">{h.cost.none}</p>
             )}

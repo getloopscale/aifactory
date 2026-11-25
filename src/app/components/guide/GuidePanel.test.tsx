@@ -40,6 +40,7 @@ import { GuideProvider, useGuideState } from '../../lib/guide-state'
 import { GuidePanel } from './GuidePanel'
 import { CopyProvider, LANGUAGE_KEY } from '../../lib/copy'
 import { ptBR } from '../../lib/copy/pt-BR'
+import { WidthContext, type WidthClass } from '../../lib/media'
 // The owner's language is Portuguese here; the dictionary keys say what is on the screen.
 window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper: CopyProvider })
@@ -240,5 +241,20 @@ describe('the guide beside the page', () => {
     expect(screen.getByText(/Antes/)).toBeDefined()
     expect(await screen.findByLabelText(ptBR.chatgpt.label)).toBeDefined()
     expect(window.localStorage.getItem('aifactory.guide.model')).toBe('codex')
+  })
+})
+
+describe('the guide by width', () => {
+  it.each([
+    ['expanded', false],
+    ['medium', true],
+    ['compact', true],
+  ] as [WidthClass, boolean][])('is %s: a sheet over the page is %s', (width, sheet) => {
+    render(<WidthContext.Provider value={width}>{tree()}</WidthContext.Provider>)
+    openIt()
+    const aside = panel()!
+    expect(aside.hasAttribute('data-sheet')).toBe(sheet)
+    expect(aside.className.includes('fixed')).toBe(sheet)
+    expect(aside.className.includes('relative')).toBe(!sheet)
   })
 })
