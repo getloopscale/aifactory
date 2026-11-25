@@ -1,8 +1,8 @@
 import './globals.css'
 
 import { ThemeProvider, builtinThemes } from '@theokit/ui'
-import { useCallback, useEffect, useState } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 
 import type { HealthReport, InboxItem, RepositoriesView, SetupReport } from '../shared/panel'
 
@@ -12,6 +12,7 @@ import { setupAttention } from './components/shell/SetupCount'
 import { Sidebar } from './components/shell/Sidebar'
 import { inWork, TopBar } from './components/shell/TopBar'
 import { post } from './lib/api'
+import { nextAttention, type Announcement } from './lib/attention'
 import { ChatsProvider } from './lib/chats'
 import { CopyProvider, useCopy } from './lib/copy'
 import { GuideProvider } from './lib/guide-state'
@@ -19,6 +20,20 @@ import { useInstall } from './lib/install'
 import { useResource } from './lib/live'
 import { useWidthClass, WidthContext } from './lib/media'
 import { useEscape } from './lib/keys'
+
+/** The title and the favicon say how many items wait, for a tab the owner is not looking at. */
+function useTabSigns(count: number) {
+  useEffect(() => {
+    document.title = count > 0 ? `(${count}) aifactory` : 'aifactory'
+    let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    if (!link) {
+      link = document.createElement('link')
+      link.rel = 'icon'
+      document.head.appendChild(link)
+    }
+    link.href = count > 0 ? '/favicon-attention.svg' : '/favicon.svg'
+  }, [count])
+}
 
 const HIDDEN_KEY = 'aifactory.menu.hidden'
 
@@ -97,6 +112,43 @@ function Shell() {
   }, [me.data, onLogin, navigate])
 
   const signedIn = me.data?.owner === true
+
+  const items = inbox.data?.items
+  const count = signedIn ? (items?.length ?? 0) : 0
+  useTabSigns(count)
+  const seen = useRef<InboxItem[] | null>(null)
+  const [announcement, setAnnouncement] = useState<Announcement | null>(null)
+  const [toast, setToast] = useState<Announcement | null>(null)
+  useEffect(() => {
+    if (!signedIn) {
+      seen.current = null
+      setAnnouncement(null)
+      setToast(null)
+      return
+    }
+    if (!items) return
+    const next = nextAttention(seen.current, items, Date.now())
+    seen.current = items
+    if (!next) return
+    setAnnouncement(next)
+    const taskId = next.first.task?.id
+    const go = () => void navigate(`/tasks/${taskId}`)
+    if (document.hasFocus()) {
+      setToast(next)
+    } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      try {
+        const shown = new Notification(t.attention.notificationTitle, { body: next.first.summary })
+        shown.onclick = () => {
+          window.focus()
+          go()
+        }
+      } catch {
+        setToast(next)
+      }
+    }
+  }, [items, signedIn, navigate, t])
+  const say = (a: Announcement) =>
+    a.count > 1 ? t.attention.many(a.count, a.first.summary) : t.attention.one(a.first.summary)
   const signOut = () =>
     void post('/api/panel/logout').then(() => {
       me.reload()
@@ -180,6 +232,27 @@ function Shell() {
               </div>
               {signedIn ? <GuidePanel /> : null}
             </div>
+            <div aria-live="polite" role="status" className="sr-only" data-testid="attention-live">
+              {announcement ? <span key={announcement.at}>{say(announcement)}</span> : null}
+            </div>
+            {toast ? (
+              <div
+                role="alert"
+                className="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm shadow-lg"
+              >
+                <span>{say(toast)}</span>
+                <Link
+                  to={`/tasks/${toast.first.task?.id}`}
+                  className="underline underline-offset-2"
+                  onClick={() => setToast(null)}
+                >
+                  {t.attention.openTask}
+                </Link>
+                <button type="button" onClick={() => setToast(null)}>
+                  {t.attention.dismiss}
+                </button>
+              </div>
+            ) : null}
           </GuideProvider>
         </ChatsProvider>
       </ThemeProvider>

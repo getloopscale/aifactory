@@ -260,7 +260,7 @@ export const en = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
   conversation: {
-    heading: 'Talk to the agent',
+    heading: 'Conversation',
     mode: 'How to talk',
     ask: 'Ask',
     guide: 'Guide',
@@ -283,6 +283,39 @@ export const en = {
     cost: (usd: string) => `cost ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `A message from the owner to the agent that worked on "${title}" (issue #${issue} of ${repository}).`,
+  },
+  thread: {
+    tabs: 'Agents',
+    empty: 'Nothing was said or done yet.',
+    waitingFirst: 'Waiting for the first step of the agent…',
+    closed: (stage: string) => `The agent takes no message while the task is in ${stage}.`,
+    recipient: 'Your message goes to the agent the task is waiting on, whichever tab is open.',
+    summary: (c: {
+      read?: number
+      search?: number
+      edit?: number
+      command?: number
+      other?: number
+    }) =>
+      [
+        c.read ? `read ${c.read} ${c.read === 1 ? 'file' : 'files'}` : '',
+        c.search ? `searched ${c.search} ${c.search === 1 ? 'time' : 'times'}` : '',
+        c.edit ? `edited ${c.edit} ${c.edit === 1 ? 'file' : 'files'}` : '',
+        c.command ? `ran ${c.command} ${c.command === 1 ? 'command' : 'commands'}` : '',
+        c.other ? `${c.other} other ${c.other === 1 ? 'step' : 'steps'}` : '',
+      ]
+        .filter(Boolean)
+        .join(', '),
+    failedSteps: (n: number) => `${n} failed`,
+    worked: (time: string) => `worked for ${time}`,
+    pass: (who: string, engine: string | null) =>
+      engine ? `${who} started · ${engine}` : `${who} started`,
+    doing: (what: string, time: string) => `${what} · ${time}`,
+    working: 'working',
+    running: (tool: string, target: string) =>
+      target ? `running ${tool} ${target}` : `running ${tool}`,
+    openSteps: 'Show the steps',
+    closeSteps: 'Hide the steps',
   },
   taskActions: {
     title: 'Actions',
@@ -1210,6 +1243,18 @@ export const en = {
       base_conflict: 'Merge of the integration branch conflicted',
       queue_blocked: 'Fix waiting in the queue',
     } as Record<string, string>,
+  },
+  attention: {
+    one: (summary: string) => `Waiting for you: ${summary}`,
+    many: (count: number, summary: string) => `${count} things wait for you. First: ${summary}`,
+    notificationTitle: 'aifactory',
+    openTask: 'Open the task',
+    dismiss: 'Dismiss',
+    notify: 'Notify me',
+    notifyOn: 'Notifications are on',
+    notifyDenied:
+      'Notifications are off. Your browser refused them: allow them for this site in the browser settings (the lock next to the address), then reload.',
+    notifyUnsupported: 'This browser cannot show notifications.',
   },
   inbox: {
     heading: 'Inbox',
