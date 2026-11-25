@@ -236,6 +236,14 @@ export const en = {
     noChecks: 'No checks have run yet.',
     evidenceMeta: (sha: string, exit: number, secs: string) =>
       `on ${sha} · exit ${exit} · ${secs} s`,
+    testProof: 'Test proof',
+    testProofOutcome: {
+      proven: 'Proven: the tests fail on the base',
+      unproven: 'Unproven: the tests pass without the change',
+      no_tests: 'No test file changed',
+      not_run: 'Not run',
+    },
+    testProofMeta: (sha: string, files: number) => `on ${sha} · ${files} test files`,
     output: 'Output',
     reviews: 'Reviews',
     securityReviews: 'Security review',
