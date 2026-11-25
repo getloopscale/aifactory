@@ -53,6 +53,7 @@ describe('the transition table', () => {
       retry_from_finding: true,
       resolve: true,
       release: true,
+      conversation: true,
       retry_due: true,
       conflict_rerun: true,
       send_back_after_ci: true,
@@ -80,7 +81,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(32 * 15)
+    expect(pairs).toHaveLength(33 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -630,5 +631,77 @@ describe('the stages a task may be in when what was decided is carried out', () 
     expect(stagesWhere('resolve', {})).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', { mergedSha: 'm' })).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', {})).toEqual(['done', 'handoff', 'failed'])
+  })
+})
+
+describe('the owner writing to a task agent', () => {
+  const ask = { conversation: 'ask' } as const
+  const guide = { conversation: 'guide' } as const
+
+  it('asks of an agent that stopped, in every stage it can have stopped in', () => {
+    expect(acting('conversation', ask)).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+      waiting: 'ask_agent',
+      done: 'ask_agent',
+      handoff: 'ask_agent',
+      failed: 'ask_agent',
+    })
+    expect(acting('conversation', {})).toEqual(acting('conversation', ask))
+    expect(acting('conversation', { ...ask, mergedSha: 'm', branchGone: true })).toEqual(
+      acting('conversation', ask),
+    )
+  })
+
+  it('guides only a done or handed-over task whose branch is there and whose work is not integrated', () => {
+    expect(acting('conversation', guide)).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+      done: 'guide_agent',
+      handoff: 'guide_agent',
+    })
+    expect(acting('conversation', { ...guide, mergedSha: 'm' })).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+    })
+    expect(acting('conversation', { ...guide, resolvedSha: 'r' })).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+    })
+    expect(acting('conversation', { ...guide, branchGone: true })).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+    })
+  })
+
+  it('tells a person why each stage refuses', () => {
+    for (const stage of ['intake', 'sandbox', 'plan', 'pr'] as const) {
+      expect(outcome({ stage, ...ask }, 'conversation')).toEqual(
+        refused('the agent of this task is working: wait until it stops, then write to it'),
+      )
+    }
+    expect(outcome({ stage: 'merge', ...ask }, 'conversation').kind).toBe('refused')
+    for (const stage of ['released', 'cancelled'] as const) {
+      expect(outcome({ stage, ...ask }, 'conversation')).toEqual(
+        refused(
+          'the owner can write only to the agent of a task that waits for an answer, was handed over, is done or failed',
+        ),
+      )
+    }
+    for (const stage of ['waiting', 'failed'] as const) {
+      expect(outcome({ stage, ...guide }, 'conversation')).toEqual(
+        refused(
+          'a message can guide the agent only of a task that is done or was handed over: ask instead, or answer its question',
+        ),
+      )
+    }
+    expect(outcome({ stage: 'done', mergedSha: 'm', ...guide }, 'conversation')).toEqual(
+      refused(
+        'this work is already integrated, so guiding the agent would change work that was delivered: ask instead, or open a new job',
+      ),
+    )
+    expect(outcome({ stage: 'handoff', branchGone: true, ...guide }, 'conversation')).toEqual(
+      refused('the task has no branch on GitHub to continue: ask instead, or retry the task'),
+    )
   })
 })

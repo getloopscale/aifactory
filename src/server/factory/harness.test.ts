@@ -228,6 +228,20 @@ describe('claudeCodeHarness plugin', () => {
     expect(sandbox.backend.commands.at(-1)).toContain(`--resume ${id}`)
   })
 
+  it('resumes an ask turn in plan mode, with no bypass, the prompt by file', async () => {
+    const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    const harness = claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+
+    await harness.resume?.(backend, id, { prompt: 'P', cwd: '/w', timeoutMs: 5, ask: true })
+    const command = sandbox.backend.commands.at(-1)!
+    expect(command).toContain('--permission-mode plan')
+    expect(command).not.toContain('--dangerously-skip-permissions')
+    expect(command).toContain(`--resume ${id}`)
+    expect(command).toContain('< /tmp/factory-prompt.md')
+    expect(sandbox.backend.files.get('/tmp/factory-prompt.md')).toBe('P')
+  })
+
   it('loads no plugin for a pass with no role', async () => {
     const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
     const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })

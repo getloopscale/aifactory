@@ -244,6 +244,31 @@ export const en = {
     reviewLine: (round: number, verdict: string) => `Attempt ${round}: ${verdict}`,
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
+  conversation: {
+    heading: 'Talk to the agent',
+    mode: 'How to talk',
+    ask: 'Ask',
+    guide: 'Guide',
+    askHelp: 'The agent only reads and answers. Nothing it does is kept.',
+    guideHelp:
+      'The agent works on what you write, and the checks and the review run on its result.',
+    label: 'Your message to the agent',
+    placeholder: 'What do you want to know, or to change?',
+    send: 'Send',
+    sent: 'Sent.',
+    you: 'You',
+    agent: 'Agent',
+    pending: 'Waiting for the agent to read it…',
+    failed: (reason: string) => `Not delivered: ${reason}`,
+    guided: 'Sent to the agent as a change. The task runs again.',
+    runningHelp:
+      'The agent is working. It reads your message while it works and answers in its transcript.',
+    stopsStep:
+      'This agent is Codex: a message stops the step it is running and continues the same session with your words.',
+    cost: (usd: string) => `cost ${usd}`,
+    context: (title: string, issue: number, repository: string) =>
+      `A message from the owner to the agent that worked on "${title}" (issue #${issue} of ${repository}).`,
+  },
   taskActions: {
     title: 'Actions',
     heading: 'What do you want to do?',

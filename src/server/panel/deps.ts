@@ -14,6 +14,7 @@ import { createIssuesApi } from '../github/issues-api'
 import { createGithubApi } from '../github/pulls'
 
 import { ActionRefused, type ActionDeps } from './actions'
+import type { ConversationDeps } from './conversation'
 import { repositoryDoctor, type DoctorDeps } from './doctor'
 import type { RunProofDeps, StartProofDeps } from './prove'
 import type { WorkDeps } from './work'
@@ -44,6 +45,29 @@ export function actionDeps(env: NodeJS.ProcessEnv = process.env): ActionDeps {
     },
     deleteSnapshot: async (snapshotId) => {
       await sandboxProviderFromEnv(env).deleteSnapshot?.(snapshotId)
+    },
+  }
+}
+
+/** What writing to an agent needs: the message and the `conversation` job that delivers it commit together. */
+export function conversationDeps(): Omit<ConversationDeps, 'guide'> {
+  return {
+    db: getDb(),
+    inTransaction: async (work) => {
+      const client = await getPool().connect()
+      try {
+        return await drizzle(client, { schema }).transaction((tx) =>
+          work(tx as never, async (input, key) => {
+            await jobBackend().enqueueInTransaction(client, {
+              name: 'conversation',
+              input,
+              idempotencyKey: key,
+            })
+          }),
+        )
+      } finally {
+        client.release()
+      }
     },
   }
 }

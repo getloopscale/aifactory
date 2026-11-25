@@ -27,6 +27,7 @@ import {
   type CodingHarness,
   type HarnessInput,
   type HarnessResult,
+  watched,
 } from './harness'
 import { codexEvents } from './transcript'
 import type { EgressRule } from './sandbox'
@@ -134,17 +135,93 @@ export function codexHarness(
     if (placed.exitCode !== 0) throw new Error(`could not place the Codex login: ${placed.stderr}`)
   }
 
-  async function invoke(backend: SandboxBackend, input: HarnessInput, resume: string) {
-    await backend.uploadFile(PROMPT_FILE, input.prompt)
-    const env = credential.kind === 'api-key' ? 'OPENAI_API_KEY=placeholder-not-a-secret ' : ''
-    // `cwd` is a path the factory built, and `resume` was checked to be a UUID.
-    const result = await executeAgent(
-      backend,
-      `cd ${input.cwd} && ${env}${CODEX} exec${resume ? ` resume ${resume}` : ''}${model}${effort} --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --json - < ${PROMPT_FILE}`,
-      input,
-      codexEvents,
+  /** One `codex exec` process, started for `prompt`, continuing `resume` when it is given. */
+  function once(
+    backend: SandboxBackend,
+    input: HarnessInput,
+    prompt: string,
+    resume: string,
+    seen?: (line: string) => void,
+  ) {
+    // `cwd` is a path the factory built, and `resume` is checked to be a UUID.
+    if (resume) assertSessionId(resume)
+    return backend.uploadFile(PROMPT_FILE, prompt).then(() =>
+      executeAgent(
+        backend,
+        `cd ${input.cwd} && ${credential.kind === 'api-key' ? 'OPENAI_API_KEY=placeholder-not-a-secret ' : ''}${CODEX} exec${resume ? ` resume ${resume}` : ''}${model}${effort} --skip-git-repo-check ${input.ask ? '--sandbox read-only' : '--dangerously-bypass-approvals-and-sandbox'} --json - < ${PROMPT_FILE}`,
+        input,
+        seen
+          ? (line) => {
+              seen(line)
+              return codexEvents(line)
+            }
+          : codexEvents,
+      ),
     )
-    return parseCodexResult(result.exitCode, result.stdout, result.stderr)
+  }
+
+  async function invoke(backend: SandboxBackend, input: HarnessInput, resume: string) {
+    if (!input.live || !watched(backend, input)) {
+      const result = await once(backend, input, input.prompt, resume)
+      return parseCodexResult(result.exitCode, result.stdout, result.stderr)
+    }
+    return invokeLive(backend, input, input.live, resume)
+  }
+
+  /**
+   * A pass an owner's message can reach. Codex reads its input to the end before it starts, so nothing reaches
+   * a running turn: the message stops the process, and the same session is resumed with it once the process is
+   * gone, so the session never has two writers.
+   */
+  async function invokeLive(
+    backend: SandboxBackend,
+    input: HarnessInput,
+    live: NonNullable<HarnessInput['live']>,
+    resume: string,
+  ): Promise<HarnessResult> {
+    let session = resume
+    let waiting: string | undefined
+    let over = false
+    live.attach({
+      interrupts: true,
+      async send(text) {
+        if (over) return 'ended'
+        if (!session)
+          throw new Error('the pass has not told its session yet, so it cannot be resumed')
+        waiting = waiting === undefined ? text : `${waiting}\n\n${text}`
+        // `[c]` keeps the pattern from matching this command's own shell.
+        await backend.execute(`pkill -f '[c]odex exec'`)
+        return 'delivered'
+      },
+    })
+    let prompt = input.prompt
+    let total: HarnessResult | undefined
+    try {
+      for (;;) {
+        const run = await once(backend, input, prompt, session, (line) => {
+          const id = threadOf(line)
+          if (id) session = id
+        })
+        const parsed = parseCodexResult(run.exitCode, run.stdout, run.stderr)
+        session = parsed.sessionId ?? session
+        const message = waiting
+        waiting = undefined
+        if (message === undefined) {
+          over = true
+          return total ? merged(total, parsed, session) : parsed
+        }
+        // The stopped process is not a result; what it spent still counts.
+        total = merged(
+          total,
+          { ok: true, summary: '', tokensIn: parsed.tokensIn, tokensOut: parsed.tokensOut },
+          session,
+        )
+        prompt = message
+      }
+    } finally {
+      // However the pass ended, a message that comes later is not ours to resume.
+      over = true
+    }
   }
 
   return {
@@ -301,5 +378,30 @@ export function parseCodexResult(exitCode: number, stdout: string, stderr: strin
     ...(sessionId ? { sessionId } : {}),
     ...tokenCounts(tokensIn, tokensOut),
     ...(quota ? { quota } : {}),
+  }
+}
+
+/** The pass so far and the segment that followed: the last one decides, what they used is added up. */
+function merged(
+  before: HarnessResult | undefined,
+  last: HarnessResult,
+  sessionId: string,
+): HarnessResult {
+  const { tokensIn, tokensOut, ...rest } = last
+  return {
+    ...rest,
+    ...(sessionId ? { sessionId } : {}),
+    ...tokenCounts(sum(before?.tokensIn, tokensIn), sum(before?.tokensOut, tokensOut)),
+  }
+}
+
+/** The thread id a `thread.started` line carries, the session a pass can be resumed from. */
+function threadOf(line: string): string | undefined {
+  if (!line.startsWith('{')) return undefined
+  try {
+    const event = JSON.parse(line) as CodexEvent
+    return event.type === 'thread.started' ? event.thread_id : undefined
+  } catch {
+    return undefined
   }
 }

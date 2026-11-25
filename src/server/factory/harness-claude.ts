@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto'
+
 import { assertSafeName, type HarnessOptions } from './engine-models'
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 
@@ -15,7 +17,7 @@ import {
   watched,
 } from './harness'
 import { pluginDir, type CodingRole, pluginFiles } from './agent-plugin'
-import { claudeEvents } from './transcript'
+import { claudeEvents, type AgentEvent } from './transcript'
 
 /**
  * The Claude Code the factory installs in every sandbox. Pinned, so a run never meets a CLI the factory was
@@ -90,17 +92,25 @@ export function claudeCodeHarness(
   const variable = credential.kind === 'api-key' ? 'ANTHROPIC_API_KEY' : 'CLAUDE_CODE_OAUTH_TOKEN'
 
   async function invoke(backend: SandboxBackend, input: HarnessInput, flags: string) {
-    await backend.uploadFile(PROMPT_FILE, input.prompt)
+    const live = input.live && watched(backend, input) ? input.live : undefined
+    if (!live) await backend.uploadFile(PROMPT_FILE, input.prompt)
     const plugin = input.role ? await installPlugin(backend, input.role) : ''
     // A watched run prints one event per line, and its last line is the same result `json` prints.
     const format = watched(backend, input) ? 'stream-json --verbose' : 'json'
+    const inbox = live ? await openInbox(backend, input.prompt, live) : undefined
     // `cwd` is a path the factory built (see run-task), never text from the issue.
-    const result = await executeAgent(
-      backend,
-      `cd ${input.cwd} && ${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p --output-format ${format} --dangerously-skip-permissions${model}${effort}${plugin}${flags} < ${PROMPT_FILE}`,
-      input,
-      claudeEvents,
-    )
+    let result: Awaited<ReturnType<typeof executeAgent>>
+    try {
+      result = await executeAgent(
+        backend,
+        `cd ${input.cwd} && ${inbox ? `${inbox.reader} | ` : ''}${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p ${inbox ? '--input-format stream-json ' : ''}--output-format ${format} ${input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'}${model}${effort}${plugin}${flags}${inbox ? '' : ` < ${PROMPT_FILE}`}`,
+        input,
+        inbox ? (line) => inbox.seen(line) : claudeEvents,
+      )
+    } finally {
+      // Whatever ended the pass (a timeout, a dead sandbox), the `tail` and the inbox files do not outlive it.
+      inbox?.end()
+    }
     return parseClaudeResult(result.exitCode, resultLine(result.stdout), result.stderr)
   }
 
@@ -126,6 +136,69 @@ export function claudeCodeHarness(
     run: (backend, input) => invoke(backend, input, ''),
     resume: async (backend, sessionId, input) =>
       invoke(backend, input, ` --resume ${assertSessionId(sessionId)}`),
+  }
+}
+
+/** One message as Claude Code reads it on its input: a JSON line, never text in a shell. */
+export function userLine(text: string): string {
+  return `${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`
+}
+
+/**
+ * The file a pass reads its input from, `tail -f` feeding Claude Code (`SandboxBackend` cannot write to a running
+ * command's stdin). The prompt is the first line; a message is appended by file. The input is closed, which ends
+ * the pass, once every line written has had its `result`.
+ */
+async function openInbox(
+  backend: SandboxBackend,
+  prompt: string,
+  live: NonNullable<HarnessInput['live']>,
+) {
+  const path = `/tmp/factory-inbox-${randomUUID()}.jsonl`
+  const reader = `tail -n +1 -f ${path}`
+  await backend.uploadFile(path, userLine(prompt))
+  let sent = 1
+  let results = 0
+  let closed = false
+  let appended = 0
+
+  const close = () => {
+    if (closed) return
+    closed = true
+    // Anchored, so it matches the `tail` process and not the shell whose command line holds the same words.
+    void backend
+      .execute(`pkill -f '^${reader.replace('+', '\\+')}$'; rm -f ${path} ${path}.*`)
+      .catch(() => undefined)
+  }
+  live.attach({
+    interrupts: false,
+    async send(text) {
+      if (closed) return 'ended'
+      // Counted before the write, so a result that arrives meanwhile does not close the input.
+      sent += 1
+      const file = `${path}.${(appended += 1)}`
+      try {
+        await backend.uploadFile(file, userLine(text))
+        const appendedOk = await backend.execute(`cat ${file} >> ${path} && rm -f ${file}`)
+        if (appendedOk.exitCode !== 0) throw new Error(appendedOk.stderr)
+      } catch (error) {
+        sent -= 1
+        if (results >= sent) close()
+        throw error
+      }
+      return 'delivered'
+    },
+  })
+  return {
+    reader,
+    seen(line: string): AgentEvent[] {
+      if (isResult(line)) {
+        results += 1
+        if (results >= sent) close()
+      }
+      return claudeEvents(line)
+    },
+    end: close,
   }
 }
 

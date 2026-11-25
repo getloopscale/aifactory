@@ -13,6 +13,7 @@ import type {
   WatchView,
 } from '../shared/panel'
 
+import { Conversation } from './components/Conversation'
 import { TaskActions } from './components/TaskActions'
 import { TaskDetailView } from './components/TaskDetail'
 import { Transcript } from './components/Transcript'
@@ -115,6 +116,7 @@ const detail = (over: Partial<TaskDetail> = {}): TaskDetail => ({
   deliveries: [],
   watches: [],
   runs: [],
+  messages: [],
   ...over,
 })
 
@@ -1365,5 +1367,107 @@ describe('the task page in two languages', () => {
       expect(screen.getByRole('button', { name })).toBeDefined()
     }
     expect(screen.getByText(t.heading)).toBeDefined()
+  })
+})
+
+describe('writing to the agent of a stopped task', () => {
+  const noop = () => {}
+
+  it('sends the message and its mode with the action header, and clears the box', async () => {
+    const calls = serve({
+      'POST /api/panel/tasks/5/messages': { messageId: 1, delivery: 'pending' },
+    })
+    render(<Conversation detail={detail()} onDone={noop} />)
+    const send = screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement
+    expect(send.disabled).toBe(true)
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Why a map?' } })
+    fireEvent.click(send)
+
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({
+      url: '/api/panel/tasks/5/messages',
+      body: { text: 'Why a map?', mode: 'ask' },
+      csrf: '1',
+    })
+    await waitFor(() => expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe(''))
+  })
+
+  it('sends in guide mode when the owner picks it', async () => {
+    const calls = serve({
+      'POST /api/panel/tasks/5/messages': { messageId: 2, delivery: 'delivered' },
+    })
+    render(<Conversation detail={detail()} onDone={noop} />)
+    fireEvent.change(screen.getByLabelText('How to talk'), { target: { value: 'guide' } })
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Use a Set.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({ body: { text: 'Use a Set.', mode: 'guide' } })
+  })
+
+  it('shows the thread, with the answer and why a delivery failed', () => {
+    const message = {
+      author: 'owner',
+      mode: 'ask' as const,
+      costUsd: null,
+      at: '2026-11-25T10:00:00Z',
+      answeredAt: null,
+    }
+    render(
+      <Conversation
+        detail={detail({
+          messages: [
+            {
+              ...message,
+              id: 1,
+              text: 'First?',
+              delivery: 'delivered',
+              reason: null,
+              answer: 'Yes.',
+            },
+            {
+              ...message,
+              id: 2,
+              text: 'Second?',
+              delivery: 'failed',
+              reason: 'it broke',
+              answer: null,
+            },
+            { ...message, id: 3, text: 'Third?', delivery: 'pending', reason: null, answer: null },
+          ],
+        })}
+        onDone={noop}
+      />,
+    )
+    expect(screen.getByText('Yes.')).toBeTruthy()
+    expect(screen.getByText('Not delivered: it broke')).toBeTruthy()
+    expect(screen.getByText('Waiting for the agent to read it…')).toBeTruthy()
+  })
+
+  it('offers no box to an agent that is planning, and nothing when there is no thread', () => {
+    const planning = detail({ task: { ...base, stage: 'plan', column: 'working' } })
+    const { container } = render(<Conversation detail={planning} onDone={noop} />)
+    expect(container.textContent).toBe('')
+  })
+
+  it('offers a box to a working builder, with no mode, and sends it as a question', async () => {
+    const calls = serve({
+      'POST /api/panel/tasks/5/messages': { messageId: 3, delivery: 'pending' },
+    })
+    const working = detail({ task: { ...base, stage: 'build', column: 'working' } })
+    render(<Conversation detail={working} onDone={noop} />)
+    expect(screen.queryByLabelText('How to talk')).toBeNull()
+    expect(screen.queryByText(/stops the step/)).toBeNull()
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Use a Set.' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+    await waitFor(() => expect(calls).toHaveLength(1))
+    expect(calls[0]).toMatchObject({ body: { text: 'Use a Set.', mode: 'ask' } })
+  })
+
+  it('says before sending that a message to a working Codex stops its step', () => {
+    const run = { id: 1, role: 'builder', harness: 'codex', ok: true } as never
+    const working = detail({ task: { ...base, stage: 'build', column: 'working' }, runs: [run] })
+    render(<Conversation detail={working} onDone={noop} />)
+    expect(screen.getByText(/stops the step it is running/)).toBeTruthy()
   })
 })
