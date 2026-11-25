@@ -209,3 +209,29 @@ async function listed(): Promise<string[]> {
     .split('\n')
     .filter(Boolean)
 }
+
+// A repository set to the browser image: a check that starts a headless browser and loads a local page passes
+// with the egress allowlist unchanged. Opt-in, because it builds the browser image on first use.
+describe.runIf(process.env.FACTORY_BROWSER_E2E === '1')('the browser image', () => {
+  it('loads a local page in headless chromium under the same allowlist', async () => {
+    const browser = await createIsolatedSandbox(dockerSandboxProvider(), {
+      timeoutMs: 10 * 60_000,
+      egress: ORIGINAL_EGRESS,
+      image: 'browser',
+    })
+    try {
+      await browser.backend.execute(
+        `mkdir -p /tmp/site && echo '<title>hello</title>' > /tmp/site/index.html`,
+        { timeoutMs: 10_000 },
+      )
+      const run = await browser.backend.execute(
+        `chromium --headless --no-sandbox --disable-gpu --dump-dom file:///tmp/site/index.html`,
+        { timeoutMs: 120_000 },
+      )
+      expect(run.exitCode).toBe(0)
+      expect(run.stdout).toContain('<title>hello</title>')
+    } finally {
+      await browser.stop()
+    }
+  }, 600_000)
+})

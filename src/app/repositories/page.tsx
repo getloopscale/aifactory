@@ -104,6 +104,7 @@ function Settings({
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
+  const [image, setImage] = useState<'default' | 'browser'>(repo.sandboxImage ?? 'default')
   const [runLimit, setRunLimit] = useState(repo.runLimitMinutes?.toString() ?? '')
   const [atRisk, setAtRisk] = useState(repo.leadTimeAtRiskMinutes?.toString() ?? '')
   const [overdue, setOverdue] = useState(repo.leadTimeOverdueMinutes?.toString() ?? '')
@@ -146,6 +147,7 @@ function Settings({
         reviewer: reviewer || null,
         releaseMode: release || null,
         runLimitMinutes: minutes,
+        sandboxImage: image,
         leadTimeAtRiskMinutes: limits.atRiskMinutes,
         leadTimeOverdueMinutes: limits.overdueMinutes,
       })
@@ -234,6 +236,19 @@ function Settings({
           className="mt-1 w-full"
         />
         <span className="text-muted-foreground">{s.releaseBranchHelp}</span>
+      </label>
+      <label className="block">
+        <span className="text-foreground">{s.sandboxImage}</span>
+        <select
+          aria-label={s.sandboxImage}
+          value={image}
+          onChange={(e) => setImage(e.target.value === 'browser' ? 'browser' : 'default')}
+          className="mt-1 w-full rounded border border-border bg-background p-2"
+        >
+          <option value="default">{s.imageDefault}</option>
+          <option value="browser">{s.imageBrowser}</option>
+        </select>
+        <span className="text-muted-foreground">{s.sandboxImageHelp}</span>
       </label>
       <label className="block">
         <span className="text-foreground">{s.linearTeam}</span>

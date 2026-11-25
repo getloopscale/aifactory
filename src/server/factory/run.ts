@@ -27,6 +27,7 @@ import {
   resolutionProblems,
   withConflictFiles,
 } from './merge-base'
+import { artifactsAt, storeEvidence } from './artifacts'
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
 import { ensureBranches, integrationBranch } from './branches'
@@ -121,6 +122,7 @@ import {
   StageFailure,
   type Continuation,
   type StoredCheck,
+  artifactLinks,
 } from './run-support'
 import {
   fitToSession,
@@ -554,6 +556,7 @@ export class Run {
       timeoutMs: fitToSession(deps.timeouts ?? DEFAULT_TIMEOUTS, deps.sandbox.maxSessionMs)
         .sandboxMs,
       cacheKey: c.row.repository,
+      ...(c.repo.sandboxImage ? { image: c.repo.sandboxImage } : {}),
       egress: [
         githubEgress(c.token),
         ...agentEgress,
@@ -1828,7 +1831,7 @@ export class Run {
       this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
     )
     for (const check of results) {
-      await this.c.deps.db.insert(evidence).values({ taskId: this.c.taskId, sha: target, ...check })
+      await storeEvidence(this.c.deps.db, this.c.taskId, target, check)
     }
     const failed = failingChecks(results)
     if (failed.length > 0) await this.refuseMerged(failed, head, target)
@@ -2034,7 +2037,7 @@ export class Run {
       this.checks,
       this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
     )
-    for (const check of results) await db.insert(evidence).values({ taskId, sha, ...check })
+    for (const check of results) await storeEvidence(db, taskId, sha, check)
     const rows = await this.checkRuns()
     const verdict = gate({ headSha: sha, required: this.checks.map((c) => c.name), evidence: rows })
     const here = rows.filter((r) => r.sha === sha)
@@ -2308,6 +2311,8 @@ export class Run {
         review: { reviewer: this.reviewer.name, attempt, outcome },
         plan: this.renderedPlan,
         repository: row.repository,
+        artifacts: await this.artifactLinksAt(sha),
+        taskId: this.c.taskId,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
         ...(this.risk ? { risk: this.risk } : {}),
       }),
@@ -2506,6 +2511,11 @@ export class Run {
     })
   }
 
+  /** The files the checks wrote on this commit, linked to the panel when its address is configured. */
+  private async artifactLinksAt(sha: string): Promise<string[]> {
+    return artifactLinks(await artifactsAt(this.c.deps.db, this.c.taskId, sha), this.c.taskId)
+  }
+
   private async handOver(
     sha: string,
     attempt: number,
@@ -2537,6 +2547,8 @@ export class Run {
         handoff: reason,
         plan: this.renderedPlan,
         repository: row.repository,
+        artifacts: await this.artifactLinksAt(sha),
+        taskId: this.c.taskId,
         ...(this.changeFacts ? { change: this.changeFacts } : {}),
         ...(this.risk ? { risk: this.risk } : {}),
       }),
