@@ -103,6 +103,23 @@ describe('threadRows', () => {
   it('keeps an owner message of a finished pass out of the fold', () => {
     const events = [...call(0, 'Read'), ...call(20, 'Read')]
     const rows = threadRows(events, [message(1, 10)], T0 + 99_000)
-    expect(rows.map((r) => r.type)).toEqual(['worked', 'owner'])
+    expect(rows.map((r) => r.type)).toEqual(['worked', 'owner', 'worked'])
+  })
+
+  it('keeps the order of a finished pass when the owner wrote in the middle of it', () => {
+    const events = [...call(0, 'Read'), ...call(20, 'Read'), ev(40, 'message', 'done')]
+    const rows = threadRows(events, [message(1, 10)], T0 + 99_000)
+    expect(rows.map((r) => r.type)).toEqual(['worked', 'owner', 'worked', 'said'])
+    expect(rows[0]).toMatchObject({ steps: [{ seq: events[0]?.seq }] })
+    expect(rows[2]).toMatchObject({ counts: { read: 1 } })
+  })
+
+  it('shows a failed note on its own, counted as failed', () => {
+    const events = [ev(0, 'error', 'boom'), ...call(5, 'Read'), ev(20, 'message', 'done')]
+    for (const running of [undefined, 'builder'] as const) {
+      const rows = threadRows(events, [], T0 + 30_000, running ? { running } : {})
+      const note = rows.find((r) => r.type === 'work' && r.steps[0]?.type === 'note')
+      expect(note).toMatchObject({ failed: 1, steps: [{ type: 'note', text: 'boom' }] })
+    }
   })
 })

@@ -72,6 +72,10 @@ function count(steps: TranscriptRow[]): { counts: ToolCounts; failed: number } {
   const counts: ToolCounts = {}
   let failed = 0
   for (const s of steps) {
+    if (s.type === 'note') {
+      if (s.failed) failed++
+      continue
+    }
     if (s.type !== 'tool') continue
     const kind = toolKind(s.tool)
     counts[kind] = (counts[kind] ?? 0) + 1
@@ -150,23 +154,42 @@ function passRows(
   const lastSay = [...steps].reverse().find((s) => s.type === 'say')
 
   if (!running) {
-    const folded = steps.filter((s) => foldable(s) || (s.type === 'say' && s !== lastSay))
+    const isFolded = (s: TranscriptRow) => foldable(s) || (s.type === 'say' && s !== lastSay)
     const rows: ThreadRow[] = []
-    if (folded.length > 0)
-      rows.push({
-        type: 'worked',
-        key: `d-${firstSeq}`,
-        role: pass.role,
-        at: startAt,
-        engine,
-        durationMs: lastAt - Date.parse(startAt),
-        steps: folded,
-        ...count(folded),
-      })
-    for (const e of entries) {
-      if ('message' in e) rows.push(...ownerRows(e.message, pass.role))
-      else if (!folded.includes(e.step)) rows.push(...single(e.step, pass.role, atOf))
+    // Folded steps are cut at every message of the owner, so the thread keeps the order it happened in.
+    let group: TranscriptRow[] = []
+    const flushWorked = (final = false) => {
+      if (group.length > 0) {
+        const first = group[0]
+        const begun = rows.some((r) => r.type === 'worked' || r.type === 'owner')
+        const from = (begun && atOf.get(first?.seq ?? -1)) || Date.parse(startAt)
+        const last = group.at(-1)
+        const to = final ? lastAt : (atOf.get(last?.seq ?? -1) ?? lastAt)
+        rows.push({
+          type: 'worked',
+          key: `d-${first?.seq ?? firstSeq}`,
+          role: pass.role,
+          at: new Date(from).toISOString(),
+          engine,
+          durationMs: to - from,
+          steps: group,
+          ...count(group),
+        })
+      }
+      group = []
     }
+    const lastMessage = entries.reduce((k, e, j) => ('message' in e ? j : k), -1)
+    for (const [i, e] of entries.entries()) {
+      if ('message' in e) {
+        flushWorked()
+        rows.push(...ownerRows(e.message, pass.role))
+      } else if (isFolded(e.step)) group.push(e.step)
+      else {
+        flushWorked(i > lastMessage)
+        rows.push(...single(e.step, pass.role, atOf))
+      }
+    }
+    flushWorked(true)
     return rows
   }
 
