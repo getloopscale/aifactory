@@ -83,7 +83,7 @@ import {
   renderChangePlan,
   type ChangePlan,
 } from './change-plan'
-import { saveSession, SESSION_ROLES, type SessionRole } from './agent-session'
+import { restoreSession, saveSession, SESSION_ROLES, type SessionRole } from './agent-session'
 import { buildPrompt, type Clarification, type CodingHarness, type HarnessResult } from './harness'
 import {
   blockingCount,
@@ -125,6 +125,7 @@ import {
   type Continuation,
   type StoredCheck,
   artifactLinks,
+  guidePrompt,
 } from './run-support'
 import {
   fitToSession,
@@ -739,6 +740,8 @@ export class Run {
       ok: result.ok,
       quota: result.quota !== undefined,
       sessionId: result.sessionId ?? null,
+      conversation:
+        role === 'builder' && attempt === 1 && this.c.continuation?.conversation === true,
     })
     await this.keepSession(who, role, result)
     // A builder cut at its limit goes on to `failUnfinished`, which keeps what it wrote before the quota is told.
@@ -1062,6 +1065,8 @@ export class Run {
     const { deps, taskId, resuming } = this.c
     const timeoutMs = await this.agentTimeout()
     const { builder, backend, repoDir } = this
+    const guided = this.c.continuation?.conversation ? this.c.continuation.feedback : undefined
+    if (guided !== undefined) return this.guidedPass(guided, timeoutMs)
     if (resuming) {
       if (!builder.resume) throw new StageFailure(`${builder.name} cannot resume a session`)
       await enterRunStage(deps.db, taskId, 'build', {
@@ -1116,6 +1121,34 @@ export class Run {
         cwd: repoDir,
         timeoutMs,
         prompt: buildPrompt(this.buildInput()),
+        role: 'builder',
+      }),
+    )
+  }
+
+  /**
+   * The owner's guidance (`conversation` event): the builder's stored session is put back in this sandbox and
+   * resumed with the message, in the repository's working directory. Without that session the run fails and says
+   * so, rather than starting a builder that knows nothing of the task. The result goes on to the checks and the
+   * review as any pass does, and it is no rework attempt: the loop's counters start at their first value.
+   */
+  private async guidedPass(text: string, timeoutMs: number): Promise<HarnessResult> {
+    const { deps, taskId } = this.c
+    const { builder, backend, repoDir } = this
+    if (!builder.resume) throw new StageFailure(`${builder.name} cannot resume a session`)
+    const sessionId = await restoreSession(deps.db, backend, builder, { taskId, role: 'builder' })
+    await enterRunStage(deps.db, taskId, 'build', {
+      ...agentFacts(builder),
+      attempt: 1,
+      conversation: true,
+    })
+    const prompt = guidePrompt(text)
+    return this.settle(builder, 'builder', 1, (onEvent) =>
+      builder.resume!(backend, sessionId, {
+        onEvent,
+        cwd: repoDir,
+        timeoutMs,
+        prompt,
         role: 'builder',
       }),
     )

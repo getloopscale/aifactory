@@ -336,6 +336,11 @@ export type Continuation = {
    * checks and reviews the merge.
    */
   mergeBase?: boolean
+  /**
+   * The owner's guidance (`conversation` event): the run resumes the builder's stored session with the note,
+   * and the checks and the review then read the result like any work.
+   */
+  conversation?: boolean
 }
 
 /**
@@ -349,9 +354,12 @@ export function runContinuation(
   resume?: boolean,
   mergeBase?: boolean,
   fromReview?: boolean,
+  conversation?: boolean,
 ): Continuation | undefined {
   if (mergeBase) return { feedback: '', mergeBase: true }
-  if (decided?.kind === 'request_changes') return { feedback: decided.note }
+  if (decided?.kind === 'request_changes') {
+    return { feedback: decided.note, ...(conversation ? { conversation: true } : {}) }
+  }
   if (feedback) return { feedback, fromChecks: true, ...(fromReview ? { fromReview: true } : {}) }
   return resume ? { feedback: '', plain: true } : undefined
 }
@@ -363,3 +371,16 @@ export function runContinuation(
  */
 export const feedbackSource = (sentBack: Continuation | undefined): 'person' | 'checks' =>
   sentBack?.fromChecks && !sentBack.fromReview ? 'checks' : 'person'
+
+/** What the builder is told when the owner guides it: its own session continues, with the owner's words. */
+export function guidePrompt(text: string): string {
+  return `The owner of the factory writes to you about this task, in the session you already have, and asks for a change.
+Do what they ask on the branch you already have. Do not run git commit, git push or any other git command that
+writes: the factory commits and pushes, then runs the checks and the review on the result.
+Do not edit anything under .github/. Finish with a short summary of what you changed.
+
+The owner writes:
+
+${text}
+`
+}

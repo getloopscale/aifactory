@@ -2,7 +2,7 @@ import { route } from 'theokit/server/define'
 import { z } from 'zod'
 
 import { MESSAGE_MAX } from '../../../../../shared/panel'
-import { requestChanges } from '../../../../panel/actions'
+import { guideTask } from '../../../../panel/actions'
 import { sendMessage } from '../../../../panel/conversation'
 import { actionDeps, conversationDeps, refusal } from '../../../../panel/deps'
 import { ownerOnly } from '../../../../panel/policy'
@@ -16,7 +16,7 @@ export const POST = route()
     try {
       const actions = actionDeps()
       return await sendMessage(
-        { ...conversationDeps(), guide: (taskId, text) => requestChanges(actions, taskId, text) },
+        { ...conversationDeps(), guide: (taskId, text) => guideTask(actions, taskId, text) },
         params.id,
         body,
       )

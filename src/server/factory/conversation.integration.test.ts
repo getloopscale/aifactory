@@ -7,7 +7,7 @@ import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { agentMessage, ingress, task } from '../db/schema'
 
-import { CLAIM_STALE_MS, claimNext } from './conversation'
+import { CLAIM_STALE_MS, claimNext, stuckConversations, UNTAKEN_MS } from './conversation'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -80,5 +80,20 @@ describe('delivering the messages of one task', () => {
     const taskId = await seedTask()
     await write(taskId, 'one')
     expect(await claimNext(getDb(), taskId + 1)).toBeUndefined()
+  })
+
+  it('finds the tasks whose oldest message waits with no worker', async () => {
+    const taskId = await seedTask()
+    const [only] = await write(taskId, 'one')
+    const now = new Date(only.createdAt.getTime() + UNTAKEN_MS + 1000)
+    expect(await stuckConversations(getDb(), new Date(only.createdAt.getTime() + 1000))).toEqual([])
+    expect(await stuckConversations(getDb(), now)).toEqual([
+      { taskId, messageId: only.id, claimedAt: null },
+    ])
+    await claimNext(getDb(), taskId, now)
+    expect(await stuckConversations(getDb(), new Date(now.getTime() + 60_000))).toEqual([])
+    expect(
+      await stuckConversations(getDb(), new Date(now.getTime() + CLAIM_STALE_MS + 1)),
+    ).toHaveLength(1)
   })
 })

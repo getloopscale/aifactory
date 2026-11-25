@@ -5,9 +5,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { agentMessage, ingress, task } from '../db/schema'
+import { agentMessage, agentSession, ingress, task } from '../db/schema'
 
 import { ActionRefused } from './actions'
+import { guideTask } from './actions'
 import { sendMessage, type ConversationDeps } from './conversation'
 
 beforeAll(async () => {
@@ -108,5 +109,26 @@ describe('the owner writing to an agent', () => {
       .where(eq(agentMessage.mode, 'guide'))
       .orderBy(asc(agentMessage.id))
     expect(rows.map((r) => r.taskId)).toEqual([id])
+  })
+
+  it('guides only a task that kept its session, and not while a message waits', async () => {
+    const id = await seed('handoff', { headSha: 'h' })
+    const actions = { db: getDb(), inTransaction: deps().made.inTransaction } as never
+    await expect(guideTask(actions, id, 'x')).rejects.toThrow(/no session/)
+
+    await getDb()
+      .insert(agentSession)
+      .values({
+        taskId: id,
+        role: 'builder',
+        harness: 'claude-code',
+        sessionId: 's',
+        archive: Buffer.from('a'),
+        sizeBytes: 1,
+      })
+    await getDb()
+      .insert(agentMessage)
+      .values({ taskId: id, author: 'owner', text: 'q', mode: 'ask' })
+    await expect(guideTask(actions, id, 'x')).rejects.toThrow(/still being delivered/)
   })
 })

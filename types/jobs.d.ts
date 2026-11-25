@@ -15,6 +15,7 @@ declare module 'theokit/server/jobs' {
       resume?: boolean
       mergeBase?: boolean
       fromReview?: boolean
+      conversation?: boolean
     }
     /**
      * Takes work the review approved, waiting in `merge`, to its pull request and the integration branch, at

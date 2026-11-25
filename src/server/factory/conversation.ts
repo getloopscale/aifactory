@@ -158,6 +158,26 @@ async function bookCost(
   })
 }
 
+/** Saves the session only while the task's agent is still stopped; answers why not when it is not. */
+async function keepSessionIfStopped(
+  db: Database,
+  backend: SandboxBackend,
+  harness: CodingHarness,
+  taskId: number,
+  sessionId: string,
+): Promise<string | undefined> {
+  return db.transaction(async (tx) => {
+    const [now] = await tx.select().from(task).where(eq(task.id, taskId)).for('update')
+    const allowed = now ? outcome({ ...now, conversation: 'ask' }, 'conversation') : undefined
+    if (allowed?.kind !== 'action') {
+      const why = allowed ? allowed.reason : 'the task is gone'
+      return `the task moved on while the agent answered, so its session was not touched: ${why}`
+    }
+    await saveSession(tx as never, backend, harness, { taskId, role: 'builder', sessionId })
+    return undefined
+  })
+}
+
 /**
  * Delivers one claimed ask message: a sandbox cloned from the task's branch, the stored session restored and
  * resumed with the message as its prompt, read-only. The answer, or why there is none, is stored on the message.
@@ -261,13 +281,12 @@ async function attempt(
     if (!result.ok) {
       return { delivery: 'failed', reason: result.summary.slice(0, 500), costUsd }
     }
-    // The next message continues from this answer, so the session is kept before it can start.
+    // The next message continues from this answer, so the session is kept before it can start. The task's
+    // row is locked while it is written and the stage read again: a run that began meanwhile (a guide, a
+    // send-back, a retry) is the session's writer now, and an answer must not overwrite what it writes.
     if (result.sessionId) {
-      await saveSession(db, backend, harness, {
-        taskId: row.id,
-        role: 'builder',
-        sessionId: result.sessionId,
-      })
+      const moved = await keepSessionIfStopped(db, backend, harness, row.id, result.sessionId)
+      if (moved) return { delivery: 'failed', reason: moved, answer: result.summary, costUsd }
     }
     return { delivery: 'delivered', answer: result.summary, costUsd }
   } finally {
@@ -297,3 +316,32 @@ export const messagesOf = (db: Database, taskId: number) =>
     .from(agentMessage)
     .where(eq(agentMessage.taskId, taskId))
     .orderBy(asc(agentMessage.id))
+
+/** A message nobody took for this long has lost its job, so another is queued for it. */
+export const UNTAKEN_MS = 5 * 60_000
+
+/**
+ * The tasks whose oldest pending message waits with no worker: never claimed for `UNTAKEN_MS` (its job was lost),
+ * or claimed so long ago that the worker is gone (`CLAIM_STALE_MS`). The job has one attempt, so nothing else
+ * would deliver them until a later message queued a new job.
+ */
+export async function stuckConversations(
+  db: Database,
+  now = new Date(),
+): Promise<{ taskId: number; messageId: number; claimedAt: Date | null }[]> {
+  const untaken = new Date(now.getTime() - UNTAKEN_MS)
+  const stale = new Date(now.getTime() - CLAIM_STALE_MS)
+  const oldest = await db
+    .selectDistinctOn([agentMessage.taskId], {
+      taskId: agentMessage.taskId,
+      messageId: agentMessage.id,
+      claimedAt: agentMessage.claimedAt,
+      createdAt: agentMessage.createdAt,
+    })
+    .from(agentMessage)
+    .where(eq(agentMessage.delivery, 'pending'))
+    .orderBy(agentMessage.taskId, agentMessage.id)
+  return oldest
+    .filter((m) => (m.claimedAt ? m.claimedAt < stale : m.createdAt < untaken))
+    .map(({ taskId, messageId, claimedAt }) => ({ taskId, messageId, claimedAt }))
+}
