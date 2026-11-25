@@ -42,7 +42,7 @@ import {
 import { FakeGithub, type FakeCheckRun, type FakePullRequest } from '../../test/fake-github'
 import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
-import type { NewNote } from '../knowledge/store'
+import type { NewGap, NewNote } from '../knowledge/store'
 
 import { githubEgress } from './credential-renewal'
 import { CHANGESET_CHECK_SCRIPT } from './changeset-check'
@@ -6800,11 +6800,17 @@ describe('what the owner set for the repository', () => {
 })
 
 /** A knowledge base that is ready, kept in memory, which remembers what the run kept and received. */
-function knowledgeBase(): KnowledgeSource & { kept: NewNote[]; deliveries: unknown[] } {
+function knowledgeBase(): KnowledgeSource & {
+  kept: NewNote[]
+  gaps: NewGap[]
+  deliveries: unknown[]
+} {
   const kept: NewNote[] = []
+  const gaps: NewGap[] = []
   const deliveries: unknown[] = []
   return {
     kept,
+    gaps,
     deliveries,
     pin: async () => ({
       repository: 'me/kb',
@@ -6820,6 +6826,9 @@ function knowledgeBase(): KnowledgeSource & { kept: NewNote[]; deliveries: unkno
     },
     keep: async (notes) => {
       kept.push(...notes)
+    },
+    keepGaps: async (more) => {
+      gaps.push(...more)
     },
   }
 }
@@ -6880,6 +6889,52 @@ describe('runTask with a knowledge base', () => {
         baseSha: 'abc123def',
       },
     ])
+  })
+
+  it("keeps up to three questions the builder could not find answered, as the builder's", async () => {
+    const id = await seedTask()
+    const asking: CodingHarness = {
+      name: 'asking',
+      egress: agentEgress,
+      run: async () => ({
+        ok: true,
+        summary: [
+          'Added truncate.',
+          'KNOWLEDGE_GAP: does this project use named or default exports?',
+          'KNOWLEDGE_GAP: which date library does the project use?',
+          'KNOWLEDGE_GAP: where do fixtures live in this project?',
+          'KNOWLEDGE_GAP: a fourth question that must not be stored?',
+        ].join('\n'),
+      }),
+    }
+    const knowledge = knowledgeBase()
+
+    await runTask(deps(new FakeSandbox(changed()), { harness: asking, knowledge }), id)
+
+    expect(knowledge.gaps).toHaveLength(3)
+    expect(knowledge.gaps[0]).toEqual({
+      repository: 'paulo/app',
+      question: 'does this project use named or default exports?',
+      taskId: id,
+      issueNumber: 7,
+      role: 'builder',
+      baseSha: 'abc123def',
+    })
+  })
+
+  it('stores no gap and does not ask for one without a knowledge base', async () => {
+    const id = await seedTask()
+    const prompts: string[] = []
+    const asking: CodingHarness = {
+      name: 'asking',
+      egress: agentEgress,
+      run: async (_backend, { prompt }) => {
+        prompts.push(prompt)
+        return { ok: true, summary: 'Done.\nKNOWLEDGE_GAP: does this project use named exports?' }
+      },
+    }
+    await runTask(deps(new FakeSandbox(changed()), { harness: asking }), id)
+    expect(prompts[0]).not.toContain('KNOWLEDGE_GAP:')
   })
 
   describe('an issue the code already resolves', () => {
