@@ -2,10 +2,13 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 
 import { eq } from 'drizzle-orm'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
+import { getStorageManager } from 'theokit/server/storage'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDb } from '../db'
-import { agentEvent, agentRun, task } from '../db/schema'
+import { getDb, getPool, readDatabaseUrl } from '../db'
+import { storageFromUrl } from '../db/config'
+import { agentEvent, agentRun, ingress, task } from '../db/schema'
 import { exportTrace } from './export'
 import { loadPass, recordPass } from './record'
 import { passToOtlp } from './spans'
@@ -20,13 +23,19 @@ let received: { url: string; body: string }[]
 let status = 200
 let endpoint: string
 
+beforeAll(async () => {
+  getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
+  await migrate(getDb(), { migrationsFolder: 'drizzle' })
+})
+afterAll(() => getStorageManager().dispose())
+
 beforeEach(async () => {
   queued.length = 0
   received = []
   status = 200
-  const db = getDb()
-  await db.delete(agentEvent)
-  await db.delete(agentRun)
+  await getPool().query(
+    'truncate table agent_event, agent_run, task, ingress restart identity cascade',
+  )
   server = createServer((req, res) => {
     let body = ''
     req.on('data', (c) => (body += c))
@@ -45,9 +54,26 @@ afterEach(async () => {
 })
 
 async function aTask() {
+  const [i] = await getDb()
+    .insert(ingress)
+    .values({
+      deliveryId: 'd-trace',
+      event: 'issues',
+      payload: {},
+      outcome: 'task_created',
+      code: 'issue_labeled',
+      reason: 'r',
+    })
+    .returning({ id: ingress.id })
   const [row] = await getDb()
     .insert(task)
-    .values({ repository: 'o/trace', issueNumber: 573, issueTitle: 't', issueBody: '' } as never)
+    .values({
+      ingressId: i!.id,
+      repository: 'o/trace',
+      issueNumber: 573,
+      issueTitle: 't',
+      issueBody: '',
+    } as never)
     .returning()
   return row!
 }
