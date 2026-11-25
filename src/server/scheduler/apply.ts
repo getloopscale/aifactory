@@ -187,19 +187,28 @@ export async function blockTask(
 
 export type DraftDeps = Pick<AskDeps, 'db' | 'github'> & {
   issues: Pick<IssuesApi, 'updateIssueBody'>
+  /** A read of the issue as GitHub holds it now, not the pass's listing. */
+  readIssue: (
+    repo: string,
+    number: number,
+    token: string,
+  ) => Promise<{ title: string; body: string }>
 }
 
-export type Drafted = { drafted: true } | { drafted: false; reason: string }
+/** `stale`: the issue is not the version the verdict was made for (or could not be confirmed); nothing was written. */
+export type Drafted = { drafted: true } | { drafted: false; stale?: boolean; reason: string }
 
 /**
- * Writes drafted acceptance criteria into the issue and records a `ready` verdict for the new body, leaving the
- * queued run and the task's stage as they are. The transition and the run are checked first; a body that already
- * holds the section (an earlier pass wrote it and failed to record) is not written twice.
+ * Writes drafted acceptance criteria into the issue and records a `ready` verdict for the body GitHub holds
+ * afterwards, leaving the queued run and the task's stage as they are. The transition and the run are checked
+ * first, and the issue is read again just before the write: when it is no longer the version judged (the owner
+ * edited it), nothing is written. A body that already holds the section is not written twice. The recorded
+ * hash is that of the body read back after the write, since GitHub may store it differently from what was sent.
  */
 export async function applyAcceptance(
   deps: DraftDeps,
   run: AskedRun,
-  issue: { title: string; body: string },
+  judged: { title: string; body: string },
   criteria: string[],
 ): Promise<Drafted> {
   const [row] = await deps.db
@@ -214,21 +223,25 @@ export async function applyAcceptance(
   if ((queued.rowCount ?? 0) === 0) {
     return { drafted: false, reason: 'its queued run was taken, held or withdrawn first' }
   }
-  const body = issue.body.includes(ACCEPTANCE_HEADING)
-    ? issue.body
-    : [issue.body.trimEnd(), acceptanceSection(criteria)].filter((p) => p !== '').join('\n\n')
-  if (body === issue.body && !issue.body.includes(ACCEPTANCE_HEADING)) {
-    return { drafted: false, reason: 'the draft holds no usable criterion' }
+  const { token } = await deps.github.installationToken(run.repository)
+  const current = await deps.readIssue(run.repository, run.issueNumber, token)
+  const written = current.body.includes(ACCEPTANCE_HEADING)
+  if (!written && bodyHash(current.title, current.body) !== bodyHash(judged.title, judged.body)) {
+    return { drafted: false, stale: true, reason: 'the issue changed after it was judged' }
   }
-  if (body !== issue.body) {
-    const { token } = await deps.github.installationToken(run.repository)
+  let after = current
+  if (!written) {
+    const body = [current.body.trimEnd(), acceptanceSection(criteria)]
+      .filter((p) => p !== '')
+      .join('\n\n')
     await deps.issues.updateIssueBody(run.repository, token, run.issueNumber, body)
+    after = await deps.readIssue(run.repository, run.issueNumber, token)
   }
   await recordDecision(deps.db, {
     taskId: run.taskId,
     kind: 'readiness',
     mode: 'auto',
-    head: bodyHash(issue.title, body),
+    head: bodyHash(after.title, after.body),
     detail: { verdict: 'ready', missing: '', question: '', drafted: true },
   })
   return { drafted: true }

@@ -197,6 +197,20 @@ describe('the drafted acceptance criteria', () => {
     expect(parseCriteria('nothing').error).toBeDefined()
   })
 
+  it.each([
+    'ask @octocat to review',
+    'notify @org/team',
+    'see https://example.com/x',
+    'see www.example.com',
+    'fixes #123',
+    'see GH-123',
+    'mail a@b.co',
+  ])('rejects a draft with a mention, link or reference: %s', (text) => {
+    const read = parseCriteria(JSON.stringify({ criteria: ['a passes', text] }))
+    expect(read.criteria).toEqual([])
+    expect(read.error).toMatch(/mention, a link or an issue reference/)
+  })
+
   it('writes each criterion as one plain list line', () => {
     const section = acceptanceSection(['- [x](http://e) <b>ok</b>\n## Head', 'a `test` passes'])
     expect(section.split('\n')).toEqual([

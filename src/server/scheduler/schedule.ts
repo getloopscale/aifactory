@@ -3,6 +3,7 @@ import type { Pool } from 'pg'
 import { openAmong, type BlockerReads } from '../factory/blocker-check'
 import { refOf, withoutOwn } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
+import { fetchIssue } from '../github/issues'
 
 import {
   applyAcceptance,
@@ -136,21 +137,30 @@ async function draftFor(
   return { ...verdict, draft: detail.draft }
 }
 
-/** Writes a recorded draft into the issue in `auto`; false when there is none to write or it was not written. */
-async function appliedDraft(deps: SchedulerDeps, run: ReadRun, verdict: ReadinessRecord) {
-  if (!deps.issues || !verdict.draft || verdict.draft.length === 0) return false
+/**
+ * Writes a recorded draft into the issue in `auto`. `none`: there is no draft to write, or it could not be
+ * written, and the owner is asked; `done`: written; `skip`: the issue changed or the write failed, so nothing is
+ * asked about a version that is gone and the next pass judges what the issue is now.
+ */
+async function appliedDraft(
+  deps: SchedulerDeps,
+  run: ReadRun,
+  verdict: ReadinessRecord,
+): Promise<'none' | 'done' | 'skip'> {
+  if (!deps.issues || !verdict.draft || verdict.draft.length === 0) return 'none'
   try {
     const done = await applyAcceptance(
-      { ...deps, issues: deps.issues },
+      { ...deps, issues: deps.issues, readIssue: deps.fetchIssue ?? fetchIssue },
       run,
       run.issue.value,
       verdict.draft,
     )
-    if (!done.drafted) log('schedule_not_drafted', { taskId: run.taskId, reason: done.reason })
-    return done.drafted
+    if (done.drafted) return 'done'
+    log('schedule_not_drafted', { taskId: run.taskId, reason: done.reason })
+    return done.stale ? 'skip' : 'none'
   } catch (error) {
     log('schedule_draft_not_applied', { taskId: run.taskId, error: errorMessage(error) })
-    return false
+    return 'skip'
   }
 }
 
@@ -212,7 +222,10 @@ async function readinessOf(
     verdict = await draftFor({ ...deps, drafter: deps.drafter }, run, verdict!)
   }
   const step = readinessStep(verdict, mode)
-  if (step === 'ask' && (await appliedDraft(deps, run, verdict!))) return false
+  if (step === 'ask') {
+    const drafted = await appliedDraft(deps, run, verdict!)
+    if (drafted !== 'none') return false
+  }
   if (step === 'block') return blockedByIssues(deps, run, verdict!)
   if (step !== 'ask') return false
   const asked = await askOwner(deps, run, verdict!, verdict!.id)

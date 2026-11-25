@@ -93,6 +93,8 @@ export const ACCEPTANCE_HEADING = '## Acceptance (drafted by the factory)'
 const CRITERIA_MIN = 2
 const CRITERIA_MAX = 6
 const CRITERION_MAX = 500
+/** Text GitHub turns into a notification or a link: a mention, an email, a URL, an issue reference. */
+const NOTIFIES = /@|:\/\/|www\.|mailto:|#\s*\d|\bGH-\d/i
 
 /** The criteria in the drafter's answer: its last JSON object that holds them, or none with the error. */
 export function parseCriteria(answer: string): { criteria: string[]; error?: string } {
@@ -111,6 +113,9 @@ export function parseCriteria(answer: string): { criteria: string[]; error?: str
       .map((c) => c.replace(/\s+/g, ' ').trim().slice(0, CRITERION_MAX))
       .filter((c) => c !== '')
     if (criteria.length === 0) return { criteria: [] }
+    if (criteria.some((c) => NOTIFIES.test(c))) {
+      return { criteria: [], error: 'the draft holds a mention, a link or an issue reference' }
+    }
     if (criteria.length < CRITERIA_MIN || criteria.length > CRITERIA_MAX) {
       return { criteria: [], error: `the draft has ${criteria.length} criteria, not 2 to 6` }
     }
