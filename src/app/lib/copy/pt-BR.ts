@@ -110,6 +110,8 @@ export const ptBR: Copy = {
     noneYet: 'Nenhuma conversa ainda',
     account: 'Conta',
     signOut: 'Sair',
+    install: 'Instalar o app',
+    installIos: 'Para instalar: toque em Compartilhar e depois em "Adicionar à Tela de Início".',
   },
   chatRow: {
     name: 'Nome da conversa',
