@@ -6,6 +6,12 @@ const agents = ['claude-code', 'codex']
 const problem = (patch: Parameters<typeof patchProblem>[0]) => patchProblem(patch, agents)
 
 describe('patchProblem', () => {
+  it('accepts risk patterns that read as high: or medium: and a glob, and refuses any other line', () => {
+    expect(problem({ riskPatterns: ['high: src/auth/**', 'medium: **/api/**'] })).toBeUndefined()
+    expect(problem({ riskPatterns: [] })).toBeUndefined()
+    expect(problem({ riskPatterns: ['src/auth/**'] })).toContain('is not a pattern')
+  })
+
   it('has nothing to say about an empty patch or a good one', () => {
     expect(problem({})).toBeUndefined()
     expect(

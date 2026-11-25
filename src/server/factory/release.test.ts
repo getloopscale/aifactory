@@ -144,4 +144,16 @@ describe('versions and notes, at their edges', () => {
     expect(body).toContain('a'.repeat(3_000))
     expect(body).not.toContain('Z')
   })
+
+  it('shows the risk of the change when one was recorded, and nothing for older work', () => {
+    const risk = {
+      sha: 'abcdef1',
+      level: 'medium' as const,
+      reasons: ['the issue is labelled breaking'],
+    }
+    expect(preReleaseNotes({ ...notes, risk }).body).toContain(
+      'Risk: medium\n- the issue is labelled breaking',
+    )
+    expect(preReleaseNotes(notes).body).not.toContain('Risk:')
+  })
 })

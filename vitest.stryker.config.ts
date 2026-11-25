@@ -56,6 +56,7 @@ export default defineConfig({
       'src/server/factory/sandbox-provider.test.ts',
       'src/server/factory/sandbox-reaper.test.ts',
       'src/server/factory/repo-config.test.ts',
+      'src/server/factory/risk.test.ts',
       'src/server/panel/work.test.ts',
       'src/app/lib/format.test.ts',
       'src/shared/panel.test.ts',

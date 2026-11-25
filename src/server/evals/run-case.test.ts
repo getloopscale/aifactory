@@ -675,6 +675,25 @@ describe('runCase', () => {
   const deletedTests = (n: number) =>
     'M\tsrc/cli.ts\n' + Array.from({ length: n }, (_, i) => `D\tsrc/old${i}.test.ts\n`).join('')
 
+  it('rates each reviewed commit: a rework that drops the migration is rated again, low', async () => {
+    const provider = sandbox({
+      nameStatusPerCommit: ['M\tsrc/cli.ts\nA\tdrizzle/0049_x.sql\n', 'M\tsrc/cli.ts\n'],
+    })
+    const builder = agent('builder', planned(built(), built()))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: changesWith(1) },
+      { ok: true, summary: APPROVE },
+    ])
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result).toMatchObject({ passed: true, reviewRounds: 2 })
+    expect(reviewer.prompts[0]).toContain('rated this change high risk')
+    expect(reviewer.prompts[0]).toContain('drizzle/0049_x.sql matches high: drizzle/**')
+    expect(reviewer.prompts[1]).toContain('rated this change low risk')
+    expect(reviewer.prompts[1]).not.toContain('drizzle/0049_x.sql matches')
+  })
+
   it('counts the factory\'s own guards: blocking guards that fall give another round, 4, 3, 2', async () => {
     const provider = sandbox({
       nameStatusPerCommit: [deletedTests(4), deletedTests(3), deletedTests(2), deletedTests(0)],
