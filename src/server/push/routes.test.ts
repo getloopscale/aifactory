@@ -42,4 +42,19 @@ describe('the push routes', () => {
     expect(body).toContain('pub')
     expect(body).not.toContain(SECRET)
   })
+
+  it('refuses to subscribe an address that is not a push service', () => {
+    const schema = subscribe.body as { safeParse: (v: unknown) => { success: boolean } }
+    const keys = { p256dh: 'a', auth: 'b' }
+    expect(schema.safeParse({ endpoint: 'https://fcm.googleapis.com/x', keys }).success).toBe(true)
+    for (const endpoint of [
+      'http://169.254.169.254/',
+      'https://localhost/x',
+      'https://10.0.0.1/x',
+    ]) {
+      expect(schema.safeParse({ endpoint, keys }).success).toBe(false)
+    }
+    const remove = unsubscribe.body as { safeParse: (v: unknown) => { success: boolean } }
+    expect(remove.safeParse({ endpoint: 'https://localhost/x' }).success).toBe(false)
+  })
 })

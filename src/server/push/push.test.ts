@@ -14,7 +14,7 @@ const env = {
   FACTORY_PUSH_PRIVATE_KEY: SECRET,
   FACTORY_PANEL_ORIGIN: 'https://panel.example/some/path',
 }
-const target = { endpoint: 'https://push.example/1', p256dh: 'a', auth: 'b' }
+const target = { endpoint: 'https://fcm.googleapis.com/fcm/send/1', p256dh: 'a', auth: 'b' }
 const payload = { title: 't', body: 'b', url: 'u', tag: 'x' }
 
 beforeEach(() => {
@@ -53,5 +53,14 @@ describe('webPushSender', () => {
     expect(result.ok).toBe(false)
     expect(isGone(result)).toBe(false)
     expect(JSON.stringify(result)).not.toContain(SECRET)
+  })
+
+  it('never calls the network for an endpoint that is not a push service, and reports it gone', async () => {
+    const result = await webPushSender(pushConfig(env)!)(
+      { ...target, endpoint: 'https://169.254.169.254/latest' },
+      payload,
+    )
+    expect(sendNotification).not.toHaveBeenCalled()
+    expect(isGone(result)).toBe(true)
   })
 })

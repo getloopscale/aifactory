@@ -3,6 +3,7 @@ import { sendNotification } from 'web-push'
 import type { PushPayload } from '../../shared/push'
 
 import type { PushConfig } from './config'
+import { isPushEndpoint } from './endpoint'
 
 export type PushTarget = { endpoint: string; p256dh: string; auth: string }
 
@@ -17,6 +18,10 @@ export type PushSender = (target: PushTarget, payload: PushPayload) => Promise<S
  */
 export function webPushSender(config: PushConfig): PushSender {
   return async (target, payload) => {
+    // A row saved before the check, or edited in the database, never reaches the network; the 410 deletes it.
+    if (!isPushEndpoint(target.endpoint)) {
+      return { ok: false, status: 410, reason: 'endpoint is not a known push service' }
+    }
     try {
       await sendNotification(
         { endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } },

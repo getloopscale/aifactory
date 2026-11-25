@@ -3,11 +3,12 @@ import { z } from 'zod'
 
 import { getDb } from '../../../db'
 import { ownerOnly } from '../../../panel/policy'
+import { PushEndpoint } from '../../../push/endpoint'
 import { pushConfig } from '../../../push/config'
 import { saveSubscription } from '../../../push/store'
 
 export const SubscribeBody = z.object({
-  endpoint: z.string().url().max(2048),
+  endpoint: PushEndpoint,
   keys: z.object({ p256dh: z.string().min(1).max(512), auth: z.string().min(1).max(512) }),
 })
 

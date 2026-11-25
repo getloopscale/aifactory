@@ -32,7 +32,7 @@ afterAll(() => getStorageManager().dispose())
 async function subscribe(n: number) {
   return saveSubscription(
     getDb(),
-    { endpoint: `https://push.example/${n}`, keys: { p256dh: 'a', auth: 'b' } },
+    { endpoint: `https://fcm.googleapis.com/fcm/send/${n}`, keys: { p256dh: 'a', auth: 'b' } },
     'Mozilla/5.0 (X11; Linux) Chrome/120 Safari/537',
   )
 }
@@ -109,7 +109,7 @@ describe('pushPass', () => {
     const result = await pushPass({ db: getDb(), pool: pool(), config, sender })
     expect(result).toMatchObject({ sent: 1, removed: 1 })
     const left = await getDb().select().from(pushSubscription)
-    expect(left.map((s) => s.endpoint)).toEqual(['https://push.example/2'])
+    expect(left.map((s) => s.endpoint)).toEqual(['https://fcm.googleapis.com/fcm/send/2'])
   })
 
   it('retries a transient failure at the next pass and logs no key', async () => {
