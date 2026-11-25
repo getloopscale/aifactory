@@ -632,6 +632,15 @@ export const en = {
     propose: 'Propose the structure',
     opened: 'Pull request opened:',
     afterMerge: 'After the merge, the factory reads the new structure within a minute.',
+    gapsTitle: 'Rules the agents missed',
+    gapsAbout:
+      'Questions about this project that the knowledge base did not answer. Write the rule, then mark the question answered; a question three tasks asked is also opened as an issue on the knowledge repository.',
+    askedBy: (count: number) => (count === 1 ? 'Asked by 1 task:' : `Asked by ${count} tasks:`),
+    markAnswered: 'Mark answered',
+    dismiss: 'Dismiss',
+    candidatesTitle: 'Answers that may be rules',
+    candidatesAbout:
+      'Questions a task asked you that you already answered. An answer that holds for the whole project belongs in the knowledge base.',
   },
   account: {
     tryAgain: 'Try again',

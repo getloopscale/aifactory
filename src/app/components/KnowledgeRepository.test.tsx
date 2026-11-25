@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { KnowledgeStatus } from '../../shared/knowledge'
@@ -32,16 +32,20 @@ const chosen: KnowledgeStatus = {
   syncedAt: '2026-11-06T12:00:00.000Z',
 }
 
-function serve(status: KnowledgeStatus) {
+const noGaps = { gaps: [], candidates: [] }
+
+function serve(status: KnowledgeStatus, gaps: unknown = noGaps) {
   api.get.mockImplementation(async (path: string) =>
-    path === '/api/panel/repositories'
-      ? {
-          repositories: [
-            { fullName: 'me/kb', reachable: true },
-            { fullName: 'me/gone', reachable: false },
-          ],
-        }
-      : status,
+    path === '/api/panel/knowledge/gaps'
+      ? gaps
+      : path === '/api/panel/repositories'
+        ? {
+            repositories: [
+              { fullName: 'me/kb', reachable: true },
+              { fullName: 'me/gone', reachable: false },
+            ],
+          }
+        : status,
   )
 }
 
@@ -139,5 +143,57 @@ describe('choosing the knowledge base in the panel', () => {
     expect((await screen.findByText(/GitHub answered 401/)).textContent).toContain(
       en.knowledge.failure('GitHub answered 401', '').split(' (')[0],
     )
+  })
+})
+
+describe('knowledge gaps', () => {
+  const gap = {
+    id: 4,
+    repository: 'me/app',
+    question: 'does this project use named or default exports?',
+    tasks: [
+      { taskId: 1, issueNumber: 11, role: 'builder' },
+      { taskId: 2, issueNumber: 12, role: 'builder' },
+    ],
+  }
+  const candidate = {
+    id: 9,
+    repository: 'me/app',
+    issueNumber: 20,
+    taskId: 3,
+    question: 'which date library?',
+    answer: 'date-fns',
+  }
+
+  it('lists the open gaps with the tasks that asked and the answers that may be rules', async () => {
+    serve(chosen, { gaps: [gap], candidates: [candidate] })
+    mount()
+    expect(await screen.findByText(/named or default exports/)).toBeTruthy()
+    expect(screen.getByText('#11')).toBeTruthy()
+    expect(screen.getByText('#12')).toBeTruthy()
+    expect(screen.getByText('date-fns')).toBeTruthy()
+  })
+
+  it('marks a gap answered and takes it out of the list', async () => {
+    serve(chosen, { gaps: [gap], candidates: [] })
+    api.post.mockResolvedValue({ ok: true })
+    mount()
+    fireEvent.click(await screen.findByText(en.knowledge.markAnswered))
+    expect(api.post).toHaveBeenCalledWith('/api/panel/knowledge/gaps', {
+      id: 4,
+      status: 'answered',
+    })
+    await waitFor(() => expect(screen.queryByText(/named or default exports/)).toBeNull())
+  })
+
+  it('dismisses a gap', async () => {
+    serve(chosen, { gaps: [gap], candidates: [] })
+    api.post.mockResolvedValue({ ok: true })
+    mount()
+    fireEvent.click(await screen.findByText(en.knowledge.dismiss))
+    expect(api.post).toHaveBeenCalledWith('/api/panel/knowledge/gaps', {
+      id: 4,
+      status: 'dismissed',
+    })
   })
 })

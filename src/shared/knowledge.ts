@@ -26,3 +26,23 @@ export type KnowledgeStatus = {
 
 /** The repository and branch the owner sends; a null repository clears the choice. */
 export type KnowledgeChoice = { repository: string | null; branch?: string | null }
+
+/** A question agents needed answered and the knowledge base did not say, with the tasks that asked it. */
+export type KnowledgeGapView = {
+  id: number
+  repository: string
+  question: string
+  tasks: { taskId: number; issueNumber: number; role: string }[]
+}
+
+/** A question a task asked the owner and the owner answered: the answer may already be a rule. */
+export type RuleCandidate = {
+  id: number
+  repository: string
+  issueNumber: number
+  taskId: number
+  question: string
+  answer: string
+}
+
+export type GapsView = { gaps: KnowledgeGapView[]; candidates: RuleCandidate[] }

@@ -28,6 +28,7 @@ function source(pins: (Pin | undefined)[], slice: Slice = { files: [], left: [] 
       delivered.push(input)
     },
     keep: async () => {},
+    keepGaps: async () => {},
   }
   return { fake, delivered }
 }

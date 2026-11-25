@@ -1,3 +1,6 @@
+import { createIssuesApi, issueOpener } from '../github/issues-api'
+
+import { fileKnowledgeGaps } from './gaps'
 import { serialized, syncKnowledge, type KnowledgeDeps } from './sync'
 
 type Log = (line: string) => void
@@ -49,5 +52,16 @@ async function onePass(makeDeps: () => KnowledgeDeps, log: { info: Log; error: L
     if (state) log.info(JSON.stringify(describeState(state)))
   } catch (error) {
     log.error(JSON.stringify({ event: 'knowledge_sync_failed', error: String(error) }))
+  }
+  try {
+    const filed = await fileKnowledgeGaps({
+      db: deps.db,
+      openIssue: issueOpener(deps.github, createIssuesApi()),
+    })
+    if (filed.length > 0) {
+      log.info(JSON.stringify({ event: 'knowledge_gap_filed', issues: filed }))
+    }
+  } catch (error) {
+    log.error(JSON.stringify({ event: 'knowledge_gap_failed', error: String(error) }))
   }
 }
