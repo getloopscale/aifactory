@@ -63,7 +63,9 @@ import {
 import { DEFAULT_TIMEOUTS, PLAN_MS } from '../factory/run'
 import {
   addsProofFinding,
+  blockedByProof,
   proveTests,
+  provedOnce,
   testProofModeFromEnv,
   type TestProof,
 } from '../factory/test-proof'
@@ -422,24 +424,23 @@ class CaseRun {
     required: Parameters<CaseRun['review']>[2],
   ): Promise<ReviewVerdict> {
     const mode = testProofModeFromEnv(process.env)
-    if (mode === 'off') return this.review(sha, unplanned, required)
-    let proof = this.proofs.get(sha)
-    if (!proof) {
-      proof = await proveTests(this.backend, {
-        repoDir: this.repoDir,
-        baseSha: this.c.baseSha,
-        headSha: sha,
-        checks: this.c.checks,
-        timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
-      })
-      this.proofs.set(sha, proof)
-    }
+    const proof = await provedOnce(
+      { mode, sha, known: this.proofs, store: { load: async () => undefined, save: async () => {} } },
+      () =>
+        proveTests(this.backend, {
+          repoDir: this.repoDir,
+          baseSha: this.c.baseSha,
+          headSha: sha,
+          checks: this.c.checks,
+          timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
+        }),
+    )
     const proved = addsProofFinding(mode, proof)
     const read = await this.review(sha, unplanned, required)
     if (proved.length === 0) return read
     return {
       ...read,
-      verdict: read.verdict === 'approve' ? 'changes' : read.verdict,
+      verdict: blockedByProof(read.verdict, proved),
       findings: [...proved, ...read.findings],
     }
   }

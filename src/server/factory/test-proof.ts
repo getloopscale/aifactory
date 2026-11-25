@@ -60,6 +60,36 @@ export function addsProofFinding(mode: TestProofMode, proof: TestProof | undefin
   return mode === 'auto' ? unprovenFinding(proof) : []
 }
 
+/** Where a head's proof is kept between runs; `Run` keeps it in `test_proof`. */
+export type ProofStore = {
+  load: (sha: string) => Promise<TestProof | undefined>
+  save: (sha: string, proof: TestProof) => Promise<void>
+}
+
+/**
+ * What the tests of `sha` proved, run once per head (#550): from `known` (the run's memory), else from the store,
+ * else by `prove`, which is then stored. Nothing in `off`: no run, no row.
+ */
+export async function provedOnce(
+  input: { mode: TestProofMode; sha: string; known: Map<string, TestProof>; store: ProofStore },
+  prove: () => Promise<TestProof>,
+): Promise<TestProof | undefined> {
+  const { mode, sha, known, store } = input
+  if (mode === 'off') return undefined
+  const held = known.get(sha)
+  if (held) return held
+  const stored = await store.load(sha)
+  const proof = stored ?? (await prove())
+  if (!stored) await store.save(sha, proof)
+  known.set(sha, proof)
+  return proof
+}
+
+/** A verdict that cannot approve while the factory's own finding stands. */
+export function blockedByProof<V extends string>(verdict: V, proved: Finding[]): V | 'changes' {
+  return verdict === 'approve' && proved.length > 0 ? 'changes' : verdict
+}
+
 /** The test files the work added or changed, in git's order, by the rule `test-weakening.ts` uses. */
 async function changedTests(backend: SandboxBackend, run: ProofRun): Promise<string[]> {
   const listed = await must(

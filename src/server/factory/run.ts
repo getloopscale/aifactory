@@ -32,7 +32,13 @@ import {
 import { artifactsAt, storeEvidence } from './artifacts'
 import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
-import { addsProofFinding, proveTests, testProofModeFromEnv, type TestProof } from './test-proof'
+import {
+  addsProofFinding,
+  proveTests,
+  provedOnce,
+  testProofModeFromEnv,
+  type TestProof,
+} from './test-proof'
 import { ensureBranches, integrationBranch } from './branches'
 import { prepareDeclaredPackageManager } from './package-manager'
 import { uploadChangesetCheck } from './changeset-check'
@@ -2235,51 +2241,57 @@ export class Run {
   }
 
   private testProofMode() {
-    return this.c.deps.testProofMode ?? testProofModeFromEnv(process.env)
+    return testProofModeFromEnv(process.env)
   }
 
   /**
    * Runs the tests the head adds on the commit the run started from and records what that proved, once per head
    * (#550). Nothing in `off`. The result is stored, so a resumed run does not repeat it either.
    */
-  private async provesTests(sha: string): Promise<TestProof | undefined> {
+  private provesTests(sha: string): Promise<TestProof | undefined> {
     const mode = this.testProofMode()
-    if (mode === 'off') return undefined
-    const known = this.proofs.get(sha)
-    if (known) return known
     const { deps, taskId } = this.c
-    const [stored] = await deps.db
-      .select()
-      .from(testProof)
-      .where(and(eq(testProof.taskId, taskId), eq(testProof.sha, sha)))
-    const proof: TestProof = stored
-      ? {
-          outcome: stored.outcome as TestProof['outcome'],
-          files: stored.files,
-          ...(stored.detail ? { detail: stored.detail } : {}),
-        }
-      : await proveTests(this.backend, {
+    const where = (at: string) => and(eq(testProof.taskId, taskId), eq(testProof.sha, at))
+    return provedOnce(
+      {
+        mode,
+        sha,
+        known: this.proofs,
+        store: {
+          load: async (at) => {
+            const [stored] = await deps.db.select().from(testProof).where(where(at))
+            return stored
+              ? {
+                  outcome: stored.outcome as TestProof['outcome'],
+                  files: stored.files,
+                  ...(stored.detail ? { detail: stored.detail } : {}),
+                }
+              : undefined
+          },
+          save: async (at, proof) => {
+            await deps.db
+              .insert(testProof)
+              .values({
+                taskId,
+                sha: at,
+                outcome: proof.outcome,
+                detail: proof.detail ?? null,
+                files: proof.files,
+                mode,
+              })
+              .onConflictDoNothing()
+          },
+        },
+      },
+      () =>
+        proveTests(this.backend, {
           repoDir: this.repoDir,
           baseSha: this.baseSha,
           headSha: sha,
           checks: this.checks,
           timeoutMs: this.timeouts.checkMs ?? DEFAULT_CHECK_MS,
-        })
-    if (!stored) {
-      await deps.db
-        .insert(testProof)
-        .values({
-          taskId,
-          sha,
-          outcome: proof.outcome,
-          detail: proof.detail ?? null,
-          files: proof.files,
-          mode,
-        })
-        .onConflictDoNothing()
-    }
-    this.proofs.set(sha, proof)
-    return proof
+        }),
+    )
   }
 
   /** The risk of the change on `sha` from the facts of its diff and the owner's patterns (#470). */

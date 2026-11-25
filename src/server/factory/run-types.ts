@@ -1,4 +1,3 @@
-import type { TestProofMode } from './test-proof'
 import type { untilSlotFree } from './sandbox-slot'
 import type { Recipe } from './recipe'
 import type { KnowledgeSource } from '../knowledge/source'
@@ -74,8 +73,6 @@ export type RunTaskDeps = {
    * an agent would have released, and `auto` releases a commit with green checks and an approval.
    */
   releaseMode?: ReleaseMode
-  /** Whether the tests a head adds are run on the base (`FACTORY_TEST_PROOF_MODE`, `trial` unless set). */
-  testProofMode?: TestProofMode
   /** What must pass on the pushed commit before a pull request opens. */
   checks?: CheckSpec[]
   /**

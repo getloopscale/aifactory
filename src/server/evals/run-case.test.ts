@@ -362,6 +362,25 @@ describe('runCase', () => {
       expect(provider.backend.commands.some((c) => c.includes('worktree remove --force /tmp/aifactory-proof'))).toBe(true)
     })
 
+    it('sends the finding to the rework and runs the proof once across two rounds on one head', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built(), built('changed')))
+      const reviewer = agent('reviewer', [
+        { ok: true, summary: APPROVE },
+        { ok: true, summary: APPROVE },
+      ])
+
+      await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(reviewer.prompts).toHaveLength(2)
+      expect(builder.prompts[2]).toContain('the tests this work adds pass without the change')
+      const adds = provider.backend.commands.filter((c) =>
+        c.includes('worktree add --detach /tmp/aifactory-proof'),
+      )
+      expect(adds).toHaveLength(1)
+    })
+
     it('records and adds nothing in trial, the default', async () => {
       const provider = withTests(sandbox())
       const builder = agent('builder', planned(built('done', 0.3)))
