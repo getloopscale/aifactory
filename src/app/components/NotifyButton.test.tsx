@@ -61,6 +61,9 @@ describe('requestPermission call sites', () => {
       }
     }
     walk(join(__dirname, '..'))
-    expect(found.map((f) => f.split('/').pop())).toEqual(['NotifyButton.tsx', 'PushNotifications.tsx'])
+    expect(found.map((f) => f.split('/').pop())).toEqual([
+      'NotifyButton.tsx',
+      'PushNotifications.tsx',
+    ])
   })
 })
