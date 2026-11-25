@@ -5,3 +5,18 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
 }
+
+/* On a phone every control a finger uses is at least 40 pixels high, and nothing makes a page scroll sideways. */
+[data-width='compact']
+  :is(button, [role='tab'], [role='button'], select, input:not([type='checkbox'], [type='radio'])),
+[data-width='compact'] a[class*='rounded'] {
+  min-height: 40px;
+}
+[data-width='compact'] main {
+  overflow-x: hidden;
+}
+[data-width='compact'] main :is(table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}

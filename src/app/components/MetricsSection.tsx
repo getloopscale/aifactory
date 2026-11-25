@@ -33,33 +33,35 @@ export function MetricsSection() {
       {!data ? null : data.rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t.metrics.empty}</p>
       ) : (
-        <table className="w-full text-left text-sm">
-          <thead className="text-xs text-muted-foreground">
-            <tr>
-              <th className="py-1 pr-3">{t.metrics.indicator}</th>
-              <th className="py-1 pr-3">{t.metrics.repository}</th>
-              <th className="py-1 pr-3">{t.metrics.day}</th>
-              <th className="py-1 pr-3">{t.metrics.value}</th>
-              <th className="py-1 pr-3">{t.metrics.baseline}</th>
-              <th className="py-1 pr-3">{t.metrics.band}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.rows.map((r) => (
-              <tr key={`${r.metric}-${r.repository}`} className="border-t border-border">
-                <td className="py-1 pr-3 font-medium">{r.label}</td>
-                <td className="py-1 pr-3">{where(r.repository)}</td>
-                <td className="py-1 pr-3">{r.day}</td>
-                <td className="py-1 pr-3">
-                  {metricValue(r.value, r.unit)}
-                  <span className="text-xs text-muted-foreground"> ({r.samples})</span>
-                </td>
-                <td className="py-1 pr-3">{baseline(r)}</td>
-                <td className={`py-1 pr-3 ${BAND[r.band]}`}>{t.metrics.bands[r.band]}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="text-xs text-muted-foreground">
+              <tr>
+                <th className="py-1 pr-3">{t.metrics.indicator}</th>
+                <th className="py-1 pr-3">{t.metrics.repository}</th>
+                <th className="py-1 pr-3">{t.metrics.day}</th>
+                <th className="py-1 pr-3">{t.metrics.value}</th>
+                <th className="py-1 pr-3">{t.metrics.baseline}</th>
+                <th className="py-1 pr-3">{t.metrics.band}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {data.rows.map((r) => (
+                <tr key={`${r.metric}-${r.repository}`} className="border-t border-border">
+                  <td className="py-1 pr-3 font-medium">{r.label}</td>
+                  <td className="py-1 pr-3">{where(r.repository)}</td>
+                  <td className="py-1 pr-3">{r.day}</td>
+                  <td className="py-1 pr-3">
+                    {metricValue(r.value, r.unit)}
+                    <span className="text-xs text-muted-foreground"> ({r.samples})</span>
+                  </td>
+                  <td className="py-1 pr-3">{baseline(r)}</td>
+                  <td className={`py-1 pr-3 ${BAND[r.band]}`}>{t.metrics.bands[r.band]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {data?.conflictSessions ? (
         <p className="mt-3 text-sm" data-metric="conflict_sessions">
