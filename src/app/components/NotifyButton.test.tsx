@@ -49,7 +49,7 @@ describe('the notify button', () => {
 })
 
 describe('requestPermission call sites', () => {
-  it('is called only by the button', () => {
+  it('is called only by the two buttons', () => {
     const found: string[] = []
     const walk = (dir: string) => {
       for (const name of readdirSync(dir)) {
@@ -61,6 +61,6 @@ describe('requestPermission call sites', () => {
       }
     }
     walk(join(__dirname, '..'))
-    expect(found.map((f) => f.split('/').pop())).toEqual(['NotifyButton.tsx'])
+    expect(found.map((f) => f.split('/').pop())).toEqual(['NotifyButton.tsx', 'PushNotifications.tsx'])
   })
 })
