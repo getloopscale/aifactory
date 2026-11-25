@@ -159,6 +159,7 @@ describe('app_events', () => {
     'pull_request_review_comment',
     'check_suite',
     'check_run',
+    'pull_request',
   ]
 
   it('is fine when the App subscribes to every event the factory routes', () => {
@@ -798,6 +799,7 @@ describe('the report', () => {
         'pull_request_review_comment',
         'check_suite',
         'check_run',
+        'pull_request',
       ],
       settingsUrl: 'https://github.com/settings/apps/x/permissions',
     }),

@@ -102,6 +102,7 @@ function Settings({
   const [linearTeam, setLinearTeam] = useState(repo.linearTeamId ?? '')
   const [linearLabel, setLinearLabel] = useState(repo.linearLabel ?? '')
   const [ask, setAsk] = useState(repo.askQuestions)
+  const [reviewPulls, setReviewPulls] = useState(repo.reviewExternalPulls)
   const [harness, setHarness] = useState(repo.harness ?? '')
   const [reviewer, setReviewer] = useState(repo.reviewer ?? '')
   const [release, setRelease] = useState(repo.releaseMode ?? '')
@@ -144,6 +145,7 @@ function Settings({
         linearTeamId: linearTeam.trim() || null,
         linearLabel: linearLabel.trim() || null,
         askQuestions: ask,
+        reviewExternalPulls: reviewPulls,
         harness: harness || null,
         reviewer: reviewer || null,
         releaseMode: release || null,
@@ -311,6 +313,14 @@ function Settings({
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={ask} onChange={(e) => setAsk(e.target.checked)} />
         <span className="text-foreground">{s.ask}</span>
+      </label>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={reviewPulls}
+          onChange={(e) => setReviewPulls(e.target.checked)}
+        />
+        <span className="text-foreground">{s.reviewPulls}</span>
       </label>
       <div className="grid grid-cols-3 gap-3">
         <label className="block">
