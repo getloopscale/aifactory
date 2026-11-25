@@ -22,14 +22,16 @@ type Filed = { taken: false; already: number | null }
 /** Takes the signature back from a closed issue, or answers what was filed for it. */
 async function reclaim(
   db: Database,
-  signature: string,
+  { signature, repository }: { signature: string; repository: string },
   now: Date,
   closed?: (issueNumber: number) => Promise<boolean>,
 ): Promise<Taken | Filed> {
   const [row] = await db
     .select()
     .from(failureSignature)
-    .where(eq(failureSignature.signature, signature))
+    .where(
+      and(eq(failureSignature.signature, signature), eq(failureSignature.repository, repository)),
+    )
   const issueNumber = row?.issueNumber ?? null
   if (issueNumber === null || !closed || !(await closed(issueNumber))) {
     return { taken: false, already: issueNumber }
@@ -57,7 +59,7 @@ export async function fileOnce(
     .returning({ id: failureSignature.id })
   const taken: Taken | Filed = claimed
     ? { taken: true, id: claimed.id }
-    : await reclaim(db, signature, now, closed)
+    : await reclaim(db, { signature, repository }, now, closed)
   if (!taken.taken) return { already: taken.already }
   const { previous } = taken
   let created: CreatedIssue

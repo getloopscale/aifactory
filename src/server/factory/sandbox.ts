@@ -16,6 +16,7 @@ export type SandboxOwner =
   | { owner: 'prove-checks'; repository: string }
   | { owner: 'review-pull-request'; repository: string; pull: number }
   | { owner: 'plan'; planId: number }
+  | { owner: 'improve'; repository: string; kind: string }
 
 /** A sandbox as the provider lists it: what it was created with, and when. */
 export type ListedSandbox = { id: string; startedAt: Date; metadata: Record<string, string> }
