@@ -237,7 +237,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
 }
 
 /**
- * The size of each task's change at its latest approved commit, from the `merge` or `done` event that carries it.
+ * The size of each task's change at its latest approved commit, from the `merge`, `done` or `handoff` event that carries it.
  * A task from before the size was measured has none, which is not a change of zero lines.
  */
 async function changeSizes(
@@ -250,7 +250,7 @@ async function changeSizes(
     .where(
       and(
         inArray(stageEvent.taskId, ids),
-        inArray(stageEvent.stage, ['merge', 'done']),
+        inArray(stageEvent.stage, ['merge', 'done', 'handoff']),
         sql`${stageEvent.detail} -> 'change' is not null`,
       ),
     )
@@ -270,7 +270,7 @@ async function changeSizes(
 }
 
 /**
- * The risk of each task's change at its latest approved commit (#470), from the `merge` or `done` event that
+ * The risk of each task's change at its latest approved commit (#470), from the `merge`, `done` or `handoff` event that
  * carries it. A task from before it was recorded has none.
  */
 async function latestRisks(db: Database, ids: number[]): Promise<Map<number, RiskAssessment>> {
@@ -280,7 +280,7 @@ async function latestRisks(db: Database, ids: number[]): Promise<Map<number, Ris
     .where(
       and(
         inArray(stageEvent.taskId, ids),
-        inArray(stageEvent.stage, ['merge', 'done']),
+        inArray(stageEvent.stage, ['merge', 'done', 'handoff']),
         sql`${stageEvent.detail} -> 'risk' is not null`,
       ),
     )
