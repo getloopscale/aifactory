@@ -8,7 +8,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, knowledgeCuration, knowledgeNote, repository, task } from '../db/schema'
+import {
+  ingress,
+  knowledgeCuration,
+  knowledgeNote,
+  repository,
+  reviewPattern,
+  task,
+} from '../db/schema'
 import { FakeGithub } from '../../test/fake-github'
 
 import { curate } from './curator'
@@ -16,6 +23,7 @@ import { MEMORY_BRANCH } from './format'
 import { runGit } from './git'
 import { Mirror } from './mirror'
 import { conformance, readConcept } from './okf'
+import { patternBranch, proposePatternRule } from './review-pattern-proposal'
 import { knowledgePass } from './pass'
 import { KnowledgeReader, NO_KNOWLEDGE } from './reader'
 import { knowledgeSource } from './source'
@@ -631,6 +639,72 @@ describe('one pass of the cron', () => {
         },
       },
     ])
+  })
+})
+
+describe('proposing a review pattern as a rule', () => {
+  async function pattern(taskIds: number[]) {
+    const [row] = await getDb()
+      .insert(reviewPattern)
+      .values({
+        repository: 'acme/app',
+        classKey: 'input validated outside route',
+        className: 'input validated outside the route',
+        invariant: 'validate with Zod at the route',
+        taskIds,
+        firstSeenAt: new Date(CLOCK),
+        lastSeenAt: new Date(CLOCK),
+      })
+      .returning()
+    return row
+  }
+
+  it('opens one pull request into the owner’s branch with the rule, and again returns the same one', async () => {
+    const { remote } = await knowledgeRepo([{ path: 'index.md', content: INDEX }])
+    const { d, pulls } = deps(remote)
+    await saveKnowledge(d, { repository: 'me/kb' })
+    const tasks = [await aTask(), await aTask(), await aTask()]
+    const row = await pattern(tasks.map((t) => t.id))
+
+    const [first, second] = await Promise.all([
+      proposePatternRule(d, row.id),
+      proposePatternRule(d, row.id),
+    ])
+
+    expect(first.url).toBe(second.url)
+    expect(pulls()[0]).toMatchObject({ head: patternBranch(row.id), base: 'main' })
+    const text = await remoteFile(remote, patternBranch(row.id), first.path)
+    expect(text).toContain('type: Rule')
+    expect(first.path).toMatch(/^knowledge\/projects\/acme\/app\/review-pattern-/)
+    expect(await remoteFile(remote, 'main', 'index.md')).toBe(INDEX)
+    const [stored] = await getDb().select().from(reviewPattern)
+    expect(stored.proposalUrl).toBe(first.url)
+    // Once stored, a later click opens nothing.
+    const before = pulls().length
+    expect((await proposePatternRule(d, row.id)).url).toBe(first.url)
+    expect(pulls()).toHaveLength(before)
+  })
+
+  it('refuses without a knowledge repository, and stores no proposal when the pull request fails', async () => {
+    const { remote } = await knowledgeRepo([{ path: 'index.md', content: INDEX }])
+    const { d } = deps(remote)
+    const row = await pattern([(await aTask()).id])
+    await expect(proposePatternRule(d, row.id)).rejects.toThrow(KnowledgeRefused)
+
+    await saveKnowledge(d, { repository: 'me/kb' })
+    const failing = {
+      ...d,
+      api: new Proxy(d.api, {
+        get: (target, key) =>
+          key === 'openPullRequest'
+            ? async () => {
+                throw new Error('GitHub refused')
+              }
+            : Reflect.get(target, key),
+      }),
+    } as KnowledgeDeps
+    await expect(proposePatternRule(failing, row.id)).rejects.toThrow('GitHub refused')
+    expect((await getDb().select().from(reviewPattern))[0].proposalUrl).toBeNull()
   })
 })
 

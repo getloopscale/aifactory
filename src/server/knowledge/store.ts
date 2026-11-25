@@ -102,6 +102,7 @@ export type NewNote = {
   taskId: number
   issueNumber: number
   baseSha: string | null
+  sourceTasks?: { taskId: number; issueNumber: number }[]
 }
 
 /** Keeps notes to be written. A text already kept for the project is not kept again. */
@@ -131,6 +132,7 @@ export async function pendingNotes(db: Database, limit: number): Promise<Note[]>
     taskId: r.taskId,
     issueNumber: r.issueNumber,
     baseSha: r.baseSha,
+    sourceTasks: r.sourceTasks,
     createdAt: r.createdAt,
   }))
 }
