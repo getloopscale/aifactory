@@ -13,6 +13,7 @@
     "src/server/factory/review.ts:64-177",
     "src/server/factory/required-files.ts",
     "src/server/factory/guards.ts",
+    "src/server/factory/risk.ts",
     "src/server/factory/watch.ts:1-40",
     "src/server/factory/waiting.ts:1-90",
     "src/shared/panel.ts",

@@ -7,6 +7,7 @@ import * as schema from '../db/schema'
 import { stageEvent, task } from '../db/schema'
 import { createGithubApi, type GithubApi } from '../github/pulls'
 
+import type { RiskAssessment } from '../../shared/panel'
 import type { ChangeFacts } from './change-size'
 import { integrationBranch } from './branches'
 import { errorMessage } from './error-message'
@@ -45,10 +46,15 @@ export type MergeDetail = {
   pullRequestBody: string
   /** The size of the change at the reviewed commit; a task from before it was measured has none. */
   change?: ChangeFacts
+  /** The risk of the change at the reviewed commit (#470). */
+  risk?: RiskAssessment | undefined
 }
 
 /** The change facts of the delivery, in the `done` event the indicators read. */
-const changeOf = (detail: MergeDetail) => (detail.change ? { change: detail.change } : {})
+const changeOf = (detail: MergeDetail) => ({
+  ...(detail.change ? { change: detail.change } : {}),
+  ...(detail.risk ? { risk: detail.risk } : {}),
+})
 
 /** What the job did: the run's own result once it got that far, or why the task was not its to merge. */
 export type MergeResult = RunResult | { status: 'skipped'; reason: string }
@@ -227,6 +233,7 @@ async function delivered(
       attempts: detail.attempts,
       costUsd: detail.costUsd,
       agentSummary: detail.agentSummary,
+      risk: detail.risk,
     },
     integrated,
   )

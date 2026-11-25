@@ -3,6 +3,9 @@
  * worth handing over; a release is that work promoted, by a person or by an agent's verdict.
  */
 
+import type { RiskAssessment } from '../../shared/panel'
+import { renderRisk } from './risk'
+
 export type Bump = 'patch' | 'minor' | 'major'
 
 const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)$/
@@ -56,6 +59,7 @@ export type PreReleaseNotes = {
   attempts: number
   costUsd: number
   agentSummary: string
+  risk?: RiskAssessment | undefined
 }
 
 /** What a pre-release says about itself: what it is, what stands behind it, and what it is not. */
@@ -83,6 +87,7 @@ export function preReleaseNotes(n: PreReleaseNotes): { name: string; body: strin
       '',
       `Independent review: ${review}`,
       '',
+      ...(n.risk ? [renderRisk(n.risk), ''] : []),
       `Attempts: ${n.attempts}. Cost: $${n.costUsd.toFixed(2)}.`,
       '',
       '<details><summary>What the agent said</summary>',
