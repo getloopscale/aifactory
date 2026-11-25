@@ -19,6 +19,7 @@ const TRIED: DoctorTriedSentences = {
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
   proofs: (v) => `ler as provas dos checks de ${v.repo}`,
+  file: (v) => `ler ${v.path} em ${v.ref} de ${v.repo}`,
 }
 
 /** What was tried, in Portuguese when the code is one this panel knows, and as the server said it otherwise. */
@@ -92,6 +93,8 @@ export const ptBR: Copy = {
     setup: 'Configuração',
   },
   menu: {
+    setupNeedsAttention: (n: number) =>
+      n === 1 ? '1 item da configuração pede atenção' : `${n} itens da configuração pedem atenção`,
     label: 'Menu',
     folded: 'Menu recolhido',
     main: 'Principal',
@@ -420,6 +423,8 @@ export const ptBR: Copy = {
     checking: 'Verificando…',
     ready: (when: string) => `Este repositório está pronto. Verificado ${when}.`,
     repair: 'Como resolver:',
+    groups: { operation: 'Operação', codebase: 'Código' },
+    passing: (n: number, m: number) => `${n} de ${m} em ordem`,
     loading: 'Lendo o repositório…',
     unprovenLine: (names: string) => `Estas verificações ainda não foram provadas: ${names}.`,
     allProven: 'Todas as verificações salvas já foram provadas.',
@@ -544,6 +549,41 @@ export const ptBR: Copy = {
             ? `Os checks passaram em ${v.passedOn} e nunca foram provados em ${v.providers}; não se sabe se uma execução lá passa.`
             : `Os checks não passaram em nenhum provedor de sandbox (não provados em ${v.providers}).`,
         repair: (v) => `Prove os checks do repositório com a fábrica rodando em ${v.providers}.`,
+      },
+      agent_guide_missing: {
+        cause: (v) =>
+          `${v.repo} não tem AGENTS.md nem CLAUDE.md em ${v.ref}, então um agente começa sem saber os comandos nem as convenções.`,
+        repair: () =>
+          'Adicione um AGENTS.md na raiz com os comandos de build e teste, a estrutura e as convenções.',
+      },
+      lockfile_missing: {
+        cause: (v) =>
+          `${v.repo} tem package.json em ${v.ref} e nenhum lockfile ao lado, então a instalação no sandbox não é reproduzível.`,
+        repair: () =>
+          'Faça commit do lockfile do gerenciador de pacotes (pnpm-lock.yaml, package-lock.json, yarn.lock ou bun.lockb).',
+      },
+      test_entry_missing: {
+        cause: (v) =>
+          `${v.repo} não tem checks salvos, a receita não declara nenhum e o package.json em ${v.ref} não tem script test, então o check padrão npm test não tem o que rodar.`,
+        repair: () =>
+          'Adicione um script "test" ao package.json, ou salve os checks no painel ou em .factory/setup.json.',
+      },
+      ok_agent_guide: {
+        cause: (v) => `${v.file} em ${v.ref} dá ao agente o guia do repositório.`,
+        repair: () => '',
+      },
+      ok_lockfile: {
+        cause: (v) => `${v.file} está ao lado do package.json em ${v.ref}.`,
+        repair: () => '',
+      },
+      ok_test_entry: {
+        cause: (v) => `Os checks vêm de ${v.source}.`,
+        repair: () => '',
+      },
+      ok_not_applicable: {
+        cause: (v) =>
+          `Não se aplica: ${v.repo} não tem package.json em ${v.ref}, e a fábrica ainda não conhece arquivos de outros ecossistemas.`,
+        repair: () => '',
       },
       ok_provider_checks: {
         cause: (v) => `Os checks passaram em todos os provedores de sandbox: ${v.providers}.`,

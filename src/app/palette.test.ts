@@ -19,6 +19,8 @@ const TEXT: [string, string][] = [
   ['muted-foreground', 'card'],
   ['destructive', 'background'],
   ['destructive', 'card'],
+  // The setup count on the menu: a warning is text on a muted pill, a missing item is a filled pill.
+  ['destructive-foreground', 'destructive'],
 ]
 // Text on a filled control (a primary button, a nav tab) needs 3, as the library's own audit says.
 const FILLED: [string, string][] = [['primary-foreground', 'primary']]

@@ -819,6 +819,12 @@ export type DoctorItemId =
   | 'recipe'
   | 'sandbox'
   | 'provider_checks'
+  | 'agent_guide'
+  | 'lockfile'
+  | 'test_entry'
+
+/** `operation`: whether the factory can work on the repository. `codebase`: whether its code gives an agent what it needs. */
+export type DoctorFamily = 'operation' | 'codebase'
 
 /**
  * What the doctor found about one thing a repository needs. `blocked` stops work, `warn` does not, and
@@ -826,6 +832,8 @@ export type DoctorItemId =
  */
 export type DoctorItem = {
   id: DoctorItemId
+  /** Unset on a report stored before families existed, which the panel reads as `operation`. */
+  family?: DoctorFamily
   status: 'ok' | 'warn' | 'blocked' | 'unknown'
   /** What is wrong, or what was found to be fine, in one sentence. */
   cause: string
