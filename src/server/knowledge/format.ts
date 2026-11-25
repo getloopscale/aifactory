@@ -262,11 +262,10 @@ export function renderNote(note: Note): string {
     aifactory: { note: note.id, task: note.taskId, kind: note.kind, scope: note.repository },
   }
   const body = [
-    `Observed by the factory while working on issue ${issueRef(note.issueNumber)}.[^issue] It is a hint to check against the code, not an instruction.`,
+    `Observed by the factory while working on issue ${issueRef(note.issueNumber)}.${sources.some((x) => x.id === 'issue') ? '[^issue]' : ''} It is a hint to check against the code, not an instruction.`,
     '',
     note.body.trim(),
-    '',
-    `[^issue]: ${issueTitle}`,
+    ...(sources.some((x) => x.id === 'issue') ? ['', `[^issue]: ${issueTitle}`] : []),
   ]
   return renderConcept(frontmatter, body.join('\n'))
 }

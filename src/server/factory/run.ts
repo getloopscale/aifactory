@@ -1,4 +1,3 @@
-import { issueRef } from './item-ref'
 import { itemRef } from './item-ref'
 import { randomUUID } from 'node:crypto'
 
@@ -882,7 +881,7 @@ export class Run {
       {
         repository: row.repository,
         kind: 'no-change',
-        body: `Issue ${issueRef(row.issueNumber)} (${oneLine(issue.title)}): a run starting from ${this.baseSha} found nothing to change.${said}`,
+        body: `Issue ${itemRef(row)} (${oneLine(issue.title)}): a run starting from ${this.baseSha} found nothing to change.${said}`,
         taskId,
         issueNumber: row.issueNumber,
         baseSha: this.baseSha,

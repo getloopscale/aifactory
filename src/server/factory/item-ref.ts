@@ -14,3 +14,7 @@ export const itemRef = (row: {
 /** `#n` for a GitHub issue number; a negative local ordinal is a Linear item and is never shown as a number. */
 export const issueRef = (issueNumber: number): string =>
   issueNumber < 0 ? 'a Linear item' : `#${issueNumber}`
+
+/** `owner/name#4`, or `owner/name (a Linear item)` for a negative local ordinal. */
+export const repoItemRef = (repository: string, issueNumber: number): string =>
+  issueNumber < 0 ? `${repository} (a Linear item)` : `${repository}#${issueNumber}`

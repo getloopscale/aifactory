@@ -262,6 +262,16 @@ describe('what the drafter is given', () => {
   })
 })
 
+describe('a Linear task’s negative ordinal', () => {
+  it('is never written as a GitHub reference, and what is written still parses', () => {
+    const { body } = followUpIssue(draft(), 'o/r', -3)!
+    expect(body).not.toContain('-3')
+    expect(followUpOrigin(body)).toEqual({ repo: 'o/r', issue: 0 })
+    const input = { repo: 'o/r', issueNumber: -3, title: 'T', body: 'b', reviews: [], findings: [], roundsNote: '' }
+    expect(scopeMessage(input as never)).not.toContain('-3')
+  })
+})
+
 describe('the issue a follow-up was filed for', () => {
   it('is the one its body names on the line the factory writes', () => {
     const { body } = followUpIssue(draft(), 'o/r', 590)!

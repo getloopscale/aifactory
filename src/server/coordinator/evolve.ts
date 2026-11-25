@@ -1,4 +1,4 @@
-import { issueRef } from '../factory/item-ref'
+import { repoItemRef } from '../factory/item-ref'
 import { FACTORY_SIGNATURE } from '../../shared/personas'
 import type { CoordinatorMode } from './mode'
 
@@ -173,7 +173,7 @@ function fenced(content: string): string {
 
 function listed(e: FailureEvent): string {
   return [
-    `- Task ${e.taskId}, ${e.repository}${issueRef(e.issueNumber)}, ${e.stage} at ${e.at.toISOString()}:`,
+    `- Task ${e.taskId}, ${repoItemRef(e.repository, e.issueNumber)}, ${e.stage} at ${e.at.toISOString()}:`,
     '',
     fenced(e.reason.slice(0, EVOLVE.reasonQuoted)),
   ].join('\n')

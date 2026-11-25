@@ -132,22 +132,31 @@ export function scopeSection(draft: ScopeDraft, date: string, followUp: number |
 }
 
 const FOLLOW_UP_OF = 'Follow-up of'
+const LINEAR_ITEM = '(a Linear item)'
+
+/** `owner/name#4` for a GitHub issue; a Linear task's negative local ordinal is never written as a number. */
+const referenceTo = (repo: string, issueNumber: number) =>
+  issueNumber < 0 ? `${repo} ${LINEAR_ITEM}` : `${repo}#${issueNumber}`
 
 /** The follow-up issue the draft files, its body ending with a line linking the original issue. */
 export function followUpIssue(draft: ScopeDraft, repo: string, issueNumber: number) {
   if (!draft.followUp) return undefined
   return {
     title: draft.followUp.title,
-    body: `${draft.followUp.body}\n\n${FOLLOW_UP_OF} ${repo}#${issueNumber}.`,
+    body: `${draft.followUp.body}\n\n${FOLLOW_UP_OF} ${referenceTo(repo, issueNumber)}.`,
   }
 }
 
-const ORIGIN = new RegExp(`^${FOLLOW_UP_OF} ([\\w.-]+/[\\w.-]+)#(\\d+)\\.$`, 'm')
+const ORIGIN = new RegExp(
+  `^${FOLLOW_UP_OF} ([\\w.-]+/[\\w.-]+)(?:#(\\d+)| \\(a Linear item\\))\\.$`,
+  'm',
+)
 
 /** The issue a follow-up was filed for, read from the line `followUpIssue` ends its body with; nothing for any other issue. */
 export function followUpOrigin(body: string): { repo: string; issue: number } | undefined {
   const found = ORIGIN.exec(body)
-  return found ? { repo: found[1], issue: Number(found[2]) } : undefined
+  // A Linear item has no GitHub number: 0 is no issue, so it names none but still marks a follow-up.
+  return found ? { repo: found[1], issue: Number(found[2] ?? 0) } : undefined
 }
 
 /** A title as two people would write it: its case, spacing and punctuation set aside. */
@@ -217,7 +226,7 @@ const round = (r: ReviewRound) =>
 /** The message the drafter gets. The issue and the plan sit inside markers, as data. */
 export function scopeMessage(input: ScopeInput): string {
   return [
-    `Issue ${input.repo}#${input.issueNumber}: ${input.title}`,
+    `Issue ${referenceTo(input.repo, input.issueNumber)}: ${input.title}`,
     '',
     `<issue-body>\n${input.body.slice(0, BODY_MAX)}\n</issue-body>`,
     '',
@@ -237,7 +246,7 @@ export function gapIssue(draft: ScopeDraft, repo: string, issueNumber: number) {
   return {
     repository: draft.gap.repository,
     title: draft.gap.title,
-    body: `${draft.gap.body}\n\nFiled by the factory for ${repo}#${issueNumber}, whose review asked for this issue.`,
+    body: `${draft.gap.body}\n\nFiled by the factory for ${referenceTo(repo, issueNumber)}, whose review asked for this issue.`,
   }
 }
 
