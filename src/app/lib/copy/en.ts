@@ -261,6 +261,10 @@ export const en = {
     pending: 'Waiting for the agent to read it…',
     failed: (reason: string) => `Not delivered: ${reason}`,
     guided: 'Sent to the agent as a change. The task runs again.',
+    runningHelp:
+      'The agent is working. It reads your message while it works and answers in its transcript.',
+    stopsStep:
+      'This agent is Codex: a message stops the step it is running and continues the same session with your words.',
     cost: (usd: string) => `cost ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `A message from the owner to the agent that worked on "${title}" (issue #${issue} of ${repository}).`,

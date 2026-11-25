@@ -24,7 +24,13 @@ import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
 import { storedSession } from '../factory/agent-session'
 import { fileOnce } from '../coordinator/file-once'
 import type { IssuesApi } from '../github/issues-api'
-import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
+import {
+  outcome,
+  stagesWhere,
+  type Action,
+  type Facts,
+  type TransitionEvent,
+} from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
 export class ActionRefused extends Error {
@@ -99,7 +105,7 @@ async function requeue(
     // so no run starts on work already integrated and the cron's `done` never lands after the intake.
     if (locked) {
       if (conversation) {
-        mustAllow({ ...locked, conversation: 'guide' }, 'conversation')
+        mustAllow({ ...locked, conversation: 'guide' }, 'conversation', 'guide_agent')
         const [waiting] = await tx
           .select({ id: agentMessage.id })
           .from(agentMessage)
@@ -271,9 +277,13 @@ async function load(db: Database, taskId: number) {
 }
 
 /** Refuses, with the reason the transition table gives, an event the task's state does not allow. */
-function mustAllow(row: Facts, event: TransitionEvent) {
+function mustAllow(row: Facts, event: TransitionEvent, only?: Action) {
   const decided = outcome(row, event)
   if (decided.kind !== 'action') throw new ActionRefused(decided.reason)
+  // An event can lead to another action in another stage: a message to a working agent is not a guide.
+  if (only !== undefined && decided.action !== only) {
+    throw new ActionRefused('the agent of this task is working: wait until it stops, then guide it')
+  }
 }
 
 /**
@@ -329,7 +339,7 @@ export async function guideTask(deps: ActionDeps, taskId: number, text: string) 
   if (note === '') throw new ActionRefused('say what the agent should do')
   const row = await load(deps.db, taskId)
   const facts: Facts = { ...row, conversation: 'guide' }
-  mustAllow(facts, 'conversation')
+  mustAllow(facts, 'conversation', 'guide_agent')
   if (!(await storedSession(deps.db, { taskId, role: 'builder' }))) {
     throw new ActionRefused('the task kept no session of its agent to guide: ask instead')
   }
@@ -337,7 +347,7 @@ export async function guideTask(deps: ActionDeps, taskId: number, text: string) 
   const decisionId = await requeue(
     deps,
     taskId,
-    stagesWhere('conversation', facts),
+    stagesWhere('conversation', facts, 'guide_agent'),
     'request_changes',
     note.slice(0, NOTE_MAX),
     row.headSha,

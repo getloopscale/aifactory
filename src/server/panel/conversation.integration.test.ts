@@ -85,8 +85,28 @@ describe('the owner writing to an agent', () => {
     expect(queued).toEqual([{ input: { taskId: id }, key: `conversation-${row.id}` }])
   })
 
-  it('refuses a running task, with the reason, and stores nothing', async () => {
-    const id = await seed('build')
+  it('stores a message to a working builder or reviewer as pending, with no job queued', async () => {
+    for (const stage of ['build', 'review']) {
+      const id = await seed(stage)
+      const { made, queued } = deps()
+      const sent = await sendMessage(made, id, { text: 'use a Set', mode: 'ask' })
+      const [row] = await getDb()
+        .select()
+        .from(agentMessage)
+        .where(eq(agentMessage.id, sent.messageId))
+      expect(row).toMatchObject({
+        taskId: id,
+        text: 'use a Set',
+        delivery: 'pending',
+        claimedAt: null,
+      })
+      expect(sent.delivery).toBe('pending')
+      expect(queued).toEqual([])
+    }
+  })
+
+  it('refuses a task whose agent is not at a pass that takes messages, with the reason, and stores nothing', async () => {
+    const id = await seed('plan')
     const { made, queued } = deps()
     await expect(sendMessage(made, id, { text: 'hi', mode: 'ask' })).rejects.toThrow(ActionRefused)
     expect(await getDb().select().from(agentMessage)).toEqual([])
@@ -110,6 +130,12 @@ describe('the owner writing to an agent', () => {
       .orderBy(asc(agentMessage.id))
     // The stub of the guide stored nothing, and the refused one stored nothing either.
     expect(rows).toEqual([])
+  })
+
+  it('does not guide a task whose builder is working', async () => {
+    const id = await seed('build', { headSha: 'h' })
+    const actions = { db: getDb(), inTransaction: deps().made.inTransaction } as never
+    await expect(guideTask(actions, id, 'x')).rejects.toThrow(/is working/)
   })
 
   it('guides only a task that kept its session, and not while a message waits', async () => {

@@ -640,6 +640,8 @@ describe('the owner writing to a task agent', () => {
 
   it('asks of an agent that stopped, in every stage it can have stopped in', () => {
     expect(acting('conversation', ask)).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
       waiting: 'ask_agent',
       done: 'ask_agent',
       handoff: 'ask_agent',
@@ -652,14 +654,28 @@ describe('the owner writing to a task agent', () => {
   })
 
   it('guides only a done or handed-over task whose branch is there and whose work is not integrated', () => {
-    expect(acting('conversation', guide)).toEqual({ done: 'guide_agent', handoff: 'guide_agent' })
-    expect(acting('conversation', { ...guide, mergedSha: 'm' })).toEqual({})
-    expect(acting('conversation', { ...guide, resolvedSha: 'r' })).toEqual({})
-    expect(acting('conversation', { ...guide, branchGone: true })).toEqual({})
+    expect(acting('conversation', guide)).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+      done: 'guide_agent',
+      handoff: 'guide_agent',
+    })
+    expect(acting('conversation', { ...guide, mergedSha: 'm' })).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+    })
+    expect(acting('conversation', { ...guide, resolvedSha: 'r' })).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+    })
+    expect(acting('conversation', { ...guide, branchGone: true })).toEqual({
+      build: 'message_running_agent',
+      review: 'message_running_agent',
+    })
   })
 
   it('tells a person why each stage refuses', () => {
-    for (const stage of ['intake', 'sandbox', 'build', 'review', 'pr'] as const) {
+    for (const stage of ['intake', 'sandbox', 'plan', 'pr'] as const) {
       expect(outcome({ stage, ...ask }, 'conversation')).toEqual(
         refused('the agent of this task is working: wait until it stops, then write to it'),
       )

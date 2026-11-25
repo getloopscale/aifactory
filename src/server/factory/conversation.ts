@@ -1,5 +1,5 @@
 import type { SandboxBackend } from '@theokit/agents/sandbox'
-import { and, asc, eq, isNull, lt, or, sql } from 'drizzle-orm'
+import { asc, eq, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { agentMessage, agentRun, task } from '../db/schema'
@@ -15,49 +15,20 @@ import type { CodingHarness, HarnessResult } from './harness'
 import { INSTANCE, mergeEgress } from './run-support'
 import { DEFAULT_TIMEOUTS } from './run'
 import { labelsWithRepoChoice, loadRepoConfig } from './repo-config'
-import { MAX_RUN_MS, resolveTimeouts } from './run-limit'
+import { resolveTimeouts } from './run-limit'
 import type { RunTaskDeps } from './run-types'
 import { pauseOnRefusal } from './provider-pause-store'
 import { createIsolatedSandbox, type SandboxSpec } from './sandbox'
 import { untilSlotFree } from './sandbox-slot'
 import { restoreSession, saveSession, storedSession } from './agent-session'
+import { CLAIM_STALE_MS, claimNext, type Message } from './message-claim'
 import { outcome } from './transitions'
+
+export { CLAIM_STALE_MS, claimNext }
 import { SANDBOX_PROVIDER_BLOCKED } from '../../shared/panel'
 
 /** What a failed ask says when the agent touched the repository. */
 export const CHANGED_IN_ASK = 'the agent changed the repository in ask mode'
-
-/** A claim older than this is the claim of a worker that died: the message is taken again. */
-export const CLAIM_STALE_MS = MAX_RUN_MS + 10 * 60_000
-
-type Message = typeof agentMessage.$inferSelect
-
-/**
- * Takes the oldest pending message of the task, and only when nobody holds it. Messages of one task are
- * delivered one at a time, oldest first: a worker that finds the oldest claimed gets nothing, and the one that
- * holds it goes on to the next when it is done.
- */
-export async function claimNext(
-  db: Database,
-  taskId: number,
-  now = new Date(),
-): Promise<Message | undefined> {
-  const oldest = sql`(select id from agent_message where task_id = ${taskId} and delivery = 'pending' order by id limit 1)`
-  const [claimed] = await db
-    .update(agentMessage)
-    .set({ claimedAt: now })
-    .where(
-      and(
-        eq(agentMessage.id, oldest as never),
-        or(
-          isNull(agentMessage.claimedAt),
-          lt(agentMessage.claimedAt, new Date(now.getTime() - CLAIM_STALE_MS)),
-        ),
-      ),
-    )
-    .returning()
-  return claimed
-}
 
 type Ended = {
   delivery: 'delivered' | 'failed'
@@ -180,8 +151,12 @@ export async function keepSessionIfStopped(
   return db.transaction(async (tx) => {
     const [now] = await tx.select().from(task).where(eq(task.id, taskId)).for('update')
     const allowed = now ? outcome({ ...now, conversation: 'ask' }, 'conversation') : undefined
-    if (allowed?.kind !== 'action') {
-      const why = allowed ? allowed.reason : 'the task is gone'
+    if (allowed?.kind !== 'action' || allowed.action !== 'ask_agent') {
+      const why = !allowed
+        ? 'the task is gone'
+        : allowed.kind === 'action'
+          ? 'the agent is working on it again'
+          : allowed.reason
       return `the task moved on while the agent answered, so its session was not touched: ${why}`
     }
     await saveSession(tx as never, backend, harness, { taskId, role: 'builder', sessionId })
@@ -222,7 +197,13 @@ export async function readyToDeliver(deps: RunTaskDeps, message: Message): Promi
   if (!row) return { delivery: 'failed', reason: `task ${message.taskId} does not exist` }
   // The task may have gone back to work since the message was written: one writer per session.
   const allowed = outcome({ ...row, conversation: 'ask' }, 'conversation')
-  if (allowed.kind !== 'action') return { delivery: 'failed', reason: allowed.reason }
+  // A working pass takes messages through its own process: this path would be a second writer on the session.
+  if (allowed.kind !== 'action' || allowed.action !== 'ask_agent') {
+    return {
+      delivery: 'failed',
+      reason: allowed.kind === 'action' ? 'the agent is working on it again' : allowed.reason,
+    }
+  }
   const stored = await storedSession(db, { taskId: row.id, role: 'builder' })
   if (!stored) return { delivery: 'failed', reason: 'the task kept no session of its agent' }
   const { token } = await deps.github.installationToken(row.repository)
