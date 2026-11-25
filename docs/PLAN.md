@@ -247,9 +247,7 @@ Critérios de aceite:
 
 ### M13: conversa com os agentes
 
-> **Desenho não verificado.** S2 e S3 ainda não foram rodados em sandbox real; o roteiro é
-> `spikes/vercel-sandbox/04-agent-conversation.mjs` e o registro, `docs/adr/0013-agent-conversation.md`.
-> A implementação espera esse ADR.
+> Verified 2026-11-25 in `docs/adr/0013-agent-conversation.md`; the spikes forced two changes: Codex has no delivery to a running process, and a parallel `--resume` is not delivery.
 
 O Paulo escreve para um agente pelo painel. Há dois casos, e eles têm mecânicas diferentes.
 
