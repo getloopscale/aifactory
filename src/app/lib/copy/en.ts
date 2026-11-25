@@ -17,6 +17,8 @@ export const en = {
     setup: 'Setup',
   },
   menu: {
+    setupNeedsAttention: (n: number) =>
+      n === 1 ? '1 setup item needs attention' : `${n} setup items need attention`,
     label: 'Menu',
     folded: 'Folded menu',
     main: 'Main',
@@ -346,6 +348,8 @@ export const en = {
     checking: 'Checking…',
     ready: (when: string) => `This repository is ready. Checked ${when}.`,
     repair: 'How to fix:',
+    groups: { operation: 'Operation', codebase: 'Codebase' },
+    passing: (n: number, m: number) => `${n} of ${m} passing`,
     loading: 'Reading the repository…',
     unprovenLine: (names: string) => `These checks have not been proven: ${names}.`,
     allProven: 'Every saved check has been proven.',
