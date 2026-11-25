@@ -285,12 +285,12 @@ describe('a pass cut at its time limit', () => {
 })
 
 describe('buildPrompt', () => {
-  it('asks for KNOWLEDGE_GAP lines only when a knowledge base was delivered', () => {
+  it('never asks the builder for KNOWLEDGE_GAP lines, with or without a knowledge base', () => {
     const input = { repo: 'o/r', issueNumber: 7, title: 'T', body: 'B', branch: 'factory/7' }
-    expect(buildPrompt(input)).not.toContain('KNOWLEDGE_GAP:')
+    expect(buildPrompt(input)).not.toContain('KNOWLEDGE_GAP')
     const withBase = buildPrompt({ ...input, knowledgeDir: '/tmp/knowledge' })
-    expect(withBase).toContain('KNOWLEDGE_GAP:')
-    expect(withBase).toContain('up to 3 lines')
+    expect(withBase).not.toContain('KNOWLEDGE_GAP')
+    expect(withBase).toContain('LEARNED:')
   })
 
   it('names the branch and the issue, and forbids the agent from pushing', () => {
