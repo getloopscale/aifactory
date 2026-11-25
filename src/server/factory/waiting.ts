@@ -52,7 +52,7 @@ export function answerPrompt(asked: string, answer: string, by: string): string 
 }
 
 /** Only people with write access can steer an agent: a stranger's comment is not an instruction. */
-const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
+export const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR'])
 const ANSWER_MAX = 4_000
 
 /**

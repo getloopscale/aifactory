@@ -36,7 +36,7 @@ const green: CommitChecks = {
 const REPO = 'usetheokit/ui'
 const VERSION_MERGE = 'version-merge'
 /** The commits whose checks the publication step reads: the heads it may merge, and the promotion. */
-const CHECKED = ['version-head', 'promoted1', 'main-head']
+const CHECKED = ['version-head', 'second-head', 'promoted1', 'main-head']
 
 /** GitHub as the publication step sees it. */
 let api = new FakeGithub()
@@ -542,6 +542,71 @@ describe('publishing a changesets release', () => {
     expect((await row()).status).toBe('waiting')
     expect((await getDb().select().from(task).where(eq(task.id, other)))[0].stage).toBe('done')
     expect(closed()).toEqual([])
+  })
+
+  describe('when the release workflow opens a second Version Packages pull request', () => {
+    const mergedFirst = () =>
+      versionPr({ state: 'closed', merged: true, mergedAt: new Date('2026-11-11T12:10:00Z') })
+    const second = (fields: Partial<FakePullRequest> = {}) =>
+      repo().pullRequest({
+        number: 190,
+        headRef: 'changeset-release/main',
+        baseRef: 'main',
+        headSha: 'second-head',
+        ...fields,
+      })
+    const recorded = async () => {
+      await waitingPublication()
+      await getDb().update(publication).set({ versionPullRequest: 180 })
+    }
+
+    it('merges it pinned to its head and records it on the publication', async () => {
+      await recorded()
+      mergedFirst()
+      second()
+      repo().holds('second-head', [VERSION_MERGE])
+
+      const result = await pollPublications(deps())
+
+      expect(result.merged).toHaveLength(1)
+      expect(merges()).toEqual([{ number: 190, sha: 'second-head', merge: { method: 'merge' } }])
+      expect(await row()).toMatchObject({ status: 'waiting', versionPullRequest: 190 })
+    })
+
+    it('merges nothing and names it while it is red or a draft', async () => {
+      await recorded()
+      mergedFirst()
+      second({ draft: true })
+      repo().holds('second-head', [VERSION_MERGE])
+
+      await pollPublications(deps())
+
+      expect(merges()).toEqual([])
+      expect((await row()).detail).toMatch(/Version Packages #190.* is a draft/)
+    })
+
+    it('ignores one whose head does not hold the recorded merge', async () => {
+      await recorded()
+      mergedFirst()
+      second()
+      repo().holds('second-head', ['other'])
+
+      await pollPublications(deps())
+
+      expect(merges()).toEqual([])
+      expect(await row()).toMatchObject({ status: 'waiting', versionPullRequest: 180 })
+    })
+
+    it('fails, saying so, when no release appears within the window after the last merge', async () => {
+      await recorded()
+      mergedFirst()
+
+      const result = await pollPublications(deps(new Date('2026-11-11T12:50:00Z')))
+
+      expect(result.failed).toEqual([(await row()).id])
+      expect(await row()).toMatchObject({ status: 'failed' })
+      expect((await row()).detail).toMatch(/no release appeared 30 minutes after .*#180/)
+    })
   })
 
   describe('when the Version Packages merge versioned several packages', () => {

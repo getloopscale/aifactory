@@ -1,9 +1,18 @@
-import { and, asc, count, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { knowledgeCuration, knowledgeDelivery, knowledgeNote, setting } from '../db/schema'
+import {
+  knowledgeCuration,
+  knowledgeDelivery,
+  knowledgeGap,
+  knowledgeGapTask,
+  knowledgeNote,
+  question,
+  setting,
+  task,
+} from '../db/schema'
 
-import { noteHash, type Note, type NoteKind } from './format'
+import { gapHash, noteHash, type Note, type NoteKind } from './format'
 
 const REPOSITORY_KEY = 'knowledge.repository'
 const BRANCH_KEY = 'knowledge.branch'
@@ -251,4 +260,151 @@ export async function updateCuration(
     .update(knowledgeCuration)
     .set({ ...patch, updatedAt: new Date() })
     .where(eq(knowledgeCuration.id, id))
+}
+
+export type NewGap = {
+  repository: string
+  question: string
+  taskId: number
+  issueNumber: number
+  role: 'builder'
+  baseSha: string | null
+}
+
+/**
+ * Keeps the questions an agent could not find answered. The same question in the same project is one gap
+ * (`knowledge_gap_once`), and a task counts once for it however often it asks.
+ */
+export async function recordGaps(db: Database, gaps: NewGap[]): Promise<void> {
+  for (const gap of gaps) {
+    await db.transaction(async (tx) => {
+      const hash = gapHash(gap.repository, gap.question)
+      await tx
+        .insert(knowledgeGap)
+        .values({ repository: gap.repository, question: gap.question, questionHash: hash })
+        .onConflictDoNothing()
+      const [row] = await tx
+        .select({ id: knowledgeGap.id })
+        .from(knowledgeGap)
+        .where(
+          and(eq(knowledgeGap.repository, gap.repository), eq(knowledgeGap.questionHash, hash)),
+        )
+      await tx
+        .insert(knowledgeGapTask)
+        .values({
+          gapId: row.id,
+          taskId: gap.taskId,
+          issueNumber: gap.issueNumber,
+          role: gap.role,
+          baseSha: gap.baseSha,
+        })
+        .onConflictDoNothing()
+    })
+  }
+}
+
+export type GapRow = {
+  id: number
+  repository: string
+  question: string
+  status: 'open' | 'answered' | 'dismissed'
+  createdAt: Date
+  tasks: { taskId: number; issueNumber: number; role: string; baseSha: string | null }[]
+}
+
+/** The gaps with this status, newest first, each with the tasks that asked it. */
+export async function gapsWithStatus(
+  db: Database,
+  status: GapRow['status'] = 'open',
+): Promise<GapRow[]> {
+  const gaps = await db
+    .select()
+    .from(knowledgeGap)
+    .where(eq(knowledgeGap.status, status))
+    .orderBy(desc(knowledgeGap.id))
+  if (gaps.length === 0) return []
+  const asked = await db
+    .select()
+    .from(knowledgeGapTask)
+    .where(
+      inArray(
+        knowledgeGapTask.gapId,
+        gaps.map((g) => g.id),
+      ),
+    )
+    .orderBy(asc(knowledgeGapTask.id))
+  return gaps.map((g) => ({
+    id: g.id,
+    repository: g.repository,
+    question: g.question,
+    status: g.status,
+    createdAt: g.createdAt,
+    tasks: asked
+      .filter((a) => a.gapId === g.id)
+      .map((a) => ({
+        taskId: a.taskId,
+        issueNumber: a.issueNumber,
+        role: a.role,
+        baseSha: a.baseSha,
+      })),
+  }))
+}
+
+/** Marks an open gap answered or dismissed. False when it is not open (or not there). */
+export async function resolveGap(
+  db: Database,
+  id: number,
+  status: 'answered' | 'dismissed',
+  now: Date = new Date(),
+): Promise<boolean> {
+  const rows = await db
+    .update(knowledgeGap)
+    .set({ status, resolvedAt: now })
+    .where(and(eq(knowledgeGap.id, id), eq(knowledgeGap.status, 'open')))
+    .returning({ id: knowledgeGap.id })
+  return rows.length > 0
+}
+
+/** Whether a gap is still open, read again right before it is filed. */
+export async function gapIsOpen(db: Database, id: number): Promise<boolean> {
+  const [row] = await db
+    .select({ status: knowledgeGap.status })
+    .from(knowledgeGap)
+    .where(eq(knowledgeGap.id, id))
+  return row?.status === 'open'
+}
+
+export type AnsweredQuestion = {
+  id: number
+  repository: string
+  issueNumber: number
+  taskId: number
+  question: string
+  answer: string
+}
+
+/** What a task asked the owner in `waiting` and the owner answered: an answer that may be a rule. */
+export async function answeredQuestions(db: Database, limit = 20): Promise<AnsweredQuestion[]> {
+  const rows = await db
+    .select({
+      id: question.id,
+      repository: task.repository,
+      issueNumber: task.issueNumber,
+      taskId: question.taskId,
+      body: question.body,
+      answer: question.answer,
+    })
+    .from(question)
+    .innerJoin(task, eq(task.id, question.taskId))
+    .where(and(isNotNull(question.answer), sql`${question.answeredBy} is not null`))
+    .orderBy(desc(question.id))
+    .limit(limit)
+  return rows.map((r) => ({
+    id: r.id,
+    repository: r.repository,
+    issueNumber: r.issueNumber,
+    taskId: r.taskId,
+    question: r.body,
+    answer: r.answer ?? '',
+  }))
 }

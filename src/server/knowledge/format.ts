@@ -60,6 +60,7 @@ export const SLICE_MAX_TOTAL_BYTES = 1024 * 1024
 
 /** What an agent may leave for the next run: a few short facts. */
 export const LEARNED_MAX = 5
+export const GAP_MAX = 3
 const LEARNED_MIN_CHARS = 12
 const LEARNED_MAX_CHARS = 600
 
@@ -166,12 +167,34 @@ export function parseLearned(summary: string): string[] {
   return facts
 }
 
-/** The final message without its `LEARNED:` lines, so they never become part of a question. */
+/**
+ * The questions an agent asked of the knowledge base: lines of its final message that start with
+ * `KNOWLEDGE_GAP:`. One too short to be a question, a repeated one and any past the third are dropped.
+ */
+export function parseGaps(summary: string): string[] {
+  const gaps: string[] = []
+  for (const match of summary.matchAll(/^[ \t>*-]*KNOWLEDGE_GAP:(.*)/gm)) {
+    const gap = oneLine(match[1]).slice(0, LEARNED_MAX_CHARS)
+    if (gap.length < LEARNED_MIN_CHARS || gaps.includes(gap)) continue
+    gaps.push(gap)
+    if (gaps.length === GAP_MAX) break
+  }
+  return gaps
+}
+
+/** The final message without its `LEARNED:` and `KNOWLEDGE_GAP:` lines, so they never become part of a question. */
 export function withoutLearned(summary: string): string {
   return summary
     .split('\n')
-    .filter((line) => !/^[ \t>*-]*LEARNED:/.test(line))
+    .filter((line) => !/^[ \t>*-]*(LEARNED|KNOWLEDGE_GAP):/.test(line))
     .join('\n')
+}
+
+/** What two questions in the same project share, so a gap is kept once. */
+export function gapHash(repository: string, question: string): string {
+  return createHash('sha256')
+    .update(`gap\n${repository}\n${oneLine(question)}`)
+    .digest('hex')
 }
 
 /** What two notes with the same text in the same scope share, so a fact is kept once. */

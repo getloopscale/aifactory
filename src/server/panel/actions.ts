@@ -11,6 +11,8 @@ import type { GithubApi } from '../github/pulls'
 import type { Bump } from '../factory/release'
 import { answerMarker } from '../factory/waiting'
 import { latestSendBackDecision, pendingSendBack } from '../factory/send-back'
+import { fileOnce } from '../coordinator/file-once'
+import type { IssuesApi } from '../github/issues-api'
 import { outcome, stagesWhere, type Facts, type TransitionEvent } from '../factory/transitions'
 
 /** A person asked for something the task's state does not allow. The panel shows the message. */
@@ -58,13 +60,15 @@ const NOTE_MAX = 4_000
  * cannot queue two runs. A task that runs again is not resolved any more: what the new run finds decides.
  */
 async function requeue(
-  deps: ActionDeps,
+  deps: Pick<ActionDeps, 'inTransaction'>,
   taskId: number,
   from: string[],
   kind: 'request_changes' | 'retry' | 'automatic_retry' | 'automatic_changes',
   note: string,
   sha: string | null,
   rework?: Rework,
+  /** The task must still be unmerged and unresolved when its stage changes (the owner's merge of the base). */
+  unmerged = false,
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
     // What a person's send-back clears is kept on its intake, so withdrawing it can give it back. It is read
@@ -83,7 +87,13 @@ async function requeue(
     const moved = await tx
       .update(task)
       .set({ stage: 'intake', awaitingCiSha: null, integrationHeld: false, resolvedSha: null })
-      .where(and(eq(task.id, taskId), inArray(task.stage, from as never)))
+      .where(
+        and(
+          eq(task.id, taskId),
+          inArray(task.stage, from as never),
+          ...(unmerged ? [isNull(task.mergedSha), isNull(task.resolvedSha)] : []),
+        ),
+      )
       .returning({ id: task.id })
     if (moved.length === 0) {
       throw new ActionRefused(
@@ -239,7 +249,11 @@ export async function approve(deps: ActionDeps, taskId: number) {
  * on GitHub (resolved with no change, or its branch deleted by a retry) starts from the integration
  * branch instead, as a first run does, with the same note.
  */
-export async function requestChanges(deps: ActionDeps, taskId: number, note: string) {
+export async function requestChanges(
+  deps: Pick<ActionDeps, 'db' | 'inTransaction'> & Partial<ActionDeps>,
+  taskId: number,
+  note: string,
+) {
   const text = note.trim()
   if (text === '') throw new ActionRefused('say what should change')
   const row = await load(deps.db, taskId)
@@ -543,6 +557,33 @@ export async function mergeBaseByCoordinator(deps: ActionDeps, taskId: number, n
   })
 }
 
+/**
+ * The owner asks for the integration branch to be merged into a handed-over (or never merged) task's branch.
+ * It queues the run the coordinator does (`mergeBase: true`: the factory merges, a conflict goes to the merge
+ * agent, no builder session starts). The note is only the record of why; no agent is given it. The stage and
+ * the absence of a merge are checked by the same statement that changes them.
+ */
+export async function mergeBaseByOwner(deps: ActionDeps, taskId: number) {
+  const row = await load(deps.db, taskId)
+  const { token } = await deps.github.installationToken(row.repository)
+  const head = await deps.api.branchHead(row.repository, token, `factory/${row.issueNumber}`)
+  const facts = { ...row, branchGone: !head }
+  mustAllow(facts, 'merge_base_by_owner')
+  const note = 'The owner asked for the integration branch to be merged.'
+  const from = stagesWhere('merge_base_by_owner', facts)
+  await requeue(
+    deps,
+    taskId,
+    from,
+    'automatic_changes',
+    note,
+    row.headSha,
+    { note, mergeBase: true, preAgent: false },
+    true,
+  )
+  return { queued: true }
+}
+
 /** What the rerun of a task's checks needs from GitHub. */
 export type RerunApi = Pick<PromotionApi, 'failedChecks' | 'rerunFailedJobs'>
 
@@ -717,4 +758,42 @@ export async function resolveFinding(
   }
   await deps.db.update(finding).set({ resolvedAt: new Date() }).where(eq(finding.id, findingId))
   return { findingId }
+}
+
+/** What a person wrote on the pull request of work already integrated, which asks for a follow-up issue. */
+export type FollowUpRequest = {
+  taskId: number
+  repository: string
+  issueNumber: number
+  /** Names the review or comment, so one that is delivered twice files one issue. */
+  signature: string
+  by: string
+  text: string
+}
+
+/**
+ * Files the follow-up issue for something a trusted person wrote on the pull request of integrated work, once
+ * per review or comment (`fileOnce`). GitHub cannot commit with the database, so this runs after the delivery
+ * is recorded; a delivery of the same review again finds the claim and files nothing.
+ */
+export async function openFollowUpIssue(
+  deps: Pick<ActionDeps, 'db' | 'github'> & { issues: Pick<IssuesApi, 'createIssue'> },
+  request: FollowUpRequest,
+): Promise<{ filed: number } | { already: number | null }> {
+  const { token } = await deps.github.installationToken(request.repository)
+  const done = await fileOnce(
+    deps.db,
+    { signature: request.signature, repository: request.repository, now: new Date() },
+    () =>
+      deps.issues.createIssue(request.repository, token, {
+        title: `Follow-up of #${request.issueNumber}: a review on its pull request`,
+        body: [
+          `${request.by} wrote this on the pull request of #${request.issueNumber}, after its work was integrated:`,
+          request.text.slice(0, NOTE_MAX).replace(/^/gm, '> '),
+          `Follow-up of #${request.issueNumber}.`,
+        ].join('\n\n'),
+        labels: ['follow-up'],
+      }),
+  )
+  return 'filed' in done ? { filed: done.filed.number } : { already: done.already }
 }

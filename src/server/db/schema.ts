@@ -753,6 +753,47 @@ export const knowledgeCuration = pgTable(
 )
 
 /**
+ * A question an agent needed answered and the knowledge base did not: the same question (by whitespace-normalised
+ * text) in the same project is one row, and `knowledge_gap_task` says which tasks asked it. `open` until the owner
+ * marks it `answered` or `dismissed`.
+ */
+export const knowledgeGap = pgTable(
+  'knowledge_gap',
+  {
+    id: serial('id').primaryKey(),
+    /** The project the question is about, owner/name. */
+    repository: text('repository').notNull(),
+    question: text('question').notNull(),
+    questionHash: text('question_hash').notNull(),
+    status: text('status', { enum: ['open', 'answered', 'dismissed'] })
+      .notNull()
+      .default('open'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  },
+  (table) => [unique('knowledge_gap_once').on(table.repository, table.questionHash)],
+)
+
+/** One task that asked a gap, with the role that did and the commit it started from. */
+export const knowledgeGapTask = pgTable(
+  'knowledge_gap_task',
+  {
+    id: serial('id').primaryKey(),
+    gapId: integer('gap_id')
+      .notNull()
+      .references(() => knowledgeGap.id, { onDelete: 'cascade' }),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id),
+    issueNumber: integer('issue_number').notNull(),
+    role: text('role', { enum: ['builder'] }).notNull(),
+    baseSha: text('base_sha'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [unique('knowledge_gap_task_once').on(table.gapId, table.taskId)],
+)
+
+/**
  * Each time the factory put a slice of the knowledge base in an agent's sandbox: at the start, and again
  * whenever the base moved while the agent worked. It is what makes a run's knowledge auditable, since the
  * base can change under a run that lasts half an hour.

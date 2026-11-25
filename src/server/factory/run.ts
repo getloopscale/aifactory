@@ -16,7 +16,7 @@ import type { Issue } from '../github/issues'
 import { NEEDS_A_PERSON, type GithubApi } from '../github/pulls'
 import { KnowledgeFeed } from '../knowledge/feed'
 import { mergerPrompt } from '../agents/prompts/merger'
-import { parseLearned, withoutLearned } from '../knowledge/format'
+import { parseGaps, parseLearned, withoutLearned } from '../knowledge/format'
 
 import { cloneRepository } from './clone'
 import {
@@ -34,6 +34,7 @@ import { uploadChangesetCheck } from './changeset-check'
 import { withChangesetCheck } from './changesets'
 import { freshGithubCredential, githubEgress, renewGithubCredential } from './credential-renewal'
 import { deliverPreRelease, describeDelivery, type Handed } from './integration'
+import type { ChangeFacts } from './change-size'
 import { enterMerge } from './merge-task'
 import { heldForEvaluation, heldForReview } from '../evals/cases'
 import {
@@ -255,6 +256,8 @@ export class Run {
   private planned: { discarded: boolean } | undefined
   /** Every path the change under review touches, as the last review read it. */
   private touched: string[] = []
+  /** The size of the change at the commit last reviewed (#474), kept for the pull request and the delivery. */
+  private changeFacts: ChangeFacts | undefined
   /** Whether the checks the run failed fail on the base too, asking each check at most once (#219). */
   private readonly baseProbe = new BaseProbe()
   /** The last review of this run that asked for changes: the next round starts from its findings. */
@@ -846,6 +849,23 @@ export class Run {
     )
   }
 
+  /** The questions the builder left with `KNOWLEDGE_GAP:`, kept for the owner to answer with a rule. */
+  private async keepGaps(summary: string): Promise<void> {
+    const questions = parseGaps(summary)
+    if (questions.length === 0 || !this.feed?.delivered) return
+    const { deps, taskId, row } = this.c
+    await deps.knowledge?.keepGaps(
+      questions.map((question) => ({
+        repository: row.repository,
+        question,
+        taskId,
+        issueNumber: row.issueNumber,
+        role: 'builder' as const,
+        baseSha: this.baseSha,
+      })),
+    )
+  }
+
   /**
    * A run that found nothing to change in an issue is worth remembering: the next run on the same issue
    * starts from what this one found, instead of finding it again.
@@ -1332,6 +1352,29 @@ export class Run {
       row.issueNumber,
       `You asked for changes. The agent left the pull request as it is:\n\n${first.summary.slice(0, 3_000)}`,
     )
+    // `done` means integrated, or waiting for CI to integrate: any other work waits for a person.
+    if (!(row.mergedSha || row.resolvedSha || row.awaitingCiSha)) {
+      const held = await this.previousHandoff()
+      const reason = `the rework changed nothing, so the work still waits for a person${held.reason ? `: ${held.reason}` : ''}`
+      await enterRunStage(deps.db, taskId, 'handoff', {
+        branch,
+        sha: row.headSha,
+        reason,
+        heldReason: held.reason ?? null,
+        ...(held.cause ? { cause: held.cause } : {}),
+        pullRequestUrl: row.pullRequestUrl,
+        unchanged: true,
+        agentSummary: first.summary.slice(0, 4_000),
+        costUsd: this.cost,
+      })
+      return {
+        status: 'handoff',
+        branch,
+        sha: row.headSha,
+        pullRequestUrl: row.pullRequestUrl,
+        reason,
+      }
+    }
     await enterRunStage(deps.db, taskId, 'done', {
       branch,
       sha: row.headSha,
@@ -1346,6 +1389,29 @@ export class Run {
       sha: row.headSha,
       pullRequestUrl: row.pullRequestUrl,
       summary: first.summary,
+    }
+  }
+
+  /**
+   * The handoff the run was sent back from, with its cause and the reason it was first held for (never the
+   * reason of an unchanged send-back, so repeated ones do not stack their prefix). Empty when the last
+   * ending was not a handoff; an older handoff has no cause and none is invented.
+   */
+  private async previousHandoff(): Promise<{ cause?: HandoffCause; reason?: string }> {
+    const { deps, taskId } = this.c
+    const [ended] = await deps.db
+      .select()
+      .from(stageEvent)
+      .where(and(eq(stageEvent.taskId, taskId), inArray(stageEvent.stage, ENDING_STAGES)))
+      .orderBy(desc(stageEvent.id))
+      .limit(1)
+    if (!ended || ended.stage !== 'handoff') return {}
+    const detail = (ended.detail ?? {}) as Record<string, unknown>
+    const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
+    return {
+      cause: text(detail.cause) as HandoffCause | undefined,
+      // `heldReason` is there, null when nothing held it, on every handoff of an unchanged send-back.
+      reason: 'heldReason' in detail ? text(detail.heldReason) : text(detail.reason),
     }
   }
 
@@ -1490,6 +1556,7 @@ export class Run {
     )
     if (!result.ok) await this.failUnfinished(result, 'the agent did not finish')
     await this.keepLearned(result.summary)
+    await this.keepGaps(result.summary)
     this.sessionId = result.sessionId ?? this.sessionId
     const asked = parseQuestion(withoutLearned(result.summary))
     if (asked) await this.ask(asked, 1)
@@ -1568,6 +1635,7 @@ export class Run {
     const first = await this.firstPass()
     if (!first.ok) await this.failUnfinished(first, 'the agent did not finish')
     await this.keepLearned(first.summary)
+    await this.keepGaps(first.summary)
     // A fact the agent left is not part of its question, wherever it put it.
     const asked = parseQuestion(withoutLearned(first.summary))
     this.sessionId = first.sessionId ?? this.sessionId
@@ -1999,12 +2067,16 @@ export class Run {
       integration: integrationBranch(this.c.repo),
     })
     this.reviewedFrom = base
-    const { guards, unplanned, required, touched } = await diffFacts(this.backend, this.repoDir, {
-      baseSha: base,
-      plan: this.plan,
-      issue,
-      checkRuns: await this.checkRuns(),
-    })
+    const { guards, unplanned, required, touched, size } = await diffFacts(
+      this.backend,
+      this.repoDir,
+      {
+        baseSha: base,
+        plan: this.plan,
+        issue,
+        checkRuns: await this.checkRuns(),
+      },
+    )
     const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent) =>
       this.reviewer.run(this.backend, {
         onEvent,
@@ -2036,6 +2108,7 @@ export class Run {
       }),
     )
     this.touched = touched
+    this.changeFacts = { ...size, sha }
     // The reviewer reads and does not write. If it wrote anyway, none of it counts.
     await must(this.backend, `git -C ${this.repoDir} reset --hard ${sha}`)
     await must(this.backend, `git -C ${this.repoDir} clean -fd`)
@@ -2108,13 +2181,14 @@ export class Run {
       baseSha: this.baseSha,
       integration,
     })
-    const { guards, touched } = await diffFacts(this.backend, this.repoDir, {
+    const { guards, touched, size } = await diffFacts(this.backend, this.repoDir, {
       baseSha: base,
       plan: this.plan,
       issue: this.c.issue,
     })
     if (guards.some((g) => g.severity !== 'minor')) return undefined
     this.touched = touched
+    this.changeFacts = { ...size, sha }
     this.c.state.current = 'review'
     await enterRunStage(deps.db, taskId, 'review', { sha, attempt, approvalOf: last.sha })
     const kept: ReviewVerdict = {
@@ -2198,7 +2272,9 @@ export class Run {
         review: { reviewer: this.reviewer.name, attempt, outcome },
         plan: this.renderedPlan,
         repository: row.repository,
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
       }),
+      ...(this.changeFacts ? { change: this.changeFacts } : {}),
     })
     return { status: 'merging', branch, sha, summary: this.summary }
   }
@@ -2420,6 +2496,7 @@ export class Run {
         handoff: reason,
         plan: this.renderedPlan,
         repository: row.repository,
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
       }),
     })
     await api.commentOnIssue(
@@ -2453,6 +2530,7 @@ export class Run {
         pullRequestUrl: pull.url,
         findings: outcome.findings,
         costUsd: this.cost,
+        ...(this.changeFacts ? { change: this.changeFacts } : {}),
         attempts: attempt,
         ...describeDelivery(handed),
       },

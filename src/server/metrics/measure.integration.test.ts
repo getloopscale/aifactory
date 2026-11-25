@@ -19,7 +19,7 @@ import {
 import { metricsReport } from '../panel/metrics'
 
 import { BANDS } from './config'
-import { compareWithBaseline, loadDecisions, loadHistories, measure } from './measure'
+import { compareWithBaseline, firstDay, loadDecisions, loadHistories, measure } from './measure'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -227,6 +227,59 @@ describe('measure', () => {
     await delivered(-60, 100)
 
     expect((await measure({ db: getDb(), now: () => NOW, openIssue })).points).toBe(0)
+  })
+})
+
+describe('the size of the code the deliveries add up to', () => {
+  const change = (testAdded: number, added: number, path = 'src/f.ts') => ({
+    sha: 'a',
+    added,
+    removed: 0,
+    testAdded,
+    testRemoved: 0,
+    files: 1,
+    paths: [path],
+  })
+  const point = async (metric: string, day: string) => {
+    const rows = await getDb().select().from(metricPoint).where(eq(metricPoint.metric, metric))
+    return rows.find((r) => r.repository === 'paulo/app' && r.day === day)
+  }
+
+  it('writes a point per indicator once the day has three measured deliveries, and none before', async () => {
+    await taskEndingIn('done', 18, { change: change(10, 40) })
+    await taskEndingIn('done', 18, { change: change(10, 40) })
+    await measure({ db: getDb(), now: () => NOW })
+    expect(await point('net_lines_per_delivery', '2026-11-07')).toBeUndefined()
+
+    await taskEndingIn('done', 18, { change: change(10, 40) })
+    await measure({ db: getDb(), now: () => NOW })
+
+    expect(await point('net_lines_per_delivery', '2026-11-07')).toMatchObject({ value: 40 })
+    expect(await point('test_share_of_change', '2026-11-07')).toMatchObject({ value: 0.2 })
+    expect(await point('repeat_touch_share', '2026-11-07')).toBeDefined()
+  })
+
+  it('weights the share of tests by the lines each delivery added', async () => {
+    await taskEndingIn('done', 18, { change: change(1, 0) })
+    await taskEndingIn('done', 18, { change: change(0, 250) })
+    await taskEndingIn('done', 18, { change: change(0, 250) })
+
+    await measure({ db: getDb(), now: () => NOW })
+
+    const p = await point('test_share_of_change', '2026-11-07')
+    expect(p?.value).toBeCloseTo(1 / 501)
+  })
+
+  it('counts a repeat touch of a file delivered before the window the points cover', async () => {
+    const first = firstDay(NOW, BANDS)
+    const offset = Math.round((first.getTime() - FIRST) / DAY_MS)
+    await taskEndingIn('done', offset - 5, { change: change(0, 5) })
+    for (let n = 0; n < 3; n++) await taskEndingIn('done', offset + 1, { change: change(0, 5) })
+
+    await measure({ db: getDb(), now: () => NOW })
+
+    const day = new Date(FIRST + (offset + 1) * DAY_MS).toISOString().slice(0, 10)
+    expect(await point('repeat_touch_share', day)).toMatchObject({ value: 1, samples: 3 })
   })
 })
 

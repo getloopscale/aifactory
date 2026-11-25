@@ -2,7 +2,10 @@ import { isMergeConflict } from '../factory/auto-retry'
 import { isFixedBaseNote } from '../factory/ci-wait'
 import type { decision, TaskStage } from '../db/schema'
 
+import { readFacts, totalAdded, type ChangeFacts } from '../factory/change-size'
+
 import type { MetricName } from './config'
+import type { Delivery } from './repeat-touch'
 
 export type HistoryEvent = { stage: TaskStage; at: Date; detail: Record<string, unknown> | null }
 
@@ -27,6 +30,8 @@ export type Observation = {
   at: Date
   value: number
   sample?: false
+  /** Counts the observation this many times in the day's mean: a share weighted by the lines it covers. */
+  weight?: number
 }
 
 type Run = { start: Date; end: number; events: HistoryEvent[] }
@@ -88,6 +93,7 @@ function firstPass(run: Run, evidence: TaskHistory['evidence']): number | undefi
 /** What one finished run, which ended in `ended`, says about each indicator. */
 function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | undefined) {
   const values: Partial<Record<MetricName, number>> = {}
+  const weights: Partial<Record<MetricName, number>> = {}
   values.handoff_share = ended === 'handoff' ? 1 : 0
   const builds = run.events.filter((e) => e.stage === 'build')
   if (builds.length > 0)
@@ -104,6 +110,15 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     values.minutes_to_delivery = (done.at.getTime() - run.start.getTime()) / MINUTE
     // The delivery is the sample; the decisions of its day are added by `personDecisions`.
     values.person_decisions_per_delivery = 0
+    const change = readFacts(done.detail?.change)
+    if (change) {
+      values.net_lines_per_delivery = change.added - change.removed
+      // A delivery that added nothing has no share of tests to give.
+      if (totalAdded(change) > 0) {
+        values.test_share_of_change = change.testAdded / totalAdded(change)
+        weights.test_share_of_change = totalAdded(change)
+      }
+    }
     const cost = done.detail?.costUsd
     if (typeof cost === 'number') values.cost_per_delivery = cost
     const after = run.events.slice(doneAt + 1)
@@ -120,7 +135,7 @@ function measureRun(run: Run, h: TaskHistory, ended: TaskStage, next: Run | unde
     values.change_failure_release_red = cause === 'release_red' ? 1 : 0
     values.change_failure_other = cause === 'other' ? 1 : 0
   }
-  return values
+  return { values, weights }
 }
 
 /**
@@ -134,10 +149,17 @@ export function observe(h: TaskHistory): Observation[] {
     const terminal = run.events.find((e) => TERMINAL.includes(e.stage))
     if (!terminal) return
     if (Array.isArray(terminal.detail?.blockedBy)) return
-    const values = measureRun(run, h, terminal.stage, runs[i + 1])
+    const { values, weights } = measureRun(run, h, terminal.stage, runs[i + 1])
     for (const [metric, value] of Object.entries(values)) {
       if (value === undefined) continue
-      out.push({ metric: metric as MetricName, repository: h.repository, at: terminal.at, value })
+      const weight = weights[metric as MetricName]
+      out.push({
+        metric: metric as MetricName,
+        repository: h.repository,
+        at: terminal.at,
+        value,
+        ...(weight === undefined ? {} : { weight }),
+      })
     }
   })
   const released = h.events.find((e) => e.stage === 'released')
@@ -150,6 +172,16 @@ export function observe(h: TaskHistory): Observation[] {
     })
   }
   return out
+}
+
+/** The deliveries of a task whose change was measured, for the repeat touches. Older ones are unknown, not empty. */
+export function deliveriesOf(h: TaskHistory): Delivery[] {
+  return runsOf(h.events).flatMap((run) => {
+    const terminal = run.events.find((e) => TERMINAL.includes(e.stage))
+    if (terminal?.stage !== 'done' || Array.isArray(terminal.detail?.blockedBy)) return []
+    const change: ChangeFacts | undefined = readFacts(terminal.detail?.change)
+    return change ? [{ repository: h.repository, at: terminal.at, paths: change.paths }] : []
+  })
 }
 
 /** A row of `decision`, with the repository of its task. */

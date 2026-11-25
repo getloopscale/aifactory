@@ -7,6 +7,18 @@ import { ALL_REPOSITORIES, dailySeries } from './series'
 const obs = (repository: string, day: string, value: number, metric = 'first_pass_checks') =>
   ({ metric, repository, at: new Date(`${day}T12:00:00Z`), value }) as Observation
 
+describe('dailySeries and a weight', () => {
+  it('takes the mean of the day weighted: a 1-line all-test delivery beside two of 250 lines with no test', () => {
+    const at = new Date('2026-11-01T12:00:00Z')
+    const o = (value: number, weight: number) =>
+      ({ metric: 'test_share_of_change', repository: 'o/a', at, value, weight }) as Observation
+
+    const [series] = dailySeries([o(1, 1), o(0, 250), o(0, 250)], METRICS)
+
+    expect(series.points).toEqual([{ day: '2026-11-01', value: 1 / 501, samples: 3 }])
+  })
+})
+
 describe('dailySeries', () => {
   it('makes one point per day: the mean of the day and how many observations made it', () => {
     const series = dailySeries(

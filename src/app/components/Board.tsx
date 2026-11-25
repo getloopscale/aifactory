@@ -275,6 +275,18 @@ export function Card({ task }: { task: TaskCard }) {
             {t.board.mainRedAfterRelease}
           </div>
         ) : null}
+        {task.change ? (
+          <div
+            className="mt-1 text-xs tabular-nums text-muted-foreground"
+            aria-label={t.board.changeSize(
+              task.change.added,
+              task.change.removed,
+              task.change.files,
+            )}
+          >
+            +{task.change.added} −{task.change.removed}
+          </div>
+        ) : null}
         {task.waitingOnBase ? (
           <div className="mt-1 text-xs font-medium text-destructive">
             {t.board.waitingOnBase(task.waitingOnBase.checks.join(', '), task.waitingOnBase.branch)}
