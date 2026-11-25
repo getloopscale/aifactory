@@ -1,78 +1,69 @@
-# ADR 0013: conversa com os agentes (spikes S2 e S3)
+# ADR 0013: conversation with the agents (spikes S2 and S3)
 
-Status: **não verificado**. Os spikes não foram rodados.
+Status: **accepted, verified 2026-11-25**.
 
-## Contexto
+## Context
 
-O M13 (`docs/PLAN.md`) depende de duas respostas que só um sandbox real dá:
+M13 (`docs/PLAN.md`) depends on two answers that only a real sandbox gives:
 
-- **S2:** uma mensagem alcança o processo em execução? O passo atual sobrevive? O modo Perguntar
-  (Claude `--permission-mode plan`, Codex `--sandbox read-only`) impede escrita?
-- **S3:** a sessão do CLI, salva fora do sandbox e restaurada num sandbox novo, responde sobre um fato
-  dito antes?
+- **S2:** does a message reach the running process? Does the step in progress survive? Does ask mode
+  (Claude `--permission-mode plan`, Codex `--sandbox read-only`) prevent writes?
+- **S3:** does the CLI's session, saved outside the sandbox and restored in a new one, answer about a fact
+  told before?
 
-## Execução
+## Execution
 
-O roteiro é `spikes/vercel-sandbox/04-agent-conversation.mjs`, um CLI por vez
-(`node --env-file=.env.local spikes/vercel-sandbox/04-agent-conversation.mjs claude|codex`). A chave do
-provedor é anexada pelo firewall e nunca entra no sandbox; o texto chega ao CLI por arquivo. Ele imprime
-só versão, código de saída, duração, se o fato único voltou e o `git status` depois do modo Perguntar.
+Both spikes ran on 2026-11-25 in live E2B sandboxes, with real Anthropic and ChatGPT credentials attached by
+the firewall, through the factory's own path (`sandboxProviderFromEnv`, `createIsolatedSandbox`, each
+harness's `egress()` and `prepare()`). The script is `spikes/e2b/agent-conversation.test.ts`, with a vitest
+config of its own; it skips unless `SPIKE_CLI` is set, so no suite runs it:
 
-O roteiro instala os CLIs nas versões que a fábrica fixa (`CLAUDE_CODE_VERSION`, `CODEX_VERSION`) e aborta
-se `--version` ou um passo de preparo falhar, para que uma execução quebrada não pareça resultado.
+```
+SPIKE_CLI=claude|codex [SPIKE_ONLY=stdin] node --env-file=.env.local node_modules/vitest/vitest.mjs run \
+  --config spikes/e2b/vitest.config.ts
+```
 
-O ambiente do builder não tem credenciais do Vercel Sandbox, da Anthropic nem da OpenAI (e não deve
-tê-las). Nada foi rodado, e nenhum resultado abaixo é evidência.
+Claude Code 2.1.319 and codex-cli 0.166.0, the versions the factory pins. Codex used the subscription login
+(`FACTORY_CODEX_AUTH=subscription`). One run per CLI, plus one rerun of the stdin part.
 
-## Resultados
+## Results (observed)
 
-| Pergunta                                               | Claude     | Codex      |
-| ------------------------------------------------------ | ---------- | ---------- |
-| Versão do CLI                                          | não rodado | não rodado |
-| S2: mensagem chega ao processo em execução             | não rodado | não rodado |
-| S2: entrega por stdin (segunda mensagem respondida)    | não rodado | não rodado |
-| S2: o passo em andamento sobrevive                     | não rodado | não rodado |
-| S2: Perguntar não escreve (árvore e HEAD)              | não rodado | não rodado |
-| S3: fato único lembrado após restaurar em sandbox novo | não rodado | não rodado |
-| S3: estado mínimo da sessão                            | não rodado | não rodado |
+| Question                                                                                  | Claude                                                                                                                                                                                                                                       | Codex                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ask mode leaves the tree and HEAD untouched when asked to edit `f.txt` and create `g.txt` | yes: `git status --porcelain` empty, `f.txt` unchanged, HEAD unchanged (`--permission-mode plan`)                                                                                                                                            | yes, same checks (`--sandbox read-only`)                                                                                                                         |
+| stdin reaches a running turn                                                              | yes: with `-p --input-format stream-json --output-format stream-json`, a second message written 15 s into a turn running a 50 s command was answered in that turn's result (`<code>\n\nfinished`), before end of input; the command finished | no: `codex exec -` reads stdin to EOF before it starts; 0 bytes of output before EOF, and after EOF only the first message was handled and its command never ran |
+| `--resume <id>` / `exec resume <id>` while a turn of the same session runs                | answered in 2.8 s and recalled the earlier fact; the running turn still finished                                                                                                                                                             | answered in 3.2 s, recalled; the running turn still finished                                                                                                     |
+| Session restored in a new sandbox from the session folder alone, same `cwd`, then resumed | recalled the fact; archive 132,616 bytes gzipped (`~/.claude/projects`)                                                                                                                                                                      | recalled the fact; archive 118,810 bytes gzipped (`~/.codex/sessions`)                                                                                           |
 
-## Decisão
+Notes on reading them:
 
-Nenhum mecanismo está escolhido. O desenho do M13 permanece o do plano, **como hipótese**:
+- The parallel resume is **not delivery to the running process** (inferred): it is a second process on the
+  same session that sees the history up to then; nothing tells the running turn about the message. Two
+  writers on one session is what M13's rule "one writer per instance" forbids. Do not use it.
+- Claude refused a bare `sleep 45` in the first stdin attempt ("the harness blocks a plain sleep"); the rerun
+  used `timeout 50 tail -f /dev/null`. This is the CLI, not the delivery.
+- Ask mode was tested against one plain write request, not every write path (`sed -i`, redirection, `git`).
+  The post-answer check below is the guarantee.
+- The archives were taken with the CLI's credential as a placeholder (the real one is attached by the
+  firewall), so the folder cannot hold the secret (inferred). Codex's login file is `~/.codex/auth.json`,
+  outside `~/.codex/sessions`, so it is not in the archive.
 
-- entrega: stdin onde existir; senão interromper e retomar. O roteiro mede os dois
-  caminhos: `runCommand({ stdin: true })` com `writeStdin` (Claude `stream-json`, Codex `exec -`) e
-  retomar com `--continue`/`resume --last`. A fábrica hoje não expõe stdin; o SDK sim. Ainda não rodado;
-- isolamento do Perguntar: confirmar pela árvore de trabalho e pelo `git status`, não só pelo SHA da branch;
-- sessão: só a pasta de conversas do CLI (`~/.claude/projects`, `~/.codex/sessions`), sem credenciais nem
-  caches, guardada em `agent_session`; o roteiro testa se isso basta.
+## Decision
 
-## Pendente (bloqueado por credenciais, precisa de uma pessoa)
+- **Running Claude instance: deliver through stdin.** The CLI runs with `--input-format stream-json` and reads
+  from a file the factory appends to inside the sandbox (`tail -f <inbox> | claude ...`), since
+  `SandboxBackend` has no stdin for a running command. Each message is one JSON line written with
+  `uploadFile` and appended, never through a shell, like issue text.
+- **Running Codex instance: interrupt and resume.** The panel says the message stops the current step.
+- **Stopped instance (both):** save only the session folder to `agent_session` at the end of every run and
+  restore it, in a sandbox cloned from the branch with the same `cwd`, before `--resume <id>` /
+  `exec resume <id>`. No snapshot.
+- **Ask mode:** `--permission-mode plan` / `--sandbox read-only`, plus a check of `git status --porcelain`
+  and HEAD after the answer; any change is discarded and the message is marked failed with the reason.
+- **Mailbox read by a hook:** not run and not needed: stdin covers Claude, and Codex has no hooks.
+- **The M13 design stands with these two changes; no rewrite:** Codex has no delivery to a running process,
+  and a parallel `--resume` is not delivery.
 
-Rodar o roteiro para os dois CLIs com credenciais válidas, preencher a tabela com a saída (sem segredos nem
-conteúdo de sessão), escolher os mecanismos e reescrever o M13 se algo contradisser. A implementação do M13
-não começa antes disso.
+## Consequences
 
-## Superfície dos CLIs verificada sem credenciais (2026-11-24)
-
-Claude Code 2.1.319 e `codex-cli` 0.166.0, só `--help`, sem chamar o modelo. Isto diz que os caminhos
-existem, não que funcionam:
-
-- Claude: `--input-format stream-json` existe e só vale com `--print`; `--replay-user-messages` existe;
-  `--resume <id>`, `--session-id <uuid>`, `--fork-session`, `--no-session-persistence`; `--permission-mode`
-  aceita `plan`.
-- Codex: `codex exec resume [SESSION_ID] [PROMPT]` existe e lê o prompt do stdin com `-`; `--sandbox <modo>`
-  existe. Não há opção de entrada em fluxo para um `codex exec` já iniciado.
-
-## Outras variantes a provar
-
-- Caixa de correio lida por hook (`PostToolUse` / `UserPromptSubmit`) dentro do sandbox (Claude; n/a no Codex).
-- Perguntar: pedir uma escrita por todos os meios (editor, `sed -i`, redirecionamento, `git`) e comparar SHA e
-  `git status` antes e depois. Se algo escrever, a garantia vira a checagem do SHA da branch depois da resposta.
-- Sessão: o Claude deriva o diretório da sessão do `cwd`, que precisa ser idêntico na restauração; medir o
-  tamanho do arquivo e checar se contém segredo antes de guardá-lo.
-
-| Spike                    | Claude     | Codex      | Evidência |
-| ------------------------ | ---------- | ---------- | --------- |
-| S2 caixa de correio      | não rodado | n/a        | —         |
-| S2 interromper e retomar | não rodado | não rodado | —         |
+The implementation is split into separate issues; this ADR records the evidence and the choice only.
