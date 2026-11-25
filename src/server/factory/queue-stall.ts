@@ -1,5 +1,6 @@
 // Which repositories have queued runs that nobody starts, and why when it is known. Pure: `supervise.ts`
 // reads the facts and records the findings.
+import { issueRef } from './item-ref'
 import type { ProviderPause } from './provider-pause'
 
 /** The runs of one repository waiting to start: due, or held with no end ('infinity'). */
@@ -41,7 +42,7 @@ const minutes = (ms: number) => Math.round(ms / 60_000)
 function causeOf(q: QueueFacts, around: QueueSurroundings, now: Date, stallMs: number): string {
   const line = around.stoppedLines.get(q.repository)
   if (q.held > 0 && line) {
-    return `the line is stopped (${line.surface}, fix #${line.issueNumber}); its runs wait for the fix`
+    return `the line is stopped (${line.surface}, fix ${issueRef(line.issueNumber)}); its runs wait for the fix`
   }
   if (q.held > 0) {
     return 'the coordinator holds them until the fix of a failing test integrates, fails or goes to a person (prioritise)'

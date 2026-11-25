@@ -495,6 +495,11 @@ export const en = {
       releaseBranchDefault: (defaultBranch: string) => `${defaultBranch} (the default)`,
       releaseBranchHelp:
         'Only needed when the default branch is develop, which is where the pre-release goes: name main, or the branch your releases use.',
+      linearTeam: 'Linear team that feeds this repository',
+      linearTeamHelp:
+        'The id of a Linear team. Items of that team that carry the label below become tasks here, once the repository is enabled. A team feeds one repository. Leave it empty to take nothing from Linear.',
+      linearLabel: 'Label that asks for work in Linear',
+      linearLabelDefault: 'factory (the default)',
       ask: 'Let the agent ask me questions on the issue when something is unclear',
       builder: 'Builder',
       reviewer: 'Reviewer',

@@ -12,7 +12,9 @@ const SEMVER = /^v?(\d+)\.(\d+)\.(\d+)$/
  * has its own, and an earlier one is not overwritten when a rework pushes again.
  */
 export function preReleaseTag(issueNumber: number, sha: string): string {
-  return `pre/${issueNumber}-${sha.slice(0, 7)}`
+  // A Linear task's local ordinal is negative: the tag names it `L<n>`, never `-n`.
+  const id = issueNumber < 0 ? `L${-issueNumber}` : String(issueNumber)
+  return `pre/${id}-${sha.slice(0, 7)}`
 }
 
 const parts = (tag: string) => SEMVER.exec(tag)!.slice(1, 4).map(Number)
@@ -43,6 +45,8 @@ export function nextVersion(latest: string | undefined, bump: Bump): string {
 type EvidenceLine = { command: string; passed: boolean; durationMs: number }
 
 export type PreReleaseNotes = {
+  /** How the item is named (`ENG-12`); `#<issueNumber>` when absent. */
+  item?: string
   issueNumber: number
   title: string
   sha: string
@@ -68,9 +72,9 @@ export function preReleaseNotes(n: PreReleaseNotes): { name: string; body: strin
     ? `${n.review.reviewer}: ${n.review.verdict}. ${n.review.summary}`
     : 'not reviewed'
   return {
-    name: `#${n.issueNumber} ${n.title}`,
+    name: `${n.item ?? `#${n.issueNumber}`} ${n.title}`,
     body: [
-      `Pre-release of the factory's work on #${n.issueNumber}, at \`${n.sha.slice(0, 7)}\`.`,
+      `Pre-release of the factory's work on ${n.item ?? `#${n.issueNumber}`}, at \`${n.sha.slice(0, 7)}\`.`,
       '',
       ...(n.pullRequestUrl ? [`Pull request: ${n.pullRequestUrl}`, ''] : []),
       'Checks the factory ran on this commit:',

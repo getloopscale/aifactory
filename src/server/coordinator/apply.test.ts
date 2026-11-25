@@ -25,12 +25,24 @@ const draft = (over: Partial<ScopeDraft> = {}): ScopeDraft => ({
 const decision = (d: ScopeDraft): Decision => ({ action: 'scope', reason: 'plateau', draft: d })
 const exception = { taskId: 1, kind: 'review_plateau', head: 'abc' } as unknown as TaskException
 
-function setup(opts: { enabled?: boolean; open?: { number: number; title: string }[] } = {}) {
+function setup(
+  opts: { enabled?: boolean; open?: { number: number; title: string }[]; source?: string } = {},
+) {
   const inserted: Record<string, unknown>[] = []
   const earlier: { reference: string }[] = []
   const rowsOf = (table: unknown) =>
     table === task
-      ? [{ id: 1, repository: 'o/r', issueNumber: 5, stage: 'handoff', headSha: 'abc' }]
+      ? [
+          {
+            id: 1,
+            repository: 'o/r',
+            issueNumber: 5,
+            stage: 'handoff',
+            headSha: 'abc',
+            source: opts.source ?? 'github',
+            displayIdentifier: 'ENG-1',
+          },
+        ]
       : table === repository
         ? opts.enabled === undefined
           ? []
@@ -80,6 +92,21 @@ function setup(opts: { enabled?: boolean; open?: { number: number; title: string
 
 beforeEach(() => {
   sendBack.mockReset()
+})
+
+describe('a Linear task', () => {
+  it('is not scoped: nothing is filed and nothing reaches GitHub with a negative number', async () => {
+    const { deps, created } = setup({ enabled: true, source: 'linear' })
+    const outcome = await applyDecision(
+      deps,
+      exception,
+      decision(draft({ gap: null, followUp: null })),
+      'auto',
+    ).catch((error: Error) => error.message)
+    expect(String(outcome)).not.toBe('applied')
+    expect(created).toHaveLength(0)
+    expect(sendBack).not.toHaveBeenCalled()
+  })
 })
 
 describe('applying a gap draft', () => {
