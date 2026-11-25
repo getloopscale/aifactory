@@ -13,6 +13,7 @@ import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import {
   agentRun,
+  agentSession,
   changePlan,
   decision,
   delivery,
@@ -3251,6 +3252,95 @@ describe('runTask continuing from a branch a person sent back', () => {
     expect(prompts[0]).toContain('The branch already holds your earlier work')
     expect(commands.some((c) => c.includes('checkout -B factory/7 FETCH_HEAD'))).toBe(true)
     expect(commands.some((c) => c.includes('checkout -b factory/7'))).toBe(false)
+  })
+
+  describe("the owner's guidance to a done task", () => {
+    const SESSION = '7db0be59-83ce-4961-a568-391f7b5c0327'
+
+    async function doneTask() {
+      const id = await seedTask()
+      branchPushed()
+      await getDb()
+        .update(task)
+        .set({ stage: 'done', headSha: 'oldsha1', pullRequestUrl: PR_URL })
+        .where(eq(task.id, id))
+      return id
+    }
+
+    function guidedBuilder() {
+      const resumed: string[] = []
+      let fresh = 0
+      const builder: CodingHarness = {
+        name: 'fake-agent',
+        egress: agentEgress,
+        sessionFolder: '.fake/sessions',
+        run: async () => {
+          fresh += 1
+          return { ok: true, summary: 'fresh' }
+        },
+        resume: async (_backend, sessionId, input) => {
+          dirty = true
+          resumed.push(`${sessionId}: ${input.prompt}`)
+          return { ok: true, summary: 'guided', costUsd: 0.2, sessionId }
+        },
+      }
+      return { builder, resumed, fresh: () => fresh }
+    }
+
+    it('restores the builder session, resumes it with the message, and checks and reviews the result', async () => {
+      const id = await doneTask()
+      await getDb()
+        .insert(agentSession)
+        .values({
+          taskId: id,
+          role: 'builder',
+          harness: 'fake-agent',
+          sessionId: SESSION,
+          archive: Buffer.from('tgz'),
+          sizeBytes: 3,
+        })
+      const sandbox = new FakeSandbox(changed())
+      sandbox.backend.downloads.set('/tmp/factory-session.tgz', Buffer.from('tgz2'))
+      const { builder, resumed, fresh } = guidedBuilder()
+      const reviewer = reviewerSaying(verdictJson('approve'))
+
+      const result = await runTask(deps(sandbox, { harness: builder, reviewer }), id, undefined, {
+        feedback: 'use a Set',
+        conversation: true,
+      })
+
+      expect(result).toMatchObject({ status: 'done' })
+      expect(fresh()).toBe(0)
+      expect(resumed).toHaveLength(1)
+      expect(resumed[0]).toContain(`${SESSION}: `)
+      expect(resumed[0]).toContain('use a Set')
+      expect(sandbox.backend.commands.some((c) => c.includes('tar -xzf'))).toBe(true)
+      // The result went through the checks and the review, and the pass was no rework attempt.
+      expect(reviewer.prompts).toHaveLength(1)
+      const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+      expect(runs.find((r) => r.role === 'builder')).toMatchObject({
+        attempt: 1,
+        conversation: true,
+      })
+      expect(runs.filter((r) => r.role === 'builder' && r.attempt > 1)).toEqual([])
+    })
+
+    it('fails with a reason a person reads when no session was stored, and starts no new builder', async () => {
+      const id = await doneTask()
+      const { builder, resumed, fresh } = guidedBuilder()
+
+      const result = await runTask(
+        deps(new FakeSandbox(changed()), { harness: builder }),
+        id,
+        undefined,
+        { feedback: 'use a Set', conversation: true },
+      )
+
+      expect(result).toMatchObject({ status: 'failed' })
+      expect(JSON.stringify(result)).toMatch(/no stored session for task/)
+      expect(fresh()).toBe(0)
+      expect(resumed).toEqual([])
+    })
   })
 
   it('returns to done, and tells the person why, when the agent finds nothing to change', async () => {

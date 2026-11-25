@@ -16,7 +16,7 @@ export type ConversationDeps = {
     ) => Promise<T>,
   ) => Promise<T>
   /** Sends the task back to its agent with the message as the note: today's loop takes over from there. */
-  guide: (taskId: number, text: string) => Promise<unknown>
+  guide: (taskId: number, text: string) => Promise<{ messageId: number }>
 }
 
 /**
@@ -37,17 +37,20 @@ export async function sendMessage(
   const decided = outcome({ ...row, conversation: input.mode }, 'conversation')
   if (decided.kind !== 'action') throw new ActionRefused(decided.reason)
 
-  const message = { taskId, author: 'owner', text, mode: input.mode }
   if (decided.action === 'guide_agent') {
-    await deps.guide(taskId, text)
-    const [made] = await deps.db
-      .insert(agentMessage)
-      .values({ ...message, delivery: 'delivered', answeredAt: new Date() })
-      .returning({ id: agentMessage.id })
-    return { messageId: made.id, delivery: 'delivered' as const }
+    // The run is queued and the message recorded in one transaction, under the task's lock.
+    const { messageId } = await deps.guide(taskId, text)
+    return { messageId, delivery: 'delivered' as const }
   }
   return deps.inTransaction(async (tx, enqueue) => {
-    const [made] = await tx.insert(agentMessage).values(message).returning({ id: agentMessage.id })
+    // The task's row is locked and read again: a guide that began meanwhile has taken the session.
+    const [locked] = await tx.select().from(task).where(eq(task.id, taskId)).for('update')
+    const again = outcome({ ...locked, conversation: 'ask' }, 'conversation')
+    if (again.kind !== 'action') throw new ActionRefused(again.reason)
+    const [made] = await tx
+      .insert(agentMessage)
+      .values({ taskId, author: 'owner', text, mode: 'ask' })
+      .returning({ id: agentMessage.id })
     await enqueue({ taskId }, `conversation-${made.id}`)
     return { messageId: made.id, delivery: 'pending' as const }
   })

@@ -82,8 +82,11 @@ async function requeue(
   rework?: Rework,
   /** The task must still be unmerged and unresolved when its stage changes (the owner's merge of the base). */
   unmerged = false,
-  /** The send-back is the owner's guidance to the agent (`conversation` event), not a request for changes. */
-  conversation = false,
+  /**
+   * The send-back is the owner's guidance to the agent (`conversation` event), not a request for changes: its
+   * message is recorded in the same transaction, after checking under the task's lock that none waits for delivery.
+   */
+  conversation?: { text: string; messageId?: number },
 ): Promise<number | null> {
   return deps.inTransaction(async (tx, enqueueRun) => {
     // What a person's send-back clears is kept on its intake, so withdrawing it can give it back. It is read
@@ -95,8 +98,19 @@ async function requeue(
     // The integration may have finished between the panel's read and this lock: a merged task is not sent back,
     // so no run starts on work already integrated and the cron's `done` never lands after the intake.
     if (locked) {
-      if (conversation) mustAllow({ ...locked, conversation: 'guide' }, 'conversation')
-      else mustAllow(locked, 'request_changes')
+      if (conversation) {
+        mustAllow({ ...locked, conversation: 'guide' }, 'conversation')
+        const [waiting] = await tx
+          .select({ id: agentMessage.id })
+          .from(agentMessage)
+          .where(and(eq(agentMessage.taskId, taskId), eq(agentMessage.delivery, 'pending')))
+          .limit(1)
+        if (waiting) {
+          throw new ActionRefused(
+            'a message to the agent is still being delivered: wait until it ends',
+          )
+        }
+      } else mustAllow(locked, 'request_changes')
     }
     const before = locked
       ? { resolvedSha: locked.resolvedSha, awaitingCiSha: locked.awaitingCiSha }
@@ -155,6 +169,20 @@ async function requeue(
         ...(kind === 'request_changes' ? { decisionId: made.id, restore: before } : {}),
       },
     })
+    if (conversation) {
+      const [written] = await tx
+        .insert(agentMessage)
+        .values({
+          taskId,
+          author: 'owner',
+          text: conversation.text,
+          mode: 'guide',
+          delivery: 'delivered',
+          answeredAt: new Date(),
+        })
+        .returning({ id: agentMessage.id })
+      conversation.messageId = written.id
+    }
     await enqueueRun(
       { taskId, decisionId: made.id, ...(conversation ? { conversation: true } : {}) },
       `task-${taskId}-d${made.id}`,
@@ -305,14 +333,7 @@ export async function guideTask(deps: ActionDeps, taskId: number, text: string) 
   if (!(await storedSession(deps.db, { taskId, role: 'builder' }))) {
     throw new ActionRefused('the task kept no session of its agent to guide: ask instead')
   }
-  const [waiting] = await deps.db
-    .select({ id: agentMessage.id })
-    .from(agentMessage)
-    .where(and(eq(agentMessage.taskId, taskId), eq(agentMessage.delivery, 'pending')))
-    .limit(1)
-  if (waiting) {
-    throw new ActionRefused('a message to the agent is still being delivered: wait until it ends')
-  }
+  const message: { text: string; messageId?: number } = { text: note.slice(0, NOTE_MAX) }
   const decisionId = await requeue(
     deps,
     taskId,
@@ -322,9 +343,9 @@ export async function guideTask(deps: ActionDeps, taskId: number, text: string) 
     row.headSha,
     undefined,
     false,
-    true,
+    message,
   )
-  return { decisionId }
+  return { decisionId: decisionId!, messageId: message.messageId! }
 }
 
 /**

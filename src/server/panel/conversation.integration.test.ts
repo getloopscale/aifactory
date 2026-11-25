@@ -51,7 +51,7 @@ async function seed(stage: string, fields: Partial<typeof task.$inferInsert> = {
 
 function deps() {
   const queued: { input: { taskId: number }; key: string }[] = []
-  const guide = vi.fn(async () => undefined)
+  const guide = vi.fn(async () => ({ messageId: 7 }))
   const made: ConversationDeps = {
     db: getDb(),
     guide,
@@ -108,7 +108,8 @@ describe('the owner writing to an agent', () => {
       .from(agentMessage)
       .where(eq(agentMessage.mode, 'guide'))
       .orderBy(asc(agentMessage.id))
-    expect(rows.map((r) => r.taskId)).toEqual([id])
+    // The stub of the guide stored nothing, and the refused one stored nothing either.
+    expect(rows).toEqual([])
   })
 
   it('guides only a task that kept its session, and not while a message waits', async () => {
@@ -130,5 +131,51 @@ describe('the owner writing to an agent', () => {
       .insert(agentMessage)
       .values({ taskId: id, author: 'owner', text: 'q', mode: 'ask' })
     await expect(guideTask(actions, id, 'x')).rejects.toThrow(/still being delivered/)
+  })
+
+  it('records the guidance with its queued run in one transaction, and the run carries the flag', async () => {
+    const id = await seed('handoff', { headSha: 'h' })
+    await getDb()
+      .insert(agentSession)
+      .values({
+        taskId: id,
+        role: 'builder',
+        harness: 'claude-code',
+        sessionId: 's',
+        archive: Buffer.from('a'),
+        sizeBytes: 1,
+      })
+    const queued: unknown[] = []
+    const inTransaction = (fail: boolean) =>
+      ((work: Parameters<ConversationDeps['inTransaction']>[0]) =>
+        getDb().transaction((tx) =>
+          work(tx as never, async (input: unknown) => {
+            if (fail) throw new Error('queue down')
+            queued.push(input)
+          }),
+        )) as never
+
+    // A queue that fails takes the message with it: no thread entry for guidance that never ran.
+    await expect(
+      guideTask({ db: getDb(), inTransaction: inTransaction(true) } as never, id, 'use a Set'),
+    ).rejects.toThrow('queue down')
+    expect(await getDb().select().from(agentMessage)).toEqual([])
+    expect((await getDb().select().from(task).where(eq(task.id, id)))[0].stage).toBe('handoff')
+
+    const { messageId } = await guideTask(
+      { db: getDb(), inTransaction: inTransaction(false) } as never,
+      id,
+      'use a Set',
+    )
+    const [row] = await getDb().select().from(agentMessage)
+    expect(row).toMatchObject({ id: messageId, mode: 'guide', delivery: 'delivered' })
+    expect(queued).toEqual([expect.objectContaining({ taskId: id, conversation: true })])
+  })
+
+  it('refuses an ask once a guide has taken the task back to work', async () => {
+    const id = await seed('intake', { headSha: 'h' })
+    const { made } = deps()
+    await expect(sendMessage(made, id, { text: 'hi', mode: 'ask' })).rejects.toThrow(/working/)
+    expect(await getDb().select().from(agentMessage)).toEqual([])
   })
 })

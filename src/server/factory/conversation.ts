@@ -159,7 +159,7 @@ async function bookCost(
 }
 
 /** Saves the session only while the task's agent is still stopped; answers why not when it is not. */
-async function keepSessionIfStopped(
+export async function keepSessionIfStopped(
   db: Database,
   backend: SandboxBackend,
   harness: CodingHarness,

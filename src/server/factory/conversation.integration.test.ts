@@ -5,9 +5,17 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { agentMessage, ingress, task } from '../db/schema'
+import { agentMessage, agentSession, ingress, task } from '../db/schema'
 
-import { CLAIM_STALE_MS, claimNext, stuckConversations, UNTAKEN_MS } from './conversation'
+import {
+  CLAIM_STALE_MS,
+  claimNext,
+  keepSessionIfStopped,
+  stuckConversations,
+  UNTAKEN_MS,
+} from './conversation'
+import { FakeSandbox } from './fake-sandbox'
+import type { CodingHarness } from './harness'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -95,5 +103,31 @@ describe('delivering the messages of one task', () => {
     expect(
       await stuckConversations(getDb(), new Date(now.getTime() + CLAIM_STALE_MS + 1)),
     ).toHaveLength(1)
+  })
+})
+
+describe('keeping the session after an ask', () => {
+  const harness = { name: 'fake', sessionFolder: '.fake/sessions' } as CodingHarness
+
+  async function sandbox() {
+    const fake = new FakeSandbox()
+    fake.backend.downloads.set('/tmp/factory-session.tgz', Buffer.from('new'))
+    return fake.backend
+  }
+
+  it('saves it while the agent is stopped', async () => {
+    const taskId = await seedTask()
+    const kept = await keepSessionIfStopped(getDb(), await sandbox(), harness, taskId, 's-new')
+    expect(kept).toBeUndefined()
+    const [row] = await getDb().select().from(agentSession).where(eq(agentSession.taskId, taskId))
+    expect(row).toMatchObject({ sessionId: 's-new', role: 'builder' })
+  })
+
+  it('leaves the session alone, and says why, when a run took the task meanwhile', async () => {
+    const taskId = await seedTask()
+    await getDb().update(task).set({ stage: 'build' }).where(eq(task.id, taskId))
+    const kept = await keepSessionIfStopped(getDb(), await sandbox(), harness, taskId, 's-new')
+    expect(kept).toMatch(/moved on while the agent answered/)
+    expect(await getDb().select().from(agentSession)).toEqual([])
   })
 })
