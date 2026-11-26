@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -114,5 +114,16 @@ describe('the history entry of the menu', () => {
     const link = screen.getByRole('link', { name: en.places.history })
     expect(link.getAttribute('href')).toBe('/history')
     expect(link.getAttribute('aria-current')).toBe('page')
+  })
+})
+
+describe('the order of the menu', () => {
+  it('starts with the inbox, before the entry that sets the factory up', () => {
+    mount(true)
+    const places = within(screen.getByRole('navigation', { name: en.menu.main }))
+      .getAllByRole('link')
+      .map((l) => l.getAttribute('href'))
+      .filter((href) => ['/inbox', '/onboarding', '/floor', '/work', '/plans'].includes(href ?? ''))
+    expect(places).toEqual(['/inbox', '/onboarding', '/floor', '/work', '/plans'])
   })
 })
