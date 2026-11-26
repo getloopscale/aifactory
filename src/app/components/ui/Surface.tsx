@@ -212,8 +212,11 @@ export function Row({
   detail,
   trail,
   below,
+  current = false,
   children,
 }: {
+  /** The row the page beside it is about. */
+  current?: boolean
   to?: To
   /** An address outside the panel, opened in a new tab. */
   href?: string
@@ -259,7 +262,11 @@ export function Row({
   return (
     <li>
       {to ? (
-        <Link to={to} className={`${ROW} ${focus}`}>
+        <Link
+          to={to}
+          aria-current={current ? 'true' : undefined}
+          className={`${ROW} ${focus} ${current ? 'bg-muted/60' : ''}`}
+        >
           {body}
         </Link>
       ) : href ? (

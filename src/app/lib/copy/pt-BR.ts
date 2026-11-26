@@ -457,6 +457,7 @@ export const ptBR: Copy = {
   },
   task: {
     tabs: {
+      conversation: 'Conversa',
       label: 'Sobre esta tarefa',
       activity: 'Atividade',
       runs: 'Execuções',
@@ -1826,6 +1827,7 @@ export const ptBR: Copy = {
     page: (n: number) => `Página ${n}`,
   },
   inbox: {
+    openPage: 'Abrir a tarefa em página própria',
     heading: 'Caixa de entrada',
     nothing: 'Nada espera por você.',
     question: 'Responder a uma pergunta',

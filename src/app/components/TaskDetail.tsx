@@ -42,7 +42,9 @@ import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
 const TASK_TABS = ['activity', 'runs', 'evidence', 'reviews'] as const
-type TaskTab = (typeof TASK_TABS)[number]
+/** In one column the conversation is a tab too, and the first. */
+const PANES = ['conversation', ...TASK_TABS] as const
+type TaskTab = (typeof PANES)[number]
 
 /**
  * One tab of the task's side: beside the conversation only the chosen one shows, and the others stay in the
@@ -81,10 +83,13 @@ export function TaskDetailView({
   above,
   focusRun,
   workbench = false,
+  tabbed = false,
 }: {
   id: number
   /** On a page of its own and a wide screen: the conversation beside the rest, which is in tabs. */
   workbench?: boolean
+  /** In a column that has a height of its own: one tab at a time, the conversation first, each filling it. */
+  tabbed?: boolean
   above?: ReactNode
   /** The pass to open the conversation at. */
   focusRun?: number
@@ -94,30 +99,73 @@ export function TaskDetailView({
   const detail = resource.data
   const transcript = useTranscript(id)
   const wide = useWidth() === 'expanded'
-  const split = workbench && wide
-  const [tab, setTab] = useState<TaskTab>('activity')
+  const beside = workbench && wide && !tabbed
+  /** Tabs take the place of the stack, beside the conversation or over it. */
+  const split = beside || tabbed
+  const [picked, setTab] = useState<TaskTab>()
+  const tab: TaskTab = picked ?? (tabbed ? 'conversation' : 'activity')
+  const talking = tabbed && tab === 'conversation'
 
   if (resource.error) return <p className="text-sm text-destructive">{resource.error}</p>
   if (!detail) return <p className="text-sm text-muted-foreground">{t.task.loading}</p>
   const { task } = detail
 
   const counts: Record<TaskTab, number> = {
+    conversation: 0,
     activity: detail.timeline.length,
     runs: detail.runs.length,
     evidence: detail.evidence.length,
     reviews: detail.reviews.length + detail.securityReviews.length,
   }
 
+  const tabs = (
+    <div
+      role="tablist"
+      aria-label={t.task.tabs.label}
+      className="flex gap-1 rounded-xl border border-border bg-card p-1"
+    >
+      {(tabbed ? PANES : TASK_TABS).map((name) => (
+        <button
+          key={name}
+          type="button"
+          role="tab"
+          aria-selected={tab === name}
+          onClick={() => setTab(name)}
+          className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors ${
+            tab === name
+              ? 'bg-muted font-medium text-foreground'
+              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+          }`}
+        >
+          {t.task.tabs[name]}
+          {counts[name] > 0 ? (
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+              {counts[name]}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
     <div
-      data-layout={split ? 'workbench' : 'stack'}
+      data-layout={beside ? 'workbench' : tabbed ? 'tabbed' : 'stack'}
       className={
-        split
-          ? 'grid h-[calc(100vh-8.75rem)] grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-4'
-          : STACK
+        beside
+          ? 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-4'
+          : tabbed
+            ? 'flex h-full min-h-0 flex-col gap-4'
+            : STACK
       }
     >
-      <div className={split ? 'flex min-h-0 min-w-0 flex-col gap-4' : `min-w-0 ${STACK}`}>
+      <div
+        className={
+          split
+            ? `flex min-w-0 flex-col gap-4 ${beside || talking ? 'min-h-0 flex-1' : 'shrink-0'}`
+            : `min-w-0 ${STACK}`
+        }
+      >
         <div>
           <PageHeader title={task.title} above={above} />
           <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
@@ -186,48 +234,25 @@ export function TaskDetailView({
           </Surface>
         ) : null}
 
-        <Conversation
-          detail={detail}
-          events={transcript.events}
-          error={transcript.error}
-          focusRun={focusRun}
-          tall={split}
-          onDone={resource.reload}
-        />
+        {tabbed ? tabs : null}
+        <div className={split ? (tabbed && !talking ? 'hidden' : 'contents') : undefined}>
+          <Conversation
+            detail={detail}
+            events={transcript.events}
+            error={transcript.error}
+            focusRun={focusRun}
+            tall={split}
+            onDone={resource.reload}
+          />
+        </div>
       </div>
       <aside
         aria-label={t.task.tabs.label}
-        className={split ? 'flex min-h-0 min-w-0 flex-col gap-4' : STACK}
+        className={
+          split ? (talking ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col gap-4') : STACK
+        }
       >
-        {split ? (
-          <div
-            role="tablist"
-            aria-label={t.task.tabs.label}
-            className="flex gap-1 rounded-xl border border-border bg-card p-1"
-          >
-            {TASK_TABS.map((name) => (
-              <button
-                key={name}
-                type="button"
-                role="tab"
-                aria-selected={tab === name}
-                onClick={() => setTab(name)}
-                className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors ${
-                  tab === name
-                    ? 'bg-muted font-medium text-foreground'
-                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                }`}
-              >
-                {t.task.tabs[name]}
-                {counts[name] > 0 ? (
-                  <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                    {counts[name]}
-                  </span>
-                ) : null}
-              </button>
-            ))}
-          </div>
-        ) : null}
+        {beside ? tabs : null}
         <TaskPane id="activity" active={tab} split={split}>
           <WatchPanel watches={detail.watches} onDone={resource.reload} />
 

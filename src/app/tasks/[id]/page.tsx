@@ -12,15 +12,17 @@ export default function TaskPage() {
   const { t } = useCopy()
   useEscape(() => void navigate('/work'))
   return (
-    <TaskDetailView
-      id={id}
-      workbench
-      focusRun={Number.isInteger(pass) && pass > 0 ? pass : undefined}
-      above={
-        <Link to="/work" className="text-sm text-muted-foreground hover:text-foreground">
-          {t.work.backToBoard}
-        </Link>
-      }
-    />
+    <div className="h-[calc(100vh-8.75rem)]">
+      <TaskDetailView
+        id={id}
+        workbench
+        focusRun={Number.isInteger(pass) && pass > 0 ? pass : undefined}
+        above={
+          <Link to="/work" className="text-sm text-muted-foreground hover:text-foreground">
+            {t.work.backToBoard}
+          </Link>
+        }
+      />
+    </div>
   )
 }

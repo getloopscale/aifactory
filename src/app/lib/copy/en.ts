@@ -386,6 +386,7 @@ export const en = {
   },
   task: {
     tabs: {
+      conversation: 'Conversation',
       label: 'About this task',
       activity: 'Activity',
       runs: 'Runs',
@@ -1529,6 +1530,7 @@ export const en = {
     page: (n: number) => `Page ${n}`,
   },
   inbox: {
+    openPage: 'Open the task on its own page',
     heading: 'Inbox',
     nothing: 'Nothing waits for you.',
     question: 'Answer a question',

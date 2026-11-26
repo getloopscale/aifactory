@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The inbox on a wide screen shows the list beside the task it is about: a click on an item opens its task in the next column, with the conversation, the activity, the runs, the evidence and the reviews as tabs, and the first item is open on arrival. The page does not scroll, the list and the open tab do
 - The page of a task on a wide screen shows the conversation beside the rest: the timeline, the runs, the evidence and the reviews are tabs on the right, each with its count, and the page itself no longer scrolls, only the thread and the open tab do. In the side panel of the board and on a narrow screen the task is stacked as before
 - The conversation with a task's agent draws what the agent said as Markdown, names who said it (the tool, the persona, the model and when), puts the owner's messages on the right, and folds a turn into one line that opens its steps. A line above the thread names the tool, the model and the effort of the agent on screen, and the box says which agent a message goes to. Ctrl+Enter sends
 - A status bar under every page shows how many runs work and wait, how many tasks wait for the owner and whether the factory has findings, each a link to its page
