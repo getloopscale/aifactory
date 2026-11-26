@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events'
 import { spawnSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 
@@ -18,7 +19,7 @@ import {
   type Docker,
   type DockerResult,
 } from './docker-sandbox'
-import { streams } from './sandbox'
+import { streams, terminals } from './sandbox'
 
 describe('egressRules', () => {
   it('lists each destination, with the headers the proxy attaches, and nothing else', () => {
@@ -671,5 +672,74 @@ describe('localhostOnIpv4', () => {
   it('changes nothing in a file that already names localhost on 127.0.0.1 alone', () => {
     const hosts = '127.0.0.1\tlocalhost\n::1\tip6-localhost ip6-loopback\n'
     expect(localhostOnIpv4(hosts)).toBe(hosts)
+  })
+})
+
+describe('a docker terminal', () => {
+  /** A `docker exec` that is a pair of pipes the test drives. */
+  function fakeProcess() {
+    const stdout = new EventEmitter()
+    const stderr = new EventEmitter()
+    const child = new EventEmitter() as EventEmitter & Record<string, unknown>
+    const written: string[] = []
+    child.stdout = stdout
+    child.stderr = stderr
+    child.stdin = { write: (d: string) => written.push(d), end: () => {} }
+    child.kill = () => {
+      child.emit('close', 137)
+    }
+    return { child, stdout, written }
+  }
+
+  it('runs the command under script with the size, relays bytes, resizes through the pid file and kills', async () => {
+    const { docker, all } = fakeDocker()
+    const proc = fakeProcess()
+    let args: string[] = []
+    const sandbox = await dockerSandboxProvider({
+      docker,
+      sleep: instant,
+      spawn: (a) => {
+        args = a
+        return proc.child as never
+      },
+    }).create(spec)
+    const backend = sandbox.backend
+    if (!terminals(backend)) throw new Error('no terminal')
+
+    const term = await backend.openTerminal("claude --resume x'y", {
+      cols: 90,
+      rows: 30,
+      cwd: '/work/r',
+    })
+    expect(args.slice(0, 8)).toEqual([
+      'exec',
+      '-i',
+      '-u',
+      'node',
+      '-w',
+      '/work/r',
+      '-e',
+      'TERM=xterm-256color',
+    ])
+    const joined = args.join(' ')
+    expect(joined).toContain('script -qfc')
+    expect(joined).toContain('stty cols 90 rows 30')
+    // The command is one quoted word: the quote in it cannot end it.
+    expect(joined).toContain(`'claude --resume x'\\''y'`)
+
+    const seen: string[] = []
+    term.onData((d) => seen.push(d))
+    proc.stdout.emit('data', Buffer.from('hello'))
+    expect(seen).toEqual(['hello'])
+    term.write('ls\n')
+    expect(proc.written).toEqual(['ls\n'])
+
+    await term.resize(120, 40)
+    expect(all().at(-1)).toContain('stty cols 120 rows 40')
+    await expect(term.resize(0, 40)).rejects.toThrow(/bad terminal size/)
+
+    await term.kill()
+    expect(await term.wait()).toEqual({ exitCode: 137 })
+    await sandbox.stop()
   })
 })

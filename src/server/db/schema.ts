@@ -236,6 +236,37 @@ export const agentSession = pgTable(
 )
 
 /**
+ * A terminal a person opened on a stopped agent's kept session: the agent's own CLI, interactive, in a sandbox.
+ * A task has at most one open row (the unique index), which is what makes a terminal the task's one writer.
+ * `seenAt` is its heartbeat: an open row nobody renewed belongs to a process that is gone. The cost is never
+ * known (an interactive CLI reports none), so `costUsd` stays null and is not zero.
+ */
+export const terminalSession = pgTable(
+  'terminal_session',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'cascade' }),
+    role: text('role').notNull(),
+    engine: text('engine').notNull(),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+    seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
+    closedAt: timestamp('closed_at', { withTimezone: true }),
+    /** Why it closed: `closed`, `idle`, `limit`, `abandoned` or `failed`. */
+    closeReason: text('close_reason'),
+    /** What went wrong, when the terminal did not start or its session was not kept. */
+    error: text('error'),
+    costUsd: real('cost_usd'),
+  },
+  (table) => [
+    uniqueIndex('terminal_session_one_open')
+      .on(table.taskId)
+      .where(sql`${table.closedAt} is null`),
+  ],
+)
+
+/**
  * What an independent reviewer decided about one commit. `invalid` is an answer the factory could
  * not read as a verdict, which counts as no approval.
  */

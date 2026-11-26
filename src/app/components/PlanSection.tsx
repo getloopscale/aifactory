@@ -45,6 +45,12 @@ export function PlanSection({ plans }: { plans: ChangePlanView[] }) {
             {t.planSection.by(plan.harness, shortSha(plan.baseSha))}
             {plans.length > 1 ? t.planSection.latestOf(plans.length) : ''}
           </p>
+          <Items
+            title={t.planSection.acceptance}
+            items={(plan.acceptance ?? []).map(
+              (a) => `${a.id}: ${a.statement}${a.evidence ? ` (${a.evidence})` : ''}`,
+            )}
+          />
           <h3 className="mt-2 text-xs font-semibold text-muted-foreground">
             {t.planSection.files}
           </h3>

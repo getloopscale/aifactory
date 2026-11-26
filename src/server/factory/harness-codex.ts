@@ -275,6 +275,8 @@ export function codexHarness(
 
     run: (backend, input) => invoke(backend, input, ''),
     resume: async (backend, sessionId, input) => invoke(backend, input, assertSessionId(sessionId)),
+    interactive: (sessionId) =>
+      `${credential.kind === 'api-key' ? 'OPENAI_API_KEY=placeholder-not-a-secret ' : ''}${CODEX} resume ${assertSessionId(sessionId)}${model}${effort}`,
   }
 }
 

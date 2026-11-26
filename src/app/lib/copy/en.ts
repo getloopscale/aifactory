@@ -8,6 +8,7 @@ export const en = {
     ownerRole: 'factory owner',
   },
   places: {
+    history: 'History',
     board: 'Board',
     plans: 'Plans',
     repositories: 'Repositories',
@@ -260,6 +261,7 @@ export const en = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
   conversation: {
+    passMissing: 'The steps of that pass are not kept, so the conversation opens at its start.',
     heading: 'Conversation',
     mode: 'How to talk',
     ask: 'Ask',
@@ -283,6 +285,17 @@ export const en = {
     cost: (usd: string) => `cost ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `A message from the owner to the agent that worked on "${title}" (issue #${issue} of ${repository}).`,
+    terminal: {
+      open: 'Open in terminal',
+      warning:
+        "This opens the agent's own CLI on the session it left, in a sandbox. Nothing you change there is committed or pushed. It ends when you close it, after 15 minutes without a key, or after two hours.",
+      back: 'Back to the chat',
+      connecting: 'Opening the terminal…',
+      ended: (reason: string) => `The terminal ended (${reason}).`,
+      failed: (reason: string) => `The terminal did not open: ${reason}`,
+      label: 'Terminal of the agent',
+      noSession: 'The agent kept no session to open.',
+    },
   },
   thread: {
     tabs: 'Agents',
@@ -1211,6 +1224,7 @@ export const en = {
     none: 'No plan was written for this task.',
     by: (harness: string, sha: string) => `by ${harness} on ${sha}`,
     latestOf: (n: number) => ` · the latest of ${n}`,
+    acceptance: 'Acceptance',
     files: 'Files',
     noFile: 'No file: the builder expected the code to already do what the issue asks.',
     order: 'Order',
@@ -1312,6 +1326,31 @@ export const en = {
     notifyDenied:
       'Notifications are off. Your browser refused them: allow them for this site in the browser settings (the lock next to the address), then reload.',
     notifyUnsupported: 'This browser cannot show notifications.',
+  },
+  history: {
+    heading: 'History',
+    search: 'Search what the agents did',
+    placeholder: 'A word or phrase',
+    submit: 'Search',
+    tooShort: 'Type at least 2 characters.',
+    repository: 'Repository',
+    anyRepository: 'Any repository',
+    role: 'Role',
+    anyRole: 'Any role',
+    from: 'From',
+    to: 'To',
+    off: (variable: string) =>
+      `History search is off. Set ${variable} to the address of Looptrace to turn it on.`,
+    unavailable: 'Looptrace did not answer, so the search could not run.',
+    empty: 'Nothing found.',
+    attempt: (n: number) => `attempt ${n}`,
+    openTask: 'Open the task at this pass',
+    openTrace: 'Open in Looptrace',
+    input: 'Input',
+    output: 'Output',
+    previous: 'Previous',
+    next: 'Next',
+    page: (n: number) => `Page ${n}`,
   },
   inbox: {
     heading: 'Inbox',

@@ -5,6 +5,7 @@ import {
   changePlanPrompt,
   implementPlanPrompt,
   parseChangePlan,
+  parseNewChangePlan,
   planAgainPrompt,
   renderChangePlan,
   unplannedFiles,
@@ -12,6 +13,7 @@ import {
 } from './change-plan'
 
 const plan: ChangePlan = {
+  acceptance: [{ id: 'A1', statement: 'a negative max is refused', evidence: 'truncate.test.ts' }],
   files: [
     { path: 'src/truncate.ts', why: 'the function' },
     { path: 'src/truncate.test.ts', why: 'the tests' },
@@ -39,6 +41,7 @@ describe('parseChangePlan', () => {
 
   it('reads plain strings as files and fills the lists the agent left out', () => {
     expect(parseChangePlan('{"files":["src/a.ts"]}')).toEqual({
+      acceptance: [],
       files: [{ path: 'src/a.ts', why: '' }],
       order: [],
       risks: [],
@@ -224,6 +227,10 @@ describe('renderChangePlan', () => {
   it('shows each part of the plan', () => {
     expect(renderChangePlan(plan)).toBe(
       [
+        '**Acceptance**',
+        '',
+        '- **A1**: a negative max is refused (evidence: truncate.test.ts)',
+        '',
         '**Files**',
         '',
         '- `src/truncate.ts`: the function',
@@ -262,5 +269,41 @@ describe('renderChangePlan', () => {
     expect(
       renderChangePlan({ files: [], order: [], risks: [], proof: [], outOfScope: [] }),
     ).toContain('No file')
+  })
+})
+
+describe('acceptance', () => {
+  it('reads the entries and drops one without an id or a statement', () => {
+    const read = parseChangePlan(
+      JSON.stringify({
+        files: [],
+        acceptance: [
+          { id: 'A1', statement: 'it truncates', evidence: 'a test' },
+          { statement: 'no id' },
+          { id: 'A3' },
+          { id: 'A4', statement: '  ' },
+          'text',
+        ],
+      }),
+    )
+    expect(read?.acceptance).toEqual([{ id: 'A1', statement: 'it truncates', evidence: 'a test' }])
+  })
+
+  it('reads a plan with none, as a plan stored before the field', () => {
+    expect(parseChangePlan('{"files":[]}')?.acceptance).toEqual([])
+  })
+
+  it('is no plan for a new planning turn when the list is empty', () => {
+    expect(parseNewChangePlan('{"files":[]}')).toBeUndefined()
+    expect(parseNewChangePlan(JSON.stringify(plan))).toEqual(plan)
+  })
+
+  it('is asked for and rendered', () => {
+    expect(changePlanPrompt({} as never)).toContain('"acceptance"')
+    expect(planAgainPrompt()).toContain('"acceptance"')
+    expect(renderChangePlan(plan)).toContain(
+      '- **A1**: a negative max is refused (evidence: truncate.test.ts)',
+    )
+    expect(renderChangePlan({ ...plan, acceptance: undefined })).not.toContain('Acceptance')
   })
 })
