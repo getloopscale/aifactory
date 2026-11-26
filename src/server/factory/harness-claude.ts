@@ -82,6 +82,21 @@ export function claudeCredentialFromEnv(env: NodeJS.ProcessEnv): ClaudeCredentia
  * because the sandbox is the boundary (a microVM with an explicit egress allowlist and no
  * secrets), and a headless run has nobody to answer a prompt.
  */
+/** `--tools` leaves the agent only these built-ins, so there is no shell to run a checkout's code with. */
+const READ_ONLY_TOOLS = 'Read,Grep,Glob'
+
+function permissionFlags(input: HarnessInput): string {
+  if (input.readFilesOnly) {
+    // `dontAsk` denies a read outside the working directory unless it is named here.
+    const dirs = (input.readDirs ?? []).map((d) => {
+      if (!/^\/[\w./-]+$/.test(d)) throw new Error(`readable directory "${d}" is not a plain path`)
+      return ` --add-dir ${d}`
+    })
+    return `--tools ${READ_ONLY_TOOLS} --allowedTools ${READ_ONLY_TOOLS} --permission-mode dontAsk${dirs.join('')}`
+  }
+  return input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'
+}
+
 export function claudeCodeHarness(
   credential: ClaudeCredential,
   options: HarnessOptions = {},
@@ -103,7 +118,7 @@ export function claudeCodeHarness(
     try {
       result = await executeAgent(
         backend,
-        `cd ${input.cwd} && ${inbox ? `${inbox.reader} | ` : ''}${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p ${inbox ? '--input-format stream-json ' : ''}--output-format ${format} ${input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'}${model}${effort}${plugin}${flags}${inbox ? '' : ` < ${PROMPT_FILE}`}`,
+        `cd ${input.cwd} && ${inbox ? `${inbox.reader} | ` : ''}${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p ${inbox ? '--input-format stream-json ' : ''}--output-format ${format} ${permissionFlags(input)}${model}${effort}${plugin}${flags}${inbox ? '' : ` < ${PROMPT_FILE}`}`,
         input,
         inbox ? (line) => inbox.seen(line) : claudeEvents,
       )

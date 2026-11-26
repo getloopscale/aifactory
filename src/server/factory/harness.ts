@@ -34,6 +34,13 @@ export type HarnessInput = {
   /** A conversation turn that may only read: the agent runs in its CLI's read-only mode and the factory pushes nothing. */
   ask?: boolean
   /**
+   * The agent reads files and runs nothing: no shell, no edit tool. Set for a pass over a stranger's code
+   * where the agent's credential is. A harness that cannot enforce it throws; none may ignore it.
+   */
+  readFilesOnly?: boolean
+  /** With `readFilesOnly`: directories outside `cwd` the agent may read (absolute, plain paths). */
+  readDirs?: string[]
+  /**
    * When given and the run is watched, the harness hands over the means to write to the pass while it works
    * (see `ActivePass`). A harness that cannot simply never attaches.
    */
