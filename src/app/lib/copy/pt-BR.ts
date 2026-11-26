@@ -16,6 +16,7 @@ const TRIED: DoctorTriedSentences = {
   events: () => 'ler os eventos que o GitHub App assina',
   runs: (v) => `ler as execuções que falharam em ${v.repo}`,
   sandboxes: () => 'listar os sandboxes que a conta tem ativos',
+  image: () => 'ler se o provedor de sandbox tem o template da imagem do repositório',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
   proofs: (v) => `ler as provas dos checks de ${v.repo}`,
@@ -597,6 +598,12 @@ export const ptBR: Copy = {
           SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
             : 'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
+      },
+      sandbox_image_missing: {
+        cause: (v) =>
+          `Este repositório usa a imagem de sandbox ${v.image}, e a conta do provedor ${v.provider} não tem o template dela, então uma execução não consegue começar.`,
+        repair: () =>
+          'Construa o template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Ou escolha a imagem padrão na página do repositório.',
       },
       provider_checks_failed: {
         cause: (v) =>

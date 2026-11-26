@@ -12,7 +12,9 @@ import { shellEscapePosix } from '@theokit/agents/sandbox'
 import { describe, expect, it } from 'vitest'
 
 import {
+  BROWSER_ENV,
   E2BBackend,
+  envFor,
   e2bMaxSessionMs,
   e2bSandboxLimit,
   networkFor,
@@ -349,6 +351,38 @@ describe('E2BBackend after the stream to a running command drops', () => {
     )
     await expect(backend.execute('true')).rejects.toThrow('something else')
     expect(connects).toHaveLength(0)
+  })
+})
+
+describe('the browser image', () => {
+  it('adds the variables its Dockerfile sets, and only for it', () => {
+    expect(envFor('browser')).toMatchObject({ ...SANDBOX_ENV, ...BROWSER_ENV })
+    expect(envFor('browser').PUPPETEER_SKIP_DOWNLOAD).toBe('1')
+    expect(envFor()).toEqual(SANDBOX_ENV)
+    expect(sandboxOptions({ ...spec([]), image: 'browser' }).envs.CHROME_BIN).toBe(
+      '/usr/bin/chromium',
+    )
+    expect(sandboxOptions(spec([])).envs).toEqual(SANDBOX_ENV)
+  })
+
+  it('reaches a terminal of a browser sandbox', async () => {
+    const created: { envs: Record<string, string> }[] = []
+    const pty = {
+      create: async (o: { envs: Record<string, string> }) => {
+        created.push(o)
+        return { wait: () => new Promise(() => {}), pid: 1 }
+      },
+      sendInput: async () => {},
+      resize: async () => {},
+      kill: async () => true,
+    }
+    const backend = new E2BBackend(
+      { commands: {}, files: {}, pty } as never,
+      undefined,
+      envFor('browser'),
+    )
+    await backend.openTerminal('true', { cols: 80, rows: 24 })
+    expect(created[0]!.envs.CHROME_BIN).toBe('/usr/bin/chromium')
   })
 })
 

@@ -147,3 +147,22 @@ describe('an E2B sandbox', () => {
     expect(left.map((snapshot) => snapshot.snapshotId)).not.toContain(snapshotId)
   }, 300_000)
 })
+
+describe.skipIf(!process.env.FACTORY_BROWSER_E2E)('an E2B browser sandbox', () => {
+  it('has the template, chromium on the PATH and the variables that stop a download', async () => {
+    expect(await provider.imageAvailable!('browser')).toBe(true)
+    const browser = await createIsolatedSandbox(provider, { ...spec, image: 'browser' })
+    try {
+      const run = (command: string) => browser.backend.execute(command, { timeoutMs: 60_000 })
+      expect((await run('command -v chromium')).exitCode).toBe(0)
+      expect((await run('echo $PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD')).stdout.trim()).toBe('1')
+      await browser.backend.uploadFile('/tmp/page.html', '<body>hello</body>')
+      const dom = await run(
+        'chromium --headless --no-sandbox --disable-gpu --dump-dom file:///tmp/page.html',
+      )
+      expect(dom.stdout).toContain('hello')
+    } finally {
+      await browser.stop()
+    }
+  }, 180_000)
+})

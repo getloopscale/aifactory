@@ -8,6 +8,7 @@ import {
   Sandbox,
   SandboxNotRunningError,
   SandboxUnreachableError,
+  Template,
   TimeoutError,
   type SandboxNetworkOpts,
   type SandboxNetworkRule,
@@ -70,6 +71,24 @@ export const SANDBOX_ENV: Record<string, string> = {
   npm_config_nodedir: SANDBOX_TOOLCHAIN.nodeHeadersDir,
 }
 
+/** What the browser image's Dockerfile sets and E2B does not apply: a check finds Chromium instead of downloading one. */
+export const BROWSER_ENV: Record<string, string> = {
+  CHROME_BIN: '/usr/bin/chromium',
+  PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium',
+  PUPPETEER_SKIP_DOWNLOAD: '1',
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
+}
+
+/** The environment of a sandbox of an image. */
+export function envFor(image?: SandboxSpec['image']): Record<string, string> {
+  return image === 'browser' ? { ...SANDBOX_ENV, ...BROWSER_ENV } : SANDBOX_ENV
+}
+
+/** The template an image starts from. */
+export const templateFor = (image?: SandboxSpec['image']) =>
+  image === 'browser' ? E2B_BROWSER_TEMPLATE : E2B_TEMPLATE
+
 /**
  * The egress policy for a spec: only the listed domains, everything else denied, and the headers of a rule
  * attached by E2B's egress proxy outside the sandbox (credential brokering), so the secret never exists in
@@ -108,6 +127,7 @@ export class E2BBackend extends SandboxBackend {
   constructor(
     private readonly sandbox: Pick<Sandbox, 'commands' | 'files'> & Partial<Pick<Sandbox, 'pty'>>,
     private readonly timing: Timing = realTiming,
+    private readonly env: Record<string, string> = SANDBOX_ENV,
   ) {
     super()
   }
@@ -141,7 +161,7 @@ export class E2BBackend extends SandboxBackend {
       rows: opts.rows,
       user: USER,
       cwd: opts.cwd ?? WORKDIR,
-      envs: { ...SANDBOX_ENV, TERM: 'xterm-256color' },
+      envs: { ...this.env, TERM: 'xterm-256color' },
       timeoutMs: 0,
       onData: (bytes) => {
         const text = decoder.decode(bytes, { stream: true })
@@ -314,7 +334,7 @@ const wrap = (
     await (after ??= gone())
   }
   return {
-    backend: new E2BBackend(sandbox),
+    backend: new E2BBackend(sandbox, undefined, envFor(spec.image)),
     stop: end,
     snapshot: async () => {
       const { snapshotId } = await sandbox.createSnapshot()
@@ -341,7 +361,7 @@ export function sandboxOptions(spec: SandboxSpec, env: NodeJS.ProcessEnv = proce
   return {
     apiKey: env.E2B_API_KEY,
     timeoutMs: Math.min(spec.timeoutMs, e2bMaxSessionMs(env)),
-    envs: SANDBOX_ENV,
+    envs: envFor(spec.image),
     network: networkFor(spec),
     metadata: metadataFor(spec.owner, THIS_PROCESS),
   }
@@ -383,14 +403,11 @@ export function e2bSandboxProvider(env: NodeJS.ProcessEnv = process.env): Isolat
     async killSandbox(id) {
       await Sandbox.kill(id, { apiKey: env.E2B_API_KEY })
     },
+    async imageAvailable(image) {
+      return Template.exists(templateFor(image), { apiKey: env.E2B_API_KEY })
+    },
     async create(spec) {
-      return wrap(
-        await Sandbox.create(
-          spec.image === 'browser' ? E2B_BROWSER_TEMPLATE : E2B_TEMPLATE,
-          options(spec),
-        ),
-        spec,
-      )
+      return wrap(await Sandbox.create(templateFor(spec.image), options(spec)), spec)
     },
     async restore(snapshotId, spec) {
       const sandbox = await Sandbox.create(snapshotId, options(spec))

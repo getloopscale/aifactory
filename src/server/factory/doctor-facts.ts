@@ -60,7 +60,10 @@ import { loadRepoConfig, type RepoConfig } from './repo-config'
 export type DoctorSources = {
   db: Database
   /** The sandbox provider, when it can list what the account has up. */
-  sandboxes?: Pick<IsolatedSandboxProvider, 'listSandboxes' | 'maxSandboxes'>
+  sandboxes?: Pick<
+    IsolatedSandboxProvider,
+    'listSandboxes' | 'maxSandboxes' | 'imageAvailable' | 'name'
+  >
   github: Pick<GithubApp, 'installationToken'> & AppEvents & AppAccess
   api: Pick<
     GithubApi,
@@ -139,10 +142,25 @@ async function readSlots(
   })
 }
 
+/** Whether the provider has the template of the repository's image. Nothing to read for the default image. */
+async function readImage(
+  provider: DoctorSources['sandboxes'],
+  image: RepoConfig['sandboxImage'],
+): Promise<SandboxFacts['image']> {
+  if (image !== 'browser' || !provider?.imageAvailable) return undefined
+  const check = provider.imageAvailable.bind(provider)
+  return attempt(triedOf('image'), async () => ({
+    name: image,
+    provider: provider.name ?? 'the sandbox',
+    available: await check(image),
+  }))
+}
+
 async function readSandbox(
   db: Database,
   name: string,
   provider?: DoctorSources['sandboxes'],
+  image?: RepoConfig['sandboxImage'],
 ): Promise<SandboxFacts> {
   const ofTheRepository = sql`lower(${task.repository}) = lower(${name})`
   const failures = await db
@@ -167,6 +185,7 @@ async function readSandbox(
     },
     lastStartedAt: started?.at?.toISOString(),
     slots: await readSlots(db, provider),
+    image: await readImage(provider, image),
   }
 }
 
@@ -373,7 +392,9 @@ export async function collectFacts(sources: DoctorSources, name: string): Promis
   const [access, events, sandbox, providerProofs, token] = await Promise.all([
     attempt(triedOf('installation', { repo: name }), () => readAccess(github, name)),
     attempt(triedOf('events'), () => github.subscriptions()),
-    attempt(triedOf('runs', { repo: name }), () => readSandbox(db, name, sources.sandboxes)),
+    attempt(triedOf('runs', { repo: name }), () =>
+      readSandbox(db, name, sources.sandboxes, config.sandboxImage),
+    ),
     attempt(triedOf('proofs', { repo: name }), () => readProviderProofs(db, name)),
     attempt(
       triedOf('token', { repo: name }),
