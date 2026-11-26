@@ -241,7 +241,7 @@ describe('task page', () => {
     expect(screen.getByText('paulo answered: Yes')).toBeDefined()
   })
 
-  it('puts the question before the transcript', async () => {
+  it('puts the question before the conversation', async () => {
     serve({
       'GET /api/panel/tasks/5': detail({
         task: { ...base, stage: 'waiting', column: 'waiting', headSha: null },
@@ -259,7 +259,7 @@ describe('task page', () => {
     })
     renderTask()
     const question = await screen.findByText('A or B?')
-    const transcript = screen.getByRole('region', { name: 'What the agents did' })
+    const transcript = screen.getByRole('region', { name: en.conversation.heading })
     expect(
       question.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
