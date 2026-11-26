@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -48,36 +48,35 @@ function mount(
 }
 
 describe('the folded menu', () => {
-  it('has the icons of the menu it replaces, each with a name for the tooltip and the screen reader', () => {
+  it('has the places of the open menu in the same order, each named for the screen reader', () => {
     mount()
-    for (const name of [
-      t.menu.show,
-      t.menu.newChat,
-      t.menu.searchChats,
-      t.menu.pinned,
-      t.menu.chats,
-      t.menu.account,
-    ]) {
-      expect(screen.getByRole('button', { name }).getAttribute('title')).toBeTruthy()
-    }
+    for (const name of [t.menu.show, t.menu.newChat, t.menu.searchChats, t.menu.account])
+      expect(screen.getByRole('button', { name })).toBeDefined()
     const places: [string, string][] = [
+      [t.floor.name, '/floor'],
       [t.places.board, '/work'],
+      [t.places.inbox, '/inbox'],
       [t.places.plans, '/plans'],
       [t.places.repositories, '/repositories'],
-      [t.places.inbox, '/inbox'],
-      [t.places.health, '/health'],
       [t.places.agents, '/agents'],
+      [t.places.health, '/health'],
+      [t.places.history, '/history'],
       [t.places.setup, '/setup'],
     ]
-    for (const [name, href] of places)
-      expect(screen.getByRole('link', { name }).getAttribute('href')).toBe(href)
+    const links = within(screen.getByRole('navigation')).getAllByRole('link')
+    expect(links.map((l) => [l.getAttribute('aria-label'), l.getAttribute('href')])).toEqual(places)
   })
 
-  it('brings the whole menu back from the logo, the pin and the conversations', () => {
+  it('says the name of an item beside it when it takes the focus', async () => {
+    mount()
+    fireEvent.focus(screen.getByRole('link', { name: t.places.board }))
+    expect((await screen.findByRole('tooltip')).textContent).toBe(t.places.board)
+  })
+
+  it('brings the whole menu back from the logo', () => {
     const props = mount()
-    for (const name of [t.menu.show, t.menu.pinned, t.menu.chats])
-      fireEvent.click(screen.getByRole('button', { name }))
-    expect(props.onExpand).toHaveBeenCalledTimes(3)
+    fireEvent.click(screen.getByRole('button', { name: t.menu.show }))
+    expect(props.onExpand).toHaveBeenCalledTimes(1)
     expect(props.onExpand.mock.calls.every(([search]) => search === undefined)).toBe(true)
   })
 
@@ -173,12 +172,13 @@ describe('the setup icon of the folded menu', () => {
     expect(link.textContent).toBe('')
   })
 
-  it('shows the count and tone, and names it in words', () => {
+  it('marks it in the tone, and names the count in words', () => {
     mount('/inbox', { setup: { count: 2, tone: 'destructive' } })
     const link = screen.getByRole('link', {
       name: `${t.places.setup}, ${t.menu.setupNeedsAttention(2)}`,
     })
-    expect(link.textContent).toBe('2')
+    // The count is in the name and in the tooltip; on the icon it is a mark in the tone.
+    expect(link.textContent).toBe('')
     expect(link.querySelector('[data-tone="destructive"]')).not.toBeNull()
   })
 
