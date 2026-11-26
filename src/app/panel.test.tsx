@@ -259,7 +259,7 @@ describe('task page', () => {
     })
     renderTask()
     const question = await screen.findByText('A or B?')
-    const transcript = screen.getByRole('region', { name: 'What the agents did' })
+    const transcript = screen.getByRole('region', { name: en.conversation.heading })
     expect(
       question.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
