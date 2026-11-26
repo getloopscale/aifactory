@@ -114,3 +114,25 @@ describe('restoreIsolatedSandbox', () => {
     expect(waits).toHaveLength(0)
   })
 })
+
+describe('terminals', () => {
+  it('tells a backend that opens a terminal from one that does not', async () => {
+    const { terminals } = await import('./sandbox')
+    expect(terminals(new FakeSandbox().backend)).toBe(false)
+    expect(terminals(new FakeSandbox(undefined, { terminal: true }).backend)).toBe(true)
+  })
+
+  it('echoes what is written to the in-memory terminal and ends when told to exit', async () => {
+    const { terminals } = await import('./sandbox')
+    const { backend } = await new FakeSandbox(undefined, { terminal: true }).create(ok)
+    if (!terminals(backend)) throw new Error('no terminal')
+    const term = await backend.openTerminal('echo', { cols: 80, rows: 24 })
+    const seen: string[] = []
+    term.onData((d) => seen.push(d))
+    term.write('echo hi\n')
+    expect(seen).toEqual(['echo hi\n'])
+    await term.resize(100, 30)
+    term.write('exit\n')
+    expect(await term.wait()).toEqual({ exitCode: 0 })
+  })
+})

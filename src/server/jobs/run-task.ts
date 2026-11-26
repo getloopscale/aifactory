@@ -7,6 +7,7 @@ import { getDb } from '../db'
 import { decision } from '../db/schema'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
+import { deferJobWhileTerminal } from '../factory/task-writer'
 import { deferJobAfterRefusal, deferJobWhilePaused } from '../factory/provider-pause-store'
 import { sendBackWithdrawn } from '../factory/send-back'
 import { runTask } from '../factory/run-task'
@@ -39,6 +40,9 @@ export default defineJob('run-task', {
     }
     // While the sandbox provider refuses for credit, the run waits in the queue instead of failing.
     if (await deferJobWhilePaused({ name: 'run-task', input, taskId: input.taskId })) return
+    // A terminal is the task's one writer: the job waits in the queue until it closes.
+    if (await deferJobWhileTerminal(getDb(), { name: 'run-task', input, taskId: input.taskId }))
+      return
     const deps = await jobDeps(input.taskId)
 
     // The lease is two minutes and a run up to half an hour: renew it while the run is alive.

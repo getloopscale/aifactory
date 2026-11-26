@@ -136,6 +136,9 @@ export function claudeCodeHarness(
     run: (backend, input) => invoke(backend, input, ''),
     resume: async (backend, sessionId, input) =>
       invoke(backend, input, ` --resume ${assertSessionId(sessionId)}`),
+    // A person is at the keyboard, so the permission prompts stay on.
+    interactive: (sessionId) =>
+      `${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} --resume ${assertSessionId(sessionId)}${model}${effort}`,
   }
 }
 

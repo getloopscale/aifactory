@@ -615,6 +615,14 @@ export type CoordinatorActionView = {
   at: string
 }
 
+/** Whether the owner may open the agent's own CLI on the session a role kept, and why not when it may not. */
+export type TerminalView = {
+  role: 'builder' | 'reviewer' | 'merger'
+  engine: string
+  available: boolean
+  reason?: string
+}
+
 export type TaskDetail = {
   task: TaskCard
   /** A send-back of the owner waits in `intake` and can still be withdrawn. */
@@ -637,6 +645,8 @@ export type TaskDetail = {
   runs: RunView[]
   /** What the owner wrote to the task's agent, oldest first. */
   messages: MessageView[]
+  /** The kept sessions a terminal could open on, one per role. */
+  terminals?: TerminalView[]
 }
 
 /** What the inbox lists: a task that waits for a person, and why. */

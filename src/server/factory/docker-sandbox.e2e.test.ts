@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { dockerSandboxProvider, removeStaleSandboxes } from './docker-sandbox'
 import { prepareDeclaredPackageManager } from './package-manager'
 import { SANDBOX_TOOLCHAIN } from './sandbox-toolchain'
-import { createIsolatedSandbox, type IsolatedSandbox } from './sandbox'
+import { createIsolatedSandbox, terminals, type IsolatedSandbox } from './sandbox'
 
 // Runs real containers: Docker must be up. It needs the internet for the allowed domains it reaches.
 let echo: Server
@@ -38,6 +38,31 @@ beforeAll(async () => {
 afterAll(async () => {
   await sandbox?.stop()
   await new Promise((done) => echo?.close(done))
+})
+
+describe('a terminal in the docker sandbox', () => {
+  it('sends echo through the pseudo-terminal and reads it back, and follows a resize', async () => {
+    const backend = sandbox.backend
+    if (!terminals(backend)) throw new Error('the docker sandbox opens no terminal')
+    const term = await backend.openTerminal('sh', { cols: 80, rows: 24 })
+    let seen = ''
+    term.onData((d) => {
+      seen += d
+    })
+    const until = async (text: string) => {
+      for (let i = 0; i < 100 && !seen.includes(text); i += 1) {
+        await new Promise((done) => setTimeout(done, 100))
+      }
+      expect(seen).toContain(text)
+    }
+    term.write('echo from-$((40 + 2))\n')
+    await until('from-42')
+    await term.resize(120, 40)
+    term.write('stty size\n')
+    await until('40 120')
+    term.write('exit\n')
+    expect((await term.wait()).exitCode).toBe(0)
+  }, 60_000)
 })
 
 describe('the docker sandbox', () => {

@@ -1,8 +1,10 @@
 import { defineJob } from 'theokit/server/jobs'
 import { z } from 'zod'
 
+import { getDb } from '../db'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
+import { deferJobWhileTerminal } from '../factory/task-writer'
 import { deferJobAfterRefusal, deferJobWhilePaused } from '../factory/provider-pause-store'
 import { resumeTask } from '../factory/run-task'
 
@@ -16,6 +18,9 @@ export default defineJob('resume-task', {
   async handler({ input, signal, extendLease }) {
     // While the sandbox provider refuses for credit, the answer waits in the queue instead of failing the task.
     if (await deferJobWhilePaused({ name: 'resume-task', input, taskId: input.taskId })) return
+    // A terminal is the task's one writer: the job waits in the queue until it closes.
+    if (await deferJobWhileTerminal(getDb(), { name: 'resume-task', input, taskId: input.taskId }))
+      return
     const deps = await jobDeps(input.taskId)
 
     await withLeaseHeartbeat(extendLease, async () => {
