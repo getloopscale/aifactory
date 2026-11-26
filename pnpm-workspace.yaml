@@ -25,9 +25,15 @@ allowBuilds:
   # decision is already made the day you do.
   better-sqlite3: true
   workerd: true
+  # The desktop client's runtime and installer builder download binaries on install; off so a frozen install needs no network. See desktop/README.md.
+  electron: false
+  electron-winstaller: false
 minimumReleaseAgeExclude:
   - '@theokit/http@2.3.1'
   - theokit@0.77.4 || 0.78.0 || 0.79.0
   - '@theokit/sdk@5.14.0'
   - '@theokit/agents@16.3.0'
   - '@usetheo/ui@0.36.0'
+
+packages:
+  - desktop

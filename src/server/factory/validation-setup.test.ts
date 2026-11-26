@@ -33,6 +33,9 @@ function installInputs(): string {
   for (const f of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc']) {
     if (existsSync(join(root, f))) copyFileSync(join(root, f), join(scratch, f))
   }
+  // A workspace package (`pnpm-workspace.yaml` lists it) is an importer of the lockfile: its manifest goes too.
+  mkdirSync(join(scratch, 'desktop'))
+  copyFileSync(join(root, 'desktop', 'package.json'), join(scratch, 'desktop', 'package.json'))
   return scratch
 }
 
