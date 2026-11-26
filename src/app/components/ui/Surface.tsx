@@ -323,7 +323,12 @@ export function Row({
           {body}
         </a>
       ) : (
-        <div className={ROW}>{body}</div>
+        <div
+          aria-current={current ? 'true' : undefined}
+          className={`${ROW} ${current ? 'bg-muted/60' : ''}`}
+        >
+          {body}
+        </div>
       )}
       {below ? <div className="px-4 pb-3">{below}</div> : null}
     </li>

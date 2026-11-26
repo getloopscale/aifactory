@@ -750,6 +750,7 @@ export const en = {
     changesPerTask: 'Changes per task',
   },
   repositories: {
+    settingsOf: 'Settings of',
     title: 'Repositories',
     refresh: 'Refresh',
     installOnGitHub: 'Install on GitHub',

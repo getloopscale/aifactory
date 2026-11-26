@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -28,11 +28,34 @@ const repo = {
   defaultBranch: 'main',
 } as unknown as RepositoriesView['repositories'][number]
 
+/** An enabled repository with the lists its settings read. */
+const on = {
+  ...repo,
+  enabled: true,
+  checks: null,
+  integrationChecks: [],
+  fixes: [],
+  riskPatterns: [],
+  egress: [],
+  unprovenChecks: [],
+  unprovenIntegrationChecks: [],
+} as unknown as RepositoriesView['repositories'][number]
+
 function show(language: Language, body: RepositoriesView) {
   window.localStorage.setItem(LANGUAGE_KEY, language)
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    vi.fn(async (url: string) => {
+      // The doctor of an enabled repository asks for its own report.
+      const answer = String(url).endsWith('/doctor')
+        ? { at: '2026-11-04T10:00:00Z', items: [] }
+        : String(url).includes('/checks/prove')
+          ? { proof: null }
+          : String(url).includes('/review-patterns')
+            ? []
+            : body
+      return new Response(JSON.stringify(answer), { status: 200 })
+    }),
   )
   return render(
     <MemoryRouter>
@@ -69,6 +92,35 @@ describe('the repositories page in two languages', () => {
       expect(await screen.findByText(t.repositories.noneTitle)).toBeTruthy()
     })
   }
+
+  it('lists the enabled repositories first and shows the settings of one at a time, chosen in the list', async () => {
+    show(
+      'en',
+      view([
+        { ...repo, fullName: 'paulo/idle' },
+        { ...on, fullName: 'paulo/one' },
+        { ...on, fullName: 'paulo/two' },
+      ]),
+    )
+    await screen.findByText('paulo/idle')
+    const names = screen
+      .getAllByRole('listitem')
+      .map((item) => item.textContent ?? '')
+      .filter((text) => text.includes('paulo/'))
+    expect(names[0]).toContain('paulo/one')
+    expect(names.at(-1)).toContain('paulo/idle')
+
+    const current = () => document.querySelector('[aria-current="true"]')?.textContent ?? ''
+    expect(current()).toContain('paulo/one')
+    expect(screen.getAllByText(/· paulo\/one/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/· paulo\/two/)).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: `${en.repositories.settingsOf} paulo/two` }))
+
+    await waitFor(() => expect(current()).toContain('paulo/two'))
+    expect(screen.getAllByText(/· paulo\/two/).length).toBeGreaterThan(0)
+    expect(screen.queryByText(/· paulo\/one/)).toBeNull()
+  })
 
   it('links an enabled repository to its own page', async () => {
     show(

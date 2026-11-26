@@ -1,5 +1,5 @@
 import { Alert, Badge, Button, Input, Textarea } from '@usetheo/ui'
-import { Building2, FolderGit2, GitBranch, Lock, Settings2 } from 'lucide-react'
+import { Building2, FolderGit2, GitBranch, Lock, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
@@ -16,13 +16,15 @@ import {
   Row,
   RowIcon,
   Rows,
-  STACK,
   Surface,
+  Pane,
+  Workbench,
 } from '../components/ui/Surface'
 import { put } from '../lib/api'
 import type { Proposal } from '../lib/assist'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
+import { useWidth } from '../lib/media'
 import {
   leadTimeLimitsProblem,
   MAX_LEAD_TIME_MINUTES,
@@ -393,7 +395,19 @@ function Settings({
 }
 
 /** One repository as a row: what it is, its branches, who builds in it, and the switch that enables it. */
-function RepoRow({ repo, onChanged }: { repo: RepositoryView; onChanged: () => void }) {
+function RepoRow({
+  repo,
+  onChanged,
+  current = false,
+  onPick,
+}: {
+  repo: RepositoryView
+  onChanged: () => void
+  /** Its settings are the ones in the column beside the list. */
+  current?: boolean
+  /** Shows its settings beside the list; given only where there is such a column. */
+  onPick?: () => void
+}) {
   const { t } = useCopy()
   const s = t.repositories.settings
   const [message, setMessage] = useState<string>()
@@ -417,6 +431,7 @@ function RepoRow({ repo, onChanged }: { repo: RepositoryView; onChanged: () => v
   )
   return (
     <Row
+      current={current}
       lead={
         <RowIcon
           icon={repo.private ? Lock : FolderGit2}
@@ -457,6 +472,18 @@ function RepoRow({ repo, onChanged }: { repo: RepositoryView; onChanged: () => v
           </Badge>
           {!repo.reachable ? <Badge variant="warning">{t.repositories.noAccess}</Badge> : null}
           {repo.enabled ? <Badge variant="success">{t.repositories.enabled}</Badge> : null}
+          {repo.enabled && onPick ? (
+            <Button
+              size="sm"
+              variant={current ? 'secondary' : 'ghost'}
+              aria-pressed={current}
+              aria-label={`${t.repositories.settingsOf} ${repo.fullName}`}
+              title={`${t.repositories.settingsOf} ${repo.fullName}`}
+              onClick={onPick}
+            >
+              <SlidersHorizontal aria-hidden className="size-4" />
+            </Button>
+          ) : null}
           <Button
             size="sm"
             // One per row: a column of buttons in the brand colour would leave the page with no accent.
@@ -574,22 +601,34 @@ export default function RepositoriesPage() {
   }
 
   const enabled = data?.repositories.filter((repo) => repo.enabled) ?? []
+  // The repositories the factory works in come first: they are the ones the owner comes here for.
+  const listed = [...(data?.repositories ?? [])].sort(
+    (a, b) => Number(b.enabled) - Number(a.enabled),
+  )
+  // With a column of its own, the settings show one repository at a time.
+  const wide = useWidth() === 'expanded'
+  const chosen = enabled.find((repo) => repo.fullName === params.get('repo')) ?? enabled[0]
+  const shown = wide && chosen ? [chosen] : enabled
   return (
-    <>
-      <PageHeader
-        title={r.title}
-        actions={
-          <>
-            {data?.installUrl ? (
-              <InstallButton url={data.installUrl} onClick={startWatching} />
-            ) : null}
-            <Button size="sm" variant="secondary" onClick={resource.reload}>
-              {r.refresh}
-            </Button>
-          </>
-        }
-      />
-      <div className={STACK}>
+    <Workbench
+      columns={enabled.length > 0 ? 'grid-cols-[minmax(360px,5fr)_minmax(0,7fr)]' : undefined}
+      header={
+        <PageHeader
+          title={r.title}
+          actions={
+            <>
+              {data?.installUrl ? (
+                <InstallButton url={data.installUrl} onClick={startWatching} />
+              ) : null}
+              <Button size="sm" variant="secondary" onClick={resource.reload}>
+                {r.refresh}
+              </Button>
+            </>
+          }
+        />
+      }
+    >
+      <Pane>
         {watch ? (
           <p role="status" className="text-sm text-muted-foreground">
             {r.waiting}
@@ -650,8 +689,18 @@ export default function RepositoriesPage() {
           ) : (
             <Surface label={r.title}>
               <Rows>
-                {data.repositories.map((repo) => (
-                  <RepoRow key={repo.fullName} repo={repo} onChanged={resource.reload} />
+                {listed.map((repo) => (
+                  <RepoRow
+                    key={repo.fullName}
+                    repo={repo}
+                    onChanged={resource.reload}
+                    current={wide && repo.fullName === chosen?.fullName}
+                    onPick={
+                      wide && enabled.length > 1
+                        ? () => setParams({ repo: repo.fullName }, { replace: true })
+                        : undefined
+                    }
+                  />
                 ))}
               </Rows>
             </Surface>
@@ -661,15 +710,19 @@ export default function RepositoriesPage() {
             <Quiet>{r.loading}</Quiet>
           </Surface>
         )}
-        {enabled.map((repo) => (
-          <RepoSettings
-            key={repo.fullName}
-            repo={repo}
-            agents={data?.agents ?? []}
-            onChanged={resource.reload}
-          />
-        ))}
-      </div>
-    </>
+      </Pane>
+      {enabled.length > 0 ? (
+        <Pane>
+          {shown.map((repo) => (
+            <RepoSettings
+              key={repo.fullName}
+              repo={repo}
+              agents={data?.agents ?? []}
+              onChanged={resource.reload}
+            />
+          ))}
+        </Pane>
+      ) : null}
+    </Workbench>
   )
 }

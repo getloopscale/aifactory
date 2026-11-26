@@ -1040,6 +1040,7 @@ export const ptBR: Copy = {
     changesPerTask: 'Mudanças por tarefa',
   },
   repositories: {
+    settingsOf: 'Configurações de',
     title: 'Repositórios',
     refresh: 'Atualizar',
     installOnGitHub: 'Instalar no GitHub',
