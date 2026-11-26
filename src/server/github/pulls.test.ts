@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
+import { classify } from '../factory/watch'
 import { RateLimited } from './rate-limit'
 
 const noWait = async () => {}
@@ -840,6 +841,70 @@ describe('commitChecks', () => {
       statusContexts: [{ context: 'deploy', state: 'pending' }],
     })
     expect(calls[0].url).toContain('per_page=100')
+  })
+
+  describe('Dependabot update jobs', () => {
+    const failed = (name: string, extra: object = {}) => ({
+      name,
+      status: 'completed',
+      conclusion: 'failure',
+      app: { slug: 'github-actions' },
+      check_suite: { id: 7 },
+      ...extra,
+    })
+    const ci = {
+      name: 'CI',
+      status: 'completed',
+      conclusion: 'success',
+      app: { slug: 'github-actions' },
+      check_suite: { id: 8 },
+    }
+    const answers = (checkRuns: object[], path?: string) => ({
+      'GET /commits/abc/check-runs': {
+        status: 200,
+        body: { total_count: checkRuns.length, check_runs: checkRuns },
+      },
+      'GET /commits/abc/status': { status: 200, body: { state: 'success', total_count: 0 } },
+      'GET /actions/runs': { status: 200, body: { workflow_runs: path ? [{ path }] : [] } },
+    })
+
+    it('leaves out a failed Dependabot update and classifies the commit green', async () => {
+      const { fetch } = fakeFetch(
+        answers([failed('Dependabot'), ci], 'dynamic/dependabot/dependabot-updates'),
+      )
+      const checks = await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+      expect(checks.checkRuns.map((c) => c.name)).toEqual(['CI'])
+      expect(classify(checks).state).toBe('green')
+    })
+
+    it('keeps a failed dynamic CodeQL run and classifies the commit red', async () => {
+      const { fetch } = fakeFetch(
+        answers([failed('CodeQL'), ci], 'dynamic/github-code-scanning/codeql'),
+      )
+      const checks = await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+      expect(checks.checkRuns.map((c) => c.name)).toEqual(['CodeQL', 'CI'])
+      expect(classify(checks).state).toBe('red')
+    })
+
+    it('asks for no workflow run when every check passed or the failure is not Actions', async () => {
+      const { fetch, calls } = fakeFetch(
+        answers([
+          ci,
+          failed('ext', { app: { slug: 'other' } }),
+          failed('none', { check_suite: null }),
+        ]),
+      )
+      await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+      expect(calls.some((c) => c.url.includes('/actions/runs'))).toBe(false)
+    })
+
+    it('fails when the workflow run cannot be read', async () => {
+      const { fetch } = fakeFetch({
+        ...answers([failed('Dependabot')]),
+        'GET /actions/runs': { status: 500 },
+      })
+      await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow()
+    })
   })
 
   it('says there are no statuses when there are none, because GitHub then answers pending', async () => {
