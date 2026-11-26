@@ -7,7 +7,7 @@ import { PERSONAS } from '../../shared/personas'
 import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import {
-  rowSeq,
+  focusThread,
   span,
   threadRoles,
   threadRows,
@@ -107,16 +107,6 @@ function Row({ row, focus = false }: { row: ThreadRow; focus?: boolean }) {
   return <Folded row={row} focus={focus} />
 }
 
-/** The transcript groups the passes it keeps under three roles. */
-const TRANSCRIPT_ROLE: Record<string, ThreadRole> = {
-  builder: 'builder',
-  planner: 'builder',
-  reviewer: 'reviewer',
-  security: 'reviewer',
-  lens: 'reviewer',
-  merger: 'merger',
-}
-
 /**
  * The one conversation of a task: a tab for each agent, what the owner wrote and what the agent said and
  * did in the order it happened, and the box to write at the bottom.
@@ -157,26 +147,14 @@ export function Conversation({
     engineOf: (role) => harnessOf(role) ?? null,
   })
   const roles = threadRoles(rows, liveRole)
-  const focused = focusRun === undefined ? undefined : detail.runs.find((r) => r.id === focusRun)
-  const focusRole = focused ? TRANSCRIPT_ROLE[focused.role] : undefined
-  const role =
-    picked && roles.includes(picked)
-      ? picked
-      : focusRole && roles.includes(focusRole)
-        ? focusRole
-        : roles[0]
-  const shown = rows.filter((r) => r.role === role)
-  // A pass recorded before its range was kept (or one whose steps are gone) cannot be pointed at.
-  const from = focused?.eventFrom ?? undefined
-  const to = focused?.eventTo ?? undefined
-  const target =
-    from === undefined || to === undefined || focusRole !== role
-      ? undefined
-      : shown.find((r) => {
-          const seq = rowSeq(r)
-          return seq !== undefined && seq >= from && seq <= to
-        })
-  const passMissing = focusRun !== undefined && !target && (events.length > 0 || from === undefined)
+  const { role, shown, target, passMissing } = focusThread({
+    rows,
+    roles,
+    picked,
+    runs: detail.runs,
+    focusRun,
+    hasEvents: events.length > 0,
+  })
   const pass = [...shown].reverse().find((r) => r.type === 'pass')
   const activity =
     pass && pass.type === 'pass' && pass.role === liveRole
