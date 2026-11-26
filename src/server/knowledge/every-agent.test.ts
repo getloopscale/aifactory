@@ -9,6 +9,7 @@ import { assistantTools } from '../factory/assistant'
 import { CHAT_SPEC } from '../factory/chat-agent'
 import { guideSpec } from '../factory/guides'
 import { buildPrompt } from '../factory/harness'
+import { improverPrompt } from '../agents/prompts/improver'
 import { planPrompt } from '../factory/plan'
 import { reviewPrompt } from '../factory/review'
 import { UNBLOCKER_SPEC } from '../coordinator/unblocker'
@@ -120,6 +121,7 @@ describe('every agent of the factory reads the knowledge base', () => {
     expect(buildPrompt({ ...issue, knowledgeDir: dir })).toContain(rules)
     expect(reviewPrompt({ ...issue, baseSha: 'abc', knowledgeDir: dir })).toContain(rules)
     expect(planPrompt({ repo: 'o/r', goal: 'g', knowledgeDir: dir })).toContain(rules)
+    expect(improverPrompt({ repo: 'o/r', kind: 'stale_doc', knowledgeDir: dir })).toContain(rules)
   })
 
   it('in a sandbox: an agent without a base delivered is told nothing about one', () => {
@@ -127,5 +129,6 @@ describe('every agent of the factory reads the knowledge base', () => {
     expect(buildPrompt(issue)).not.toContain(SANDBOX_KNOWLEDGE_DIR)
     expect(reviewPrompt({ ...issue, baseSha: 'abc' })).not.toContain(SANDBOX_KNOWLEDGE_DIR)
     expect(planPrompt({ repo: 'o/r', goal: 'g' })).not.toContain(SANDBOX_KNOWLEDGE_DIR)
+    expect(improverPrompt({ repo: 'o/r', kind: 'stale_doc' })).not.toContain(SANDBOX_KNOWLEDGE_DIR)
   })
 })

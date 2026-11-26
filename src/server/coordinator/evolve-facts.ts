@@ -63,6 +63,7 @@ export async function readFiledSignatures(db: Database) {
       and(
         notLike(failureSignature.signature, 'base_red:%'),
         notLike(failureSignature.signature, 'knowledge_gap:%'),
+        notLike(failureSignature.signature, 'improve:%'),
       ),
     )
     .orderBy(failureSignature.id)
