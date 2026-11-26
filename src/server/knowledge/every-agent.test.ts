@@ -109,6 +109,8 @@ describe('every agent of the factory reads the knowledge base', () => {
       .map((f) => f.path)
     expect(opening.filter((p) => PUBLIC_UNTRUSTED.includes(p))).toEqual([])
     for (const file of listed) {
+      // A stranger's code is read, never run: the reviewer starts without a shell.
+      expect(file.text).toContain('readFilesOnly: true')
       expect(
         /knowledge/i.test(file.text.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')),
       ).toBe(false)
