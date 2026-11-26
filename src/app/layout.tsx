@@ -2,7 +2,7 @@ import '@theokit/ui/styles.css'
 import './globals.css'
 
 import { ThemeProvider } from '@theokit/ui'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 
 import type {
@@ -25,8 +25,8 @@ import { ChatsProvider } from './lib/chats'
 import { CopyProvider, useCopy } from './lib/copy'
 import { GuideProvider } from './lib/guide-state'
 import { useInstall } from './lib/install'
-import { useResource } from './lib/live'
-import { useWidthClass, WidthContext } from './lib/media'
+import { useResource, type Resource } from './lib/live'
+import { useWidthClass, WidthContext, type WidthClass } from './lib/media'
 import { useEscape } from './lib/keys'
 
 /** The title and the favicon say how many items wait, for a tab the owner is not looking at. */
@@ -68,64 +68,18 @@ function useMenuHidden(): [boolean, (hidden: boolean) => void] {
   ]
 }
 
-/** The frame of every page: the menu on the left, the bar on top, and the way to the login. */
-export default function RootLayout() {
-  return (
-    <CopyProvider>
-      <Shell />
-    </CopyProvider>
-  )
+/** How many items of the setup wait. A report that failed to load, even after one that loaded, shows no count. */
+function setupCount(report: Resource<SetupReport>) {
+  return report.error || report.signedOut ? undefined : setupAttention(report.data)
 }
 
-function Shell() {
-  const { t, adopt } = useCopy()
-  const location = useLocation()
+/**
+ * What to say when the inbox gets a new item: a line for a screen reader every time, and a toast when the
+ * owner is looking at the panel, or a notification of the system when they are not.
+ */
+function useAttention(items: InboxItem[] | undefined, signedIn: boolean) {
+  const { t } = useCopy()
   const navigate = useNavigate()
-  const onLogin = location.pathname === '/login'
-  const me = useResource<{ owner: boolean; name?: string; language?: string }>('/api/panel/me', {
-    everyMs: 60_000,
-  })
-  const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
-  const health = useResource<HealthReport>('/api/panel/health', { everyMs: 60_000 })
-  const pulse = useResource<PulseReport>('/api/panel/pulse')
-  const repositories = useResource<RepositoriesView>('/api/panel/repositories', {
-    everyMs: 60_000,
-    stream: false,
-  })
-  const setupReport = useResource<SetupReport>('/api/panel/setup', {
-    everyMs: 30_000,
-    stream: false,
-  })
-  // A report that failed to load, even after one that loaded, shows no count.
-  const setup =
-    setupReport.error || setupReport.signedOut ? undefined : setupAttention(setupReport.data)
-  const [menuHidden, setMenuHidden] = useMenuHidden()
-  const [searchOnOpen, setSearchOnOpen] = useState(false)
-  const width = useWidthClass()
-  const compact = width === 'compact'
-  // The menu over the page: on a phone, and on a tablet when the rail asks to be opened.
-  const [overlay, setOverlay] = useState(false)
-  const closeOverlay = useCallback(() => setOverlay(false), [])
-  useEscape(closeOverlay)
-  // A choice in the menu is a navigation, and a navigation closes it.
-  useEffect(() => setOverlay(false), [location.pathname, location.search])
-  useEffect(() => {
-    if (width === 'expanded') setOverlay(false)
-  }, [width])
-  const install = useInstall()
-
-  const savedLanguage = me.data?.language
-  useEffect(() => adopt(savedLanguage), [savedLanguage, adopt])
-
-  useEffect(() => {
-    if (me.data && !me.data.owner && !onLogin) void navigate('/login', { replace: true })
-  }, [me.data, onLogin, navigate])
-
-  const signedIn = me.data?.owner === true
-
-  const items = inbox.data?.items
-  const count = signedIn ? (items?.length ?? 0) : 0
-  useTabSigns(count)
   const seen = useRef<InboxItem[] | null>(null)
   const [announcement, setAnnouncement] = useState<Announcement | null>(null)
   const [toast, setToast] = useState<Announcement | null>(null)
@@ -157,8 +111,153 @@ function Shell() {
       }
     }
   }, [items, signedIn, navigate, t])
+  return { announcement, toast, dismiss: () => setToast(null) }
+}
+
+/** The new item of the inbox, said: the line a screen reader hears and the toast with the way to its task. */
+function Attention({
+  announcement,
+  toast,
+  onDismiss,
+}: {
+  announcement: Announcement | null
+  toast: Announcement | null
+  onDismiss: () => void
+}) {
+  const { t } = useCopy()
   const say = (a: Announcement) =>
     a.count > 1 ? t.attention.many(a.count, a.first.summary) : t.attention.one(a.first.summary)
+  return (
+    <>
+      <div aria-live="polite" role="status" className="sr-only" data-testid="attention-live">
+        {announcement ? <span key={announcement.at}>{say(announcement)}</span> : null}
+      </div>
+      {toast ? (
+        <div
+          role="alert"
+          className="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm shadow-lg"
+        >
+          <span>{say(toast)}</span>
+          <Link
+            to={`/tasks/${toast.first.task?.id}`}
+            className="underline underline-offset-2"
+            onClick={onDismiss}
+          >
+            {t.attention.openTask}
+          </Link>
+          <button type="button" onClick={onDismiss}>
+            {t.attention.dismiss}
+          </button>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/**
+ * The menu that stays beside the page: none on a phone, the rail on a tablet or when the owner hid the
+ * menu, the whole menu otherwise.
+ */
+function Docked({
+  width,
+  hidden,
+  rail,
+  menu,
+}: {
+  width: WidthClass
+  hidden: boolean
+  rail: ReactNode
+  menu: ReactNode
+}) {
+  if (width === 'compact') return null
+  return hidden || width === 'medium' ? rail : menu
+}
+
+/** What the page shows: a work page inside its margins, any other page as it is, and a wait before the owner is known. */
+function Page({
+  signedIn,
+  onLogin,
+  compact,
+  pathname,
+}: {
+  signedIn: boolean
+  onLogin: boolean
+  compact: boolean
+  pathname: string
+}) {
+  const { t } = useCopy()
+  if (signedIn && inWork(pathname)) {
+    return (
+      <div className={`mx-auto max-w-[1800px] pb-10 pt-5 ${compact ? 'px-4' : 'px-6'}`}>
+        <Outlet />
+      </div>
+    )
+  }
+  if (signedIn || onLogin) return <Outlet />
+  return <p className="p-6 text-sm text-muted-foreground">{t.layout.loading}</p>
+}
+
+/** The frame of every page: the menu on the left, the bar on top, and the way to the login. */
+export default function RootLayout() {
+  return (
+    <CopyProvider>
+      <Shell />
+    </CopyProvider>
+  )
+}
+
+function Shell() {
+  const { t, adopt } = useCopy()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const onLogin = location.pathname === '/login'
+  const me = useResource<{ owner: boolean; name?: string; language?: string }>('/api/panel/me', {
+    everyMs: 60_000,
+  })
+  const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
+  const health = useResource<HealthReport>('/api/panel/health', { everyMs: 60_000 })
+  const pulse = useResource<PulseReport>('/api/panel/pulse')
+  const repositories = useResource<RepositoriesView>('/api/panel/repositories', {
+    everyMs: 60_000,
+    stream: false,
+  })
+  const setupReport = useResource<SetupReport>('/api/panel/setup', {
+    everyMs: 30_000,
+    stream: false,
+  })
+  const setup = setupCount(setupReport)
+  const [menuHidden, setMenuHidden] = useMenuHidden()
+  const [searchOnOpen, setSearchOnOpen] = useState(false)
+  const width = useWidthClass()
+  const compact = width === 'compact'
+  // The menu over the page: on a phone, and on a tablet when the rail asks to be opened.
+  const [overlay, setOverlay] = useState(false)
+  const closeOverlay = useCallback(() => setOverlay(false), [])
+  useEscape(closeOverlay)
+  // A choice in the menu is a navigation, and a navigation closes it.
+  useEffect(() => setOverlay(false), [location.pathname, location.search])
+  useEffect(() => {
+    if (width === 'expanded') setOverlay(false)
+  }, [width])
+  const install = useInstall()
+
+  const savedLanguage = me.data?.language
+  useEffect(() => adopt(savedLanguage), [savedLanguage, adopt])
+
+  useEffect(() => {
+    if (me.data && !me.data.owner && !onLogin) void navigate('/login', { replace: true })
+  }, [me.data, onLogin, navigate])
+
+  const signedIn = me.data?.owner === true
+
+  const items = inbox.data?.items
+  const count = signedIn ? (items?.length ?? 0) : 0
+  useTabSigns(count)
+  const attention = useAttention(items, signedIn)
+  const waiting = inbox.data?.items.length ?? 0
+  const wrong = health.data?.findings.length ?? 0
+  const name = me.data?.name ?? t.layout.ownerName
+  const pulseNow = pulse.data ?? undefined
   const signOut = () =>
     void post('/api/panel/logout').then(() => {
       me.reload()
@@ -174,9 +273,9 @@ function Shell() {
       }}
       startSearching={searchOnOpen}
       showOnboarding={repositories.data?.repositories.some((r) => r.enabled) === false}
-      waiting={inbox.data?.items.length ?? 0}
-      wrong={health.data?.findings.length ?? 0}
-      name={me.data?.name ?? t.layout.ownerName}
+      waiting={waiting}
+      wrong={wrong}
+      name={name}
       plan={t.layout.ownerRole}
       onSignOut={signOut}
       install={install}
@@ -194,22 +293,25 @@ function Shell() {
               className="flex h-screen overflow-x-hidden bg-background text-foreground"
             >
               {signedIn ? (
-                compact ? null : menuHidden || width === 'medium' ? (
-                  <Rail
-                    onExpand={(search = false) => {
-                      setSearchOnOpen(search)
-                      if (width === 'medium') setOverlay(true)
-                      else setMenuHidden(false)
-                    }}
-                    waiting={inbox.data?.items.length ?? 0}
-                    wrong={health.data?.findings.length ?? 0}
-                    name={me.data?.name ?? t.layout.ownerName}
-                    onSignOut={signOut}
-                    setup={setup}
-                  />
-                ) : (
-                  menu
-                )
+                <Docked
+                  width={width}
+                  hidden={menuHidden}
+                  menu={menu}
+                  rail={
+                    <Rail
+                      onExpand={(search = false) => {
+                        setSearchOnOpen(search)
+                        if (width === 'medium') setOverlay(true)
+                        else setMenuHidden(false)
+                      }}
+                      waiting={waiting}
+                      wrong={wrong}
+                      name={name}
+                      onSignOut={signOut}
+                      setup={setup}
+                    />
+                  }
+                />
               ) : null}
               {signedIn && width !== 'expanded' && overlay ? (
                 <div className="fixed inset-0 z-50 flex">
@@ -225,53 +327,26 @@ function Shell() {
                 </div>
               ) : null}
               <div className="flex min-w-0 flex-1 flex-col">
-                {signedIn ? (
-                  <TopBar onMenu={() => setOverlay(true)} pulse={pulse.data ?? undefined} />
-                ) : null}
+                {signedIn ? <TopBar onMenu={() => setOverlay(true)} pulse={pulseNow} /> : null}
                 <main className="min-h-0 flex-1 overflow-y-auto">
-                  {signedIn && inWork(location.pathname) ? (
-                    <div
-                      className={`mx-auto max-w-[1800px] pb-10 pt-5 ${compact ? 'px-4' : 'px-6'}`}
-                    >
-                      <Outlet />
-                    </div>
-                  ) : signedIn || onLogin ? (
-                    <Outlet />
-                  ) : (
-                    <p className="p-6 text-sm text-muted-foreground">{t.layout.loading}</p>
-                  )}
+                  <Page
+                    signedIn={signedIn}
+                    onLogin={onLogin}
+                    compact={compact}
+                    pathname={location.pathname}
+                  />
                 </main>
                 {signedIn && !compact ? (
-                  <StatusBar
-                    pulse={pulse.data ?? undefined}
-                    waiting={inbox.data?.items.length ?? 0}
-                    wrong={health.data?.findings.length ?? 0}
-                  />
+                  <StatusBar pulse={pulseNow} waiting={waiting} wrong={wrong} />
                 ) : null}
               </div>
               {signedIn ? <GuidePanel /> : null}
             </div>
-            <div aria-live="polite" role="status" className="sr-only" data-testid="attention-live">
-              {announcement ? <span key={announcement.at}>{say(announcement)}</span> : null}
-            </div>
-            {toast ? (
-              <div
-                role="alert"
-                className="fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm shadow-lg"
-              >
-                <span>{say(toast)}</span>
-                <Link
-                  to={`/tasks/${toast.first.task?.id}`}
-                  className="underline underline-offset-2"
-                  onClick={() => setToast(null)}
-                >
-                  {t.attention.openTask}
-                </Link>
-                <button type="button" onClick={() => setToast(null)}>
-                  {t.attention.dismiss}
-                </button>
-              </div>
-            ) : null}
+            <Attention
+              announcement={attention.announcement}
+              toast={attention.toast}
+              onDismiss={attention.dismiss}
+            />
           </GuideProvider>
         </ChatsProvider>
       </ThemeProvider>

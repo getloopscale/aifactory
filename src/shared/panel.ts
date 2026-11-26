@@ -657,6 +657,21 @@ export type TaskDetail = {
   guide?: GuideView
 }
 
+/** One file a task's pull request changes. `patch` is missing for a binary file or one too large to show. */
+export type DiffFile = {
+  path: string
+  status: string
+  previousPath?: string
+  additions: number
+  deletions: number
+  patch?: string
+}
+
+/** What a task's pull request changes; `truncated` when it changes more files than the ones listed. */
+export type TaskDiff =
+  | { state: 'no_pull_request' }
+  | { state: 'ready'; pullRequestUrl: string; files: DiffFile[]; truncated: boolean }
+
 /** Whether the conversation box may offer `guide`, and why not. */
 export type GuideView = { available: boolean; reason?: string }
 

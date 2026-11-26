@@ -62,6 +62,15 @@ export type OpenPullRequest = {
  */
 export type ChangedFile = { path: string; status: string; previousPath?: string }
 
+/** One file of a pull request with what it changes. `patch` is missing for a binary file or one too large for GitHub to show. */
+export type PullRequestFile = ChangedFile & { additions: number; deletions: number; patch?: string }
+
+/** The files of a pull request, and whether it has more than the ones listed. */
+export type PullRequestFiles = { files: PullRequestFile[]; truncated: boolean }
+
+/** The most files of a pull request the panel reads: three pages of GitHub's listing. */
+export const MAX_PULL_REQUEST_FILES = 300
+
 /** A branch as its comparison with another reads: its head, how far ahead it is, and when the head was committed. */
 export type BranchAhead = { sha: string; aheadBy: number; committedAt: Date }
 
@@ -240,6 +249,11 @@ export type GithubApi = {
    * GitHub to list whole is an error, never a partial list.
    */
   changedFiles(repo: string, token: string, base: string, head: string): Promise<ChangedFile[]>
+  /**
+   * The files a pull request changes since its merge base, each with its patch, at most
+   * `MAX_PULL_REQUEST_FILES`. A longer pull request comes back `truncated`, never as if it were whole.
+   */
+  pullRequestFiles(repo: string, token: string, number: number): Promise<PullRequestFiles>
   /** The path of every file on a branch. */
   filePaths(repo: string, token: string, ref: string): Promise<string[]>
   /** What a file holds on a branch, or undefined when it is not there. */
@@ -406,6 +420,22 @@ const statusState = (state: string): CheckReport['state'] => {
 }
 
 type GraphqlAnswer<T> = { data?: T; errors?: { message: string }[] }
+
+const pullRequestFile = (f: {
+  filename: string
+  status: string
+  previous_filename?: string
+  additions: number
+  deletions: number
+  patch?: string
+}): PullRequestFile => ({
+  path: f.filename,
+  status: f.status,
+  ...(f.previous_filename ? { previousPath: f.previous_filename } : {}),
+  additions: f.additions,
+  deletions: f.deletions,
+  ...(f.patch === undefined ? {} : { patch: f.patch }),
+})
 
 /** The most files GitHub's compare lists for one comparison. */
 const MAX_COMPARE_FILES = 3000
@@ -619,6 +649,32 @@ export function createGithubApi(
             `${base}...${head} on ${repo} changes ${MAX_COMPARE_FILES} files or more, the most GitHub lists, so what it changes cannot be told`,
           )
         }
+      }
+    },
+
+    async pullRequestFiles(repo, token, number) {
+      const files: PullRequestFile[] = []
+      for (let page = 1; ; page += 1) {
+        const listed = (await (
+          await ensure(
+            await call(repo, token, `/pulls/${number}/files?per_page=100&page=${page}`),
+            `listing the files of ${repo}#${number}`,
+            [200],
+          )
+        ).json()) as {
+          filename: string
+          status: string
+          previous_filename?: string
+          additions: number
+          deletions: number
+          patch?: string
+        }[]
+        if (files.length + listed.length > MAX_PULL_REQUEST_FILES) {
+          files.push(...listed.slice(0, MAX_PULL_REQUEST_FILES - files.length).map(pullRequestFile))
+          return { files, truncated: true }
+        }
+        files.push(...listed.map(pullRequestFile))
+        if (listed.length < 100) return { files, truncated: false }
       }
     },
 

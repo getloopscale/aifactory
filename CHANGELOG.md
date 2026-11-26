@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A task has a Changes tab that shows what its pull request changes, file by file, read from GitHub when the tab is opened. A line of the new version takes a note; the notes wait in the browser and go to the agent together as one send-back, whose whole text the owner reads and may edit before sending. A file with no text to show, a listing cut at 300 files and a failure of GitHub each say so, and the last one offers to try again
 - The attention, decisions and projects views of the floor, the coordinator, setup, a plan and a repository's page keep the height of the window on a wide screen, each column scrolling by itself. A plan shows its goal beside its issues, with the first line of the goal as the title and the buttons that save and create issues always in view
 - The repositories page on a wide screen keeps the height of the window, with the list on the left and the health and settings of one repository on the right. The enabled repositories come first in the list, the first one is open on arrival, and a button on each enabled row chooses which one the right column shows
 - A task opened from the board or the floor on a wide screen is docked beside the page in one frame, with its head, its tabs and the chosen tab together: the page keeps its place and nothing is covered. Escape or the close button closes it, and the card or row of the open task is marked. A narrower screen keeps the panel that slides over
@@ -57,6 +58,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- On a task's page the conversation takes the height that the actions used to: asking for changes and marking a task resolved another way each open their form from a button in the row of actions, the terminal opens from a button beside the agent's name, and the message box starts at one line and grows with what is typed
+- The folded menu is the open menu without its words: the same places in the same order and groups, the same icon size and row height, the accent bar on the place the owner is in, and a head as tall as the bar over the page. The name of an item shows beside it at once, with how many wait when something does, and the marks on the inbox, health and setup take the colours the open menu uses. The pinned and conversations icons, which only opened the menu, are gone
+- A card on the board says its stage and its priority with a dot and the words in normal case, in place of a pill in capitals. The agent is one line with its mark and its model, tinted only while it works, the size of the change, the risk and the attempt share one line, and a card with little to say is shorter
 - The factory metrics at the top of the board are one line while closed
 - The panel uses the LoopScale brand as its theme, in dark and light: ink and paper in place of black and white, one lime, Hanken Grotesk and JetBrains Mono (served by the panel), and the LoopScale symbol in the menu and the favicon. The built-in themes of `@theokit/ui` are no longer offered
 - Every page of the panel is built from the same blocks, as wide as the page: a bordered sheet with a heading strip, rows parted by a hairline, and tables with one rhythm. The side menu groups the places of the factory, and the top bar shows where the owner is and how many runs work and wait

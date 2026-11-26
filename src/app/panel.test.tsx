@@ -317,6 +317,9 @@ describe('task actions', () => {
   it('sends changes back only with a note', async () => {
     const calls = serve({ 'POST /api/panel/tasks/5/changes': { decisionId: 1 } })
     render(<TaskActions detail={detail()} onDone={noop} />)
+    // The form waits behind its button, so the actions stay one row.
+    expect(screen.queryByRole('textbox')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask for changes' }))
     const send = screen.getByRole('button', { name: 'Send back' }) as HTMLButtonElement
     expect(send.disabled).toBe(true)
 
@@ -355,6 +358,7 @@ describe('task actions', () => {
     })
     const calls = serve({ 'POST /api/panel/tasks/5/resolve': { decisionId: 3, sha: 'h' } })
     render(<TaskActions detail={failed} onDone={noop} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Resolved another way' }))
     const mark = screen.getByRole('button', { name: 'Mark as resolved' }) as HTMLButtonElement
     expect(mark.disabled).toBe(true)
 
@@ -385,7 +389,7 @@ describe('task actions', () => {
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: 'Approve this commit' })).toBeNull()
     // After a withdrawal the failed task can be sent back again with the right note.
-    expect(screen.getByRole('button', { name: 'Send back' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Ask for changes' })).toBeTruthy()
 
     cleanup()
     const running = detail({ task: { ...base, stage: 'build', column: 'working', headSha: null } })
@@ -1451,7 +1455,7 @@ describe('the task page in two languages', () => {
     const handoff = detail({ task: { ...base, stage: 'handoff', column: 'attention' } })
     inLanguage('pt-BR', <TaskActions detail={handoff} onDone={() => {}} />)
     const t = ptBR.taskActions
-    for (const name of [t.approve, t.retry, t.sendBack, t.markResolved]) {
+    for (const name of [t.approve, t.retry, t.askChanges, t.resolvedAnotherWay]) {
       expect(screen.getByRole('button', { name })).toBeDefined()
     }
     expect(screen.getByText(t.heading)).toBeDefined()
