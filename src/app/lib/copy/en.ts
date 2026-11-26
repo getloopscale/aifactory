@@ -242,6 +242,7 @@ export const en = {
     factoryNow: 'The factory now',
   },
   work: {
+    closeTask: 'Close the task',
     board: 'Board',
     list: 'List',
     viewGroup: 'View',
@@ -1530,6 +1531,8 @@ export const en = {
     page: (n: number) => `Page ${n}`,
   },
   inbox: {
+    filter: 'Show only',
+    everything: 'All',
     openPage: 'Open the task on its own page',
     heading: 'Inbox',
     nothing: 'Nothing waits for you.',

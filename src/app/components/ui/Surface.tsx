@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { Link, type To } from 'react-router'
+import { useWidth } from '../../lib/media'
 
 /**
  * The one look every block of the panel has, taken from the line of the factory floor: a bordered sheet as
@@ -72,6 +73,54 @@ export function PageHeader({
       </div>
       {actions ? <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div> : null}
     </header>
+  )
+}
+
+/**
+ * A page that keeps the height of the window on a wide screen: what is in `header` stays, and each `Pane`
+ * under it scrolls by itself, so the page never does. On a narrower screen it is the stack it always was.
+ */
+export function Workbench({
+  header,
+  columns = 'grid-cols-1',
+  footer,
+  children,
+}: {
+  header?: ReactNode
+  /** The grid columns of the panes, as a whole class (`grid-cols-[280px_minmax(0,1fr)]`). */
+  columns?: string
+  /** A line that stays under the panes, like a pager. */
+  footer?: ReactNode
+  children: ReactNode
+}) {
+  const wide = useWidth() === 'expanded'
+  return (
+    <div
+      data-layout={wide ? 'workbench' : 'stack'}
+      className={wide ? 'flex h-[calc(100vh-8.75rem)] flex-col' : undefined}
+    >
+      {header}
+      <div
+        className={wide ? `grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 ${columns}` : STACK}
+      >
+        {children}
+      </div>
+      {footer}
+    </div>
+  )
+}
+
+/** One column of a `Workbench`: its blocks stacked, scrolling inside the column. */
+export function Pane({ children, label }: { children: ReactNode; label?: string }) {
+  const wide = useWidth() === 'expanded'
+  return (
+    <div
+      data-pane=""
+      aria-label={label}
+      className={wide ? `min-h-0 min-w-0 overflow-y-auto pr-1 ${STACK}` : `min-w-0 ${STACK}`}
+    >
+      {children}
+    </div>
   )
 }
 

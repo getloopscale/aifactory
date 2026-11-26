@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A task opened from the board or the floor on a wide screen is docked beside the page in one frame, with its head, its tabs and the chosen tab together: the page keeps its place and nothing is covered. Escape or the close button closes it, and the card or row of the open task is marked. A narrower screen keeps the panel that slides over
+- The floor, the board, health, plans, agents and history keep the height of the window on a wide screen: the page does not scroll, and each column, list or board column scrolls by itself
+- The inbox offers one kind of item at a time once it holds more than eight, and in its narrow column each row starts with the task's title
+- A folded turn of the conversation names the tool and the model that worked
 - The inbox on a wide screen shows the list beside the task it is about: a click on an item opens its task in the next column, with the conversation, the activity, the runs, the evidence and the reviews as tabs, and the first item is open on arrival. The page does not scroll, the list and the open tab do
 - The page of a task on a wide screen shows the conversation beside the rest: the timeline, the runs, the evidence and the reviews are tabs on the right, each with its count, and the page itself no longer scrolls, only the thread and the open tab do. In the side panel of the board and on a narrow screen the task is stacked as before
 - The conversation with a task's agent draws what the agent said as Markdown, names who said it (the tool, the persona, the model and when), puts the owner's messages on the right, and folds a turn into one line that opens its steps. A line above the thread names the tool, the model and the effort of the agent on screen, and the box says which agent a message goes to. Ctrl+Enter sends
@@ -51,6 +55,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The factory metrics at the top of the board are one line while closed
 - The panel uses the LoopScale brand as its theme, in dark and light: ink and paper in place of black and white, one lime, Hanken Grotesk and JetBrains Mono (served by the panel), and the LoopScale symbol in the menu and the favicon. The built-in themes of `@theokit/ui` are no longer offered
 - Every page of the panel is built from the same blocks, as wide as the page: a bordered sheet with a heading strip, rows parted by a hairline, and tables with one rhythm. The side menu groups the places of the factory, and the top bar shows where the owner is and how many runs work and wait
 - When the builder answers a review by changing nothing, the reviewer reads its reasons on the same commit once before the task goes to a person. An approval then goes on to merge; a review that still blocks hands the task over as before (#385)

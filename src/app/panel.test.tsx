@@ -1284,6 +1284,35 @@ describe('health', () => {
 })
 
 describe('inbox', () => {
+  it('offers one kind at a time once the list is long, and opens the first task beside it', async () => {
+    const items: InboxItem[] = Array.from({ length: 9 }, (_, i) => ({
+      task: { ...base, id: i + 1, title: `Waiting ${i + 1}`, stage: i < 2 ? 'waiting' : 'failed' },
+      kind: i < 2 ? 'question' : 'failed',
+      summary: `Why ${i + 1}`,
+      coordinatorReason: null,
+      at: '2026-11-04T10:00:00Z',
+    }))
+    serve({ 'GET /api/panel/inbox': { items } })
+    render(
+      <MemoryRouter>
+        <InboxPage />
+      </MemoryRouter>,
+    )
+    const filter = await screen.findByRole('group', { name: 'Show only' })
+    expect(screen.getByText('Waiting 9')).toBeDefined()
+    // The first item is the one open beside the list.
+    expect(screen.getByRole('link', { name: /Waiting 1/ }).getAttribute('aria-current')).toBe(
+      'true',
+    )
+
+    fireEvent.click(within(filter).getByRole('button', { name: /Answer a question/ }))
+
+    expect(screen.getByText('Waiting 2')).toBeDefined()
+    expect(screen.queryByText('Waiting 9')).toBeNull()
+    fireEvent.click(within(filter).getByRole('button', { name: /All/ }))
+    expect(screen.getByText('Waiting 9')).toBeDefined()
+  })
+
   it('lists what waits for a person with why, and says so when nothing does', async () => {
     const items: InboxItem[] = [
       {

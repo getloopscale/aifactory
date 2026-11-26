@@ -46,7 +46,7 @@ function Note({ tile }: { tile: PulseTile }) {
 function Summary({ groups }: { groups: PulseGroups }) {
   const { t } = useCopy()
   return (
-    <div className="flex min-w-0 flex-wrap gap-x-6 gap-y-1 px-4 py-2.5 text-xs">
+    <div className="flex min-w-0 flex-wrap gap-x-6 gap-y-1 px-3 py-2 text-xs">
       {GROUPS.map((g) => (
         <div key={g} className="flex min-w-0 items-baseline gap-2">
           <span className="font-semibold text-foreground">{t.pulse.groups[g]}</span>
@@ -124,18 +124,31 @@ export function Pulse() {
   }
   // A group, not a region: the board's columns are the only regions of the page.
   return (
-    <div role="group" aria-label={t.pulse.region} className="mb-4">
-      <Surface
-        title={<>{t.pulse.region}</>}
-        icon={Activity}
-        action={
-          <Button size="sm" variant="secondary" aria-expanded={open} onClick={toggle}>
-            {open ? t.pulse.hide : t.pulse.show}
+    <div role="group" aria-label={t.pulse.region} className="mb-3 shrink-0">
+      {open ? (
+        <Surface
+          title={<>{t.pulse.region}</>}
+          icon={Activity}
+          action={
+            <Button size="sm" variant="secondary" aria-expanded={open} onClick={toggle}>
+              {t.pulse.hide}
+            </Button>
+          }
+        >
+          <Details groups={groups} />
+        </Surface>
+      ) : (
+        // Closed it is one line: the numbers, and the way to the rest.
+        <div className="flex items-center rounded-xl border border-border bg-card pr-1.5">
+          <Activity aria-hidden className="ml-4 size-4 shrink-0 stroke-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <Summary groups={groups} />
+          </div>
+          <Button size="sm" variant="ghost" aria-expanded={open} onClick={toggle}>
+            {t.pulse.show}
           </Button>
-        }
-      >
-        {open ? <Details groups={groups} /> : <Summary groups={groups} />}
-      </Surface>
+        </div>
+      )}
     </div>
   )
 }

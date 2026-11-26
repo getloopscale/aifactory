@@ -169,7 +169,7 @@ describe('board', () => {
     expect(screen.queryByLabelText('Empty columns')).toBeNull()
   })
 
-  it('keeps every column title in view while the cards scroll, empty columns too, in a frame of its own', async () => {
+  it('keeps every column title in view while its cards scroll under it, empty columns too', async () => {
     serve({ tasks: [card({ id: 1, title: 'Building one' })] })
     render(
       <MemoryRouter>
@@ -177,21 +177,20 @@ describe('board', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
-    const title = screen
-      .getByRole('region', { name: en.columns.working })
-      .querySelector('h2') as HTMLElement
-    expect(title.className).toContain('sticky')
-    const frame = screen.getByRole('region', { name: en.columns.working }).parentElement
-      ?.parentElement as HTMLElement
-    expect(frame.className).toContain('overflow-auto')
-    expect(frame.className).toContain('max-h-')
-    // A title sticks only inside its own column, so every column must be as tall as the tallest. With
-    // `items-start` an empty one is short and its title scrolled away while the others stayed.
-    const grid = screen.getByRole('region', { name: en.columns.working })
-      .parentElement as HTMLElement
+    const column = screen.getByRole('region', { name: en.columns.working })
+    // The cards scroll inside their column, so the title above them never leaves.
+    expect(column.className).toContain('flex-col')
+    expect((column.querySelector('ul') as HTMLElement).className).toContain('overflow-y-auto')
+    // The board takes the height its page leaves and scrolls only sideways: the page itself does not scroll.
+    const grid = column.parentElement as HTMLElement
+    const frame = grid.parentElement as HTMLElement
+    expect(frame.className).toContain('overflow-x-auto')
+    expect(frame.className).toContain('flex-1')
+    // Every column is as tall as the board, an empty one too.
+    expect(grid.className).toContain('grid-rows-[minmax(0,1fr)]')
     expect(grid.className).not.toContain('items-start')
     for (const section of screen.getAllByRole('region')) {
-      expect((section.querySelector('h2') as HTMLElement).className).toContain('sticky')
+      expect(section.className).toContain('flex-col')
     }
   })
 

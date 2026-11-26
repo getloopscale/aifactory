@@ -1,6 +1,6 @@
 import { Sheet } from '@usetheo/ui'
 import { ListOrdered, type LucideIcon, PackageCheck, Timer, Zap } from 'lucide-react'
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import type { CoordinatorActionView, InboxItem, PulseReport, TaskCard } from '../../shared/panel'
@@ -9,8 +9,10 @@ import { waitLine } from '../components/floor/FloorCard'
 import { FloorHeading } from '../components/floor/FloorNav'
 import { actionIcon } from '../components/floor/icons'
 import { LineHeader, LineRow, LineSection } from '../components/floor/LineTable'
+import { TaskDock } from '../components/TaskDock'
 import { TaskDetailView } from '../components/TaskDetail'
 import { useCopy } from '../lib/copy'
+import { useWidth } from '../lib/media'
 import { shortRepository, splitInbox, stateOf, type FloorState } from '../lib/floor'
 import { ago, itemName, stepLine } from '../lib/format'
 import { useResource } from '../lib/live'
@@ -52,6 +54,9 @@ export default function FloorPage() {
   })
   const [params, setParams] = useSearchParams()
   const open = Number(params.get('task')) || undefined
+  const close = useCallback(() => setParams({}), [setParams])
+  // With room for both, the task is docked beside the line, in the place of the day's column.
+  const docked = useWidth() === 'expanded' && open !== undefined
 
   const asked = useMemo(
     () => new Map(splitInbox(inbox.data?.items ?? []).decide.map((item) => [item.task.id, item])),
@@ -109,118 +114,141 @@ export default function FloorPage() {
     : undefined
 
   return (
-    <>
-      <FloorHeading title={t.floor.heading} lede={t.floor.lede} waiting={asked.size} />
-      {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
+    // On a wide screen the page keeps the height of the window: the line and the column beside it scroll.
+    <div className={docked ? 'flex h-[calc(100vh-8.75rem)] gap-4' : undefined}>
+      <div
+        className={
+          docked
+            ? 'flex min-h-0 min-w-0 flex-1 flex-col'
+            : 'xl:flex xl:h-[calc(100vh-8.75rem)] xl:flex-col'
+        }
+      >
+        <FloorHeading title={t.floor.heading} lede={t.floor.lede} waiting={asked.size} />
+        {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_21rem]">
-        <div className="overflow-x-auto rounded-xl border border-border bg-card">
-          <div className="min-w-[1040px]">
-            <LineHeader />
-            {tasks.data ? (
-              SECTIONS.map((state) => {
-                const rows = groups[state]
-                const shown = state === 'delivered' ? rows.slice(0, DELIVERIES) : rows
-                return (
-                  <LineSection
-                    key={state}
-                    state={state}
-                    title={t.floor.sections[state].title}
-                    lede={t.floor.sections[state].lede}
-                    empty={t.floor.sections[state].empty}
-                    count={rows.length}
-                    footer={
-                      state === 'delivered' && rows.length > shown.length ? (
-                        <Link
-                          to="/work"
-                          className="text-muted-foreground underline underline-offset-2"
-                        >
-                          {t.floor.delivered.all(rows.length)}
-                        </Link>
-                      ) : undefined
-                    }
-                  >
-                    {shown.map((task) => (
-                      <LineRow key={task.id} task={task} state={state} {...status(task, state)} />
-                    ))}
-                  </LineSection>
-                )
-              })
-            ) : (
-              <p className="px-4 py-6 text-sm text-muted-foreground">{t.layout.loading}</p>
-            )}
-          </div>
-        </div>
-
-        <aside className="space-y-4">
-          <section className="rounded-xl border border-border bg-card">
-            <h2 className="border-b border-border px-4 py-2.5 text-sm font-semibold">
-              {t.floor.today}
-            </h2>
-            <div className="divide-y divide-border">
-              <Figure icon={ListOrdered} label={t.floor.pulse.queued} value={pulse.data?.queued} />
-              <Figure
-                icon={Zap}
-                label={t.floor.pulse.lastHour}
-                value={pulse.data?.deliveredLastHour}
-              />
-              <Figure
-                icon={PackageCheck}
-                label={t.floor.pulse.last24Hours}
-                value={pulse.data?.deliveredLast24Hours}
-              />
-              <Figure icon={Timer} label={t.floor.pulse.leadTime} value={lead} />
-            </div>
-          </section>
-
-          <Crew />
-
-          <section className="rounded-xl border border-border bg-card">
-            <h2 className="flex items-center border-b border-border px-4 py-2.5 text-sm font-semibold">
-              {t.floor.recent.heading}
-              <Link
-                to="/floor/decisions"
-                className="ml-auto text-xs font-normal text-muted-foreground underline underline-offset-2"
-              >
-                {t.floor.recent.all}
-              </Link>
-            </h2>
-            <ul className="divide-y divide-border">
-              {(feed.data?.actions ?? []).slice(0, DECISIONS).map((row) => {
-                const Icon = actionIcon(row.action)
-                return (
-                  <li key={row.id}>
-                    <Link
-                      to={{ search: `?task=${row.taskId}` }}
-                      className="flex items-start gap-2.5 px-4 py-2 hover:bg-muted/40"
+        <div
+          className={
+            docked
+              ? 'flex min-h-0 flex-1 flex-col'
+              : 'grid items-start gap-4 xl:min-h-0 xl:flex-1 xl:grid-cols-[minmax(0,1fr)_21rem] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch'
+          }
+        >
+          <div
+            className={`overflow-auto rounded-xl border border-border bg-card ${docked ? 'min-h-0 flex-1' : 'xl:min-h-0'}`}
+          >
+            <div className="min-w-[1040px]">
+              <div className="sticky top-0 z-10 bg-card">
+                <LineHeader />
+              </div>
+              {tasks.data ? (
+                SECTIONS.map((state) => {
+                  const rows = groups[state]
+                  const shown = state === 'delivered' ? rows.slice(0, DELIVERIES) : rows
+                  return (
+                    <LineSection
+                      key={state}
+                      state={state}
+                      title={t.floor.sections[state].title}
+                      lede={t.floor.sections[state].lede}
+                      empty={t.floor.sections[state].empty}
+                      count={rows.length}
+                      footer={
+                        state === 'delivered' && rows.length > shown.length ? (
+                          <Link
+                            to="/work"
+                            className="text-muted-foreground underline underline-offset-2"
+                          >
+                            {t.floor.delivered.all(rows.length)}
+                          </Link>
+                        ) : undefined
+                      }
                     >
-                      <Icon
-                        aria-hidden
-                        className={`mt-0.5 size-4 shrink-0 ${row.outcome === 'escalated' ? 'stroke-warning' : row.outcome === 'failed' ? 'stroke-destructive' : row.outcome === 'applied' ? 'stroke-success' : 'stroke-muted-foreground'}`}
-                      />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-baseline justify-between gap-2 font-mono text-[11px]">
-                          <span>
-                            {row.action} · {t.coordinator.outcomes[row.outcome]}
-                          </span>
-                          <span className="shrink-0 text-muted-foreground">
-                            {ago(row.at, Date.now(), t.time)}
-                          </span>
-                        </span>
-                        <span className="block truncate text-xs text-foreground/80">
-                          {shortRepository(row.repository)} {itemName(row)} {row.title}
-                        </span>
-                      </span>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
-          </section>
-        </aside>
-      </div>
+                      {shown.map((task) => (
+                        <LineRow key={task.id} task={task} state={state} {...status(task, state)} />
+                      ))}
+                    </LineSection>
+                  )
+                })
+              ) : (
+                <p className="px-4 py-6 text-sm text-muted-foreground">{t.layout.loading}</p>
+              )}
+            </div>
+          </div>
 
-      <Sheet open={open !== undefined} onOpenChange={(next) => !next && setParams({})}>
+          <aside className={docked ? 'hidden' : 'space-y-4 xl:min-h-0 xl:overflow-y-auto'}>
+            <section className="rounded-xl border border-border bg-card">
+              <h2 className="border-b border-border px-4 py-2.5 text-sm font-semibold">
+                {t.floor.today}
+              </h2>
+              <div className="divide-y divide-border">
+                <Figure
+                  icon={ListOrdered}
+                  label={t.floor.pulse.queued}
+                  value={pulse.data?.queued}
+                />
+                <Figure
+                  icon={Zap}
+                  label={t.floor.pulse.lastHour}
+                  value={pulse.data?.deliveredLastHour}
+                />
+                <Figure
+                  icon={PackageCheck}
+                  label={t.floor.pulse.last24Hours}
+                  value={pulse.data?.deliveredLast24Hours}
+                />
+                <Figure icon={Timer} label={t.floor.pulse.leadTime} value={lead} />
+              </div>
+            </section>
+
+            <Crew />
+
+            <section className="rounded-xl border border-border bg-card">
+              <h2 className="flex items-center border-b border-border px-4 py-2.5 text-sm font-semibold">
+                {t.floor.recent.heading}
+                <Link
+                  to="/floor/decisions"
+                  className="ml-auto text-xs font-normal text-muted-foreground underline underline-offset-2"
+                >
+                  {t.floor.recent.all}
+                </Link>
+              </h2>
+              <ul className="divide-y divide-border">
+                {(feed.data?.actions ?? []).slice(0, DECISIONS).map((row) => {
+                  const Icon = actionIcon(row.action)
+                  return (
+                    <li key={row.id}>
+                      <Link
+                        to={{ search: `?task=${row.taskId}` }}
+                        className="flex items-start gap-2.5 px-4 py-2 hover:bg-muted/40"
+                      >
+                        <Icon
+                          aria-hidden
+                          className={`mt-0.5 size-4 shrink-0 ${row.outcome === 'escalated' ? 'stroke-warning' : row.outcome === 'failed' ? 'stroke-destructive' : row.outcome === 'applied' ? 'stroke-success' : 'stroke-muted-foreground'}`}
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-baseline justify-between gap-2 font-mono text-[11px]">
+                            <span>
+                              {row.action} · {t.coordinator.outcomes[row.outcome]}
+                            </span>
+                            <span className="shrink-0 text-muted-foreground">
+                              {ago(row.at, Date.now(), t.time)}
+                            </span>
+                          </span>
+                          <span className="block truncate text-xs text-foreground/80">
+                            {shortRepository(row.repository)} {itemName(row)} {row.title}
+                          </span>
+                        </span>
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </div>
+      {docked && open ? <TaskDock id={open} full={`/tasks/${open}`} onClose={close} /> : null}
+      <Sheet open={!docked && open !== undefined} onOpenChange={(next) => !next && close()}>
         <Sheet.Content side="right" className="w-full max-w-2xl overflow-y-auto">
           <Sheet.Header>
             <Sheet.Title className="sr-only">{t.work.sheetTitle}</Sheet.Title>
@@ -234,9 +262,9 @@ export default function FloorPage() {
               </Link>
             ) : null}
           </Sheet.Header>
-          <Sheet.Body>{open ? <TaskDetailView id={open} /> : null}</Sheet.Body>
+          <Sheet.Body>{open && !docked ? <TaskDetailView id={open} /> : null}</Sheet.Body>
         </Sheet.Content>
       </Sheet>
-    </>
+    </div>
   )
 }

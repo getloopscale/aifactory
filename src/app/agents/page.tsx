@@ -7,7 +7,7 @@ import { Metadata } from 'theokit/client'
 import type { AgentsView } from '../../shared/panel'
 import { AgentDetail } from '../components/agents/AgentDetail'
 import { AgentList } from '../components/agents/AgentList'
-import { PageHeader, Quiet, STACK, Surface } from '../components/ui/Surface'
+import { PageHeader, Pane, Quiet, Surface, Workbench } from '../components/ui/Surface'
 import { filterAgents } from '../lib/agents'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
@@ -26,51 +26,60 @@ export default function AgentsPage() {
   const wanted = params.get('agent')
   const selected = shown.find((a) => a.id === wanted) ?? shown[0]
 
+  const listed = data !== undefined && shown.length > 0
   return (
-    <>
-      <Metadata title={t.agents.metaTitle} description={t.agents.metaDescription} />
-      <PageHeader
-        title={t.agents.heading}
-        lede={t.agents.intro}
-        actions={
-          <label className="relative block w-72 max-w-full">
-            <span className="sr-only">{t.agents.searchLabel}</span>
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label={t.agents.searchLabel}
-              placeholder={t.agents.searchLabel}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="pl-9"
-            />
-          </label>
-        }
-      />
-      <div className={STACK}>
-        {error ? (
-          <Alert intent="destructive" title={t.agents.loadError} description={error} />
-        ) : null}
-        {!data && !error ? (
-          <Surface label={t.agents.heading}>
-            <Quiet>{t.agents.loading}</Quiet>
-          </Surface>
-        ) : null}
-
-        {data ? (
-          shown.length === 0 ? (
-            <Surface label={t.agents.heading}>
-              <Quiet role="status">{t.agents.none(query)}</Quiet>
-            </Surface>
-          ) : (
-            // The list stays beside what it chooses, so these two are the columns of one page.
-            <div className="grid items-start gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-              <div className="lg:sticky lg:top-2">
-                <AgentList
-                  agents={shown}
-                  selected={selected?.id}
-                  onSelect={(id) => setParams({ agent: id }, { replace: true })}
+    <Workbench
+      columns={listed ? 'grid-cols-[280px_minmax(0,1fr)]' : undefined}
+      header={
+        <>
+          <Metadata title={t.agents.metaTitle} description={t.agents.metaDescription} />
+          <PageHeader
+            title={t.agents.heading}
+            lede={t.agents.intro}
+            actions={
+              <label className="relative block w-72 max-w-full">
+                <span className="sr-only">{t.agents.searchLabel}</span>
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  aria-label={t.agents.searchLabel}
+                  placeholder={t.agents.searchLabel}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="pl-9"
                 />
-              </div>
+              </label>
+            }
+          />
+          {error ? (
+            <div className="mb-4">
+              <Alert intent="destructive" title={t.agents.loadError} description={error} />
+            </div>
+          ) : null}
+        </>
+      }
+    >
+      {!data && !error ? (
+        <Surface label={t.agents.heading}>
+          <Quiet>{t.agents.loading}</Quiet>
+        </Surface>
+      ) : null}
+
+      {data ? (
+        shown.length === 0 ? (
+          <Surface label={t.agents.heading}>
+            <Quiet role="status">{t.agents.none(query)}</Quiet>
+          </Surface>
+        ) : (
+          // The list stays beside what it chooses: each is a column that scrolls by itself.
+          <>
+            <Pane>
+              <AgentList
+                agents={shown}
+                selected={selected?.id}
+                onSelect={(id) => setParams({ agent: id }, { replace: true })}
+              />
+            </Pane>
+            <Pane>
               {selected ? (
                 <AgentDetail
                   key={selected.id}
@@ -81,10 +90,10 @@ export default function AgentsPage() {
                   onSettingsSaved={reload}
                 />
               ) : null}
-            </div>
-          )
-        ) : null}
-      </div>
-    </>
+            </Pane>
+          </>
+        )
+      ) : null}
+    </Workbench>
   )
 }

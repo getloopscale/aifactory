@@ -1,4 +1,5 @@
-import { Inbox } from 'lucide-react'
+import { Inbox, Maximize2 } from 'lucide-react'
+import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import type { InboxItem } from '../../shared/panel'
@@ -6,9 +7,19 @@ import { StageBadge } from '../components/Badges'
 import { INBOX_ICON } from '../components/floor/icons'
 import { NotifyButton } from '../components/NotifyButton'
 import { TaskDetailView } from '../components/TaskDetail'
-import { PageHeader, Quiet, Row, RowIcon, Rows, Surface, type Tone } from '../components/ui/Surface'
+import {
+  PageHeader,
+  Quiet,
+  Row,
+  RowIcon,
+  Rows,
+  Surface,
+  TONE_DOT,
+  type Tone,
+} from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
 import { ago, itemName, money } from '../lib/format'
+import { shortRepository } from '../lib/floor'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
@@ -21,14 +32,22 @@ const TONE: Record<InboxItem['kind'], Tone> = {
   main_red: 'destructive',
 }
 
+/** With more items than this, the list offers to show one kind at a time. */
+const FILTER_FROM = 8
+
 export default function InboxPage() {
   const { t } = useCopy()
   const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
-  const items = inbox.data?.items
+  const all = inbox.data?.items
+  const [only, setOnly] = useState<InboxItem['kind']>()
+  const kinds = [...new Set((all ?? []).map((item) => item.kind))]
+  const filtered = (all?.length ?? 0) > FILTER_FROM && kinds.length > 1
+  const items = only && filtered ? all?.filter((item) => item.kind === only) : all
   const beside = useWidth() === 'expanded'
   const [params] = useSearchParams()
   // Beside the list, the task the owner picked, or the first one: there is always something to decide on.
   const open = beside ? Number(params.get('task')) || items?.[0]?.task.id : undefined
+  const count = filtered && only ? items?.length : all?.length
   return (
     <div
       data-layout={beside ? 'workbench' : 'stack'}
@@ -54,7 +73,33 @@ export default function InboxPage() {
           }
         />
         {inbox.error ? <p className="mb-3 text-sm text-destructive">{inbox.error}</p> : null}
-        <Surface title={t.inbox.heading} icon={Inbox} count={items?.length} fill={beside}>
+        <Surface title={t.inbox.heading} icon={Inbox} count={count} fill={beside}>
+          {filtered ? (
+            <div
+              role="group"
+              aria-label={t.inbox.filter}
+              className="flex shrink-0 flex-wrap gap-1 border-b border-border px-3 py-2"
+            >
+              {[undefined, ...kinds].map((kind) => {
+                const Icon = kind ? INBOX_ICON[kind] : undefined
+                return (
+                  <button
+                    key={kind ?? 'all'}
+                    type="button"
+                    aria-pressed={only === kind}
+                    onClick={() => setOnly(kind)}
+                    className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors ${only === kind ? 'border-transparent bg-muted font-medium text-foreground' : 'border-border text-muted-foreground hover:text-foreground'}`}
+                  >
+                    {Icon ? <Icon aria-hidden className="size-3.5" /> : null}
+                    {kind ? t.inbox[kind] : t.inbox.everything}
+                    <span className="font-mono tabular-nums">
+                      {kind ? all?.filter((item) => item.kind === kind).length : all?.length}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
           <div className={beside ? 'min-h-0 flex-1 overflow-y-auto' : undefined}>
             {!items ? (
               <Quiet>{t.layout.loading}</Quiet>
@@ -69,15 +114,34 @@ export default function InboxPage() {
                     current={task.id === open}
                     lead={<RowIcon icon={INBOX_ICON[kind]} tone={TONE[kind]} />}
                     title={
-                      <>
-                        {t.inbox[kind]}
-                        <span className="font-normal text-muted-foreground"> · {task.title}</span>
-                      </>
+                      beside ? (
+                        // In the narrow column the task leads, and its kind is the coloured word under it.
+                        <span title={task.title}>{task.title}</span>
+                      ) : (
+                        <>
+                          {t.inbox[kind]}
+                          <span className="font-normal text-muted-foreground"> · {task.title}</span>
+                        </>
+                      )
                     }
                     meta={
-                      <>
-                        {task.repository} {itemName(task)} · {ago(at, Date.now(), t.time)}
-                      </>
+                      beside ? (
+                        <>
+                          <span className="font-sans font-medium text-foreground">
+                            <span
+                              aria-hidden
+                              className={`mr-1.5 inline-block size-1.5 rounded-full align-middle ${TONE_DOT[TONE[kind]]}`}
+                            />
+                            {t.inbox[kind]}
+                          </span>{' '}
+                          · {shortRepository(task.repository)} {itemName(task)} ·{' '}
+                          {ago(at, Date.now(), t.time)}
+                        </>
+                      ) : (
+                        <>
+                          {task.repository} {itemName(task)} · {ago(at, Date.now(), t.time)}
+                        </>
+                      )
                     }
                     detail={
                       <>
@@ -90,20 +154,20 @@ export default function InboxPage() {
                       </>
                     }
                     trail={
-                      <>
-                        <StageBadge
-                          stage={task.stage}
-                          integrated={task.integrated}
-                          waitingForChecks={task.waitingForChecks}
-                          resolved={task.resolved}
-                          retryable={task.retryable}
-                        />
-                        {beside ? null : (
+                      beside ? undefined : (
+                        <>
+                          <StageBadge
+                            stage={task.stage}
+                            integrated={task.integrated}
+                            waitingForChecks={task.waitingForChecks}
+                            resolved={task.resolved}
+                            retryable={task.retryable}
+                          />
                           <span className="w-14 text-right font-mono tabular-nums">
                             {money(task.costUsd)}
                           </span>
-                        )}
-                      </>
+                        </>
+                      )
                     }
                   />
                 ))}
@@ -122,9 +186,11 @@ export default function InboxPage() {
               above={
                 <Link
                   to={`/tasks/${open}`}
-                  className="text-sm text-muted-foreground hover:text-foreground"
+                  aria-label={t.inbox.openPage}
+                  title={t.inbox.openPage}
+                  className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                 >
-                  {t.inbox.openPage}
+                  <Maximize2 aria-hidden className="size-3.5" />
                 </Link>
               }
             />

@@ -41,6 +41,9 @@ import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
+/** Inside the frame of a tabbed task, the well its blocks sit in, under the head. */
+const WELL = 'flex min-w-0 flex-col gap-3 bg-background px-3 pb-3'
+
 const TASK_TABS = ['activity', 'runs', 'evidence', 'reviews'] as const
 /** In one column the conversation is a tab too, and the first. */
 const PANES = ['conversation', ...TASK_TABS] as const
@@ -122,7 +125,11 @@ export function TaskDetailView({
     <div
       role="tablist"
       aria-label={t.task.tabs.label}
-      className="flex gap-1 rounded-xl border border-border bg-card p-1"
+      className={
+        tabbed
+          ? 'flex gap-1 overflow-x-auto overflow-y-hidden border-t border-border px-2'
+          : 'flex gap-1 rounded-xl border border-border bg-card p-1'
+      }
     >
       {(tabbed ? PANES : TASK_TABS).map((name) => (
         <button
@@ -131,11 +138,19 @@ export function TaskDetailView({
           role="tab"
           aria-selected={tab === name}
           onClick={() => setTab(name)}
-          className={`flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors ${
-            tab === name
-              ? 'bg-muted font-medium text-foreground'
-              : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-          }`}
+          className={
+            tabbed
+              ? `-mb-px flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[13px] transition-colors ${
+                  tab === name
+                    ? 'border-primary font-medium text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`
+              : `flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors ${
+                  tab === name
+                    ? 'bg-muted font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                }`
+          }
         >
           {t.task.tabs[name]}
           {counts[name] > 0 ? (
@@ -155,65 +170,129 @@ export function TaskDetailView({
         beside
           ? 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-4'
           : tabbed
-            ? 'flex h-full min-h-0 flex-col gap-4'
+            ? // One frame for the head, the tabs and what the chosen tab shows: they open and close together.
+              'flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card'
             : STACK
       }
     >
       <div
         className={
-          split
-            ? `flex min-w-0 flex-col gap-4 ${beside || talking ? 'min-h-0 flex-1' : 'shrink-0'}`
-            : `min-w-0 ${STACK}`
+          tabbed
+            ? `${WELL} ${talking ? 'min-h-0 flex-1' : 'shrink-0'}`
+            : beside
+              ? 'flex min-h-0 min-w-0 flex-1 flex-col gap-4'
+              : `min-w-0 ${STACK}`
         }
       >
-        <div>
-          <PageHeader title={task.title} above={above} />
-          <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
-            <span className="font-mono text-xs">
-              {task.repository} {itemName(task)}
-            </span>
-            <StageBadge
-              stage={task.stage}
-              integrated={task.integrated}
-              waitingForChecks={task.waitingForChecks}
-              resolved={task.resolved}
-              retryable={task.retryable}
-            />
-            <span className="font-mono text-xs tabular-nums">{money(task.costUsd)}</span>
-            {task.attempts > 0 ? <span>{t.task.attempts(task.attempts)}</span> : null}
-            {task.headSha ? <code className="text-xs">{shortSha(task.headSha)}</code> : null}
-            {task.preRelease ? (
-              <a
-                href={task.preRelease.url}
-                className="text-foreground underline underline-offset-2"
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t.task.preRelease(task.preRelease.tag)}
-              </a>
-            ) : null}
-            {task.release ? (
-              <a
-                href={task.release.url}
-                className="font-medium text-foreground underline underline-offset-2"
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t.task.release(task.release.tag)}
-              </a>
-            ) : null}
-            {task.pullRequestUrl ? (
-              <a
-                href={task.pullRequestUrl}
-                className="text-foreground underline underline-offset-2"
-                target="_blank"
-                rel="noreferrer"
-              >
-                {t.task.pullRequest}
-              </a>
-            ) : null}
+        {tabbed ? (
+          // One sheet for the whole head, as every block of the factory: a strip that says which task and
+          // where it is, its name and facts, and the tabs as the sheet's last line.
+          <header className="-mx-3 shrink-0 border-b border-border bg-card">
+            <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
+              <span className="font-mono text-xs">
+                {task.repository} {itemName(task)}
+              </span>
+              <StageBadge
+                stage={task.stage}
+                integrated={task.integrated}
+                waitingForChecks={task.waitingForChecks}
+                resolved={task.resolved}
+                retryable={task.retryable}
+              />
+              <span className="ml-auto flex shrink-0 items-center">{above}</span>
+            </div>
+            <div className="px-4 py-3">
+              <h1 className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight">
+                {task.title}
+              </h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+                <span className="font-mono text-xs tabular-nums">{money(task.costUsd)}</span>
+                {task.attempts > 0 ? <span>{t.task.attempts(task.attempts)}</span> : null}
+                {task.headSha ? <code className="text-xs">{shortSha(task.headSha)}</code> : null}
+                {task.preRelease ? (
+                  <a
+                    href={task.preRelease.url}
+                    className="text-foreground underline underline-offset-2"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t.task.preRelease(task.preRelease.tag)}
+                  </a>
+                ) : null}
+                {task.release ? (
+                  <a
+                    href={task.release.url}
+                    className="font-medium text-foreground underline underline-offset-2"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t.task.release(task.release.tag)}
+                  </a>
+                ) : null}
+                {task.pullRequestUrl ? (
+                  <a
+                    href={task.pullRequestUrl}
+                    className="text-foreground underline underline-offset-2"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {t.task.pullRequest}
+                  </a>
+                ) : null}
+              </div>
+            </div>
+            {tabs}
+          </header>
+        ) : (
+          <div>
+            <PageHeader title={task.title} above={above} />
+            <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+              <span className="font-mono text-xs">
+                {task.repository} {itemName(task)}
+              </span>
+              <StageBadge
+                stage={task.stage}
+                integrated={task.integrated}
+                waitingForChecks={task.waitingForChecks}
+                resolved={task.resolved}
+                retryable={task.retryable}
+              />
+              <span className="font-mono text-xs tabular-nums">{money(task.costUsd)}</span>
+              {task.attempts > 0 ? <span>{t.task.attempts(task.attempts)}</span> : null}
+              {task.headSha ? <code className="text-xs">{shortSha(task.headSha)}</code> : null}
+              {task.preRelease ? (
+                <a
+                  href={task.preRelease.url}
+                  className="text-foreground underline underline-offset-2"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t.task.preRelease(task.preRelease.tag)}
+                </a>
+              ) : null}
+              {task.release ? (
+                <a
+                  href={task.release.url}
+                  className="font-medium text-foreground underline underline-offset-2"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t.task.release(task.release.tag)}
+                </a>
+              ) : null}
+              {task.pullRequestUrl ? (
+                <a
+                  href={task.pullRequestUrl}
+                  className="text-foreground underline underline-offset-2"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t.task.pullRequest}
+                </a>
+              ) : null}
+            </div>
           </div>
-        </div>
+        )}
 
         <TaskActions detail={detail} onDone={resource.reload} />
         {detail.questions.length > 0 ? (
@@ -234,7 +313,6 @@ export function TaskDetailView({
           </Surface>
         ) : null}
 
-        {tabbed ? tabs : null}
         <div className={split ? (tabbed && !talking ? 'hidden' : 'contents') : undefined}>
           <Conversation
             detail={detail}
@@ -242,6 +320,7 @@ export function TaskDetailView({
             error={transcript.error}
             focusRun={focusRun}
             tall={split}
+            untitled={tabbed}
             onDone={resource.reload}
           />
         </div>
@@ -249,7 +328,13 @@ export function TaskDetailView({
       <aside
         aria-label={t.task.tabs.label}
         className={
-          split ? (talking ? 'hidden' : 'flex min-h-0 min-w-0 flex-1 flex-col gap-4') : STACK
+          tabbed
+            ? talking
+              ? 'hidden'
+              : `${WELL} min-h-0 flex-1`
+            : split
+              ? 'flex min-h-0 min-w-0 flex-1 flex-col gap-4'
+              : STACK
         }
       >
         {beside ? tabs : null}

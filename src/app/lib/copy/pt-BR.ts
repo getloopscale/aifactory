@@ -313,6 +313,7 @@ export const ptBR: Copy = {
     factoryNow: 'A fábrica agora',
   },
   work: {
+    closeTask: 'Fechar a tarefa',
     board: 'Quadro',
     list: 'Lista',
     viewGroup: 'Visão',
@@ -1827,6 +1828,8 @@ export const ptBR: Copy = {
     page: (n: number) => `Página ${n}`,
   },
   inbox: {
+    filter: 'Mostrar só',
+    everything: 'Tudo',
     openPage: 'Abrir a tarefa em página própria',
     heading: 'Caixa de entrada',
     nothing: 'Nada espera por você.',

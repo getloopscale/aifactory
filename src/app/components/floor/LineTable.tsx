@@ -1,6 +1,6 @@
 import { TriangleAlert } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 
 import type { TaskCard } from '../../../shared/panel'
 import { useCopy } from '../../lib/copy'
@@ -150,10 +150,15 @@ export function LineRow({
   // The mark beside the title says which tool; the model it ran with is the name under it.
   const seen = task.working?.step === 'checks' ? null : (task.working ?? task.lastAgent)
   const Step = task.working ? STEP_ICON[task.working.step] : null
+  // The row whose task is open beside the line.
+  const current = useSearchParams()[0].get('task') === String(task.id)
   return (
-    <li className="border-b border-border last:border-b-0 hover:bg-muted/40">
+    <li
+      className={`border-b border-border last:border-b-0 hover:bg-muted/40 ${current ? 'bg-muted/60' : ''}`}
+    >
       <Link
         to={{ search: `?task=${task.id}` }}
+        aria-current={current ? 'true' : undefined}
         className={`${COLUMNS} px-4 py-2.5 focus-visible:outline-2 focus-visible:outline-ring`}
       >
         <span className="flex min-w-0 items-center gap-3">

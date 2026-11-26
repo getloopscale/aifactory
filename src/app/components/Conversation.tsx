@@ -35,9 +35,12 @@ type Engine = { harness: string | null; model: string | null }
 function Folded({
   row,
   focus = false,
+  engine,
 }: {
   row: Extract<ThreadRow, { type: 'work' | 'worked' }>
   focus?: boolean
+  /** The tool and the model that did the work, said beside the pill. */
+  engine?: Engine
 }) {
   const { t } = useCopy()
   const [open, setOpen] = useState(focus)
@@ -67,6 +70,15 @@ function Folded({
           <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-destructive" />
         ) : null}
       </button>
+      {engine?.model ? (
+        <span
+          data-testid="turn-engine"
+          className="ml-2 inline-flex items-center gap-1 align-middle font-mono text-[11px] text-muted-foreground"
+        >
+          <AgentIcon agent={engine.harness ?? ''} size="sm" />
+          {engine.model}
+        </span>
+      ) : null}
       {open ? (
         <ol className="mt-2 space-y-2 border-l border-border pl-3">
           {row.steps.map((step) => (
@@ -156,7 +168,7 @@ function Row({
         <StepRow row={row.steps[0]} />
       </div>
     )
-  return <Folded row={row} focus={focus} />
+  return <Folded row={row} focus={focus} engine={engine} />
 }
 
 /**
@@ -170,9 +182,12 @@ export function Conversation({
   onDone,
   focusRun,
   tall = false,
+  untitled = false,
 }: {
   /** Beside the rest of the task, the thread takes the height of the window. */
   tall?: boolean
+  /** Under a tab that already names it, the block has no heading of its own. */
+  untitled?: boolean
   detail: TaskDetail
   events?: TranscriptEvent[]
   error?: string
@@ -263,7 +278,12 @@ export function Conversation({
   }
 
   return (
-    <Surface title={t.conversation.heading} icon={MessagesSquare} padded fill={tall}>
+    <Surface
+      title={untitled ? undefined : t.conversation.heading}
+      icon={untitled ? undefined : MessagesSquare}
+      padded
+      fill={tall}
+    >
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {roles.length > 0 ? (
           <div

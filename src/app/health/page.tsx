@@ -8,14 +8,15 @@ import { AgentIcon } from '../components/floor/AgentIcon'
 import { MetricsSection } from '../components/MetricsSection'
 import {
   PageHeader,
+  Pane,
   Quiet,
   Row,
   RowIcon,
   Rows,
-  STACK,
   Stats,
   Surface,
   TABLE,
+  Workbench,
 } from '../components/ui/Surface'
 import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'
@@ -125,95 +126,104 @@ export default function HealthPage() {
   const report = useResource<HealthReport>('/api/panel/health')
   const data = report.data
   return (
-    <>
-      <PageHeader title={h.title} />
-      {report.error ? <p className="mb-3 text-sm text-destructive">{report.error}</p> : null}
+    <Workbench
+      columns={data ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : undefined}
+      header={
+        <>
+          <PageHeader title={h.title} />
+          {report.error ? <p className="mb-3 text-sm text-destructive">{report.error}</p> : null}
+        </>
+      }
+    >
       {!data ? (
         <Surface label={h.title}>
           <Quiet>{h.loading}</Quiet>
         </Surface>
       ) : (
-        <div className={STACK}>
-          <Surface title={h.findings} icon={Stethoscope} count={data.findings.length}>
-            {data.findings.length === 0 ? (
-              <Quiet>{h.nothingWrong}</Quiet>
-            ) : (
-              <Rows>
-                {data.findings.map((f) => (
-                  <FindingRow key={f.id} finding={f} onDone={report.reload} />
-                ))}
-              </Rows>
-            )}
-          </Surface>
-
-          <Surface title={h.cost.title} icon={CircleDollarSign}>
-            <Stats
-              items={[
-                { label: h.cost.last24, value: money(data.cost.last24HoursUsd) },
-                { label: h.cost.last7, value: money(data.cost.last7DaysUsd) },
-                { label: h.cost.allTime, value: money(data.cost.totalUsd) },
-                {
-                  label: h.cost.perTask(data.cost.tasks),
-                  value: money(data.cost.avgPerTaskUsd),
-                },
-              ]}
-            />
-            {data.cost.groups.length > 0 ? (
-              <div className="overflow-x-auto border-t border-border">
-                <table className={TABLE.table}>
-                  <thead className={TABLE.head}>
-                    <tr>
-                      <th className={TABLE.th}>{h.cost.agent}</th>
-                      <th className={TABLE.th}>{h.cost.role}</th>
-                      <th className={`${TABLE.th} text-right`}>{h.cost.runs}</th>
-                      <th className={`${TABLE.th} text-right`}>{h.cost.cost}</th>
-                      <th className={`${TABLE.th} text-right`}>{h.cost.averageTime}</th>
-                      <th className={`${TABLE.th} text-right`}>{h.cost.failed}</th>
-                      <th className={`${TABLE.th} text-right`}>{h.cost.quota}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.cost.groups.map((g) => (
-                      <tr key={`${g.harness}-${g.role}`} className={TABLE.row}>
-                        <td className={TABLE.td}>
-                          <span className="flex items-center gap-2">
-                            <AgentIcon agent={g.harness} size="sm" />
-                            <span className="font-medium">{g.harness}</span>
-                          </span>
-                        </td>
-                        <td className={TABLE.td}>{g.role}</td>
-                        <td className={TABLE.number}>{g.runs}</td>
-                        <td className={TABLE.number}>
-                          {g.reportedRuns === 0 ? (
-                            <span className="text-muted-foreground">{h.cost.notReported}</span>
-                          ) : (
-                            money(g.costUsd)
-                          )}
-                          {partlyReported(g) ? (
-                            <span className="text-xs text-muted-foreground">
-                              {' '}
-                              {h.cost.partlyReported(g.reportedRuns, g.runs)}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className={TABLE.number}>{seconds(g.avgDurationMs)}</td>
-                        <td className={TABLE.number}>{g.failed}</td>
-                        <td className={TABLE.number}>{g.quota}</td>
+        <>
+          <Pane>
+            <Surface title={h.findings} icon={Stethoscope} count={data.findings.length}>
+              {data.findings.length === 0 ? (
+                <Quiet>{h.nothingWrong}</Quiet>
+              ) : (
+                <Rows>
+                  {data.findings.map((f) => (
+                    <FindingRow key={f.id} finding={f} onDone={report.reload} />
+                  ))}
+                </Rows>
+              )}
+            </Surface>
+            <Surface title={h.cost.title} icon={CircleDollarSign}>
+              <Stats
+                items={[
+                  { label: h.cost.last24, value: money(data.cost.last24HoursUsd) },
+                  { label: h.cost.last7, value: money(data.cost.last7DaysUsd) },
+                  { label: h.cost.allTime, value: money(data.cost.totalUsd) },
+                  {
+                    label: h.cost.perTask(data.cost.tasks),
+                    value: money(data.cost.avgPerTaskUsd),
+                  },
+                ]}
+              />
+              {data.cost.groups.length > 0 ? (
+                <div className="overflow-x-auto border-t border-border">
+                  <table className={TABLE.table}>
+                    <thead className={TABLE.head}>
+                      <tr>
+                        <th className={TABLE.th}>{h.cost.agent}</th>
+                        <th className={TABLE.th}>{h.cost.role}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.runs}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.cost}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.averageTime}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.failed}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.quota}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="border-t border-border">
-                <Quiet>{h.cost.none}</Quiet>
-              </div>
-            )}
-          </Surface>
+                    </thead>
+                    <tbody>
+                      {data.cost.groups.map((g) => (
+                        <tr key={`${g.harness}-${g.role}`} className={TABLE.row}>
+                          <td className={TABLE.td}>
+                            <span className="flex items-center gap-2">
+                              <AgentIcon agent={g.harness} size="sm" />
+                              <span className="font-medium">{g.harness}</span>
+                            </span>
+                          </td>
+                          <td className={TABLE.td}>{g.role}</td>
+                          <td className={TABLE.number}>{g.runs}</td>
+                          <td className={TABLE.number}>
+                            {g.reportedRuns === 0 ? (
+                              <span className="text-muted-foreground">{h.cost.notReported}</span>
+                            ) : (
+                              money(g.costUsd)
+                            )}
+                            {partlyReported(g) ? (
+                              <span className="text-xs text-muted-foreground">
+                                {' '}
+                                {h.cost.partlyReported(g.reportedRuns, g.runs)}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className={TABLE.number}>{seconds(g.avgDurationMs)}</td>
+                          <td className={TABLE.number}>{g.failed}</td>
+                          <td className={TABLE.number}>{g.quota}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="border-t border-border">
+                  <Quiet>{h.cost.none}</Quiet>
+                </div>
+              )}
+            </Surface>
+          </Pane>
 
-          <MetricsSection />
-        </div>
+          <Pane>
+            <MetricsSection />
+          </Pane>
+        </>
       )}
-    </>
+    </Workbench>
   )
 }

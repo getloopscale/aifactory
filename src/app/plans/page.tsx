@@ -8,14 +8,15 @@ import { post } from '../lib/api'
 import { Assist } from '../components/Assist'
 import {
   PageHeader,
+  Pane,
   Quiet,
   READABLE,
   Row,
   RowIcon,
   Rows,
-  STACK,
   Surface,
   type Tone,
+  Workbench,
 } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
 import { money } from '../lib/format'
@@ -69,9 +70,11 @@ export default function PlansPage() {
   }
 
   return (
-    <>
-      <PageHeader title={t.plans.heading} />
-      <div className={STACK}>
+    <Workbench
+      columns="grid-cols-[minmax(360px,5fr)_minmax(0,7fr)]"
+      header={<PageHeader title={t.plans.heading} />}
+    >
+      <Pane>
         {repos.data && enabled.length === 0 ? (
           <Alert
             intent="info"
@@ -127,7 +130,8 @@ export default function PlansPage() {
             </div>
           </Surface>
         )}
-
+      </Pane>
+      <Pane>
         <Surface title={t.plans.earlier} icon={ListTree} count={plans.data?.plans.length}>
           {plans.data && plans.data.plans.length === 0 ? (
             <Quiet>{t.plans.none}</Quiet>
@@ -155,7 +159,7 @@ export default function PlansPage() {
             </Rows>
           )}
         </Surface>
-      </div>
-    </>
+      </Pane>
+    </Workbench>
   )
 }

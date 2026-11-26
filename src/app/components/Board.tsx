@@ -1,6 +1,6 @@
 import { ListTodo } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 
 import {
   COLUMNS,
@@ -210,10 +210,13 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
  */
 export function Card({ task }: { task: TaskCard }) {
   const { t } = useCopy()
+  // The card whose task is open beside the board.
+  const current = useSearchParams()[0].get('task') === String(task.id)
   return (
     <Link
       to={openTask(task.id)}
-      className="block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring"
+      aria-current={current ? 'true' : undefined}
+      className={`block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring ${current ? 'bg-muted/60' : ''}`}
     >
       <div
         data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
@@ -344,11 +347,25 @@ const COLUMN_TONE: Record<ColumnId, Tone> = {
  * One column as a sheet: a heading strip with its dot, name and count, and its cards as rows parted by a
  * hairline. The sheet does not clip, so the strip can stay at the top of the board's frame while the cards scroll.
  */
-function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: TaskCard[] }) {
+function Column({
+  id,
+  title,
+  tasks,
+  fill = false,
+}: {
+  id: ColumnId
+  title: string
+  tasks: TaskCard[]
+  /** The column keeps the height of the board and its cards scroll under its title. */
+  fill?: boolean
+}) {
   const { t } = useCopy()
   const head = tasks.filter((task) => topRank(task.queue) !== null).length
   return (
-    <section aria-label={title} className="min-w-0 rounded-xl border border-border bg-card">
+    <section
+      aria-label={title}
+      className={`min-w-0 rounded-xl border border-border bg-card ${fill ? 'flex min-h-0 flex-col overflow-hidden' : ''}`}
+    >
       <h2 className="sticky top-0 z-10 rounded-t-xl border-b border-border bg-card text-sm font-semibold text-foreground">
         <span className="block rounded-t-xl bg-muted/40 px-3 py-2">
           <span className="flex items-center gap-2">
@@ -369,7 +386,7 @@ function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: Task
       {tasks.length === 0 ? (
         <p className="px-3 py-3 text-xs text-muted-foreground">{t.board.nothingHere}</p>
       ) : (
-        <ul className="divide-y divide-border">
+        <ul className={`divide-y divide-border ${fill ? 'min-h-0 flex-1 overflow-y-auto' : ''}`}>
           {tasks.map((task, i) => (
             <li key={task.id}>
               {i === head && head > 0 ? (
@@ -393,7 +410,14 @@ function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: Task
  * frame when the screen is narrower than the columns need, so the sideways scrollbar stays at the bottom
  * of the screen where it can be found, and the column titles stay at the top.
  */
-export function Board({ tasks }: { tasks: TaskCard[] }) {
+export function Board({
+  tasks,
+  fill = false,
+}: {
+  tasks: TaskCard[]
+  /** The board takes the height its page leaves: each column scrolls by itself, and the page does not. */
+  fill?: boolean
+}) {
   const { t } = useCopy()
   const compact = useWidth() === 'compact'
   const [picked, pick] = useState<ColumnId>('waiting')
@@ -431,10 +455,16 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
     )
   }
   return (
-    <div className="max-h-[calc(100vh-170px)] overflow-auto pb-2">
+    <div
+      className={
+        fill
+          ? 'min-h-0 flex-1 overflow-x-auto pb-2'
+          : 'max-h-[calc(100vh-170px)] overflow-auto pb-2'
+      }
+    >
       {/* The columns are as tall as the tallest: a title sticks only inside its own column, so a short one would let it go. */}
       <div
-        className="grid gap-2.5"
+        className={`grid gap-2.5 ${fill ? 'h-full grid-rows-[minmax(0,1fr)]' : ''}`}
         style={{ gridTemplateColumns: `repeat(${COLUMNS.length}, ${COLUMN})` }}
       >
         {COLUMNS.map((column) => (
@@ -442,6 +472,7 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
             key={column.id}
             id={column.id}
             title={t.columns[column.id]}
+            fill={fill}
             tasks={ordered(
               column.id,
               tasks.filter((t) => t.column === column.id),
