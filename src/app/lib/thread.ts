@@ -60,11 +60,35 @@ export type ThreadOptions = {
   engineOf?: (role: ThreadRole) => string | null
 }
 
-export function toolKind(tool: string): ToolKind {
+const SEARCHES = new Set(['rg', 'grep', 'find', 'fd', 'ag', 'ls', 'tree'])
+const READS = new Set(['cat', 'head', 'tail', 'nl', 'wc', 'less', 'bat'])
+const EDITS = new Set(['apply_patch', 'patch', 'tee'])
+
+/** The shell an agent wraps its command in: `/bin/bash -lc "..."`. */
+const WRAPPER = /^(?:\/\S*\/)?(?:ba|z)?sh\s+-l?c\s+(['"])/
+
+/**
+ * What a shell command does, told by the program it starts with. An agent that has only a shell reads and
+ * searches with it, so counting every call as a command says nothing about the turn. `sed -n` prints and
+ * `sed -i` edits; a command that writes a file with `>` edits; anything unknown stays a command.
+ */
+export function shellKind(command: string): ToolKind {
+  const line = command.trim().replace(WRAPPER, '')
+  const program = /^(?:\S*\/)?([\w.-]+)/.exec(line)?.[1] ?? ''
+  if (program === 'sed') return /\s-[a-z]*i/.test(line) ? 'edit' : 'read'
+  if (EDITS.has(program)) return 'edit'
+  if (/^cat\s*>|^(?:echo|printf)\b[^|]*>/.test(line)) return 'edit'
+  if (SEARCHES.has(program)) return 'search'
+  if (READS.has(program)) return 'read'
+  return 'command'
+}
+
+/** The kind of a tool call. `target` is what the tool was called with: for a shell, the command. */
+export function toolKind(tool: string, target = ''): ToolKind {
   if (/grep|glob|search|find|^ls$|list/i.test(tool)) return 'search'
   if (/read|view|open|cat/i.test(tool)) return 'read'
   if (/edit|write|patch|apply|create/i.test(tool)) return 'edit'
-  if (/bash|shell|exec|command|run/i.test(tool)) return 'command'
+  if (/bash|shell|exec|command|run/i.test(tool)) return target ? shellKind(target) : 'command'
   return 'other'
 }
 
@@ -77,7 +101,7 @@ function count(steps: TranscriptRow[]): { counts: ToolCounts; failed: number } {
       continue
     }
     if (s.type !== 'tool') continue
-    const kind = toolKind(s.tool)
+    const kind = toolKind(s.tool, s.target)
     counts[kind] = (counts[kind] ?? 0) + 1
     if (s.status === 'failed') failed++
   }

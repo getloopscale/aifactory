@@ -160,6 +160,38 @@ function renderTask(id = 5) {
   )
 }
 
+describe('the side of the task page', () => {
+  const frame = () => document.querySelector('[data-layout="workbench"]')
+
+  it('takes more of the width while it shows the changes, and gives it back on another tab', async () => {
+    serve({ 'GET /api/panel/tasks/5': detail() })
+    renderTask()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Add truncate' })).toBeDefined())
+    expect(frame()?.getAttribute('data-side')).toBe('narrow')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Changes/ }))
+    expect(frame()?.getAttribute('data-side')).toBe('wide')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Runs/ }))
+    expect(frame()?.getAttribute('data-side')).toBe('narrow')
+  })
+
+  it('closes on its button and opens again on the tab it was showing', async () => {
+    serve({ 'GET /api/panel/tasks/5': detail() })
+    renderTask()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Add truncate' })).toBeDefined())
+    fireEvent.click(screen.getByRole('tab', { name: /^Runs/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the details' }))
+    expect(frame()?.getAttribute('data-side')).toBe('closed')
+    expect(screen.queryByRole('tab', { name: /^Runs/ })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the details' }))
+    expect(frame()?.getAttribute('data-side')).toBe('narrow')
+    expect(screen.getByRole('tab', { name: /^Runs/ }).getAttribute('aria-selected')).toBe('true')
+  })
+})
+
 describe('task page', () => {
   it('shows the timeline, the evidence with its output, and the review with its findings', async () => {
     serve({ 'GET /api/panel/tasks/5': detail() })

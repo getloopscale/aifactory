@@ -391,6 +391,8 @@ export const en = {
       label: 'About this task',
       activity: 'Activity',
       changes: 'Changes',
+      hide: 'Hide the details',
+      show: 'Show the details',
       runs: 'Runs',
       evidence: 'Evidence',
       reviews: 'Reviews',
