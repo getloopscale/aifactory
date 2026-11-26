@@ -34,11 +34,11 @@ export type DiffFacts = {
  * which is what the reviewer reads (`git diff baseSha...HEAD`) and what GitHub shows on the pull request.
  * On a first run that is `baseSha` itself. On a task sent back, `baseSha` is the integration branch as it
  * is now and HEAD is the branch cut from it earlier, and what the integration branch changed since then is
- * not the agent's (paulohenriquevn/aifactory#38).
+ * not the agent's (getloopscale/aifactory#38).
  *
  * `checkRuns` is every result of the factory's checks on this task. A file added between the commit a check
  * failed on and the commit it then passed on is what the check asked for, so it is not listed as outside
- * the plan (paulohenriquevn/aifactory#53), unless it is a changeset that names no package. The guards read the whole diff either way.
+ * the plan (getloopscale/aifactory#53), unless it is a changeset that names no package. The guards read the whole diff either way.
  */
 export async function diffFacts(
   backend: SandboxBackend,
@@ -262,7 +262,7 @@ const PLAIN_CHANGESET = /^\.changeset\/[\w.-]+\.md$/
 /**
  * The added files a check can have asked for: all of them but a changeset that names no package. No check
  * asks for one of those (the factory's own fails on it), and it breaks the release of the repository
- * (paulohenriquevn/aifactory#67), so it stays among the files outside the plan and the reviewer is not
+ * (getloopscale/aifactory#67), so it stays among the files outside the plan and the reviewer is not
  * told it is legitimate. A changeset is read at the commit the check passed on, and only when its path is
  * plain: one with any other character is not handed to a shell, and is not taken as asked for either.
  */

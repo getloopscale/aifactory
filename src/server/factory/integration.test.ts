@@ -10,7 +10,7 @@ vi.mock('./promotion-merge', async (original) => ({
   integrationHeldUntil: async () => undefined,
 }))
 
-const OWN = 'paulohenriquevn/aifactory'
+const OWN = 'getloopscale/aifactory'
 const SHA = 'abc1234'
 let api: FakeGithub
 

@@ -753,7 +753,7 @@ zero, a série fica "no baseline yet". A detecção é só aritmética, sem mode
 | `beyond_3_sigma`              | O último ponto além de 3σ          | Registra, mostra e abre issue |
 
 As faixas e os níveis ficam em `src/server/metrics/config.ts`, versionados. Cada regra quebrada num dia vira
-uma linha em `metric_signal`, uma vez só. A issue vai para `paulohenriquevn/aifactory`, com a tabela dos
+uma linha em `metric_signal`, uma vez só. A issue vai para `getloopscale/aifactory`, com a tabela dos
 pontos, e só uma por indicador e repositório a cada 30 dias. Quando o mesmo dia já abriu issue num
 repositório, a série da fábrica inteira não abre outra. Se o GitHub recusa, o erro fica na linha e a passada
 seguinte tenta de novo. A página Health mostra o último dia de cada indicador, a base e o estado da faixa, e

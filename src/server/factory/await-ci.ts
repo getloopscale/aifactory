@@ -543,7 +543,7 @@ export type AdoptResult = {
 
 /**
  * A person merged the pull request a handoff left, as the owner does with work the factory holds for them
- * (paulohenriquevn/aifactory#139): the task is integrated from that merge as from the factory's own, so the
+ * (getloopscale/aifactory#139): the task is integrated from that merge as from the factory's own, so the
  * pre-release is made and a release ships it and closes its issue. Nothing is merged here.
  */
 export async function adoptMergedHandoffs(deps: IntegrationDeps): Promise<AdoptResult> {

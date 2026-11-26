@@ -519,7 +519,7 @@ export function conflictNote(base: string, files: string[] = []): string {
 /**
  * Sends a done task whose pull request conflicts with its base back to its own branch, to merge the base,
  * and answers whether it did. Approved work is kept: starting over would delete the branch and pay for the
- * whole run again (paulohenriquevn/aifactory#122). Without the branch there is nothing to keep.
+ * whole run again (getloopscale/aifactory#122). Without the branch there is nothing to keep.
  */
 async function mergesTheBase(
   deps: ActionDeps,

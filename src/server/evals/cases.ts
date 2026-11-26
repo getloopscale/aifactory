@@ -167,7 +167,23 @@ export function agentConfigurationChanged(changed: string[]): string[] {
 }
 
 /** The factory's own repository: the one whose code `AGENT_CONFIGURATION` names. */
-export const FACTORY_REPOSITORY = 'paulohenriquevn/aifactory'
+export const FACTORY_REPOSITORY = 'getloopscale/aifactory'
+
+/**
+ * The names the factory's repository had before. A task recorded under one of them is still the factory's own
+ * work, so a rename never opens a way to integrate a change to the agents or the gates.
+ */
+export const FORMER_FACTORY_REPOSITORIES = ['paulohenriquevn/aifactory']
+
+/**
+ * Whether `repository` is the factory's own. With no `own` it is the factory's name now or any name it had;
+ * a fork names its `own`, and then only that one counts. GitHub compares names without case, and so does this.
+ */
+export function isFactoryRepository(repository: string, own?: string): boolean {
+  const name = repository.toLowerCase()
+  if (own !== undefined) return name === own.toLowerCase()
+  return [FACTORY_REPOSITORY, ...FORMER_FACTORY_REPOSITORIES].some((n) => n.toLowerCase() === name)
+}
 
 /**
  * The agent configuration a change of `repository` touches. The factory never integrates such a change on
@@ -177,9 +193,9 @@ export const FACTORY_REPOSITORY = 'paulohenriquevn/aifactory'
 export function heldForEvaluation(
   repository: string,
   changed: string[],
-  own: string = FACTORY_REPOSITORY,
+  own?: string,
 ): string[] {
-  return repository === own ? agentConfigurationChanged(changed) : []
+  return isFactoryRepository(repository, own) ? agentConfigurationChanged(changed) : []
 }
 
 /**
@@ -189,9 +205,9 @@ export function heldForEvaluation(
 export function heldForReview(
   repository: string,
   changed: string[],
-  own: string = FACTORY_REPOSITORY,
+  own?: string,
 ): string[] {
-  if (repository !== own) return []
+  if (!isFactoryRepository(repository, own)) return []
   return changed.filter(
     (path) =>
       !isTest(path) &&

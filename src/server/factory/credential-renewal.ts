@@ -36,7 +36,7 @@ const withGithubToken = (egress: EgressRule[], token: string) =>
 /**
  * Gives a sandbox that just started a GitHub token minted now, the firewall first, then the run. The wait for a
  * sandbox has no limit (#405) and the token in its firewall was minted before it, so after a long wait that
- * token ends before the first renewal comes, and the clone or the push fails (paulohenriquevn/aifactory#424).
+ * token ends before the first renewal comes, and the clone or the push fails (getloopscale/aifactory#424).
  */
 export async function freshGithubCredential(
   sandbox: IsolatedSandbox,
@@ -60,7 +60,7 @@ export async function freshGithubCredential(
 /**
  * Renews the GitHub token of a running sandbox every `CREDENTIAL_RENEWAL_MS`: the firewall first, then the
  * run, so the run never holds a token the sandbox's git does not. This is what lets a run last longer than
- * the hour a token does (paulohenriquevn/aifactory#4). Stopping the returned sandbox, or saving it to a
+ * the hour a token does (getloopscale/aifactory#4). Stopping the returned sandbox, or saving it to a
  * snapshot, stops the renewals.
  */
 export function renewGithubCredential(

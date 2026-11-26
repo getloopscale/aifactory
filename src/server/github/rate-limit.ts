@@ -3,7 +3,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import type { FetchLike } from './app'
 
 /**
- * GitHub's hourly request budget, seen from the factory (paulohenriquevn/aifactory#232). Every call the
+ * GitHub's hourly request budget, seen from the factory (getloopscale/aifactory#232). Every call the
  * factory makes to the API goes through `gated`, which reads the `x-ratelimit-*` headers of each answer,
  * turns a refusal for the limit into `RateLimited`, and counts the call for the pass it was made in. The
  * crons that only poll ask `rateGate.waitUntil` before a pass, so once the budget is spent they wait for

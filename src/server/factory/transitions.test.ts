@@ -186,7 +186,7 @@ describe('what a person asks for in the panel', () => {
     )
   })
 
-  // paulohenriquevn/aifactory#54
+  // getloopscale/aifactory#54
   it('starts a task sent back from the integration branch when its branch is gone', () => {
     for (const stage of ['done', 'handoff'] as const) {
       expect(outcome({ stage, branchGone: true }, 'request_changes')).toEqual(
@@ -477,14 +477,14 @@ describe('integrating approved work', () => {
     expect(outcome({ stage: 'pr', checksPassed: true }, 'integrate')).toEqual(act('merge'))
   })
 
-  // paulohenriquevn/aifactory#51
+  // getloopscale/aifactory#51
   it('merges directly a pull request whose required checks already passed', () => {
     expect(outcome({ stage: 'pr', checksRequired: true, checksPassed: true }, 'integrate')).toEqual(
       act('merge'),
     )
   })
 
-  // paulohenriquevn/aifactory#56
+  // getloopscale/aifactory#56
   it('marks a draft pull request ready for review before anything merges it', () => {
     const draft = { stage: 'pr', draft: true } as const
     expect(outcome(draft, 'integrate')).toEqual(act('mark_ready_for_review'))

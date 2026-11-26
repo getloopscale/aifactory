@@ -74,7 +74,7 @@ export function countsOf(c, db) {
 /**
  * Throws unless pg_restore reads the whole dump. `--list` was not enough: it reads only the table of contents,
  * so it took a truncated dump for a good one, and it exits before reading the rest of stdin, which broke the
- * pipe once a dump outgrew it (paulohenriquevn/aifactory#3). Restoring to /dev/null reads every block.
+ * pipe once a dump outgrew it (getloopscale/aifactory#3). Restoring to /dev/null reads every block.
  */
 export function verifyDump(c, path) {
   const read = spawnSync('docker', ['exec', '-i', c.container, 'pg_restore', '-f', '/dev/null'], {

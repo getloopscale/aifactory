@@ -183,7 +183,7 @@ const ALREADY_INTEGRATED = refuse(
 )
 /**
  * The run continues on the task's branch only while GitHub has it. Without it the run would fail on the
- * fetch before any agent read the note (paulohenriquevn/aifactory#54).
+ * fetch before any agent read the note (getloopscale/aifactory#54).
  */
 const onBranch = (task: Facts) =>
   act(task.branchGone ? 'start_from_integration_branch' : 'continue_on_branch')
@@ -296,9 +296,9 @@ const NOBODY_WORKING = ignore(
 )
 const NOT_AT_ITS_PULL_REQUEST = ignore('only a run that reached its pull request integrates it')
 /**
- * GitHub merges no draft, so the draft a handoff left is marked ready first (paulohenriquevn/aifactory#56).
+ * GitHub merges no draft, so the draft a handoff left is marked ready first (getloopscale/aifactory#56).
  * Required checks that already passed leave nothing for auto-merge to wait for, and GitHub refuses it: the
- * pull request is merged at once, like one with no required checks (paulohenriquevn/aifactory#51).
+ * pull request is merged at once, like one with no required checks (getloopscale/aifactory#51).
  */
 const integrate: Rule = (task) => {
   if (task.draft) return act('mark_ready_for_review')
