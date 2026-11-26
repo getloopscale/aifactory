@@ -58,6 +58,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The inbox is the first place of the menu, open or folded, ahead of the floor and the board.
 - On a task's page the side with the tabs takes more than half of the width while it shows the changes, so a line of code fits without wrapping, and goes back to a third on any other tab. A button beside the tabs closes the side and leaves the page to the conversation; the same button, at the top of the page, opens it again on the tab it was showing.
 - The line that folds a turn of the agent says what the turn did when the agent works through a shell: a command that prints a file counts as a file read, one that searches counts as a search and one that writes a file counts as an edit, where every one of them used to count as a command.
 - On a task's page the conversation takes the height that the actions used to: asking for changes and marking a task resolved another way each open their form from a button in the row of actions, the terminal opens from a button beside the agent's name, and the message box starts at one line and grows with what is typed

@@ -53,9 +53,9 @@ describe('the folded menu', () => {
     for (const name of [t.menu.show, t.menu.newChat, t.menu.searchChats, t.menu.account])
       expect(screen.getByRole('button', { name })).toBeDefined()
     const places: [string, string][] = [
+      [t.places.inbox, '/inbox'],
       [t.floor.name, '/floor'],
       [t.places.board, '/work'],
-      [t.places.inbox, '/inbox'],
       [t.places.plans, '/plans'],
       [t.places.repositories, '/repositories'],
       [t.places.agents, '/agents'],

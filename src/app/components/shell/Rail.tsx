@@ -154,8 +154,6 @@ export function Rail({
       </div>
 
       <nav aria-label={t.menu.main} className="flex flex-col items-center gap-1 pt-3">
-        <Place id="floor" to="/floor" icon={Factory} label={t.floor.name} />
-        <Place id="board" to="/work" icon={LayoutDashboard} label={t.places.board} />
         <Place
           id="inbox"
           to="/inbox"
@@ -164,6 +162,8 @@ export function Rail({
           mark="waiting"
           count={waiting}
         />
+        <Place id="floor" to="/floor" icon={Factory} label={t.floor.name} />
+        <Place id="board" to="/work" icon={LayoutDashboard} label={t.places.board} />
         <Place id="plans" to="/plans" icon={ListChecks} label={t.places.plans} />
         <Rule />
         <Place

@@ -266,6 +266,7 @@ export function Sidebar({
       <ScrollArea className="min-h-0 flex-1 px-2 pb-3">
         <nav aria-label={t.menu.main}>
           <Section title={t.menu.groups.operation}>
+            <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} count={waiting} />
             {showOnboarding ? (
               <Place id="onboarding" to="/onboarding" icon={Rocket} label={t.onboarding.title} />
             ) : null}
@@ -278,7 +279,6 @@ export function Sidebar({
               <span className="truncate">{t.floor.name}</span>
             </Link>
             <Place id="board" to="/work" icon={LayoutDashboard} label={t.places.board} />
-            <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} count={waiting} />
             <Place id="plans" to="/plans" icon={ListChecks} label={t.places.plans} />
           </Section>
           <Section title={t.menu.groups.factory}>
