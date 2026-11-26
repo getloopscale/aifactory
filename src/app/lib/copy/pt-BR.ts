@@ -1515,6 +1515,7 @@ export const ptBR: Copy = {
     none: 'Nenhum plano foi escrito para esta tarefa.',
     by: (harness: string, sha: string) => `por ${harness} sobre ${sha}`,
     latestOf: (n: number) => ` · o último de ${n}`,
+    acceptance: 'Aceite',
     files: 'Arquivos',
     noFile: 'Nenhum arquivo: o construtor esperava que o código já fizesse o que a issue pede.',
     order: 'Ordem',

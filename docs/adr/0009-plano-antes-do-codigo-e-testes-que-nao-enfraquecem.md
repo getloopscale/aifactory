@@ -120,3 +120,13 @@ bug, em que o teste de regressão é a prova do conserto.
 - Uma task nova passa por `plan` antes de `build`, e o painel mostra o estágio como "planning".
 - Os dois guardas novos usam heurísticas de texto. Um framework de teste com outra sintaxe (por exemplo,
   `#[test]` em Rust) não é lido. O guarda não falha nesse caso: só não aponta nada.
+
+## Nota de 2026-11-25: critérios de aceite no plano
+
+O plano ganha `acceptance`: uma lista de `{ id, statement, evidence }` (`A1`, `A2`, ...), derivada da issue
+antes de `files`. Um plano novo sem nenhuma entrada é tratado como um plano que não pôde ser lido: mais um
+turno na mesma sessão e, depois, falha em `plan`. O revisor recebe a lista e responde `acceptance`:
+`[{ id, met, where }]`; um id não atendido ou omitido vira um achado `major` que o nomeia, acrescentado pela
+fábrica, e a aprovação passa a `changes`. Um plano gravado antes disso não tem `acceptance`, continua
+legível e é revisado como antes. Isto muda os prompts de plano e de revisão (`AGENT_CONFIGURATION`): o dono
+roda `pnpm evals:check` e compara as rodadas de revisão por caso e o custo.

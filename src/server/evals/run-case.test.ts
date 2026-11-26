@@ -30,10 +30,12 @@ const evalCase: EvalCase = {
   original: { taskId: 1, costUsd: 0.4, durationMs: 600_000, attempts: 1, mergedSha: 'm' },
 }
 
-const APPROVE = '{"verdict":"approve","summary":"good","findings":[]}'
+const APPROVE =
+  '{"verdict":"approve","summary":"good","findings":[],"acceptance":[{"id":"A1","met":true,"where":"src/cli.test.ts"}]}'
 const CHANGES =
   '{"verdict":"changes","summary":"no test","findings":[{"severity":"major","issue":"add a test"}]}'
 const PLAN = JSON.stringify({
+  acceptance: [{ id: 'A1', statement: 'the flag works', evidence: 'src/cli.test.ts' }],
   files: [{ path: 'src/cli.ts', why: 'the flag' }],
   order: ['add the flag'],
   risks: [],
@@ -588,6 +590,28 @@ describe('runCase', () => {
     const result = await runCase(deps(sandbox(), builder, agent('reviewer', [])), evalCase)
 
     expect(result).toMatchObject({ passed: false, reason: 'the agent wrote no plan: Still reading.' })
+  })
+
+  it('asks again for a plan with no acceptance, and fails when the second has none either', async () => {
+    const bare = JSON.stringify({ ...JSON.parse(PLAN), acceptance: [] })
+    const once = agent('builder', [
+      { ok: true, summary: bare, sessionId: 's1' },
+      { ok: true, summary: PLAN, sessionId: 's1' },
+      built(),
+    ])
+    const ok = await runCase(
+      deps(sandbox(), once, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    expect(ok.passed).toBe(true)
+    expect(once.prompts[1]).toContain('Your answer had no plan that could be read')
+
+    const twice = agent('builder', [
+      { ok: true, summary: bare, sessionId: 's1' },
+      { ok: true, summary: bare, sessionId: 's1' },
+    ])
+    const result = await runCase(deps(sandbox(), twice, agent('reviewer', [])), evalCase)
+    expect(result.reason).toContain('the agent wrote no plan')
   })
 
   it('shows the reviewer the plan and the files the diff changed outside it', async () => {
@@ -1343,7 +1367,10 @@ describe('runCase review record', () => {
     summary: `round ${n}`,
     findings: [{ severity: n === 2 ? 'minor' : 'major', file: `src/f${n}.ts`, issue: `problem ${n}` }],
   })
-  const answer = (n: number): HarnessResult => ({ ok: true, summary: JSON.stringify(round(n)) })
+  const answer = (n: number): HarnessResult => ({
+    ok: true,
+    summary: JSON.stringify({ ...round(n), acceptance: [{ id: 'A1', met: true, where: 'x' }] }),
+  })
 
   it('keeps the distinct verdict of every review round in the run file', async () => {
     const builder = agent('builder', planned(built(), built(), built()))
@@ -1456,6 +1483,22 @@ describe('the security agent in a case', () => {
   })
 })
 
+
+describe('runCase acceptance', () => {
+  it('gives the reviewer the plan acceptance and turns an unmet id into a major finding', async () => {
+    const builder = agent('builder', planned(built(), built(), built(), built()))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+      { ok: true, summary: APPROVE.replace('"met":true', '"met":false') },
+    ])
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(reviewer.prompts[0]).toContain('A1: the flag works')
+    expect(result.reviews?.[0]?.verdict).toBe('changes')
+    expect(result.reviews?.[0]?.findings[0]?.issue).toContain('A1')
+  })
+})
 
 describe('the lens in a case', () => {
   const MAJOR =
