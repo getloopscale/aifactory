@@ -93,8 +93,8 @@ describe('opening the conversation at a pass', () => {
 
 describe('the mode the box offers', () => {
   const modes = () =>
-    Array.from(screen.getByLabelText(en.conversation.mode).querySelectorAll('option')).map(
-      (o) => o.getAttribute('value'),
+    Array.from(screen.getByLabelText(en.conversation.mode).querySelectorAll('option')).map((o) =>
+      o.getAttribute('value'),
     )
   it('offers guide where the server takes it', () => {
     render(<Conversation detail={{ ...detail, guide: { available: true } }} onDone={() => {}} />)
