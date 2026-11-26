@@ -9,11 +9,15 @@ const state = vi.hoisted(() => ({
     { harness: string; sessionId: string } | undefined,
   cloneFails: false,
   saveFails: false,
+  beats: 0,
+  gate: undefined as Promise<void> | undefined,
 }))
 
 vi.mock('./task-writer', () => ({
   reserveTerminal: async () => state.reserve,
-  beatTerminal: async () => {},
+  beatTerminal: async () => {
+    state.beats += 1
+  },
   closeTerminalRow: async (_db: unknown, id: number, ended: { reason: string; error?: string }) => {
     state.closed.push({ id, ...ended })
   },
@@ -41,7 +45,10 @@ vi.mock('./conversation', () => ({
   sandboxSpecFor: async () => ({ timeoutMs: 1, egress: [{ domain: 'github.com' }] }),
 }))
 vi.mock('./sandbox-slot', () => ({
-  untilSlotFree: async () => ({}),
+  untilSlotFree: async () => {
+    await state.gate
+    return {}
+  },
   whenSlotFree: async (create: () => unknown) => create(),
 }))
 vi.mock('../knowledge/feed', () => ({
@@ -96,6 +103,8 @@ beforeEach(() => {
   state.stored = { harness: 'claude-code', sessionId: '019a0000-0000-7000-8000-000000000001' }
   state.cloneFails = false
   state.saveFails = false
+  state.beats = 0
+  state.gate = undefined
 })
 afterEach(() => vi.useRealTimers())
 
@@ -181,6 +190,33 @@ describe('openTerminalSession', () => {
     expect(state.closed).toEqual([{ id: 5, reason: 'failed', error: 'clone failed' }])
     expect(sandbox.stopped).toBe(1)
     expect(sandbox.up.size).toBe(0)
+  })
+
+  it('renews the row while the sandbox is still starting, and stops renewing once it ended', async () => {
+    let open!: () => void
+    state.gate = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const { deps } = build()
+    const opening = openTerminalSession(deps, { ...input(), limits: { beatMs: 1000 } })
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(state.beats).toBe(5)
+    open()
+    const handle = await opening
+    await handle.close()
+    const after = state.beats
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(state.beats).toBe(after)
+  })
+
+  it('stops renewing the row when the start fails', async () => {
+    state.cloneFails = true
+    const { deps } = build()
+    await expect(
+      openTerminalSession(deps, { ...input(), limits: { beatMs: 1000 } }),
+    ).rejects.toThrow('clone failed')
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(state.beats).toBe(0)
   })
 
   it('refuses a sandbox that cannot open a terminal, with no sandbox left up', async () => {

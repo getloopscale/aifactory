@@ -95,6 +95,14 @@ export async function openTerminalSession(
 
   const limits = input.limits ?? {}
   const timers: NodeJS.Timeout[] = []
+  // The row is renewed from the moment it is reserved: a slow start must not look abandoned, or a second writer
+  // could take the task. clearInterval and clearTimeout are the same in Node, and `end` clears it.
+  timers.push(
+    setInterval(
+      () => void beatTerminal(db, rowId).catch(() => undefined),
+      limits.beatMs ?? TERMINAL_BEAT_MS,
+    ) as unknown as NodeJS.Timeout,
+  )
   let sandbox: IsolatedSandbox | undefined
   let terminal: Terminal | undefined
   let sessionId: string | undefined
@@ -184,12 +192,6 @@ export async function openTerminalSession(
   }
   resetIdle()
   timers.push(setTimeout(() => void end('limit'), limits.totalMs ?? TERMINAL_TOTAL_MS))
-  const beat = setInterval(
-    () => void beatTerminal(db, rowId).catch(() => undefined),
-    limits.beatMs ?? TERMINAL_BEAT_MS,
-  )
-  timers.push(beat as unknown as NodeJS.Timeout)
-  // clearInterval and clearTimeout are the same in Node.
 
   return {
     rowId,

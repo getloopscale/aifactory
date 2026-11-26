@@ -18,6 +18,18 @@ export type Reservation = { kind: 'reserved'; id: number } | { kind: 'refused'; 
 const TERMINAL_OPEN =
   'a terminal of this task is already open: close it first, a task has one writer'
 
+/** Postgres' unique violation, however the driver or Drizzle wraps it. */
+function isUniqueViolation(error: unknown): boolean {
+  for (
+    let e = error as { code?: string; cause?: unknown } | undefined;
+    e;
+    e = e.cause as typeof e
+  ) {
+    if (e.code === '23505') return true
+  }
+  return false
+}
+
 /** Closes the open rows of the task that nobody renews: their process is gone, and so is its sandbox's owner. */
 async function closeAbandoned(tx: Database, taskId: number, now: Date): Promise<void> {
   await tx
@@ -77,8 +89,9 @@ export async function reserveTerminal(
         .values({ ...key, openedAt: now, seenAt: now })
         .returning({ id: terminalSession.id })
       return { kind: 'reserved', id: made.id }
-    } catch {
-      // The unique index: another process opened one between the read and the insert.
+    } catch (error) {
+      // The unique index: another process opened one between the read and the insert. Any other error is real.
+      if (!isUniqueViolation(error)) throw error
       return { kind: 'refused', reason: TERMINAL_OPEN }
     }
   })

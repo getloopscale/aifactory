@@ -115,6 +115,13 @@ describe('the one writer of a task', () => {
     expect(await reserveTerminal(getDb(), key(taskId))).toMatchObject({ kind: 'reserved' })
   })
 
+  it('rethrows an error of the insert that is not the unique index', async () => {
+    const taskId = await seedTask()
+    await expect(
+      reserveTerminal(getDb(), { taskId, role: 'builder', engine: null as unknown as string }),
+    ).rejects.toThrow()
+  })
+
   it('takes over a terminal nobody renews, and records why', async () => {
     const taskId = await seedTask()
     const first = await reserveTerminal(
