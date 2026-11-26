@@ -95,7 +95,7 @@ import {
   changePlanPrompt,
   givenPlanPrompt,
   implementPlanPrompt,
-  parseChangePlan,
+  parseNewChangePlan,
   planAgainPrompt,
   renderChangePlan,
   type ChangePlan,
@@ -114,6 +114,7 @@ import {
   reviewPrompt,
   reworkPrompt,
   roundsNote,
+  withAcceptance,
   type EarlierReview,
   type Finding,
   type ReviewVerdict,
@@ -1277,7 +1278,7 @@ export class Run {
     const session = first.sessionId ?? (apart ? undefined : this.sessionId)
     if (!apart) this.sessionId = session
     const plan =
-      parseChangePlan(first.summary) ?? (await this.planAgain(planner, session, timeoutMs))
+      parseNewChangePlan(first.summary) ?? (await this.planAgain(planner, session, timeoutMs))
     const discarded = await this.discardEdits()
     await deps.db.insert(changePlan).values({
       taskId,
@@ -1308,7 +1309,7 @@ export class Run {
       }),
     )
     if (planner.name === this.builder.name) this.sessionId = again.sessionId ?? this.sessionId
-    const plan = again.ok ? parseChangePlan(again.summary) : undefined
+    const plan = again.ok ? parseNewChangePlan(again.summary) : undefined
     if (!plan)
       throw new StageFailure(`the agent wrote no plan: ${oneLine(again.summary).slice(0, 700)}`)
     return plan
@@ -2219,7 +2220,9 @@ export class Run {
               risk: this.risk,
               ...(this.earlier ? { earlier: this.earlier } : {}),
               builderSummary: this.reviewAnswer ?? this.summary,
-              ...(this.plan ? { plan: this.renderedPlan, unplanned } : {}),
+              ...(this.plan
+                ? { plan: this.renderedPlan, unplanned, acceptance: this.plan.acceptance ?? [] }
+                : {}),
             }),
       }),
     )
@@ -2230,7 +2233,11 @@ export class Run {
     await must(this.backend, `git -C ${this.repoDir} clean -fd`)
 
     const read: ReviewVerdict = result.ok
-      ? parseVerdict(result.summary)
+      ? withAcceptance(
+          parseVerdict(result.summary),
+          this.resolvedMerge ? undefined : this.plan?.acceptance,
+          result.summary,
+        )
       : { verdict: 'invalid', summary: `the reviewer failed: ${result.summary}`, findings: [] }
     // A fact about the diff that an agent could bend outranks an approval.
     const blocked =

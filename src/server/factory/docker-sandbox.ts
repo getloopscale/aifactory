@@ -1,11 +1,11 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { chmodSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
-import { SandboxBackend } from '@theokit/agents/sandbox'
+import { SandboxBackend, shellEscapePosix } from '@theokit/agents/sandbox'
 
 import type {
   ExecuteResult,
@@ -13,6 +13,8 @@ import type {
   IsolatedSandboxProvider,
   SandboxSpec,
   StreamingOptions,
+  Terminal,
+  TerminalOptions,
 } from './sandbox'
 import { MAX_RUN_MS } from './run-limit'
 import { assertIsolated } from './sandbox'
@@ -95,6 +97,19 @@ const realDocker: Docker = (args, opts = {}) =>
     child.stdin.end(opts.input)
   })
 
+/** Starts `docker` with these arguments and keeps its pipes, for a terminal. Replaced in tests. */
+export type SpawnDocker = (args: string[]) => ChildProcessWithoutNullStreams
+
+const realSpawn: SpawnDocker = (args) => spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] })
+
+/** The file the terminal's command writes its own pid to, so a resize can reach its pseudo-terminal. */
+const TERMINAL_PID = '/tmp/.factory-terminal-pid'
+
+const dimension = (n: number): number => {
+  if (!Number.isInteger(n) || n < 1 || n > 1000) throw new Error(`bad terminal size ${n}`)
+  return n
+}
+
 async function must(docker: Docker, args: string[], opts: DockerOptions = {}) {
   const result = await docker(args, opts)
   if (result.code !== 0) {
@@ -120,6 +135,7 @@ class DockerBackend extends SandboxBackend {
   constructor(
     private readonly docker: Docker,
     private readonly container: string,
+    private readonly spawnDocker: SpawnDocker = realSpawn,
   ) {
     // A clone or an install through the proxy takes longer than the 30 seconds the SDK gives a command by
     // default, which is what a microVM's own network needs. The base class fills in its own 30 seconds when
@@ -145,6 +161,89 @@ class DockerBackend extends SandboxBackend {
       )
     } finally {
       split.end()
+    }
+  }
+
+  /**
+   * `command` under a pseudo-terminal (usetheokit/theokit-sdk#1614). `docker exec -t` needs a terminal on the
+   * host, so the container's own `script` makes one: it runs the command on a pty and relays the bytes through
+   * the pipes of an ordinary `docker exec -i`. The command's pid is written to a file, which is how a resize
+   * reaches that pty (`stty` on its input, then SIGWINCH).
+   */
+  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+    const cols = dimension(opts.cols)
+    const rows = dimension(opts.rows)
+    const inner = `echo $$ > ${TERMINAL_PID}; stty cols ${cols} rows ${rows}; exec sh -c ${shellEscapePosix(command)}`
+    const child = this.spawnDocker([
+      'exec',
+      '-i',
+      '-u',
+      USER,
+      '-w',
+      opts.cwd ?? WORKDIR,
+      '-e',
+      'TERM=xterm-256color',
+      this.container,
+      'script',
+      '-qfc',
+      inner,
+      '/dev/null',
+    ])
+    const listeners: ((data: string) => void)[] = []
+    const decoder = new StringDecoder('utf8')
+    const emit = (chunk: Buffer) => {
+      const text = decoder.write(chunk)
+      if (text) for (const listener of listeners) listener(text)
+    }
+    child.stdout.on('data', emit)
+    child.stderr.on('data', emit)
+    let ended = false
+    const finished = new Promise<{ exitCode: number }>((done) => {
+      child.on('error', () => {
+        ended = true
+        done({ exitCode: 1 })
+      })
+      child.on('close', (code: number | null) => {
+        ended = true
+        done({ exitCode: code ?? 1 })
+      })
+    })
+    return {
+      write: (data) => {
+        if (!ended) child.stdin.write(data)
+      },
+      resize: async (c, r) => {
+        const width = dimension(c)
+        const height = dimension(r)
+        if (ended) return
+        await this.docker([
+          'exec',
+          '-u',
+          USER,
+          this.container,
+          'sh',
+          '-c',
+          `pid=$(cat ${TERMINAL_PID}) && stty cols ${width} rows ${height} < /proc/$pid/fd/0 && kill -WINCH $pid`,
+        ])
+      },
+      onData: (listener) => {
+        listeners.push(listener)
+      },
+      wait: () => finished,
+      kill: async () => {
+        if (ended) return
+        child.stdin.end()
+        child.kill('SIGKILL')
+        await this.docker([
+          'exec',
+          '-u',
+          USER,
+          this.container,
+          'sh',
+          '-c',
+          `kill -HUP $(cat ${TERMINAL_PID}) 2>/dev/null; true`,
+        ]).catch(() => undefined)
+      },
     }
   }
 
@@ -543,6 +642,8 @@ async function trustProxy(docker: Docker, backend: DockerBackend, name: string, 
 
 export type DockerProviderDeps = {
   docker?: Docker
+  /** How a terminal's `docker exec` is started; tests replace it. */
+  spawn?: SpawnDocker
   env?: NodeJS.ProcessEnv
   sleep?: (ms: number) => Promise<void>
 }
@@ -611,7 +712,7 @@ export function dockerSandboxProvider(deps: DockerProviderDeps = {}): IsolatedSa
         await must(docker, ['network', 'connect', '--alias', 'proxy', net, proxy])
         await must(docker, sandboxArgs(name, net, env, spec.cacheKey, spec.image))
         await pinLocalhost(docker, name)
-        const backend = new DockerBackend(docker, name)
+        const backend = new DockerBackend(docker, name, deps.spawn)
         await trustProxy(docker, backend, name, cert)
         await waitForProxy(docker, name, sleep)
         const timer = setTimeout(() => {

@@ -3,6 +3,7 @@ import { and, eq, isNull, lt, or, sql } from 'drizzle-orm'
 import type { Database } from '../db'
 import { agentMessage } from '../db/schema'
 import { MAX_RUN_MS } from './run-limit'
+import { openTerminalOf, underWriterLock } from './terminal-lock'
 
 /** A claim older than this is the claim of a worker that died: the message is taken again. */
 export const CLAIM_STALE_MS = MAX_RUN_MS + 10 * 60_000
@@ -23,20 +24,25 @@ export async function claimNext(
 ): Promise<Message | undefined> {
   const from = since ? sql` and created_at >= ${since}` : sql``
   const oldest = sql`(select id from agent_message where task_id = ${taskId} and delivery = 'pending'${from} order by id limit 1)`
-  const [claimed] = await db
-    .update(agentMessage)
-    .set({ claimedAt: now })
-    .where(
-      and(
-        eq(agentMessage.id, oldest as never),
-        or(
-          isNull(agentMessage.claimedAt),
-          lt(agentMessage.claimedAt, new Date(now.getTime() - CLAIM_STALE_MS)),
+  // Under the task's writer lock, so a terminal that opens and a claim that is taken cannot both pass.
+  return underWriterLock(db, taskId, async (tx) => {
+    // A terminal is the session's writer: the message stays pending until it closes.
+    if (await openTerminalOf(tx, taskId, now)) return undefined
+    const [claimed] = await tx
+      .update(agentMessage)
+      .set({ claimedAt: now })
+      .where(
+        and(
+          eq(agentMessage.id, oldest as never),
+          or(
+            isNull(agentMessage.claimedAt),
+            lt(agentMessage.claimedAt, new Date(now.getTime() - CLAIM_STALE_MS)),
+          ),
         ),
-      ),
-    )
-    .returning()
-  return claimed
+      )
+      .returning()
+    return claimed
+  })
 }
 
 /** Gives a claimed message back, so another delivery path may take it. */

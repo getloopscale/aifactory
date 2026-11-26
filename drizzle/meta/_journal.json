@@ -407,6 +407,13 @@
       "when": 1795952881100,
       "tag": "0060_agent_run_events",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1795952882100,
+      "tag": "0061_terminal_session",
+      "breakpoints": true
     }
   ]
 }

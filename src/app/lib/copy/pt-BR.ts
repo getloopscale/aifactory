@@ -361,6 +361,17 @@ export const ptBR: Copy = {
     cost: (usd: string) => `custo ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `Uma mensagem do dono para o agente que trabalhou em "${title}" (issue #${issue} de ${repository}).`,
+    terminal: {
+      open: 'Abrir no terminal',
+      warning:
+        'Isto abre a própria CLI do agente na sessão que ele deixou, em um sandbox. Nada do que você mudar ali é commitado ou enviado. Termina quando você fecha, após 15 minutos sem uma tecla, ou após duas horas.',
+      back: 'Voltar ao chat',
+      connecting: 'Abrindo o terminal…',
+      ended: (reason: string) => `O terminal terminou (${reason}).`,
+      failed: (reason: string) => `O terminal não abriu: ${reason}`,
+      label: 'Terminal do agente',
+      noSession: 'O agente não guardou uma sessão para abrir.',
+    },
   },
   thread: {
     tabs: 'Agentes',
@@ -1515,6 +1526,7 @@ export const ptBR: Copy = {
     none: 'Nenhum plano foi escrito para esta tarefa.',
     by: (harness: string, sha: string) => `por ${harness} sobre ${sha}`,
     latestOf: (n: number) => ` · o último de ${n}`,
+    acceptance: 'Aceite',
     files: 'Arquivos',
     noFile: 'Nenhum arquivo: o construtor esperava que o código já fizesse o que a issue pede.',
     order: 'Ordem',

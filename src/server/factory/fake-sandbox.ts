@@ -6,6 +6,8 @@ import type {
   ListedSandbox,
   SandboxSpec,
   StreamingOptions,
+  Terminal,
+  TerminalOptions,
 } from './sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
@@ -52,6 +54,69 @@ export class StreamingFakeBackend extends FakeBackend {
   }
 }
 
+/** A terminal that echoes what it is sent, remembers its size and ends when it is killed or told `exit`. */
+export class FakeTerminal implements Terminal {
+  written: string[] = []
+  sizes: { cols: number; rows: number }[]
+  killed = false
+  private listeners: ((data: string) => void)[] = []
+  private end!: (result: { exitCode: number }) => void
+  private readonly finished = new Promise<{ exitCode: number }>((done) => {
+    this.end = done
+  })
+
+  constructor(
+    readonly command: string,
+    readonly options: TerminalOptions,
+  ) {
+    this.sizes = [{ cols: options.cols, rows: options.rows }]
+  }
+
+  write(data: string) {
+    this.written.push(data)
+    this.print(data)
+    if (data.trim() === 'exit') this.end({ exitCode: 0 })
+  }
+
+  /** What the command prints, as the test scripts it. */
+  print(data: string) {
+    for (const listener of this.listeners) listener(data)
+  }
+
+  /** The command ends by itself. */
+  exit(exitCode = 0) {
+    this.end({ exitCode })
+  }
+
+  async resize(cols: number, rows: number) {
+    this.sizes.push({ cols, rows })
+  }
+
+  onData(listener: (data: string) => void) {
+    this.listeners.push(listener)
+  }
+
+  wait() {
+    return this.finished
+  }
+
+  async kill() {
+    this.killed = true
+    this.end({ exitCode: 137 })
+  }
+}
+
+/** A `FakeBackend` that can also open a terminal. */
+export class TerminalFakeBackend extends FakeBackend {
+  terminals: FakeTerminal[] = []
+
+  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+    const terminal = new FakeTerminal(command, opts)
+    this.terminals.push(terminal)
+    return terminal
+  }
+}
+
 export class FakeSandbox implements IsolatedSandboxProvider {
   readonly name = 'fake'
   specs: SandboxSpec[] = []
@@ -61,7 +126,7 @@ export class FakeSandbox implements IsolatedSandboxProvider {
   deleted: string[] = []
   /** Every set of egress rules a running sandbox was given after it started. */
   egressUpdates: SandboxSpec['egress'][] = []
-  readonly backend: FakeBackend
+  readonly backend: FakeBackend | TerminalFakeBackend
   /** The sandboxes that are up, as a listing says: created and not stopped. */
   up = new Map<string, ListedSandbox>()
   killed: string[] = []
@@ -69,9 +134,13 @@ export class FakeSandbox implements IsolatedSandboxProvider {
 
   constructor(
     answer: (command: string) => Reply | undefined = () => ({}),
-    { streaming = false } = {},
+    { streaming = false, terminal = false } = {},
   ) {
-    this.backend = streaming ? new StreamingFakeBackend(answer) : new FakeBackend(answer)
+    this.backend = terminal
+      ? new TerminalFakeBackend(answer)
+      : streaming
+        ? new StreamingFakeBackend(answer)
+        : new FakeBackend(answer)
   }
 
   async create(spec: SandboxSpec): Promise<IsolatedSandbox> {
