@@ -1,3 +1,4 @@
+import { Hand } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Textarea } from '@usetheo/ui'
@@ -8,6 +9,7 @@ import { useCopy } from '../lib/copy'
 import type { Copy } from '../lib/copy/en'
 
 import { Assist } from './Assist'
+import { READABLE, Surface } from './ui/Surface'
 
 /** What the panel says once a release was asked for: made, or waiting for the release branch's checks. */
 function released(t: Copy, answer: unknown): string {
@@ -16,7 +18,7 @@ function released(t: Copy, answer: unknown): string {
 }
 
 /** Which actions the task's state offers. The server checks each one again when it is asked. */
-function actionsOf(detail: TaskDetail) {
+export function actionsOf(detail: TaskDetail) {
   const { task } = detail
   const hasPullRequest = (task.stage === 'done' || task.stage === 'handoff') && !!task.headSha
   const canResolve = task.stage === 'failed' || task.stage === 'handoff'
@@ -43,7 +45,7 @@ function actionsOf(detail: TaskDetail) {
 function WithdrawSendBack({ busy, onWithdraw }: { busy: boolean; onWithdraw: () => void }) {
   const { t } = useCopy()
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <p className="text-sm text-muted-foreground">{t.taskActions.sendBackWaiting}</p>
       <Button
         size="sm"
@@ -71,6 +73,8 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string>()
   const [bump, setBump] = useState<'patch' | 'minor' | 'major'>('patch')
+  // One form at a time, and only once asked for: the buttons stay one row and the conversation keeps the height.
+  const [form, setForm] = useState<'changes' | 'resolve'>()
 
   const {
     hasPullRequest,
@@ -92,6 +96,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
       setMessage(typeof done === 'function' ? done(answer) : done)
       setNote('')
       setResolution('')
+      setForm(undefined)
       onDone()
     } catch (e) {
       setMessage(e instanceof Error ? e.message : String(e))
@@ -103,16 +108,14 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
   if (!hasPullRequest && !canRetry && !canRelease && !releaseWaiting && !canWithdraw) return null
 
   return (
-    <section
-      aria-label={t.taskActions.title}
-      className="rounded-lg border border-border bg-card p-4"
-    >
-      <h2 className="mb-3 text-sm font-semibold">{t.taskActions.heading}</h2>
+    <Surface label={t.taskActions.title} padded>
       {task.waitingForChecks ? (
-        <p className="mb-3 text-sm text-muted-foreground">{t.taskActions.waitingForChecks}</p>
+        <p className={`text-sm text-muted-foreground ${READABLE}`}>
+          {t.taskActions.waitingForChecks}
+        </p>
       ) : null}
       {task.waitingOnBase ? (
-        <p className="mb-3 text-sm text-foreground">
+        <p className={`text-sm text-foreground ${READABLE}`}>
           {t.taskActions.waitingOnBase(
             task.waitingOnBase.checks.join(', '),
             task.waitingOnBase.branch,
@@ -120,7 +123,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </p>
       ) : null}
       {releaseWaiting && task.releaseWait ? (
-        <p className="mb-3 text-sm text-muted-foreground">
+        <p className={`text-sm text-muted-foreground ${READABLE}`}>
           {t.taskActions.releaseWaitBefore}{' '}
           <a href={task.releaseWait.pullRequestUrl} className="underline">
             {task.releaseWait.pullRequestUrl}
@@ -129,7 +132,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </p>
       ) : null}
       {releaseRefused ? (
-        <p className="mb-3 text-sm text-foreground">
+        <p className={`text-sm text-foreground ${READABLE}`}>
           {t.taskActions.releaseRefused(releaseRefused)}
         </p>
       ) : null}
@@ -140,6 +143,11 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         />
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
+        {/* The question and its answers on one line: a heading of its own cost the conversation a row. */}
+        <span className="mr-1 flex items-center gap-2 text-sm font-semibold">
+          <Hand aria-hidden className="size-4 text-muted-foreground" />
+          {t.taskActions.heading}
+        </span>
         {hasPullRequest ? (
           <Button
             size="sm"
@@ -204,12 +212,33 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
             {t.taskActions.retry}
           </Button>
         ) : null}
+        {canSendBack ? (
+          <Button
+            size="sm"
+            variant="secondary"
+            aria-expanded={form === 'changes'}
+            onClick={() => setForm(form === 'changes' ? undefined : 'changes')}
+          >
+            {t.taskActions.askChanges}
+          </Button>
+        ) : null}
+        {canResolve ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-expanded={form === 'resolve'}
+            onClick={() => setForm(form === 'resolve' ? undefined : 'resolve')}
+          >
+            {t.taskActions.resolvedAnotherWay}
+          </Button>
+        ) : null}
       </div>
-      {canSendBack ? (
-        <div className="mt-4">
+      {canSendBack && form === 'changes' ? (
+        <div className={`border-t border-border pt-3 ${READABLE}`}>
           <label className="block text-sm">
-            <span className="text-foreground">{t.taskActions.askChanges}</span>
+            <span className="sr-only">{t.taskActions.askChanges}</span>
             <Textarea
+              autoFocus
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={3}
@@ -234,11 +263,12 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
           </Button>
         </div>
       ) : null}
-      {canResolve ? (
-        <div className="mt-4">
+      {canResolve && form === 'resolve' ? (
+        <div className={`border-t border-border pt-3 ${READABLE}`}>
           <label className="block text-sm">
-            <span className="text-foreground">{t.taskActions.resolvedAnotherWay}</span>
+            <span className="sr-only">{t.taskActions.resolvedAnotherWay}</span>
             <Textarea
+              autoFocus
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
               rows={2}
@@ -265,10 +295,10 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </div>
       ) : null}
       {message ? (
-        <p role="status" className="mt-3 text-sm text-foreground">
+        <p role="status" className="text-sm text-foreground">
           {message}
         </p>
       ) : null}
-    </section>
+    </Surface>
   )
 }

@@ -1,16 +1,30 @@
-import { Alert, Badge, Button, Card, Input, Textarea } from '@usetheo/ui'
+import { Alert, Badge, Button, Input, Textarea } from '@usetheo/ui'
+import { Building2, FolderGit2, GitBranch, Lock, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import type { RepositoriesView, RepositoryView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
+import { AgentIcon } from '../components/floor/AgentIcon'
 import { RecipeCard } from '../components/RecipeCard'
 import { ProveChecks, RepositoryDoctor } from '../components/RepositoryDoctor'
 import { ReviewPatterns } from '../components/ReviewPatterns'
+import {
+  PageHeader,
+  Quiet,
+  READABLE,
+  Row,
+  RowIcon,
+  Rows,
+  Surface,
+  Pane,
+  Workbench,
+} from '../components/ui/Surface'
 import { put } from '../lib/api'
 import type { Proposal } from '../lib/assist'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
+import { useWidth } from '../lib/media'
 import {
   leadTimeLimitsProblem,
   MAX_LEAD_TIME_MINUTES,
@@ -164,7 +178,7 @@ function Settings({
   }
 
   return (
-    <div className="mt-3 space-y-3 border-t border-border pt-3 text-sm">
+    <div className={`space-y-3 text-sm ${READABLE}`}>
       <CommandsBox
         repository={repo.fullName}
         label={s.checks}
@@ -246,7 +260,7 @@ function Settings({
           aria-label={s.sandboxImage}
           value={image}
           onChange={(e) => setImage(e.target.value === 'browser' ? 'browser' : 'default')}
-          className="mt-1 w-full rounded border border-border bg-background p-2"
+          className={`mt-1 ${selectClass}`}
         >
           <option value="default">{s.imageDefault}</option>
           <option value="browser">{s.imageBrowser}</option>
@@ -380,16 +394,22 @@ function Settings({
   )
 }
 
-function Repo({
+/** One repository as a row: what it is, its branches, who builds in it, and the switch that enables it. */
+function RepoRow({
   repo,
-  agents,
   onChanged,
+  current = false,
+  onPick,
 }: {
   repo: RepositoryView
-  agents: string[]
   onChanged: () => void
+  /** Its settings are the ones in the column beside the list. */
+  current?: boolean
+  /** Shows its settings beside the list; given only where there is such a column. */
+  onPick?: () => void
 }) {
   const { t } = useCopy()
+  const s = t.repositories.settings
   const [message, setMessage] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -406,55 +426,110 @@ function Repo({
     }
   }
 
+  const branches = [repo.baseBranch, repo.defaultBranch, repo.releaseBranch].filter(
+    (branch, index, all): branch is string => Boolean(branch) && all.indexOf(branch) === index,
+  )
   return (
-    <li>
-      <Card size="sm" className="p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          {repo.enabled ? (
-            <Link
-              to={`/repositories/${repo.fullName}`}
-              aria-label={`${t.repositoryDetail.open}: ${repo.fullName}`}
-              className="font-medium underline underline-offset-2"
-            >
-              {repo.fullName}
-            </Link>
-          ) : (
-            <span className="font-medium">{repo.fullName}</span>
-          )}
+    <Row
+      current={current}
+      lead={
+        <RowIcon
+          icon={repo.private ? Lock : FolderGit2}
+          tone={!repo.reachable ? 'warning' : repo.enabled ? 'success' : 'neutral'}
+        />
+      }
+      title={
+        repo.enabled ? (
+          <Link
+            to={`/repositories/${repo.fullName}`}
+            aria-label={`${t.repositoryDetail.open}: ${repo.fullName}`}
+            className="underline underline-offset-2"
+          >
+            {repo.fullName}
+          </Link>
+        ) : (
+          repo.fullName
+        )
+      }
+      meta={
+        branches.length > 0 ? (
+          <span className="flex items-center gap-1">
+            <GitBranch aria-hidden className="size-3 shrink-0" />
+            {branches.join(' · ')}
+          </span>
+        ) : null
+      }
+      trail={
+        <>
+          {repo.enabled && repo.harness ? <AgentIcon agent={repo.harness} size="sm" /> : null}
+          {repo.enabled && repo.releaseMode ? (
+            <span className="hidden lg:inline">
+              {s.release}: {s[repo.releaseMode]}
+            </span>
+          ) : null}
           <Badge variant="default">
             {repo.private ? t.repositories.private : t.repositories.public}
           </Badge>
           {!repo.reachable ? <Badge variant="warning">{t.repositories.noAccess}</Badge> : null}
           {repo.enabled ? <Badge variant="success">{t.repositories.enabled}</Badge> : null}
+          {repo.enabled && onPick ? (
+            <Button
+              size="sm"
+              variant={current ? 'secondary' : 'ghost'}
+              aria-pressed={current}
+              aria-label={`${t.repositories.settingsOf} ${repo.fullName}`}
+              title={`${t.repositories.settingsOf} ${repo.fullName}`}
+              onClick={onPick}
+            >
+              <SlidersHorizontal aria-hidden className="size-4" />
+            </Button>
+          ) : null}
           <Button
             size="sm"
-            variant={repo.enabled ? 'secondary' : 'primary'}
-            className="ml-auto"
+            // One per row: a column of buttons in the brand colour would leave the page with no accent.
+            variant="secondary"
             disabled={busy}
             onClick={() => void toggle()}
           >
             {repo.enabled ? t.repositories.disable : t.repositories.enable}
           </Button>
-        </div>
-        {message ? (
-          <p role="alert" className="mt-2 text-sm text-destructive">
+        </>
+      }
+      below={
+        message ? (
+          <p role="alert" className="text-sm text-destructive">
             {message}
           </p>
-        ) : null}
-        {repo.enabled ? (
-          <>
-            <RepositoryDoctor repo={repo} />
-            <Settings repo={repo} agents={agents} onSaved={onChanged} />
-            <ProveChecks repo={repo} />
-            <ProveChecks repo={repo} kind="integration" />
-            <ReviewPatterns repository={repo.fullName} />
-            <div className="mt-4 border-t border-border pt-3">
-              <RecipeCard fullName={repo.fullName} />
-            </div>
-          </>
-        ) : null}
-      </Card>
-    </li>
+        ) : null
+      }
+    />
+  )
+}
+
+/** Everything the owner sets in an enabled repository: its health first, then its settings and proofs. */
+function RepoSettings({
+  repo,
+  agents,
+  onChanged,
+}: {
+  repo: RepositoryView
+  agents: string[]
+  onChanged: () => void
+}) {
+  const { t } = useCopy()
+  return (
+    <>
+      <RepositoryDoctor repo={repo} />
+      <Surface title={`${t.places.setup} · ${repo.fullName}`} icon={Settings2} padded>
+        <Settings repo={repo} agents={agents} onSaved={onChanged} />
+        <ProveChecks repo={repo} />
+        <ProveChecks repo={repo} kind="integration" />
+        <ReviewPatterns repository={repo.fullName} />
+        <div className="border-t border-border pt-3">
+          <RecipeCard fullName={repo.fullName} />
+        </div>
+      </Surface>
+    </>
   )
 }
 
@@ -525,75 +600,129 @@ export default function RepositoriesPage() {
     })
   }
 
+  const enabled = data?.repositories.filter((repo) => repo.enabled) ?? []
+  // The repositories the factory works in come first: they are the ones the owner comes here for.
+  const listed = [...(data?.repositories ?? [])].sort(
+    (a, b) => Number(b.enabled) - Number(a.enabled),
+  )
+  // With a column of its own, the settings show one repository at a time.
+  const wide = useWidth() === 'expanded'
+  const chosen = enabled.find((repo) => repo.fullName === params.get('repo')) ?? enabled[0]
+  const shown = wide && chosen ? [chosen] : enabled
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">{r.title}</h1>
-        <div className="flex items-center gap-2">
-          {data?.installUrl ? (
-            <InstallButton url={data.installUrl} onClick={startWatching} />
-          ) : null}
-          <Button size="sm" variant="secondary" onClick={resource.reload}>
-            {r.refresh}
-          </Button>
-        </div>
-      </div>
-      {watch ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {r.waiting}
-        </p>
-      ) : null}
-      {installed ? <Alert intent="success" title={installed} description={r.enableBelow} /> : null}
-      {resource.error ? <p className="text-sm text-destructive">{resource.error}</p> : null}
-      {data?.error ? (
-        <Alert intent="warning" title={r.githubFailed} description={data.error} />
-      ) : null}
-      {data && data.installations.length > 0 ? (
-        <ul aria-label={r.installationsLabel} className="space-y-1 text-sm text-muted-foreground">
-          {data.installations.map((i) => (
-            <li key={i.account}>
-              {r.installation.installedOn} {i.account},{' '}
-              {i.selection === 'all' ? r.installation.every : r.installation.chosen}.{' '}
-              <a
-                href={i.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-foreground underline underline-offset-2"
-              >
-                {r.installation.manage}
-              </a>{' '}
-              {r.installation.signedInAs(i.account)}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {data ? (
-        data.repositories.length === 0 ? (
-          <Alert
-            intent="info"
-            title={r.noneTitle}
-            description={r.noneDescription}
-            action={
-              data.installUrl ? (
+    <Workbench
+      columns={enabled.length > 0 ? 'grid-cols-[minmax(360px,5fr)_minmax(0,7fr)]' : undefined}
+      header={
+        <PageHeader
+          title={r.title}
+          actions={
+            <>
+              {data?.installUrl ? (
                 <InstallButton url={data.installUrl} onClick={startWatching} />
-              ) : undefined
-            }
-          />
+              ) : null}
+              <Button size="sm" variant="secondary" onClick={resource.reload}>
+                {r.refresh}
+              </Button>
+            </>
+          }
+        />
+      }
+    >
+      <Pane>
+        {watch ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {r.waiting}
+          </p>
+        ) : null}
+        {installed ? (
+          <Alert intent="success" title={installed} description={r.enableBelow} />
+        ) : null}
+        {resource.error ? <p className="text-sm text-destructive">{resource.error}</p> : null}
+        {data?.error ? (
+          <Alert intent="warning" title={r.githubFailed} description={data.error} />
+        ) : null}
+        {data && data.installations.length > 0 ? (
+          <Surface
+            // The list carries the name, so the sheet around it is not a second thing called the same.
+            title={<>{r.installationsLabel}</>}
+            icon={Building2}
+            count={data.installations.length}
+          >
+            <Rows label={r.installationsLabel}>
+              {data.installations.map((i) => (
+                <Row
+                  key={i.account}
+                  lead={<RowIcon icon={Building2} />}
+                  title={`${r.installation.installedOn} ${i.account}, ${i.selection === 'all' ? r.installation.every : r.installation.chosen}`}
+                  trail={
+                    <>
+                      <span className="hidden lg:inline">
+                        {r.installation.signedInAs(i.account)}
+                      </span>
+                      <a
+                        href={i.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-foreground underline underline-offset-2"
+                      >
+                        {r.installation.manage}
+                      </a>
+                    </>
+                  }
+                />
+              ))}
+            </Rows>
+          </Surface>
+        ) : null}
+        {data ? (
+          data.repositories.length === 0 ? (
+            <Alert
+              intent="info"
+              title={r.noneTitle}
+              description={r.noneDescription}
+              action={
+                data.installUrl ? (
+                  <InstallButton url={data.installUrl} onClick={startWatching} />
+                ) : undefined
+              }
+            />
+          ) : (
+            <Surface label={r.title}>
+              <Rows>
+                {listed.map((repo) => (
+                  <RepoRow
+                    key={repo.fullName}
+                    repo={repo}
+                    onChanged={resource.reload}
+                    current={wide && repo.fullName === chosen?.fullName}
+                    onPick={
+                      wide && enabled.length > 1
+                        ? () => setParams({ repo: repo.fullName }, { replace: true })
+                        : undefined
+                    }
+                  />
+                ))}
+              </Rows>
+            </Surface>
+          )
         ) : (
-          <ul className="space-y-2">
-            {data.repositories.map((repo) => (
-              <Repo
-                key={repo.fullName}
-                repo={repo}
-                agents={data.agents}
-                onChanged={resource.reload}
-              />
-            ))}
-          </ul>
-        )
-      ) : (
-        <p className="text-sm text-muted-foreground">{r.loading}</p>
-      )}
-    </div>
+          <Surface label={r.title}>
+            <Quiet>{r.loading}</Quiet>
+          </Surface>
+        )}
+      </Pane>
+      {enabled.length > 0 ? (
+        <Pane>
+          {shown.map((repo) => (
+            <RepoSettings
+              key={repo.fullName}
+              repo={repo}
+              agents={data?.agents ?? []}
+              onChanged={resource.reload}
+            />
+          ))}
+        </Pane>
+      ) : null}
+    </Workbench>
   )
 }

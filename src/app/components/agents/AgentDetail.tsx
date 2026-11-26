@@ -1,9 +1,23 @@
 import { Badge } from '@usetheo/ui'
+import {
+  Box,
+  Eye,
+  FileCode,
+  Hand,
+  Layers,
+  type LucideIcon,
+  ScrollText,
+  UserRound,
+  Wrench,
+} from 'lucide-react'
 import { useState } from 'react'
 
 import type { AgentEntry, AgentPrompt, AgentRole, AgentSettings } from '../../../shared/panel'
 
 import { useCopy } from '../../lib/copy'
+import { READABLE, Row, RowIcon, Rows, STACK, Surface, type Tone } from '../ui/Surface'
+
+import { agentIcon } from './AgentList'
 import { EngineChooser } from './EngineChooser'
 import { PromptBlock } from './PromptBlock'
 
@@ -17,6 +31,13 @@ const ROLES = [
 const roleOf = (id: string): AgentRole | undefined => ROLES.find((r) => r === id)
 
 const TONE = { reads: 'default', asks: 'warning', sandbox: 'primary' } as const
+
+/** The mark of what a tool may do: only read, change something once the owner agrees, or act in the sandbox. */
+const EFFECT: Record<keyof typeof TONE, { icon: LucideIcon; tone: Tone }> = {
+  reads: { icon: Eye, tone: 'neutral' },
+  asks: { icon: Hand, tone: 'warning' },
+  sandbox: { icon: Box, tone: 'neutral' },
+}
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -49,45 +70,49 @@ export function AgentDetail({
   const context = shared.filter((s) => agent.shared.includes(s.id))
 
   return (
-    <article aria-label={agent.name} className="space-y-6">
-      <header>
-        <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-xl font-semibold">{agent.name}</h2>
+    <article aria-label={agent.name} className={STACK}>
+      <Surface
+        title={agent.name}
+        icon={agentIcon(agent.id)}
+        action={
           <Badge variant={agent.runsIn === 'sandbox' ? 'primary' : 'accent'}>
             {agent.runsIn === 'sandbox' ? t.agents.runsInSandbox : t.agents.runsOnServer}
           </Badge>
-        </div>
-        <p className="mt-2 text-sm text-foreground/90">{agent.role}</p>
-      </header>
+        }
+      >
+        <p className={`px-4 py-3 text-sm text-foreground/90 ${READABLE}`}>{agent.role}</p>
+        <dl className="grid gap-5 border-t border-border p-4 md:grid-cols-2">
+          <Fact label={t.agents.when}>{agent.when}</Fact>
+          <Fact label={t.agents.engine}>
+            <span className="font-mono text-[13px]">{agent.engine.value}</span>
+            <span className="mt-1 block text-xs text-muted-foreground">
+              {t.agents.howToChange(agent.engine.change)}
+            </span>
+          </Fact>
+        </dl>
+      </Surface>
 
       {agent.persona ? (
-        <section
-          aria-label={t.agents.persona}
-          className="space-y-2 rounded-xl border border-border bg-card p-4 text-sm"
+        <Surface
+          title={`${t.agents.persona}: ${agent.persona.name}`}
+          label={t.agents.persona}
+          icon={UserRound}
+          padded
         >
-          <h3 className="text-sm font-semibold">
-            {t.agents.persona}: {agent.persona.name}
-          </h3>
-          <p>{agent.persona.job}</p>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">{t.agents.never}</p>
-          <ul className="list-disc pl-5">
-            {agent.persona.never.map((n) => (
-              <li key={n}>{n}</li>
-            ))}
-          </ul>
-          <p className="text-muted-foreground">{agent.persona.voice}</p>
-        </section>
+          <div className={`space-y-2 text-sm ${READABLE}`}>
+            <p>{agent.persona.job}</p>
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              {t.agents.never}
+            </p>
+            <ul className="list-disc pl-5">
+              {agent.persona.never.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+            <p className="text-muted-foreground">{agent.persona.voice}</p>
+          </div>
+        </Surface>
       ) : null}
-
-      <dl className="grid gap-5 rounded-xl border border-border bg-card p-4 md:grid-cols-2">
-        <Fact label={t.agents.when}>{agent.when}</Fact>
-        <Fact label={t.agents.engine}>
-          <span className="font-mono text-[13px]">{agent.engine.value}</span>
-          <span className="mt-1 block text-xs text-muted-foreground">
-            {t.agents.howToChange(agent.engine.change)}
-          </span>
-        </Fact>
-      </dl>
 
       {role ? (
         <EngineChooser
@@ -98,32 +123,34 @@ export function AgentDetail({
         />
       ) : null}
 
-      <section aria-label={t.agents.canDo}>
-        <h3 className="mb-2 text-sm font-semibold">{t.agents.canDo}</h3>
-        <ul className="divide-y divide-border rounded-xl border border-border bg-card">
+      <Surface title={t.agents.canDo} icon={Wrench} count={agent.tools.length}>
+        <Rows>
           {agent.tools.map((tool) => (
-            <li key={tool.name} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-4 py-2.5">
-              <code className="shrink-0 font-mono text-[13px] text-foreground">{tool.name}</code>
-              <Badge variant={TONE[tool.effect]} className="shrink-0">
-                {t.agents.effects[tool.effect]}
-              </Badge>
-              <span className="min-w-0 basis-full text-xs text-muted-foreground">
-                {tool.description}
-              </span>
-            </li>
+            <Row
+              key={tool.name}
+              lead={<RowIcon icon={EFFECT[tool.effect].icon} tone={EFFECT[tool.effect].tone} />}
+              title={<code className="font-mono text-[13px]">{tool.name}</code>}
+              detail={tool.description}
+              trail={
+                <Badge variant={TONE[tool.effect]} className="shrink-0">
+                  {t.agents.effects[tool.effect]}
+                </Badge>
+              }
+            />
           ))}
-        </ul>
-      </section>
+        </Rows>
+      </Surface>
 
-      <section aria-label={t.agents.instructions}>
-        <h3 className="mb-2 text-sm font-semibold">
-          {t.agents.instructions} {agent.prompts.length > 1 ? `(${agent.prompts.length})` : ''}
-        </h3>
+      <Surface
+        title={t.agents.instructions}
+        icon={ScrollText}
+        count={agent.prompts.length > 1 ? agent.prompts.length : undefined}
+      >
         {agent.prompts.length > 1 ? (
           <div
             role="tablist"
             aria-label={t.agents.instructionsOf}
-            className="mb-3 flex flex-wrap gap-1.5"
+            className="flex flex-wrap gap-1.5 border-b border-border px-4 py-2.5"
           >
             {agent.prompts.map((p, i) => (
               <button
@@ -140,31 +167,39 @@ export function AgentDetail({
           </div>
         ) : null}
         <PromptBlock key={`${agent.id}:${prompt.id}`} prompt={prompt} query={query} />
-      </section>
+      </Surface>
 
       {context.map((c) => (
-        <details key={c.id} className="rounded-xl border border-border bg-card">
-          <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+        // A block that folds, so it is a details element with the look of a Surface.
+        <details
+          key={c.id}
+          className="w-full overflow-hidden rounded-xl border border-border bg-card"
+        >
+          <summary className="flex min-h-10 cursor-pointer items-center gap-2 px-4 py-2 text-sm font-semibold">
+            <Layers aria-hidden className="size-4 shrink-0 text-muted-foreground" />
             {t.agents.alsoReceives} {c.title}
-            <span className="ml-2 text-xs font-normal text-muted-foreground">{c.when}</span>
+            <span className="ml-1 min-w-0 truncate text-xs font-normal text-muted-foreground">
+              {c.when}
+            </span>
           </summary>
-          <div className="border-t border-border p-3">
+          <div className="border-t border-border">
             <PromptBlock prompt={c} query={query} />
           </div>
         </details>
       ))}
 
-      <section aria-label={t.agents.whereInCode}>
-        <h3 className="mb-2 text-sm font-semibold">{t.agents.whereInCode}</h3>
-        <ul className="space-y-1 text-xs text-muted-foreground">
+      <Surface title={t.agents.whereInCode} icon={FileCode} count={agent.source.length}>
+        <Rows>
           {agent.source.map((file) => (
-            <li key={file}>
-              <code className="font-mono">{file}</code>
-            </li>
+            <Row key={file} lead={<RowIcon icon={FileCode} />}>
+              <code className="block truncate font-mono text-xs text-muted-foreground">{file}</code>
+            </Row>
           ))}
-        </ul>
-        <p className="mt-2 text-xs text-muted-foreground">{t.agents.readOnly}</p>
-      </section>
+        </Rows>
+        <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+          {t.agents.readOnly}
+        </p>
+      </Surface>
     </article>
   )
 }

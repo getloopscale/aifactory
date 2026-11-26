@@ -160,6 +160,38 @@ function renderTask(id = 5) {
   )
 }
 
+describe('the side of the task page', () => {
+  const frame = () => document.querySelector('[data-layout="workbench"]')
+
+  it('takes more of the width while it shows the changes, and gives it back on another tab', async () => {
+    serve({ 'GET /api/panel/tasks/5': detail() })
+    renderTask()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Add truncate' })).toBeDefined())
+    expect(frame()?.getAttribute('data-side')).toBe('narrow')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Changes/ }))
+    expect(frame()?.getAttribute('data-side')).toBe('wide')
+
+    fireEvent.click(screen.getByRole('tab', { name: /^Runs/ }))
+    expect(frame()?.getAttribute('data-side')).toBe('narrow')
+  })
+
+  it('closes on its button and opens again on the tab it was showing', async () => {
+    serve({ 'GET /api/panel/tasks/5': detail() })
+    renderTask()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Add truncate' })).toBeDefined())
+    fireEvent.click(screen.getByRole('tab', { name: /^Runs/ }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide the details' }))
+    expect(frame()?.getAttribute('data-side')).toBe('closed')
+    expect(screen.queryByRole('tab', { name: /^Runs/ })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the details' }))
+    expect(frame()?.getAttribute('data-side')).toBe('narrow')
+    expect(screen.getByRole('tab', { name: /^Runs/ }).getAttribute('aria-selected')).toBe('true')
+  })
+})
+
 describe('task page', () => {
   it('shows the timeline, the evidence with its output, and the review with its findings', async () => {
     serve({ 'GET /api/panel/tasks/5': detail() })
@@ -317,6 +349,9 @@ describe('task actions', () => {
   it('sends changes back only with a note', async () => {
     const calls = serve({ 'POST /api/panel/tasks/5/changes': { decisionId: 1 } })
     render(<TaskActions detail={detail()} onDone={noop} />)
+    // The form waits behind its button, so the actions stay one row.
+    expect(screen.queryByRole('textbox')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Ask for changes' }))
     const send = screen.getByRole('button', { name: 'Send back' }) as HTMLButtonElement
     expect(send.disabled).toBe(true)
 
@@ -355,6 +390,7 @@ describe('task actions', () => {
     })
     const calls = serve({ 'POST /api/panel/tasks/5/resolve': { decisionId: 3, sha: 'h' } })
     render(<TaskActions detail={failed} onDone={noop} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Resolved another way' }))
     const mark = screen.getByRole('button', { name: 'Mark as resolved' }) as HTMLButtonElement
     expect(mark.disabled).toBe(true)
 
@@ -385,7 +421,7 @@ describe('task actions', () => {
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(screen.queryByRole('button', { name: 'Approve this commit' })).toBeNull()
     // After a withdrawal the failed task can be sent back again with the right note.
-    expect(screen.getByRole('button', { name: 'Send back' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Ask for changes' })).toBeTruthy()
 
     cleanup()
     const running = detail({ task: { ...base, stage: 'build', column: 'working', headSha: null } })
@@ -1284,6 +1320,35 @@ describe('health', () => {
 })
 
 describe('inbox', () => {
+  it('offers one kind at a time once the list is long, and opens the first task beside it', async () => {
+    const items: InboxItem[] = Array.from({ length: 9 }, (_, i) => ({
+      task: { ...base, id: i + 1, title: `Waiting ${i + 1}`, stage: i < 2 ? 'waiting' : 'failed' },
+      kind: i < 2 ? 'question' : 'failed',
+      summary: `Why ${i + 1}`,
+      coordinatorReason: null,
+      at: '2026-11-04T10:00:00Z',
+    }))
+    serve({ 'GET /api/panel/inbox': { items } })
+    render(
+      <MemoryRouter>
+        <InboxPage />
+      </MemoryRouter>,
+    )
+    const filter = await screen.findByRole('group', { name: 'Show only' })
+    expect(screen.getByText('Waiting 9')).toBeDefined()
+    // The first item is the one open beside the list.
+    expect(screen.getByRole('link', { name: /Waiting 1/ }).getAttribute('aria-current')).toBe(
+      'true',
+    )
+
+    fireEvent.click(within(filter).getByRole('button', { name: /Answer a question/ }))
+
+    expect(screen.getByText('Waiting 2')).toBeDefined()
+    expect(screen.queryByText('Waiting 9')).toBeNull()
+    fireEvent.click(within(filter).getByRole('button', { name: /All/ }))
+    expect(screen.getByText('Waiting 9')).toBeDefined()
+  })
+
   it('lists what waits for a person with why, and says so when nothing does', async () => {
     const items: InboxItem[] = [
       {
@@ -1422,7 +1487,7 @@ describe('the task page in two languages', () => {
     const handoff = detail({ task: { ...base, stage: 'handoff', column: 'attention' } })
     inLanguage('pt-BR', <TaskActions detail={handoff} onDone={() => {}} />)
     const t = ptBR.taskActions
-    for (const name of [t.approve, t.retry, t.sendBack, t.markResolved]) {
+    for (const name of [t.approve, t.retry, t.askChanges, t.resolvedAnotherWay]) {
       expect(screen.getByRole('button', { name })).toBeDefined()
     }
     expect(screen.getByText(t.heading)).toBeDefined()
@@ -1464,7 +1529,7 @@ describe('writing to the agent of a stopped task', () => {
     expect(calls[0]).toMatchObject({ body: { text: 'Use a Set.', mode: 'guide' } })
   })
 
-  it('shows the thread, with the answer and why a delivery failed', () => {
+  it('shows the thread, with the answer and why a delivery failed', async () => {
     const message = {
       author: 'owner',
       mode: 'ask' as const,
@@ -1498,7 +1563,8 @@ describe('writing to the agent of a stopped task', () => {
         onDone={noop}
       />,
     )
-    expect(screen.getByText('Yes.')).toBeTruthy()
+    // The agent's words are Markdown, drawn once its renderer has loaded.
+    expect(await screen.findByText('Yes.')).toBeTruthy()
     expect(screen.getByText('Not delivered: it broke')).toBeTruthy()
     expect(screen.getByText('Waiting for the agent to read it…')).toBeTruthy()
   })
@@ -1546,14 +1612,14 @@ describe('writing to the agent of a stopped task', () => {
       at: `2026-11-25T10:00:0${seq}Z`,
     }) as never
 
-  it('has a tab for each agent and shows only the rows of the one picked', () => {
+  it('has a tab for each agent and shows only the rows of the one picked', async () => {
     const events = [step(1, 'builder', 'message', null), step(2, 'reviewer', 'message', null)]
     render(<Conversation detail={detail()} events={events} onDone={noop} />)
     expect(screen.getAllByRole('tab').map((x) => x.textContent)).toEqual(['Builder', 'Reviewer'])
-    expect(screen.getByText(/builder message/)).toBeTruthy()
+    expect(await screen.findByText(/builder message/)).toBeTruthy()
     expect(screen.queryByText(/reviewer message/)).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Reviewer' }))
-    expect(screen.getByText(/reviewer message/)).toBeTruthy()
+    expect(await screen.findByText(/reviewer message/)).toBeTruthy()
     expect(screen.queryByText(/builder message/)).toBeNull()
   })
 

@@ -1,9 +1,23 @@
 import { useState } from 'react'
 import { Button } from '@usetheo/ui'
+import { CircleDollarSign, Stethoscope, TriangleAlert } from 'lucide-react'
 import { Link } from 'react-router'
 
 import type { FindingView, HealthReport } from '../../shared/panel'
+import { AgentIcon } from '../components/floor/AgentIcon'
 import { MetricsSection } from '../components/MetricsSection'
+import {
+  PageHeader,
+  Pane,
+  Quiet,
+  Row,
+  RowIcon,
+  Rows,
+  Stats,
+  Surface,
+  TABLE,
+  Workbench,
+} from '../components/ui/Surface'
 import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { ago, money } from '../lib/format'
@@ -51,31 +65,30 @@ function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => v
   }
 
   return (
-    <li className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-medium">
-          <span className="mr-2 rounded bg-warning/30 px-1.5 py-0.5 text-xs uppercase">
-            {finding.kind}
-          </span>
-          {t.health.kind[finding.subject]}
-        </span>
-        <span className="text-xs text-muted-foreground">
+    <Row
+      lead={<RowIcon icon={TriangleAlert} tone="warning" />}
+      title={t.health.kind[finding.subject]}
+      meta={
+        <>
+          {finding.kind}
+          {finding.taskId !== null ? (
+            <>
+              {' · '}
+              <Link
+                to={`/tasks/${finding.taskId}`}
+                className="text-foreground underline underline-offset-2"
+              >
+                {finding.taskTitle ?? t.health.task(finding.taskId)}
+              </Link>
+            </>
+          ) : null}
+          {' · '}
           {t.health.since(ago(finding.firstSeenAt, Date.now(), t.time))}
-        </span>
-      </div>
-      {finding.taskId !== null ? (
-        <div className="mt-1 text-xs">
-          <Link
-            to={`/tasks/${finding.taskId}`}
-            className="text-foreground underline underline-offset-2"
-          >
-            {finding.taskTitle ?? t.health.task(finding.taskId)}
-          </Link>
-        </div>
-      ) : null}
-      <p className="mt-1 text-foreground">{finding.detail}</p>
-      {subject === 'back_merge' && finding.ref ? (
-        <div className="mt-1 text-xs">
+        </>
+      }
+      detail={finding.detail}
+      trail={
+        subject === 'back_merge' && finding.ref ? (
           <a
             href={finding.ref}
             target="_blank"
@@ -84,19 +97,20 @@ function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => v
           >
             {t.health.openOnGithub}
           </a>
-        </div>
-      ) : null}
-      {todo ? (
-        <Button size="sm" variant="secondary" className="mt-2" onClick={() => void resolve()}>
-          {todo.label}
-        </Button>
-      ) : null}
-      {message ? (
-        <p role="status" className="mt-2 text-destructive">
-          {message}
-        </p>
-      ) : null}
-    </li>
+        ) : todo ? (
+          <Button size="sm" variant="secondary" onClick={() => void resolve()}>
+            {todo.label}
+          </Button>
+        ) : undefined
+      }
+      below={
+        message ? (
+          <p role="status" className="text-sm text-destructive">
+            {message}
+          </p>
+        ) : undefined
+      }
+    />
   )
 }
 
@@ -112,90 +126,104 @@ export default function HealthPage() {
   const report = useResource<HealthReport>('/api/panel/health')
   const data = report.data
   return (
-    <div className="space-y-8">
-      <h1 className="text-xl font-semibold">{h.title}</h1>
-      {report.error ? <p className="text-sm text-destructive">{report.error}</p> : null}
+    <Workbench
+      columns={data ? 'grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : undefined}
+      header={
+        <>
+          <PageHeader title={h.title} />
+          {report.error ? <p className="mb-3 text-sm text-destructive">{report.error}</p> : null}
+        </>
+      }
+    >
       {!data ? (
-        <p className="text-sm text-muted-foreground">{h.loading}</p>
+        <Surface label={h.title}>
+          <Quiet>{h.loading}</Quiet>
+        </Surface>
       ) : (
         <>
-          <section aria-label={h.findings}>
-            <h2 className="mb-2 text-sm font-semibold">{h.findings}</h2>
-            {data.findings.length === 0 ? (
-              <p className="text-sm text-muted-foreground">{h.nothingWrong}</p>
-            ) : (
-              <ul className="space-y-2">
-                {data.findings.map((f) => (
-                  <FindingRow key={f.id} finding={f} onDone={report.reload} />
-                ))}
-              </ul>
-            )}
-          </section>
-
-          <section aria-label={h.cost.title}>
-            <h2 className="mb-2 text-sm font-semibold">{h.cost.title}</h2>
-            <dl className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-              {[
-                [h.cost.last24, money(data.cost.last24HoursUsd)],
-                [h.cost.last7, money(data.cost.last7DaysUsd)],
-                [h.cost.allTime, money(data.cost.totalUsd)],
-                [h.cost.perTask(data.cost.tasks), money(data.cost.avgPerTaskUsd)],
-              ].map(([label, value]) => (
-                <div key={label} className="rounded-lg border border-border bg-card p-3">
-                  <dt className="text-xs text-muted-foreground">{label}</dt>
-                  <dd className="mt-1 text-lg font-semibold">{value}</dd>
-                </div>
-              ))}
-            </dl>
-            {data.cost.groups.length > 0 ? (
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="text-xs text-muted-foreground">
-                    <tr>
-                      <th className="py-1 pr-3">{h.cost.agent}</th>
-                      <th className="py-1 pr-3">{h.cost.role}</th>
-                      <th className="py-1 pr-3">{h.cost.runs}</th>
-                      <th className="py-1 pr-3">{h.cost.cost}</th>
-                      <th className="py-1 pr-3">{h.cost.averageTime}</th>
-                      <th className="py-1 pr-3">{h.cost.failed}</th>
-                      <th className="py-1 pr-3">{h.cost.quota}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.cost.groups.map((g) => (
-                      <tr key={`${g.harness}-${g.role}`} className="border-t border-border">
-                        <td className="py-1 pr-3 font-medium">{g.harness}</td>
-                        <td className="py-1 pr-3">{g.role}</td>
-                        <td className="py-1 pr-3">{g.runs}</td>
-                        <td className="py-1 pr-3">
-                          {g.reportedRuns === 0 ? (
-                            <span className="text-muted-foreground">{h.cost.notReported}</span>
-                          ) : (
-                            money(g.costUsd)
-                          )}
-                          {partlyReported(g) ? (
-                            <span className="text-xs text-muted-foreground">
-                              {' '}
-                              {h.cost.partlyReported(g.reportedRuns, g.runs)}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="py-1 pr-3">{seconds(g.avgDurationMs)}</td>
-                        <td className="py-1 pr-3">{g.failed}</td>
-                        <td className="py-1 pr-3">{g.quota}</td>
+          <Pane>
+            <Surface title={h.findings} icon={Stethoscope} count={data.findings.length}>
+              {data.findings.length === 0 ? (
+                <Quiet>{h.nothingWrong}</Quiet>
+              ) : (
+                <Rows>
+                  {data.findings.map((f) => (
+                    <FindingRow key={f.id} finding={f} onDone={report.reload} />
+                  ))}
+                </Rows>
+              )}
+            </Surface>
+            <Surface title={h.cost.title} icon={CircleDollarSign}>
+              <Stats
+                items={[
+                  { label: h.cost.last24, value: money(data.cost.last24HoursUsd) },
+                  { label: h.cost.last7, value: money(data.cost.last7DaysUsd) },
+                  { label: h.cost.allTime, value: money(data.cost.totalUsd) },
+                  {
+                    label: h.cost.perTask(data.cost.tasks),
+                    value: money(data.cost.avgPerTaskUsd),
+                  },
+                ]}
+              />
+              {data.cost.groups.length > 0 ? (
+                <div className="overflow-x-auto border-t border-border">
+                  <table className={TABLE.table}>
+                    <thead className={TABLE.head}>
+                      <tr>
+                        <th className={TABLE.th}>{h.cost.agent}</th>
+                        <th className={TABLE.th}>{h.cost.role}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.runs}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.cost}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.averageTime}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.failed}</th>
+                        <th className={`${TABLE.th} text-right`}>{h.cost.quota}</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="mt-3 text-sm text-muted-foreground">{h.cost.none}</p>
-            )}
-          </section>
+                    </thead>
+                    <tbody>
+                      {data.cost.groups.map((g) => (
+                        <tr key={`${g.harness}-${g.role}`} className={TABLE.row}>
+                          <td className={TABLE.td}>
+                            <span className="flex items-center gap-2">
+                              <AgentIcon agent={g.harness} size="sm" />
+                              <span className="font-medium">{g.harness}</span>
+                            </span>
+                          </td>
+                          <td className={TABLE.td}>{g.role}</td>
+                          <td className={TABLE.number}>{g.runs}</td>
+                          <td className={TABLE.number}>
+                            {g.reportedRuns === 0 ? (
+                              <span className="text-muted-foreground">{h.cost.notReported}</span>
+                            ) : (
+                              money(g.costUsd)
+                            )}
+                            {partlyReported(g) ? (
+                              <span className="text-xs text-muted-foreground">
+                                {' '}
+                                {h.cost.partlyReported(g.reportedRuns, g.runs)}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className={TABLE.number}>{seconds(g.avgDurationMs)}</td>
+                          <td className={TABLE.number}>{g.failed}</td>
+                          <td className={TABLE.number}>{g.quota}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="border-t border-border">
+                  <Quiet>{h.cost.none}</Quiet>
+                </div>
+              )}
+            </Surface>
+          </Pane>
 
-          <MetricsSection />
+          <Pane>
+            <MetricsSection />
+          </Pane>
         </>
       )}
-    </div>
+    </Workbench>
   )
 }

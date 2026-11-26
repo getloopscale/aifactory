@@ -9,6 +9,8 @@ import { ago } from '../lib/format'
 import { subscribe } from '../lib/live'
 import { mergeSteps, transcriptRows, type TranscriptRow } from '../lib/transcript'
 
+import { Quiet } from './ui/Surface'
+
 /**
  * Every step of a task's agents: the stored ones a page at a time, and the new ones from the page's one
  * event stream as they happen. The stream is listened to before the first page is asked for, and what it
@@ -87,21 +89,18 @@ export function StepRow({ row }: { row: TranscriptRow }) {
   )
 }
 
+/** The steps as rows of the block that holds them, so the block gives the border and the heading. */
 export function Transcript({ taskId, live }: { taskId: number; live: boolean }) {
   const { events, error } = useTranscript(taskId)
   const { t } = useCopy()
-  if (error) return <p className="text-sm text-destructive">{error}</p>
+  if (error) return <p className="px-4 py-3 text-sm text-destructive">{error}</p>
   if (events.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        {live ? t.transcript.waitingFirst : t.transcript.none}
-      </p>
-    )
+    return <Quiet>{live ? t.transcript.waitingFirst : t.transcript.none}</Quiet>
   }
   return (
-    <ol className="space-y-2">
+    <ol className="divide-y divide-border">
       {transcriptRows(events, live).map((row) => (
-        <li key={row.seq} className="text-sm">
+        <li key={row.seq} className="px-4 py-2.5 text-sm">
           <StepRow row={row} />
         </li>
       ))}

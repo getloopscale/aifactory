@@ -105,3 +105,28 @@ describe('the security review on a card', () => {
     })
   })
 })
+
+describe('cardAgent, with the models the passes reported', () => {
+  const reported = new Map([['claude-code', 'claude-sonnet-5-5']])
+
+  it('names the model the agent last reported when the stage recorded none', () => {
+    const events = [event(4, 'build', { harness: 'claude-code', attempt: 1 })]
+    expect(cardAgent('build', events, reported)).toEqual({
+      working: { step: 'building', agent: 'claude-code', model: 'claude-sonnet-5-5', attempt: 1 },
+      lastAgent: { agent: 'claude-code', model: 'claude-sonnet-5-5' },
+    })
+  })
+
+  it('keeps the model the stage recorded over the reported one', () => {
+    const events = [event(4, 'build', { harness: 'claude-code', model: 'opus' })]
+    expect(cardAgent('build', events, reported).lastAgent).toEqual({
+      agent: 'claude-code',
+      model: 'opus',
+    })
+  })
+
+  it('names no model for an agent that reported none on the task', () => {
+    const events = [event(4, 'plan', { harness: 'codex' })]
+    expect(cardAgent('plan', events, reported).lastAgent).toEqual({ agent: 'codex', model: null })
+  })
+})

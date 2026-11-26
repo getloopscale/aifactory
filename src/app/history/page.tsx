@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 
 import { HISTORY_ROLES, type HistoryReport } from '../../shared/panel'
 import { ApiError, get } from '../lib/api'
+import { Pane, Workbench } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
 import { ago, itemName, money } from '../lib/format'
 import { useResource } from '../lib/live'
@@ -60,76 +61,94 @@ export default function HistoryPage() {
   const offVariable = report && !report.enabled ? report.variable : off
   const field = 'rounded-md border border-border bg-background px-2 py-1 text-sm'
   return (
-    <>
-      <h1 className="mb-4 text-xl font-semibold">{t.history.heading}</h1>
-      {offVariable ? (
-        <p role="status" className="text-sm text-muted-foreground">
-          {t.history.off(offVariable)}
-        </p>
-      ) : (
-        <form onSubmit={submit} className="mb-4 space-y-2">
-          <div className="flex gap-2">
-            <input
-              aria-label={t.history.search}
-              placeholder={t.history.placeholder}
-              value={form.q}
-              maxLength={200}
-              onChange={(e) => setForm({ ...form, q: e.target.value })}
-              className={`${field} flex-1`}
-            />
-            <button
-              type="submit"
-              className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground"
-            >
-              {t.history.submit}
+    <Workbench
+      header={
+        <>
+          <h1 className="mb-4 text-xl font-semibold">{t.history.heading}</h1>
+          {offVariable ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              {t.history.off(offVariable)}
+            </p>
+          ) : (
+            <form onSubmit={submit} className="mb-4 space-y-2">
+              <div className="flex gap-2">
+                <input
+                  aria-label={t.history.search}
+                  placeholder={t.history.placeholder}
+                  value={form.q}
+                  maxLength={200}
+                  onChange={(e) => setForm({ ...form, q: e.target.value })}
+                  className={`${field} flex-1`}
+                />
+                <button
+                  type="submit"
+                  className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground"
+                >
+                  {t.history.submit}
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-2 text-sm">
+                <input
+                  aria-label={t.history.repository}
+                  placeholder={t.history.anyRepository}
+                  value={form.repository}
+                  onChange={(e) => setForm({ ...form, repository: e.target.value })}
+                  className={field}
+                />
+                <select
+                  aria-label={t.history.role}
+                  value={form.role}
+                  onChange={(e) => setForm({ ...form, role: e.target.value })}
+                  className={field}
+                >
+                  <option value="">{t.history.anyRole}</option>
+                  {HISTORY_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  type="date"
+                  aria-label={t.history.from}
+                  value={form.from}
+                  onChange={(e) => setForm({ ...form, from: e.target.value })}
+                  className={field}
+                />
+                <input
+                  type="date"
+                  aria-label={t.history.to}
+                  value={form.to}
+                  onChange={(e) => setForm({ ...form, to: e.target.value })}
+                  className={field}
+                />
+              </div>
+              {short ? <p className="text-sm text-destructive">{t.history.tooShort}</p> : null}
+            </form>
+          )}
+          {error ? (
+            <p role="alert" className="text-sm text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </>
+      }
+      footer={
+        report?.enabled ? (
+          <div className="mt-3 flex shrink-0 items-center gap-3 text-sm">
+            <button type="button" disabled={page <= 1} onClick={() => go(page - 1)}>
+              {t.history.previous}
+            </button>
+            <span>{t.history.page(page)}</span>
+            <button type="button" disabled={!report.hasMore} onClick={() => go(page + 1)}>
+              {t.history.next}
             </button>
           </div>
-          <div className="flex flex-wrap gap-2 text-sm">
-            <input
-              aria-label={t.history.repository}
-              placeholder={t.history.anyRepository}
-              value={form.repository}
-              onChange={(e) => setForm({ ...form, repository: e.target.value })}
-              className={field}
-            />
-            <select
-              aria-label={t.history.role}
-              value={form.role}
-              onChange={(e) => setForm({ ...form, role: e.target.value })}
-              className={field}
-            >
-              <option value="">{t.history.anyRole}</option>
-              {HISTORY_ROLES.map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-            <input
-              type="date"
-              aria-label={t.history.from}
-              value={form.from}
-              onChange={(e) => setForm({ ...form, from: e.target.value })}
-              className={field}
-            />
-            <input
-              type="date"
-              aria-label={t.history.to}
-              value={form.to}
-              onChange={(e) => setForm({ ...form, to: e.target.value })}
-              className={field}
-            />
-          </div>
-          {short ? <p className="text-sm text-destructive">{t.history.tooShort}</p> : null}
-        </form>
-      )}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
+        ) : null
+      }
+    >
       {report?.enabled ? (
-        <>
+        <Pane>
           {report.results.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t.history.empty}</p>
           ) : (
@@ -182,17 +201,8 @@ export default function HistoryPage() {
               ))}
             </ul>
           )}
-          <div className="mt-4 flex items-center gap-3 text-sm">
-            <button type="button" disabled={page <= 1} onClick={() => go(page - 1)}>
-              {t.history.previous}
-            </button>
-            <span>{t.history.page(page)}</span>
-            <button type="button" disabled={!report.hasMore} onClick={() => go(page + 1)}>
-              {t.history.next}
-            </button>
-          </div>
-        </>
+        </Pane>
       ) : null}
-    </>
+    </Workbench>
   )
 }
