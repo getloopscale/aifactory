@@ -8,6 +8,7 @@ import { SCOPE_DRAFTER_SPEC } from '../coordinator/draft'
 import { assistantTools } from '../factory/assistant'
 import { CHAT_SPEC } from '../factory/chat-agent'
 import { guideSpec } from '../factory/guides'
+import { HISTORY_TOOLS } from '../agents/tools/history'
 import { buildPrompt } from '../factory/harness'
 import { improverPrompt } from '../agents/prompts/improver'
 import { planPrompt } from '../factory/plan'
@@ -130,5 +131,37 @@ describe('every agent of the factory reads the knowledge base', () => {
     expect(reviewPrompt({ ...issue, baseSha: 'abc' })).not.toContain(SANDBOX_KNOWLEDGE_DIR)
     expect(planPrompt({ repo: 'o/r', goal: 'g' })).not.toContain(SANDBOX_KNOWLEDGE_DIR)
     expect(improverPrompt({ repo: 'o/r', kind: 'stale_doc' })).not.toContain(SANDBOX_KNOWLEDGE_DIR)
+  })
+})
+
+describe('only the assistants that answer the owner read the history', () => {
+  const names = Object.keys(HISTORY_TOOLS)
+
+  it('the chat and every guide declare both tools, and no other agent does', () => {
+    for (const spec of [CHAT_SPEC, ...GUIDE_IDS.map((id) => guideSpec(id))]) {
+      expect(Object.keys(spec.tools)).toEqual(expect.arrayContaining(names))
+    }
+    for (const spec of [SCOPE_DRAFTER_SPEC, UNBLOCKER_SPEC, READINESS_JUDGE_SPEC, CURATOR_SPEC]) {
+      for (const name of names) expect(Object.keys(assistantTools(spec))).not.toContain(name)
+    }
+  })
+
+  it('the external reviewer has neither tool', () => {
+    const text = readFileSync(PUBLIC_UNTRUSTED[0]!, 'utf8')
+    for (const name of [...names, 'tools/history', 'HISTORY_TOOLS']) {
+      expect(text).not.toContain(name)
+    }
+  })
+
+  it('no file but the specs of the chat and the guides uses the tools', () => {
+    const users = sources()
+      .filter((f) => /HISTORY_TOOLS|historySearchTool|historyReadTool/.test(f.text))
+      .map((f) => f.path)
+      .sort()
+    expect(users).toEqual([
+      'src/server/agents/tools/history.ts',
+      'src/server/factory/chat-agent.ts',
+      'src/server/factory/guides.ts',
+    ])
   })
 })
