@@ -90,3 +90,20 @@ describe('opening the conversation at a pass', () => {
     expect(screen.queryByText(en.conversation.passMissing)).toBeNull()
   })
 })
+
+describe('the mode the box offers', () => {
+  const modes = () =>
+    Array.from(screen.getByLabelText(en.conversation.mode).querySelectorAll('option')).map(
+      (o) => o.getAttribute('value'),
+    )
+  it('offers guide where the server takes it', () => {
+    render(<Conversation detail={{ ...detail, guide: { available: true } }} onDone={() => {}} />)
+    expect(modes()).toEqual(['ask', 'guide'])
+  })
+  it('offers only ask, with the reason, where the server refuses guide', () => {
+    const refused = { ...detail, guide: { available: false, reason: 'not here' } }
+    render(<Conversation detail={refused} onDone={() => {}} />)
+    expect(modes()).toEqual(['ask'])
+    expect(screen.getByText('not here')).toBeTruthy()
+  })
+})

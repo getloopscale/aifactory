@@ -138,6 +138,8 @@ export function Conversation({
   const stuck = useRef(true)
   const scroller = useRef<HTMLDivElement>(null)
   const liveRole = LIVE[task.stage as keyof typeof LIVE] as 'builder' | 'reviewer' | undefined
+  const mayGuide = detail.guide?.available !== false
+  const sendMode = liveRole || !mayGuide ? 'ask' : mode
   const canWrite = liveRole !== undefined || CONVERSABLE.includes(task.stage)
   // The harness of the last pass of that role: Codex cannot read while it runs, so a message stops its step.
   const harnessOf = (role: string) =>
@@ -190,9 +192,9 @@ export function Conversation({
     try {
       await post(`/api/panel/tasks/${task.id}/messages`, {
         text,
-        mode: liveRole ? 'ask' : mode,
+        mode: sendMode,
       })
-      setNotice(mode === 'guide' ? t.conversation.guided : t.conversation.sent)
+      setNotice(sendMode === 'guide' ? t.conversation.guided : t.conversation.sent)
       setText('')
       onDone()
     } catch (e) {
@@ -291,16 +293,19 @@ export function Conversation({
             <div className="mb-2 flex items-center gap-2">
               <select
                 aria-label={t.conversation.mode}
-                value={mode}
+                value={sendMode}
                 onChange={(e) => setMode(e.target.value as typeof mode)}
                 className="h-8 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
               >
                 <option value="ask">{t.conversation.ask}</option>
-                <option value="guide">{t.conversation.guide}</option>
+                {mayGuide ? <option value="guide">{t.conversation.guide}</option> : null}
               </select>
               <span className="text-sm text-muted-foreground">
-                {mode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
+                {sendMode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
               </span>
+              {!mayGuide && detail.guide?.reason ? (
+                <span className="text-sm text-muted-foreground">{detail.guide.reason}</span>
+              ) : null}
             </div>
           )}
           <label className="block text-sm">
