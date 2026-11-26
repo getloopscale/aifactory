@@ -2,11 +2,12 @@ import { defineCron } from 'theokit/server/cron'
 
 import { getPool } from '../db'
 import { mainProcessOnly } from '../factory/worker-only'
+import { createIssuesApi } from '../github/issues-api'
 import { fetchIssue, listOpenIssues } from '../github/issues'
 import { FACTORY_LABEL } from '../ingest/decide'
 import { actionDeps } from '../panel/deps'
 import { listingReader } from '../scheduler/issue-reader'
-import { modelReadinessJudge } from '../scheduler/judge'
+import { modelAcceptanceDrafter, modelReadinessJudge } from '../scheduler/judge'
 import { passIsOff, schedulerModesFromEnv } from '../scheduler/mode'
 import { alone, schedule } from '../scheduler/schedule'
 import { githubPass } from '../github/budget-pass'
@@ -37,7 +38,9 @@ export default defineCron('schedule', {
             (repo, token) => listOpenIssues(repo, FACTORY_LABEL, token),
             (repo, number, token) => fetchIssue(repo, number, token),
           ),
+          issues: createIssuesApi(),
           judge: modelReadinessJudge(),
+          drafter: modelAcceptanceDrafter(),
         }
       } catch (error) {
         console.error(JSON.stringify({ event: 'schedule_not_configured', error: String(error) }))

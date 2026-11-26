@@ -19,7 +19,11 @@ export const readinessSchema = z.object({
   missing: z.string(),
   question: z.string(),
   blockedBy: z.array(z.string()).optional(),
+  reason: z.string().optional(),
 })
+
+/** Why an issue needs refinement. A reason the code does not know is `owner_decision`. */
+export type RefinementReason = 'no_acceptance' | 'several_changes' | 'owner_decision'
 
 export type Readiness = {
   verdict: ReadinessVerdict
@@ -27,6 +31,11 @@ export type Readiness = {
   question: string
   /** With `blocked`: the open issues it waits for, as `owner/repo#number`, which a pass can read again. */
   blockedBy?: string[]
+  /**
+   * With `needs_refinement`: `no_acceptance` or `several_changes`. Absent means `owner_decision`, which is what
+   * a missing or unknown reason is read as (`refinementReason`).
+   */
+  reason?: Exclude<RefinementReason, 'owner_decision'>
   /** Why the answer could not be read, when it could not: the verdict is then `ready`. */
   error?: string
 }
@@ -65,7 +74,68 @@ function readCandidate(candidate: string): Readiness {
       ...(blockedBy.length > 0 ? { blockedBy } : {}),
     }
   }
-  return { verdict, missing: missing.trim(), question: question.trim() }
+  const reason = parsed.data.reason?.trim()
+  const known =
+    reason === 'no_acceptance' || reason === 'several_changes' ? ({ reason } as const) : {}
+  return {
+    verdict,
+    missing: missing.trim(),
+    question: question.trim(),
+    ...(verdict === 'needs_refinement' ? known : {}),
+  }
+}
+
+/** The reason of a recorded or parsed verdict; an older verdict, with none, needs the owner. */
+export const refinementReason = (r: { reason?: string }): RefinementReason =>
+  r.reason === 'no_acceptance' || r.reason === 'several_changes' ? r.reason : 'owner_decision'
+
+export const ACCEPTANCE_HEADING = '## Acceptance (drafted by the factory)'
+const CRITERIA_MIN = 2
+const CRITERIA_MAX = 6
+const CRITERION_MAX = 500
+/** Text GitHub turns into a notification or a link: a mention, an email, a URL, an issue reference. */
+const NOTIFIES = /@|:\/\/|www\.|mailto:|#\s*\d|\bGH-\d/i
+
+/** The criteria in the drafter's answer: its last JSON object that holds them, or none with the error. */
+export function parseCriteria(answer: string): { criteria: string[]; error?: string } {
+  const candidates = jsonObjects(answer)
+  if (candidates.length === 0) return { criteria: [], error: 'the answer holds no JSON object' }
+  for (const candidate of [...candidates].reverse()) {
+    let value: unknown
+    try {
+      value = JSON.parse(candidate)
+    } catch {
+      continue
+    }
+    const parsed = z.object({ criteria: z.array(z.string()) }).safeParse(value)
+    if (!parsed.success) continue
+    const criteria = parsed.data.criteria
+      .map((c) => c.replace(/\s+/g, ' ').trim().slice(0, CRITERION_MAX))
+      .filter((c) => c !== '')
+    if (criteria.length === 0) return { criteria: [] }
+    if (criteria.some((c) => NOTIFIES.test(c))) {
+      return { criteria: [], error: 'the draft holds a mention, a link or an issue reference' }
+    }
+    if (criteria.length < CRITERIA_MIN || criteria.length > CRITERIA_MAX) {
+      return { criteria: [], error: `the draft has ${criteria.length} criteria, not 2 to 6` }
+    }
+    return { criteria }
+  }
+  return { criteria: [], error: 'the answer is not a list of criteria' }
+}
+
+/** A criterion as plain list text: one line, with nothing that Markdown would turn into structure. */
+const plainCriterion = (text: string): string =>
+  text
+    .replace(/[\\`*_~<>[\]|#!]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[-+\d.)\s]+/, '')
+    .trim()
+
+/** The section appended to the issue body. */
+export function acceptanceSection(criteria: string[]): string {
+  const items = criteria.map(plainCriterion).filter((c) => c !== '')
+  return [ACCEPTANCE_HEADING, '', ...items.map((c) => `- ${c}`)].join('\n')
 }
 
 /** The verdict in the assistant's answer: its last JSON object that is one, or `ready` with the error. */
@@ -100,6 +170,9 @@ export type RecordedReadiness = {
   verdict: ReadinessVerdict
   questionId?: number
   blockedBy?: string[]
+  reason?: string
+  /** The acceptance criteria drafted for this verdict; empty when the drafter had none or its answer was unreadable. */
+  draft?: string[]
 }
 
 /**
