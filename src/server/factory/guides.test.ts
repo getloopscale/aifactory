@@ -60,7 +60,11 @@ describe('the guides', () => {
   })
 
   it('keeps to the tools of its own page: the setup guide only reads, and none can release', () => {
-    expect(Object.keys(GUIDE_SPECS.setup.tools)).toEqual(['setup_report'])
+    expect(Object.keys(GUIDE_SPECS.setup.tools)).toEqual([
+      'setup_report',
+      'history_search',
+      'history_read',
+    ])
     expect(GUIDE_SPECS.setup.asks).toEqual({})
     for (const spec of Object.values(GUIDE_SPECS)) {
       for (const name of Object.keys(spec.tools))
@@ -71,6 +75,8 @@ describe('the guides', () => {
       'repo_files',
       'repo_file',
       'update_repository',
+      'history_search',
+      'history_read',
     ])
   })
 
@@ -79,6 +85,8 @@ describe('the guides', () => {
       'list_agents',
       'agent_prompt',
       'update_agent_settings',
+      'history_search',
+      'history_read',
     ])
     expect(Object.keys(GUIDE_SPECS.agents.asks)).toEqual(['update_agent_settings'])
     expect(GUIDE_INSTRUCTIONS('agents')).toContain('agent_prompt')

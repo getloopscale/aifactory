@@ -3,7 +3,15 @@ import type { AddressInfo } from 'node:net'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { searchHistory, TraceUnavailable, type LookupTasks, type TaskFacts } from './search'
+import {
+  fetchTrace,
+  searchHistory,
+  searchPasses,
+  SEARCH_LIMIT,
+  TraceUnavailable,
+  type LookupTasks,
+  type TaskFacts,
+} from './search'
 import { traceIdOf } from './spans'
 
 let server: Server
@@ -104,5 +112,18 @@ describe('searchHistory', () => {
     await expect(searchHistory({ q: 'ab', page: 1 }, lookup, env)).rejects.toBeInstanceOf(
       TraceUnavailable,
     )
+  })
+
+  it('gives an assistant at most 10 passes when Looptrace lists 50', async () => {
+    const many: LookupTasks = async () => new Map([[1, facts(1, 'o/a')]])
+    reply.body = { traces: Array.from({ length: 50 }, () => trace('task:1', 10)) }
+    const report = await searchPasses({ q: 'ab' }, many, env)
+    expect(report.enabled && report.results).toHaveLength(SEARCH_LIMIT)
+  })
+
+  it('fetchTrace is undefined on 404 and with no endpoint', async () => {
+    reply = { status: 404, body: {} }
+    expect(await fetchTrace('abc', env)).toBeUndefined()
+    expect(await fetchTrace('abc', {})).toBeUndefined()
   })
 })
