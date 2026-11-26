@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { bodyHash, parseReadiness, readinessMessage, readinessStep } from './readiness'
+import {
+  acceptanceSection,
+  bodyHash,
+  parseCriteria,
+  parseReadiness,
+  readinessMessage,
+  readinessStep,
+  refinementReason,
+} from './readiness'
 
 describe('reading the readiness answer', () => {
   it('reads a ready verdict', () => {
@@ -151,5 +159,65 @@ describe('what a pass does with a queued issue', () => {
 
   it('leaves a ready issue alone', () => {
     expect(readinessStep(verdict({ verdict: 'ready' }), 'auto')).toBe('none')
+  })
+})
+
+describe('the refinement reason', () => {
+  const answer = (reason?: string) =>
+    JSON.stringify({
+      verdict: 'needs_refinement',
+      missing: 'm',
+      question: 'q?',
+      ...(reason === undefined ? {} : { reason }),
+    })
+
+  it('reads a known reason', () => {
+    expect(refinementReason(parseReadiness(answer('no_acceptance')))).toBe('no_acceptance')
+    expect(refinementReason(parseReadiness(answer('several_changes')))).toBe('several_changes')
+  })
+
+  it('reads a missing or unknown reason as owner_decision', () => {
+    expect(refinementReason(parseReadiness(answer()))).toBe('owner_decision')
+    expect(refinementReason(parseReadiness(answer('because')))).toBe('owner_decision')
+  })
+})
+
+describe('the drafted acceptance criteria', () => {
+  it('reads two to six criteria', () => {
+    expect(parseCriteria('{"criteria":["a passes"," b exists "]}').criteria).toEqual([
+      'a passes',
+      'b exists',
+    ])
+  })
+
+  it('reads an empty list, a wrong count and an unreadable answer as no criteria', () => {
+    expect(parseCriteria('{"criteria":[]}')).toEqual({ criteria: [] })
+    expect(parseCriteria('{"criteria":["one"]}').criteria).toEqual([])
+    expect(parseCriteria('{"criteria":["one"]}').error).toBeDefined()
+    expect(parseCriteria('nothing').error).toBeDefined()
+  })
+
+  it.each([
+    'ask @octocat to review',
+    'notify @org/team',
+    'see https://example.com/x',
+    'see www.example.com',
+    'fixes #123',
+    'see GH-123',
+    'mail a@b.co',
+  ])('rejects a draft with a mention, link or reference: %s', (text) => {
+    const read = parseCriteria(JSON.stringify({ criteria: ['a passes', text] }))
+    expect(read.criteria).toEqual([])
+    expect(read.error).toMatch(/mention, a link or an issue reference/)
+  })
+
+  it('writes each criterion as one plain list line', () => {
+    const section = acceptanceSection(['- [x](http://e) <b>ok</b>\n## Head', 'a `test` passes'])
+    expect(section.split('\n')).toEqual([
+      '## Acceptance (drafted by the factory)',
+      '',
+      '- x (http://e) b ok /b Head',
+      '- a test passes',
+    ])
   })
 })

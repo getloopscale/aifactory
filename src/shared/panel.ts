@@ -251,7 +251,7 @@ export type WatchView = {
 
 export type RunView = {
   id: number
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
   harness: string
   /** The model and effort the pass ran with, null when it is unknown (not configured and not reported). */
   model: string | null
@@ -302,7 +302,7 @@ export type FindingView = {
 
 export type CostGroup = {
   harness: string
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
   runs: number
   /** How many of them reported a cost, since some agents report none. */
   reportedRuns: number
@@ -502,6 +502,17 @@ export type TimelineEvent = {
   detail: Record<string, unknown> | null
 }
 
+/** Whether the tests a head adds depend on the change, as the factory found it by running them on the base (#550). */
+export type TestProofView = {
+  id: number
+  sha: string
+  outcome: 'proven' | 'unproven' | 'no_tests' | 'not_run'
+  /** The check that failed on the base, or why the step could not run. */
+  detail: string | null
+  files: string[]
+  at: string
+}
+
 export type EvidenceView = {
   id: number
   name: string
@@ -612,6 +623,8 @@ export type TaskDetail = {
   sendBackPending?: boolean
   timeline: TimelineEvent[]
   evidence: EvidenceView[]
+  /** The outcome of the test proof of each head, oldest first; none when the step is off. */
+  testProofs?: TestProofView[]
   reviews: ReviewView[]
   /** The security review of each approval, oldest first. */
   securityReviews: SecurityReviewView[]
@@ -821,6 +834,12 @@ export type DoctorItemId =
   | 'recipe'
   | 'sandbox'
   | 'provider_checks'
+  | 'agent_guide'
+  | 'lockfile'
+  | 'test_entry'
+
+/** `operation`: whether the factory can work on the repository. `codebase`: whether its code gives an agent what it needs. */
+export type DoctorFamily = 'operation' | 'codebase'
 
 /**
  * What the doctor found about one thing a repository needs. `blocked` stops work, `warn` does not, and
@@ -828,6 +847,8 @@ export type DoctorItemId =
  */
 export type DoctorItem = {
   id: DoctorItemId
+  /** Unset on a report stored before families existed, which the panel reads as `operation`. */
+  family?: DoctorFamily
   status: 'ok' | 'warn' | 'blocked' | 'unknown'
   /** What is wrong, or what was found to be fine, in one sentence. */
   cause: string
@@ -1099,4 +1120,56 @@ export type StoppedLine = {
    * with only its fix going first (`fix_first`).
    */
   scope: 'hold' | 'fix_first'
+}
+
+/** What the page of one repository shows (`/repositories/<owner>/<name>`). A cost or a value that is unknown is null, never zero. */
+export type RepositoryDetail = {
+  repository: string
+  /** The repository's tasks, one entry per stage that has any. */
+  tasks: { stage: string; count: number }[]
+  /** The last 30 agent passes of its tasks, newest first. */
+  passes: {
+    id: number
+    taskId: number
+    issueNumber: number
+    role: string
+    harness: string
+    model: string | null
+    durationMs: number
+    costUsd: number | null
+    ok: boolean
+    at: string
+  }[]
+  /** Open findings of the repository or of one of its tasks, newest first. */
+  findings: {
+    id: number
+    kind: string
+    subject: string
+    taskId: number | null
+    detail: string
+    firstSeenAt: string
+  }[]
+  patterns: {
+    id: number
+    className: string
+    invariant: string
+    taskIds: number[]
+    lastSeenAt: string
+  }[]
+  /** Each indicator with points for the repository: 14 days, oldest first, a day with no point has a null value. */
+  indicators: {
+    metric: string
+    label: string
+    unit: string
+    days: { day: string; value: number | null; samples: number | null }[]
+  }[]
+  /** The last 14 days of passes by role; `costUsd` leaves out the passes whose cost is unknown. */
+  costByRole: { role: string; passes: number; costUsd: number; unknownShare: number }[]
+  /** The last 14 days of reviews by reviewer harness. */
+  reviewRounds: {
+    reviewer: string
+    tasks: number
+    plateauShare: number
+    changesPerTask: number
+  }[]
 }

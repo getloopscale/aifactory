@@ -165,6 +165,8 @@ describe('setup', () => {
     const inside = screen.getByRole('link', { name: 'Enable one' })
     expect(inside.getAttribute('href')).toBe('/repositories')
     expect(inside.getAttribute('target')).toBeNull()
+    // Without the browser's notifications the control says so; it is on the page either way.
+    expect(screen.getByText('This browser cannot show notifications.')).toBeDefined()
   })
 
   it('shows what is missing on GitHub as a button, and what is only worth a look as a link', async () => {

@@ -17,6 +17,8 @@ export const en = {
     setup: 'Setup',
   },
   menu: {
+    setupNeedsAttention: (n: number) =>
+      n === 1 ? '1 setup item needs attention' : `${n} setup items need attention`,
     label: 'Menu',
     folded: 'Folded menu',
     main: 'Main',
@@ -32,6 +34,8 @@ export const en = {
     noneYet: 'No chat yet',
     account: 'Account',
     signOut: 'Sign out',
+    install: 'Install app',
+    installIos: 'To install: tap the Share button, then "Add to Home Screen".',
   },
   chatRow: {
     name: 'Chat name',
@@ -44,6 +48,8 @@ export const en = {
   },
   topBar: {
     part: 'Part of the app',
+    openMenu: 'Open the menu',
+    closeMenu: 'Close the menu',
     chat: 'Chat',
     work: 'Work',
     guide: 'Guide',
@@ -74,6 +80,7 @@ export const en = {
   },
   board: {
     nothingHere: 'Nothing here.',
+    stages: 'Stages',
     mainRedAfterRelease: 'main is red after the release',
     mainRed: 'main is red',
     changeSize: (added: number, removed: number, files: number) =>
@@ -234,6 +241,14 @@ export const en = {
     noChecks: 'No checks have run yet.',
     evidenceMeta: (sha: string, exit: number, secs: string) =>
       `on ${sha} · exit ${exit} · ${secs} s`,
+    testProof: 'Test proof',
+    testProofOutcome: {
+      proven: 'Proven: the tests fail on the base',
+      unproven: 'Unproven: the tests pass without the change',
+      no_tests: 'No test file changed',
+      not_run: 'Not run',
+    },
+    testProofMeta: (sha: string, files: number) => `on ${sha} · ${files} test files`,
     output: 'Output',
     reviews: 'Reviews',
     securityReviews: 'Security review',
@@ -245,7 +260,7 @@ export const en = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
   conversation: {
-    heading: 'Talk to the agent',
+    heading: 'Conversation',
     mode: 'How to talk',
     ask: 'Ask',
     guide: 'Guide',
@@ -268,6 +283,39 @@ export const en = {
     cost: (usd: string) => `cost ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `A message from the owner to the agent that worked on "${title}" (issue #${issue} of ${repository}).`,
+  },
+  thread: {
+    tabs: 'Agents',
+    empty: 'Nothing was said or done yet.',
+    waitingFirst: 'Waiting for the first step of the agent…',
+    closed: (stage: string) => `The agent takes no message while the task is in ${stage}.`,
+    recipient: 'Your message goes to the agent the task is waiting on, whichever tab is open.',
+    summary: (c: {
+      read?: number
+      search?: number
+      edit?: number
+      command?: number
+      other?: number
+    }) =>
+      [
+        c.read ? `read ${c.read} ${c.read === 1 ? 'file' : 'files'}` : '',
+        c.search ? `searched ${c.search} ${c.search === 1 ? 'time' : 'times'}` : '',
+        c.edit ? `edited ${c.edit} ${c.edit === 1 ? 'file' : 'files'}` : '',
+        c.command ? `ran ${c.command} ${c.command === 1 ? 'command' : 'commands'}` : '',
+        c.other ? `${c.other} other ${c.other === 1 ? 'step' : 'steps'}` : '',
+      ]
+        .filter(Boolean)
+        .join(', '),
+    failedSteps: (n: number) => `${n} failed`,
+    worked: (time: string) => `worked for ${time}`,
+    pass: (who: string, engine: string | null) =>
+      engine ? `${who} started · ${engine}` : `${who} started`,
+    doing: (what: string, time: string) => `${what} · ${time}`,
+    working: 'working',
+    running: (tool: string, target: string) =>
+      target ? `running ${tool} ${target}` : `running ${tool}`,
+    openSteps: 'Show the steps',
+    closeSteps: 'Hide the steps',
   },
   taskActions: {
     title: 'Actions',
@@ -343,6 +391,8 @@ export const en = {
     checking: 'Checking…',
     ready: (when: string) => `This repository is ready. Checked ${when}.`,
     repair: 'How to fix:',
+    groups: { operation: 'Operation', codebase: 'Codebase' },
+    passing: (n: number, m: number) => `${n} of ${m} passing`,
     loading: 'Reading the repository…',
     unprovenLine: (names: string) => `These checks have not been proven: ${names}.`,
     allProven: 'Every saved check has been proven.',
@@ -467,6 +517,45 @@ export const en = {
       notRead: 'Some items could not be read, so they are not counted as fine.',
       firstJob: 'Open the first job',
     },
+  },
+  repositoryDetail: {
+    open: 'Open the page of this repository',
+    back: 'Back to the repositories',
+    loading: 'Loading…',
+    notFound: 'This repository does not exist or is not enabled.',
+    runs: 'Runs',
+    noTasks: 'No task in this repository yet.',
+    noPasses: 'No agent pass yet.',
+    passes: 'Last agent passes',
+    task: 'Task',
+    role: 'Role',
+    agent: 'Agent',
+    model: 'Model',
+    time: 'Time',
+    cost: 'Cost',
+    unknownCost: 'unknown',
+    result: 'Result',
+    ok: 'ok',
+    failed: 'failed',
+    seconds: (n: string) => `${n} s`,
+    findings: 'Findings',
+    noFindings: 'No open finding.',
+    patterns: 'Review patterns',
+    noPatterns: 'No review pattern.',
+    indicators: 'Indicators',
+    noIndicators: 'No indicator has points for this repository yet.',
+    gap: 'no point',
+    samples: (n: number) => `${n} samples`,
+    costByRole: 'Cost by role, last 14 days',
+    noCost: 'No agent pass in the last 14 days.',
+    passCount: 'Passes',
+    unknownShare: 'Unknown cost',
+    reviewRounds: 'Review rounds, last 14 days',
+    noReviews: 'No task reviewed in the last 14 days.',
+    reviewer: 'Reviewer',
+    reviewedTasks: 'Tasks reviewed',
+    plateau: 'Reached a plateau',
+    changesPerTask: 'Changes per task',
   },
   repositories: {
     title: 'Repositories',
@@ -1194,6 +1283,18 @@ export const en = {
       base_conflict: 'Merge of the integration branch conflicted',
       queue_blocked: 'Fix waiting in the queue',
     } as Record<string, string>,
+  },
+  attention: {
+    one: (summary: string) => `Waiting for you: ${summary}`,
+    many: (count: number, summary: string) => `${count} things wait for you. First: ${summary}`,
+    notificationTitle: 'aifactory',
+    openTask: 'Open the task',
+    dismiss: 'Dismiss',
+    notify: 'Notify me',
+    notifyOn: 'Notifications are on',
+    notifyDenied:
+      'Notifications are off. Your browser refused them: allow them for this site in the browser settings (the lock next to the address), then reload.',
+    notifyUnsupported: 'This browser cannot show notifications.',
   },
   inbox: {
     heading: 'Inbox',

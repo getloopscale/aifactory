@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 
 import {
-  columnOf,
   type ReviewView,
   type RunView,
   type TaskDetail,
@@ -13,7 +12,7 @@ import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
 import { Conversation } from './Conversation'
 import { TaskActions } from './TaskActions'
-import { Transcript } from './Transcript'
+import { useTranscript } from './Transcript'
 import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
@@ -27,6 +26,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
   const { t } = useCopy()
   const resource = useResource<TaskDetail>(`/api/panel/tasks/${id}`, { only: id })
   const detail = resource.data
+  const transcript = useTranscript(id)
 
   if (resource.error) return <p className="text-sm text-destructive">{resource.error}</p>
   if (!detail) return <p className="text-sm text-muted-foreground">{t.task.loading}</p>
@@ -85,10 +85,6 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
       </div>
 
       <TaskActions detail={detail} onDone={resource.reload} />
-      <Conversation detail={detail} onDone={resource.reload} />
-
-      <WatchPanel watches={detail.watches} onDone={resource.reload} />
-
       {detail.questions.length > 0 ? (
         <section aria-label={t.task.questions}>
           <h2 className="mb-2 text-sm font-semibold">{t.task.questions}</h2>
@@ -107,6 +103,15 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
           </ul>
         </section>
       ) : null}
+
+      <Conversation
+        detail={detail}
+        events={transcript.events}
+        error={transcript.error}
+        onDone={resource.reload}
+      />
+
+      <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
       {detail.coordinatorActions.length > 0 ? (
         <section aria-label={t.coordinator.sectionTitle}>
@@ -160,56 +165,55 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
         </ol>
       </section>
 
-      <section aria-label={t.task.transcript}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.transcript}</h2>
-        <Transcript taskId={task.id} live={columnOf(task.stage) === 'working'} />
-      </section>
-
       {detail.runs.length > 0 ? (
         <section aria-label={t.task.executions}>
           <h2 className="mb-2 text-sm font-semibold">{t.task.executions}</h2>
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs text-muted-foreground">
-              <tr>
-                <th className="py-1 pr-3">{t.task.role}</th>
-                <th className="py-1 pr-3">{t.task.agent}</th>
-                <th className="py-1 pr-3">{t.task.model}</th>
-                <th className="py-1 pr-3">{t.task.attempt}</th>
-                <th className="py-1 pr-3">{t.task.tokens}</th>
-                <th className="py-1 pr-3">{t.task.cost}</th>
-                <th className="py-1 pr-3">{t.task.time}</th>
-                <th className="py-1 pr-3">{t.task.result}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {detail.runs.map((r) => (
-                <tr key={r.id} className="border-t border-border">
-                  <td className="py-1 pr-3">{r.role}</td>
-                  <td className="py-1 pr-3">{r.harness}</td>
-                  <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
-                  <td className="py-1 pr-3">{r.attempt}</td>
-                  <td className="py-1 pr-3">
-                    {r.tokensIn === null && r.tokensOut === null ? (
-                      <span className="text-muted-foreground">{t.task.notReported}</span>
-                    ) : (
-                      `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
-                    )}
-                  </td>
-                  <td className="py-1 pr-3">
-                    {r.costUsd === null ? (
-                      <span className="text-muted-foreground">{t.task.notReported}</span>
-                    ) : (
-                      money(r.costUsd)
-                    )}
-                  </td>
-                  <td className="py-1 pr-3">{t.task.seconds((r.durationMs / 1000).toFixed(1))}</td>
-                  <td className="py-1 pr-3">
-                    {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-sm">
+              <thead className="text-xs text-muted-foreground">
+                <tr>
+                  <th className="py-1 pr-3">{t.task.role}</th>
+                  <th className="py-1 pr-3">{t.task.agent}</th>
+                  <th className="py-1 pr-3">{t.task.model}</th>
+                  <th className="py-1 pr-3">{t.task.attempt}</th>
+                  <th className="py-1 pr-3">{t.task.tokens}</th>
+                  <th className="py-1 pr-3">{t.task.cost}</th>
+                  <th className="py-1 pr-3">{t.task.time}</th>
+                  <th className="py-1 pr-3">{t.task.result}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {detail.runs.map((r) => (
+                  <tr key={r.id} className="border-t border-border">
+                    <td className="py-1 pr-3">{r.role}</td>
+                    <td className="py-1 pr-3">{r.harness}</td>
+                    <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
+                    <td className="py-1 pr-3">{r.attempt}</td>
+                    <td className="py-1 pr-3">
+                      {r.tokensIn === null && r.tokensOut === null ? (
+                        <span className="text-muted-foreground">{t.task.notReported}</span>
+                      ) : (
+                        `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
+                      )}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {r.costUsd === null ? (
+                        <span className="text-muted-foreground">{t.task.notReported}</span>
+                      ) : (
+                        money(r.costUsd)
+                      )}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {t.task.seconds((r.durationMs / 1000).toFixed(1))}
+                    </td>
+                    <td className="py-1 pr-3">
+                      {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -272,6 +276,19 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
             ))}
           </ul>
         )}
+        {(detail.testProofs ?? []).length > 0 ? (
+          <ul aria-label={t.task.testProof} className="mt-2 space-y-1">
+            {(detail.testProofs ?? []).map((p) => (
+              <li key={p.id} className="rounded border border-border bg-card p-3 text-sm">
+                <span className="font-medium">{t.task.testProofOutcome[p.outcome]}</span>{' '}
+                <span className="text-xs text-muted-foreground">
+                  {t.task.testProofMeta(shortSha(p.sha), p.files.length)}
+                </span>
+                {p.detail ? <code className="ml-2 text-xs">{p.detail}</code> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
       </section>
 
       <PlanSection plans={detail.plans} />

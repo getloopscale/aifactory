@@ -1,5 +1,6 @@
+import { LENS_PREFIX } from './lens-review'
 import { itemRef } from './item-ref'
-import { and, asc, eq, like, sql } from 'drizzle-orm'
+import { and, asc, eq, like, notLike, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -84,7 +85,7 @@ export async function createPreRelease(
     await deps.db
       .select()
       .from(review)
-      .where(eq(review.taskId, input.taskId))
+      .where(and(eq(review.taskId, input.taskId), notLike(review.reviewer, `${LENS_PREFIX}%`)))
       .orderBy(asc(review.id))
   ).slice(-1)
   const { name, body } = preReleaseNotes({

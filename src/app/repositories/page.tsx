@@ -1,6 +1,6 @@
 import { Alert, Badge, Button, Card, Input, Textarea } from '@usetheo/ui'
 import { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 
 import type { RepositoriesView, RepositoryView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
@@ -322,7 +322,7 @@ function Settings({
         />
         <span className="text-foreground">{s.reviewPulls}</span>
       </label>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <label className="block">
           <span className="text-foreground">{s.builder}</span>
           <select
@@ -410,7 +410,17 @@ function Repo({
     <li>
       <Card size="sm" className="p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="font-medium">{repo.fullName}</span>
+          {repo.enabled ? (
+            <Link
+              to={`/repositories/${repo.fullName}`}
+              aria-label={`${t.repositoryDetail.open}: ${repo.fullName}`}
+              className="font-medium underline underline-offset-2"
+            >
+              {repo.fullName}
+            </Link>
+          ) : (
+            <span className="font-medium">{repo.fullName}</span>
+          )}
           <Badge variant="default">
             {repo.private ? t.repositories.private : t.repositories.public}
           </Badge>

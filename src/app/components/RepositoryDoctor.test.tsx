@@ -103,6 +103,30 @@ describe('the repository doctor', () => {
     expect(screen.queryByRole('listitem')).toBeNull()
   })
 
+  it('groups the items by family, each with how many pass', async () => {
+    const item = (id: DoctorItem['id'], family: 'operation' | 'codebase', status: 'ok' | 'warn') =>
+      ({ id, family, status, cause: `cause ${id}`, repair: '', canRepair: false }) as DoctorItem
+    api.get.mockResolvedValue({
+      ...blocked,
+      items: [
+        item('label', 'operation', 'warn'),
+        item('branches', 'operation', 'ok'),
+        item('agent_guide', 'codebase', 'warn'),
+        item('lockfile', 'codebase', 'ok'),
+        item('test_entry', 'codebase', 'ok'),
+      ],
+    })
+    mount()
+    expect(await screen.findByText('cause label')).toBeTruthy()
+    const operation = document.querySelector('[data-group="operation"]')!
+    const codebase = document.querySelector('[data-group="codebase"]')!
+    expect(operation.textContent).toContain('Operation')
+    expect(operation.textContent).toContain('1 of 2 passing')
+    expect(codebase.textContent).toContain('2 of 3 passing')
+    expect(codebase.querySelector('[data-item="agent_guide"]')).not.toBeNull()
+    expect(operation.querySelector('[data-item="agent_guide"]')).toBeNull()
+  })
+
   it('never shows an unknown item as a pass', async () => {
     api.get.mockResolvedValue({
       ...blocked,

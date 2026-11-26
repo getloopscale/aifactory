@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,6 +8,7 @@ import RootLayout from './layout'
 import WorkPage from './work/page'
 import { en } from './lib/copy/en'
 import { ptBR } from './lib/copy/pt-BR'
+import { announceChange } from './lib/live'
 
 // The expected text comes from the dictionary of the language the test runs in.
 let t = ptBR
@@ -97,6 +98,24 @@ describe('the layout', () => {
       expect(screen.getByRole('link', { name: `${t.places.inbox} 2` })).toBeDefined(),
     )
     expect(screen.getByRole('link', { name: `${t.places.health} 3` })).toBeDefined()
+  })
+
+  it('counts the setup items that are not ok on the Setup entry, and nothing while the report is not there', async () => {
+    const item = (status: string) => ({ id: status, label: status, status, detail: '' })
+    serve({
+      ...signedIn,
+      'GET /api/panel/setup': { ready: false, items: [item('ok'), item('warn'), item('missing')] },
+    })
+    renderAt('/')
+    const name = `${t.places.setup}, ${t.menu.setupNeedsAttention(2)}`
+    const link = await screen.findByRole('link', { name })
+    expect(link.querySelector('[data-tone="destructive"]')?.textContent).toBe('2')
+    cleanup()
+    vi.unstubAllGlobals()
+    serve(signedIn)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.getByRole('link', { name: t.places.setup }).textContent).toBe(t.places.setup)
   })
 
   it('marks the item of the menu the owner is in, and "Novo chat" only on the empty conversation', async () => {
@@ -225,7 +244,7 @@ describe('the layout', () => {
     })
     renderAt('/')
     await waitFor(() => expect(screen.getByText('the login')).toBeDefined())
-    expect(screen.queryByRole('link', { name: t.places.board })).toBeNull()
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
     expect(screen.queryByRole('button', { name: t.menu.account })).toBeNull()
   })
 
@@ -342,5 +361,216 @@ describe('the language of the panel', () => {
       ),
     )
     expect(board(calls)).toBe(before)
+  })
+})
+
+describe('the owner is told when something waits', () => {
+  const entry = (id: number, summary = `pergunta ${id}`) => ({
+    task: { id, repository: 'o/r', issueNumber: id, title: 'T', stage: 'waiting', costUsd: 0 },
+    kind: 'question',
+    summary,
+    at: '2026-11-05T10:00:00Z',
+  })
+
+  class FakeNotification {
+    static permission: NotificationPermission = 'granted'
+    static made: FakeNotification[] = []
+    static requestPermission = vi.fn()
+    onclick: (() => void) | null = null
+    constructor(
+      public title: string,
+      public options?: NotificationOptions,
+    ) {
+      FakeNotification.made.push(this)
+    }
+  }
+
+  function setup(focused: boolean, permission: NotificationPermission) {
+    FakeNotification.made = []
+    FakeNotification.permission = permission
+    vi.spyOn(window, 'focus').mockImplementation(() => {})
+    vi.stubGlobal('Notification', FakeNotification)
+    vi.spyOn(document, 'hasFocus').mockReturnValue(focused)
+    const routes: Record<string, unknown> = { ...signedIn, 'GET /api/panel/inbox': { items: [] } }
+    serve(routes)
+    return (items: unknown[]) => {
+      routes['GET /api/panel/inbox'] = { items }
+      act(() => announceChange())
+    }
+  }
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it('puts the count in the title and a dot on the favicon', async () => {
+    serve({ ...signedIn, 'GET /api/panel/inbox': { items: [entry(1), entry(2)] } })
+    renderAt('/')
+    await waitFor(() => expect(document.title).toBe('(2) aifactory'))
+    expect(document.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe(
+      '/favicon-attention.svg',
+    )
+    cleanup()
+    serve({ ...signedIn, 'GET /api/panel/inbox': { items: [] } })
+    renderAt('/')
+    await waitFor(() => expect(document.title).toBe('aifactory'))
+    expect(document.querySelector('link[rel="icon"]')?.getAttribute('href')).toBe('/favicon.svg')
+  })
+
+  it('holds the announcement in a live region outside the menu', async () => {
+    const give = setup(true, 'default')
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    give([entry(1)])
+    const live = await screen.findByTestId('attention-live')
+    await waitFor(() => expect(live.textContent).toBe(ptBR.attention.one('pergunta 1')))
+    expect(live.getAttribute('aria-live')).toBe('polite')
+    expect(live.closest('nav, aside')).toBeNull()
+  })
+
+  it('notifies without focus when allowed, and a click opens the task', async () => {
+    const give = setup(false, 'granted')
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    give([entry(1)])
+    await waitFor(() => expect(FakeNotification.made).toHaveLength(1))
+    expect(FakeNotification.made[0]?.options?.body).toBe('pergunta 1')
+    give([entry(1)])
+    expect(FakeNotification.made).toHaveLength(1)
+    act(() => FakeNotification.made[0]?.onclick?.())
+    await waitFor(() => expect(screen.getByText('a task')).toBeDefined())
+  })
+
+  it('shows a toast with a link instead, when the window has focus', async () => {
+    const give = setup(true, 'granted')
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    give([entry(3)])
+    const link = await screen.findByRole('link', { name: ptBR.attention.openTask })
+    expect(link.getAttribute('href')).toBe('/tasks/3')
+    expect(FakeNotification.made).toHaveLength(0)
+  })
+
+  it.each(['default', 'denied'] as const)(
+    'makes no notification when permission is %s',
+    async (permission) => {
+      const give = setup(false, permission)
+      renderAt('/')
+      await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+      give([entry(1)])
+      await waitFor(() => expect(document.title).toBe('(1) aifactory'))
+      expect(FakeNotification.made).toHaveLength(0)
+      expect(FakeNotification.requestPermission).not.toHaveBeenCalled()
+    },
+  )
+})
+
+function widthOf(px: number) {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((query: string) => ({
+      matches: px >= Number(/min-width: (\d+)px/.exec(query)?.[1]),
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })),
+  )
+}
+
+describe('the layout on a phone', () => {
+  it('shows no menu until the button is pressed, and closes it after a navigation', async () => {
+    serve(signedIn)
+    widthOf(390)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+    expect(screen.queryByRole('navigation', { name: t.menu.main })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.openMenu }))
+    expect(screen.getByRole('complementary', { name: t.menu.label })).toBeDefined()
+    fireEvent.click(screen.getByRole('link', { name: t.places.board }))
+    await waitFor(() => expect(screen.getByText('the board')).toBeDefined())
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+  })
+
+  it('closes the menu on Escape and on a tap outside it', async () => {
+    serve(signedIn)
+    widthOf(390)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.openMenu }))
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.openMenu }))
+    fireEvent.click(screen.getByRole('button', { name: t.topBar.closeMenu }))
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+  })
+
+  it('keeps the rail on a tablet and the menu beside the page on a desk', async () => {
+    serve(signedIn)
+    widthOf(800)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.queryByRole('button', { name: t.topBar.openMenu })).toBeNull()
+    expect(screen.queryByRole('complementary', { name: t.menu.label })).toBeNull()
+  })
+})
+
+describe('installing the panel', () => {
+  const stubMedia = (standalone: boolean) =>
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn((query: string) => ({
+        // A desk-wide window, so the menu is beside the page; only the display mode varies.
+        matches: query.includes('min-width') || standalone,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    )
+  const firePrompt = () => {
+    const prompt = vi.fn(async () => undefined)
+    const event = Object.assign(new Event('beforeinstallprompt', { cancelable: true }), { prompt })
+    window.dispatchEvent(event)
+    return { prompt, event }
+  }
+
+  it('offers the entry after beforeinstallprompt and calls the prompt', async () => {
+    serve(signedIn)
+    stubMedia(false)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(screen.queryByRole('button', { name: t.menu.install })).toBeNull()
+    let fired!: ReturnType<typeof firePrompt>
+    act(() => {
+      fired = firePrompt()
+    })
+    expect(fired.event.defaultPrevented).toBe(true)
+    fireEvent.click(await screen.findByRole('button', { name: t.menu.install }))
+    expect(fired.prompt).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole('button', { name: t.menu.install })).toBeNull()
+  })
+
+  it('shows no entry in standalone mode', async () => {
+    serve(signedIn)
+    stubMedia(true)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    act(() => {
+      firePrompt()
+    })
+    expect(screen.queryByRole('button', { name: t.menu.install })).toBeNull()
+  })
+
+  it('registers the worker only in a secure context that has one', async () => {
+    serve(signedIn)
+    stubMedia(false)
+    const register = vi.fn(async () => undefined)
+    vi.stubGlobal('isSecureContext', true)
+    Object.defineProperty(navigator, 'serviceWorker', { value: { register }, configurable: true })
+    renderAt('/')
+    await waitFor(() => expect(register).toHaveBeenCalledWith('/sw.js'))
+    cleanup()
+    register.mockClear()
+    vi.stubGlobal('isSecureContext', false)
+    renderAt('/')
+    await waitFor(() => expect(screen.getByText('the chat')).toBeDefined())
+    expect(register).not.toHaveBeenCalled()
+    Reflect.deleteProperty(navigator, 'serviceWorker')
   })
 })

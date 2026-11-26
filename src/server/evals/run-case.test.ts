@@ -99,6 +99,8 @@ type World = {
   integrationExit?: number
   /** What `git status --porcelain` says right after an install: what it changed in the checkout. */
   installChanges?: string
+  /** What `git ls-files -z` lists: the repository's tracked paths. */
+  tracked?: string
 }
 
 function sandbox(world: World = {}) {
@@ -116,6 +118,7 @@ function sandbox(world: World = {}) {
     if (command.endsWith('&& pnpm install') && world.install?.length) return world.install.shift()
     if (afterInstall && command.includes('status --porcelain'))
       return { stdout: world.installChanges ?? '' }
+    if (command.includes('ls-files -z')) return { stdout: world.tracked ?? '' }
     if (command.includes('write-tree')) return { stdout: 'tree0\n' }
     if (command.includes('status --porcelain')) {
       const afterPlan = statuses++ === 0
@@ -337,6 +340,73 @@ describe('runCase', () => {
     })
     expect(result.costUsd).toBeCloseTo(0.4)
     expect(provider.stopped).toBe(1)
+  })
+
+  describe('the proof of the tests (#550)', () => {
+    afterEach(() => vi.unstubAllEnvs())
+
+    const withTests = (provider: FakeSandbox) => {
+      const execute = provider.backend.execute.bind(provider.backend)
+      provider.backend.execute = async (command: string) =>
+        command.includes(' diff -z ')
+          ? { stdout: 'src/a.test.ts\0', stderr: '', exitCode: 0, timedOut: false }
+          : execute(command)
+      return provider
+    }
+
+    it('does not approve in auto when the tests the case adds pass on its base', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(result.passed).toBe(false)
+      expect(provider.backend.commands.some((c) => c.includes('worktree add --detach /tmp/aifactory-proof'))).toBe(true)
+      expect(provider.backend.commands.some((c) => c.includes('worktree remove --force /tmp/aifactory-proof'))).toBe(true)
+    })
+
+    it('sends the finding to the rework and runs the proof once across two rounds on one head', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built(), built('changed')))
+      const reviewer = agent('reviewer', [
+        { ok: true, summary: APPROVE },
+        { ok: true, summary: APPROVE },
+      ])
+
+      await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(reviewer.prompts).toHaveLength(2)
+      expect(builder.prompts[2]).toContain('the tests this work adds pass without the change')
+      const adds = provider.backend.commands.filter((c) =>
+        c.includes('worktree add --detach /tmp/aifactory-proof'),
+      )
+      expect(adds).toHaveLength(1)
+    })
+
+    it('records and adds nothing in trial, the default', async () => {
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(result.passed).toBe(true)
+      expect(provider.backend.commands.some((c) => c.includes('/tmp/aifactory-proof'))).toBe(true)
+    })
+
+    it('runs nothing in off', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'off')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(provider.backend.commands.some((c) => c.includes('/tmp/aifactory-proof'))).toBe(false)
+    })
   })
 
   it("runs the repository's fixes before the checks and commits what they changed as its own commit", async () => {
@@ -1427,5 +1497,56 @@ describe('runCase acceptance', () => {
     expect(reviewer.prompts[0]).toContain('A1: the flag works')
     expect(result.reviews?.[0]?.verdict).toBe('changes')
     expect(result.reviews?.[0]?.findings[0]?.issue).toContain('A1')
+  })
+})
+
+describe('the lens in a case', () => {
+  const MAJOR =
+    '{"verdict":"changes","summary":"false","findings":[{"severity":"major","file":"AGENTS.md","issue":"the command table says npm"}]}'
+  const tracked = 'AGENTS.md\0src/cli.ts\0'
+  const run = (mode: string, reviewer: ReturnType<typeof agent>, builder = agent('builder', planned(built(), built()))) => {
+    vi.stubEnv('FACTORY_LENS_MODE', mode)
+    return runCase({ ...deps(sandbox({ tracked }), builder, reviewer) }, evalCase)
+  }
+  afterEach(() => vi.unstubAllEnvs())
+
+  it('asks nothing when the mode is off', async () => {
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const result = await run('off', reviewer)
+    expect(result.passed).toBe(true)
+    expect(reviewer.prompts).toHaveLength(1)
+  })
+
+  it('records a blocking answer and sends nothing back in trial', async () => {
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: APPROVE },
+      { ok: true, summary: MAJOR },
+    ])
+    const result = await run('trial', reviewer, builder)
+    expect(result.passed).toBe(true)
+    expect(reviewer.prompts).toHaveLength(2)
+    expect(reviewer.prompts[1]).toContain('AGENTS.md')
+  })
+
+  it('sends the work back once in auto, and goes on when the lens blocks again', async () => {
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: APPROVE },
+      { ok: true, summary: MAJOR },
+      { ok: true, summary: APPROVE },
+      { ok: true, summary: MAJOR },
+    ])
+    const result = await run('auto', reviewer)
+    expect(result.passed).toBe(true)
+    expect(reviewer.prompts).toHaveLength(4)
+  })
+
+  it('goes on when the answer does not parse', async () => {
+    const reviewer = agent('reviewer', [
+      { ok: true, summary: APPROVE },
+      { ok: true, summary: 'not json' },
+    ])
+    const result = await run('auto', reviewer)
+    expect(result.passed).toBe(true)
   })
 })

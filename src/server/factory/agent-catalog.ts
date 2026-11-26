@@ -1,3 +1,4 @@
+import { LENSES } from './lens-review'
 import { securityPrompt } from './security-review'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -170,13 +171,26 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
         KNOWLEDGE_TOOL,
       ],
       shared: [],
-      source: ['src/server/factory/review.ts'],
+      source: ['src/server/factory/review.ts', 'src/server/factory/lens-review.ts'],
       prompts: [
         template(
           'review',
           'Instruções da revisão',
           'Toda vez que o revisor entra, com o diff entre o commit base e o commit do construtor.',
           reviewPrompt({ ...issue, baseSha: '‹commit base›' }),
+        ),
+        ...LENSES.map((lens) =>
+          template(
+            `lens-${lens.name}`,
+            `Instruções da lente ${lens.name}`,
+            'Depois da aprovação, numa sessão nova e só de leitura, com o diff e os caminhos dos documentos.',
+            lens.prompt({
+              ...issue,
+              baseSha: '‹commit base›',
+              diff: '‹diff›',
+              documents: ['‹documentos›'],
+            }),
+          ),
         ),
       ],
     },

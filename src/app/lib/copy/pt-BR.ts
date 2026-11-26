@@ -19,6 +19,7 @@ const TRIED: DoctorTriedSentences = {
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
   proofs: (v) => `ler as provas dos checks de ${v.repo}`,
+  file: (v) => `ler ${v.path} em ${v.ref} de ${v.repo}`,
 }
 
 /** What was tried, in Portuguese when the code is one this panel knows, and as the server said it otherwise. */
@@ -92,6 +93,8 @@ export const ptBR: Copy = {
     setup: 'Configuração',
   },
   menu: {
+    setupNeedsAttention: (n: number) =>
+      n === 1 ? '1 item da configuração pede atenção' : `${n} itens da configuração pedem atenção`,
     label: 'Menu',
     folded: 'Menu recolhido',
     main: 'Principal',
@@ -107,6 +110,8 @@ export const ptBR: Copy = {
     noneYet: 'Nenhuma conversa ainda',
     account: 'Conta',
     signOut: 'Sair',
+    install: 'Instalar o app',
+    installIos: 'Para instalar: toque em Compartilhar e depois em "Adicionar à Tela de Início".',
   },
   chatRow: {
     name: 'Nome da conversa',
@@ -119,6 +124,8 @@ export const ptBR: Copy = {
   },
   topBar: {
     part: 'Parte do app',
+    openMenu: 'Abrir o menu',
+    closeMenu: 'Fechar o menu',
     chat: 'Chat',
     work: 'Trabalho',
     guide: 'Guia',
@@ -149,6 +156,7 @@ export const ptBR: Copy = {
   },
   board: {
     nothingHere: 'Nada aqui.',
+    stages: 'Etapas',
     mainRedAfterRelease: 'a main quebrou depois da versão',
     mainRed: 'main quebrada',
     changeSize: (added: number, removed: number, files: number) =>
@@ -309,6 +317,14 @@ export const ptBR: Copy = {
     noChecks: 'Nenhuma verificação rodou ainda.',
     evidenceMeta: (sha: string, exit: number, secs: string) =>
       `em ${sha} · saída ${exit} · ${secs} s`,
+    testProof: 'Prova dos testes',
+    testProofOutcome: {
+      proven: 'Provado: os testes falham na base',
+      unproven: 'Não provado: os testes passam sem a mudança',
+      no_tests: 'Nenhum arquivo de teste mudou',
+      not_run: 'Não executado',
+    },
+    testProofMeta: (sha: string, files: number) => `em ${sha} · ${files} arquivos de teste`,
     output: 'Saída',
     reviews: 'Revisões',
     securityReviews: 'Revisão de segurança',
@@ -320,7 +336,7 @@ export const ptBR: Copy = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} em ${sha}`,
   },
   conversation: {
-    heading: 'Fale com o agente',
+    heading: 'Conversa',
     mode: 'Como falar',
     ask: 'Perguntar',
     guide: 'Orientar',
@@ -343,6 +359,43 @@ export const ptBR: Copy = {
     cost: (usd: string) => `custo ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `Uma mensagem do dono para o agente que trabalhou em "${title}" (issue #${issue} de ${repository}).`,
+  },
+  thread: {
+    tabs: 'Agentes',
+    empty: 'Nada foi dito ou feito ainda.',
+    waitingFirst: 'Esperando o primeiro passo do agente…',
+    closed: (stage: string) => `O agente não recebe mensagens enquanto a tarefa está em ${stage}.`,
+    recipient:
+      'Sua mensagem vai para o agente de que a tarefa depende, qualquer que seja a aba aberta.',
+    summary: (c: {
+      read?: number
+      search?: number
+      edit?: number
+      command?: number
+      other?: number
+    }) =>
+      (
+        [
+          ['read', 'leu', 'arquivo', 'arquivos'],
+          ['search', 'buscou', 'vez', 'vezes'],
+          ['edit', 'editou', 'arquivo', 'arquivos'],
+          ['command', 'rodou', 'comando', 'comandos'],
+        ] as const
+      )
+        .map(([k, verb, one, many]) => (c[k] ? `${verb} ${c[k]} ${c[k] === 1 ? one : many}` : ''))
+        .concat(c.other ? `${c.other} ${c.other === 1 ? 'outro passo' : 'outros passos'}` : '')
+        .filter(Boolean)
+        .join(', '),
+    failedSteps: (n: number) => `${n} ${n === 1 ? 'falhou' : 'falharam'}`,
+    worked: (time: string) => `trabalhou por ${time}`,
+    pass: (who: string, engine: string | null) =>
+      engine ? `${who} começou · ${engine}` : `${who} começou`,
+    doing: (what: string, time: string) => `${what} · ${time}`,
+    working: 'trabalhando',
+    running: (tool: string, target: string) =>
+      target ? `rodando ${tool} ${target}` : `rodando ${tool}`,
+    openSteps: 'Mostrar os passos',
+    closeSteps: 'Esconder os passos',
   },
   taskActions: {
     title: 'Ações',
@@ -418,6 +471,8 @@ export const ptBR: Copy = {
     checking: 'Verificando…',
     ready: (when: string) => `Este repositório está pronto. Verificado ${when}.`,
     repair: 'Como resolver:',
+    groups: { operation: 'Operação', codebase: 'Código' },
+    passing: (n: number, m: number) => `${n} de ${m} em ordem`,
     loading: 'Lendo o repositório…',
     unprovenLine: (names: string) => `Estas verificações ainda não foram provadas: ${names}.`,
     allProven: 'Todas as verificações salvas já foram provadas.',
@@ -542,6 +597,41 @@ export const ptBR: Copy = {
             ? `Os checks passaram em ${v.passedOn} e nunca foram provados em ${v.providers}; não se sabe se uma execução lá passa.`
             : `Os checks não passaram em nenhum provedor de sandbox (não provados em ${v.providers}).`,
         repair: (v) => `Prove os checks do repositório com a fábrica rodando em ${v.providers}.`,
+      },
+      agent_guide_missing: {
+        cause: (v) =>
+          `${v.repo} não tem AGENTS.md nem CLAUDE.md em ${v.ref}, então um agente começa sem saber os comandos nem as convenções.`,
+        repair: () =>
+          'Adicione um AGENTS.md na raiz com os comandos de build e teste, a estrutura e as convenções.',
+      },
+      lockfile_missing: {
+        cause: (v) =>
+          `${v.repo} tem package.json em ${v.ref} e nenhum lockfile ao lado, então a instalação no sandbox não é reproduzível.`,
+        repair: () =>
+          'Faça commit do lockfile do gerenciador de pacotes (pnpm-lock.yaml, package-lock.json, yarn.lock ou bun.lockb).',
+      },
+      test_entry_missing: {
+        cause: (v) =>
+          `${v.repo} não tem checks salvos, a receita não declara nenhum e o package.json em ${v.ref} não tem script test, então o check padrão npm test não tem o que rodar.`,
+        repair: () =>
+          'Adicione um script "test" ao package.json, ou salve os checks no painel ou em .factory/setup.json.',
+      },
+      ok_agent_guide: {
+        cause: (v) => `${v.file} em ${v.ref} dá ao agente o guia do repositório.`,
+        repair: () => '',
+      },
+      ok_lockfile: {
+        cause: (v) => `${v.file} está ao lado do package.json em ${v.ref}.`,
+        repair: () => '',
+      },
+      ok_test_entry: {
+        cause: (v) => `Os checks vêm de ${v.source}.`,
+        repair: () => '',
+      },
+      ok_not_applicable: {
+        cause: (v) =>
+          `Não se aplica: ${v.repo} não tem package.json em ${v.ref}, e a fábrica ainda não conhece arquivos de outros ecossistemas.`,
+        repair: () => '',
       },
       ok_provider_checks: {
         cause: (v) => `Os checks passaram em todos os provedores de sandbox: ${v.providers}.`,
@@ -722,6 +812,45 @@ export const ptBR: Copy = {
       notRead: 'Alguns itens não puderam ser lidos, então não contam como certos.',
       firstJob: 'Abrir o primeiro trabalho',
     },
+  },
+  repositoryDetail: {
+    open: 'Abrir a página deste repositório',
+    back: 'Voltar aos repositórios',
+    loading: 'Carregando…',
+    notFound: 'Este repositório não existe ou não está habilitado.',
+    runs: 'Execuções',
+    noTasks: 'Nenhuma tarefa neste repositório ainda.',
+    noPasses: 'Nenhuma passada de agente ainda.',
+    passes: 'Últimas passadas dos agentes',
+    task: 'Tarefa',
+    role: 'Papel',
+    agent: 'Agente',
+    model: 'Modelo',
+    time: 'Tempo',
+    cost: 'Custo',
+    unknownCost: 'desconhecido',
+    result: 'Resultado',
+    ok: 'ok',
+    failed: 'falhou',
+    seconds: (n: string) => `${n} s`,
+    findings: 'Achados',
+    noFindings: 'Nenhum achado aberto.',
+    patterns: 'Padrões de revisão',
+    noPatterns: 'Nenhum padrão de revisão.',
+    indicators: 'Indicadores',
+    noIndicators: 'Nenhum indicador tem pontos para este repositório ainda.',
+    gap: 'sem ponto',
+    samples: (n: number) => `${n} amostras`,
+    costByRole: 'Custo por papel, últimos 14 dias',
+    noCost: 'Nenhuma passada de agente nos últimos 14 dias.',
+    passCount: 'Passadas',
+    unknownShare: 'Custo desconhecido',
+    reviewRounds: 'Rodadas de revisão, últimos 14 dias',
+    noReviews: 'Nenhuma tarefa revisada nos últimos 14 dias.',
+    reviewer: 'Revisor',
+    reviewedTasks: 'Tarefas revisadas',
+    plateau: 'Chegou a um impasse',
+    changesPerTask: 'Mudanças por tarefa',
   },
   repositories: {
     title: 'Repositórios',
@@ -1456,6 +1585,18 @@ export const ptBR: Copy = {
       base_conflict: 'Merge da branch de integração com conflito',
       queue_blocked: 'Correção esperando na fila',
     } as Record<string, string>,
+  },
+  attention: {
+    one: (summary) => `Esperando por você: ${summary}`,
+    many: (count, summary) => `${count} itens esperam por você. O primeiro: ${summary}`,
+    notificationTitle: 'aifactory',
+    openTask: 'Abrir a tarefa',
+    dismiss: 'Dispensar',
+    notify: 'Me avise',
+    notifyOn: 'Os avisos estão ligados',
+    notifyDenied:
+      'Os avisos estão desligados. O navegador os recusou: permita-os para este site nas configurações do navegador (o cadeado ao lado do endereço) e recarregue.',
+    notifyUnsupported: 'Este navegador não mostra avisos.',
   },
   inbox: {
     heading: 'Caixa de entrada',

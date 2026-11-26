@@ -9,7 +9,7 @@ export type CaseResult = {
   /** What the agents said they cost; the sandbox is not included. */
   costUsd: number
   /** The same cost by role (builder includes the planner and the merger), so a comparison shows where it goes. */
-  costByRole?: { builder: number; reviewer: number; security: number }
+  costByRole?: { builder: number; reviewer: number; security: number; lens?: number }
   durationMs: number
   /** How many builder passes the case took. */
   attempts: number

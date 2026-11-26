@@ -17,6 +17,9 @@ import { usesChangesets, withChangesetCheck } from './changesets'
 import type { ProviderProofs } from '../../shared/panel'
 import type { DoctorTried, RecipeWhy } from '../../shared/doctor-say'
 import {
+  AGENT_GUIDES,
+  fileTried,
+  LOCKFILES,
   manifestVersion,
   providerRefusal,
   readOf,
@@ -244,7 +247,13 @@ function factoryCheckNames(reader: Reader, recipe: Recipe | undefined, changeset
 
 type RepositoryFacts = Omit<
   DoctorFacts,
-  'repo' | 'integration' | 'access' | 'events' | 'sandbox' | 'providerProofs'
+  | 'repo'
+  | 'integration'
+  | 'access'
+  | 'events'
+  | 'sandbox'
+  | 'providerProofs'
+  | keyof Awaited<ReturnType<typeof readCodebase>>
 >
 
 /** What the proofs of the repository's checks found on each sandbox provider. */
@@ -297,6 +306,65 @@ async function readRepository(reader: Reader): Promise<RepositoryFacts> {
   }
 }
 
+/**
+ * The first of `paths` that is on `ref`, or undefined when none is. A path that could not be read does not
+ * hide one that was found; with none found, the first that failed is what was not read.
+ */
+export async function firstFile(
+  reader: Pick<Reader, 'api' | 'name' | 'token'>,
+  paths: readonly string[],
+  ref: string,
+): Promise<Read<string | undefined>> {
+  let failed: Read<never> | undefined
+  for (const path of paths) {
+    const found = await attempt(fileTried(reader.name, path, ref), () =>
+      reader.api.readFile(reader.name, reader.token, path, ref),
+    )
+    if (!found.read) failed ??= found
+    else if (found.value !== undefined) return readOf(path)
+  }
+  return failed ?? readOf(undefined)
+}
+
+/** What the code of the repository gives an agent, read on the integration branch. */
+export async function readCodebase(reader: Reader) {
+  const { api, name, token, integration: ref } = reader
+  const [guide, manifest, lockfile, recipeText] = await Promise.all([
+    firstFile(reader, AGENT_GUIDES, ref),
+    attempt(fileTried(name, 'package.json', ref), () =>
+      api.readFile(name, token, 'package.json', ref),
+    ),
+    firstFile(reader, LOCKFILES, ref),
+    attempt(fileTried(name, RECIPE_PATH, ref), () => api.readFile(name, token, RECIPE_PATH, ref)),
+  ])
+  const recipeChecks: Read<boolean> = !recipeText.read
+    ? recipeText
+    : recipeText.value === undefined
+      ? readOf(false)
+      : recipeDeclaresChecks(name, recipeText.value, ref)
+  return {
+    guide,
+    manifest,
+    lockfile,
+    recipeChecks,
+    savedChecks: (reader.config.checks ?? []).length > 0,
+  }
+}
+
+/** Whether a recipe text declares checks; a recipe that cannot be used is a file that was not read. */
+function recipeDeclaresChecks(name: string, text: string, ref: string): Read<boolean> {
+  try {
+    return readOf((parseRecipe(name, text).checks ?? []).length > 0)
+  } catch (error) {
+    if (!(error instanceof RecipeError)) throw error
+    return unread(
+      triedText(fileTried(name, RECIPE_PATH, ref)),
+      error.message,
+      fileTried(name, RECIPE_PATH, ref),
+    )
+  }
+}
+
 /** Everything the doctor decides over for one repository, each fact read or said not to be. */
 export async function collectFacts(sources: DoctorSources, name: string): Promise<DoctorFacts> {
   const { db, github, api } = sources
@@ -316,6 +384,11 @@ export async function collectFacts(sources: DoctorSources, name: string): Promis
   if (!token.read) {
     return {
       ...local,
+      guide: token,
+      manifest: token,
+      lockfile: token,
+      recipeChecks: token,
+      savedChecks: (config.checks ?? []).length > 0,
       settings: token,
       branches: token,
       label: token,
@@ -327,5 +400,6 @@ export async function collectFacts(sources: DoctorSources, name: string): Promis
     }
   }
   const reader = { api, name, token: token.value, config, integration }
-  return { ...local, ...(await readRepository(reader)) }
+  const [repository, codebase] = await Promise.all([readRepository(reader), readCodebase(reader)])
+  return { ...local, ...repository, ...codebase }
 }

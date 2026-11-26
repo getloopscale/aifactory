@@ -8,10 +8,11 @@ import { enterStage } from '../factory/stages'
 import { outcome } from '../factory/transitions'
 import { questionComment } from '../factory/waiting'
 import type { GithubApp } from '../github/app'
+import type { IssuesApi } from '../github/issues-api'
 import type { GithubApi } from '../github/pulls'
 
 import type { Placement } from './order'
-import type { Readiness } from './readiness'
+import { ACCEPTANCE_HEADING, acceptanceSection, bodyHash, type Readiness } from './readiness'
 
 /**
  * The scheduler's only side effects: its decisions recorded, the order written to `available_at`, and the
@@ -182,4 +183,66 @@ export async function blockTask(
     })
     return { blocked: true } as const
   })
+}
+
+export type DraftDeps = Pick<AskDeps, 'db' | 'github'> & {
+  issues: Pick<IssuesApi, 'updateIssueBody'>
+  /** A read of the issue as GitHub holds it now, not the pass's listing. */
+  readIssue: (
+    repo: string,
+    number: number,
+    token: string,
+  ) => Promise<{ title: string; body: string }>
+}
+
+/** `stale`: the issue is not the version the verdict was made for (or could not be confirmed); nothing was written. */
+export type Drafted = { drafted: true } | { drafted: false; stale?: boolean; reason: string }
+
+/**
+ * Writes drafted acceptance criteria into the issue and records a `ready` verdict for the body GitHub holds
+ * afterwards, leaving the queued run and the task's stage as they are. The transition and the run are checked
+ * first, and the issue is read again just before the write: when it is no longer the version judged (the owner
+ * edited it), nothing is written. A body that already holds the section is not written twice. The recorded
+ * hash is that of the body read back after the write, since GitHub may store it differently from what was sent.
+ */
+export async function applyAcceptance(
+  deps: DraftDeps,
+  run: AskedRun,
+  judged: { title: string; body: string },
+  criteria: string[],
+): Promise<Drafted> {
+  const [row] = await deps.db
+    .select({ stage: task.stage })
+    .from(task)
+    .where(eq(task.id, run.taskId))
+  const allowed = outcome({ stage: row?.stage ?? 'cancelled' }, 'needs_refinement')
+  if (allowed.kind !== 'action') return { drafted: false, reason: allowed.reason }
+  const queued = await deps.db.execute(
+    sql`select 1 from theokit_jobs where theokit_jobs.id = ${run.jobId} and ${MOVABLE}`,
+  )
+  if ((queued.rowCount ?? 0) === 0) {
+    return { drafted: false, reason: 'its queued run was taken, held or withdrawn first' }
+  }
+  const { token } = await deps.github.installationToken(run.repository)
+  const current = await deps.readIssue(run.repository, run.issueNumber, token)
+  const written = current.body.includes(ACCEPTANCE_HEADING)
+  if (!written && bodyHash(current.title, current.body) !== bodyHash(judged.title, judged.body)) {
+    return { drafted: false, stale: true, reason: 'the issue changed after it was judged' }
+  }
+  let after = current
+  if (!written) {
+    const body = [current.body.trimEnd(), acceptanceSection(criteria)]
+      .filter((p) => p !== '')
+      .join('\n\n')
+    await deps.issues.updateIssueBody(run.repository, token, run.issueNumber, body)
+    after = await deps.readIssue(run.repository, run.issueNumber, token)
+  }
+  await recordDecision(deps.db, {
+    taskId: run.taskId,
+    kind: 'readiness',
+    mode: 'auto',
+    head: bodyHash(after.title, after.body),
+    detail: { verdict: 'ready', missing: '', question: '', drafted: true },
+  })
+  return { drafted: true }
 }

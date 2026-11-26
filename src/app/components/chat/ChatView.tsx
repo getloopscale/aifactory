@@ -135,7 +135,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
 
   if (empty) {
     return (
-      <div className="flex h-full flex-col items-center justify-center px-6 pb-24">
+      <div className="flex h-full flex-col items-center justify-center px-4 sm:px-6 pb-24">
         <h1 className="mb-8 text-[26px] font-normal tracking-tight">{t.chat.ready}</h1>
         <div className="w-full max-w-[770px]">{composer}</div>
         <ul className="mt-6 w-full max-w-[770px] space-y-1">
@@ -159,7 +159,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <ScrollArea className="min-h-0 flex-1">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-6 py-6">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 sm:px-6 py-6">
           <Messages
             messages={messages}
             running={running}
@@ -167,7 +167,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
           />
         </div>
       </ScrollArea>
-      <div className="mx-auto w-full max-w-3xl px-6 pb-5">{composer}</div>
+      <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pb-5">{composer}</div>
     </div>
   )
 }
