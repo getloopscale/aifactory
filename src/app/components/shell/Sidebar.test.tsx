@@ -94,3 +94,25 @@ describe('the setup entry of the menu', () => {
     expect(entry().getAttribute('aria-label')).toContain('1 setup item needs attention')
   })
 })
+
+describe('the history entry of the menu', () => {
+  it('is in the menu and marks the page it leads to', () => {
+    render(
+      <MemoryRouter initialEntries={['/history']}>
+        <CopyProvider>
+          <Sidebar
+            onToggle={vi.fn()}
+            waiting={0}
+            wrong={0}
+            name="paulo"
+            plan="owner"
+            onSignOut={vi.fn()}
+          />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    const link = screen.getByRole('link', { name: en.places.history })
+    expect(link.getAttribute('href')).toBe('/history')
+    expect(link.getAttribute('aria-current')).toBe('page')
+  })
+})

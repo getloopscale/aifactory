@@ -1171,3 +1171,40 @@ export type RepositoryDetail = {
     changesPerTask: number
   }[]
 }
+
+/** The roles a pass of the history can be filtered by. */
+export const HISTORY_ROLES = [
+  'builder',
+  'planner',
+  'reviewer',
+  'merger',
+  'security',
+  'lens',
+] as const
+
+/** One pass an agent made, found by the text of what it did, and the task it belongs to. */
+export type HistoryResult = {
+  taskId: number
+  issueNumber: number
+  displayIdentifier: string | null
+  title: string
+  repository: string
+  /** The pass the trace is of; null when the factory holds no pass for that trace. */
+  runId: number | null
+  role: string | null
+  attempt: number | null
+  at: string | null
+  costUsd: number | null
+  inputPreview: string
+  outputPreview: string
+  /** The trace in Looptrace, when `FACTORY_TRACE_UI_URL` is set. */
+  traceUrl: string | null
+}
+
+/** What `GET /api/panel/history` answers. With no endpoint set it is `{ enabled: false }`. */
+export type HistoryReport =
+  | { enabled: false; variable: string }
+  | { enabled: true; results: HistoryResult[]; page: number; hasMore: boolean }
+
+/** The 502 body: Looptrace did not answer, or answered something the panel cannot read. */
+export type HistoryError = { error: 'trace_unavailable'; message: string }
