@@ -108,6 +108,38 @@ function Row({ row, focus = false }: { row: ThreadRow; focus?: boolean }) {
   return <Folded row={row} focus={focus} />
 }
 
+/** The choice between asking and guiding; guide is offered only where the server takes it. */
+function ModeSelect({
+  mode,
+  mayGuide,
+  reason,
+  onChange,
+}: {
+  mode: 'ask' | 'guide'
+  mayGuide: boolean
+  reason?: string
+  onChange: (mode: 'ask' | 'guide') => void
+}) {
+  const { t } = useCopy()
+  return (
+    <div className="mb-2 flex items-center gap-2">
+      <select
+        aria-label={t.conversation.mode}
+        value={mode}
+        onChange={(e) => onChange(e.target.value as 'ask' | 'guide')}
+        className="h-8 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
+      >
+        <option value="ask">{t.conversation.ask}</option>
+        {mayGuide ? <option value="guide">{t.conversation.guide}</option> : null}
+      </select>
+      <span className="text-sm text-muted-foreground">
+        {mode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
+      </span>
+      {!mayGuide && reason ? <span className="text-sm text-muted-foreground">{reason}</span> : null}
+    </div>
+  )
+}
+
 /**
  * The one conversation of a task: a tab for each agent, what the owner wrote and what the agent said and
  * did in the order it happened, and the box to write at the bottom.
@@ -290,23 +322,12 @@ export function Conversation({
               {stopsStep ? <> {t.conversation.stopsStep}</> : null}
             </p>
           ) : (
-            <div className="mb-2 flex items-center gap-2">
-              <select
-                aria-label={t.conversation.mode}
-                value={sendMode}
-                onChange={(e) => setMode(e.target.value as typeof mode)}
-                className="h-8 rounded-lg border border-border bg-card px-2 text-sm text-foreground"
-              >
-                <option value="ask">{t.conversation.ask}</option>
-                {mayGuide ? <option value="guide">{t.conversation.guide}</option> : null}
-              </select>
-              <span className="text-sm text-muted-foreground">
-                {sendMode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
-              </span>
-              {!mayGuide && detail.guide?.reason ? (
-                <span className="text-sm text-muted-foreground">{detail.guide.reason}</span>
-              ) : null}
-            </div>
+            <ModeSelect
+              mode={sendMode}
+              mayGuide={mayGuide}
+              reason={detail.guide?.reason}
+              onChange={setMode}
+            />
           )}
           <label className="block text-sm">
             <span className="text-foreground">{t.conversation.label}</span>
