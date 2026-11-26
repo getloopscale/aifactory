@@ -45,4 +45,14 @@ describe('the installable panel', () => {
     expect(worker).not.toMatch(/onfetch/)
     expect(worker).not.toMatch(/caches\./)
   })
+
+  it('shows a notification per task on push and focuses or opens the link on click', () => {
+    const worker = read('public/sw.js')
+    expect(worker).toContain("addEventListener('push'")
+    expect(worker).toContain('showNotification')
+    expect(worker).toMatch(/tag:\s*data\.tag/)
+    expect(worker).toContain("addEventListener('notificationclick'")
+    expect(worker).toContain('matchAll')
+    expect(worker).toContain('openWindow')
+  })
 })
