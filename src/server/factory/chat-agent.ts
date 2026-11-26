@@ -8,6 +8,7 @@ import {
   startJobTool,
   taskDetailTool,
 } from '../agents/tools/chat'
+import { HISTORY_TOOLS } from '../agents/tools/history'
 
 import { buildAssistant, type AssistantSpec } from './assistant'
 
@@ -21,6 +22,7 @@ export const CHAT_SPEC: AssistantSpec = {
     retry_task: retryTaskTool,
     request_changes: requestChangesTool,
     start_job: startJobTool,
+    ...HISTORY_TOOLS,
   },
   asks: {
     retry_task: 'Start this task again from the beginning?',
