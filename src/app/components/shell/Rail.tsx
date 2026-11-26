@@ -4,6 +4,7 @@ import {
   Factory,
   FolderGit2,
   HeartPulse,
+  History,
   Inbox,
   LayoutDashboard,
   ListChecks,
@@ -15,7 +16,7 @@ import {
   SquarePen,
 } from 'lucide-react'
 import type { ComponentType } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 
 import type { GuideId } from '../../../shared/guides'
 import { useCopy } from '../../lib/copy'
@@ -37,7 +38,7 @@ function Place({
   dot,
   attention,
 }: {
-  id: GuideId
+  id: GuideId | 'history'
   to: string
   icon: Icon
   label: string
@@ -45,7 +46,9 @@ function Place({
   attention?: SetupAttention
 }) {
   const { t } = useCopy()
-  const active = usePlace() === id
+  const place = usePlace()
+  const { pathname } = useLocation()
+  const active = id === 'history' ? pathname.startsWith(to) : place === id
   return (
     <Link
       to={to}
@@ -167,6 +170,7 @@ export function Rail({
         <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} dot={waiting > 0} />
         <Place id="health" to="/health" icon={HeartPulse} label={t.places.health} dot={wrong > 0} />
         <Place id="agents" to="/agents" icon={Bot} label={t.places.agents} />
+        <Place id="history" to="/history" icon={History} label={t.places.history} />
         <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} attention={setup} />
       </nav>
 

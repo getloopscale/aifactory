@@ -8,6 +8,7 @@ export const en = {
     ownerRole: 'factory owner',
   },
   places: {
+    history: 'History',
     board: 'Board',
     plans: 'Plans',
     repositories: 'Repositories',
@@ -260,6 +261,7 @@ export const en = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
   conversation: {
+    passMissing: 'The steps of that pass are not kept, so the conversation opens at its start.',
     heading: 'Conversation',
     mode: 'How to talk',
     ask: 'Ask',
@@ -1312,6 +1314,31 @@ export const en = {
     notifyDenied:
       'Notifications are off. Your browser refused them: allow them for this site in the browser settings (the lock next to the address), then reload.',
     notifyUnsupported: 'This browser cannot show notifications.',
+  },
+  history: {
+    heading: 'History',
+    search: 'Search what the agents did',
+    placeholder: 'A word or phrase',
+    submit: 'Search',
+    tooShort: 'Type at least 2 characters.',
+    repository: 'Repository',
+    anyRepository: 'Any repository',
+    role: 'Role',
+    anyRole: 'Any role',
+    from: 'From',
+    to: 'To',
+    off: (variable: string) =>
+      `History search is off. Set ${variable} to the address of Looptrace to turn it on.`,
+    unavailable: 'Looptrace did not answer, so the search could not run.',
+    empty: 'Nothing found.',
+    attempt: (n: number) => `attempt ${n}`,
+    openTask: 'Open the task at this pass',
+    openTrace: 'Open in Looptrace',
+    input: 'Input',
+    output: 'Output',
+    previous: 'Previous',
+    next: 'Next',
+    page: (n: number) => `Page ${n}`,
   },
   inbox: {
     heading: 'Inbox',
