@@ -289,6 +289,13 @@ export function threadRows(
   return rows
 }
 
+/** The `seq` of the first step a row shows; undefined for a row of the owner's conversation, which has none. */
+export function rowSeq(row: ThreadRow): number | undefined {
+  if (row.type === 'work' || row.type === 'worked') return row.steps[0]?.seq
+  const match = /^[psfd]-(\d+)$/.exec(row.key)
+  return match ? Number(match[1]) : undefined
+}
+
 /** The roles that have rows, the running one first. */
 export function threadRoles(rows: ThreadRow[], running?: ThreadRole): ThreadRole[] {
   const roles = [...new Set(rows.map((r) => r.role))]

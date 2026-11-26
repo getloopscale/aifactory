@@ -267,6 +267,9 @@ export type RunView = {
   quota: boolean
   /** The pass answered a message of the owner. */
   conversation?: boolean
+  /** The `seq` range of the task's transcript the pass wrote (inclusive); null for a pass recorded before it was kept. */
+  eventFrom?: number | null
+  eventTo?: number | null
   at: string
 }
 

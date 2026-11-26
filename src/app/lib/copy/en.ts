@@ -261,6 +261,7 @@ export const en = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
   conversation: {
+    passMissing: 'The steps of that pass are not kept, so the conversation opens at its start.',
     heading: 'Conversation',
     mode: 'How to talk',
     ask: 'Ask',

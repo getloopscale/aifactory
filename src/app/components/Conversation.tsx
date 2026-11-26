@@ -6,7 +6,14 @@ import type { TaskDetail, TranscriptEvent } from '../../shared/panel'
 import { PERSONAS } from '../../shared/personas'
 import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'
-import { span, threadRoles, threadRows, type ThreadRole, type ThreadRow } from '../lib/thread'
+import {
+  rowSeq,
+  span,
+  threadRoles,
+  threadRows,
+  type ThreadRole,
+  type ThreadRow,
+} from '../lib/thread'
 
 import { Assist } from './Assist'
 import { StepRow } from './Transcript'
@@ -17,9 +24,15 @@ export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed']
 export const LIVE = { build: 'builder', review: 'reviewer' } as const
 
 /** A folded row opens on a click and shows the steps it holds. */
-function Folded({ row }: { row: Extract<ThreadRow, { type: 'work' | 'worked' }> }) {
+function Folded({
+  row,
+  focus = false,
+}: {
+  row: Extract<ThreadRow, { type: 'work' | 'worked' }>
+  focus?: boolean
+}) {
   const { t } = useCopy()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(focus)
   const summary = t.thread.summary(row.counts)
   const label =
     row.type === 'worked'
@@ -50,7 +63,7 @@ function Folded({ row }: { row: Extract<ThreadRow, { type: 'work' | 'worked' }> 
   )
 }
 
-function Row({ row }: { row: ThreadRow }) {
+function Row({ row, focus = false }: { row: ThreadRow; focus?: boolean }) {
   const { t } = useCopy()
   if (row.type === 'owner')
     return (
@@ -91,7 +104,17 @@ function Row({ row }: { row: ThreadRow }) {
   // A failed step stands on its own.
   if (row.type === 'work' && row.failed > 0 && row.steps.length === 1 && row.steps[0])
     return <StepRow row={row.steps[0]} />
-  return <Folded row={row} />
+  return <Folded row={row} focus={focus} />
+}
+
+/** The transcript groups the passes it keeps under three roles. */
+const TRANSCRIPT_ROLE: Record<string, ThreadRole> = {
+  builder: 'builder',
+  planner: 'builder',
+  reviewer: 'reviewer',
+  security: 'reviewer',
+  lens: 'reviewer',
+  merger: 'merger',
 }
 
 /**
@@ -103,11 +126,14 @@ export function Conversation({
   events = [],
   error,
   onDone,
+  focusRun,
 }: {
   detail: TaskDetail
   events?: TranscriptEvent[]
   error?: string
   onDone: () => void
+  /** The pass (`agent_run` id) to open the thread at: its tab, scrolled to and opened. */
+  focusRun?: number
 }) {
   const { task, messages } = detail
   const { t } = useCopy()
@@ -131,8 +157,26 @@ export function Conversation({
     engineOf: (role) => harnessOf(role) ?? null,
   })
   const roles = threadRoles(rows, liveRole)
-  const role = picked && roles.includes(picked) ? picked : roles[0]
+  const focused = focusRun === undefined ? undefined : detail.runs.find((r) => r.id === focusRun)
+  const focusRole = focused ? TRANSCRIPT_ROLE[focused.role] : undefined
+  const role =
+    picked && roles.includes(picked)
+      ? picked
+      : focusRole && roles.includes(focusRole)
+        ? focusRole
+        : roles[0]
   const shown = rows.filter((r) => r.role === role)
+  // A pass recorded before its range was kept (or one whose steps are gone) cannot be pointed at.
+  const from = focused?.eventFrom ?? undefined
+  const to = focused?.eventTo ?? undefined
+  const target =
+    from === undefined || to === undefined || focusRole !== role
+      ? undefined
+      : shown.find((r) => {
+          const seq = rowSeq(r)
+          return seq !== undefined && seq >= from && seq <= to
+        })
+  const passMissing = focusRun !== undefined && !target && (events.length > 0 || from === undefined)
   const pass = [...shown].reverse().find((r) => r.type === 'pass')
   const activity =
     pass && pass.type === 'pass' && pass.role === liveRole
@@ -152,6 +196,12 @@ export function Conversation({
     const box = scroller.current
     if (box && stuck.current) box.scrollTop = box.scrollHeight
   }, [shown.length, activity])
+
+  useEffect(() => {
+    if (!target) return
+    stuck.current = false
+    scroller.current?.querySelector('[data-focus="true"]')?.scrollIntoView?.({ block: 'start' })
+  }, [target?.key])
 
   async function send() {
     setBusy(true)
@@ -194,6 +244,11 @@ export function Conversation({
         </div>
       ) : null}
       {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
+      {passMissing ? (
+        <p role="status" className="mb-2 text-sm text-muted-foreground">
+          {t.conversation.passMissing}
+        </p>
+      ) : null}
       <div
         ref={scroller}
         onScroll={(e) => {
@@ -209,8 +264,14 @@ export function Conversation({
         ) : (
           <ol className="space-y-3">
             {shown.map((row) => (
-              <li key={row.key}>
-                <Row row={row} />
+              <li
+                key={row.key}
+                data-focus={row.key === target?.key ? 'true' : undefined}
+                className={
+                  row.key === target?.key ? 'rounded-md ring-2 ring-primary/50' : undefined
+                }
+              >
+                <Row row={row} focus={row.key === target?.key} />
               </li>
             ))}
           </ol>

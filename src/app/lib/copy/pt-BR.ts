@@ -337,6 +337,7 @@ export const ptBR: Copy = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} em ${sha}`,
   },
   conversation: {
+    passMissing: 'Os passos dessa passagem não foram guardados, então a conversa abre no começo.',
     heading: 'Conversa',
     mode: 'Como falar',
     ask: 'Perguntar',
