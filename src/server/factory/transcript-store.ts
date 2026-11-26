@@ -44,6 +44,11 @@ export class Transcript {
     return new Transcript(db, taskId, (row?.last ?? 0) + 1)
   }
 
+  /** The `seq` of the last step handed to a sink, 0 when there is none: the end of the pass so far. */
+  get last(): number {
+    return this.next - 1
+  }
+
   /** The callback for one agent run: each event it gets is stored, redacted and cut, in order. */
   sink(role: Role, attempt: number): (event: AgentEvent) => void {
     return (event) => {

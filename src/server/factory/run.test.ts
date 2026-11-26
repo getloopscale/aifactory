@@ -81,7 +81,10 @@ function reviewerRun(answers: string[], fetchLike: typeof fetch) {
   const updates: EgressRule[][] = []
   const rows: unknown[] = []
   const chain: Record<string, unknown> = {
-    values: async (row: unknown) => void rows.push(row),
+    values: (row: unknown) => {
+      rows.push(row)
+      return Object.assign(Promise.resolve(), { returning: async () => [{ id: 1 }] })
+    },
     set: () => chain,
     where: async () => undefined,
   }
@@ -275,7 +278,10 @@ describe('the install before the builder', () => {
       run: (_b: unknown, o: { prompt: string }) => answer('run', o.prompt),
       resume: (_b: unknown, _s: string, o: { prompt: string }) => answer('resume', o.prompt),
     }
-    const chain = { values: async () => {}, set: () => ({ where: async () => {} }) }
+    const chain = {
+      values: () => Object.assign(Promise.resolve(), { returning: async () => [{ id: 1 }] }),
+      set: () => ({ where: async () => {} }),
+    }
     const db = {
       insert: () => chain,
       update: () => chain,
