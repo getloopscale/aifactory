@@ -1,4 +1,4 @@
-import { ListTodo } from 'lucide-react'
+import { FlaskConical as FlaskIcon, ListTodo } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
@@ -30,8 +30,7 @@ import {
 
 import { PriorityBadge, ReturnedBadge, StageBadge } from './Badges'
 import { AgentIcon } from './floor/AgentIcon'
-import { STEP_ICON } from './floor/icons'
-import { RowIcon, Surface, TABLE, TONE_DOT, type Tone } from './ui/Surface'
+import { Surface, TABLE, TONE_DOT, type Tone } from './ui/Surface'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
@@ -66,7 +65,7 @@ function QueueLines({ queue }: { queue: QueueView }) {
   const { place, verdict } = queueWords(queue, t.board)
   return (
     <>
-      <div className="mt-1 flex items-start gap-1.5">
+      <div className="flex items-baseline gap-1.5">
         {queue.reasons?.priority != null ? (
           <PriorityBadge priority={queue.reasons.priority} />
         ) : null}
@@ -75,7 +74,7 @@ function QueueLines({ queue }: { queue: QueueView }) {
         </span>
       </div>
       {verdict ? (
-        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={verdict}>
+        <div className="line-clamp-2 text-xs text-muted-foreground" title={verdict}>
           {verdict}
         </div>
       ) : null}
@@ -89,12 +88,13 @@ function QueueLines({ queue }: { queue: QueueView }) {
  */
 function Panel({
   label,
-  surface,
+  lit,
   lead,
   children,
 }: {
   label: string
-  surface: string
+  /** Tinted while what it shows is at work. */
+  lit?: 'primary' | 'warning'
   lead: ReactNode
   children: ReactNode
 }) {
@@ -102,10 +102,10 @@ function Panel({
     <div
       aria-label={label}
       title={label}
-      className={`mt-2 flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${surface}`}
+      className={`flex min-w-0 items-center gap-1.5 text-xs ${lit ? '-mx-1 rounded-md px-1 py-1' : ''} ${lit === 'primary' ? 'bg-primary/10' : lit === 'warning' ? 'bg-warning/10' : ''}`}
     >
       {lead}
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1 truncate">{children}</div>
     </div>
   )
 }
@@ -121,11 +121,11 @@ function AgentPanel({ task }: { task: TaskCard }) {
     return (
       <Panel
         label={workingLine(step, t.board)}
-        surface="border-warning/40 bg-warning/10"
-        lead={<RowIcon icon={STEP_ICON.checks} tone="warning" />}
+        lit="warning"
+        lead={<FlaskIcon aria-hidden className="size-3.5 shrink-0 text-foreground" />}
       >
-        <div className="text-[13px] font-semibold text-foreground">{t.board.steps.checks}</div>
-        <div className="mt-0.5 line-clamp-2 text-muted-foreground">{step.checks.join(', ')}</div>
+        <span className="font-medium text-foreground">{t.board.steps.checks}</span>{' '}
+        <span className="text-muted-foreground">{step.checks.join(', ')}</span>
       </Panel>
     )
   }
@@ -134,15 +134,15 @@ function AgentPanel({ task }: { task: TaskCard }) {
   return (
     <Panel
       label={step ? workingLine(step, t.board) : lastAgentLine(seen, t.board)}
-      surface={step ? 'border-primary/40 bg-primary/10' : 'border-border'}
-      lead={<AgentIcon agent={seen.agent} live={step !== null} />}
+      lit={step ? 'primary' : undefined}
+      lead={<AgentIcon agent={seen.agent} size="sm" live={step !== null} />}
     >
+      {step ? <span className="font-medium text-foreground">{stepLine(step, t.board)}</span> : null}
+      {step && seen.model ? ' · ' : null}
       {seen.model ? (
-        <div className="truncate font-mono text-[11px] text-foreground">{seen.model}</div>
+        <span className="font-mono text-[11px] text-muted-foreground">{seen.model}</span>
       ) : null}
-      <div className={`mt-0.5 ${step ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
-        {step ? stepLine(step, t.board) : t.board.lastWorked}
-      </div>
+      {step ? null : <span className="sr-only"> {t.board.lastWorked}</span>}
     </Panel>
   )
 }
@@ -166,8 +166,8 @@ function Rank({ queue }: { queue: TaskCard['queue'] }) {
 /** The bar on the side of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
 const LEAD_BORDER: Record<LeadTimeStatus, string> = {
   on_track: '',
-  at_risk: 'border-l-4 border-warning',
-  overdue: 'border-l-4 border-destructive',
+  at_risk: 'border-l-2 border-warning',
+  overdue: 'border-l-2 border-destructive',
 }
 
 const LEAD_TEXT: Record<LeadTimeStatus, string> = {
@@ -191,7 +191,7 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
   return (
     <div
       data-lead-time={lead.status}
-      className={`mt-1 text-xs tabular-nums ${lead.running ? LEAD_TEXT[lead.status] : 'text-muted-foreground'}`}
+      className={`text-xs tabular-nums ${lead.running ? LEAD_TEXT[lead.status] : 'text-muted-foreground'}`}
     >
       {lead.running && lead.status !== 'on_track' ? (
         <span
@@ -205,6 +205,9 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
 }
 
 /**
+ * The card is the containing block of what it hides for a screen reader: left to the page, 1,500 such marks in a
+ * scrolling column made the page itself as tall as the column.
+ *
  * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
  * takes up to three lines, the agent its own panel, and the stage closes the card.
  */
@@ -216,11 +219,11 @@ export function Card({ task }: { task: TaskCard }) {
     <Link
       to={openTask(task.id)}
       aria-current={current ? 'true' : undefined}
-      className={`block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring ${current ? 'bg-muted/60' : ''}`}
+      className={`relative block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring ${current ? 'bg-muted/60' : ''}`}
     >
       <div
         data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
-        className={`flex min-h-[168px] flex-col px-3 py-2.5 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
+        className={`flex min-h-[124px] flex-col gap-1 px-3 py-2.5 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
       >
         <div className="flex items-baseline gap-2 font-mono text-[11px] text-muted-foreground">
           <Rank queue={task.queue} />
@@ -234,58 +237,57 @@ export function Card({ task }: { task: TaskCard }) {
         </div>
         <div
           title={task.title}
-          className="mt-1.5 line-clamp-3 text-sm font-medium leading-snug text-foreground"
+          className="line-clamp-3 text-sm font-medium leading-snug text-foreground"
         >
           {task.title}
         </div>
         {task.leadTime ? <LeadTimeLine lead={task.leadTime} /> : null}
         {task.returned ? (
-          <div className="mt-1.5">
+          <div className="">
             <ReturnedBadge returned={task.returned} />
           </div>
         ) : null}
         {task.mainRed ? (
-          <div className="mt-1 text-xs font-medium text-destructive">
-            {t.board.mainRedAfterRelease}
-          </div>
+          <div className="text-xs font-medium text-destructive">{t.board.mainRedAfterRelease}</div>
         ) : null}
-        {task.change ? (
-          <div
-            className="mt-1 text-xs tabular-nums text-muted-foreground"
-            aria-label={t.board.changeSize(
-              task.change.added,
-              task.change.removed,
-              task.change.files,
-            )}
-          >
-            +{task.change.added} −{task.change.removed}
-          </div>
-        ) : null}
-        {task.risk ? (
-          <div
-            className={`mt-1 text-xs ${task.risk.level === 'high' ? 'font-medium text-destructive' : 'text-muted-foreground'}`}
-            title={t.board.riskReasons(task.risk.reasons)}
-          >
-            {t.board.risk[task.risk.level]}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted-foreground empty:hidden">
+          {task.change ? (
+            <span
+              className="font-mono tabular-nums"
+              aria-label={t.board.changeSize(
+                task.change.added,
+                task.change.removed,
+                task.change.files,
+              )}
+            >
+              +{task.change.added} −{task.change.removed}
+            </span>
+          ) : null}
+          {task.risk ? (
+            <span
+              className={task.risk.level === 'high' ? 'font-medium text-destructive' : undefined}
+              title={t.board.riskReasons(task.risk.reasons)}
+            >
+              {t.board.risk[task.risk.level]}
+            </span>
+          ) : null}
+          {task.attempts > 1 ? <span>{t.board.attempt(task.attempts)}</span> : null}
+        </div>
         {task.waitingOnBase ? (
-          <div className="mt-1 text-xs font-medium text-destructive">
+          <div className="text-xs font-medium text-destructive">
             {t.board.waitingOnBase(task.waitingOnBase.checks.join(', '), task.waitingOnBase.branch)}
           </div>
         ) : null}
         {task.queue ? <QueueLines queue={task.queue} /> : null}
         {task.retryAt ? (
-          <div className="mt-1 text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             {runsAgain(task.retryAt, Date.now(), t.time)}
           </div>
         ) : null}
-        {task.attempts > 1 ? (
-          <div className="mt-1 text-xs text-muted-foreground">{t.board.attempt(task.attempts)}</div>
-        ) : null}
-        <AgentPanel task={task} />
-        <div className="mt-auto pt-2">
+        <div className="mt-auto flex flex-col gap-1.5 pt-1.5">
+          <AgentPanel task={task} />
           <StageBadge
+            quiet
             stage={task.stage}
             integrated={task.integrated}
             waitingForChecks={task.waitingForChecks}
@@ -303,7 +305,7 @@ export function Card({ task }: { task: TaskCard }) {
  * Every column is the same width, full or empty, and they share the room equally, so the board looks the
  * same however many tasks there are. None goes below this: under it the board scrolls instead.
  */
-const COLUMN = 'minmax(176px, 1fr)'
+const COLUMN = 'minmax(152px, 1fr)'
 
 /**
  * The queued column in the order the worker serves it, with a line under the first ten so the head of the

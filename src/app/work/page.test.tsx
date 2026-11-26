@@ -147,7 +147,7 @@ describe('board', () => {
       en.columns.attention,
     ])
     const grid = regions[0].parentElement as HTMLElement
-    expect(grid.style.gridTemplateColumns).toBe('repeat(9, minmax(176px, 1fr))')
+    expect(grid.style.gridTemplateColumns).toBe('repeat(9, minmax(152px, 1fr))')
     for (const name of [
       en.columns.queued,
       en.columns.waiting,
@@ -212,7 +212,7 @@ describe('board', () => {
       .filter((l) => l.getAttribute('href')?.includes('?task='))
     expect(cards).toHaveLength(2)
     // Every card starts at the same height and grows with what it says, so nothing on it is cut.
-    for (const c of cards) expect(c.querySelector('[class*="min-h-[168px]"]')).not.toBeNull()
+    for (const c of cards) expect(c.querySelector('[class*="min-h-[124px]"]')).not.toBeNull()
     for (const c of cards) expect(c.querySelector('[class*=" h-["]')).toBeNull()
     expect(screen.getByText(/A very long title/).className).toContain('line-clamp-3')
     expect(screen.queryAllByText('paulo/app #7').length).toBe(0)
@@ -510,5 +510,25 @@ describe('the agent on a card', () => {
       </MemoryRouter>,
     )
     await screen.findByLabelText('Claude Code · opus · corrigindo achados · tentativa 2')
+  })
+})
+
+describe('what a card hides for a screen reader', () => {
+  it('stays inside the card, so a long column never makes the page as tall as itself', async () => {
+    serve({
+      tasks: [card({ id: 1, lastAgent: { agent: 'claude-code', model: 'claude-sonnet-5-5' } })],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    const hidden = await waitFor(() => {
+      const found = document.querySelector('a[href*="?task="] .sr-only')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    // `sr-only` is absolutely positioned: without a positioned card it is laid out against the page.
+    expect(hidden.closest('a')?.className).toMatch(/(^| )relative( |$)/)
   })
 })
