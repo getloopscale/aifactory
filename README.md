@@ -38,10 +38,10 @@ pnpm db:migrate                      # creates the ingress and task tables
 pnpm dev
 ```
 
-| Route             | Response                                                             |
-| ----------------- | -------------------------------------------------------------------- |
-| `GET /api/health` | 200 whenever the process is up                                       |
-| `GET /api/ready`  | 200 when Postgres answers, 503 with the reason when it does not      |
+| Route             | Response                                                        |
+| ----------------- | --------------------------------------------------------------- |
+| `GET /api/health` | 200 whenever the process is up                                  |
+| `GET /api/ready`  | 200 when Postgres answers, 503 with the reason when it does not |
 
 ### GitHub webhook
 
