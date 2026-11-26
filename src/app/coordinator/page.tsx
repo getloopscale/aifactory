@@ -4,7 +4,7 @@ import { Link } from 'react-router'
 
 import type { CoordinatorActionView } from '../../shared/panel'
 import { CoordinatorActions } from '../components/CoordinatorActions'
-import { PageHeader, Quiet, Surface } from '../components/ui/Surface'
+import { PageHeader, Pane, Quiet, Surface, Workbench } from '../components/ui/Surface'
 import { get } from '../lib/api'
 import { useCopy } from '../lib/copy'
 
@@ -63,58 +63,65 @@ export default function CoordinatorPage() {
   }, [outcome, rows])
 
   return (
-    <>
-      <PageHeader
-        title={t.coordinator.heading}
-        lede={t.coordinator.intro}
-        above={
-          <Link to="/inbox" className="hover:text-foreground">
-            {t.coordinator.back}
-          </Link>
-        }
-        actions={
-          <label className="flex items-center gap-2 text-sm">
-            {t.coordinator.filter}
-            <select
-              value={outcome}
-              onChange={(e) => setOutcome(e.target.value)}
-              className="rounded-md border border-border bg-background px-2 py-1"
-            >
-              <option value="">{t.coordinator.all}</option>
-              {OUTCOMES.map((o) => (
-                <option key={o} value={o}>
-                  {t.coordinator.outcomes[o]}
-                </option>
-              ))}
-            </select>
-          </label>
-        }
-      />
-      {error ? <p className="mb-3 text-sm text-destructive">{error}</p> : null}
-      <Surface title={t.coordinator.sectionTitle} icon={Zap} count={rows?.length}>
-        {rows ? (
-          rows.length === 0 ? (
-            <Quiet>{t.coordinator.empty}</Quiet>
+    <Workbench
+      header={
+        <>
+          <PageHeader
+            title={t.coordinator.heading}
+            lede={t.coordinator.intro}
+            above={
+              <Link to="/inbox" className="hover:text-foreground">
+                {t.coordinator.back}
+              </Link>
+            }
+            actions={
+              <label className="flex items-center gap-2 text-sm">
+                {t.coordinator.filter}
+                <select
+                  value={outcome}
+                  onChange={(e) => setOutcome(e.target.value)}
+                  className="rounded-md border border-border bg-background px-2 py-1"
+                >
+                  <option value="">{t.coordinator.all}</option>
+                  {OUTCOMES.map((o) => (
+                    <option key={o} value={o}>
+                      {t.coordinator.outcomes[o]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            }
+          />
+          {error ? <p className="mb-3 text-sm text-destructive">{error}</p> : null}
+        </>
+      }
+    >
+      <Pane label={t.coordinator.sectionTitle}>
+        <Surface title={t.coordinator.sectionTitle} icon={Zap} count={rows?.length}>
+          {rows ? (
+            rows.length === 0 ? (
+              <Quiet>{t.coordinator.empty}</Quiet>
+            ) : (
+              <>
+                <CoordinatorActions actions={rows} withTask />
+                {more ? (
+                  <div className="border-t border-border px-4 py-2.5">
+                    <button
+                      type="button"
+                      onClick={loadMore}
+                      className="rounded-md border border-border px-3 py-1 text-sm"
+                    >
+                      {t.coordinator.loadMore}
+                    </button>
+                  </div>
+                ) : null}
+              </>
+            )
           ) : (
-            <>
-              <CoordinatorActions actions={rows} withTask />
-              {more ? (
-                <div className="border-t border-border px-4 py-2.5">
-                  <button
-                    type="button"
-                    onClick={loadMore}
-                    className="rounded-md border border-border px-3 py-1 text-sm"
-                  >
-                    {t.coordinator.loadMore}
-                  </button>
-                </div>
-              ) : null}
-            </>
-          )
-        ) : (
-          <Quiet>{t.layout.loading}</Quiet>
-        )}
-      </Surface>
-    </>
+            <Quiet>{t.layout.loading}</Quiet>
+          )}
+        </Surface>
+      </Pane>
+    </Workbench>
   )
 }

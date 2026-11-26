@@ -1,12 +1,12 @@
 import { Alert, Badge, Button, Input, Textarea } from '@usetheo/ui'
-import { ArrowDown, ArrowUp, ListTree } from 'lucide-react'
+import { ArrowDown, ArrowUp, ListTree, Target } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router'
 
 import type { PlanItemView, PlanView } from '../../../shared/panel'
 import { post, put } from '../../lib/api'
 import { Assist } from '../../components/Assist'
-import { PageHeader, READABLE, STACK, Surface } from '../../components/ui/Surface'
+import { PageHeader, Pane, READABLE, Surface, Workbench } from '../../components/ui/Surface'
 import { useCopy } from '../../lib/copy'
 import { money } from '../../lib/format'
 import { useResource } from '../../lib/live'
@@ -111,35 +111,83 @@ export default function PlanPage() {
   const canAct = plan.status === 'ready' || plan.status === 'created'
 
   return (
-    <>
-      <PageHeader
-        title={plan.goal}
-        above={
-          <Link to="/plans" className="hover:text-foreground">
-            {t.plans.back}
-          </Link>
-        }
-        actions={
-          <>
-            <span className="font-mono text-xs text-muted-foreground">{plan.repository}</span>
-            <span className="font-mono text-xs tabular-nums text-muted-foreground">
-              {money(plan.costUsd)}
-            </span>
-            <Badge
-              variant={
-                plan.status === 'failed'
-                  ? 'destructive'
-                  : plan.status === 'planning'
-                    ? 'primary'
-                    : 'success'
-              }
-            >
-              {t.plans.status[plan.status]}
-            </Badge>
-          </>
-        }
-      />
-      <div className={STACK}>
+    <Workbench
+      columns="grid-cols-[minmax(320px,4fr)_minmax(0,8fr)]"
+      header={
+        <PageHeader
+          title={<span className="line-clamp-2">{plan.goal.split('\n', 1)[0]}</span>}
+          above={
+            <Link to="/plans" className="hover:text-foreground">
+              {t.plans.back}
+            </Link>
+          }
+          actions={
+            <>
+              <span className="font-mono text-xs text-muted-foreground">{plan.repository}</span>
+              <span className="font-mono text-xs tabular-nums text-muted-foreground">
+                {money(plan.costUsd)}
+              </span>
+              <Badge
+                variant={
+                  plan.status === 'failed'
+                    ? 'destructive'
+                    : plan.status === 'planning'
+                      ? 'primary'
+                      : 'success'
+                }
+              >
+                {t.plans.status[plan.status]}
+              </Badge>
+            </>
+          }
+        />
+      }
+      footer={
+        canAct || message ? (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+            {canAct ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void act(async () => (await save(), t.plans.saved))}
+                >
+                  {t.plans.saveChanges}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy || waiting === 0}
+                  onClick={() => void createIssues(false)}
+                >
+                  {t.plans.createIssues}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={busy || waiting === 0}
+                  onClick={() => void createIssues(true)}
+                >
+                  {t.plans.createAndStart}
+                </Button>
+                <span className="text-xs text-muted-foreground">{t.plans.toCreate(waiting)}</span>
+              </>
+            ) : null}
+            {message ? (
+              <p role="status" className="text-sm text-foreground">
+                {message}
+              </p>
+            ) : null}
+          </div>
+        ) : null
+      }
+    >
+      <Pane label={t.plans.goal}>
+        <Surface title={t.plans.goal} icon={Target} padded>
+          <p className="whitespace-pre-wrap break-words text-sm text-foreground">{plan.goal}</p>
+        </Surface>
+      </Pane>
+      <Pane label={t.plans.issues}>
         {plan.status === 'planning' ? (
           <Alert intent="info" title={t.plans.reading} description={t.plans.readingText} />
         ) : null}
@@ -274,43 +322,9 @@ export default function PlanPage() {
                 })}
               </ol>
             ) : null}
-
-            {canAct ? (
-              <div className="flex flex-wrap items-center gap-3 border-t border-border px-4 py-3">
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => void act(async () => (await save(), t.plans.saved))}
-                >
-                  {t.plans.saveChanges}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={busy || waiting === 0}
-                  onClick={() => void createIssues(false)}
-                >
-                  {t.plans.createIssues}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={busy || waiting === 0}
-                  onClick={() => void createIssues(true)}
-                >
-                  {t.plans.createAndStart}
-                </Button>
-                <span className="text-xs text-muted-foreground">{t.plans.toCreate(waiting)}</span>
-              </div>
-            ) : null}
           </Surface>
         ) : null}
-        {message ? (
-          <p role="status" className="text-sm text-foreground">
-            {message}
-          </p>
-        ) : null}
-      </div>
-    </>
+      </Pane>
+    </Workbench>
   )
 }

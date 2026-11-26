@@ -8,7 +8,16 @@ import { AgentLine } from '../../components/floor/FloorCard'
 import { FloorHeading } from '../../components/floor/FloorNav'
 import { actionIcon, INBOX_ICON } from '../../components/floor/icons'
 import { StageTape } from '../../components/floor/StageTape'
-import { Quiet, READABLE, Row, RowIcon, Rows, STACK, Surface } from '../../components/ui/Surface'
+import {
+  Pane,
+  Quiet,
+  READABLE,
+  Row,
+  RowIcon,
+  Rows,
+  Surface,
+  Workbench,
+} from '../../components/ui/Surface'
 import { useCopy } from '../../lib/copy'
 import { laneOf, shortRepository, splitInbox, stateOf } from '../../lib/floor'
 import { ago, itemName, money, runsAgain } from '../../lib/format'
@@ -74,15 +83,20 @@ export default function FloorAttentionPage() {
   }
 
   return (
-    <>
-      <FloorHeading
-        title={inbox.data ? t.floor.attention.heading(items.length) : t.floor.views.attention}
-        lede={t.floor.attention.lede}
-        waiting={items.length}
-      />
-      {inbox.error ? <p className="mb-4 text-sm text-destructive">{inbox.error}</p> : null}
-
-      <div className={STACK}>
+    <Workbench
+      columns="grid-cols-[minmax(0,7fr)_minmax(360px,5fr)]"
+      header={
+        <>
+          <FloorHeading
+            title={inbox.data ? t.floor.attention.heading(items.length) : t.floor.views.attention}
+            lede={t.floor.attention.lede}
+            waiting={items.length}
+          />
+          {inbox.error ? <p className="mb-4 text-sm text-destructive">{inbox.error}</p> : null}
+        </>
+      }
+    >
+      <Pane label={t.floor.attention.owner}>
         <Surface
           title={t.floor.attention.owner}
           icon={UserRound}
@@ -160,7 +174,8 @@ export default function FloorAttentionPage() {
             </Rows>
           )}
         </Surface>
-
+      </Pane>
+      <Pane label={t.floor.attention.factory(handled.length)}>
         {alerts.length > 0 ? (
           <Surface
             title={t.floor.attention.alerts(split.alerts.length)}
@@ -225,7 +240,7 @@ export default function FloorAttentionPage() {
             </Rows>
           )}
         </Surface>
-      </div>
-    </>
+      </Pane>
+    </Workbench>
   )
 }

@@ -13,7 +13,16 @@ import { AgentIcon } from '../../components/floor/AgentIcon'
 import { FloorHeading } from '../../components/floor/FloorNav'
 import { ROLE_ICON } from '../../components/floor/icons'
 import { StatePill } from '../../components/floor/StageTape'
-import { Quiet, Row, RowIcon, Rows, STACK, Surface, TABLE } from '../../components/ui/Surface'
+import {
+  Pane,
+  Quiet,
+  Row,
+  RowIcon,
+  Rows,
+  Surface,
+  TABLE,
+  Workbench,
+} from '../../components/ui/Surface'
 import { useCopy } from '../../lib/copy'
 import { ownerTasks, stateOf, type FloorState } from '../../lib/floor'
 import { duration, metricValue, money } from '../../lib/format'
@@ -110,14 +119,20 @@ export default function FloorProjectsPage() {
   const error = tasks.error ?? metrics.error ?? health.error
 
   return (
-    <>
-      <FloorHeading
-        title={t.floor.projects.heading}
-        lede={t.floor.projects.lede}
-        waiting={ownerTasks(inbox.data?.items ?? []).size}
-      />
-      {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
-      <div className={STACK}>
+    <Workbench
+      columns="grid-cols-[minmax(0,7fr)_minmax(360px,5fr)]"
+      header={
+        <>
+          <FloorHeading
+            title={t.floor.projects.heading}
+            lede={t.floor.projects.lede}
+            waiting={ownerTasks(inbox.data?.items ?? []).size}
+          />
+          {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
+        </>
+      }
+    >
+      <Pane label={t.floor.projects.heading}>
         <Surface
           title={t.floor.projects.heading}
           icon={FolderGit2}
@@ -203,7 +218,8 @@ export default function FloorProjectsPage() {
             <Quiet>{t.layout.loading}</Quiet>
           )}
         </Surface>
-
+      </Pane>
+      <Pane label={t.floor.projects.costByRole}>
         <Surface
           title={t.floor.projects.costByRole}
           icon={Coins}
@@ -238,7 +254,7 @@ export default function FloorProjectsPage() {
             ))}
           </Rows>
         </Surface>
-      </div>
-    </>
+      </Pane>
+    </Workbench>
   )
 }

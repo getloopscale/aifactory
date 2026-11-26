@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The attention, decisions and projects views of the floor, the coordinator, setup, a plan and a repository's page keep the height of the window on a wide screen, each column scrolling by itself. A plan shows its goal beside its issues, with the first line of the goal as the title and the buttons that save and create issues always in view
 - The repositories page on a wide screen keeps the height of the window, with the list on the left and the health and settings of one repository on the right. The enabled repositories come first in the list, the first one is open on arrival, and a button on each enabled row chooses which one the right column shows
 - A task opened from the board or the floor on a wide screen is docked beside the page in one frame, with its head, its tabs and the chosen tab together: the page keeps its place and nothing is covered. Escape or the close button closes it, and the card or row of the open task is marked. A narrower screen keeps the panel that slides over
 - The floor, the board, health, plans, agents and history keep the height of the window on a wide screen: the page does not scroll, and each column, list or board column scrolls by itself

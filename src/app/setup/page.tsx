@@ -7,7 +7,7 @@ import { CodexAccount } from '../components/CodexAccount'
 import { KnowledgeRepository } from '../components/KnowledgeRepository'
 import { PushNotifications } from '../components/PushNotifications'
 import { NotifyButton } from '../components/NotifyButton'
-import { PageHeader, Quiet, Row, Rows, STACK, Surface } from '../components/ui/Surface'
+import { PageHeader, Pane, Quiet, Row, Rows, Surface, Workbench } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 
@@ -70,19 +70,23 @@ export default function SetupPage() {
   const report = useResource<SetupReport>('/api/panel/setup', { everyMs: 30_000, stream: false })
   const data = report.data
   return (
-    <>
-      <PageHeader
-        title={t.setup.title}
-        actions={
-          <>
-            <NotifyButton />
-            <Button size="sm" variant="secondary" onClick={report.reload}>
-              {t.setup.checkAgain}
-            </Button>
-          </>
-        }
-      />
-      <div className={STACK}>
+    <Workbench
+      columns="grid-cols-[minmax(0,7fr)_minmax(360px,5fr)]"
+      header={
+        <PageHeader
+          title={t.setup.title}
+          actions={
+            <>
+              <NotifyButton />
+              <Button size="sm" variant="secondary" onClick={report.reload}>
+                {t.setup.checkAgain}
+              </Button>
+            </>
+          }
+        />
+      }
+    >
+      <Pane label={t.setup.title}>
         {report.error ? <p className="text-sm text-destructive">{report.error}</p> : null}
         {data ? (
           <>
@@ -111,14 +115,14 @@ export default function SetupPage() {
                 ))}
               </Rows>
             </Surface>
-            <PushNotifications />
           </>
         ) : (
           <Surface label={t.setup.title}>
             <Quiet>{t.setup.loading}</Quiet>
           </Surface>
         )}
-      </div>
-    </>
+      </Pane>
+      <Pane>{data ? <PushNotifications /> : null}</Pane>
+    </Workbench>
   )
 }

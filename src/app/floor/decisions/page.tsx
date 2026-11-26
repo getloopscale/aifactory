@@ -6,7 +6,16 @@ import { Link } from 'react-router'
 import type { CoordinatorActionView, InboxItem } from '../../../shared/panel'
 import { FloorHeading } from '../../components/floor/FloorNav'
 import { actionIcon } from '../../components/floor/icons'
-import { Quiet, Row, RowIcon, Rows, Surface, type Tone } from '../../components/ui/Surface'
+import {
+  Pane,
+  Quiet,
+  Row,
+  RowIcon,
+  Rows,
+  Surface,
+  Workbench,
+  type Tone,
+} from '../../components/ui/Surface'
 import { useCopy } from '../../lib/copy'
 import { ownerTasks, shortRepository } from '../../lib/floor'
 import { ago, itemName } from '../../lib/format'
@@ -67,62 +76,71 @@ export default function FloorDecisionsPage() {
   const unread = firstRead === -1 ? (last === undefined ? 0 : rows.length) : firstRead
 
   return (
-    <>
-      <FloorHeading
-        title={t.floor.decisions.heading}
-        lede={t.floor.decisions.lede}
-        waiting={ownerTasks(inbox.data?.items ?? []).size}
-      />
-      {feed.error ? <p className="mb-4 text-sm text-destructive">{feed.error}</p> : null}
-      <Surface
-        title={last === undefined ? t.floor.decisions.firstVisit : t.floor.decisions.unread(unread)}
-        icon={Zap}
-        action={
-          <Link to="/coordinator" className="text-muted-foreground underline underline-offset-2">
-            {t.floor.decisions.all}
-          </Link>
-        }
-      >
-        {!feed.data ? (
-          <Quiet>{t.layout.loading}</Quiet>
-        ) : rows.length === 0 ? (
-          <Quiet>{t.coordinator.empty}</Quiet>
-        ) : (
-          <Rows>
-            {rows.map((row, index) => (
-              <Fragment key={row.id}>
-                {index === unread && unread > 0 ? (
-                  <li className="border-t border-dashed border-warning bg-warning/15 px-4 py-1 font-mono text-[11px] text-foreground">
-                    {t.floor.decisions.readUntilHere}
-                  </li>
-                ) : null}
-                <Row
-                  to={`/tasks/${row.taskId}`}
-                  lead={<RowIcon icon={actionIcon(row.action)} tone={TONE[row.outcome]} />}
-                  title={row.title}
-                  meta={
-                    <>
-                      {shortRepository(row.repository)} {itemName(row)} · {row.action} ·{' '}
-                      {row.exceptionKind}
-                    </>
-                  }
-                  detail={<span className="line-clamp-3">{row.reason}</span>}
-                  trail={
-                    <>
-                      <Badge variant={BADGE[row.outcome]}>
-                        {t.coordinator.outcomes[row.outcome]}
-                      </Badge>
-                      <span className="w-16 text-right font-mono text-[11px] tabular-nums">
-                        {ago(row.at, Date.now(), t.time)}
-                      </span>
-                    </>
-                  }
-                />
-              </Fragment>
-            ))}
-          </Rows>
-        )}
-      </Surface>
-    </>
+    <Workbench
+      header={
+        <>
+          <FloorHeading
+            title={t.floor.decisions.heading}
+            lede={t.floor.decisions.lede}
+            waiting={ownerTasks(inbox.data?.items ?? []).size}
+          />
+          {feed.error ? <p className="mb-4 text-sm text-destructive">{feed.error}</p> : null}
+        </>
+      }
+    >
+      <Pane label={t.floor.decisions.heading}>
+        <Surface
+          title={
+            last === undefined ? t.floor.decisions.firstVisit : t.floor.decisions.unread(unread)
+          }
+          icon={Zap}
+          action={
+            <Link to="/coordinator" className="text-muted-foreground underline underline-offset-2">
+              {t.floor.decisions.all}
+            </Link>
+          }
+        >
+          {!feed.data ? (
+            <Quiet>{t.layout.loading}</Quiet>
+          ) : rows.length === 0 ? (
+            <Quiet>{t.coordinator.empty}</Quiet>
+          ) : (
+            <Rows>
+              {rows.map((row, index) => (
+                <Fragment key={row.id}>
+                  {index === unread && unread > 0 ? (
+                    <li className="border-t border-dashed border-warning bg-warning/15 px-4 py-1 font-mono text-[11px] text-foreground">
+                      {t.floor.decisions.readUntilHere}
+                    </li>
+                  ) : null}
+                  <Row
+                    to={`/tasks/${row.taskId}`}
+                    lead={<RowIcon icon={actionIcon(row.action)} tone={TONE[row.outcome]} />}
+                    title={row.title}
+                    meta={
+                      <>
+                        {shortRepository(row.repository)} {itemName(row)} · {row.action} ·{' '}
+                        {row.exceptionKind}
+                      </>
+                    }
+                    detail={<span className="line-clamp-3">{row.reason}</span>}
+                    trail={
+                      <>
+                        <Badge variant={BADGE[row.outcome]}>
+                          {t.coordinator.outcomes[row.outcome]}
+                        </Badge>
+                        <span className="w-16 text-right font-mono text-[11px] tabular-nums">
+                          {ago(row.at, Date.now(), t.time)}
+                        </span>
+                      </>
+                    }
+                  />
+                </Fragment>
+              ))}
+            </Rows>
+          )}
+        </Surface>
+      </Pane>
+    </Workbench>
   )
 }
