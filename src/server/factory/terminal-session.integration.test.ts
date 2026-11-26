@@ -50,6 +50,7 @@ beforeEach(async () => {
 })
 afterAll(() => getStorageManager().dispose())
 
+let issueNumber = 0
 async function seedTask(stage: 'done' | 'build' | 'intake' | 'failed' = 'done'): Promise<number> {
   const [i] = await getDb()
     .insert(ingress)
@@ -64,7 +65,13 @@ async function seedTask(stage: 'done' | 'build' | 'intake' | 'failed' = 'done'):
     .returning({ id: ingress.id })
   const [t] = await getDb()
     .insert(task)
-    .values({ ingressId: i.id, repository: 'paulo/app', issueNumber: 1, issueTitle: 'x', stage })
+    .values({
+      ingressId: i.id,
+      repository: 'paulo/app',
+      issueNumber: ++issueNumber,
+      issueTitle: 'x',
+      stage,
+    })
     .returning({ id: task.id })
   return t.id
 }
