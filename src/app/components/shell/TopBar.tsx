@@ -1,5 +1,5 @@
 import { useTheme } from '@theokit/ui'
-import { ChevronRight, Languages, Menu, Moon, Sparkles, Sun } from 'lucide-react'
+import { ChevronRight, Languages, Menu, Moon, Search, Sparkles, Sun } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router'
 
 import type { PulseReport } from '../../../shared/panel'
@@ -51,7 +51,16 @@ function FactoryNow({ pulse }: { pulse: PulseReport }) {
  * The bar over the page: the two halves of the app and where the owner is on the left; what the factory is
  * doing, the guide of the page, the language and the theme on the right.
  */
-export function TopBar({ onMenu, pulse }: { onMenu?: () => void; pulse?: PulseReport }) {
+export function TopBar({
+  onMenu,
+  onSearch,
+  pulse,
+}: {
+  onMenu?: () => void
+  /** Opens the palette. The button says the key that does the same. */
+  onSearch?: () => void
+  pulse?: PulseReport
+}) {
   const compact = useWidth() === 'compact'
   const { mode, toggleMode } = useTheme()
   const { t, language, setLanguage } = useCopy()
@@ -104,6 +113,26 @@ export function TopBar({ onMenu, pulse }: { onMenu?: () => void; pulse?: PulseRe
         </nav>
       ) : null}
       <div className="ml-auto flex shrink-0 items-center gap-1">
+        {onSearch ? (
+          <button
+            type="button"
+            aria-label={t.palette.open}
+            title={t.palette.open}
+            aria-keyshortcuts="Control+K Meta+K"
+            onClick={onSearch}
+            className={`mr-1 border border-border ${tool}`}
+          >
+            <Search className="size-4" />
+            {compact ? null : (
+              <>
+                {t.palette.search}
+                <kbd className="rounded border border-border px-1 font-mono text-[11px] text-foreground/60">
+                  {t.palette.key}
+                </kbd>
+              </>
+            )}
+          </button>
+        ) : null}
         {pulse ? <FactoryNow pulse={pulse} /> : null}
         {guide ? (
           <button
