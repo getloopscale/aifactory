@@ -463,6 +463,8 @@ export const ptBR: Copy = {
       label: 'Sobre esta tarefa',
       activity: 'Atividade',
       changes: 'Mudanças',
+      hide: 'Esconder os detalhes',
+      show: 'Mostrar os detalhes',
       runs: 'Execuções',
       evidence: 'Evidências',
       reviews: 'Revisões',

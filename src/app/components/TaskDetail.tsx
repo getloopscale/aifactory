@@ -5,6 +5,8 @@ import {
   FlaskConical,
   History,
   PackageCheck,
+  PanelRightClose,
+  PanelRightOpen,
   Rocket,
   ShieldCheck,
   Workflow,
@@ -82,10 +84,44 @@ type Layout = 'workbench' | 'tabbed' | 'stack'
 
 /** The frame of the whole task in each shape. */
 const FRAME: Record<Layout, string> = {
-  workbench: 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-4',
+  workbench: 'grid h-full min-h-0 gap-4',
   // One frame for the head, the tabs and what the chosen tab shows: they open and close together.
   tabbed: 'flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card',
   stack: STACK,
+}
+
+/**
+ * How wide the side is beside the conversation. A change is read in lines of code, so its tab takes more
+ * than half; closed, the conversation has the page.
+ */
+type SideWidth = 'narrow' | 'wide' | 'closed'
+const COLUMNS: Record<SideWidth, string> = {
+  narrow: 'grid-cols-[minmax(0,1fr)_minmax(380px,34%)]',
+  wide: 'grid-cols-[minmax(0,1fr)_minmax(480px,56%)]',
+  closed: 'grid-cols-1',
+}
+
+/** The frame's classes: the workbench also says how its two columns share the width. */
+const frameClass = (layout: Layout, side: SideWidth) =>
+  layout === 'workbench' ? `${FRAME.workbench} ${COLUMNS[side]}` : FRAME[layout]
+
+/** Closes the side of the workbench, or opens it again. It says which by its name and its pressed state. */
+function SideToggle({ closed, onToggle }: { closed: boolean; onToggle: () => void }) {
+  const { t } = useCopy()
+  const Icon = closed ? PanelRightOpen : PanelRightClose
+  const name = closed ? t.task.tabs.show : t.task.tabs.hide
+  return (
+    <button
+      type="button"
+      aria-label={name}
+      title={name}
+      aria-pressed={!closed}
+      onClick={onToggle}
+      className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      <Icon aria-hidden className="size-4" />
+    </button>
+  )
 }
 
 /** The column with the head, the actions and the conversation in each shape. */
@@ -564,6 +600,7 @@ export function TaskDetailView({
   const transcript = useTranscript(id)
   const wide = useWidth() === 'expanded'
   const [picked, setTab] = useState<TaskTab>()
+  const [closed, setClosed] = useState(false)
   const { layout, beside, split, tab, talking } = arrange({ workbench, wide, tabbed, picked })
 
   if (resource.error) return <p className="text-sm text-destructive">{resource.error}</p>
@@ -581,11 +618,23 @@ export function TaskDetailView({
   }
 
   const tabs = <TaskTabs tabbed={tabbed} tab={tab} counts={counts} onPick={setTab} />
+  const side: SideWidth = closed ? 'closed' : tab === 'changes' ? 'wide' : 'narrow'
 
   return (
-    <div data-layout={layout} className={FRAME[layout]}>
+    <div
+      data-layout={layout}
+      data-side={beside ? side : undefined}
+      className={frameClass(layout, side)}
+    >
       <div className={talking ? `${WELL} min-h-0 flex-1` : MAIN[layout]}>
-        <TaskHead task={task} above={above} tabs={tabbed ? tabs : undefined} />
+        <div className="relative">
+          <TaskHead task={task} above={above} tabs={tabbed ? tabs : undefined} />
+          {beside && closed ? (
+            <div className="absolute right-0 top-0">
+              <SideToggle closed onToggle={() => setClosed(false)} />
+            </div>
+          ) : null}
+        </div>
 
         <TaskActions detail={detail} onDone={resource.reload} />
         <Questions questions={detail.questions} />
@@ -602,8 +651,17 @@ export function TaskDetailView({
           />
         </div>
       </div>
-      <aside aria-label={t.task.tabs.label} className={talking ? 'hidden' : SIDE[layout]}>
-        {beside ? tabs : null}
+      <aside
+        aria-label={t.task.tabs.label}
+        hidden={beside && closed}
+        className={talking || (beside && closed) ? 'hidden' : SIDE[layout]}
+      >
+        {beside ? (
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">{tabs}</div>
+            <SideToggle closed={false} onToggle={() => setClosed(true)} />
+          </div>
+        ) : null}
         <TaskPane id="activity" active={tab} split={split}>
           <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
