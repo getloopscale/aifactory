@@ -10,12 +10,13 @@ import { knowledgeRules } from '../knowledge/prompt'
 import type { KnowledgeSource } from '../knowledge/source'
 
 import { cloneRepository } from './clone'
-import type { CodingHarness } from './harness'
+import type { CodingHarness, HarnessResult } from './harness'
 import { jsonObjects } from './review'
 import { ensureBranches, integrationBranch } from './branches'
 import { loadRepoConfig, labelsWithRepoChoice } from './repo-config'
 import { mergeEgress } from './run-support'
-import { createIsolatedSandbox, type IsolatedSandboxProvider } from './sandbox'
+import type { Recipient } from '../knowledge/store'
+import { createIsolatedSandbox, type IsolatedSandboxProvider, type SandboxOwner } from './sandbox'
 
 /** More than this is not a plan an owner will read, and each item is a run that costs money. */
 export const MAX_ITEMS = 10
@@ -95,6 +96,87 @@ export type PlanDeps = {
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
+export type PlannerSession = {
+  repository: string
+  owner: SandboxOwner
+  /** Whom the knowledge feed records its deliveries for. */
+  recipient: Recipient
+  /** Create the integration and release branches when missing. A reader that must write nothing leaves it off. */
+  ensureBranches: boolean
+  prompt: (knowledgeDir: string | undefined) => string
+}
+
+/**
+ * The path every read-only agent that studies a repository takes: a sandbox with the firewall, a clone of the
+ * integration branch, the knowledge feed and the planner agent. The sandbox is always stopped. Throws on a
+ * failure, so each caller records it its own way.
+ */
+export async function runPlanner(
+  deps: PlanDeps,
+  session: PlannerSession,
+): Promise<{ result: HarnessResult; agentName: string }> {
+  const { repository } = session
+  let stop: (() => Promise<void>) | undefined
+  try {
+    const config = await loadRepoConfig(deps.db, repository)
+    const agent = deps.harness(labelsWithRepoChoice([], config))
+    const { token } = await deps.github.installationToken(repository)
+    const integration = integrationBranch(config)
+    if (session.ensureBranches) {
+      await ensureBranches(deps.api, repository, token, {
+        integration,
+        release: config.releaseBranch,
+      })
+    } else if (!(await deps.api.branchHead(repository, token, integration))) {
+      throw new Error(`${repository} has no ${integration} branch`)
+    }
+    const sandbox = await createIsolatedSandbox(deps.sandbox, {
+      owner: session.owner,
+      cacheKey: repository,
+      timeoutMs: (deps.timeoutMs ?? 15 * 60_000) + 5 * 60_000,
+      egress: [
+        {
+          domain: 'github.com',
+          headers: {
+            authorization: `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+          },
+        },
+        ...mergeEgress([await agent.egress()]),
+        { domain: 'registry.npmjs.org' },
+        ...config.egress.map((domain) => ({ domain })),
+      ],
+    })
+    stop = () => sandbox.stop().catch(() => {})
+    const { repoDir } = await cloneRepository(sandbox.backend, {
+      repoUrl: `https://github.com/${repository}.git`,
+      ref: integration,
+      instanceId: 'plan',
+    })
+    await agent.prepare?.(sandbox.backend)
+    const feed = await KnowledgeFeed.open(
+      deps.knowledge,
+      sandbox.backend,
+      repository,
+      session.recipient,
+    )
+    // Stopping the sandbox stops the feed first, so no copy goes into a sandbox that is gone.
+    stop = () =>
+      feed
+        .attachTo(sandbox)
+        .stop()
+        .catch(() => {})
+    const result = await agent.run(sandbox.backend, {
+      cwd: repoDir,
+      timeoutMs: deps.timeoutMs ?? 15 * 60_000,
+      role: 'planner',
+      prompt: session.prompt(feed.dir),
+    })
+    return { result, agentName: agent.name }
+  } finally {
+    await stop?.()
+  }
+}
+
 /**
  * Has an agent read the repository and split the goal into issues. It runs in a sandbox like any other
  * agent, with the same firewall, and what it produces is a draft the owner edits: nothing reaches
@@ -112,59 +194,20 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
       .set({ ...values, updatedAt: new Date() })
       .where(eq(plan.id, planId))
 
-  let stop: (() => Promise<void>) | undefined
   try {
-    const config = await loadRepoConfig(db, row.repository)
-    const agent = deps.harness(labelsWithRepoChoice([], config))
-    const { token } = await deps.github.installationToken(row.repository)
-    await ensureBranches(deps.api, row.repository, token, {
-      integration: integrationBranch(config),
-      release: config.releaseBranch,
-    })
-    const sandbox = await createIsolatedSandbox(deps.sandbox, {
+    const { result, agentName } = await runPlanner(deps, {
+      repository: row.repository,
       owner: { owner: 'plan', planId },
-      cacheKey: row.repository,
-      timeoutMs: (deps.timeoutMs ?? 15 * 60_000) + 5 * 60_000,
-      egress: [
-        {
-          domain: 'github.com',
-          headers: {
-            authorization: `Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
-          },
-        },
-        ...mergeEgress([await agent.egress()]),
-        { domain: 'registry.npmjs.org' },
-        ...config.egress.map((domain) => ({ domain })),
-      ],
-    })
-    stop = () => sandbox.stop().catch(() => {})
-    const { repoDir } = await cloneRepository(sandbox.backend, {
-      repoUrl: `https://github.com/${row.repository}.git`,
-      ref: integrationBranch(config),
-      instanceId: 'plan',
-    })
-    await agent.prepare?.(sandbox.backend)
-    const feed = await KnowledgeFeed.open(deps.knowledge, sandbox.backend, row.repository, {
-      planId,
-    })
-    // Stopping the sandbox stops the feed first, so no copy goes into a sandbox that is gone.
-    stop = () =>
-      feed
-        .attachTo(sandbox)
-        .stop()
-        .catch(() => {})
-    const result = await agent.run(sandbox.backend, {
-      cwd: repoDir,
-      timeoutMs: deps.timeoutMs ?? 15 * 60_000,
-      role: 'planner',
-      prompt: planPrompt({ repo: row.repository, goal: row.goal, knowledgeDir: feed.dir }),
+      recipient: { planId },
+      ensureBranches: true,
+      prompt: (knowledgeDir) => planPrompt({ repo: row.repository, goal: row.goal, knowledgeDir }),
     })
     const cost = result.costUsd ?? 0
     if (result.quota) {
       await finish({
         status: 'failed',
         costUsd: cost,
-        error: `the ${agent.name} quota ran out: ${result.quota.message}`,
+        error: `the ${agentName} quota ran out: ${result.quota.message}`,
       })
       return
     }
@@ -182,7 +225,5 @@ export async function runPlan(deps: PlanDeps, planId: number): Promise<void> {
     await finish({ status: 'ready', summary: draft.summary, costUsd: cost })
   } catch (error) {
     await finish({ status: 'failed', error: message(error).slice(0, 600) })
-  } finally {
-    await stop?.()
   }
 }

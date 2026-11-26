@@ -138,6 +138,8 @@ export type SandboxFacts = {
   lastStartedAt?: string
   /** Sandboxes up on the account against its limit, and how many have an owner at work. Unset when it cannot be listed. */
   slots?: Read<{ up: number; limit: number; atWork: number }>
+  /** Whether the template of the repository's non-default image exists on the provider. Unset for the default image or a provider that cannot say. */
+  image?: Read<{ name: string; provider: string; available: boolean }>
 }
 
 export type DoctorFacts = {
@@ -546,7 +548,14 @@ export function providerRefusal(detail: Record<string, unknown> | null | undefin
 
 export function sandboxItem(sandbox: Read<SandboxFacts>): DoctorItem {
   if (!sandbox.read) return unknownItem('sandbox', sandbox)
-  const { refusal, lastStartedAt } = sandbox.value
+  const { refusal, lastStartedAt, image } = sandbox.value
+  if (image && !image.read) return unknownItem('sandbox', image)
+  if (image?.read && !image.value.available) {
+    return problem('sandbox', 'blocked', 'sandbox_image_missing', {
+      image: image.value.name,
+      provider: image.value.provider,
+    })
+  }
   // A listing that failed is not a count: it is said not to be known, with what was tried.
   const slots = sandbox.value.slots?.read ? sandbox.value.slots.value : undefined
   // With no start to compare, the date is not a number and nothing is at or after the refusal.

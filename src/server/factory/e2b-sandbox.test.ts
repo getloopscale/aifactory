@@ -9,15 +9,18 @@ import {
   TimeoutError,
 } from 'e2b'
 import { shellEscapePosix } from '@theokit/agents/sandbox'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
+  BROWSER_ENV,
   E2BBackend,
+  envFor,
   e2bMaxSessionMs,
   e2bSandboxLimit,
   networkFor,
   SANDBOX_ENV,
   sandboxOptions,
+  templateTagExists,
   UPLOAD_BATCH,
 } from './e2b-sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
@@ -349,6 +352,66 @@ describe('E2BBackend after the stream to a running command drops', () => {
     )
     await expect(backend.execute('true')).rejects.toThrow('something else')
     expect(connects).toHaveLength(0)
+  })
+})
+
+describe('the browser image', () => {
+  it('adds the variables its Dockerfile sets, and only for it', () => {
+    expect(envFor('browser')).toMatchObject({ ...SANDBOX_ENV, ...BROWSER_ENV })
+    expect(envFor('browser').PUPPETEER_SKIP_DOWNLOAD).toBe('1')
+    expect(envFor()).toEqual(SANDBOX_ENV)
+    expect(sandboxOptions({ ...spec([]), image: 'browser' }).envs.CHROME_BIN).toBe(
+      '/usr/bin/chromium',
+    )
+    expect(sandboxOptions(spec([])).envs).toEqual(SANDBOX_ENV)
+  })
+
+  it('reaches a terminal of a browser sandbox', async () => {
+    const created: { envs: Record<string, string> }[] = []
+    const pty = {
+      create: async (o: { envs: Record<string, string> }) => {
+        created.push(o)
+        return { wait: () => new Promise(() => {}), pid: 1 }
+      },
+      sendInput: async () => {},
+      resize: async () => {},
+      kill: async () => true,
+    }
+    const backend = new E2BBackend(
+      { commands: {}, files: {}, pty } as never,
+      undefined,
+      envFor('browser'),
+    )
+    await backend.openTerminal('true', { cols: 80, rows: 24 })
+    expect(created[0]!.envs.CHROME_BIN).toBe('/usr/bin/chromium')
+  })
+})
+
+describe('templateTagExists', () => {
+  const error = (statusCode: number) =>
+    Object.assign(new Error(`${statusCode}: no`), { statusCode })
+
+  it('is true when the tag is on the template, and false when it is not', async () => {
+    const getTags = vi.fn(async () => [{ tag: 'default' }, { tag: '1' }])
+    expect(await templateTagExists('aifactory-sandbox-browser:1', getTags)).toBe(true)
+    expect(getTags).toHaveBeenCalledWith('aifactory-sandbox-browser')
+    expect(await templateTagExists('aifactory-sandbox-browser:2', getTags)).toBe(false)
+  })
+
+  it('is false for a template that is not there', async () => {
+    const missing = async () => {
+      throw error(404)
+    }
+    expect(await templateTagExists('aifactory-sandbox-browser:1', missing)).toBe(false)
+  })
+
+  it('throws for a refusal or a failure, so it is not said to exist or to be missing', async () => {
+    for (const code of [401, 403, 500]) {
+      const failing = async () => {
+        throw error(code)
+      }
+      await expect(templateTagExists('aifactory-sandbox-browser:1', failing)).rejects.toThrow()
+    }
   })
 })
 

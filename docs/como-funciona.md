@@ -190,6 +190,11 @@ do Docker (`ops/sandbox/Dockerfile`), publicada como template `aifactory-sandbox
 `node --env-file=.env.local scripts/build-e2b-template.mts`. Quem muda o Dockerfile roda o script de novo
 e sobe a versão em `E2B_TEMPLATE` (`src/server/factory/e2b-template.ts`).
 
+Um repositório com a imagem `browser` precisa do template `E2B_BROWSER_TEMPLATE`, que nada constrói sozinho:
+`node --env-file=.env.local scripts/build-e2b-template.mts --browser`. O doutor lê na E2B se esse template existe
+e mostra um item bloqueado quando não existe. O adapter passa ao sandbox `browser` as variáveis do
+`Dockerfile.browser` (`CHROME_BIN`, `PUPPETEER_EXECUTABLE_PATH` e as que impedem o download de um navegador).
+
 O E2B aplica a lista de domínios (`allowOut`, com todo o resto negado) e anexa os cabeçalhos de cada regra
 no proxy de saída dele, fora do sandbox. A renovação do token do GitHub troca as regras com o sandbox
 rodando (`updateNetwork`). O E2B não aplica as linhas `ENV` do Dockerfile, então o adapter passa as
