@@ -537,6 +537,9 @@ export const agentRun = pgTable('agent_run', {
   /** The agent stopped because its account's quota ran out. */
   quota: boolean('quota').notNull().default(false),
   sessionId: text('session_id'),
+  /** The `agent_event.seq` range of the task the pass wrote (inclusive); null for a pass recorded before this. */
+  eventFrom: integer('event_from'),
+  eventTo: integer('event_to'),
   /** The pass answered a message of the owner (`agent_message`), it did not work on the task's issue. */
   conversation: boolean('conversation').notNull().default(false),
   at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
@@ -1304,4 +1307,34 @@ export const improverDecision = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index('improver_decision_repository').on(t.repository, t.id)],
+)
+
+/** One browser the owner turned notifications on in. The endpoint is the browser's address at its push service. */
+export const pushSubscription = pgTable('push_subscription', {
+  id: serial('id').primaryKey(),
+  endpoint: text('endpoint').notNull().unique(),
+  p256dh: text('p256dh').notNull(),
+  auth: text('auth').notNull(),
+  /** Read from the user agent, so the owner can tell the devices apart. */
+  label: text('label').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  lastSuccessAt: timestamp('last_success_at', { withTimezone: true }),
+})
+
+/**
+ * A push that reached one device: the item (`<task id>:<kind>`) and the time it appeared. The unique
+ * index is the claim that makes a message go once per item and device, whatever number of passes run.
+ */
+export const pushSent = pgTable(
+  'push_sent',
+  {
+    id: serial('id').primaryKey(),
+    identity: text('identity').notNull(),
+    itemAt: timestamp('item_at', { withTimezone: true }).notNull(),
+    subscriptionId: integer('subscription_id')
+      .notNull()
+      .references(() => pushSubscription.id, { onDelete: 'cascade' }),
+    sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('push_sent_item').on(t.identity, t.itemAt, t.subscriptionId)],
 )

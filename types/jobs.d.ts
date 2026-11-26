@@ -26,6 +26,8 @@ declare module 'theokit/server/jobs' {
     'resume-task': { taskId: number; questionId: number }
     /** Delivers the owner's pending messages to a stopped task's agent, oldest first, one writer per task. */
     conversation: { taskId: number }
+    /** Sends one finished agent pass to Looptrace over OTLP; queued only when FACTORY_TRACE_ENDPOINT is set. */
+    'export-trace': { runId: number }
     /** Has an agent read a repository and split a goal into issues. */
     'plan-run': { planId: number }
     /** Reviews a pull request the factory did not open, at one head commit, and posts one review. */

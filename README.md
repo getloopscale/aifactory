@@ -114,6 +114,29 @@ conteúdo e o secret). A API do GitHub não liga o webhook do App: a caixa "Acti
 configurações do App, e o GitHub pede a confirmação de acesso (sudo) para abri-la. No repositório de
 teste há também um webhook próprio do repositório, com a mesma URL e o mesmo secret.
 
+### Notificações no celular (Web Push)
+
+Com o painel fechado, uma tarefa que espera uma resposta não avisa ninguém. Com as chaves abaixo, o
+cron `push-attention` manda um Web Push, a cada minuto, para os aparelhos em que o dono ligou as
+notificações (Configuração, "Notificações neste dispositivo"). Sem as três variáveis o push fica
+desligado: as rotas dizem que não está configurado e nada é enviado.
+
+```bash
+pnpm push:keys   # imprime FACTORY_PUSH_PUBLIC_KEY, FACTORY_PUSH_PRIVATE_KEY e FACTORY_PANEL_ORIGIN
+```
+
+Ponha as três linhas no ambiente do servidor. `FACTORY_PANEL_ORIGIN` é a origem HTTPS em que o dono
+abre o painel; o navegador só aceita push em HTTPS. Nos aparelhos do próprio dono, o `tailscale serve`
+dá esse HTTPS sem expor nada à internet:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:3000
+# o painel abre em https://<máquina>.<tailnet>.ts.net, e essa é a FACTORY_PANEL_ORIGIN
+```
+
+A chave privada só o servidor lê; ela não vai para log nem para resposta. O Cloudflare Tunnel não muda:
+continua deixando passar só o webhook e o health check, e o painel nunca passa por ele.
+
 ### Readiness
 
 Sem `DATABASE_URL` o servidor sobe e `/api/ready` responde 503 com "Database "main" not

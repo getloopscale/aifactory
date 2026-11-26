@@ -41,8 +41,9 @@ src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
-                    `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `improve`, `conversation-recover`)
+                    `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `improve`, `conversation-recover`, `push-attention`)
   metrics/          the factory's own indicators, their daily points and control bands (`config.ts`)
+  push/             Web Push to the owner's devices: new inbox items (`notify.ts`, pure), the only network call (`send.ts`), the pass
   knowledge/        the owner's knowledge repository: mirror, sync, the slice each agent gets, notes
   db/               Postgres config, pool, Drizzle schema, health probe
   ingest/           GitHub delivery: decide, record (ingress + task), signed webhook handler
@@ -451,6 +452,18 @@ reads that file, not a convention.
   merge (`adoptMergedHandoffs` in `factory/await-ci.ts`, the `merged_by_person` event): the pre-release is made as
   after the factory's own merge, and the release train or a person releases it and closes its issue. It starts no
   release itself.
+- **A finished agent pass is exported to Looptrace by the `export-trace` job, never by the run.** `recordPass`
+  (`trace/record.ts`) stores the `agent_run` row and, only when `FACTORY_TRACE_ENDPOINT` is set, queues the job under
+  `trace-<run id>`; `trace/spans.ts` turns the stored, redacted steps into OTLP JSON with ids derived from the run and
+  `seq`, and only the job calls `trace/export.ts` (a test fails if `factory/` imports it). `pnpm trace:backfill`
+  queues the retained passes again. Looptrace is never reachable through the tunnel: the spans hold private code.
+- **A push is sent once per item and device.** `push-attention` reads the inbox and sends each new item
+  (`<task id>:<kind>`) to every subscription in `push_subscription`, recording it in `push_sent` until the item leaves
+  the inbox (its time moves with every event of its task, so it never makes an item new; one that leaves and comes
+  back is sent again); a 404 or 410 deletes the device, any other failure is retried next pass. `push/send.ts` is the only
+  module that calls the network and uses the `web-push` package because TheoKit ships no push sender (to be filed on
+  `usetheokit/theokit`). The private VAPID key is never logged or returned. A crash between the push service
+  accepting a message and its `push_sent` row can send it twice.
 - **Commits carry no co-author trailer.**
 - **Validate at the boundary.** A route validates input with Zod once, then trusts it.
 - **Side effects get a human.** A tool that touches the real world is gated with `.approval(...)`
