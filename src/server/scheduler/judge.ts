@@ -1,4 +1,4 @@
-import { READINESS_INSTRUCTIONS } from '../agents/prompts/readiness'
+import { ACCEPTANCE_INSTRUCTIONS, READINESS_INSTRUCTIONS } from '../agents/prompts/readiness'
 import { oneShotAssistant, type AssistantSpec, type OneShot } from '../factory/assistant'
 import { coordinatorModel } from '../factory/models'
 
@@ -21,4 +21,18 @@ const JUDGE_BUDGET_USD = 0.25
  */
 export function modelReadinessJudge(model: string = coordinatorModel()): ReadinessJudge {
   return oneShotAssistant('readiness-judge', model, READINESS_JUDGE_SPEC, JUDGE_BUDGET_USD)
+}
+
+/** A model that drafts the acceptance criteria an issue lacks. */
+export type AcceptanceDrafter = OneShot
+
+export const ACCEPTANCE_DRAFTER_SPEC: AssistantSpec = {
+  system: ACCEPTANCE_INSTRUCTIONS,
+  tools: {},
+  asks: {},
+}
+
+/** The drafter on a model, built by `buildAssistant` like the judge: the knowledge base's read tools only. */
+export function modelAcceptanceDrafter(model: string = coordinatorModel()): AcceptanceDrafter {
+  return oneShotAssistant('acceptance-drafter', model, ACCEPTANCE_DRAFTER_SPEC, JUDGE_BUDGET_USD)
 }

@@ -136,6 +136,9 @@ export type ReadinessRecord = {
   missing: string
   question: string
   blockedBy?: string[]
+  reason?: string
+  /** Criteria the drafter wrote for a `no_acceptance` verdict; an empty list is a draft that could not be used. */
+  draft?: string[]
   /** The question asked on the issue for this verdict, once one was. */
   questionId?: number
 }
