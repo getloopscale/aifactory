@@ -62,7 +62,8 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
  * found`). Bound to the factory's own template name, so an application failure that says a template of its own
  * is missing is not taken for it.
  */
-export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
+export const SANDBOX_TEMPLATE_MISSING =
+  /\b404: template 'aifactory-sandbox(?:-browser)?(?::[^']*)?' not found/i
 
 /**
  * The sandbox provider refusing every new sandbox until someone pays: E2B answers `403: team is blocked:

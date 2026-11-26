@@ -137,6 +137,8 @@ export interface IsolatedSandboxProvider {
   listSandboxes?(): Promise<ListedSandbox[]>
   /** Stops a sandbox by id. */
   killSandbox?(id: string): Promise<void>
+  /** Whether the template or image a spec of this image starts from exists on the provider, read without starting a sandbox. */
+  imageAvailable?(image: SandboxImage): Promise<boolean>
   /** How many sandboxes the account may have up at once, when the plan says. */
   readonly maxSandboxes?: number
 }

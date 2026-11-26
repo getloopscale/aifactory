@@ -741,6 +741,23 @@ describe('sandbox', () => {
     expect(item.cause).toContain('8 of 10 sandboxes are up, 2 with an owner at work')
   })
 
+  it('blocks a repository whose image has no template on the provider', () => {
+    const image = readOf({ name: 'browser', provider: 'e2b', available: false })
+    const item = sandboxItem(readOf({ image }))
+    expect(item.status).toBe('blocked')
+    expect(item.id).toBe('sandbox')
+    expect(item.repair).toContain('--browser')
+    const other = readOf({ name: 'browser', provider: 'vercel', available: false })
+    expect(sandboxItem(readOf({ image: other })).repair).not.toContain('build-e2b-template')
+  })
+
+  it('is fine when the template exists, and unknown when it could not be read', () => {
+    const there = readOf({ name: 'browser', provider: 'e2b', available: true })
+    expect(sandboxItem(readOf({ image: there })).status).toBe('ok')
+    const failed = unread('reading whether the template exists', 'Status code 500')
+    expect(sandboxItem(readOf({ image: failed })).status).toBe('unknown')
+  })
+
   it('says it does not know when the sandboxes could not be listed', () => {
     const slots = unread('reading the sandboxes the account has up', 'Status code 500')
     expect(sandboxItem(readOf({ slots })).status).toBe('unknown')
