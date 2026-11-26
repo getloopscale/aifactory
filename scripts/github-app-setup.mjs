@@ -1,43 +1,82 @@
 // Registers the factory's GitHub App through the manifest flow.
 //   node scripts/github-app-setup.mjs
-// Open the printed URL, click "Create GitHub App", then install it on the repositories the factory
-// may touch. The credentials go to .secrets/ and .env.local, both ignored by git, never to stdout.
+// Open the printed URL, click "Create GitHub App", then install it on the accounts whose repositories the
+// factory may touch. The credentials are never printed. They go to .secrets/<name>.pem and to an env file
+// (ENV_FILE, by default .env.<name>), both ignored by git, and not to .env.local: a factory that already runs
+// keeps the App it has until someone moves those lines over, once the new App is installed where the old one is.
+//
+//   APP_NAME     the name of the App and of its bot (default loopscalefactory)
+//   APP_OWNER    the organisation that owns it (default getloopscale); empty for the account of whoever is logged in
+//   APP_URL      the page the App links to
+//   WEBHOOK_URL  where GitHub delivers events; without it the webhook is created inactive
+//   APP_PUBLIC   1 lets any account install it; by default only its owner can
 import { randomBytes } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 
 const PORT = Number(process.env.PORT ?? 4567)
-const APP_NAME = process.env.APP_NAME ?? 'aifactory-paulohenriquevn'
+const APP_NAME = process.env.APP_NAME ?? 'loopscalefactory'
+const APP_OWNER = process.env.APP_OWNER ?? 'getloopscale'
+const APP_URL = process.env.APP_URL ?? 'https://github.com/getloopscale/aifactory'
+const WEBHOOK_URL = process.env.WEBHOOK_URL
+const ENV_FILE = process.env.ENV_FILE ?? `.env.${APP_NAME}`
+if (!/^[a-z0-9][a-z0-9-]*$/.test(APP_NAME)) {
+  console.error(`APP_NAME "${APP_NAME}" is not a slug: lower-case letters, digits and hyphens only`)
+  process.exit(1)
+}
 const state = randomBytes(16).toString('hex')
+
+// Where the manifest is sent: an organisation's settings, or the settings of the account logged in.
+const settings = APP_OWNER
+  ? `https://github.com/organizations/${encodeURIComponent(APP_OWNER)}/settings/apps/new`
+  : 'https://github.com/settings/apps/new'
 
 const manifest = {
   name: APP_NAME,
-  url: 'https://github.com/getloopscale/aifactory',
-  description: 'Turns issues labeled "factory" into verified pull requests.',
-  public: false,
+  url: APP_URL,
+  description:
+    'The LoopScale software factory. It takes an issue labelled "factory", builds the change in an isolated sandbox, runs the checks of the repository, reviews the result and opens a verified pull request.',
+  public: process.env.APP_PUBLIC === '1',
   redirect_url: `http://localhost:${PORT}/redirect`,
-  // Inactive until the factory has a public URL; edit it in the app settings then.
-  hook_attributes: { url: 'https://example.com/api/webhooks/github', active: false },
-  default_events: ['issues'],
+  hook_attributes: WEBHOOK_URL
+    ? { url: WEBHOOK_URL, active: true }
+    : // Inactive until the factory has a public URL; edit it in the app settings then.
+      { url: 'https://example.com/api/webhooks/github', active: false },
+  // Every event `ROUTED_EVENTS` (src/server/ingest/decide.ts) names: the setup report lists the ones missing.
+  default_events: [
+    'issues',
+    'issue_comment',
+    'pull_request',
+    'pull_request_review',
+    'pull_request_review_comment',
+    'check_suite',
+    'check_run',
+  ],
+  // `APP_PERMISSIONS` and `ACTIONS_PERMISSION` (src/server/github/app.ts), and what the reads of a private
+  // repository need: the commit statuses, and the runs and job logs of GitHub Actions.
   default_permissions: {
+    metadata: 'read',
     contents: 'write',
     pull_requests: 'write',
     issues: 'write',
     checks: 'write',
+    workflows: 'write',
+    actions: 'write',
+    statuses: 'read',
   },
 }
 
 const page = (body) =>
-  `<!doctype html><meta charset="utf-8"><title>aifactory GitHub App</title><body style="font:16px system-ui;max-width:42rem;margin:3rem auto">${body}`
+  `<!doctype html><meta charset="utf-8"><title>${APP_NAME} GitHub App</title><body style="font:16px system-ui;max-width:42rem;margin:3rem auto">${body}`
 
 const escapeAttr = (s) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
 
 function entry(res) {
   res.writeHead(200, { 'content-type': 'text/html' })
   res.end(
-    page(`<h1>Register the aifactory GitHub App</h1>
+    page(`<h1>Register the ${APP_NAME} GitHub App</h1>
 <p>This sends the manifest to GitHub. You will be asked to confirm the name and click <b>Create GitHub App</b>.</p>
-<form id="f" action="https://github.com/settings/apps/new?state=${state}" method="post">
+<form id="f" action="${settings}?state=${state}" method="post">
 <input type="hidden" name="manifest" value="${escapeAttr(JSON.stringify(manifest))}">
 <button type="submit" style="font-size:1rem;padding:.6rem 1rem">Continue to GitHub</button></form>`),
   )
@@ -64,7 +103,7 @@ async function redirect(url, res, server) {
   const app = await response.json()
 
   mkdirSync('.secrets', { recursive: true, mode: 0o700 })
-  const pemPath = '.secrets/github-app.pem'
+  const pemPath = `.secrets/${APP_NAME}.pem`
   writeFileSync(pemPath, app.pem, { mode: 0o600 })
   chmodSync(pemPath, 0o600)
 
@@ -91,23 +130,18 @@ async function redirect(url, res, server) {
     `GITHUB_APP_PRIVATE_KEY_PATH=${pemPath}`,
     `GITHUB_WEBHOOK_SECRET=${app.webhook_secret}`,
   ].join('\n')
-  const current = existsSync('.env.local') ? readFileSync('.env.local', 'utf8') : ''
-  const kept = current
-    .split('\n')
-    .filter((line) => !/^GITHUB_(APP_|WEBHOOK_SECRET)/.test(line))
-    .join('\n')
-  writeFileSync('.env.local', `${kept.replace(/\n*$/, '\n')}${env}\n`, { mode: 0o600 })
-
-  chmodSync('.env.local', 0o600)
+  writeFileSync(ENV_FILE, `${env}\n`, { mode: 0o600 })
+  chmodSync(ENV_FILE, 0o600)
 
   const install = `https://github.com/apps/${app.slug}/installations/new`
   console.log(`\nApp "${app.slug}" registered (id ${app.id}).`)
-  console.log('Saved: .secrets/github-app.pem and the GITHUB_APP_* variables in .env.local.')
-  console.log(`Next: install it on the repository: ${install}`)
+  console.log(`Saved: ${pemPath} and the GITHUB_APP_* variables in ${ENV_FILE}.`)
+  console.log(`Next: install it where the factory works: ${install}`)
+  console.log(`Then move the lines of ${ENV_FILE} into .env.local and restart the factory.`)
   res.writeHead(200, { 'content-type': 'text/html' })
   res.end(
     page(`<h1>Done</h1><p>The app <b>${app.slug}</b> exists and its credentials were saved locally.</p>
-<p>Now <a href="${install}">install it</a> and choose only <b>aifactory-playground</b>.</p><p>You can close this tab.</p>`),
+<p>Now <a href="${install}">install it</a> on the accounts whose repositories the factory works on.</p><p>You can close this tab.</p>`),
   )
   setTimeout(() => server.close(), 500)
 }
@@ -126,6 +160,6 @@ const server = createServer((req, res) => {
 })
 server.listen(PORT, '127.0.0.1', () => {
   console.log(
-    `Open http://localhost:${PORT} in the browser logged in as the account that will own the app.`,
+    `Open http://localhost:${PORT} in the browser logged in as ${APP_OWNER ? `an owner of ${APP_OWNER}` : 'the account that will own the app'}.`,
   )
 })

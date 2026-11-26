@@ -15,6 +15,9 @@ dono.
 A fábrica acessa o GitHub como um GitHub App, `aifactory-paulohenriquevn`, registrado pelo fluxo de
 manifest com `scripts/github-app-setup.mjs`.
 
+Desde 2026-11-26 o App é o `loopscalefactory`, da organização `getloopscale`, com os eventos e as permissões
+que o script declara hoje. O que segue descreve o App original.
+
 - Permissões: Contents, Pull requests, Issues e Checks com escrita, e Metadata com leitura. A
   permissão de editar `.github/workflows` não foi pedida, para o agente não alterar as Actions do
   repositório.

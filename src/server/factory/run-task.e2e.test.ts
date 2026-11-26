@@ -135,7 +135,7 @@ describe('the factory against the real services', () => {
         harness: scriptedAgent,
         reviewer: scriptedReviewer,
         author: {
-          name: 'aifactory-paulohenriquevn[bot]',
+          name: 'loopscalefactory[bot]',
           email: 'aifactory@users.noreply.github.com',
         },
       },
