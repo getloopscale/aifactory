@@ -89,6 +89,9 @@ export type TagWorkflowRun = {
   url: string
 }
 
+/** The conclusions of a failed check run, as `watch.ts` reads them. */
+const BROKEN_CONCLUSIONS = new Set(['failure', 'timed_out', 'action_required', 'startup_failure'])
+
 /** The most pages of 100 reports `commitChecks` reads of one commit before it says it could not read them all. */
 const MAX_CHECK_PAGES = 20
 
@@ -1010,7 +1013,13 @@ export function createGithubApi(
         }
         throw new Error(`${what}: more than ${MAX_CHECK_PAGES * 100} reports, not all of them read`)
       }
-      const runs = await pages<{ name: string; status: string; conclusion: string | null }>(
+      const runs = await pages<{
+        name: string
+        status: string
+        conclusion: string | null
+        app?: { slug?: string } | null
+        check_suite?: { id?: number } | null
+      }>(
         `/commits/${sha}/check-runs`,
         `reading the check runs of ${sha.slice(0, 7)} on ${repo}`,
         (b) => b.check_runs ?? [],
@@ -1021,8 +1030,30 @@ export function createGithubApi(
         (b) => b.statuses ?? [],
       )
       const state = combined.body.state as 'success' | 'failure' | 'error' | 'pending'
+      // A Dependabot update job is attached to the default branch's head but is no check of the commit.
+      // Only a failed run of GitHub Actions is looked up, so a green commit costs no extra call.
+      const isDependabotUpdate = async (r: (typeof runs.items)[number]) => {
+        const suite = r.check_suite?.id
+        if (
+          r.status !== 'completed' ||
+          r.conclusion === null ||
+          !BROKEN_CONCLUSIONS.has(r.conclusion) ||
+          r.app?.slug !== 'github-actions' ||
+          suite === undefined
+        )
+          return false
+        const found = await ensure(
+          await call(repo, token, `/actions/runs?check_suite_id=${suite}`),
+          `reading the workflow run of the check ${r.name} on ${repo}`,
+          [200],
+        )
+        const body = (await found.json()) as { workflow_runs?: { path?: string }[] }
+        return (body.workflow_runs ?? []).some((w) => w.path?.startsWith('dynamic/dependabot/'))
+      }
+      const kept: typeof runs.items = []
+      for (const r of runs.items) if (!(await isDependabotUpdate(r))) kept.push(r)
       return {
-        checkRuns: runs.items.map((r) => ({
+        checkRuns: kept.map((r) => ({
           name: r.name,
           status: r.status,
           conclusion: r.conclusion,
