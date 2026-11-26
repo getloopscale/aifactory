@@ -47,6 +47,39 @@ export function parseScout(
   return undefined
 }
 
+type PlannerResult = {
+  ok: boolean
+  summary: string
+  costUsd?: number
+  quota?: { message: string }
+}
+
+/** What the planner's last result means for the scout. */
+export function answerOf(result: PlannerResult, agentName: string): ScoutAnswer {
+  const costUsd = result.costUsd ?? 0
+  if (result.quota) {
+    return {
+      status: 'error',
+      reason: `the ${agentName} quota ran out: ${result.quota.message}`,
+      costUsd,
+    }
+  }
+  if (!result.ok) {
+    return { status: 'error', reason: `the agent did not finish: ${result.summary}`, costUsd }
+  }
+  const parsed = parseScout(result.summary)
+  if (!parsed) return { status: 'error', reason: 'the answer was not the JSON asked for', costUsd }
+  if (!parsed.found) return { status: 'none', costUsd }
+  const { found: _found, ...proposal } = parsed
+  return { status: 'found', proposal, costUsd }
+}
+
+const failure = (error: unknown): ScoutAnswer => ({
+  status: 'error',
+  reason: error instanceof Error ? error.message : String(error),
+  costUsd: 0,
+})
+
 /**
  * Has the planner agent read the repository for one kind of maintenance, through the path a plan takes
  * (sandbox, firewall, knowledge feed). It writes nothing and creates no branch.
@@ -61,29 +94,9 @@ export function scoutWith(deps: PlanDeps) {
         ensureBranches: false,
         prompt: (knowledgeDir) => improverPrompt({ repo: repository, kind, knowledgeDir }),
       })
-      const costUsd = result.costUsd ?? 0
-      if (result.quota) {
-        return {
-          status: 'error',
-          reason: `the ${agentName} quota ran out: ${result.quota.message}`,
-          costUsd,
-        }
-      }
-      if (!result.ok) {
-        return { status: 'error', reason: `the agent did not finish: ${result.summary}`, costUsd }
-      }
-      const parsed = parseScout(result.summary)
-      if (!parsed)
-        return { status: 'error', reason: 'the answer was not the JSON asked for', costUsd }
-      if (!parsed.found) return { status: 'none', costUsd }
-      const { found: _found, ...proposal } = parsed
-      return { status: 'found', proposal, costUsd }
+      return answerOf(result, agentName)
     } catch (error) {
-      return {
-        status: 'error',
-        reason: error instanceof Error ? error.message : String(error),
-        costUsd: 0,
-      }
+      return failure(error)
     }
   }
 }

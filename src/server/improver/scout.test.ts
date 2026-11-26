@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { improverPrompt } from '../agents/prompts/improver'
 
 import { IMPROVER_KINDS } from './decide'
-import { parseScout } from './scout'
+import { answerOf, parseScout } from './scout'
 
 const found = {
   found: true,
@@ -55,5 +55,33 @@ describe('improverPrompt', () => {
     expect(new Set(IMPROVER_KINDS.map((kind) => improverPrompt({ repo: 'o/r', kind }))).size).toBe(
       IMPROVER_KINDS.length,
     )
+  })
+})
+
+describe('answerOf', () => {
+  const ok = { ok: true, summary: JSON.stringify(found), costUsd: 0.5 }
+
+  it('reports a proposal without the found flag', () => {
+    const { found: _f, ...proposal } = found
+    expect(answerOf(ok, 'a')).toEqual({ status: 'found', proposal, costUsd: 0.5 })
+  })
+
+  it('reports nothing found', () => {
+    expect(answerOf({ ok: true, summary: '{"found":false}' }, 'a')).toEqual({
+      status: 'none',
+      costUsd: 0,
+    })
+  })
+
+  it('reports a quota, an unfinished run and an answer that is not the JSON', () => {
+    expect(answerOf({ ...ok, quota: { message: 'out' } }, 'codex')).toMatchObject({
+      status: 'error',
+      reason: 'the codex quota ran out: out',
+    })
+    expect(answerOf({ ok: false, summary: 'boom' }, 'a')).toMatchObject({
+      status: 'error',
+      reason: 'the agent did not finish: boom',
+    })
+    expect(answerOf({ ok: true, summary: 'nope' }, 'a')).toMatchObject({ status: 'error' })
   })
 })
