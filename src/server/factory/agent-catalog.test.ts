@@ -132,11 +132,19 @@ describe('the catalog of agents', () => {
     expect(chat.tools.map((t) => t.name)).toEqual([...CHAT_TOOLS, ...KNOWLEDGE])
     expect(chat.tools.filter((t) => t.effect === 'asks').map((t) => t.name)).toEqual(ACTING_TOOLS)
     expect(chat.tools.every((t) => t.description.length > 10)).toBe(true)
-    expect(agent('guide-setup').tools.map((t) => t.effect)).toEqual(['reads', 'reads', 'reads'])
+    expect(agent('guide-setup').tools.map((t) => t.effect)).toEqual([
+      'reads',
+      'reads',
+      'reads',
+      'reads',
+      'reads',
+    ])
     expect(agent('guide-agents').tools.map((t) => [t.name, t.effect])).toEqual([
       ['list_agents', 'reads'],
       ['agent_prompt', 'reads'],
       ['update_agent_settings', 'asks'],
+      ['history_search', 'reads'],
+      ['history_read', 'reads'],
       ['knowledge_search', 'reads'],
       ['knowledge_read', 'reads'],
     ])
