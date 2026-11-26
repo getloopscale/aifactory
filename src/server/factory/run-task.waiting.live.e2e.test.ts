@@ -121,7 +121,7 @@ describe.skipIf(!live)('a task that waits for an answer, with the real agent', (
           labels,
         ),
       author: {
-        name: 'aifactory-paulohenriquevn[bot]',
+        name: 'loopscalefactory[bot]',
         email: 'aifactory@users.noreply.github.com',
       },
     }

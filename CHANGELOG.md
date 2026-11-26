@@ -59,6 +59,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `scripts/github-app-setup.mjs` registers the App the factory uses today: named `loopscalefactory`, owned by the `getloopscale` organisation, subscribed to the seven events the factory routes and with the permissions it asks for. The credentials go to `.secrets/<name>.pem` and `.env.<name>` instead of `.env.local`, so a factory that already runs keeps its App until someone moves the lines over. `APP_NAME`, `APP_OWNER`, `APP_URL`, `WEBHOOK_URL`, `APP_PUBLIC` and `ENV_FILE` change each of those
 - The factory's repository is `getloopscale/aifactory`. A migration renames it in every table that keeps the name, the issues Evolve and the metrics file go to the new address, and a task recorded under `paulohenriquevn/aifactory` still counts as the factory's own work, so a change to its agents or its gates is held as before.
 - The inbox is the first place of the menu, open or folded, ahead of the floor and the board.
 - On a task's page the side with the tabs takes more than half of the width while it shows the changes, so a line of code fits without wrapping, and goes back to a third on any other tab. A button beside the tabs closes the side and leaves the page to the conversation; the same button, at the top of the page, opens it again on the tab it was showing.
@@ -286,6 +287,6 @@ All notable changes to this project are documented here. The format follows
 - The checks run on a clean tree of the pushed commit, so what the agent left in ignored files no longer decides the result (#6)
 - The backup check reads the whole dump and no longer fails with EPIPE on dumps over about a megabyte (#3)
 
-[Unreleased]: https://github.com/paulohenriquevn/aifactory/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/paulohenriquevn/aifactory/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/paulohenriquevn/aifactory/releases/tag/v0.1.0
+[Unreleased]: https://github.com/getloopscale/aifactory/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/getloopscale/aifactory/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/getloopscale/aifactory/releases/tag/v0.1.0

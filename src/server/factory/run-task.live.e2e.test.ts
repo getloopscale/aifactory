@@ -113,7 +113,7 @@ describe.skipIf(!live)('the factory with the real agent', () => {
               pickHarness(harnessRegistry(process.env), process.env.FACTORY_REVIEWER!, labels)
           : undefined,
         author: {
-          name: 'aifactory-paulohenriquevn[bot]',
+          name: 'loopscalefactory[bot]',
           email: 'aifactory@users.noreply.github.com',
         },
       },
@@ -237,7 +237,7 @@ describe.skipIf(!live)('the factory with the real agent', () => {
           ),
         reviewer,
         author: {
-          name: 'aifactory-paulohenriquevn[bot]',
+          name: 'loopscalefactory[bot]',
           email: 'aifactory@users.noreply.github.com',
         },
       },
