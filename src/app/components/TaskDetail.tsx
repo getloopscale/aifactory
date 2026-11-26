@@ -22,7 +22,16 @@ import { useResource } from '../lib/live'
  * shown in the side panel of the board and as a page of its own, so it takes the heading above it
  * (the way back) from whoever shows it.
  */
-export function TaskDetailView({ id, above }: { id: number; above?: ReactNode }) {
+export function TaskDetailView({
+  id,
+  above,
+  focusRun,
+}: {
+  id: number
+  above?: ReactNode
+  /** The pass to open the conversation at. */
+  focusRun?: number
+}) {
   const { t } = useCopy()
   const resource = useResource<TaskDetail>(`/api/panel/tasks/${id}`, { only: id })
   const detail = resource.data
@@ -108,6 +117,7 @@ export function TaskDetailView({ id, above }: { id: number; above?: ReactNode })
         detail={detail}
         events={transcript.events}
         error={transcript.error}
+        focusRun={focusRun}
         onDone={resource.reload}
       />
 
