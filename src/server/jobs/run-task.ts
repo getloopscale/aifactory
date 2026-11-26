@@ -7,7 +7,7 @@ import { getDb } from '../db'
 import { decision } from '../db/schema'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
-import { deferJobWhileTerminal } from '../factory/task-writer'
+import { deferJobWhileTerminal, holdJobForTerminal } from '../factory/task-writer'
 import { deferJobAfterRefusal, deferJobWhilePaused } from '../factory/provider-pause-store'
 import { sendBackWithdrawn } from '../factory/send-back'
 import { runTask } from '../factory/run-task'
@@ -60,6 +60,10 @@ export default defineJob('run-task', {
       )
       const result = await runTask(deps, input.taskId, signal, continuation)
       // The provider refused the sandbox for credit: the same input runs again after the pause.
+      if (result.status === 'held') {
+        await holdJobForTerminal({ name: 'run-task', input, taskId: input.taskId })
+        return
+      }
       if (result.status === 'deferred') {
         await deferJobAfterRefusal({ name: 'run-task', input, taskId: input.taskId })
         return

@@ -127,6 +127,13 @@ export async function deferWhileTerminal(
 ): Promise<boolean> {
   const now = deps.now ?? new Date()
   if (!(await openTerminalOf(db, job.taskId, now))) return false
+  await holdJob(job, deps)
+  return true
+}
+
+/** Queues the job again for a minute from now, with the same input: it waits as for the sandbox provider. */
+export async function holdJob(job: HeldJob, deps: HoldDeps): Promise<void> {
+  const now = deps.now ?? new Date()
   const slot = Math.floor(now.getTime() / (TERMINAL_WAIT_SECONDS * 1000))
   await deps.enqueue({
     name: job.name,
@@ -137,7 +144,11 @@ export async function deferWhileTerminal(
   console.log(
     JSON.stringify({ event: 'run_deferred', job: job.name, taskId: job.taskId, why: 'terminal' }),
   )
-  return true
+}
+
+/** `holdJob` for a job handler. */
+export function holdJobForTerminal(job: HeldJob): Promise<void> {
+  return holdJob(job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }
 
 /** `deferWhileTerminal` for a job handler: the factory's database and TheoKit's queue. */

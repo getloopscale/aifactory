@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm'
 import type { Database } from '../db'
 import { stageEvent, task, type TaskStage } from '../db/schema'
 
+import { openTerminalOf, underWriterLock } from './terminal-lock'
 import { outcome } from './transitions'
 
 /** Columns of `task` that change together with the stage. */
@@ -46,6 +47,14 @@ export class TaskCancelled extends Error {
   }
 }
 
+/** A run reached its first stage while a terminal holds the task's one writer: it waits, and does not fail. */
+export class TerminalHeld extends Error {
+  constructor(readonly taskId: number) {
+    super(`task ${taskId}: a terminal is open`)
+    this.name = 'TerminalHeld'
+  }
+}
+
 /**
  * Throws `TaskCancelled` when `transitions.ts` does not let a run record a stage of this task (`run_step`).
  * The task's row stays locked until the caller's transaction ends, so a cancel cannot slip in between.
@@ -72,6 +81,17 @@ export async function enterRunStage(
   detail?: Record<string, unknown>,
   patch: TaskPatch = {},
 ): Promise<void> {
+  if (stage === 'sandbox') {
+    // The run takes the task's writer here: "no terminal is open" and "the stage is a working one" are decided
+    // together under the lock a terminal's reservation takes, so a terminal opened while the run waited for a
+    // slot is seen now, and one asked for after this commit finds the stage working and is refused.
+    await underWriterLock(db, taskId, async (tx) => {
+      if (await openTerminalOf(tx, taskId)) throw new TerminalHeld(taskId)
+      await refuseUnlessRunMayRecord(tx, taskId)
+      await enterStage(tx, taskId, stage, detail, patch)
+    })
+    return
+  }
   await db.transaction(async (tx) => {
     await refuseUnlessRunMayRecord(tx as never, taskId)
     await enterStage(tx as never, taskId, stage, detail, patch)

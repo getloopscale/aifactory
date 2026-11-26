@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { getDb } from '../db'
 import { jobDeps } from '../factory/job-deps'
 import { withLeaseHeartbeat } from '../factory/lease'
-import { deferJobWhileTerminal } from '../factory/task-writer'
+import { deferJobWhileTerminal, holdJobForTerminal } from '../factory/task-writer'
 import { deferJobAfterRefusal, deferJobWhilePaused } from '../factory/provider-pause-store'
 import { resumeTask } from '../factory/run-task'
 
@@ -25,6 +25,10 @@ export default defineJob('resume-task', {
 
     await withLeaseHeartbeat(extendLease, async () => {
       const result = await resumeTask(deps, input.taskId, signal)
+      if (result.status === 'held') {
+        await holdJobForTerminal({ name: 'resume-task', input, taskId: input.taskId })
+        return
+      }
       if (result.status === 'deferred') {
         await deferJobAfterRefusal({ name: 'resume-task', input, taskId: input.taskId })
         return
