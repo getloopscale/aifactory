@@ -37,10 +37,13 @@ const TRIAL = { order: 'trial', readiness: 'trial' } as const
 let api = new FakeGithub()
 /** What the fake judge was asked, and what it answers for an issue number (READY otherwise). */
 const judge = { asked: [] as string[], answers: new Map<number, string>(), fails: '' }
+/** What the fake drafter answers, and the bodies written to issues. */
+const drafter = { asked: 0, answer: '', fails: '', writes: [] as string[] }
 
 beforeEach(() => {
   api = new FakeGithub()
   Object.assign(judge, { asked: [], answers: new Map(), fails: '' })
+  Object.assign(drafter, { asked: 0, answer: '', fails: '', writes: [] })
 })
 
 const deps = (): SchedulerDeps => ({
@@ -48,6 +51,18 @@ const deps = (): SchedulerDeps => ({
   github: { installationToken: async () => ({ token: 't', expiresAt: new Date() }) },
   api,
   readIssue: (repo, number) => api.readIssue(repo, number),
+  fetchIssue: (repo, number) => api.readIssue(repo, number),
+  issues: {
+    updateIssueBody: async (repo, token, number, body) => {
+      drafter.writes.push(body)
+      await api.updateIssueBody(repo, token, number, body)
+    },
+  },
+  drafter: async () => {
+    drafter.asked += 1
+    if (drafter.fails) throw new Error(drafter.fails)
+    return { response: drafter.answer, cost: 0.01 }
+  },
   judge: async (message) => {
     judge.asked.push(message)
     if (judge.fails) throw new Error(judge.fails)
@@ -510,6 +525,88 @@ describe('the readiness of a newly queued issue', () => {
     expect(await stageOf(vague.id)).toBe('intake')
     expect(asked).toMatchObject({ answer: 'The invoice page.' })
     expect(asked.resumedAt).not.toBeNull()
+  })
+})
+
+describe('an issue that lacks only an acceptance criterion', () => {
+  const NO_ACCEPTANCE =
+    '{"verdict":"needs_refinement","missing":"no acceptance criterion","question":"What should be observable?","reason":"no_acceptance"}'
+  const THREE = '{"criteria":["a test passes","the symbol exists","the output names it"]}'
+
+  async function vague() {
+    const t = await seed({ body: 'Make it better.' })
+    judge.answers.set(t.issue, NO_ACCEPTANCE)
+    await enqueue(t.id, 30)
+    return t
+  }
+
+  it('in auto, writes a drafted section once, keeps the run queued and does not judge the new body', async () => {
+    const t = await vague()
+    drafter.answer = THREE
+
+    await schedule(deps(), AUTO)
+    await schedule(deps(), AUTO)
+
+    expect(drafter.writes).toHaveLength(1)
+    expect(drafter.writes[0]).toContain('## Acceptance (drafted by the factory)\n\n- a test passes')
+    expect(await stageOf(t.id)).toBe('intake')
+    expect((await jobs()).map((j) => j.id)).toEqual([`job-${t.id}`])
+    expect(api.callsTo('commentOnIssue')).toEqual([])
+    expect(judge.asked).toHaveLength(1)
+    const ready = (await decisions()).filter(
+      (d) => d.kind === 'readiness' && (d.detail as { verdict: string }).verdict === 'ready',
+    )
+    expect(ready).toHaveLength(1)
+  })
+
+  it.each([
+    ['no criteria', '{"criteria":[]}', ''],
+    ['an answer that does not parse', 'no idea', ''],
+    ['a drafter that throws', '', 'down'],
+  ])('asks the owner as before for %s', async (_name, answer, fails) => {
+    const t = await vague()
+    Object.assign(drafter, { answer, fails })
+
+    await schedule(deps(), AUTO)
+
+    expect(drafter.writes).toEqual([])
+    expect(await stageOf(t.id)).toBe('waiting')
+    expect(await getDb().select().from(question)).toHaveLength(1)
+  })
+
+  it('in trial, stores the draft on the decision and edits nothing; auto then uses it', async () => {
+    const t = await vague()
+    drafter.answer = THREE
+
+    await schedule(deps(), TRIAL)
+
+    expect(drafter.writes).toEqual([])
+    const verdict = (await decisions()).find((d) => d.kind === 'readiness' && d.taskId === t.id)
+    expect(verdict?.detail).toMatchObject({
+      draft: ['a test passes', 'the symbol exists', 'the output names it'],
+    })
+
+    await schedule(deps(), AUTO)
+
+    expect(drafter.asked).toBe(1)
+    expect(drafter.writes).toHaveLength(1)
+    expect(await stageOf(t.id)).toBe('intake')
+  })
+
+  it("leaves the owner's edit alone when the issue changed after it was read", async () => {
+    const t = await vague()
+    drafter.answer = THREE
+    const d = deps()
+    d.drafter = async () => {
+      api.repo(REPO).issue(t.issue, { body: 'The owner rewrote this.' })
+      return { response: THREE, cost: 0 }
+    }
+
+    await schedule(d, AUTO)
+
+    expect(drafter.writes).toEqual([])
+    expect(api.repo(REPO).issue(t.issue).body).toBe('The owner rewrote this.')
+    expect(await stageOf(t.id)).toBe('intake')
   })
 })
 

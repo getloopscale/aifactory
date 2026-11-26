@@ -3,8 +3,17 @@ import type { Pool } from 'pg'
 import { openAmong, type BlockerReads } from '../factory/blocker-check'
 import { refOf, withoutOwn } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
+import { fetchIssue } from '../github/issues'
 
-import { applyOrder, askOwner, blockTask, recordDecision, type AskDeps } from './apply'
+import {
+  applyAcceptance,
+  applyOrder,
+  askOwner,
+  blockTask,
+  recordDecision,
+  type AskDeps,
+  type DraftDeps,
+} from './apply'
 import {
   readinessKey,
   readQueue,
@@ -14,7 +23,7 @@ import {
   type QueuedRunWithIssue,
   type ReadinessRecord,
 } from './facts'
-import type { ReadinessJudge } from './judge'
+import type { AcceptanceDrafter, ReadinessJudge } from './judge'
 import { passIsOff, type SchedulerMode, type SchedulerModes } from './mode'
 import {
   isBug,
@@ -26,7 +35,18 @@ import {
   type Placement,
   type QueuedEntry,
 } from './order'
-import { bodyHash, parseReadiness, readinessMessage, readinessStep } from './readiness'
+import { eq, sql } from 'drizzle-orm'
+
+import { schedulerDecision } from '../db/schema'
+
+import {
+  bodyHash,
+  parseCriteria,
+  parseReadiness,
+  readinessMessage,
+  readinessStep,
+  refinementReason,
+} from './readiness'
 
 /**
  * One pass of the scheduler: first the readiness of each newly queued issue (the only step with a model),
@@ -37,7 +57,8 @@ import { bodyHash, parseReadiness, readinessMessage, readinessStep } from './rea
 
 export type SchedulerDeps = FactsDeps &
   AskDeps &
-  Pick<BlockerReads, 'fetchIssue'> & { judge: ReadinessJudge }
+  Partial<Pick<DraftDeps, 'issues'>> &
+  Pick<BlockerReads, 'fetchIssue'> & { judge: ReadinessJudge; drafter?: AcceptanceDrafter }
 
 export type ScheduleResult = {
   judged: number
@@ -85,6 +106,62 @@ async function judge(
     detail,
   })
   return id === undefined ? undefined : { ...readiness, id }
+}
+
+/** Has the drafter write the criteria of a `no_acceptance` verdict and stores them on its decision row. */
+async function draftFor(
+  deps: SchedulerDeps & { drafter: AcceptanceDrafter },
+  run: ReadRun,
+  verdict: ReadinessRecord,
+): Promise<ReadinessRecord> {
+  const { title, body } = run.issue.value
+  let detail: { draft: string[]; draftError?: string; draftCostUsd?: number }
+  try {
+    const answer = await deps.drafter(
+      readinessMessage({ repository: run.repository, issueNumber: run.issueNumber, title, body }),
+    )
+    const read = parseCriteria(answer.response)
+    detail = {
+      draft: read.criteria,
+      ...(read.error ? { draftError: read.error } : {}),
+      draftCostUsd: answer.cost,
+    }
+  } catch (error) {
+    log('schedule_draft_failed', { taskId: run.taskId, error: errorMessage(error) })
+    detail = { draft: [], draftError: errorMessage(error) }
+  }
+  await deps.db
+    .update(schedulerDecision)
+    .set({ detail: sql`${schedulerDecision.detail} || ${JSON.stringify(detail)}::jsonb` })
+    .where(eq(schedulerDecision.id, verdict.id))
+  return { ...verdict, draft: detail.draft }
+}
+
+/**
+ * Writes a recorded draft into the issue in `auto`. `none`: there is no draft to write, or it could not be
+ * written, and the owner is asked; `done`: written; `skip`: the issue changed or the write failed, so nothing is
+ * asked about a version that is gone and the next pass judges what the issue is now.
+ */
+async function appliedDraft(
+  deps: SchedulerDeps,
+  run: ReadRun,
+  verdict: ReadinessRecord,
+): Promise<'none' | 'done' | 'skip'> {
+  if (!deps.issues || !verdict.draft || verdict.draft.length === 0) return 'none'
+  try {
+    const done = await applyAcceptance(
+      { ...deps, issues: deps.issues, readIssue: deps.fetchIssue ?? fetchIssue },
+      run,
+      run.issue.value,
+      verdict.draft,
+    )
+    if (done.drafted) return 'done'
+    log('schedule_not_drafted', { taskId: run.taskId, reason: done.reason })
+    return done.stale ? 'skip' : 'none'
+  } catch (error) {
+    log('schedule_draft_not_applied', { taskId: run.taskId, error: errorMessage(error) })
+    return 'skip'
+  }
 }
 
 /**
@@ -135,7 +212,20 @@ async function readinessOf(
     }
     result.judged += 1
   }
+  if (
+    deps.drafter &&
+    verdict!.verdict === 'needs_refinement' &&
+    refinementReason(verdict!) === 'no_acceptance' &&
+    verdict!.draft === undefined &&
+    verdict!.questionId === undefined
+  ) {
+    verdict = await draftFor({ ...deps, drafter: deps.drafter }, run, verdict!)
+  }
   const step = readinessStep(verdict, mode)
+  if (step === 'ask') {
+    const drafted = await appliedDraft(deps, run, verdict!)
+    if (drafted !== 'none') return false
+  }
   if (step === 'block') return blockedByIssues(deps, run, verdict!)
   if (step !== 'ask') return false
   const asked = await askOwner(deps, run, verdict!, verdict!.id)
