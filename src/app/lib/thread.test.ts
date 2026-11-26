@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { MessageView, TranscriptEvent } from '../../shared/panel'
 
-import { threadRows } from './thread'
+import { shellKind, threadRows, toolKind } from './thread'
 
 const T0 = Date.parse('2026-11-25T10:00:00Z')
 const at = (s: number) => new Date(T0 + s * 1000).toISOString()
@@ -121,5 +121,30 @@ describe('threadRows', () => {
       const note = rows.find((r) => r.type === 'work' && r.steps[0]?.type === 'note')
       expect(note).toMatchObject({ failed: 1, steps: [{ type: 'note', text: 'boom' }] })
     }
+  })
+})
+
+describe('what a shell command does', () => {
+  it.each([
+    ['/bin/bash -lc "rg -n \'sandbox\' src/server | head -35"', 'search'],
+    ['/bin/bash -lc "cat src/a.ts | head -125; sed -n \'100,160p\' src/b.ts"', 'read'],
+    ["sed -n '70,165p' src/server/factory/doctor.ts", 'read'],
+    ["sed -i 's/a/b/' src/a.ts", 'edit'],
+    ['apply_patch <<EOF', 'edit'],
+    ["cat > notes.md <<'EOF'", 'edit'],
+    ['echo done > out.txt', 'edit'],
+    ['ls -la src', 'search'],
+    ['/usr/bin/find . -name "*.ts"', 'search'],
+    ['pnpm test', 'command'],
+    ['git status --short', 'command'],
+    ['', 'command'],
+  ])('%s is a %s', (command, kind) => {
+    expect(shellKind(command)).toBe(kind)
+  })
+
+  it('is asked only of a shell: a tool that names what it does keeps its kind', () => {
+    expect(toolKind('Read', 'rg x')).toBe('read')
+    expect(toolKind('shell', 'rg x')).toBe('search')
+    expect(toolKind('Bash')).toBe('command')
   })
 })

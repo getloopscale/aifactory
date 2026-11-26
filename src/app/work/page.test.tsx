@@ -147,7 +147,7 @@ describe('board', () => {
       en.columns.attention,
     ])
     const grid = regions[0].parentElement as HTMLElement
-    expect(grid.style.gridTemplateColumns).toBe('repeat(9, minmax(176px, 1fr))')
+    expect(grid.style.gridTemplateColumns).toBe('repeat(9, minmax(152px, 1fr))')
     for (const name of [
       en.columns.queued,
       en.columns.waiting,
@@ -169,7 +169,7 @@ describe('board', () => {
     expect(screen.queryByLabelText('Empty columns')).toBeNull()
   })
 
-  it('keeps every column title in view while the cards scroll, empty columns too, in a frame of its own', async () => {
+  it('keeps every column title in view while its cards scroll under it, empty columns too', async () => {
     serve({ tasks: [card({ id: 1, title: 'Building one' })] })
     render(
       <MemoryRouter>
@@ -177,21 +177,20 @@ describe('board', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
-    const title = screen
-      .getByRole('region', { name: en.columns.working })
-      .querySelector('h2') as HTMLElement
-    expect(title.className).toContain('sticky')
-    const frame = screen.getByRole('region', { name: en.columns.working }).parentElement
-      ?.parentElement as HTMLElement
-    expect(frame.className).toContain('overflow-auto')
-    expect(frame.className).toContain('max-h-')
-    // A title sticks only inside its own column, so every column must be as tall as the tallest. With
-    // `items-start` an empty one is short and its title scrolled away while the others stayed.
-    const grid = screen.getByRole('region', { name: en.columns.working })
-      .parentElement as HTMLElement
+    const column = screen.getByRole('region', { name: en.columns.working })
+    // The cards scroll inside their column, so the title above them never leaves.
+    expect(column.className).toContain('flex-col')
+    expect((column.querySelector('ul') as HTMLElement).className).toContain('overflow-y-auto')
+    // The board takes the height its page leaves and scrolls only sideways: the page itself does not scroll.
+    const grid = column.parentElement as HTMLElement
+    const frame = grid.parentElement as HTMLElement
+    expect(frame.className).toContain('overflow-x-auto')
+    expect(frame.className).toContain('flex-1')
+    // Every column is as tall as the board, an empty one too.
+    expect(grid.className).toContain('grid-rows-[minmax(0,1fr)]')
     expect(grid.className).not.toContain('items-start')
     for (const section of screen.getAllByRole('region')) {
-      expect((section.querySelector('h2') as HTMLElement).className).toContain('sticky')
+      expect(section.className).toContain('flex-col')
     }
   })
 
@@ -213,7 +212,7 @@ describe('board', () => {
       .filter((l) => l.getAttribute('href')?.includes('?task='))
     expect(cards).toHaveLength(2)
     // Every card starts at the same height and grows with what it says, so nothing on it is cut.
-    for (const c of cards) expect(c.querySelector('[class*="min-h-[168px]"]')).not.toBeNull()
+    for (const c of cards) expect(c.querySelector('[class*="min-h-[124px]"]')).not.toBeNull()
     for (const c of cards) expect(c.querySelector('[class*=" h-["]')).toBeNull()
     expect(screen.getByText(/A very long title/).className).toContain('line-clamp-3')
     expect(screen.queryAllByText('paulo/app #7').length).toBe(0)
@@ -408,8 +407,9 @@ describe('the agent on a card', () => {
       </MemoryRouter>,
     )
     const panel = await screen.findByLabelText('Codex · gpt-6.1-terra · reviewing · round 2')
-    expect(panel.className).toContain('bg-info/10')
-    expect(panel.querySelector('.bg-info.animate-pulse')).not.toBeNull()
+    // The panel is lit while the agent works, and the agent is its mark, ringed as live.
+    expect(panel.className).toContain('bg-primary/10')
+    expect(within(panel).getByRole('img', { name: 'Codex' }).className).toContain('ring-2')
     expect(screen.getByText('gpt-6.1-terra')).toBeDefined()
     expect(screen.getByText('reviewing · round 2')).toBeDefined()
     expect(screen.queryByLabelText(/^last:/)).toBeNull()
@@ -450,9 +450,10 @@ describe('the agent on a card', () => {
       </MemoryRouter>,
     )
     const last = await screen.findByLabelText('last: Claude Code · opus')
-    // The agent keeps its color, so the harness reads at a glance, but the panel is not lit as a running one.
-    expect(last.querySelector('.bg-primary')).not.toBeNull()
-    expect(last.querySelector('.animate-pulse')).toBeNull()
+    // The agent keeps its mark, so the harness reads at a glance, but the panel is not lit as a running one.
+    const mark = within(last).getByRole('img', { name: 'Claude Code' })
+    expect(mark.className).not.toContain('ring-2')
+    expect(last.querySelector('[class*="animate-pulse"]')).toBeNull()
     expect(last.className).not.toContain('bg-primary/10')
     expect(screen.getByText('last on it')).toBeDefined()
   })
@@ -509,5 +510,25 @@ describe('the agent on a card', () => {
       </MemoryRouter>,
     )
     await screen.findByLabelText('Claude Code · opus · corrigindo achados · tentativa 2')
+  })
+})
+
+describe('what a card hides for a screen reader', () => {
+  it('stays inside the card, so a long column never makes the page as tall as itself', async () => {
+    serve({
+      tasks: [card({ id: 1, lastAgent: { agent: 'claude-code', model: 'claude-sonnet-5-5' } })],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    const hidden = await waitFor(() => {
+      const found = document.querySelector('a[href*="?task="] .sr-only')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    // `sr-only` is absolutely positioned: without a positioned card it is laid out against the page.
+    expect(hidden.closest('a')?.className).toMatch(/(^| )relative( |$)/)
   })
 })

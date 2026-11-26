@@ -28,18 +28,21 @@ describe('the inbox', () => {
     }
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        Response.json({
-          items: [
-            {
-              task,
-              kind: 'handoff',
-              summary: 'three attempts',
-              coordinatorReason: 'no way on',
-              at: new Date().toISOString(),
-            },
-          ],
-        }),
+      // The inbox opens its first task beside the list, so the task's own read gets an answer of its own.
+      vi.fn(async (url: string) =>
+        String(url).includes('/api/panel/inbox')
+          ? Response.json({
+              items: [
+                {
+                  task,
+                  kind: 'handoff',
+                  summary: 'three attempts',
+                  coordinatorReason: 'no way on',
+                  at: new Date().toISOString(),
+                },
+              ],
+            })
+          : Response.json({ error: 'not found' }, { status: 404 }),
       ),
     )
     render(<Page />)

@@ -156,30 +156,50 @@ describe('board and list', () => {
 })
 
 describe('a task beside the board', () => {
-  it('opens in a side panel when a card is chosen, and the board stays', async () => {
+  it('docks beside the board when a card is chosen, covering nothing', async () => {
     at('/work')
     await waitFor(() => expect(screen.getByText('Task 1')).toBeDefined())
 
     fireEvent.click(screen.getByRole('link', { name: /Task 1/ }))
 
-    await waitFor(() => expect(screen.getByRole('dialog')).toBeDefined())
+    const dock = await screen.findByRole('complementary', { name: en.work.sheetTitle })
     expect(where()).toBe('/work?task=1')
-    await waitFor(() =>
-      expect(within(screen.getByRole('dialog')).getByText('Detail of 1')).toBeDefined(),
-    )
+    await waitFor(() => expect(within(dock).getByText('Detail of 1')).toBeDefined())
+    // The board is still there and nothing lies over it.
     expect(screen.getByText('Finished work')).toBeDefined()
+    expect(screen.queryByRole('dialog')).toBeNull()
   })
 
-  it('opens from a task address, and closing it clears the address', async () => {
+  it('opens from a task address, and Escape or the button closes it and clears the address', async () => {
     at('/work?task=2')
+    const dock = await screen.findByRole('complementary', { name: en.work.sheetTitle })
+    await waitFor(() => expect(within(dock).getByText('Detail of 2')).toBeDefined())
+
+    fireEvent.keyDown(window, { key: 'Escape' })
+
+    await waitFor(() =>
+      expect(screen.queryByRole('complementary', { name: en.work.sheetTitle })).toBeNull(),
+    )
+    expect(where()).toBe('/work')
+
+    cleanup()
+    at('/work?task=2')
+    fireEvent.click(await screen.findByRole('button', { name: en.work.closeTask }))
+    await waitFor(() => expect(where()).toBe('/work'))
+  })
+
+  it('slides over the board on a screen with no room for both', async () => {
+    render(
+      <MemoryRouter initialEntries={['/work?task=2']}>
+        <WidthContext.Provider value="medium">
+          <Page />
+        </WidthContext.Provider>
+      </MemoryRouter>,
+    )
     await waitFor(() =>
       expect(within(screen.getByRole('dialog')).getByText('Detail of 2')).toBeDefined(),
     )
-
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-    expect(where()).toBe('/work')
+    expect(screen.queryByRole('complementary', { name: en.work.sheetTitle })).toBeNull()
   })
 
   it('offers the whole page for the task, and has no side panel there', async () => {

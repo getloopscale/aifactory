@@ -4,6 +4,8 @@ import type { IssuesApi } from '../server/github/issues-api'
 import {
   AutoMergeRefused,
   type ChangedFile,
+  type PullRequestFile,
+  type PullRequestFiles,
   type CheckReport,
   type CheckRun,
   type GithubApi,
@@ -184,6 +186,7 @@ export class FakeRepository {
   private readonly logs = new Map<string, string[]>()
   private readonly trees = new Map<string, Map<string, string>>()
   private readonly comparisons = new Map<string, ChangedFile[]>()
+  private readonly pullRequestFiles = new Map<number, PullRequestFiles>()
   private readonly aheadBy = new Map<string, number>()
   private readonly committedAt = new Map<string, Date>()
   private readonly parents = new Map<string, string>()
@@ -250,6 +253,19 @@ export class FakeRepository {
   /** The files at a ref, looked up by the ref as given and then by the commit it names. */
   tree(ref: string): Map<string, string> | undefined {
     return this.trees.get(ref) ?? this.trees.get(this.resolve(ref))
+  }
+
+  /** Sets the files a pull request changes, each with its patch. */
+  pullFiles(number: number, files: PullRequestFile[], truncated = false): this {
+    this.pullRequestFiles.set(number, { files, truncated })
+    return this
+  }
+
+  /** The files set for a pull request; one nobody set is not there, as on GitHub. */
+  filesOfPull(number: number): PullRequestFiles {
+    const set = this.pullRequestFiles.get(number)
+    if (!set) throw githubAnswered(404, `listing the files of ${this.name}#${number}`)
+    return set
   }
 
   /** Sets what a comparison lists, for when the two trees are not there to tell. */
@@ -735,6 +751,13 @@ export class FakeGithub implements GithubApi {
     return this.call(
       { method: 'changedFiles', repo, token, args: [base, head], failed: false },
       (r) => r.changes(base, head),
+    )
+  }
+
+  async pullRequestFiles(repo: string, token: string, number: number) {
+    return this.call(
+      { method: 'pullRequestFiles', repo, token, args: [number], failed: false },
+      (r) => r.filesOfPull(number),
     )
   }
 

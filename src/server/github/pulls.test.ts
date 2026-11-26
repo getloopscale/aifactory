@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { AutoMergeRefused, autoMergeOrMergeable, createGithubApi, titleToRestore } from './pulls'
+import { classify } from '../factory/watch'
 import { RateLimited } from './rate-limit'
 
 const noWait = async () => {}
@@ -488,6 +489,75 @@ describe('what changed between two branches, and the files of a branch', () => {
     ).rejects.toThrow(/404 comparing main with develop/)
   })
 
+  function filePages(pages: Record<string, unknown>[][]) {
+    const urls: string[] = []
+    const fetch = async (url: string) => {
+      urls.push(url.replace('https://api.github.com/repos/o/r', ''))
+      const page = Number(new URL(url).searchParams.get('page'))
+      return new Response(JSON.stringify(pages[page - 1] ?? []), { status: 200 })
+    }
+    return { fetch, urls }
+  }
+  const listed = (i: number) => ({ filename: `f${i}`, status: 'added', additions: 1, deletions: 0 })
+
+  it('lists the files of a pull request with their patches, and leaves the patch out of a file that has none', async () => {
+    const { fetch, urls } = filePages([
+      [
+        {
+          filename: 'a.ts',
+          status: 'modified',
+          additions: 2,
+          deletions: 1,
+          patch: '@@ -1 +1,2 @@',
+        },
+        {
+          filename: 'b.png',
+          status: 'renamed',
+          previous_filename: 'c.png',
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+    ])
+
+    expect(await createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)).toEqual({
+      files: [
+        { path: 'a.ts', status: 'modified', additions: 2, deletions: 1, patch: '@@ -1 +1,2 @@' },
+        { path: 'b.png', status: 'renamed', previousPath: 'c.png', additions: 0, deletions: 0 },
+      ],
+      truncated: false,
+    })
+    expect(urls).toEqual(['/pulls/12/files?per_page=100&page=1'])
+  })
+
+  it('reads a second page after a full one', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => listed(i))
+    const { fetch, urls } = filePages([full, [listed(100)]])
+
+    const answer = await createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)
+
+    expect(answer.files).toHaveLength(101)
+    expect(answer.truncated).toBe(false)
+    expect(urls).toHaveLength(2)
+  })
+
+  it('says a pull request with more files than it reads was cut short', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => listed(i))
+    const { fetch } = filePages([full, full, full, [listed(300)]])
+
+    const answer = await createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)
+
+    expect(answer.files).toHaveLength(300)
+    expect(answer.truncated).toBe(true)
+  })
+
+  it('throws when GitHub will not list the files of the pull request', async () => {
+    const { fetch } = fakeFetch({ 'GET /pulls/12/files': { status: 404 } })
+    await expect(createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)).rejects.toThrow(
+      /404 listing the files of o\/r#12/,
+    )
+  })
+
   it('lists the files of a branch, without directories', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /git/trees/develop': {
@@ -771,6 +841,70 @@ describe('commitChecks', () => {
       statusContexts: [{ context: 'deploy', state: 'pending' }],
     })
     expect(calls[0].url).toContain('per_page=100')
+  })
+
+  describe('Dependabot update jobs', () => {
+    const failed = (name: string, extra: object = {}) => ({
+      name,
+      status: 'completed',
+      conclusion: 'failure',
+      app: { slug: 'github-actions' },
+      check_suite: { id: 7 },
+      ...extra,
+    })
+    const ci = {
+      name: 'CI',
+      status: 'completed',
+      conclusion: 'success',
+      app: { slug: 'github-actions' },
+      check_suite: { id: 8 },
+    }
+    const answers = (checkRuns: object[], path?: string) => ({
+      'GET /commits/abc/check-runs': {
+        status: 200,
+        body: { total_count: checkRuns.length, check_runs: checkRuns },
+      },
+      'GET /commits/abc/status': { status: 200, body: { state: 'success', total_count: 0 } },
+      'GET /actions/runs': { status: 200, body: { workflow_runs: path ? [{ path }] : [] } },
+    })
+
+    it('leaves out a failed Dependabot update and classifies the commit green', async () => {
+      const { fetch } = fakeFetch(
+        answers([failed('Dependabot'), ci], 'dynamic/dependabot/dependabot-updates'),
+      )
+      const checks = await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+      expect(checks.checkRuns.map((c) => c.name)).toEqual(['CI'])
+      expect(classify(checks).state).toBe('green')
+    })
+
+    it('keeps a failed dynamic CodeQL run and classifies the commit red', async () => {
+      const { fetch } = fakeFetch(
+        answers([failed('CodeQL'), ci], 'dynamic/github-code-scanning/codeql'),
+      )
+      const checks = await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+      expect(checks.checkRuns.map((c) => c.name)).toEqual(['CodeQL', 'CI'])
+      expect(classify(checks).state).toBe('red')
+    })
+
+    it('asks for no workflow run when every check passed or the failure is not Actions', async () => {
+      const { fetch, calls } = fakeFetch(
+        answers([
+          ci,
+          failed('ext', { app: { slug: 'other' } }),
+          failed('none', { check_suite: null }),
+        ]),
+      )
+      await createGithubApi(fetch).commitChecks('o/r', 't', 'abc')
+      expect(calls.some((c) => c.url.includes('/actions/runs'))).toBe(false)
+    })
+
+    it('fails when the workflow run cannot be read', async () => {
+      const { fetch } = fakeFetch({
+        ...answers([failed('Dependabot')]),
+        'GET /actions/runs': { status: 500 },
+      })
+      await expect(createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')).rejects.toThrow()
+    })
   })
 
   it('says there are no statuses when there are none, because GitHub then answers pending', async () => {

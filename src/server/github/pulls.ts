@@ -62,6 +62,15 @@ export type OpenPullRequest = {
  */
 export type ChangedFile = { path: string; status: string; previousPath?: string }
 
+/** One file of a pull request with what it changes. `patch` is missing for a binary file or one too large for GitHub to show. */
+export type PullRequestFile = ChangedFile & { additions: number; deletions: number; patch?: string }
+
+/** The files of a pull request, and whether it has more than the ones listed. */
+export type PullRequestFiles = { files: PullRequestFile[]; truncated: boolean }
+
+/** The most files of a pull request the panel reads: three pages of GitHub's listing. */
+export const MAX_PULL_REQUEST_FILES = 300
+
 /** A branch as its comparison with another reads: its head, how far ahead it is, and when the head was committed. */
 export type BranchAhead = { sha: string; aheadBy: number; committedAt: Date }
 
@@ -79,6 +88,9 @@ export type TagWorkflowRun = {
   headSha: string
   url: string
 }
+
+/** The conclusions of a failed check run, as `watch.ts` reads them. */
+const BROKEN_CONCLUSIONS = new Set(['failure', 'timed_out', 'action_required', 'startup_failure'])
 
 /** The most pages of 100 reports `commitChecks` reads of one commit before it says it could not read them all. */
 const MAX_CHECK_PAGES = 20
@@ -240,6 +252,11 @@ export type GithubApi = {
    * GitHub to list whole is an error, never a partial list.
    */
   changedFiles(repo: string, token: string, base: string, head: string): Promise<ChangedFile[]>
+  /**
+   * The files a pull request changes since its merge base, each with its patch, at most
+   * `MAX_PULL_REQUEST_FILES`. A longer pull request comes back `truncated`, never as if it were whole.
+   */
+  pullRequestFiles(repo: string, token: string, number: number): Promise<PullRequestFiles>
   /** The path of every file on a branch. */
   filePaths(repo: string, token: string, ref: string): Promise<string[]>
   /** What a file holds on a branch, or undefined when it is not there. */
@@ -406,6 +423,22 @@ const statusState = (state: string): CheckReport['state'] => {
 }
 
 type GraphqlAnswer<T> = { data?: T; errors?: { message: string }[] }
+
+const pullRequestFile = (f: {
+  filename: string
+  status: string
+  previous_filename?: string
+  additions: number
+  deletions: number
+  patch?: string
+}): PullRequestFile => ({
+  path: f.filename,
+  status: f.status,
+  ...(f.previous_filename ? { previousPath: f.previous_filename } : {}),
+  additions: f.additions,
+  deletions: f.deletions,
+  ...(f.patch === undefined ? {} : { patch: f.patch }),
+})
 
 /** The most files GitHub's compare lists for one comparison. */
 const MAX_COMPARE_FILES = 3000
@@ -619,6 +652,32 @@ export function createGithubApi(
             `${base}...${head} on ${repo} changes ${MAX_COMPARE_FILES} files or more, the most GitHub lists, so what it changes cannot be told`,
           )
         }
+      }
+    },
+
+    async pullRequestFiles(repo, token, number) {
+      const files: PullRequestFile[] = []
+      for (let page = 1; ; page += 1) {
+        const listed = (await (
+          await ensure(
+            await call(repo, token, `/pulls/${number}/files?per_page=100&page=${page}`),
+            `listing the files of ${repo}#${number}`,
+            [200],
+          )
+        ).json()) as {
+          filename: string
+          status: string
+          previous_filename?: string
+          additions: number
+          deletions: number
+          patch?: string
+        }[]
+        if (files.length + listed.length > MAX_PULL_REQUEST_FILES) {
+          files.push(...listed.slice(0, MAX_PULL_REQUEST_FILES - files.length).map(pullRequestFile))
+          return { files, truncated: true }
+        }
+        files.push(...listed.map(pullRequestFile))
+        if (listed.length < 100) return { files, truncated: false }
       }
     },
 
@@ -954,7 +1013,13 @@ export function createGithubApi(
         }
         throw new Error(`${what}: more than ${MAX_CHECK_PAGES * 100} reports, not all of them read`)
       }
-      const runs = await pages<{ name: string; status: string; conclusion: string | null }>(
+      const runs = await pages<{
+        name: string
+        status: string
+        conclusion: string | null
+        app?: { slug?: string } | null
+        check_suite?: { id?: number } | null
+      }>(
         `/commits/${sha}/check-runs`,
         `reading the check runs of ${sha.slice(0, 7)} on ${repo}`,
         (b) => b.check_runs ?? [],
@@ -965,8 +1030,30 @@ export function createGithubApi(
         (b) => b.statuses ?? [],
       )
       const state = combined.body.state as 'success' | 'failure' | 'error' | 'pending'
+      // A Dependabot update job is attached to the default branch's head but is no check of the commit.
+      // Only a failed run of GitHub Actions is looked up, so a green commit costs no extra call.
+      const isDependabotUpdate = async (r: (typeof runs.items)[number]) => {
+        const suite = r.check_suite?.id
+        if (
+          r.status !== 'completed' ||
+          r.conclusion === null ||
+          !BROKEN_CONCLUSIONS.has(r.conclusion) ||
+          r.app?.slug !== 'github-actions' ||
+          suite === undefined
+        )
+          return false
+        const found = await ensure(
+          await call(repo, token, `/actions/runs?check_suite_id=${suite}`),
+          `reading the workflow run of the check ${r.name} on ${repo}`,
+          [200],
+        )
+        const body = (await found.json()) as { workflow_runs?: { path?: string }[] }
+        return (body.workflow_runs ?? []).some((w) => w.path?.startsWith('dynamic/dependabot/'))
+      }
+      const kept: typeof runs.items = []
+      for (const r of runs.items) if (!(await isDependabotUpdate(r))) kept.push(r)
       return {
-        checkRuns: runs.items.map((r) => ({
+        checkRuns: kept.map((r) => ({
           name: r.name,
           status: r.status,
           conclusion: r.conclusion,

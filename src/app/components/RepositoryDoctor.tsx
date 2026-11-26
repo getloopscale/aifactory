@@ -1,4 +1,13 @@
 import { Badge, Button } from '@usetheo/ui'
+import {
+  CircleCheck,
+  CircleHelp,
+  CircleX,
+  type LucideIcon,
+  OctagonX,
+  Stethoscope,
+  TriangleAlert,
+} from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 
 import type {
@@ -15,9 +24,27 @@ import type { Copy } from '../lib/copy/en'
 import { ago } from '../lib/format'
 import { useResource } from '../lib/live'
 
+import {
+  Quiet,
+  READABLE,
+  Row,
+  RowIcon,
+  Rows,
+  Surface,
+  SurfaceHeading,
+  type Tone,
+} from './ui/Surface'
+
 const variant = { blocked: 'destructive', warn: 'warning', unknown: 'default' } as const
 
-function Row({
+/** The mark and the colour of a finding: red blocks the repository, amber warns, grey was not read. */
+const FINDING: Record<'blocked' | 'warn' | 'unknown', { icon: LucideIcon; tone: Tone }> = {
+  blocked: { icon: OctagonX, tone: 'destructive' },
+  warn: { icon: TriangleAlert, tone: 'warning' },
+  unknown: { icon: CircleHelp, tone: 'neutral' },
+}
+
+function Finding({
   item,
   busy,
   onFix,
@@ -33,31 +60,35 @@ function Row({
   const cause = sentence && item.say ? sentence.cause(item.say.values) : item.cause
   const repair = sentence && item.say ? sentence.repair(item.say.values) : item.repair
   return (
-    <li className="space-y-1 rounded-lg border border-border p-3" data-item={item.id}>
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={variant[status]}>{t.doctor[status]}</Badge>
-        <span className="text-foreground">{cause}</span>
-      </div>
+    <Row
+      lead={<RowIcon icon={FINDING[status].icon} tone={FINDING[status].tone} />}
+      trail={<Badge variant={variant[status]}>{t.doctor[status]}</Badge>}
+    >
+      <span data-item={item.id} className="block text-sm font-medium text-foreground">
+        {cause}
+      </span>
       {repair ? (
-        <p className="text-muted-foreground">
+        <span className={`mt-0.5 block text-[13px] text-muted-foreground ${READABLE}`}>
           {t.doctor.repair} {repair}
-        </p>
+        </span>
       ) : null}
-      <div className="flex gap-2">
-        {item.link ? (
-          <Button asChild size="sm" variant="secondary">
-            <a href={item.link} target="_blank" rel="noreferrer">
-              {t.doctor.open}
-            </a>
-          </Button>
-        ) : null}
-        {item.canRepair ? (
-          <Button size="sm" disabled={busy} onClick={() => onFix(item.id)}>
-            {busy ? t.doctor.fixing : t.doctor.fix}
-          </Button>
-        ) : null}
-      </div>
-    </li>
+      {item.link || item.canRepair ? (
+        <span className="mt-2 flex gap-2">
+          {item.link ? (
+            <Button asChild size="sm" variant="secondary">
+              <a href={item.link} target="_blank" rel="noreferrer">
+                {t.doctor.open}
+              </a>
+            </Button>
+          ) : null}
+          {item.canRepair ? (
+            <Button size="sm" disabled={busy} onClick={() => onFix(item.id)}>
+              {busy ? t.doctor.fixing : t.doctor.fix}
+            </Button>
+          ) : null}
+        </span>
+      ) : null}
+    </Row>
   )
 }
 
@@ -111,17 +142,21 @@ export function RepositoryDoctor({
   })
   const error = message ?? resource.error
   return (
-    <section aria-label={t.doctor.title} className="mt-3 space-y-2 text-sm">
-      <div className="flex items-center gap-3">
-        <span className="font-medium text-foreground">{t.doctor.title}</span>
+    <Surface
+      title={t.doctor.title}
+      icon={Stethoscope}
+      count={report ? rows.length : undefined}
+      action={
         <Button size="sm" variant="secondary" disabled={loading} onClick={again}>
           {loading ? t.doctor.checking : t.doctor.checkAgain}
         </Button>
-      </div>
-      {error ? <p className="text-destructive">{error}</p> : null}
-      {!report && !error ? <p className="text-muted-foreground">{t.doctor.loading}</p> : null}
+      }
+    >
+      {error ? <p className="px-4 py-3 text-sm text-destructive">{error}</p> : null}
+      {!report && !error ? <Quiet>{t.doctor.loading}</Quiet> : null}
       {report && rows.length === 0 ? (
-        <p className="text-foreground">
+        <p className="flex items-center gap-2 px-4 py-3 text-sm text-foreground">
+          <CircleCheck aria-hidden className="size-4 shrink-0 stroke-success" />
           {t.doctor.ready(
             language === 'pt-BR'
               ? new Date(report.at).toLocaleString('pt-BR')
@@ -130,32 +165,35 @@ export function RepositoryDoctor({
         </p>
       ) : null}
       {rows.length > 0 ? (
-        <div className="space-y-3">
-          {groups.map((group) => (
-            <div key={group.family} className="space-y-2" data-group={group.family}>
-              <p className="font-medium text-foreground">
-                {t.doctor.groups[group.family]}{' '}
-                <span className="text-muted-foreground">
-                  {t.doctor.passing(group.passing, group.total)}
-                </span>
-              </p>
-              <ul className="space-y-2">
-                {rows
-                  .filter((item) => (item.family ?? 'operation') === group.family)
-                  .map((item) => (
-                    <Row
-                      key={item.id}
-                      item={item}
-                      busy={fixing === item.id}
-                      onFix={(id) => void fix(id)}
-                    />
-                  ))}
-              </ul>
-            </div>
-          ))}
-        </div>
+        <>
+          {groups.map((group) => {
+            const found = rows.filter((item) => (item.family ?? 'operation') === group.family)
+            return (
+              <div key={group.family} data-group={group.family}>
+                <SurfaceHeading
+                  inner
+                  as="h3"
+                  title={t.doctor.groups[group.family]}
+                  lede={t.doctor.passing(group.passing, group.total)}
+                />
+                {found.length > 0 ? (
+                  <Rows>
+                    {found.map((item) => (
+                      <Finding
+                        key={item.id}
+                        item={item}
+                        busy={fixing === item.id}
+                        onFix={(id) => void fix(id)}
+                      />
+                    ))}
+                  </Rows>
+                ) : null}
+              </div>
+            )
+          })}
+        </>
       ) : null}
-    </section>
+    </Surface>
   )
 }
 
@@ -188,23 +226,33 @@ function ProofResults({ results }: { results: ProvenCheck[] }) {
   const { t } = useCopy()
   const label = { passed: t.doctor.passed, failed: t.doctor.failed, too_slow: t.doctor.tooSlow }
   return (
-    <ul className="space-y-2">
-      {results.map((r) => (
-        <li key={r.name} className="rounded-lg border border-border p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={r.status === 'passed' ? 'success' : 'destructive'}>
-              {label[r.status]}
-            </Badge>
-            <span className="text-foreground">{r.name}</span>
-            <span className="text-muted-foreground">
-              {t.doctor.seconds((r.durationMs / 1000).toFixed(1))}
-            </span>
-          </div>
-          {r.output ? (
-            <pre className="mt-1 overflow-x-auto font-mono text-muted-foreground">{r.output}</pre>
-          ) : null}
-        </li>
-      ))}
+    <ul className="divide-y divide-border border-y border-border">
+      {results.map((r) => {
+        const passed = r.status === 'passed'
+        const Icon = passed ? CircleCheck : CircleX
+        return (
+          <li key={r.name} className="py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <Icon
+                aria-hidden
+                className={`size-4 shrink-0 ${passed ? 'stroke-success' : 'stroke-destructive'}`}
+              />
+              <span className="font-medium text-foreground">{r.name}</span>
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {t.doctor.seconds((r.durationMs / 1000).toFixed(1))}
+              </span>
+              <Badge variant={passed ? 'success' : 'destructive'} className="ml-auto">
+                {label[r.status]}
+              </Badge>
+            </div>
+            {r.output ? (
+              <pre className="mt-1 overflow-x-auto font-mono text-xs text-muted-foreground">
+                {r.output}
+              </pre>
+            ) : null}
+          </li>
+        )
+      })}
     </ul>
   )
 }
@@ -261,7 +309,7 @@ export function ProveChecks({ repo, kind = 'checks' }: { repo: RepositoryView; k
   if (kind === 'integration' && side.checks.length === 0 && !asked) return null
   const proving = asked && (!proof || proof.status === 'proving')
   return (
-    <div className="mt-3 space-y-2 text-sm">
+    <div className="space-y-2 text-sm">
       <div className="flex flex-wrap items-center gap-3">
         <span className="text-foreground">
           {side.unproven.length > 0 ? side.unprovenLine(side.unproven.join(', ')) : side.allProven}

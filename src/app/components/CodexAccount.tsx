@@ -66,7 +66,7 @@ export function CodexAccount({ onChanged }: { onChanged: () => void }) {
   const { account, login } = conn
 
   return (
-    <section aria-label={c.label} className="rounded-lg border border-border bg-card p-3 text-sm">
+    <section aria-label={c.label} className="rounded-md bg-muted/40 p-3 text-sm">
       {login.status === 'idle' ? (
         <div className="flex flex-wrap items-center gap-3">
           <p className="min-w-0 flex-1 text-muted-foreground">

@@ -1,10 +1,13 @@
 import { Alert, Badge, Button } from '@usetheo/ui'
+import { FileCog } from 'lucide-react'
 import { useState } from 'react'
 
 import type { RecipeView } from '../../shared/panel'
 import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
+
+import { READABLE } from './ui/Surface'
 
 /**
  * What the project's `.factory/setup.json` asks for, read from its default branch. The panel's own
@@ -44,8 +47,11 @@ export function RecipeCard({ fullName }: { fullName: string }) {
   }
   const { recipe } = view
   return (
-    <section aria-label={t.recipe.label} className="space-y-2 text-sm">
-      <h3 className="font-medium">{t.recipe.from}</h3>
+    <section aria-label={t.recipe.label} className={`space-y-2 text-sm ${READABLE}`}>
+      <div className="flex items-center gap-2">
+        <FileCog aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">{t.recipe.from}</h3>
+      </div>
       {recipe.install ? (
         <p>
           {t.recipe.install} <code>{recipe.install}</code>

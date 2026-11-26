@@ -146,6 +146,11 @@ reads that file, not a convention.
   cut at its limit is `too_slow`, never `failed`. The settings form saves what the owner types and answers
   with `unprovenChecks`. No agent runs in that sandbox, which is why it opens no knowledge feed
   (`NO_AGENT` in `every-agent.test.ts`): a file listed there may not mention a harness.
+- **A block of a page is a `Surface`, and the theme is the panel's own.** `src/app/components/ui/Surface.tsx` holds the one look
+  every page has (`PageHeader`, `Surface`, `Rows`, `Row`, `Stats`, `TABLE`); a new page is built from it. A state colours a
+  dot, a tile or an icon and never a word (`palette.test.ts`). The theme is `src/app/theme.ts`, the LoopScale brand, and
+  `theo.config.ts` sets `ui: false` because TheoKit's automatic provider knows only the built-in themes: the layout mounts
+  `ThemeProvider` and imports the styles itself.
 - **Every text box in the panel has an `<Assist>`.** `src/app/every-box.test.ts` fails when a file with a
   textarea has none. The premise is that the owner never has to be a programmer.
 - **Panel routes are owner-only.** `.policy(ownerOnly)` on everything under `/api/panel` but the login;
