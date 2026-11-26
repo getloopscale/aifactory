@@ -1,0 +1,43 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta
+  http-equiv="Content-Security-Policy"
+  content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+/>
+<title>aifactory</title>
+<style>
+  body {
+    font: 14px system-ui;
+    margin: 24px;
+  }
+  input {
+    width: 100%;
+    padding: 6px;
+    box-sizing: border-box;
+    margin: 8px 0;
+  }
+  #reason {
+    color: #b00020;
+    min-height: 1.4em;
+  }
+</style>
+<label for="address">Address of the panel</label>
+<input id="address" placeholder="http://localhost:3000" autofocus />
+<p id="reason"></p>
+<button id="go">Connect</button>
+<script>
+  const input = document.getElementById('address')
+  const reason = document.getElementById('reason')
+  const go = async () => {
+    reason.textContent = 'Checking…'
+    const r = await window.connect.check(input.value)
+    reason.textContent = r.ok ? '' : r.reason
+  }
+  document.getElementById('go').onclick = go
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter') go()
+  }
+  window.connect.current().then((a) => {
+    if (a) input.value = a
+  })
+</script>
