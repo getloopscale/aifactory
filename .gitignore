@@ -66,3 +66,6 @@ reports/
 
 # runs of the evaluation suite (ADR 0008); the baseline is in evals/
 .evals/
+
+# the desktop client's installers
+desktop/dist/

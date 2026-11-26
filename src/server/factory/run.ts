@@ -5,7 +5,6 @@ import { type SandboxBackend } from '@theokit/agents/sandbox'
 import { and, asc, desc, eq, inArray, notLike } from 'drizzle-orm'
 
 import {
-  agentRun,
   agentSession,
   changePlan,
   evidence,
@@ -164,6 +163,7 @@ import {
 } from './sandbox'
 import { Preparation } from './sandbox-prepared'
 import { enterRunStage, TaskCancelled } from './stages'
+import { recordPass } from '../trace/record'
 import { Transcript } from './transcript-store'
 import { answerPrompt, parseQuestion, questionComment } from './waiting'
 import { endLive, liveFor, type PassCall } from './live-conversation'
@@ -723,6 +723,7 @@ export class Run {
     const { taskId } = this.c
     this.transcript ??= await Transcript.open(db, taskId)
     const started = Date.now()
+    const firstSeq = this.transcript.last + 1
     let result: HarnessResult
     try {
       result = await call(
@@ -738,7 +739,7 @@ export class Run {
       await this.transcript.drain()
       // The agent did not come back (the sandbox died, say, or its login could not be renewed). It still ran,
       // and that is on record.
-      await db.insert(agentRun).values({
+      await recordPass(db, {
         taskId,
         role,
         harness: who.name,
@@ -747,6 +748,8 @@ export class Run {
         attempt,
         durationMs: Date.now() - started,
         ok: false,
+        eventFrom: firstSeq,
+        eventTo: this.transcript.last,
       })
       throw error
     }
@@ -754,7 +757,7 @@ export class Run {
     await this.transcript.flush()
     this.cost += result.costUsd ?? 0
     await db.update(task).set({ costUsd: this.cost }).where(eq(task.id, taskId))
-    await db.insert(agentRun).values({
+    await recordPass(db, {
       taskId,
       role,
       harness: who.name,
@@ -769,6 +772,8 @@ export class Run {
       ok: result.ok,
       quota: result.quota !== undefined,
       sessionId: result.sessionId ?? null,
+      eventFrom: firstSeq,
+      eventTo: this.transcript.last,
       conversation:
         role === 'builder' && attempt === 1 && this.c.continuation?.conversation === true,
     })

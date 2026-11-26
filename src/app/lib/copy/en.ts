@@ -665,6 +665,24 @@ export const en = {
     planTheWork: 'Plan the work',
     notReadyTitle: 'Not ready yet',
     notReadyDescription: 'Fix the lines marked needed, then check again.',
+    push: {
+      label: 'Notifications on this device',
+      off: 'off',
+      on: 'on',
+      notConfigured: 'not configured',
+      unsupported:
+        'This browser cannot receive notifications. Install the panel and open it over HTTPS.',
+      notConfiguredHelp:
+        'Set the push keys and the panel origin on the server first (see the README).',
+      denied: 'Notifications are blocked for this site in the browser.',
+      turnOn: 'Turn on',
+      turnOff: 'Turn off',
+      sendTest: 'Send a test',
+      devices: 'Devices',
+      noDevices: 'No device yet.',
+      remove: 'Remove',
+      testResult: (sent: number) => (sent === 1 ? 'Sent to 1 device.' : `Sent to ${sent} devices.`),
+    },
   },
   login: {
     title: 'Sign in',
