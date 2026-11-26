@@ -5,6 +5,7 @@ import type { externalReview } from '../db/schema'
 import {
   plain,
   DESCRIPTION_FILE,
+  DIFF_FILE,
   REVIEWER_DIR,
   REVIEW_MARKER,
   reviewBody,
@@ -280,7 +281,15 @@ describe('reviewExternalPull', () => {
     expect(t.log).toContain(`mkdir -p ${REVIEWER_DIR}`)
     const checkout = t.log.find((c) => c.includes('checkout --detach'))!.split(' ')[2]
     expect(t.prompts[0].cwd).not.toBe(checkout)
-    expect(t.prompts[0].prompt).toContain(`git -C ${checkout} diff`)
+    expect(t.prompts[0].prompt).toContain(DIFF_FILE)
+    expect(t.prompts[0].prompt).not.toContain(`git -C ${checkout} diff`)
+  })
+
+  it('starts the reviewer without a shell, with the diff written before its egress opens', async () => {
+    const t = setup()
+    await reviewExternalPull(t.deps, 1)
+    expect(t.prompts[0].readFilesOnly).toBe(true)
+    expect(t.log.findIndex((c) => c.includes(`> ${DIFF_FILE}`))).toBeGreaterThan(-1)
   })
 
   it('records the run without a task, with its cost', async () => {

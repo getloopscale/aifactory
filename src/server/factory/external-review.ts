@@ -93,6 +93,8 @@ export const DESCRIPTION_FILE = '/tmp/pull-request/description.md'
 const INSTANCE = 'external-review'
 /** Where the reviewer works: an empty directory, so no setting, hook or instruction file of the pull request is loaded. */
 export const REVIEWER_DIR = '/tmp/reviewer'
+/** The diff of the pull request, written before the agent starts: the agent has no shell to ask git. */
+export const DIFF_FILE = '/tmp/pull-request/change.diff'
 const REGISTRY = { domain: 'registry.npmjs.org' }
 const SANDBOX_MS = 60 * 60_000
 
@@ -212,6 +214,12 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
       plan: undefined,
       issue: { labels: [], title: row.title, body: row.body },
     })
+    // Before the agent's egress opens, so the reviewer needs nothing but file reads.
+    const diff = await backend.execute(
+      `mkdir -p /tmp/pull-request && git -C ${repoDir} diff ${baseSha}...HEAD > ${DIFF_FILE}`,
+    )
+    if (diff.exitCode !== 0)
+      throw new Error(`could not write the diff: ${diff.stderr.slice(0, 300)}`)
     await reading.sandbox.updateEgress!([REGISTRY, ...agentEgress])
     await reviewer.prepare?.(backend)
     await backend.uploadFile(DESCRIPTION_FILE, `# ${row.title}\n\n${row.body}\n`)
@@ -223,7 +231,9 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
         cwd: REVIEWER_DIR,
         timeoutMs: deps.reviewMs ?? DEFAULT_REVIEW_MS,
         role: 'reviewer',
+        readFilesOnly: true,
         prompt: pullRequestReviewPrompt({
+          diffFile: DIFF_FILE,
           repo,
           number: row.pullNumber,
           headSha: row.headSha,

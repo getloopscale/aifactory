@@ -143,6 +143,11 @@ export function codexHarness(
     resume: string,
     seen?: (line: string) => void,
   ) {
+    if (input.readFilesOnly) {
+      throw new Error(
+        "Codex cannot be started without a shell, so it cannot review a stranger's code",
+      )
+    }
     // `cwd` is a path the factory built, and `resume` is checked to be a UUID.
     if (resume) assertSessionId(resume)
     return backend.uploadFile(PROMPT_FILE, prompt).then(() =>
