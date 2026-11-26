@@ -1,50 +1,110 @@
 import { useTheme } from '@theokit/ui'
-import { Languages, Menu, Moon, Sparkles, Sun } from 'lucide-react'
-import { NavLink, useLocation } from 'react-router'
+import { ChevronRight, Languages, Menu, Moon, Sparkles, Sun } from 'lucide-react'
+import { Link, NavLink, useLocation } from 'react-router'
+
+import type { PulseReport } from '../../../shared/panel'
 
 import { useCopy } from '../../lib/copy'
 import { useGuideState } from '../../lib/guide-state'
 import { guideFor } from '../../lib/guides'
 import { useWidth } from '../../lib/media'
 
+import { crumbs } from './crumbs'
+
 /** Where in the app a path is: the conversation, or the factory's own pages. */
 export const inWork = (path: string) => !(path === '/' || path.startsWith('/chat/'))
 
-const tab = (active: boolean, compact: boolean) =>
-  `rounded-full ${compact ? 'px-4' : 'px-7'} py-1.5 text-[14px] font-medium transition-colors ${active ? 'bg-background text-foreground' : 'text-foreground/60 hover:text-foreground'}`
+const tab = (active: boolean) =>
+  `rounded-md px-3 py-1 text-[13px] font-medium transition-colors ${active ? 'bg-background text-foreground shadow-sm' : 'text-foreground/60 hover:text-foreground'}`
 
-/** The bar over the page: the two halves of the app, the guide of the page and the theme. */
-export function TopBar({ onMenu }: { onMenu?: () => void }) {
+const tool =
+  'flex h-8 items-center gap-1.5 rounded-md px-2 text-[13px] text-foreground/75 transition-colors hover:bg-muted/60 hover:text-foreground'
+
+/** What the factory is doing this minute: how many runs work and how many wait. */
+function FactoryNow({ pulse }: { pulse: PulseReport }) {
+  const { t } = useCopy()
+  const busy = pulse.working > 0
+  return (
+    <Link
+      to="/floor"
+      title={t.topBar.factoryNow}
+      className="hidden h-8 items-center gap-2 rounded-md border border-border px-2.5 font-mono text-[12px] tabular-nums text-foreground/80 transition-colors hover:bg-muted/60 md:flex"
+    >
+      <span className="relative flex size-2">
+        {busy ? (
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
+        ) : null}
+        <span
+          className={`relative inline-flex size-2 rounded-full ${busy ? 'bg-success' : 'bg-muted-foreground/50'}`}
+        />
+      </span>
+      {t.topBar.working(pulse.working)}
+      <span aria-hidden className="text-foreground/30">
+        ·
+      </span>
+      {t.topBar.queued(pulse.queued)}
+    </Link>
+  )
+}
+
+/**
+ * The bar over the page: the two halves of the app and where the owner is on the left; what the factory is
+ * doing, the guide of the page, the language and the theme on the right.
+ */
+export function TopBar({ onMenu, pulse }: { onMenu?: () => void; pulse?: PulseReport }) {
   const compact = useWidth() === 'compact'
   const { mode, toggleMode } = useTheme()
   const { t, language, setLanguage } = useCopy()
-  const guide = guideFor(useLocation().pathname, t)
-  const { open, setOpen, seen } = useGuideState()
   const { pathname } = useLocation()
+  const guide = guideFor(pathname, t)
+  const { open, setOpen, seen } = useGuideState()
   const work = inWork(pathname)
+  const trail = crumbs(pathname, t)
   return (
-    <div
-      className={`relative flex h-14 shrink-0 items-center px-4 ${compact ? 'justify-between gap-2' : 'justify-center'}`}
-    >
+    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card px-4">
       {compact && onMenu ? (
         <button
           type="button"
           aria-label={t.topBar.openMenu}
           onClick={onMenu}
-          className="rounded-lg p-2 text-foreground/80 hover:bg-muted/60"
+          className="rounded-md p-1.5 text-foreground/80 hover:bg-muted/60"
         >
           <Menu className="size-[18px]" />
         </button>
       ) : null}
-      <div role="tablist" aria-label={t.topBar.part} className="flex rounded-full bg-muted p-1">
-        <NavLink to="/" role="tab" aria-selected={!work} className={tab(!work, compact)}>
+      <div
+        role="tablist"
+        aria-label={t.topBar.part}
+        className="flex shrink-0 rounded-lg bg-muted p-0.5"
+      >
+        <NavLink to="/" role="tab" aria-selected={!work} className={tab(!work)}>
           {t.topBar.chat}
         </NavLink>
-        <NavLink to="/work" role="tab" aria-selected={work} className={tab(work, compact)}>
+        <NavLink to="/work" role="tab" aria-selected={work} className={tab(work)}>
           {t.topBar.work}
         </NavLink>
       </div>
-      <div className={`flex items-center gap-2 ${compact ? '' : 'absolute right-4'}`}>
+      {work && trail.length > 0 && !compact ? (
+        <nav aria-label={t.topBar.where} className="min-w-0 border-l border-border pl-3">
+          <ol className="flex min-w-0 items-center gap-1 text-[13px]">
+            {trail.map((name, index) => (
+              <li key={`${index}-${name}`} className="flex min-w-0 items-center gap-1">
+                {index > 0 ? (
+                  <ChevronRight aria-hidden className="size-3.5 shrink-0 text-foreground/30" />
+                ) : null}
+                <span
+                  aria-current={index === trail.length - 1 ? 'page' : undefined}
+                  className={`truncate ${index === trail.length - 1 ? 'font-medium text-foreground' : 'text-foreground/55'}`}
+                >
+                  {name}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      ) : null}
+      <div className="ml-auto flex shrink-0 items-center gap-1">
+        {pulse ? <FactoryNow pulse={pulse} /> : null}
         {guide ? (
           <button
             type="button"
@@ -52,12 +112,15 @@ export function TopBar({ onMenu }: { onMenu?: () => void }) {
             aria-pressed={open}
             title={guide.name}
             onClick={() => setOpen(!open)}
-            className={`relative flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[14px] transition-colors ${open ? 'bg-muted text-foreground' : 'text-foreground/80 hover:bg-muted/60'}`}
+            className={`relative ml-1 ${tool} ${open ? 'bg-muted text-foreground' : ''}`}
           >
-            <Sparkles className="size-[16px]" />
+            <Sparkles className="size-4" />
             {compact ? null : t.topBar.guide}
             {!seen(guide.id) ? (
-              <span aria-hidden className="absolute right-1 top-1 size-2 rounded-full bg-sky-400" />
+              <span
+                aria-hidden
+                className="absolute right-0.5 top-0.5 size-2 rounded-full bg-info"
+              />
             ) : null}
           </button>
         ) : null}
@@ -66,20 +129,20 @@ export function TopBar({ onMenu }: { onMenu?: () => void }) {
           aria-label={t.topBar.switchLanguage}
           title={t.topBar.switchLanguage}
           onClick={() => setLanguage(language === 'en' ? 'pt-BR' : 'en')}
-          className="flex items-center gap-1.5 rounded-lg p-2 text-[13px] text-foreground/80 hover:bg-muted/60"
+          className={tool}
         >
-          <Languages className="size-[18px]" />
+          <Languages className="size-4" />
           {compact ? null : t.topBar.languageName}
         </button>
         <button
           type="button"
           aria-label={mode === 'dark' ? t.topBar.lightTheme : t.topBar.darkTheme}
           onClick={toggleMode}
-          className="rounded-lg p-2 text-foreground/80 hover:bg-muted/60"
+          className={tool}
         >
-          {mode === 'dark' ? <Sun className="size-[18px]" /> : <Moon className="size-[18px]" />}
+          {mode === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </button>
       </div>
-    </div>
+    </header>
   )
 }

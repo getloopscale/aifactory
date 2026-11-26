@@ -1,3 +1,14 @@
+import {
+  Bot,
+  CircleHelp,
+  Eye,
+  FlaskConical,
+  History,
+  PackageCheck,
+  Rocket,
+  ShieldCheck,
+  Workflow,
+} from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import {
@@ -13,6 +24,18 @@ import { WatchPanel } from './WatchPanel'
 import { Conversation } from './Conversation'
 import { TaskActions } from './TaskActions'
 import { useTranscript } from './Transcript'
+import { AgentIcon } from './floor/AgentIcon'
+import {
+  PageHeader,
+  Quiet,
+  READABLE,
+  Row,
+  RowIcon,
+  Rows,
+  STACK,
+  Surface,
+  TABLE,
+} from './ui/Surface'
 import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
@@ -42,12 +65,11 @@ export function TaskDetailView({
   const { task } = detail
 
   return (
-    <div className="space-y-6">
+    <div className={STACK}>
       <div>
-        {above}
-        <h1 className="mt-1 text-xl font-semibold">{task.title}</h1>
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <span>
+        <PageHeader title={task.title} above={above} />
+        <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+          <span className="font-mono text-xs">
             {task.repository} {itemName(task)}
           </span>
           <StageBadge
@@ -57,9 +79,9 @@ export function TaskDetailView({
             resolved={task.resolved}
             retryable={task.retryable}
           />
-          <span>{money(task.costUsd)}</span>
+          <span className="font-mono text-xs tabular-nums">{money(task.costUsd)}</span>
           {task.attempts > 0 ? <span>{t.task.attempts(task.attempts)}</span> : null}
-          {task.headSha ? <code>{shortSha(task.headSha)}</code> : null}
+          {task.headSha ? <code className="text-xs">{shortSha(task.headSha)}</code> : null}
           {task.preRelease ? (
             <a
               href={task.preRelease.url}
@@ -95,22 +117,21 @@ export function TaskDetailView({
 
       <TaskActions detail={detail} onDone={resource.reload} />
       {detail.questions.length > 0 ? (
-        <section aria-label={t.task.questions}>
-          <h2 className="mb-2 text-sm font-semibold">{t.task.questions}</h2>
-          <ul className="space-y-3">
+        <Surface title={t.task.questions} icon={CircleHelp} count={detail.questions.length}>
+          <Rows>
             {detail.questions.map((q) => (
-              <li
+              <Row
                 key={q.id}
-                className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
+                lead={<RowIcon icon={CircleHelp} tone={q.answer ? 'neutral' : 'warning'} />}
               >
-                <p className="whitespace-pre-wrap">{q.body}</p>
-                <p className="mt-2 text-foreground">
+                <span className={`block whitespace-pre-wrap text-sm ${READABLE}`}>{q.body}</span>
+                <span className={`mt-1 block text-[13px] text-muted-foreground ${READABLE}`}>
                   {q.answer ? t.task.answered(q.answeredBy ?? '', q.answer) : t.task.replyHint}
-                </p>
-              </li>
+                </span>
+              </Row>
             ))}
-          </ul>
-        </section>
+          </Rows>
+        </Surface>
       ) : null}
 
       <Conversation
@@ -124,99 +145,108 @@ export function TaskDetailView({
       <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
       {detail.coordinatorActions.length > 0 ? (
-        <section aria-label={t.coordinator.sectionTitle}>
-          <h2 className="mb-2 text-sm font-semibold">{t.coordinator.sectionTitle}</h2>
+        <Surface title={t.coordinator.sectionTitle} icon={Workflow}>
           <CoordinatorActions actions={detail.coordinatorActions} />
-        </section>
+        </Surface>
       ) : null}
 
       {detail.deliveries.length > 0 ? (
-        <section aria-label={t.task.deliveries}>
-          <h2 className="mb-2 text-sm font-semibold">{t.task.deliveries}</h2>
-          <ul className="space-y-1 text-sm">
+        <Surface title={t.task.deliveries} icon={PackageCheck} count={detail.deliveries.length}>
+          <Rows>
             {detail.deliveries.map((d) => (
-              <li key={d.id}>
-                <span className="font-medium">
-                  {d.kind === 'release' ? t.task.deliveryRelease : t.task.deliveryPreRelease}
+              <Row
+                key={d.id}
+                lead={
+                  <RowIcon icon={d.kind === 'release' ? Rocket : PackageCheck} tone="success" />
+                }
+              >
+                <span className="block truncate text-sm">
+                  <span className="font-medium">
+                    {d.kind === 'release' ? t.task.deliveryRelease : t.task.deliveryPreRelease}
+                  </span>{' '}
+                  <a
+                    href={d.url}
+                    className="text-foreground underline underline-offset-2"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {d.tag}
+                  </a>
                 </span>{' '}
-                <a
-                  href={d.url}
-                  className="text-foreground underline underline-offset-2"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {d.tag}
-                </a>{' '}
-                <span className="text-xs text-muted-foreground">
+                <span className="block truncate font-mono text-[11px] text-muted-foreground">
                   {t.task.deliveryMeta(shortSha(d.sha), d.actor, ago(d.at, Date.now(), t.time))}
                 </span>
-              </li>
+              </Row>
             ))}
-          </ul>
-        </section>
+          </Rows>
+        </Surface>
       ) : null}
 
-      <section aria-label={t.task.timeline}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.timeline}</h2>
-        <ol className="space-y-1 border-l border-border pl-4">
+      <Surface title={t.task.timeline} icon={History}>
+        <ol className="divide-y divide-border">
           {detail.timeline.map((event) => (
-            <li key={event.id} className="text-sm">
-              <span className="font-medium">{event.stage}</span>{' '}
-              <span className="text-xs text-muted-foreground">
-                {ago(event.at, Date.now(), t.time)}
-              </span>
-              {describeEvent(event, t.events) ? (
-                <div className="whitespace-pre-wrap text-muted-foreground">
-                  {describeEvent(event, t.events)}
-                </div>
-              ) : null}
-            </li>
+            <Row
+              key={event.id}
+              title={event.stage}
+              detail={describeEvent(event, t.events) || undefined}
+              trail={ago(event.at, Date.now(), t.time)}
+            />
           ))}
         </ol>
-      </section>
+      </Surface>
 
       {detail.runs.length > 0 ? (
-        <section aria-label={t.task.executions}>
-          <h2 className="mb-2 text-sm font-semibold">{t.task.executions}</h2>
+        <Surface title={t.task.executions} icon={Bot} count={detail.runs.length}>
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-muted-foreground">
+            <table className={TABLE.table}>
+              <thead className={TABLE.head}>
                 <tr>
-                  <th className="py-1 pr-3">{t.task.role}</th>
-                  <th className="py-1 pr-3">{t.task.agent}</th>
-                  <th className="py-1 pr-3">{t.task.model}</th>
-                  <th className="py-1 pr-3">{t.task.attempt}</th>
-                  <th className="py-1 pr-3">{t.task.tokens}</th>
-                  <th className="py-1 pr-3">{t.task.cost}</th>
-                  <th className="py-1 pr-3">{t.task.time}</th>
-                  <th className="py-1 pr-3">{t.task.result}</th>
+                  <th className={TABLE.th}>{t.task.role}</th>
+                  <th className={TABLE.th}>{t.task.agent}</th>
+                  <th className={TABLE.th}>{t.task.model}</th>
+                  <th className={TABLE.th}>{t.task.attempt}</th>
+                  <th className={TABLE.th}>{t.task.tokens}</th>
+                  <th className={TABLE.th}>{t.task.cost}</th>
+                  <th className={TABLE.th}>{t.task.time}</th>
+                  <th className={TABLE.th}>{t.task.result}</th>
                 </tr>
               </thead>
               <tbody>
                 {detail.runs.map((r) => (
-                  <tr key={r.id} className="border-t border-border">
-                    <td className="py-1 pr-3">{r.role}</td>
-                    <td className="py-1 pr-3">{r.harness}</td>
-                    <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
-                    <td className="py-1 pr-3">{r.attempt}</td>
-                    <td className="py-1 pr-3">
+                  <tr key={r.id} className={TABLE.row}>
+                    <td className={TABLE.td}>{r.role}</td>
+                    <td className={TABLE.td}>
+                      <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                        <AgentIcon agent={r.harness} size="sm" />
+                        {r.harness}
+                      </span>
+                    </td>
+                    <td className={`${TABLE.td} whitespace-nowrap font-medium`}>
+                      {modelOf(r, t.task)}
+                    </td>
+                    <td className={`${TABLE.td} font-mono tabular-nums`}>{r.attempt}</td>
+                    <td className={`${TABLE.td} whitespace-nowrap font-mono tabular-nums`}>
                       {r.tokensIn === null && r.tokensOut === null ? (
-                        <span className="text-muted-foreground">{t.task.notReported}</span>
+                        <span className="font-sans text-muted-foreground">
+                          {t.task.notReported}
+                        </span>
                       ) : (
                         `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
                       )}
                     </td>
-                    <td className="py-1 pr-3">
+                    <td className={`${TABLE.td} font-mono tabular-nums`}>
                       {r.costUsd === null ? (
-                        <span className="text-muted-foreground">{t.task.notReported}</span>
+                        <span className="font-sans text-muted-foreground">
+                          {t.task.notReported}
+                        </span>
                       ) : (
                         money(r.costUsd)
                       )}
                     </td>
-                    <td className="py-1 pr-3">
+                    <td className={`${TABLE.td} whitespace-nowrap font-mono tabular-nums`}>
                       {t.task.seconds((r.durationMs / 1000).toFixed(1))}
                     </td>
-                    <td className="py-1 pr-3">
+                    <td className={`${TABLE.td} whitespace-nowrap`}>
                       {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
                     </td>
                   </tr>
@@ -224,150 +254,151 @@ export function TaskDetailView({
               </tbody>
             </table>
           </div>
-        </section>
+        </Surface>
       ) : null}
 
-      <section aria-label={t.task.evidence}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.evidence}</h2>
+      <Surface title={t.task.evidence} icon={FlaskConical}>
         {detail.evidence.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.task.noChecks}</p>
+          <Quiet>{t.task.noChecks}</Quiet>
         ) : (
-          <ul className="space-y-2">
+          <Rows>
             {detail.evidence.map((e) => (
-              <li key={e.id} className="rounded border border-border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-3">
-                  <code>{e.command}</code>
-                  <Pass ok={e.passed} />
-                  <span className="text-xs text-muted-foreground">
-                    {t.task.evidenceMeta(
-                      shortSha(e.sha),
-                      e.exitCode,
-                      (e.durationMs / 1000).toFixed(1),
-                    )}
-                  </span>
-                </div>
-                {e.artifacts.length > 0 || e.omitted.length > 0 ? (
-                  <div className="mt-2 text-xs">
-                    <span className="text-muted-foreground">{t.task.artifacts}</span>
-                    <ul>
-                      {e.artifacts.map((a) => (
-                        <li key={a.id}>
-                          <a
-                            href={`/api/panel/tasks/${detail.task.id}/artifacts/${a.id}`}
-                            download={a.path.split('/').pop()}
-                            className="underline"
-                          >
-                            {a.path}
-                          </a>{' '}
-                          <span className="text-muted-foreground">
-                            {t.task.artifactSize(Math.ceil(a.sizeBytes / 1024))}
-                          </span>
-                        </li>
-                      ))}
-                      {e.omitted.map((reason) => (
-                        <li key={reason} className="text-muted-foreground">
-                          {t.task.artifactOmitted(reason)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {e.output ? (
-                  <details className="mt-2">
-                    <summary className="cursor-pointer text-xs text-muted-foreground">
-                      {t.task.output}
-                    </summary>
-                    <pre className="mt-1 max-h-64 overflow-auto rounded bg-muted p-2 text-xs text-foreground">
-                      {e.output}
-                    </pre>
-                  </details>
-                ) : null}
-              </li>
+              <Row
+                key={e.id}
+                lead={<RowIcon icon={FlaskConical} tone={e.passed ? 'success' : 'destructive'} />}
+                trail={<Pass ok={e.passed} />}
+                below={
+                  e.artifacts.length > 0 || e.omitted.length > 0 || e.output ? (
+                    <div className="pl-10 text-xs">
+                      {e.artifacts.length > 0 || e.omitted.length > 0 ? (
+                        <div>
+                          <span className="text-muted-foreground">{t.task.artifacts}</span>
+                          <ul>
+                            {e.artifacts.map((a) => (
+                              <li key={a.id}>
+                                <a
+                                  href={`/api/panel/tasks/${detail.task.id}/artifacts/${a.id}`}
+                                  download={a.path.split('/').pop()}
+                                  className="underline"
+                                >
+                                  {a.path}
+                                </a>{' '}
+                                <span className="text-muted-foreground">
+                                  {t.task.artifactSize(Math.ceil(a.sizeBytes / 1024))}
+                                </span>
+                              </li>
+                            ))}
+                            {e.omitted.map((reason) => (
+                              <li key={reason} className="text-muted-foreground">
+                                {t.task.artifactOmitted(reason)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                      {e.output ? (
+                        <details className="mt-2">
+                          <summary className="cursor-pointer text-muted-foreground">
+                            {t.task.output}
+                          </summary>
+                          <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-muted p-2 text-foreground">
+                            {e.output}
+                          </pre>
+                        </details>
+                      ) : null}
+                    </div>
+                  ) : undefined
+                }
+              >
+                <code className="block break-words text-[13px]">{e.command}</code>{' '}
+                <span className="block font-mono text-[11px] text-muted-foreground">
+                  {t.task.evidenceMeta(
+                    shortSha(e.sha),
+                    e.exitCode,
+                    (e.durationMs / 1000).toFixed(1),
+                  )}
+                </span>
+              </Row>
             ))}
-          </ul>
+          </Rows>
         )}
         {(detail.testProofs ?? []).length > 0 ? (
-          <ul aria-label={t.task.testProof} className="mt-2 space-y-1">
+          <Rows label={t.task.testProof}>
             {(detail.testProofs ?? []).map((p) => (
-              <li key={p.id} className="rounded border border-border bg-card p-3 text-sm">
-                <span className="font-medium">{t.task.testProofOutcome[p.outcome]}</span>{' '}
-                <span className="text-xs text-muted-foreground">
-                  {t.task.testProofMeta(shortSha(p.sha), p.files.length)}
-                </span>
-                {p.detail ? <code className="ml-2 text-xs">{p.detail}</code> : null}
-              </li>
+              <Row
+                key={p.id}
+                title={t.task.testProofOutcome[p.outcome]}
+                meta={t.task.testProofMeta(shortSha(p.sha), p.files.length)}
+                detail={p.detail ? <code className="text-xs">{p.detail}</code> : undefined}
+              />
             ))}
-          </ul>
+          </Rows>
         ) : null}
-      </section>
+      </Surface>
 
       <PlanSection plans={detail.plans} />
 
-      <section aria-label={t.task.reviews}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.reviews}</h2>
+      <Surface title={t.task.reviews} icon={Eye}>
         {detail.reviews.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.task.notReviewed}</p>
+          <Quiet>{t.task.notReviewed}</Quiet>
         ) : (
-          <ul className="space-y-2">
+          <Rows>
             {detail.reviews.map((r) => (
-              <li key={r.id} className="rounded border border-border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-medium">{t.task.reviewLine(r.round, r.verdict)}</span>
-                  <span className="text-xs text-muted-foreground">
+              <Row
+                key={r.id}
+                lead={<AgentIcon agent={r.reviewer} />}
+                title={t.task.reviewLine(r.round, r.verdict)}
+                meta={
+                  <>
                     {t.task.reviewedOn(r.reviewer, shortSha(r.sha))}
                     {modelLine(detail.runs, detail.timeline, r, t.task)}
-                  </span>
-                </div>
-                <p className="mt-1 text-foreground">{r.summary}</p>
-                {r.findings.length > 0 ? (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
-                    {r.findings.map((f, i) => (
-                      <li key={i}>
-                        <strong>{f.severity}</strong>
-                        {f.file ? <code> {f.file}</code> : null}: {f.issue}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
+                  </>
+                }
+                detail={<span className={`block ${READABLE}`}>{r.summary}</span>}
+                below={r.findings.length > 0 ? <Findings findings={r.findings} /> : undefined}
+              />
             ))}
-          </ul>
+          </Rows>
         )}
-      </section>
+      </Surface>
 
-      <section aria-label={t.task.securityReviews}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.securityReviews}</h2>
+      <Surface title={t.task.securityReviews} icon={ShieldCheck}>
         {detail.securityReviews.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.task.noSecurityReview}</p>
+          <Quiet>{t.task.noSecurityReview}</Quiet>
         ) : (
-          <ul className="space-y-2">
+          <Rows>
             {detail.securityReviews.map((r) => (
-              <li key={r.id} className="rounded border border-border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-medium">
-                    {t.task.securityLine(r.round, r.verdict, r.outcome)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {[r.harness, r.model, r.effort, shortSha(r.sha)].filter(Boolean).join(' · ')}
-                  </span>
-                </div>
-                <p className="mt-1 text-foreground">{r.summary}</p>
-                {r.findings.length > 0 ? (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
-                    {r.findings.map((f, i) => (
-                      <li key={i}>
-                        <strong>{f.severity}</strong>
-                        {f.file ? <code> {f.file}</code> : null}: {f.issue}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
+              <Row
+                key={r.id}
+                lead={r.harness ? <AgentIcon agent={r.harness} /> : <RowIcon icon={ShieldCheck} />}
+                title={t.task.securityLine(r.round, r.verdict, r.outcome)}
+                meta={[r.harness, r.model, r.effort, shortSha(r.sha)].filter(Boolean).join(' · ')}
+                detail={<span className={`block ${READABLE}`}>{r.summary}</span>}
+                below={r.findings.length > 0 ? <Findings findings={r.findings} /> : undefined}
+              />
             ))}
-          </ul>
+          </Rows>
         )}
-      </section>
+      </Surface>
     </div>
+  )
+}
+
+/** What a review found, one line each, under its row. */
+function Findings({
+  findings,
+}: {
+  findings: { severity: string; file?: string | null; issue: string }[]
+}) {
+  return (
+    <ul className={`list-disc space-y-1 pl-14 text-sm text-foreground ${READABLE}`}>
+      {findings.map((f, i) => (
+        <li key={i}>
+          <strong>{f.severity}</strong>
+          {f.file ? <code> {f.file}</code> : null}: {f.issue}
+        </li>
+      ))}
+    </ul>
   )
 }
 

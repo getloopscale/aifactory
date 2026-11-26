@@ -463,7 +463,7 @@ export type TaskCard = {
 /** An agent by the name the factory knows it by (`claude-code`, `codex`, ...), and the model it ran with. */
 export type AgentSeen = {
   agent: string
-  /** Null when the stage did not record one. */
+  /** The model the stage recorded, else the one the agent's last pass on the task reported; null with neither. */
   model: string | null
 }
 
@@ -993,6 +993,9 @@ export type AgentsView = {
   /** Which coding agent builds, plans and reviews, and what can be changed about it. */
   settings: AgentSettings
 }
+
+/** The agent and the model each role's latest pass reported; a role that never ran has no entry. */
+export type RoleModels = Partial<Record<AgentRole, { agent: string; model: string }>>
 
 /** The roles of a coding agent (the security role's effort is pinned at the highest, never chosen) that the owner can give to one agent or another. */
 export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'

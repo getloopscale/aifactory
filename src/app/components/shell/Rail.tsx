@@ -21,6 +21,7 @@ import { Link, useLocation, useNavigate } from 'react-router'
 import type { GuideId } from '../../../shared/guides'
 import { useCopy } from '../../lib/copy'
 
+import { BrandMark } from './BrandMark'
 import { ACTIVE, useOnNewChat, usePlace } from './active'
 import { TONE, type SetupAttention } from './SetupCount'
 
@@ -59,7 +60,7 @@ function Place({
     >
       <Icon className="size-5" />
       {dot ? (
-        <span aria-hidden className="absolute right-1.5 top-1.5 size-2 rounded-full bg-sky-400" />
+        <span aria-hidden className="absolute right-1.5 top-1.5 size-2 rounded-full bg-info" />
       ) : null}
       {attention ? (
         <span
@@ -97,6 +98,7 @@ export function Rail({
   setup?: SetupAttention
 }) {
   const { t } = useCopy()
+  const onFloor = useLocation().pathname.startsWith('/floor')
   const navigate = useNavigate()
   const onNewChat = useOnNewChat()
   return (
@@ -111,7 +113,7 @@ export function Rail({
         onClick={() => onExpand()}
         className={`group ${button} mb-1`}
       >
-        <Factory className="size-6 group-hover:hidden" />
+        <BrandMark className="size-6 group-hover:hidden" />
         <PanelLeft className="hidden size-5 group-hover:block" />
       </button>
 
@@ -159,6 +161,15 @@ export function Rail({
         aria-label={t.menu.main}
         className="mt-3 flex flex-col items-center gap-1 border-t border-border pt-3"
       >
+        <Link
+          to="/floor"
+          aria-label={t.floor.name}
+          aria-current={onFloor ? 'page' : undefined}
+          title={t.floor.name}
+          className={`${button} ${onFloor ? ACTIVE : ''}`}
+        >
+          <Factory className="size-5" />
+        </Link>
         <Place id="board" to="/work" icon={LayoutDashboard} label={t.places.board} />
         <Place id="plans" to="/plans" icon={ListChecks} label={t.places.plans} />
         <Place

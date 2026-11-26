@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, ne, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import {
@@ -36,7 +36,7 @@ import { FREE_BASE_RUNS } from '../factory/transitions'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
-import { cardAgent, STEP_STAGES, type StepEvent } from './card-agent'
+import { cardAgent, STEP_STAGES, type ReportedModels, type StepEvent } from './card-agent'
 import { EMPTY_QUEUE, queueViews } from './queue-view'
 import { returnedOf } from './returned'
 import {
@@ -65,6 +65,7 @@ import {
   type TaskDetail,
   type TimelineEvent,
   type WatchView,
+  RoleModels,
 } from '../../shared/panel'
 
 type TaskRow = typeof task.$inferSelect
@@ -195,6 +196,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
     rows.filter((r) => r.stage === 'intake').map((r) => r.id),
   )
   const steps = await stepEvents(db, ids)
+  const models = await reportedModels(db, ids)
   const changes = await changeSizes(db, ids)
   const risks = await latestRisks(db, ids)
   const limits = await leadTimeLimits(db, rows)
@@ -237,7 +239,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       release: lastDelivery(delivered, r, 'release'),
       mainRed: watched.some((w) => w.taskId === r.id && w.status === 'red' && !w.acknowledgedAt),
       releaseWait: lastReleaseWait(releases, r),
-      ...cardAgent(r.stage as Stage, steps.get(r.id) ?? []),
+      ...cardAgent(r.stage as Stage, steps.get(r.id) ?? [], models.get(r.id)),
     }
   })
 }
@@ -360,6 +362,50 @@ async function stepEvents(db: Database, ids: number[]): Promise<Map<number, Step
     byTask.set(taskId, [...(byTask.get(taskId) ?? []), event])
   }
   return byTask
+}
+
+/** A model an agent named, as opposed to no record or the word the factory writes for no choice. */
+const NAMED_MODEL = and(isNotNull(agentRun.model), ne(agentRun.model, 'default'))
+
+/** The model each agent reported on its latest pass on each task, by task and by the agent's name. */
+async function reportedModels(db: Database, ids: number[]): Promise<Map<number, ReportedModels>> {
+  const latest = await db
+    .selectDistinctOn([agentRun.taskId, agentRun.harness], {
+      taskId: agentRun.taskId,
+      harness: agentRun.harness,
+      model: agentRun.model,
+    })
+    .from(agentRun)
+    .where(and(inArray(agentRun.taskId, ids), NAMED_MODEL))
+    .orderBy(agentRun.taskId, agentRun.harness, desc(agentRun.id))
+  const byTask = new Map<number, Map<string, string>>()
+  for (const row of latest) {
+    if (row.taskId === null || row.model === null) continue
+    const models = byTask.get(row.taskId) ?? new Map<string, string>()
+    byTask.set(row.taskId, models.set(row.harness, row.model))
+  }
+  return byTask
+}
+
+/**
+ * The model each role's agent reported on its latest pass, for a role the owner chose no model for. A role
+ * that never ran, or whose agent names no model, has none.
+ */
+export async function roleModels(db: Database): Promise<RoleModels> {
+  const latest = await db
+    .selectDistinctOn([agentRun.role], {
+      role: agentRun.role,
+      harness: agentRun.harness,
+      model: agentRun.model,
+    })
+    .from(agentRun)
+    .where(NAMED_MODEL)
+    .orderBy(agentRun.role, desc(agentRun.id))
+  // A pass may have a role the owner chooses no agent for (a review lens): it has no row on the crew.
+  const models: Partial<Record<string, { agent: string; model: string }>> = {}
+  for (const row of latest)
+    if (row.model !== null) models[row.role] = { agent: row.harness, model: row.model }
+  return models as RoleModels
 }
 
 /**

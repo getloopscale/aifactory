@@ -10,6 +10,7 @@ import { Board, TaskList } from '../components/Board'
 import { NewJob, type CreatedJob } from '../components/NewJob'
 import { Pulse } from '../components/Pulse'
 import { TaskDetailView } from '../components/TaskDetail'
+import { PageHeader, Quiet, Surface } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
 import { useEscape } from '../lib/keys'
 import { useResource } from '../lib/live'
@@ -47,25 +48,27 @@ export default function Page() {
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold">{t.work.board}</h1>
-        <div className="flex items-center gap-2">
-          <NewJob onCreated={setOpened} />
-          <div className="flex gap-1" role="group" aria-label={t.work.viewGroup}>
-            {(['board', 'list'] as const).map((v) => (
-              <Button
-                key={v}
-                size="sm"
-                variant={view === v ? 'primary' : 'secondary'}
-                aria-pressed={view === v}
-                onClick={() => setView(v)}
-              >
-                {v === 'board' ? t.work.board : t.work.list}
-              </Button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <PageHeader
+        title={t.work.board}
+        actions={
+          <>
+            <NewJob onCreated={setOpened} />
+            <div className="flex gap-1" role="group" aria-label={t.work.viewGroup}>
+              {(['board', 'list'] as const).map((v) => (
+                <Button
+                  key={v}
+                  size="sm"
+                  variant={view === v ? 'primary' : 'secondary'}
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                >
+                  {v === 'board' ? t.work.board : t.work.list}
+                </Button>
+              ))}
+            </div>
+          </>
+        }
+      />
       <LineAlerts lines={tasks.data?.stoppedLines ?? []} />
       <BaseAlerts tasks={tasks.data?.tasks ?? []} />
       <Pulse />
@@ -83,28 +86,32 @@ export default function Page() {
           {opened.started ? t.work.startedNote : t.work.waitsNote}
         </p>
       ) : null}
-      {tasks.error ? <p className="text-sm text-destructive">{tasks.error}</p> : null}
+      {tasks.error ? <p className="mb-3 text-sm text-destructive">{tasks.error}</p> : null}
       {tasks.data ? (
         tasks.data.tasks.length === 0 ? (
-          <EmptyState
-            title={t.work.emptyTitle}
-            description={
-              <>
-                {t.work.emptyPut} <code>factory</code> {t.work.emptyAfter}{' '}
-                <Link to="/setup" className="underline underline-offset-2">
-                  {t.work.checkSetup}
-                </Link>
-                .
-              </>
-            }
-          />
+          <Surface>
+            <EmptyState
+              title={t.work.emptyTitle}
+              description={
+                <>
+                  {t.work.emptyPut} <code>factory</code> {t.work.emptyAfter}{' '}
+                  <Link to="/setup" className="underline underline-offset-2">
+                    {t.work.checkSetup}
+                  </Link>
+                  .
+                </>
+              }
+            />
+          </Surface>
         ) : view === 'board' ? (
           <Board tasks={tasks.data.tasks} />
         ) : (
           <TaskList tasks={tasks.data.tasks} />
         )
       ) : (
-        <p className="text-sm text-muted-foreground">{t.layout.loading}</p>
+        <Surface>
+          <Quiet>{t.layout.loading}</Quiet>
+        </Surface>
       )}
       <Sheet open={open !== undefined} onOpenChange={(next) => !next && close()}>
         <Sheet.Content side="right" className="w-full max-w-2xl overflow-y-auto">

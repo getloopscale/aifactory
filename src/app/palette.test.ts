@@ -1,13 +1,15 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { contrastRatio, violetForge } from '@theokit/ui'
+import { contrastRatio } from '@theokit/ui'
 import { describe, expect, it } from 'vitest'
+
+import { loopscale } from './theme'
 
 type Scale = Record<string, string>
 const scales: Record<'light' | 'dark', Scale> = {
-  light: violetForge.light as unknown as Scale,
-  dark: violetForge.dark as unknown as Scale,
+  light: loopscale.light as unknown as Scale,
+  dark: loopscale.dark as unknown as Scale,
 }
 
 // The text the panel writes by hand, on the surfaces it writes it on. Body text needs 4.5.

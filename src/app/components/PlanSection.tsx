@@ -1,6 +1,11 @@
+import { ListTree } from 'lucide-react'
+
 import type { ChangePlanView } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
 import { shortSha } from '../lib/format'
+
+import { AgentIcon } from './floor/AgentIcon'
+import { Quiet, READABLE, Surface } from './ui/Surface'
 
 function Items({
   title,
@@ -35,15 +40,17 @@ export function PlanSection({ plans }: { plans: ChangePlanView[] }) {
   const { t } = useCopy()
   const plan = plans.at(-1)
   return (
-    <section aria-label={t.planSection.title}>
-      <h2 className="mb-2 text-sm font-semibold">{t.planSection.title}</h2>
+    <Surface title={t.planSection.title} icon={ListTree}>
       {plan === undefined ? (
-        <p className="text-sm text-muted-foreground">{t.planSection.none}</p>
+        <Quiet>{t.planSection.none}</Quiet>
       ) : (
-        <div className="rounded border border-border bg-card p-3 text-sm">
-          <p className="text-xs text-muted-foreground">
-            {t.planSection.by(plan.harness, shortSha(plan.baseSha))}
-            {plans.length > 1 ? t.planSection.latestOf(plans.length) : ''}
+        <div className={`p-4 text-sm ${READABLE}`}>
+          <p className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+            <AgentIcon agent={plan.harness} size="sm" />
+            <span>
+              {t.planSection.by(plan.harness, shortSha(plan.baseSha))}
+              {plans.length > 1 ? t.planSection.latestOf(plans.length) : ''}
+            </span>
           </p>
           <h3 className="mt-2 text-xs font-semibold text-muted-foreground">
             {t.planSection.files}
@@ -51,7 +58,7 @@ export function PlanSection({ plans }: { plans: ChangePlanView[] }) {
           {plan.files.length === 0 ? (
             <p className="mt-1 text-foreground">{t.planSection.noFile}</p>
           ) : (
-            <ul className="mt-1 space-y-1 pl-5 text-foreground list-disc">
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-foreground">
               {plan.files.map((f) => (
                 <li key={f.path}>
                   <code>{f.path}</code>
@@ -66,6 +73,6 @@ export function PlanSection({ plans }: { plans: ChangePlanView[] }) {
           <Items title={t.planSection.outOfScope} items={plan.outOfScope} />
         </div>
       )}
-    </section>
+    </Surface>
   )
 }

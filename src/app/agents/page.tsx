@@ -7,6 +7,7 @@ import { Metadata } from 'theokit/client'
 import type { AgentsView } from '../../shared/panel'
 import { AgentDetail } from '../components/agents/AgentDetail'
 import { AgentList } from '../components/agents/AgentList'
+import { PageHeader, Quiet, STACK, Surface } from '../components/ui/Surface'
 import { filterAgents } from '../lib/agents'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
@@ -26,56 +27,64 @@ export default function AgentsPage() {
   const selected = shown.find((a) => a.id === wanted) ?? shown[0]
 
   return (
-    <div className="space-y-5">
+    <>
       <Metadata title={t.agents.metaTitle} description={t.agents.metaDescription} />
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold">{t.agents.heading}</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{t.agents.intro}</p>
-        </div>
-        <label className="relative block w-full max-w-sm">
-          <span className="sr-only">{t.agents.searchLabel}</span>
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            aria-label={t.agents.searchLabel}
-            placeholder={t.agents.searchLabel}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="pl-9"
-          />
-        </label>
-      </div>
+      <PageHeader
+        title={t.agents.heading}
+        lede={t.agents.intro}
+        actions={
+          <label className="relative block w-72 max-w-full">
+            <span className="sr-only">{t.agents.searchLabel}</span>
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              aria-label={t.agents.searchLabel}
+              placeholder={t.agents.searchLabel}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="pl-9"
+            />
+          </label>
+        }
+      />
+      <div className={STACK}>
+        {error ? (
+          <Alert intent="destructive" title={t.agents.loadError} description={error} />
+        ) : null}
+        {!data && !error ? (
+          <Surface label={t.agents.heading}>
+            <Quiet>{t.agents.loading}</Quiet>
+          </Surface>
+        ) : null}
 
-      {error ? <Alert intent="destructive" title={t.agents.loadError} description={error} /> : null}
-      {!data && !error ? <p className="text-sm text-muted-foreground">{t.agents.loading}</p> : null}
-
-      {data ? (
-        shown.length === 0 ? (
-          <p role="status" className="text-sm text-muted-foreground">
-            {t.agents.none(query)}
-          </p>
-        ) : (
-          <div className="grid gap-8 lg:grid-cols-[260px_minmax(0,1fr)]">
-            <div className="lg:sticky lg:top-2 lg:self-start">
-              <AgentList
-                agents={shown}
-                selected={selected?.id}
-                onSelect={(id) => setParams({ agent: id }, { replace: true })}
-              />
+        {data ? (
+          shown.length === 0 ? (
+            <Surface label={t.agents.heading}>
+              <Quiet role="status">{t.agents.none(query)}</Quiet>
+            </Surface>
+          ) : (
+            // The list stays beside what it chooses, so these two are the columns of one page.
+            <div className="grid items-start gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+              <div className="lg:sticky lg:top-2">
+                <AgentList
+                  agents={shown}
+                  selected={selected?.id}
+                  onSelect={(id) => setParams({ agent: id }, { replace: true })}
+                />
+              </div>
+              {selected ? (
+                <AgentDetail
+                  key={selected.id}
+                  agent={selected}
+                  shared={data.shared}
+                  settings={data.settings}
+                  query={query}
+                  onSettingsSaved={reload}
+                />
+              ) : null}
             </div>
-            {selected ? (
-              <AgentDetail
-                key={selected.id}
-                agent={selected}
-                shared={data.shared}
-                settings={data.settings}
-                query={query}
-                onSettingsSaved={reload}
-              />
-            ) : null}
-          </div>
-        )
-      ) : null}
-    </div>
+          )
+        ) : null}
+      </div>
+    </>
   )
 }

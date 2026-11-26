@@ -408,8 +408,9 @@ describe('the agent on a card', () => {
       </MemoryRouter>,
     )
     const panel = await screen.findByLabelText('Codex · gpt-6.1-terra · reviewing · round 2')
-    expect(panel.className).toContain('bg-info/10')
-    expect(panel.querySelector('.bg-info.animate-pulse')).not.toBeNull()
+    // The panel is lit while the agent works, and the agent is its mark, ringed as live.
+    expect(panel.className).toContain('bg-primary/10')
+    expect(within(panel).getByRole('img', { name: 'Codex' }).className).toContain('ring-2')
     expect(screen.getByText('gpt-6.1-terra')).toBeDefined()
     expect(screen.getByText('reviewing · round 2')).toBeDefined()
     expect(screen.queryByLabelText(/^last:/)).toBeNull()
@@ -450,9 +451,10 @@ describe('the agent on a card', () => {
       </MemoryRouter>,
     )
     const last = await screen.findByLabelText('last: Claude Code · opus')
-    // The agent keeps its color, so the harness reads at a glance, but the panel is not lit as a running one.
-    expect(last.querySelector('.bg-primary')).not.toBeNull()
-    expect(last.querySelector('.animate-pulse')).toBeNull()
+    // The agent keeps its mark, so the harness reads at a glance, but the panel is not lit as a running one.
+    const mark = within(last).getByRole('img', { name: 'Claude Code' })
+    expect(mark.className).not.toContain('ring-2')
+    expect(last.querySelector('[class*="animate-pulse"]')).toBeNull()
     expect(last.className).not.toContain('bg-primary/10')
     expect(screen.getByText('last on it')).toBeDefined()
   })

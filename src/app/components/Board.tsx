@@ -1,4 +1,4 @@
-import { Card as Surface, Table } from '@usetheo/ui'
+import { ListTodo } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link } from 'react-router'
 
@@ -6,7 +6,6 @@ import {
   COLUMNS,
   mergeBreakdown,
   type MergeState,
-  type AgentSeen,
   type Column as ColumnId,
   type LeadTime,
   type LeadTimeStatus,
@@ -17,7 +16,6 @@ import { useCopy } from '../lib/copy'
 import { useWidth } from '../lib/media'
 import type { Copy } from '../lib/copy/en'
 import {
-  agentName,
   ago,
   duration,
   inQueueOrder,
@@ -31,6 +29,9 @@ import {
 } from '../lib/format'
 
 import { PriorityBadge, ReturnedBadge, StageBadge } from './Badges'
+import { AgentIcon } from './floor/AgentIcon'
+import { STEP_ICON } from './floor/icons'
+import { RowIcon, Surface, TABLE, TONE_DOT, type Tone } from './ui/Surface'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
@@ -83,65 +84,35 @@ function QueueLines({ queue }: { queue: QueueView }) {
 }
 
 /**
- * The color of each agent the factory ships with, from the theme's tokens: the harness is the first thing an owner
- * looks for on a card. It marks the panel (a stripe on its side, and its fill while the agent runs) and never the
- * text, since no brand color reads at 4.5 in both modes (see palette.test.ts). Any other agent is neutral.
- */
-const AGENT_TONE: Record<string, { stripe: string; lit: string }> = {
-  'claude-code': { stripe: 'bg-primary', lit: 'border-primary/40 bg-primary/10' },
-  codex: { stripe: 'bg-info', lit: 'border-info/40 bg-info/10' },
-}
-const NEUTRAL_TONE = { stripe: 'bg-muted-foreground', lit: 'border-border bg-muted/40' }
-
-/**
- * A panel on the card with a stripe of color on its side, which pulses while what it shows is at work. `label` is the
- * whole of it in one line, for a reader that does not see the layout.
+ * A panel on the card for who works on it, tinted while what it shows is at work. `label` is the whole of it in
+ * one line, for a reader that does not see the layout.
  */
 function Panel({
   label,
-  stripe,
   surface,
-  live,
+  lead,
   children,
 }: {
   label: string
-  stripe: string
   surface: string
-  live: boolean
+  lead: ReactNode
   children: ReactNode
 }) {
   return (
     <div
       aria-label={label}
       title={label}
-      className={`mt-2 flex gap-2 rounded-md border px-2 py-1.5 text-xs ${surface}`}
+      className={`mt-2 flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs ${surface}`}
     >
-      <span
-        aria-hidden
-        className={`w-1 shrink-0 self-stretch rounded-full ${stripe} ${live ? 'animate-pulse' : ''}`}
-      />
+      {lead}
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   )
 }
 
-/** The agent's name, larger than the rest of the card, and its model. */
-function AgentName({ seen }: { seen: AgentSeen }) {
-  return (
-    <div className="flex min-w-0 items-baseline gap-1.5">
-      <span className="shrink-0 text-[13px] font-semibold text-foreground">
-        {agentName(seen.agent)}
-      </span>
-      {seen.model ? (
-        <span className="min-w-0 truncate text-muted-foreground">{seen.model}</span>
-      ) : null}
-    </div>
-  )
-}
-
 /**
- * Who works on the task: lit in the agent's color while it runs, with what it does; outlined, with its stripe still
- * in color, once it is done, with who worked on it last. The checks have no agent, and a panel of their own.
+ * Who works on the task: the agent's mark with its model, lit while it runs, with what it does; outlined once it
+ * is done, with who worked on it last. The checks have no agent, and a panel of their own.
  */
 function AgentPanel({ task }: { task: TaskCard }) {
   const { t } = useCopy()
@@ -150,9 +121,8 @@ function AgentPanel({ task }: { task: TaskCard }) {
     return (
       <Panel
         label={workingLine(step, t.board)}
-        stripe="bg-warning"
         surface="border-warning/40 bg-warning/10"
-        live
+        lead={<RowIcon icon={STEP_ICON.checks} tone="warning" />}
       >
         <div className="text-[13px] font-semibold text-foreground">{t.board.steps.checks}</div>
         <div className="mt-0.5 line-clamp-2 text-muted-foreground">{step.checks.join(', ')}</div>
@@ -161,15 +131,15 @@ function AgentPanel({ task }: { task: TaskCard }) {
   }
   const seen = step ?? task.lastAgent
   if (!seen) return null
-  const tone = AGENT_TONE[seen.agent] ?? NEUTRAL_TONE
   return (
     <Panel
       label={step ? workingLine(step, t.board) : lastAgentLine(seen, t.board)}
-      stripe={tone.stripe}
-      surface={step ? tone.lit : 'border-border'}
-      live={step !== null}
+      surface={step ? 'border-primary/40 bg-primary/10' : 'border-border'}
+      lead={<AgentIcon agent={seen.agent} live={step !== null} />}
     >
-      <AgentName seen={seen} />
+      {seen.model ? (
+        <div className="truncate font-mono text-[11px] text-foreground">{seen.model}</div>
+      ) : null}
       <div className={`mt-0.5 ${step ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
         {step ? stepLine(step, t.board) : t.board.lastWorked}
       </div>
@@ -193,11 +163,11 @@ function Rank({ queue }: { queue: TaskCard['queue'] }) {
   )
 }
 
-/** The border of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
+/** The bar on the side of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
 const LEAD_BORDER: Record<LeadTimeStatus, string> = {
   on_track: '',
-  at_risk: 'border-warning ring-1 ring-warning/40',
-  overdue: 'border-destructive ring-1 ring-destructive/40',
+  at_risk: 'border-l-4 border-warning',
+  overdue: 'border-l-4 border-destructive',
 }
 
 const LEAD_TEXT: Record<LeadTimeStatus, string> = {
@@ -241,13 +211,15 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
 export function Card({ task }: { task: TaskCard }) {
   const { t } = useCopy()
   return (
-    <Link to={openTask(task.id)} className="group block">
-      <Surface
-        size="sm"
+    <Link
+      to={openTask(task.id)}
+      className="block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring"
+    >
+      <div
         data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
-        className={`flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
+        className={`flex min-h-[168px] flex-col px-3 py-2.5 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
       >
-        <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+        <div className="flex items-baseline gap-2 font-mono text-[11px] text-muted-foreground">
           <Rank queue={task.queue} />
           <span className="min-w-0 flex-1 truncate" title={`${task.repository} ${itemName(task)}`}>
             {task.repository.split('/').pop()} {itemName(task)}
@@ -259,7 +231,7 @@ export function Card({ task }: { task: TaskCard }) {
         </div>
         <div
           title={task.title}
-          className="mt-1.5 line-clamp-3 text-sm font-semibold leading-snug text-foreground"
+          className="mt-1.5 line-clamp-3 text-sm font-medium leading-snug text-foreground"
         >
           {task.title}
         </div>
@@ -319,7 +291,7 @@ export function Card({ task }: { task: TaskCard }) {
             wrap
           />
         </div>
-      </Surface>
+      </div>
     </Link>
   )
 }
@@ -355,34 +327,63 @@ function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
   )
 }
 
+/** The colour of each column's dot: who has the task now, and whether it ended well. */
+const COLUMN_TONE: Record<ColumnId, Tone> = {
+  queued: 'neutral',
+  working: 'primary',
+  waiting: 'warning',
+  retrying: 'info',
+  merge: 'info',
+  review: 'success',
+  released: 'success',
+  resolved: 'success',
+  attention: 'destructive',
+}
+
+/**
+ * One column as a sheet: a heading strip with its dot, name and count, and its cards as rows parted by a
+ * hairline. The sheet does not clip, so the strip can stay at the top of the board's frame while the cards scroll.
+ */
 function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: TaskCard[] }) {
   const { t } = useCopy()
   const head = tasks.filter((task) => topRank(task.queue) !== null).length
   return (
-    <section aria-label={title} className="min-w-0">
-      <h2 className="sticky top-0 z-10 mb-2 bg-background pb-1 text-sm font-semibold text-foreground">
-        <span className="block truncate">
-          {title} <span className="font-normal text-muted-foreground">{tasks.length}</span>
+    <section aria-label={title} className="min-w-0 rounded-xl border border-border bg-card">
+      <h2 className="sticky top-0 z-10 rounded-t-xl border-b border-border bg-card text-sm font-semibold text-foreground">
+        <span className="block rounded-t-xl bg-muted/40 px-3 py-2">
+          <span className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className={`size-2.5 shrink-0 rounded-full ${TONE_DOT[COLUMN_TONE[id]]}`}
+            />
+            <span className="min-w-0 truncate">
+              {title}{' '}
+              <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
+                {tasks.length}
+              </span>
+            </span>
+          </span>
+          {id === 'merge' ? <MergeCounts tasks={tasks} /> : null}
         </span>
-        {id === 'merge' ? <MergeCounts tasks={tasks} /> : null}
       </h2>
-      <div className="space-y-2">
-        {tasks.map((task, i) => (
-          <div key={task.id}>
-            {i === head && head > 0 ? (
-              <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="h-px flex-1 bg-border" />
-                {t.board.restOfQueue}
-                <span className="h-px flex-1 bg-border" />
-              </div>
-            ) : null}
-            <Card task={task} />
-          </div>
-        ))}
-        {tasks.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t.board.nothingHere}</p>
-        ) : null}
-      </div>
+      {tasks.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-muted-foreground">{t.board.nothingHere}</p>
+      ) : (
+        <ul className="divide-y divide-border">
+          {tasks.map((task, i) => (
+            <li key={task.id}>
+              {i === head && head > 0 ? (
+                <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  {t.board.restOfQueue}
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              ) : null}
+              <Card task={task} />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }
@@ -455,47 +456,77 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
 /** The same tasks as a table, for when the columns are too many to scan. */
 export function TaskList({ tasks }: { tasks: TaskCard[] }) {
   const { t } = useCopy()
+  // The table carries the name; the sheet around it is not a region of its own.
   return (
-    <Table aria-label={t.board.tasks}>
-      <Table.Header>
-        <Table.Row>
-          <Table.HeaderCell>{t.board.task}</Table.HeaderCell>
-          <Table.HeaderCell>{t.board.repository}</Table.HeaderCell>
-          <Table.HeaderCell>{t.board.stage}</Table.HeaderCell>
-          <Table.HeaderCell align="right">{t.board.cost}</Table.HeaderCell>
-          <Table.HeaderCell align="right">{t.board.updated}</Table.HeaderCell>
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {tasks.map((task) => (
-          <Table.Row key={task.id}>
-            <Table.Cell>
-              <Link to={openTask(task.id)} className="font-medium text-foreground hover:underline">
-                {task.title}
-              </Link>
-              {task.mainRed ? (
-                <span className="ml-2 text-xs font-medium text-destructive">{t.board.mainRed}</span>
-              ) : null}
-            </Table.Cell>
-            <Table.Cell>
-              {task.repository} {itemName(task)}
-            </Table.Cell>
-            <Table.Cell>
-              <StageBadge
-                stage={task.stage}
-                integrated={task.integrated}
-                waitingForChecks={task.waitingForChecks}
-                resolved={task.resolved}
-                retryable={task.retryable}
-              />
-            </Table.Cell>
-            <Table.Cell align="right" numeric>
-              {money(task.costUsd)}
-            </Table.Cell>
-            <Table.Cell align="right">{ago(task.updatedAt, Date.now(), t.time)}</Table.Cell>
-          </Table.Row>
-        ))}
-      </Table.Body>
-    </Table>
+    <Surface title={<>{t.board.tasks}</>} icon={ListTodo} count={tasks.length}>
+      <div className="overflow-x-auto">
+        <table aria-label={t.board.tasks} className={TABLE.table}>
+          <thead className={TABLE.head}>
+            <tr>
+              <th className={TABLE.th}>{t.board.task}</th>
+              <th className={TABLE.th}>{t.board.repository}</th>
+              <th className={TABLE.th}>{t.board.stage}</th>
+              <th className={`${TABLE.th} text-right`}>{t.board.cost}</th>
+              <th className={`${TABLE.th} text-right`}>{t.board.updated}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => {
+              // The checks have no agent; any other task shows the one on it, or the last one.
+              const seen = task.working?.step === 'checks' ? null : (task.working ?? task.lastAgent)
+              return (
+                <tr key={task.id} className={TABLE.row}>
+                  <td className={TABLE.td}>
+                    <span className="flex min-w-0 items-center gap-3">
+                      {seen ? (
+                        <AgentIcon agent={seen.agent} live={!!task.working} />
+                      ) : (
+                        <span aria-hidden className="size-7 shrink-0 rounded-md bg-muted/60" />
+                      )}
+                      <span className="min-w-0">
+                        <Link
+                          to={openTask(task.id)}
+                          className="font-medium text-foreground hover:underline"
+                        >
+                          {task.title}
+                        </Link>
+                        {task.mainRed ? (
+                          <span className="ml-2 text-xs font-medium text-destructive">
+                            {t.board.mainRed}
+                          </span>
+                        ) : null}
+                        {seen?.model ? (
+                          <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                            {seen.model}
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                  </td>
+                  <td className={`${TABLE.td} font-mono text-xs text-muted-foreground`}>
+                    {task.repository} {itemName(task)}
+                  </td>
+                  <td className={TABLE.td}>
+                    <StageBadge
+                      stage={task.stage}
+                      integrated={task.integrated}
+                      waitingForChecks={task.waitingForChecks}
+                      resolved={task.resolved}
+                      retryable={task.retryable}
+                    />
+                  </td>
+                  <td className={TABLE.number}>{money(task.costUsd)}</td>
+                  <td
+                    className={`${TABLE.td} whitespace-nowrap text-right text-xs text-muted-foreground`}
+                  >
+                    {ago(task.updatedAt, Date.now(), t.time)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Surface>
   )
 }

@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- A Factory floor page (`/floor`) lists every task as one row on the line, grouped by who acts next: the owner, an agent working now, the factory, the queue, and what was delivered. The station of a working task shows the step its agent is on (planning, building, checks, review). Beside the line are today's numbers, the crew with the model of each role, and the latest decisions; three more tabs show what waits for the owner, the decisions and each project
+- A card names the model its agent ran with, read from the agent's own pass, with the tool as an icon. `GET /api/panel/agents/models` returns the model each role last ran with
 - `knowledge-curator` groups the notes of each project that say the same thing (`FACTORY_KNOWLEDGE_CURATOR_MODE`: `off`, `trial` by default, `auto`). In `auto`, `knowledge-sync` merges them into one note that keeps every source, and opens a pull request on the owner's branch with a rule when notes from three tasks agree; it never merges it, and a closed one is not proposed again (#469)
 - A card on the board shows when its task came back from Delivered and has not been delivered again. A small warning line says why and how long ago: the approved pull request conflicts with a base that moved, a required check failed, the base passes its checks again and the run only merges it, a person asked for changes, or something else. Its tooltip holds the note the run was given. `GET /api/panel/tasks` returns the mark as `returned` (`reason`, `at`, `note`) (#377)
 - `FACTORY_PROMOTION_HOLD_MS` sets how long a waiting promotion holds new integrations out of the integration branch (45 minutes when unset). Zero turns the hold off, also for a promotion pinned before: approved work integrates at once, and the promotion's checks start again on each new head (#376)
@@ -45,6 +47,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The panel uses the LoopScale brand as its theme, in dark and light: ink and paper in place of black and white, one lime, Hanken Grotesk and JetBrains Mono (served by the panel), and the LoopScale symbol in the menu and the favicon. The built-in themes of `@theokit/ui` are no longer offered
+- Every page of the panel is built from the same blocks, as wide as the page: a bordered sheet with a heading strip, rows parted by a hairline, and tables with one rhythm. The side menu groups the places of the factory, and the top bar shows where the owner is and how many runs work and wait
 - When the builder answers a review by changing nothing, the reviewer reads its reasons on the same commit once before the task goes to a person. An approval then goes on to merge; a review that still blocks hands the task over as before (#385)
 - Approved work that is not integrated yet moved from the Delivered column to Merge, next to the merge job and the pull request it opens, so Delivered holds only integrated work waiting for a release. The Merge column's header counts its cards as merging, opening the pull request, waiting for CI and awaiting merge, and a card that is approved but neither merged nor waiting for CI reads "approved, awaiting merge" (#377)
 - The banner of a stopped line says what the line holds back. With `FACTORY_LINE_STOP_SCOPE=fix_first` it says the fix goes first and everything else keeps running; with `hold` it still says nothing else runs or integrates there. `GET /api/panel/tasks` returns each stopped line's `scope` (#377)

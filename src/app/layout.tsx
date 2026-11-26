@@ -1,10 +1,17 @@
+import '@theokit/ui/styles.css'
 import './globals.css'
 
-import { ThemeProvider, builtinThemes } from '@theokit/ui'
+import { ThemeProvider } from '@theokit/ui'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 
-import type { HealthReport, InboxItem, RepositoriesView, SetupReport } from '../shared/panel'
+import type {
+  HealthReport,
+  InboxItem,
+  PulseReport,
+  RepositoriesView,
+  SetupReport,
+} from '../shared/panel'
 
 import { GuidePanel } from './components/guide/GuidePanel'
 import { Rail } from './components/shell/Rail'
@@ -34,6 +41,7 @@ function useTabSigns(count: number) {
     link.href = count > 0 ? '/favicon-attention.svg' : '/favicon.svg'
   }, [count])
 }
+import { loopscale, THEMES } from './theme'
 
 const HIDDEN_KEY = 'aifactory.menu.hidden'
 
@@ -78,6 +86,7 @@ function Shell() {
   })
   const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
   const health = useResource<HealthReport>('/api/panel/health', { everyMs: 60_000 })
+  const pulse = useResource<PulseReport>('/api/panel/pulse')
   const repositories = useResource<RepositoriesView>('/api/panel/repositories', {
     everyMs: 60_000,
     stream: false,
@@ -176,7 +185,7 @@ function Shell() {
 
   return (
     <WidthContext.Provider value={width}>
-      <ThemeProvider themes={builtinThemes} defaultTheme="violet-forge" defaultMode="dark">
+      <ThemeProvider themes={THEMES} defaultTheme={loopscale.name} defaultMode="dark">
         <ChatsProvider enabled={signedIn}>
           <GuideProvider>
             <div
@@ -215,11 +224,13 @@ function Shell() {
                 </div>
               ) : null}
               <div className="flex min-w-0 flex-1 flex-col">
-                {signedIn ? <TopBar onMenu={() => setOverlay(true)} /> : null}
+                {signedIn ? (
+                  <TopBar onMenu={() => setOverlay(true)} pulse={pulse.data ?? undefined} />
+                ) : null}
                 <main className="min-h-0 flex-1 overflow-y-auto">
                   {signedIn && inWork(location.pathname) ? (
                     <div
-                      className={`mx-auto max-w-[1800px] pb-10 pt-2 ${compact ? 'px-4' : 'px-6'}`}
+                      className={`mx-auto max-w-[1800px] pb-10 pt-5 ${compact ? 'px-4' : 'px-6'}`}
                     >
                       <Outlet />
                     </div>

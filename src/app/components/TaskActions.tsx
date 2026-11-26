@@ -1,3 +1,4 @@
+import { Hand } from 'lucide-react'
 import { useState } from 'react'
 
 import { Button, Textarea } from '@usetheo/ui'
@@ -8,6 +9,7 @@ import { useCopy } from '../lib/copy'
 import type { Copy } from '../lib/copy/en'
 
 import { Assist } from './Assist'
+import { READABLE, Surface } from './ui/Surface'
 
 /** What the panel says once a release was asked for: made, or waiting for the release branch's checks. */
 function released(t: Copy, answer: unknown): string {
@@ -43,7 +45,7 @@ function actionsOf(detail: TaskDetail) {
 function WithdrawSendBack({ busy, onWithdraw }: { busy: boolean; onWithdraw: () => void }) {
   const { t } = useCopy()
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <p className="text-sm text-muted-foreground">{t.taskActions.sendBackWaiting}</p>
       <Button
         size="sm"
@@ -103,16 +105,14 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
   if (!hasPullRequest && !canRetry && !canRelease && !releaseWaiting && !canWithdraw) return null
 
   return (
-    <section
-      aria-label={t.taskActions.title}
-      className="rounded-lg border border-border bg-card p-4"
-    >
-      <h2 className="mb-3 text-sm font-semibold">{t.taskActions.heading}</h2>
+    <Surface title={t.taskActions.heading} label={t.taskActions.title} icon={Hand} padded>
       {task.waitingForChecks ? (
-        <p className="mb-3 text-sm text-muted-foreground">{t.taskActions.waitingForChecks}</p>
+        <p className={`text-sm text-muted-foreground ${READABLE}`}>
+          {t.taskActions.waitingForChecks}
+        </p>
       ) : null}
       {task.waitingOnBase ? (
-        <p className="mb-3 text-sm text-foreground">
+        <p className={`text-sm text-foreground ${READABLE}`}>
           {t.taskActions.waitingOnBase(
             task.waitingOnBase.checks.join(', '),
             task.waitingOnBase.branch,
@@ -120,7 +120,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </p>
       ) : null}
       {releaseWaiting && task.releaseWait ? (
-        <p className="mb-3 text-sm text-muted-foreground">
+        <p className={`text-sm text-muted-foreground ${READABLE}`}>
           {t.taskActions.releaseWaitBefore}{' '}
           <a href={task.releaseWait.pullRequestUrl} className="underline">
             {task.releaseWait.pullRequestUrl}
@@ -129,7 +129,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </p>
       ) : null}
       {releaseRefused ? (
-        <p className="mb-3 text-sm text-foreground">
+        <p className={`text-sm text-foreground ${READABLE}`}>
           {t.taskActions.releaseRefused(releaseRefused)}
         </p>
       ) : null}
@@ -206,7 +206,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         ) : null}
       </div>
       {canSendBack ? (
-        <div className="mt-4">
+        <div className={`border-t border-border pt-3 ${READABLE}`}>
           <label className="block text-sm">
             <span className="text-foreground">{t.taskActions.askChanges}</span>
             <Textarea
@@ -235,7 +235,7 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </div>
       ) : null}
       {canResolve ? (
-        <div className="mt-4">
+        <div className={`border-t border-border pt-3 ${READABLE}`}>
           <label className="block text-sm">
             <span className="text-foreground">{t.taskActions.resolvedAnotherWay}</span>
             <Textarea
@@ -265,10 +265,10 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
         </div>
       ) : null}
       {message ? (
-        <p role="status" className="mt-3 text-sm text-foreground">
+        <p role="status" className="text-sm text-foreground">
           {message}
         </p>
       ) : null}
-    </section>
+    </Surface>
   )
 }

@@ -1,55 +1,80 @@
+import { Inbox } from 'lucide-react'
 import { Link } from 'react-router'
 
 import type { InboxItem } from '../../shared/panel'
 import { StageBadge } from '../components/Badges'
+import { INBOX_ICON } from '../components/floor/icons'
 import { NotifyButton } from '../components/NotifyButton'
+import { PageHeader, Quiet, Row, RowIcon, Rows, Surface, type Tone } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
 import { ago, itemName, money } from '../lib/format'
 import { useResource } from '../lib/live'
 
+/** The colour of each kind of item: what waits for the owner, what failed, what only informs. */
+const TONE: Record<InboxItem['kind'], Tone> = {
+  question: 'warning',
+  review: 'warning',
+  handoff: 'warning',
+  failed: 'destructive',
+  main_red: 'destructive',
+}
+
 export default function InboxPage() {
   const { t } = useCopy()
   const inbox = useResource<{ items: InboxItem[] }>('/api/panel/inbox')
+  const items = inbox.data?.items
   return (
     <>
-      <h1 className="mb-1 text-xl font-semibold">{t.inbox.heading}</h1>
-      <Link
-        to="/coordinator"
-        className="mb-4 block text-sm text-muted-foreground underline underline-offset-2"
-      >
-        {t.coordinator.openList}
-      </Link>
-      <div className="mb-4">
-        <NotifyButton />
-      </div>
-      {inbox.error ? <p className="text-sm text-destructive">{inbox.error}</p> : null}
-      {inbox.data ? (
-        inbox.data.items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.inbox.nothing}</p>
+      <PageHeader
+        title={t.inbox.heading}
+        actions={
+          <>
+            <NotifyButton />
+            <Link
+              to="/coordinator"
+              className="text-sm text-muted-foreground underline underline-offset-2"
+            >
+              {t.coordinator.openList}
+            </Link>
+          </>
+        }
+      />
+      {inbox.error ? <p className="mb-3 text-sm text-destructive">{inbox.error}</p> : null}
+      <Surface title={t.inbox.heading} icon={Inbox} count={items?.length}>
+        {!items ? (
+          <Quiet>{t.layout.loading}</Quiet>
+        ) : items.length === 0 ? (
+          <Quiet>{t.inbox.nothing}</Quiet>
         ) : (
-          <ul className="space-y-2">
-            {inbox.data.items.map(({ task, kind, summary, coordinatorReason, at }) => (
-              <li key={task.id}>
-                <Link
-                  to={`/tasks/${task.id}`}
-                  className="block rounded-lg border border-border bg-card p-4 shadow-sm hover:border-primary/60"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="text-sm font-semibold">{t.inbox[kind]}</span>
-                    <span className="text-xs text-muted-foreground">
-                      {ago(at, Date.now(), t.time)}
-                    </span>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {task.repository} {itemName(task)} · {task.title}
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm text-foreground">{summary}</p>
-                  {coordinatorReason ? (
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                      {t.coordinator.escalatedBy(coordinatorReason)}
-                    </p>
-                  ) : null}
-                  <div className="mt-2 flex items-center gap-3">
+          <Rows>
+            {items.map(({ task, kind, summary, coordinatorReason, at }) => (
+              <Row
+                key={task.id}
+                to={`/tasks/${task.id}`}
+                lead={<RowIcon icon={INBOX_ICON[kind]} tone={TONE[kind]} />}
+                title={
+                  <>
+                    {t.inbox[kind]}
+                    <span className="font-normal text-muted-foreground"> · {task.title}</span>
+                  </>
+                }
+                meta={
+                  <>
+                    {task.repository} {itemName(task)} · {ago(at, Date.now(), t.time)}
+                  </>
+                }
+                detail={
+                  <>
+                    {summary}
+                    {coordinatorReason ? (
+                      <span className="mt-0.5 block text-muted-foreground">
+                        {t.coordinator.escalatedBy(coordinatorReason)}
+                      </span>
+                    ) : null}
+                  </>
+                }
+                trail={
+                  <>
                     <StageBadge
                       stage={task.stage}
                       integrated={task.integrated}
@@ -57,16 +82,16 @@ export default function InboxPage() {
                       resolved={task.resolved}
                       retryable={task.retryable}
                     />
-                    <span className="text-xs text-muted-foreground">{money(task.costUsd)}</span>
-                  </div>
-                </Link>
-              </li>
+                    <span className="w-14 text-right font-mono tabular-nums">
+                      {money(task.costUsd)}
+                    </span>
+                  </>
+                }
+              />
             ))}
-          </ul>
-        )
-      ) : (
-        <p className="text-sm text-muted-foreground">{t.layout.loading}</p>
-      )}
+          </Rows>
+        )}
+      </Surface>
     </>
   )
 }

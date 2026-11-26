@@ -1,3 +1,4 @@
+import { MessagesSquare } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { Button, Textarea } from '@usetheo/ui'
@@ -17,6 +18,7 @@ import {
 
 import { Assist } from './Assist'
 import { StepRow } from './Transcript'
+import { Surface } from './ui/Surface'
 
 /** The stages where the agent has stopped and the owner may write to it. The server decides again. */
 export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed']
@@ -200,11 +202,7 @@ export function Conversation({
   }
 
   return (
-    <section
-      aria-label={t.conversation.heading}
-      className="rounded-lg border border-border bg-card p-4"
-    >
-      <h2 className="mb-3 text-sm font-semibold">{t.conversation.heading}</h2>
+    <Surface title={t.conversation.heading} icon={MessagesSquare} padded>
       {roles.length > 0 ? (
         <div role="tablist" aria-label={t.thread.tabs} className="mb-2 flex gap-2">
           {roles.map((r) => (
@@ -326,6 +324,6 @@ export function Conversation({
           </Button>
         </div>
       )}
-    </section>
+    </Surface>
   )
 }

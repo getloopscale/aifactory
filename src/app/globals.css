@@ -1,6 +1,22 @@
 @import 'tailwindcss';
 @import '@theokit/ui/preset.css';
 
+/* The brand's two typefaces (SIL Open Font License), served by the panel so no page asks another host. */
+@font-face {
+  font-family: 'Hanken Grotesk';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/hanken-grotesk-latin.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-latin.woff2') format('woff2');
+}
+
 body {
   background: var(--color-background);
   color: var(--color-foreground);
