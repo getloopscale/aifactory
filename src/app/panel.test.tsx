@@ -178,6 +178,39 @@ describe('task page', () => {
     )
   })
 
+  it('shows the outcome of the test proof beside the checks', async () => {
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        testProofs: [
+          {
+            id: 1,
+            sha: 'abcdef1234',
+            outcome: 'proven',
+            detail: 'unit',
+            files: ['a.test.ts'],
+            at: '2026-11-25T10:00:00Z',
+          },
+          {
+            id: 2,
+            sha: '1234567abc',
+            outcome: 'not_run',
+            detail: 'no such commit',
+            files: [],
+            at: '2026-11-25T10:00:00Z',
+          },
+        ],
+      }),
+    })
+    renderTask()
+
+    await waitFor(() =>
+      expect(screen.getByText('Proven: the tests fail on the base')).toBeDefined(),
+    )
+    expect(screen.getByText('unit')).toBeDefined()
+    expect(screen.getByText('Not run')).toBeDefined()
+    expect(screen.getByText('no such commit')).toBeDefined()
+  })
+
   it('shows a question and what to do about it, then the answer when there is one', async () => {
     serve({
       'GET /api/panel/tasks/5': detail({
@@ -206,6 +239,30 @@ describe('task page', () => {
     await waitFor(() => expect(screen.getByText('A or B?')).toBeDefined())
     expect(screen.getByText(/Reply in a comment on the issue/)).toBeDefined()
     expect(screen.getByText('paulo answered: Yes')).toBeDefined()
+  })
+
+  it('puts the question before the transcript', async () => {
+    serve({
+      'GET /api/panel/tasks/5': detail({
+        task: { ...base, stage: 'waiting', column: 'waiting', headSha: null },
+        questions: [
+          {
+            id: 1,
+            body: 'A or B?',
+            askedAt: '2026-11-04T10:00:00Z',
+            answer: null,
+            answeredBy: null,
+            answeredAt: null,
+          },
+        ],
+      }),
+    })
+    renderTask()
+    const question = await screen.findByText('A or B?')
+    const transcript = screen.getByRole('region', { name: en.conversation.heading })
+    expect(
+      question.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
   })
 
   it('says it could not load a task that is not there', async () => {
@@ -1343,9 +1400,11 @@ describe('the task page in two languages', () => {
       await waitFor(() =>
         expect(screen.getByRole('heading', { name: t.task.timeline })).toBeDefined(),
       )
-      for (const name of [t.task.transcript, t.task.evidence, t.task.reviews]) {
+      for (const name of [t.conversation.heading, t.task.evidence, t.task.reviews]) {
         expect(screen.getByRole('heading', { name })).toBeDefined()
       }
+      expect(screen.queryByRole('heading', { name: t.task.transcript })).toBeNull()
+      expect(screen.getAllByRole('region', { name: t.conversation.heading })).toHaveLength(1)
       expect(screen.getByText(t.taskActions.approve)).toBeDefined()
     })
 
@@ -1444,10 +1503,72 @@ describe('writing to the agent of a stopped task', () => {
     expect(screen.getByText('Waiting for the agent to read it…')).toBeTruthy()
   })
 
-  it('offers no box to an agent that is planning, and nothing when there is no thread', () => {
+  it('offers no way to write to an agent that is planning, and says why', () => {
     const planning = detail({ task: { ...base, stage: 'plan', column: 'working' } })
-    const { container } = render(<Conversation detail={planning} onDone={noop} />)
-    expect(container.textContent).toBe('')
+    render(<Conversation detail={planning} onDone={noop} />)
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.getByText(/takes no message while the task is in plan/)).toBeTruthy()
+  })
+
+  it('shows what the answer to a message cost', () => {
+    const m = {
+      id: 1,
+      author: 'owner',
+      mode: 'ask' as const,
+      text: 'Why?',
+      delivery: 'delivered' as const,
+      reason: null,
+      answer: 'Because.',
+      costUsd: 0.42,
+      at: '2026-11-25T10:00:00Z',
+      answeredAt: null,
+    }
+    render(<Conversation detail={detail({ messages: [m] })} onDone={noop} />)
+    expect(screen.getByText('cost $0.42')).toBeTruthy()
+  })
+
+  it('shows the box disabled, with the reason, in a stage that takes no message', () => {
+    const merging = detail({ task: { ...base, stage: 'merge', column: 'working' } })
+    render(<Conversation detail={merging} onDone={noop} />)
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/takes no message while the task is in merge/)).toBeTruthy()
+  })
+
+  const step = (seq: number, role: 'builder' | 'reviewer', kind: string, tool: string | null) =>
+    ({
+      seq,
+      role,
+      attempt: 1,
+      kind,
+      tool,
+      content: kind === 'tool_result' ? 'output of it' : `${role} ${kind}`,
+      at: `2026-11-25T10:00:0${seq}Z`,
+    }) as never
+
+  it('has a tab for each agent and shows only the rows of the one picked', () => {
+    const events = [step(1, 'builder', 'message', null), step(2, 'reviewer', 'message', null)]
+    render(<Conversation detail={detail()} events={events} onDone={noop} />)
+    expect(screen.getAllByRole('tab').map((x) => x.textContent)).toEqual(['Builder', 'Reviewer'])
+    expect(screen.getByText(/builder message/)).toBeTruthy()
+    expect(screen.queryByText(/reviewer message/)).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Reviewer' }))
+    expect(screen.getByText(/reviewer message/)).toBeTruthy()
+    expect(screen.queryByText(/builder message/)).toBeNull()
+  })
+
+  it('opens a folded work row on a click and shows its steps', () => {
+    const events = [
+      step(1, 'builder', 'tool_use', 'Read'),
+      step(2, 'builder', 'tool_result', null),
+      step(3, 'builder', 'tool_use', 'Bash'),
+      step(4, 'builder', 'tool_result', null),
+    ]
+    const working = detail({ task: { ...base, stage: 'build', column: 'working' } })
+    render(<Conversation detail={working} events={events} onDone={noop} />)
+    expect(screen.queryByText(/builder tool_use/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /read 1 file, ran 1 command/ }))
+    expect(screen.getAllByText(/builder tool_use/).length).toBe(2)
   })
 
   it('offers a box to a working builder, with no mode, and sends it as a question', async () => {

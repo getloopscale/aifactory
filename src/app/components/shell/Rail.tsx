@@ -21,6 +21,7 @@ import type { GuideId } from '../../../shared/guides'
 import { useCopy } from '../../lib/copy'
 
 import { ACTIVE, useOnNewChat, usePlace } from './active'
+import { TONE, type SetupAttention } from './SetupCount'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -34,18 +35,21 @@ function Place({
   icon: Icon,
   label,
   dot,
+  attention,
 }: {
   id: GuideId
   to: string
   icon: Icon
   label: string
   dot?: boolean
+  attention?: SetupAttention
 }) {
+  const { t } = useCopy()
   const active = usePlace() === id
   return (
     <Link
       to={to}
-      aria-label={label}
+      aria-label={attention ? `${label}, ${t.menu.setupNeedsAttention(attention.count)}` : label}
       aria-current={active ? 'page' : undefined}
       title={label}
       className={`${button} ${active ? ACTIVE : ''}`}
@@ -53,6 +57,15 @@ function Place({
       <Icon className="size-5" />
       {dot ? (
         <span aria-hidden className="absolute right-1.5 top-1.5 size-2 rounded-full bg-sky-400" />
+      ) : null}
+      {attention ? (
+        <span
+          aria-hidden
+          data-tone={attention.tone}
+          className={`absolute -right-0.5 -top-0.5 min-w-4 rounded-full px-1 text-center text-[10px] leading-4 ${TONE[attention.tone]}`}
+        >
+          {attention.count}
+        </span>
       ) : null}
     </Link>
   )
@@ -70,12 +83,15 @@ export function Rail({
   wrong,
   name,
   onSignOut,
+  setup,
 }: {
   onExpand: (search?: boolean) => void
   waiting: number
   wrong: number
   name: string
   onSignOut: () => void
+  /** The setup items that are not ok, when the report is known. */
+  setup?: SetupAttention
 }) {
   const { t } = useCopy()
   const navigate = useNavigate()
@@ -151,7 +167,7 @@ export function Rail({
         <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} dot={waiting > 0} />
         <Place id="health" to="/health" icon={HeartPulse} label={t.places.health} dot={wrong > 0} />
         <Place id="agents" to="/agents" icon={Bot} label={t.places.agents} />
-        <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} />
+        <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} attention={setup} />
       </nav>
 
       <div className="mt-auto">

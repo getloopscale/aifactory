@@ -168,6 +168,29 @@ export const evidence = pgTable('evidence', {
 })
 
 /**
+ * Whether the tests a head adds depend on the change (#550): one row per task and head, kept apart from `evidence`
+ * so the gate never reads it as a check. `outcome` is `proven`, `unproven`, `no_tests` or `not_run`.
+ */
+export const testProof = pgTable(
+  'test_proof',
+  {
+    id: serial('id').primaryKey(),
+    taskId: integer('task_id')
+      .notNull()
+      .references(() => task.id, { onDelete: 'cascade' }),
+    sha: text('sha').notNull(),
+    outcome: text('outcome').notNull(),
+    /** The check that failed on the base (`proven`), or why the step could not run (`not_run`). */
+    detail: text('detail'),
+    /** The test files copied onto the base. */
+    files: jsonb('files').$type<string[]>().notNull().default([]),
+    mode: text('mode').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('test_proof_task_sha').on(t.taskId, t.sha)],
+)
+
+/**
  * A file a check wrote at a declared path, copied out of the sandbox for the commit it ran on. It is data made
  * by code the agent wrote: the panel serves it only as an inert file, to the owner.
  */
@@ -497,7 +520,9 @@ export const agentRun = pgTable('agent_run', {
   taskId: integer('task_id').references(() => task.id),
   /** The review of a pull request the pass was for, when it was not for a task. */
   externalReviewId: integer('external_review_id'),
-  role: text('role', { enum: ['builder', 'planner', 'reviewer', 'merger', 'security'] }).notNull(),
+  role: text('role', {
+    enum: ['builder', 'planner', 'reviewer', 'merger', 'security', 'lens'],
+  }).notNull(),
   harness: text('harness').notNull(),
   /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
   model: text('model'),

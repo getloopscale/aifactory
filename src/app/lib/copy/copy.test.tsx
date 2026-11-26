@@ -116,3 +116,17 @@ describe('the language', () => {
     render(<p />)
   })
 })
+
+describe('thread.summary', () => {
+  it('counts each kind of step in both languages', () => {
+    const c = { read: 3, search: 1, edit: 1, command: 2, other: 1 }
+    expect(en.thread.summary(c)).toBe(
+      'read 3 files, searched 1 time, edited 1 file, ran 2 commands, 1 other step',
+    )
+    expect(ptBR.thread.summary(c)).toBe(
+      'leu 3 arquivos, buscou 1 vez, editou 1 arquivo, rodou 2 comandos, 1 outro passo',
+    )
+    expect(ptBR.thread.summary({ other: 2 })).toBe('2 outros passos')
+    expect(ptBR.thread.summary({})).toBe('')
+  })
+})

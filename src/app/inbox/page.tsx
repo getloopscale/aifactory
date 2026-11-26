@@ -2,6 +2,7 @@ import { Link } from 'react-router'
 
 import type { InboxItem } from '../../shared/panel'
 import { StageBadge } from '../components/Badges'
+import { NotifyButton } from '../components/NotifyButton'
 import { useCopy } from '../lib/copy'
 import { ago, itemName, money } from '../lib/format'
 import { useResource } from '../lib/live'
@@ -18,6 +19,9 @@ export default function InboxPage() {
       >
         {t.coordinator.openList}
       </Link>
+      <div className="mb-4">
+        <NotifyButton />
+      </div>
       {inbox.error ? <p className="text-sm text-destructive">{inbox.error}</p> : null}
       {inbox.data ? (
         inbox.data.items.length === 0 ? (

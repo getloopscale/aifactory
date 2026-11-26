@@ -1,6 +1,7 @@
 import { Avatar, DropdownMenu, ScrollArea } from '@usetheo/ui'
 import {
   Bot,
+  Download,
   FolderGit2,
   HeartPulse,
   Inbox,
@@ -23,10 +24,12 @@ import { Link, NavLink, useLocation, useNavigate, useParams } from 'react-router
 import type { GuideId } from '../../../shared/guides'
 import type { ChatSummary } from '../../../shared/panel'
 import { useCopy } from '../../lib/copy'
+import type { Install } from '../../lib/install'
 import { chatApi, groupChats } from '../../lib/chat'
 import { useChats } from '../../lib/chats'
 
 import { ACTIVE, useOnNewChat, usePlace } from './active'
+import { SetupCount, type SetupAttention } from './SetupCount'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -40,13 +43,16 @@ function Place({
   icon: Icon,
   label,
   count,
+  attention,
 }: {
   id: GuideId | 'onboarding'
   to: string
   icon: Icon
   label: string
   count?: number
+  attention?: SetupAttention
 }) {
+  const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
   const active = id === 'onboarding' ? pathname === to : place === id
@@ -54,6 +60,9 @@ function Place({
     <Link
       to={to}
       aria-current={active ? 'page' : undefined}
+      aria-label={
+        attention ? `${label}, ${t.menu.setupNeedsAttention(attention.count)}` : undefined
+      }
       className={`${row} ${active ? ACTIVE : ''}`}
     >
       <Icon className={`size-[18px] shrink-0 ${active ? '' : 'opacity-90'}`} />
@@ -63,6 +72,7 @@ function Place({
           {count}
         </span>
       ) : null}
+      {attention ? <SetupCount attention={attention} className="ml-auto" /> : null}
     </Link>
   )
 }
@@ -179,6 +189,8 @@ export function Sidebar({
   onSignOut,
   startSearching = false,
   showOnboarding = false,
+  install,
+  setup,
 }: {
   onToggle: () => void
   waiting: number
@@ -190,6 +202,10 @@ export function Sidebar({
   startSearching?: boolean
   /** True while no repository is enabled: the guided start is offered. */
   showOnboarding?: boolean
+  /** Whether the panel can be installed, and how. */
+  install?: Install
+  /** The setup items that are not ok, when the report is known. */
+  setup?: SetupAttention
 }) {
   const { chats } = useChats()
   const { t } = useCopy()
@@ -197,6 +213,7 @@ export function Sidebar({
   const onNewChat = useOnNewChat()
   const [searching, setSearching] = useState(startSearching)
   const [filter, setFilter] = useState('')
+  const [iosHelp, setIosHelp] = useState(false)
   const { pinned, recent } = groupChats(chats, filter, t.menu.newChat)
 
   return (
@@ -254,7 +271,7 @@ export function Sidebar({
           <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} count={waiting} />
           <Place id="health" to="/health" icon={HeartPulse} label={t.places.health} count={wrong} />
           <Place id="agents" to="/agents" icon={Bot} label={t.places.agents} />
-          <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} />
+          <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} attention={setup} />
         </div>
       </nav>
 
@@ -285,6 +302,23 @@ export function Sidebar({
       </ScrollArea>
 
       <div className="border-t border-border p-2">
+        {install?.kind ? (
+          <>
+            <button
+              type="button"
+              onClick={install.kind === 'prompt' ? install.prompt : () => setIosHelp((on) => !on)}
+              className={row}
+            >
+              <Download className="size-[18px] shrink-0" />
+              {t.menu.install}
+            </button>
+            {install.kind === 'ios' && iosHelp ? (
+              <p role="note" className="px-3 pb-2 text-xs text-foreground/70">
+                {t.menu.installIos}
+              </p>
+            ) : null}
+          </>
+        ) : null}
         <DropdownMenu>
           <DropdownMenu.Trigger asChild>
             <button type="button" aria-label={t.menu.account} className={`${row} gap-3 py-2`}>

@@ -5,6 +5,7 @@ import {
   SANDBOX_PROVIDER_BLOCKED,
   SANDBOX_TEMPLATE_MISSING,
   type DoctorItem,
+  type DoctorFamily,
   type DoctorItemId,
   type ProviderProofs,
   type PublishMode,
@@ -84,6 +85,9 @@ export const DOCTOR_ITEMS = [
   'recipe',
   'sandbox',
   'provider_checks',
+  'agent_guide',
+  'lockfile',
+  'test_entry',
 ] as const satisfies readonly DoctorItemId[]
 
 /** Whether the App reaches the repository, what its installation was granted and what the factory asks for. */
@@ -157,6 +161,16 @@ export type DoctorFacts = {
   sandbox: Read<SandboxFacts>
   /** What the last completed proof of the checks found on each sandbox provider. */
   providerProofs: Read<ProviderProofs>
+  /** Whether `AGENTS.md` or `CLAUDE.md` is at the root of the integration branch. */
+  guide: Read<string | undefined>
+  /** The root package.json of the integration branch, undefined when there is none. */
+  manifest: Read<string | undefined>
+  /** The lockfile beside it, when there is one. */
+  lockfile: Read<string | undefined>
+  /** Whether the recipe on the integration branch declares checks. */
+  recipeChecks: Read<boolean>
+  /** Whether the owner saved checks for the repository. */
+  savedChecks: boolean
 }
 
 /**
@@ -612,10 +626,92 @@ export function providerChecksItem(proofs: Read<ProviderProofs>): DoctorItem {
   return fine('provider_checks', 'ok_provider_checks', { providers: names(passedOn) })
 }
 
+/** The files the doctor looks for at the root, which `doctor-facts.ts` reads. */
+export const AGENT_GUIDES = ['AGENTS.md', 'CLAUDE.md'] as const
+export const LOCKFILES = ['pnpm-lock.yaml', 'package-lock.json', 'yarn.lock', 'bun.lockb'] as const
+
+/** What was tried for a file of the repository, with the ref it was read on. */
+export const fileTried = (repo: string, path: string, ref: string) =>
+  triedOf('file', { repo, path, ref })
+
+/** Whether `package.json` says the item does not apply, or could not be read. */
+function withoutManifest(
+  id: DoctorItemId,
+  facts: Pick<DoctorFacts, 'repo' | 'integration' | 'manifest'>,
+): DoctorItem | undefined {
+  const { manifest, repo, integration } = facts
+  if (manifest.read && manifest.value === undefined) {
+    return fine(id, 'ok_not_applicable', { repo, ref: integration })
+  }
+  return undefined
+}
+
+export function agentGuideItem(facts: Pick<DoctorFacts, 'repo' | 'integration' | 'guide'>) {
+  const { repo, integration: ref, guide } = facts
+  if (!guide.read) return unknownItem('agent_guide', guide)
+  if (guide.value !== undefined)
+    return fine('agent_guide', 'ok_agent_guide', { file: guide.value, ref })
+  return problem('agent_guide', 'warn', 'agent_guide_missing', { repo, ref })
+}
+
+export function lockfileItem(
+  facts: Pick<DoctorFacts, 'repo' | 'integration' | 'manifest' | 'lockfile'>,
+): DoctorItem {
+  const { repo, integration: ref, manifest, lockfile } = facts
+  if (!manifest.read) return unknownItem('lockfile', manifest)
+  const none = withoutManifest('lockfile', facts)
+  if (none) return none
+  if (!lockfile.read) return unknownItem('lockfile', lockfile)
+  if (lockfile.value !== undefined)
+    return fine('lockfile', 'ok_lockfile', { file: lockfile.value, ref })
+  return problem('lockfile', 'warn', 'lockfile_missing', { repo, ref })
+}
+
+/** Whether a package.json text has a `test` script; undefined when it is not JSON. */
+export function hasTestScript(text: string): boolean | undefined {
+  try {
+    const scripts = (JSON.parse(text) as { scripts?: Record<string, unknown> } | null)?.scripts
+    return typeof scripts?.test === 'string' && scripts.test.trim() !== ''
+  } catch {
+    return undefined
+  }
+}
+
+export function testEntryItem(
+  facts: Pick<DoctorFacts, 'repo' | 'integration' | 'manifest' | 'recipeChecks' | 'savedChecks'>,
+): DoctorItem {
+  const { repo, integration: ref, manifest, recipeChecks, savedChecks } = facts
+  const none = withoutManifest('test_entry', facts)
+  if (none) return none
+  const ok = (source: string) => fine('test_entry', 'ok_test_entry', { source })
+  if (savedChecks) return ok('the checks saved for the repository')
+  if (recipeChecks.read && recipeChecks.value) return ok('the recipe')
+  const script =
+    manifest.read && manifest.value !== undefined ? hasTestScript(manifest.value) : undefined
+  if (script) return ok('the test script of package.json')
+  if (!manifest.read) return unknownItem('test_entry', manifest)
+  if (script === undefined) {
+    return unknownItem(
+      'test_entry',
+      unread(
+        triedText(fileTried(repo, 'package.json', ref)),
+        'package.json is not valid JSON',
+        fileTried(repo, 'package.json', ref),
+      ),
+    )
+  }
+  if (!recipeChecks.read) return unknownItem('test_entry', recipeChecks)
+  return problem('test_entry', 'warn', 'test_entry_missing', { repo, ref })
+}
+
+const CODEBASE_ITEMS: readonly DoctorItemId[] = ['agent_guide', 'lockfile', 'test_entry']
+const familyOf = (id: DoctorItemId): DoctorFamily =>
+  CODEBASE_ITEMS.includes(id) ? 'codebase' : 'operation'
+
 /** The report: one item for each diagnosis, in the order of `DOCTOR_ITEMS`. */
 export function diagnose(facts: DoctorFacts): DoctorItem[] {
   const { repo, integration, required, settings } = facts
-  return [
+  const items = [
     issuesItem(repo, settings),
     appAccessItem(repo, facts.access),
     appEventsItem(facts.events),
@@ -628,7 +724,11 @@ export function diagnose(facts: DoctorFacts): DoctorItem[] {
     recipeItem(facts.recipe),
     sandboxItem(facts.sandbox),
     providerChecksItem(facts.providerProofs),
+    agentGuideItem(facts),
+    lockfileItem(facts),
+    testEntryItem(facts),
   ]
+  return items.map((item) => ({ ...item, family: familyOf(item.id) }))
 }
 
 /** The items the factory repairs itself, with what the App may do: create a branch, create a label. */
@@ -647,6 +747,9 @@ const NOT_ITS_TO_REPAIR: Record<Exclude<DoctorItemId, Repairable>, string> = {
   sandbox: 'the credit and the key of the sandbox provider are outside the factory',
   provider_checks:
     "which provider a recipe runs on is the owner's choice, and a proof is asked for in the panel",
+  agent_guide: 'the GitHub App cannot write files outside a task',
+  lockfile: 'the GitHub App cannot write files outside a task',
+  test_entry: 'the GitHub App cannot write files outside a task',
 }
 
 /** Why an item cannot be repaired by the factory, or nothing for the ones it repairs. */
