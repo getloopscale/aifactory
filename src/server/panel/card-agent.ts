@@ -17,19 +17,28 @@ const text = (value: unknown): string | null =>
 const attemptOf = (value: unknown): number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : 1
 
-/** The agent a stage names: the builder in `harness`, the reviewer in `reviewer`. */
-function agentOf(event: StepEvent): AgentSeen | null {
+/** The model each agent last reported running with on one task, by the agent's name. */
+export type ReportedModels = ReadonlyMap<string, string>
+
+const NONE: ReportedModels = new Map()
+
+/**
+ * The agent a stage names: the builder in `harness`, the reviewer in `reviewer`. Its model is the one the
+ * stage recorded, which is the owner's choice; with none chosen, the one the agent's last pass on the task
+ * reported.
+ */
+function agentOf(event: StepEvent, reported: ReportedModels): AgentSeen | null {
   if (event.stage === 'verify') return null
   const detail = detailOf(event)
   // The security review is a `review` event of its own kind, which names its agent as the builder's do.
   const agent = text(
     event.stage === 'review' && detail.step !== 'security' ? detail.reviewer : detail.harness,
   )
-  return agent ? { agent, model: text(detail.model) } : null
+  return agent ? { agent, model: text(detail.model) ?? reported.get(agent) ?? null } : null
 }
 
-function agentStep(event: StepEvent): AgentStep | null {
-  const seen = agentOf(event)
+function agentStep(event: StepEvent, reported: ReportedModels): AgentStep | null {
+  const seen = agentOf(event, reported)
   if (!seen) return null
   const detail = detailOf(event)
   const step =
@@ -45,8 +54,8 @@ function agentStep(event: StepEvent): AgentStep | null {
   return { step, ...seen, attempt: attemptOf(detail.attempt) }
 }
 
-function stepOf(event: StepEvent): AgentStep | null {
-  if (event.stage !== 'verify') return agentStep(event)
+function stepOf(event: StepEvent, reported: ReportedModels): AgentStep | null {
+  if (event.stage !== 'verify') return agentStep(event, reported)
   const checks = detailOf(event).checks
   return {
     step: 'checks',
@@ -63,9 +72,13 @@ const newestFirst = (events: StepEvent[]) => [...events].sort((a, b) => b.id - a
 export function cardAgent(
   stage: Stage,
   events: StepEvent[],
+  reported: ReportedModels = NONE,
 ): Pick<TaskCard, 'working' | 'lastAgent'> {
   const ordered = newestFirst(events)
   const current = ordered[0]?.stage === stage ? ordered[0] : undefined
-  const lastAgent = ordered.map(agentOf).find((seen): seen is AgentSeen => seen !== null) ?? null
-  return { working: current ? stepOf(current) : null, lastAgent }
+  const lastAgent =
+    ordered
+      .map((event) => agentOf(event, reported))
+      .find((seen): seen is AgentSeen => seen !== null) ?? null
+  return { working: current ? stepOf(current, reported) : null, lastAgent }
 }

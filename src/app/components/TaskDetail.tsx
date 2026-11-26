@@ -1,4 +1,15 @@
-import type { ReactNode } from 'react'
+import {
+  Bot,
+  CircleHelp,
+  Eye,
+  FlaskConical,
+  History,
+  PackageCheck,
+  Rocket,
+  ShieldCheck,
+  Workflow,
+} from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 
 import {
   type ReviewView,
@@ -11,11 +22,520 @@ import { CoordinatorActions } from './CoordinatorActions'
 import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
 import { Conversation } from './Conversation'
-import { TaskActions } from './TaskActions'
+import { Changes } from './Changes'
+import { TaskActions, actionsOf } from './TaskActions'
 import { useTranscript } from './Transcript'
+import { AgentIcon } from './floor/AgentIcon'
+import {
+  PageHeader,
+  Quiet,
+  READABLE,
+  Row,
+  RowIcon,
+  Rows,
+  STACK,
+  Surface,
+  TABLE,
+} from './ui/Surface'
 import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
+import { useWidth } from '../lib/media'
+
+/** Inside the frame of a tabbed task, the well its blocks sit in, under the head. */
+const WELL = 'flex min-w-0 flex-col gap-3 bg-background px-3 pb-3'
+
+const TASK_TABS = ['activity', 'changes', 'runs', 'evidence', 'reviews'] as const
+/** In one column the conversation is a tab too, and the first. */
+const PANES = ['conversation', ...TASK_TABS] as const
+type TaskTab = (typeof PANES)[number]
+
+/**
+ * One tab of the task's side: beside the conversation only the chosen one shows, and the others stay in the
+ * page; stacked, every one shows.
+ */
+function TaskPane({
+  id,
+  active,
+  split,
+  children,
+}: {
+  id: TaskTab
+  active: TaskTab
+  split: boolean
+  children: ReactNode
+}) {
+  return (
+    <div
+      data-pane={id}
+      className={
+        split ? (active === id ? `min-h-0 flex-1 overflow-y-auto ${STACK}` : 'hidden') : STACK
+      }
+    >
+      {children}
+    </div>
+  )
+}
+
+/** Which of the three shapes the task takes, and the tab it shows in the ones that have tabs. */
+type Layout = 'workbench' | 'tabbed' | 'stack'
+
+/** The frame of the whole task in each shape. */
+const FRAME: Record<Layout, string> = {
+  workbench: 'grid h-full min-h-0 grid-cols-[minmax(0,1fr)_minmax(380px,34%)] gap-4',
+  // One frame for the head, the tabs and what the chosen tab shows: they open and close together.
+  tabbed: 'flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border bg-card',
+  stack: STACK,
+}
+
+/** The column with the head, the actions and the conversation in each shape. */
+const MAIN: Record<Layout, string> = {
+  workbench: 'flex min-h-0 min-w-0 flex-1 flex-col gap-4',
+  tabbed: `${WELL} shrink-0`,
+  stack: `min-w-0 ${STACK}`,
+}
+
+/** The side with the task's tabs in each shape. */
+const SIDE: Record<Layout, string> = {
+  workbench: 'flex min-h-0 min-w-0 flex-1 flex-col gap-4',
+  tabbed: `${WELL} min-h-0 flex-1`,
+  stack: STACK,
+}
+
+/**
+ * The shape of the task from where it is shown and what was picked, decided in one place so the view only
+ * reads it: beside the conversation, one tab at a time, or everything stacked.
+ */
+function arrange(a: { workbench: boolean; wide: boolean; tabbed: boolean; picked?: TaskTab }) {
+  const beside = a.workbench && a.wide && !a.tabbed
+  /** Tabs take the place of the stack, beside the conversation or over it. */
+  const split = beside || a.tabbed
+  const tab: TaskTab = a.picked ?? (a.tabbed ? 'conversation' : 'activity')
+  const talking = a.tabbed && tab === 'conversation'
+  const layout: Layout = beside ? 'workbench' : a.tabbed ? 'tabbed' : 'stack'
+  return { layout, beside, split, tab, talking }
+}
+
+/** How the conversation's wrapper shows: gone under another tab, without a box of its own beside or under tabs. */
+function threadClass(split: boolean, tabbed: boolean, talking: boolean) {
+  return split ? (tabbed && !talking ? 'hidden' : 'contents') : undefined
+}
+
+/** The tabs of the task's side, and of the whole task when it shows one tab at a time. */
+function TaskTabs({
+  tabbed,
+  tab,
+  counts,
+  onPick,
+}: {
+  tabbed: boolean
+  tab: TaskTab
+  counts: Record<TaskTab, number>
+  onPick: (tab: TaskTab) => void
+}) {
+  const { t } = useCopy()
+  return (
+    <div
+      role="tablist"
+      aria-label={t.task.tabs.label}
+      className={
+        tabbed
+          ? 'flex gap-1 overflow-x-auto overflow-y-hidden border-t border-border px-2'
+          : 'flex gap-1 rounded-xl border border-border bg-card p-1'
+      }
+    >
+      {(tabbed ? PANES : TASK_TABS).map((name) => (
+        <button
+          key={name}
+          type="button"
+          role="tab"
+          aria-selected={tab === name}
+          onClick={() => onPick(name)}
+          className={
+            tabbed
+              ? `-mb-px flex h-9 shrink-0 items-center gap-1.5 border-b-2 px-2.5 text-[13px] transition-colors ${
+                  tab === name
+                    ? 'border-primary font-medium text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`
+              : `flex h-8 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 text-[13px] transition-colors ${
+                  tab === name
+                    ? 'bg-muted font-medium text-foreground'
+                    : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                }`
+          }
+        >
+          {t.task.tabs[name]}
+          {counts[name] > 0 ? (
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+              {counts[name]}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+/** Which task it is and where it is: said in both heads, so written once. */
+function TaskPlace({ task }: { task: TaskDetail['task'] }) {
+  return (
+    <>
+      <span className="font-mono text-xs">
+        {task.repository} {itemName(task)}
+      </span>
+      <StageBadge
+        stage={task.stage}
+        integrated={task.integrated}
+        waitingForChecks={task.waitingForChecks}
+        resolved={task.resolved}
+        retryable={task.retryable}
+      />
+    </>
+  )
+}
+
+/** The facts line of a task: cost, attempts, commit and the links out. Both heads show the same one. */
+function TaskFacts({ task }: { task: TaskDetail['task'] }) {
+  const { t } = useCopy()
+  return (
+    <>
+      <span className="font-mono text-xs tabular-nums">{money(task.costUsd)}</span>
+      {task.attempts > 0 ? <span>{t.task.attempts(task.attempts)}</span> : null}
+      {task.headSha ? <code className="text-xs">{shortSha(task.headSha)}</code> : null}
+      {task.preRelease ? (
+        <a
+          href={task.preRelease.url}
+          className="text-foreground underline underline-offset-2"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t.task.preRelease(task.preRelease.tag)}
+        </a>
+      ) : null}
+      {task.release ? (
+        <a
+          href={task.release.url}
+          className="font-medium text-foreground underline underline-offset-2"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t.task.release(task.release.tag)}
+        </a>
+      ) : null}
+      {task.pullRequestUrl ? (
+        <a
+          href={task.pullRequestUrl}
+          className="text-foreground underline underline-offset-2"
+          target="_blank"
+          rel="noreferrer"
+        >
+          {t.task.pullRequest}
+        </a>
+      ) : null}
+    </>
+  )
+}
+
+/** The head of the task: one sheet with the tabs as its last line when tabbed, the page's heading otherwise. */
+function TaskHead({
+  task,
+  above,
+  tabs,
+}: {
+  task: TaskDetail['task']
+  above?: ReactNode
+  /** The tabs, given only when the head is the sheet that holds them. */
+  tabs?: ReactNode
+}) {
+  if (tabs) {
+    return (
+      // One sheet for the whole head, as every block of the factory: a strip that says which task and
+      // where it is, its name and facts, and the tabs as the sheet's last line.
+      <header className="-mx-3 shrink-0 border-b border-border bg-card">
+        <div className="flex items-center gap-3 border-b border-border bg-muted/40 px-4 py-2 text-sm text-muted-foreground">
+          <TaskPlace task={task} />
+          <span className="ml-auto flex shrink-0 items-center">{above}</span>
+        </div>
+        <div className="px-4 py-3">
+          <h1 className="line-clamp-2 text-[15px] font-semibold leading-snug tracking-tight">
+            {task.title}
+          </h1>
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+            <TaskFacts task={task} />
+          </div>
+        </div>
+        {tabs}
+      </header>
+    )
+  }
+  return (
+    <div>
+      <PageHeader title={task.title} above={above} />
+      <div className="-mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
+        <TaskPlace task={task} />
+        <TaskFacts task={task} />
+      </div>
+    </div>
+  )
+}
+
+/** What the agent asked the owner, and what was answered. Nothing when it asked nothing. */
+function Questions({ questions }: { questions: TaskDetail['questions'] }) {
+  const { t } = useCopy()
+  if (questions.length === 0) return null
+  return (
+    <Surface title={t.task.questions} icon={CircleHelp} count={questions.length}>
+      <Rows>
+        {questions.map((q) => (
+          <Row
+            key={q.id}
+            lead={<RowIcon icon={CircleHelp} tone={q.answer ? 'neutral' : 'warning'} />}
+          >
+            <span className={`block whitespace-pre-wrap text-sm ${READABLE}`}>{q.body}</span>
+            <span className={`mt-1 block text-[13px] text-muted-foreground ${READABLE}`}>
+              {q.answer ? t.task.answered(q.answeredBy ?? '', q.answer) : t.task.replyHint}
+            </span>
+          </Row>
+        ))}
+      </Rows>
+    </Surface>
+  )
+}
+
+/** The pre-releases and releases the task went out in. Nothing before the first. */
+function Deliveries({ deliveries }: { deliveries: TaskDetail['deliveries'] }) {
+  const { t } = useCopy()
+  if (deliveries.length === 0) return null
+  return (
+    <Surface title={t.task.deliveries} icon={PackageCheck} count={deliveries.length}>
+      <Rows>
+        {deliveries.map((d) => (
+          <Row
+            key={d.id}
+            lead={<RowIcon icon={d.kind === 'release' ? Rocket : PackageCheck} tone="success" />}
+          >
+            <span className="block truncate text-sm">
+              <span className="font-medium">
+                {d.kind === 'release' ? t.task.deliveryRelease : t.task.deliveryPreRelease}
+              </span>{' '}
+              <a
+                href={d.url}
+                className="text-foreground underline underline-offset-2"
+                target="_blank"
+                rel="noreferrer"
+              >
+                {d.tag}
+              </a>
+            </span>{' '}
+            <span className="block truncate font-mono text-[11px] text-muted-foreground">
+              {t.task.deliveryMeta(shortSha(d.sha), d.actor, ago(d.at, Date.now(), t.time))}
+            </span>
+          </Row>
+        ))}
+      </Rows>
+    </Surface>
+  )
+}
+
+/** Every agent pass of the task as a table: who ran, with what, and what it cost. Nothing before the first. */
+function Runs({ runs }: { runs: RunView[] }) {
+  const { t } = useCopy()
+  if (runs.length === 0) return null
+  return (
+    <Surface title={t.task.executions} icon={Bot} count={runs.length}>
+      <div className="overflow-x-auto">
+        <table className={TABLE.table}>
+          <thead className={TABLE.head}>
+            <tr>
+              <th className={TABLE.th}>{t.task.role}</th>
+              <th className={TABLE.th}>{t.task.agent}</th>
+              <th className={TABLE.th}>{t.task.model}</th>
+              <th className={TABLE.th}>{t.task.attempt}</th>
+              <th className={TABLE.th}>{t.task.tokens}</th>
+              <th className={TABLE.th}>{t.task.cost}</th>
+              <th className={TABLE.th}>{t.task.time}</th>
+              <th className={TABLE.th}>{t.task.result}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {runs.map((r) => (
+              <tr key={r.id} className={TABLE.row}>
+                <td className={TABLE.td}>{r.role}</td>
+                <td className={TABLE.td}>
+                  <span className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                    <AgentIcon agent={r.harness} size="sm" />
+                    {r.harness}
+                  </span>
+                </td>
+                <td className={`${TABLE.td} whitespace-nowrap font-medium`}>
+                  {modelOf(r, t.task)}
+                </td>
+                <td className={`${TABLE.td} font-mono tabular-nums`}>{r.attempt}</td>
+                <td className={`${TABLE.td} whitespace-nowrap font-mono tabular-nums`}>
+                  {r.tokensIn === null && r.tokensOut === null ? (
+                    <span className="font-sans text-muted-foreground">{t.task.notReported}</span>
+                  ) : (
+                    `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
+                  )}
+                </td>
+                <td className={`${TABLE.td} font-mono tabular-nums`}>
+                  {r.costUsd === null ? (
+                    <span className="font-sans text-muted-foreground">{t.task.notReported}</span>
+                  ) : (
+                    money(r.costUsd)
+                  )}
+                </td>
+                <td className={`${TABLE.td} whitespace-nowrap font-mono tabular-nums`}>
+                  {t.task.seconds((r.durationMs / 1000).toFixed(1))}
+                </td>
+                <td className={`${TABLE.td} whitespace-nowrap`}>
+                  {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Surface>
+  )
+}
+
+/** The checks that ran on the task with what each kept, and the proofs of its tests. */
+function Evidence({ detail }: { detail: TaskDetail }) {
+  const { t } = useCopy()
+  return (
+    <Surface title={t.task.evidence} icon={FlaskConical}>
+      {detail.evidence.length === 0 ? (
+        <Quiet>{t.task.noChecks}</Quiet>
+      ) : (
+        <Rows>
+          {detail.evidence.map((e) => (
+            <Row
+              key={e.id}
+              lead={<RowIcon icon={FlaskConical} tone={e.passed ? 'success' : 'destructive'} />}
+              trail={<Pass ok={e.passed} />}
+              below={
+                e.artifacts.length > 0 || e.omitted.length > 0 || e.output ? (
+                  <div className="pl-10 text-xs">
+                    {e.artifacts.length > 0 || e.omitted.length > 0 ? (
+                      <div>
+                        <span className="text-muted-foreground">{t.task.artifacts}</span>
+                        <ul>
+                          {e.artifacts.map((a) => (
+                            <li key={a.id}>
+                              <a
+                                href={`/api/panel/tasks/${detail.task.id}/artifacts/${a.id}`}
+                                download={a.path.split('/').pop()}
+                                className="underline"
+                              >
+                                {a.path}
+                              </a>{' '}
+                              <span className="text-muted-foreground">
+                                {t.task.artifactSize(Math.ceil(a.sizeBytes / 1024))}
+                              </span>
+                            </li>
+                          ))}
+                          {e.omitted.map((reason) => (
+                            <li key={reason} className="text-muted-foreground">
+                              {t.task.artifactOmitted(reason)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {e.output ? (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-muted-foreground">
+                          {t.task.output}
+                        </summary>
+                        <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-muted p-2 text-foreground">
+                          {e.output}
+                        </pre>
+                      </details>
+                    ) : null}
+                  </div>
+                ) : undefined
+              }
+            >
+              <code className="block break-words text-[13px]">{e.command}</code>{' '}
+              <span className="block font-mono text-[11px] text-muted-foreground">
+                {t.task.evidenceMeta(shortSha(e.sha), e.exitCode, (e.durationMs / 1000).toFixed(1))}
+              </span>
+            </Row>
+          ))}
+        </Rows>
+      )}
+      {(detail.testProofs ?? []).length > 0 ? (
+        <Rows label={t.task.testProof}>
+          {(detail.testProofs ?? []).map((p) => (
+            <Row
+              key={p.id}
+              title={t.task.testProofOutcome[p.outcome]}
+              meta={t.task.testProofMeta(shortSha(p.sha), p.files.length)}
+              detail={p.detail ? <code className="text-xs">{p.detail}</code> : undefined}
+            />
+          ))}
+        </Rows>
+      ) : null}
+    </Surface>
+  )
+}
+
+/** What each round of review said of the work, with the model that said it. */
+function Reviews({ detail }: { detail: TaskDetail }) {
+  const { t } = useCopy()
+  return (
+    <Surface title={t.task.reviews} icon={Eye}>
+      {detail.reviews.length === 0 ? (
+        <Quiet>{t.task.notReviewed}</Quiet>
+      ) : (
+        <Rows>
+          {detail.reviews.map((r) => (
+            <Row
+              key={r.id}
+              lead={<AgentIcon agent={r.reviewer} />}
+              title={t.task.reviewLine(r.round, r.verdict)}
+              meta={
+                <>
+                  {t.task.reviewedOn(r.reviewer, shortSha(r.sha))}
+                  {modelLine(detail.runs, detail.timeline, r, t.task)}
+                </>
+              }
+              detail={<span className={`block ${READABLE}`}>{r.summary}</span>}
+              below={r.findings.length > 0 ? <Findings findings={r.findings} /> : undefined}
+            />
+          ))}
+        </Rows>
+      )}
+    </Surface>
+  )
+}
+
+/** What each security review said of the work. */
+function SecurityReviews({ reviews }: { reviews: TaskDetail['securityReviews'] }) {
+  const { t } = useCopy()
+  return (
+    <Surface title={t.task.securityReviews} icon={ShieldCheck}>
+      {reviews.length === 0 ? (
+        <Quiet>{t.task.noSecurityReview}</Quiet>
+      ) : (
+        <Rows>
+          {reviews.map((r) => (
+            <Row
+              key={r.id}
+              lead={r.harness ? <AgentIcon agent={r.harness} /> : <RowIcon icon={ShieldCheck} />}
+              title={t.task.securityLine(r.round, r.verdict, r.outcome)}
+              meta={[r.harness, r.model, r.effort, shortSha(r.sha)].filter(Boolean).join(' · ')}
+              detail={<span className={`block ${READABLE}`}>{r.summary}</span>}
+              below={r.findings.length > 0 ? <Findings findings={r.findings} /> : undefined}
+            />
+          ))}
+        </Rows>
+      )}
+    </Surface>
+  )
+}
 
 /**
  * Everything about one task: where it is, what it cost, what it did, and what a person can do. It is
@@ -26,8 +546,14 @@ export function TaskDetailView({
   id,
   above,
   focusRun,
+  workbench = false,
+  tabbed = false,
 }: {
   id: number
+  /** On a page of its own and a wide screen: the conversation beside the rest, which is in tabs. */
+  workbench?: boolean
+  /** In a column that has a height of its own: one tab at a time, the conversation first, each filling it. */
+  tabbed?: boolean
   above?: ReactNode
   /** The pass to open the conversation at. */
   focusRun?: number
@@ -36,338 +562,113 @@ export function TaskDetailView({
   const resource = useResource<TaskDetail>(`/api/panel/tasks/${id}`, { only: id })
   const detail = resource.data
   const transcript = useTranscript(id)
+  const wide = useWidth() === 'expanded'
+  const [picked, setTab] = useState<TaskTab>()
+  const { layout, beside, split, tab, talking } = arrange({ workbench, wide, tabbed, picked })
 
   if (resource.error) return <p className="text-sm text-destructive">{resource.error}</p>
   if (!detail) return <p className="text-sm text-muted-foreground">{t.task.loading}</p>
   const { task } = detail
 
+  const counts: Record<TaskTab, number> = {
+    conversation: 0,
+    activity: detail.timeline.length,
+    // What the pull request changes is read from GitHub only once the tab is opened, so it has no count.
+    changes: 0,
+    runs: detail.runs.length,
+    evidence: detail.evidence.length,
+    reviews: detail.reviews.length + detail.securityReviews.length,
+  }
+
+  const tabs = <TaskTabs tabbed={tabbed} tab={tab} counts={counts} onPick={setTab} />
+
   return (
-    <div className="space-y-6">
-      <div>
-        {above}
-        <h1 className="mt-1 text-xl font-semibold">{task.title}</h1>
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-          <span>
-            {task.repository} {itemName(task)}
-          </span>
-          <StageBadge
-            stage={task.stage}
-            integrated={task.integrated}
-            waitingForChecks={task.waitingForChecks}
-            resolved={task.resolved}
-            retryable={task.retryable}
+    <div data-layout={layout} className={FRAME[layout]}>
+      <div className={talking ? `${WELL} min-h-0 flex-1` : MAIN[layout]}>
+        <TaskHead task={task} above={above} tabs={tabbed ? tabs : undefined} />
+
+        <TaskActions detail={detail} onDone={resource.reload} />
+        <Questions questions={detail.questions} />
+
+        <div className={threadClass(split, tabbed, talking)}>
+          <Conversation
+            detail={detail}
+            events={transcript.events}
+            error={transcript.error}
+            focusRun={focusRun}
+            tall={split}
+            untitled={split}
+            onDone={resource.reload}
           />
-          <span>{money(task.costUsd)}</span>
-          {task.attempts > 0 ? <span>{t.task.attempts(task.attempts)}</span> : null}
-          {task.headSha ? <code>{shortSha(task.headSha)}</code> : null}
-          {task.preRelease ? (
-            <a
-              href={task.preRelease.url}
-              className="text-foreground underline underline-offset-2"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t.task.preRelease(task.preRelease.tag)}
-            </a>
-          ) : null}
-          {task.release ? (
-            <a
-              href={task.release.url}
-              className="font-medium text-foreground underline underline-offset-2"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t.task.release(task.release.tag)}
-            </a>
-          ) : null}
-          {task.pullRequestUrl ? (
-            <a
-              href={task.pullRequestUrl}
-              className="text-foreground underline underline-offset-2"
-              target="_blank"
-              rel="noreferrer"
-            >
-              {t.task.pullRequest}
-            </a>
-          ) : null}
         </div>
       </div>
+      <aside aria-label={t.task.tabs.label} className={talking ? 'hidden' : SIDE[layout]}>
+        {beside ? tabs : null}
+        <TaskPane id="activity" active={tab} split={split}>
+          <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
-      <TaskActions detail={detail} onDone={resource.reload} />
-      {detail.questions.length > 0 ? (
-        <section aria-label={t.task.questions}>
-          <h2 className="mb-2 text-sm font-semibold">{t.task.questions}</h2>
-          <ul className="space-y-3">
-            {detail.questions.map((q) => (
-              <li
-                key={q.id}
-                className="rounded-lg border border-warning/40 bg-warning/10 p-3 text-sm"
-              >
-                <p className="whitespace-pre-wrap">{q.body}</p>
-                <p className="mt-2 text-foreground">
-                  {q.answer ? t.task.answered(q.answeredBy ?? '', q.answer) : t.task.replyHint}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+          {detail.coordinatorActions.length > 0 ? (
+            <Surface title={t.coordinator.sectionTitle} icon={Workflow}>
+              <CoordinatorActions actions={detail.coordinatorActions} />
+            </Surface>
+          ) : null}
 
-      <Conversation
-        detail={detail}
-        events={transcript.events}
-        error={transcript.error}
-        focusRun={focusRun}
-        onDone={resource.reload}
-      />
+          <Deliveries deliveries={detail.deliveries} />
 
-      <WatchPanel watches={detail.watches} onDone={resource.reload} />
+          <Surface title={t.task.timeline} icon={History}>
+            <ol className="divide-y divide-border">
+              {detail.timeline.map((event) => (
+                <Row
+                  key={event.id}
+                  title={event.stage}
+                  detail={describeEvent(event, t.events) || undefined}
+                  trail={ago(event.at, Date.now(), t.time)}
+                />
+              ))}
+            </ol>
+          </Surface>
+        </TaskPane>
+        <TaskPane id="changes" active={tab} split={split}>
+          <Changes
+            task={task}
+            active={split && tab === 'changes'}
+            canSendBack={actionsOf(detail).canSendBack}
+            onDone={resource.reload}
+          />
+        </TaskPane>
+        <TaskPane id="runs" active={tab} split={split}>
+          <Runs runs={detail.runs} />
+        </TaskPane>
+        <TaskPane id="evidence" active={tab} split={split}>
+          <Evidence detail={detail} />
 
-      {detail.coordinatorActions.length > 0 ? (
-        <section aria-label={t.coordinator.sectionTitle}>
-          <h2 className="mb-2 text-sm font-semibold">{t.coordinator.sectionTitle}</h2>
-          <CoordinatorActions actions={detail.coordinatorActions} />
-        </section>
-      ) : null}
+          <PlanSection plans={detail.plans} />
+        </TaskPane>
+        <TaskPane id="reviews" active={tab} split={split}>
+          <Reviews detail={detail} />
 
-      {detail.deliveries.length > 0 ? (
-        <section aria-label={t.task.deliveries}>
-          <h2 className="mb-2 text-sm font-semibold">{t.task.deliveries}</h2>
-          <ul className="space-y-1 text-sm">
-            {detail.deliveries.map((d) => (
-              <li key={d.id}>
-                <span className="font-medium">
-                  {d.kind === 'release' ? t.task.deliveryRelease : t.task.deliveryPreRelease}
-                </span>{' '}
-                <a
-                  href={d.url}
-                  className="text-foreground underline underline-offset-2"
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  {d.tag}
-                </a>{' '}
-                <span className="text-xs text-muted-foreground">
-                  {t.task.deliveryMeta(shortSha(d.sha), d.actor, ago(d.at, Date.now(), t.time))}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      <section aria-label={t.task.timeline}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.timeline}</h2>
-        <ol className="space-y-1 border-l border-border pl-4">
-          {detail.timeline.map((event) => (
-            <li key={event.id} className="text-sm">
-              <span className="font-medium">{event.stage}</span>{' '}
-              <span className="text-xs text-muted-foreground">
-                {ago(event.at, Date.now(), t.time)}
-              </span>
-              {describeEvent(event, t.events) ? (
-                <div className="whitespace-pre-wrap text-muted-foreground">
-                  {describeEvent(event, t.events)}
-                </div>
-              ) : null}
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      {detail.runs.length > 0 ? (
-        <section aria-label={t.task.executions}>
-          <h2 className="mb-2 text-sm font-semibold">{t.task.executions}</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs text-muted-foreground">
-                <tr>
-                  <th className="py-1 pr-3">{t.task.role}</th>
-                  <th className="py-1 pr-3">{t.task.agent}</th>
-                  <th className="py-1 pr-3">{t.task.model}</th>
-                  <th className="py-1 pr-3">{t.task.attempt}</th>
-                  <th className="py-1 pr-3">{t.task.tokens}</th>
-                  <th className="py-1 pr-3">{t.task.cost}</th>
-                  <th className="py-1 pr-3">{t.task.time}</th>
-                  <th className="py-1 pr-3">{t.task.result}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {detail.runs.map((r) => (
-                  <tr key={r.id} className="border-t border-border">
-                    <td className="py-1 pr-3">{r.role}</td>
-                    <td className="py-1 pr-3">{r.harness}</td>
-                    <td className="py-1 pr-3">{modelOf(r, t.task)}</td>
-                    <td className="py-1 pr-3">{r.attempt}</td>
-                    <td className="py-1 pr-3">
-                      {r.tokensIn === null && r.tokensOut === null ? (
-                        <span className="text-muted-foreground">{t.task.notReported}</span>
-                      ) : (
-                        `${r.tokensIn ?? '?'} / ${r.tokensOut ?? '?'}`
-                      )}
-                    </td>
-                    <td className="py-1 pr-3">
-                      {r.costUsd === null ? (
-                        <span className="text-muted-foreground">{t.task.notReported}</span>
-                      ) : (
-                        money(r.costUsd)
-                      )}
-                    </td>
-                    <td className="py-1 pr-3">
-                      {t.task.seconds((r.durationMs / 1000).toFixed(1))}
-                    </td>
-                    <td className="py-1 pr-3">
-                      {r.quota ? t.task.outOfQuota : r.ok ? t.task.finished : t.task.failed}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      ) : null}
-
-      <section aria-label={t.task.evidence}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.evidence}</h2>
-        {detail.evidence.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.task.noChecks}</p>
-        ) : (
-          <ul className="space-y-2">
-            {detail.evidence.map((e) => (
-              <li key={e.id} className="rounded border border-border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-3">
-                  <code>{e.command}</code>
-                  <Pass ok={e.passed} />
-                  <span className="text-xs text-muted-foreground">
-                    {t.task.evidenceMeta(
-                      shortSha(e.sha),
-                      e.exitCode,
-                      (e.durationMs / 1000).toFixed(1),
-                    )}
-                  </span>
-                </div>
-                {e.artifacts.length > 0 || e.omitted.length > 0 ? (
-                  <div className="mt-2 text-xs">
-                    <span className="text-muted-foreground">{t.task.artifacts}</span>
-                    <ul>
-                      {e.artifacts.map((a) => (
-                        <li key={a.id}>
-                          <a
-                            href={`/api/panel/tasks/${detail.task.id}/artifacts/${a.id}`}
-                            download={a.path.split('/').pop()}
-                            className="underline"
-                          >
-                            {a.path}
-                          </a>{' '}
-                          <span className="text-muted-foreground">
-                            {t.task.artifactSize(Math.ceil(a.sizeBytes / 1024))}
-                          </span>
-                        </li>
-                      ))}
-                      {e.omitted.map((reason) => (
-                        <li key={reason} className="text-muted-foreground">
-                          {t.task.artifactOmitted(reason)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {e.output ? (
-                  <details className="mt-2">
-                    <summary className="cursor-pointer text-xs text-muted-foreground">
-                      {t.task.output}
-                    </summary>
-                    <pre className="mt-1 max-h-64 overflow-auto rounded bg-muted p-2 text-xs text-foreground">
-                      {e.output}
-                    </pre>
-                  </details>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-        {(detail.testProofs ?? []).length > 0 ? (
-          <ul aria-label={t.task.testProof} className="mt-2 space-y-1">
-            {(detail.testProofs ?? []).map((p) => (
-              <li key={p.id} className="rounded border border-border bg-card p-3 text-sm">
-                <span className="font-medium">{t.task.testProofOutcome[p.outcome]}</span>{' '}
-                <span className="text-xs text-muted-foreground">
-                  {t.task.testProofMeta(shortSha(p.sha), p.files.length)}
-                </span>
-                {p.detail ? <code className="ml-2 text-xs">{p.detail}</code> : null}
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </section>
-
-      <PlanSection plans={detail.plans} />
-
-      <section aria-label={t.task.reviews}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.reviews}</h2>
-        {detail.reviews.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.task.notReviewed}</p>
-        ) : (
-          <ul className="space-y-2">
-            {detail.reviews.map((r) => (
-              <li key={r.id} className="rounded border border-border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-medium">{t.task.reviewLine(r.round, r.verdict)}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {t.task.reviewedOn(r.reviewer, shortSha(r.sha))}
-                    {modelLine(detail.runs, detail.timeline, r, t.task)}
-                  </span>
-                </div>
-                <p className="mt-1 text-foreground">{r.summary}</p>
-                {r.findings.length > 0 ? (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
-                    {r.findings.map((f, i) => (
-                      <li key={i}>
-                        <strong>{f.severity}</strong>
-                        {f.file ? <code> {f.file}</code> : null}: {f.issue}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section aria-label={t.task.securityReviews}>
-        <h2 className="mb-2 text-sm font-semibold">{t.task.securityReviews}</h2>
-        {detail.securityReviews.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.task.noSecurityReview}</p>
-        ) : (
-          <ul className="space-y-2">
-            {detail.securityReviews.map((r) => (
-              <li key={r.id} className="rounded border border-border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="font-medium">
-                    {t.task.securityLine(r.round, r.verdict, r.outcome)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {[r.harness, r.model, r.effort, shortSha(r.sha)].filter(Boolean).join(' · ')}
-                  </span>
-                </div>
-                <p className="mt-1 text-foreground">{r.summary}</p>
-                {r.findings.length > 0 ? (
-                  <ul className="mt-2 list-disc space-y-1 pl-5 text-foreground">
-                    {r.findings.map((f, i) => (
-                      <li key={i}>
-                        <strong>{f.severity}</strong>
-                        {f.file ? <code> {f.file}</code> : null}: {f.issue}
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          <SecurityReviews reviews={detail.securityReviews} />
+        </TaskPane>
+      </aside>
     </div>
+  )
+}
+
+/** What a review found, one line each, under its row. */
+function Findings({
+  findings,
+}: {
+  findings: { severity: string; file?: string | null; issue: string }[]
+}) {
+  return (
+    <ul className={`list-disc space-y-1 pl-14 text-sm text-foreground ${READABLE}`}>
+      {findings.map((f, i) => (
+        <li key={i}>
+          <strong>{f.severity}</strong>
+          {f.file ? <code> {f.file}</code> : null}: {f.issue}
+        </li>
+      ))}
+    </ul>
   )
 }
 

@@ -267,7 +267,7 @@ describe('the agents page', () => {
     const article = await screen.findByRole('article', { name: 'Construtor' })
     const first = within(article).getByRole('region', { name: 'Primeira tentativa' })
     expect(first.textContent).toContain('Work on ‹repositório› and ‹branch›.')
-    expect(first.querySelectorAll('pre span.bg-sky-400\\/15')).toHaveLength(2)
+    expect(first.querySelectorAll('pre span.bg-info\\/15')).toHaveLength(2)
     expect(first.textContent).toContain('(2 lugares)')
     expect(
       within(article)
@@ -334,7 +334,7 @@ describe('the agents page', () => {
     const article = await screen.findByRole('article', { name: 'Assistente do chat' })
     expect(screen.queryByRole('button', { name: 'Revisor' })).toBeNull()
     expect(screen.queryByRole('region', { name: 'Constroem o código' })).toBeNull()
-    expect(article.querySelector('span.bg-yellow-300\\/30')?.textContent).toBe('Portuguese')
+    expect(article.querySelector('span.bg-warning\\/30')?.textContent).toBe('Portuguese')
   })
 
   it('says so when nothing matches', async () => {

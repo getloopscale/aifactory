@@ -86,7 +86,7 @@ export function Assist({
       {proposal && !working ? (
         <section
           aria-label={t.assist.suggestion}
-          className="space-y-2 rounded-lg border border-border bg-muted p-3"
+          className="space-y-2 rounded-xl border border-border bg-muted/40 px-4 py-3"
         >
           {proposal.title ? <p className="font-medium text-foreground">{proposal.title}</p> : null}
           <p className="whitespace-pre-wrap text-foreground">{proposal.text}</p>

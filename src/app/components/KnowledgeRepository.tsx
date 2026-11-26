@@ -1,10 +1,13 @@
 import { Button, Input } from '@usetheo/ui'
+import { CircleHelp, Lightbulb } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { GapsView, KnowledgeChoice, KnowledgeStatus } from '../../shared/knowledge'
 import type { RepositoriesView } from '../../shared/panel'
 import { get, post, put } from '../lib/api'
 import { useCopy } from '../lib/copy'
+
+import { READABLE, RowIcon } from './ui/Surface'
 
 const short = (sha: string | null) => (sha ? sha.slice(0, 7) : '—')
 const when = (iso: string | null, language: string, never: string) =>
@@ -96,12 +99,11 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
       : choices
 
   return (
-    <section
-      aria-label={k.label}
-      className="space-y-3 rounded-lg border border-border bg-card p-3 text-sm"
-    >
-      <p className="text-muted-foreground">{k.about(status?.memoryBranch ?? 'factory-memory')}</p>
-      <div className="flex flex-wrap items-end gap-2">
+    <section aria-label={k.label} className="space-y-3 rounded-md bg-muted/40 p-3 text-sm">
+      <p className={`text-muted-foreground ${READABLE}`}>
+        {k.about(status?.memoryBranch ?? 'factory-memory')}
+      </p>
+      <div className={`flex flex-wrap items-end gap-2 ${READABLE}`}>
         <label className="min-w-64 flex-1">
           <span className="text-muted-foreground">{k.repository}</span>
           <select
@@ -148,7 +150,7 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
       ) : null}
 
       {status?.repository ? (
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <dt>{k.rules}</dt>
           <dd className="font-mono">
             {status.readBranch ?? status.branch ?? k.defaultBranchName} @{' '}
@@ -203,16 +205,20 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
       ) : null}
       {gaps.gaps.length > 0 ? (
         <div>
-          <p className="font-medium">{k.gapsTitle}</p>
-          <p className="text-muted-foreground">{k.gapsAbout}</p>
-          <ul className="mt-2 flex flex-col gap-2">
+          <p className="flex items-center gap-2 font-semibold">
+            <span aria-hidden className="size-2.5 shrink-0 rounded-full bg-warning" />
+            {k.gapsTitle}
+          </p>
+          <p className={`text-xs text-muted-foreground ${READABLE}`}>{k.gapsAbout}</p>
+          <ul className="mt-2 divide-y divide-border border-t border-border">
             {gaps.gaps.map((gap) => (
-              <li key={gap.id} className="flex flex-wrap items-center gap-3">
+              <li key={gap.id} className="flex flex-wrap items-center gap-3 py-2.5">
+                <RowIcon icon={CircleHelp} tone="warning" />
                 <div className="min-w-0 flex-1">
                   <p>
                     <span className="font-mono">{gap.repository}</span>: {gap.question}
                   </p>
-                  <p className="text-muted-foreground">
+                  <p className="font-mono text-[11px] text-muted-foreground">
                     {k.askedBy(gap.tasks.length)}{' '}
                     {gap.tasks.map((t) => (
                       <a
@@ -248,18 +254,24 @@ export function KnowledgeRepository({ onChanged }: { onChanged: () => void }) {
       ) : null}
       {gaps.candidates.length > 0 ? (
         <div>
-          <p className="font-medium">{k.candidatesTitle}</p>
-          <p className="text-muted-foreground">{k.candidatesAbout}</p>
-          <ul className="mt-2 flex flex-col gap-2">
+          <p className="flex items-center gap-2 font-semibold">
+            <span aria-hidden className="size-2.5 shrink-0 rounded-full bg-info" />
+            {k.candidatesTitle}
+          </p>
+          <p className={`text-xs text-muted-foreground ${READABLE}`}>{k.candidatesAbout}</p>
+          <ul className="mt-2 divide-y divide-border border-t border-border">
             {gaps.candidates.map((c) => (
-              <li key={c.id}>
-                <p>
-                  <span className="font-mono">
-                    {c.repository}#{c.issueNumber}
-                  </span>
-                  : {c.question}
-                </p>
-                <p className="text-muted-foreground">{c.answer}</p>
+              <li key={c.id} className="flex items-start gap-3 py-2.5">
+                <RowIcon icon={Lightbulb} tone="info" />
+                <div className="min-w-0 flex-1">
+                  <p>
+                    <span className="font-mono">
+                      {c.repository}#{c.issueNumber}
+                    </span>
+                    : {c.question}
+                  </p>
+                  <p className="text-muted-foreground">{c.answer}</p>
+                </div>
               </li>
             ))}
           </ul>

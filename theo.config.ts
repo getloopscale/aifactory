@@ -23,7 +23,9 @@ export default config()
   .appDir('src/app')
   .serverDir('src/server')
   .agentsDir('src/server/agents')
-  .set({ storage: storageFromEnv(), jobs: jobsFromEnv(), cron: cronFromEnv() })
+  // The panel has a theme of its own (`src/app/theme.ts`). TheoKit's automatic provider knows only the
+  // built-in themes and writes them over any other, so the layout mounts the provider and the styles itself.
+  .set({ storage: storageFromEnv(), jobs: jobsFromEnv(), cron: cronFromEnv(), ui: false })
   .build()
 
 /**

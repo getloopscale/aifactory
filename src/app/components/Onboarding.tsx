@@ -1,4 +1,13 @@
 import { Alert, Badge, Button, Input, Stepper, type StepperStepData } from '@usetheo/ui'
+import {
+  CircleAlert,
+  CircleCheck,
+  FolderGit2,
+  Lock,
+  type LucideIcon,
+  Plug,
+  Power,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
@@ -16,51 +25,67 @@ import { useResource } from '../lib/live'
 
 import { NewJob } from './NewJob'
 import { RepositoryDoctor } from './RepositoryDoctor'
+import { PageHeader, Quiet, READABLE, Row, RowIcon, Rows, STACK, Surface } from './ui/Surface'
 
 const STEP_IDS = ['connect', 'choose', 'enable'] as const
+
+const STEP_ICON: Record<(typeof STEP_IDS)[number], LucideIcon> = {
+  connect: Plug,
+  choose: FolderGit2,
+  enable: Power,
+}
 
 /** Each step is done only when it and every step before it are. */
 export const inOrder = (done: boolean[]): boolean[] =>
   done.map((_, i) => done.slice(0, i + 1).every(Boolean))
+
+const TEXT = 'px-4 py-3 text-sm text-muted-foreground'
 
 /** The text and the link of one thing GitHub still needs. */
 function Pending({ item }: { item: SetupItem }) {
   const external = item.link?.href.startsWith('http')
   const style = 'text-foreground underline underline-offset-2'
   return (
-    <li className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3 text-sm">
-      <span className="font-medium">{item.label}</span>
-      <span className="text-muted-foreground">{item.detail}</span>
-      {item.link && external ? (
-        <a href={item.link.href} target="_blank" rel="noreferrer" className={style}>
-          {item.link.label}
-        </a>
-      ) : item.link ? (
-        <Link to={item.link.href} className={style}>
-          {item.link.label}
-        </Link>
-      ) : null}
-    </li>
+    <Row
+      lead={<RowIcon icon={CircleAlert} tone="warning" />}
+      title={item.label}
+      detail={item.detail}
+      trail={
+        item.link && external ? (
+          <a href={item.link.href} target="_blank" rel="noreferrer" className={style}>
+            {item.link.label}
+          </a>
+        ) : item.link ? (
+          <Link to={item.link.href} className={style}>
+            {item.link.label}
+          </Link>
+        ) : null
+      }
+    />
   )
 }
 
 function Connect({ report }: { report: SetupReport | undefined }) {
   const { t } = useCopy()
-  if (!report) return <p className="text-muted-foreground">{t.onboarding.connect.loading}</p>
+  if (!report) return <Quiet>{t.onboarding.connect.loading}</Quiet>
   const pending = report.items.filter((i) => i.status !== 'ok')
   return (
-    <div className="space-y-3">
-      <p className="text-muted-foreground">{t.onboarding.connect.about}</p>
+    <>
+      <p className={`${TEXT} ${READABLE}`}>{t.onboarding.connect.about}</p>
       {report.ready ? (
-        <Alert intent="success" title={t.onboarding.connect.ready} />
+        <div className="px-4 pb-4">
+          <Alert intent="success" title={t.onboarding.connect.ready} />
+        </div>
       ) : (
-        <ul className="space-y-2">
-          {pending.map((item) => (
-            <Pending key={item.id} item={item} />
-          ))}
-        </ul>
+        <div className="border-t border-border">
+          <Rows>
+            {pending.map((item) => (
+              <Pending key={item.id} item={item} />
+            ))}
+          </Rows>
+        </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -81,9 +106,14 @@ function Choose({
   const [query, setQuery] = useState('')
   const [busy, setBusy] = useState<string>()
   const [message, setMessage] = useState<string>()
-  if (!view) return <p className="text-muted-foreground">{t.onboarding.choose.loading}</p>
+  if (!view) return <Quiet>{t.onboarding.choose.loading}</Quiet>
   if (enabled)
-    return <p className="text-foreground">{t.onboarding.choose.chosen(enabled.fullName)}</p>
+    return (
+      <p className="flex items-center gap-2 px-4 py-3 text-sm text-foreground">
+        <CircleCheck aria-hidden className="size-4 shrink-0 stroke-success" />
+        {t.onboarding.choose.chosen(enabled.fullName)}
+      </p>
+    )
 
   const offered = view.repositories.filter(
     (r) => r.reachable && r.fullName.toLowerCase() !== hidden?.toLowerCase(),
@@ -104,54 +134,60 @@ function Choose({
   }
 
   return (
-    <div className="space-y-3">
-      <p className="text-muted-foreground">{t.onboarding.choose.about}</p>
+    <>
+      <p className={`${TEXT} ${READABLE}`}>{t.onboarding.choose.about}</p>
       {offered.length === 0 ? (
-        <p className="text-muted-foreground">{t.onboarding.choose.empty}</p>
+        <Quiet>{t.onboarding.choose.empty}</Quiet>
       ) : (
         <>
-          <Input
-            aria-label={t.onboarding.choose.search}
-            placeholder={t.onboarding.choose.search}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full"
-          />
+          <div className={`px-4 pb-3 ${READABLE}`}>
+            <Input
+              aria-label={t.onboarding.choose.search}
+              placeholder={t.onboarding.choose.search}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="w-full"
+            />
+          </div>
           {shown.length === 0 ? (
-            <p className="text-muted-foreground">{t.onboarding.choose.none}</p>
+            <Quiet>{t.onboarding.choose.none}</Quiet>
           ) : (
-            <ul aria-label={t.onboarding.steps.choose} className="space-y-2">
-              {shown.map((repo) => (
-                <li
-                  key={repo.fullName}
-                  className="flex items-center gap-3 rounded-lg border border-border bg-card p-3"
-                >
-                  <span className="font-medium">{repo.fullName}</span>
-                  <Badge variant="default">
-                    {repo.private ? t.onboarding.choose.private : t.onboarding.choose.public}
-                  </Badge>
-                  <Button
-                    size="sm"
-                    className="ml-auto"
-                    disabled={readOnly || busy !== undefined}
-                    onClick={() => void pick(repo)}
-                  >
-                    {busy === repo.fullName
-                      ? t.onboarding.choose.picking
-                      : t.onboarding.choose.pick}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+            <div className="border-t border-border">
+              <Rows label={t.onboarding.steps.choose}>
+                {shown.map((repo) => (
+                  <Row
+                    key={repo.fullName}
+                    lead={<RowIcon icon={repo.private ? Lock : FolderGit2} />}
+                    title={repo.fullName}
+                    trail={
+                      <>
+                        <Badge variant="default">
+                          {repo.private ? t.onboarding.choose.private : t.onboarding.choose.public}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          disabled={readOnly || busy !== undefined}
+                          onClick={() => void pick(repo)}
+                        >
+                          {busy === repo.fullName
+                            ? t.onboarding.choose.picking
+                            : t.onboarding.choose.pick}
+                        </Button>
+                      </>
+                    }
+                  />
+                ))}
+              </Rows>
+            </div>
           )}
         </>
       )}
       {message ? (
-        <p role="alert" className="text-destructive">
+        <p role="alert" className="px-4 py-3 text-sm text-destructive">
           {message}
         </p>
       ) : null}
-    </div>
+    </>
   )
 }
 
@@ -201,59 +237,65 @@ export function Onboarding() {
     status: complete[i] ? 'done' : i === current ? 'active' : 'pending',
   }))
 
+  const step = STEP_IDS[shown]!
   return (
-    <div className="mx-auto max-w-3xl space-y-4 p-6">
-      <h1 className="text-xl font-semibold">{t.onboarding.title}</h1>
-      <Stepper
-        label={t.onboarding.stepsLabel}
-        steps={steps}
-        orientation="horizontal"
-        stateLabels={t.onboarding.stepState}
-      />
-      <div className="flex gap-2">
-        {STEP_IDS.map((id, i) =>
-          complete[i] && i !== shown ? (
-            <Button key={id} size="sm" variant="secondary" onClick={() => setViewing(i)}>
-              {t.onboarding.reopen}: {t.onboarding.steps[id]}
-            </Button>
-          ) : null,
-        )}
-      </div>
-      {(setup.error ?? repos.error) ? (
-        <p className="text-sm text-destructive">{setup.error ?? repos.error}</p>
-      ) : null}
-      <section aria-label={t.onboarding.steps[STEP_IDS[shown]!]} className="space-y-3 text-sm">
-        <h2 className="text-base font-medium">{t.onboarding.steps[STEP_IDS[shown]!]}</h2>
-        {shown === 0 ? <Connect report={setup.data} /> : null}
-        {shown === 1 ? (
-          <Choose
-            view={knowledge === undefined ? undefined : repos.data}
-            hidden={knowledge ?? null}
-            enabled={chosen}
-            readOnly={readOnly}
-            onChanged={repos.reload}
+    <>
+      <PageHeader title={t.onboarding.title} />
+      <div className={STACK}>
+        <Surface padded>
+          <Stepper
+            label={t.onboarding.stepsLabel}
+            steps={steps}
+            orientation="horizontal"
+            stateLabels={t.onboarding.stepState}
           />
+          <div className="flex flex-wrap gap-2 empty:hidden">
+            {STEP_IDS.map((id, i) =>
+              complete[i] && i !== shown ? (
+                <Button key={id} size="sm" variant="secondary" onClick={() => setViewing(i)}>
+                  {t.onboarding.reopen}: {t.onboarding.steps[id]}
+                </Button>
+              ) : null,
+            )}
+          </div>
+        </Surface>
+        {(setup.error ?? repos.error) ? (
+          <p className="text-sm text-destructive">{setup.error ?? repos.error}</p>
         ) : null}
+        <Surface title={t.onboarding.steps[step]} icon={STEP_ICON[step]}>
+          {shown === 0 ? <Connect report={setup.data} /> : null}
+          {shown === 1 ? (
+            <Choose
+              view={knowledge === undefined ? undefined : repos.data}
+              hidden={knowledge ?? null}
+              enabled={chosen}
+              readOnly={readOnly}
+              onChanged={repos.reload}
+            />
+          ) : null}
+          {shown === 2 && chosen ? (
+            <>
+              <p className={`${TEXT} ${READABLE}`}>{t.onboarding.enable.about(chosen.fullName)}</p>
+              {notRead ? <Quiet>{t.onboarding.enable.notRead}</Quiet> : null}
+            </>
+          ) : null}
+        </Surface>
         {shown === 2 && chosen ? (
           <>
-            <p className="text-muted-foreground">{t.onboarding.enable.about(chosen.fullName)}</p>
             <RepositoryDoctor repo={chosen} onReport={setReport} />
-            {notRead ? (
-              <p className="text-muted-foreground">{t.onboarding.enable.notRead}</p>
-            ) : null}
             {complete[2] ? (
-              <div className="space-y-2">
-                <p className="text-foreground">{t.onboarding.enable.ready}</p>
+              <Surface padded>
+                <p className="text-sm text-foreground">{t.onboarding.enable.ready}</p>
                 <NewJob
                   repository={chosen.fullName}
                   label={t.onboarding.enable.firstJob}
                   onCreated={() => void navigate('/work')}
                 />
-              </div>
+              </Surface>
             ) : null}
           </>
         ) : null}
-      </section>
-    </div>
+      </div>
+    </>
   )
 }

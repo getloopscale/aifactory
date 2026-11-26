@@ -1,12 +1,11 @@
-import { Card as Surface, Table } from '@usetheo/ui'
+import { FlaskConical as FlaskIcon, ListTodo } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useSearchParams } from 'react-router'
 
 import {
   COLUMNS,
   mergeBreakdown,
   type MergeState,
-  type AgentSeen,
   type Column as ColumnId,
   type LeadTime,
   type LeadTimeStatus,
@@ -17,7 +16,6 @@ import { useCopy } from '../lib/copy'
 import { useWidth } from '../lib/media'
 import type { Copy } from '../lib/copy/en'
 import {
-  agentName,
   ago,
   duration,
   inQueueOrder,
@@ -31,6 +29,8 @@ import {
 } from '../lib/format'
 
 import { PriorityBadge, ReturnedBadge, StageBadge } from './Badges'
+import { AgentIcon } from './floor/AgentIcon'
+import { Surface, TABLE, TONE_DOT, type Tone } from './ui/Surface'
 
 /** The board's address with a task open in the side panel. */
 export const openTask = (id: number) => ({ pathname: '/work', search: `?task=${id}` })
@@ -65,7 +65,7 @@ function QueueLines({ queue }: { queue: QueueView }) {
   const { place, verdict } = queueWords(queue, t.board)
   return (
     <>
-      <div className="mt-1 flex items-start gap-1.5">
+      <div className="flex items-baseline gap-1.5">
         {queue.reasons?.priority != null ? (
           <PriorityBadge priority={queue.reasons.priority} />
         ) : null}
@@ -74,7 +74,7 @@ function QueueLines({ queue }: { queue: QueueView }) {
         </span>
       </div>
       {verdict ? (
-        <div className="mt-1 line-clamp-2 text-xs text-muted-foreground" title={verdict}>
+        <div className="line-clamp-2 text-xs text-muted-foreground" title={verdict}>
           {verdict}
         </div>
       ) : null}
@@ -83,65 +83,36 @@ function QueueLines({ queue }: { queue: QueueView }) {
 }
 
 /**
- * The color of each agent the factory ships with, from the theme's tokens: the harness is the first thing an owner
- * looks for on a card. It marks the panel (a stripe on its side, and its fill while the agent runs) and never the
- * text, since no brand color reads at 4.5 in both modes (see palette.test.ts). Any other agent is neutral.
- */
-const AGENT_TONE: Record<string, { stripe: string; lit: string }> = {
-  'claude-code': { stripe: 'bg-primary', lit: 'border-primary/40 bg-primary/10' },
-  codex: { stripe: 'bg-info', lit: 'border-info/40 bg-info/10' },
-}
-const NEUTRAL_TONE = { stripe: 'bg-muted-foreground', lit: 'border-border bg-muted/40' }
-
-/**
- * A panel on the card with a stripe of color on its side, which pulses while what it shows is at work. `label` is the
- * whole of it in one line, for a reader that does not see the layout.
+ * A panel on the card for who works on it, tinted while what it shows is at work. `label` is the whole of it in
+ * one line, for a reader that does not see the layout.
  */
 function Panel({
   label,
-  stripe,
-  surface,
-  live,
+  lit,
+  lead,
   children,
 }: {
   label: string
-  stripe: string
-  surface: string
-  live: boolean
+  /** Tinted while what it shows is at work. */
+  lit?: 'primary' | 'warning'
+  lead: ReactNode
   children: ReactNode
 }) {
   return (
     <div
       aria-label={label}
       title={label}
-      className={`mt-2 flex gap-2 rounded-md border px-2 py-1.5 text-xs ${surface}`}
+      className={`flex min-w-0 items-center gap-1.5 text-xs ${lit ? '-mx-1 rounded-md px-1 py-1' : ''} ${lit === 'primary' ? 'bg-primary/10' : lit === 'warning' ? 'bg-warning/10' : ''}`}
     >
-      <span
-        aria-hidden
-        className={`w-1 shrink-0 self-stretch rounded-full ${stripe} ${live ? 'animate-pulse' : ''}`}
-      />
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  )
-}
-
-/** The agent's name, larger than the rest of the card, and its model. */
-function AgentName({ seen }: { seen: AgentSeen }) {
-  return (
-    <div className="flex min-w-0 items-baseline gap-1.5">
-      <span className="shrink-0 text-[13px] font-semibold text-foreground">
-        {agentName(seen.agent)}
-      </span>
-      {seen.model ? (
-        <span className="min-w-0 truncate text-muted-foreground">{seen.model}</span>
-      ) : null}
+      {lead}
+      <div className="min-w-0 flex-1 truncate">{children}</div>
     </div>
   )
 }
 
 /**
- * Who works on the task: lit in the agent's color while it runs, with what it does; outlined, with its stripe still
- * in color, once it is done, with who worked on it last. The checks have no agent, and a panel of their own.
+ * Who works on the task: the agent's mark with its model, lit while it runs, with what it does; outlined once it
+ * is done, with who worked on it last. The checks have no agent, and a panel of their own.
  */
 function AgentPanel({ task }: { task: TaskCard }) {
   const { t } = useCopy()
@@ -150,29 +121,28 @@ function AgentPanel({ task }: { task: TaskCard }) {
     return (
       <Panel
         label={workingLine(step, t.board)}
-        stripe="bg-warning"
-        surface="border-warning/40 bg-warning/10"
-        live
+        lit="warning"
+        lead={<FlaskIcon aria-hidden className="size-3.5 shrink-0 text-foreground" />}
       >
-        <div className="text-[13px] font-semibold text-foreground">{t.board.steps.checks}</div>
-        <div className="mt-0.5 line-clamp-2 text-muted-foreground">{step.checks.join(', ')}</div>
+        <span className="font-medium text-foreground">{t.board.steps.checks}</span>{' '}
+        <span className="text-muted-foreground">{step.checks.join(', ')}</span>
       </Panel>
     )
   }
   const seen = step ?? task.lastAgent
   if (!seen) return null
-  const tone = AGENT_TONE[seen.agent] ?? NEUTRAL_TONE
   return (
     <Panel
       label={step ? workingLine(step, t.board) : lastAgentLine(seen, t.board)}
-      stripe={tone.stripe}
-      surface={step ? tone.lit : 'border-border'}
-      live={step !== null}
+      lit={step ? 'primary' : undefined}
+      lead={<AgentIcon agent={seen.agent} size="sm" live={step !== null} />}
     >
-      <AgentName seen={seen} />
-      <div className={`mt-0.5 ${step ? 'font-medium text-foreground' : 'text-muted-foreground'}`}>
-        {step ? stepLine(step, t.board) : t.board.lastWorked}
-      </div>
+      {step ? <span className="font-medium text-foreground">{stepLine(step, t.board)}</span> : null}
+      {step && seen.model ? ' · ' : null}
+      {seen.model ? (
+        <span className="font-mono text-[11px] text-muted-foreground">{seen.model}</span>
+      ) : null}
+      {step ? null : <span className="sr-only"> {t.board.lastWorked}</span>}
     </Panel>
   )
 }
@@ -193,11 +163,11 @@ function Rank({ queue }: { queue: TaskCard['queue'] }) {
   )
 }
 
-/** The border of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
+/** The bar on the side of a card whose clock still runs: amber when it is at risk, red when it is overdue. */
 const LEAD_BORDER: Record<LeadTimeStatus, string> = {
   on_track: '',
-  at_risk: 'border-warning ring-1 ring-warning/40',
-  overdue: 'border-destructive ring-1 ring-destructive/40',
+  at_risk: 'border-l-2 border-warning',
+  overdue: 'border-l-2 border-destructive',
 }
 
 const LEAD_TEXT: Record<LeadTimeStatus, string> = {
@@ -221,7 +191,7 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
   return (
     <div
       data-lead-time={lead.status}
-      className={`mt-1 text-xs tabular-nums ${lead.running ? LEAD_TEXT[lead.status] : 'text-muted-foreground'}`}
+      className={`text-xs tabular-nums ${lead.running ? LEAD_TEXT[lead.status] : 'text-muted-foreground'}`}
     >
       {lead.running && lead.status !== 'on_track' ? (
         <span
@@ -235,19 +205,27 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
 }
 
 /**
+ * The card is the containing block of what it hides for a screen reader: left to the page, 1,500 such marks in a
+ * scrolling column made the page itself as tall as the column.
+ *
  * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
  * takes up to three lines, the agent its own panel, and the stage closes the card.
  */
 export function Card({ task }: { task: TaskCard }) {
   const { t } = useCopy()
+  // The card whose task is open beside the board.
+  const current = useSearchParams()[0].get('task') === String(task.id)
   return (
-    <Link to={openTask(task.id)} className="group block">
-      <Surface
-        size="sm"
+    <Link
+      to={openTask(task.id)}
+      aria-current={current ? 'true' : undefined}
+      className={`relative block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring ${current ? 'bg-muted/60' : ''}`}
+    >
+      <div
         data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
-        className={`flex min-h-[168px] flex-col p-3 transition-colors group-hover:border-primary/60 group-hover:bg-muted/20 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
+        className={`flex min-h-[124px] flex-col gap-1 px-3 py-2.5 ${task.leadTime?.running ? LEAD_BORDER[task.leadTime.status] : ''}`}
       >
-        <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+        <div className="flex items-baseline gap-2 font-mono text-[11px] text-muted-foreground">
           <Rank queue={task.queue} />
           <span className="min-w-0 flex-1 truncate" title={`${task.repository} ${itemName(task)}`}>
             {task.repository.split('/').pop()} {itemName(task)}
@@ -259,58 +237,57 @@ export function Card({ task }: { task: TaskCard }) {
         </div>
         <div
           title={task.title}
-          className="mt-1.5 line-clamp-3 text-sm font-semibold leading-snug text-foreground"
+          className="line-clamp-3 text-sm font-medium leading-snug text-foreground"
         >
           {task.title}
         </div>
         {task.leadTime ? <LeadTimeLine lead={task.leadTime} /> : null}
         {task.returned ? (
-          <div className="mt-1.5">
+          <div className="">
             <ReturnedBadge returned={task.returned} />
           </div>
         ) : null}
         {task.mainRed ? (
-          <div className="mt-1 text-xs font-medium text-destructive">
-            {t.board.mainRedAfterRelease}
-          </div>
+          <div className="text-xs font-medium text-destructive">{t.board.mainRedAfterRelease}</div>
         ) : null}
-        {task.change ? (
-          <div
-            className="mt-1 text-xs tabular-nums text-muted-foreground"
-            aria-label={t.board.changeSize(
-              task.change.added,
-              task.change.removed,
-              task.change.files,
-            )}
-          >
-            +{task.change.added} −{task.change.removed}
-          </div>
-        ) : null}
-        {task.risk ? (
-          <div
-            className={`mt-1 text-xs ${task.risk.level === 'high' ? 'font-medium text-destructive' : 'text-muted-foreground'}`}
-            title={t.board.riskReasons(task.risk.reasons)}
-          >
-            {t.board.risk[task.risk.level]}
-          </div>
-        ) : null}
+        <div className="flex flex-wrap items-baseline gap-x-2 text-[11px] text-muted-foreground empty:hidden">
+          {task.change ? (
+            <span
+              className="font-mono tabular-nums"
+              aria-label={t.board.changeSize(
+                task.change.added,
+                task.change.removed,
+                task.change.files,
+              )}
+            >
+              +{task.change.added} −{task.change.removed}
+            </span>
+          ) : null}
+          {task.risk ? (
+            <span
+              className={task.risk.level === 'high' ? 'font-medium text-destructive' : undefined}
+              title={t.board.riskReasons(task.risk.reasons)}
+            >
+              {t.board.risk[task.risk.level]}
+            </span>
+          ) : null}
+          {task.attempts > 1 ? <span>{t.board.attempt(task.attempts)}</span> : null}
+        </div>
         {task.waitingOnBase ? (
-          <div className="mt-1 text-xs font-medium text-destructive">
+          <div className="text-xs font-medium text-destructive">
             {t.board.waitingOnBase(task.waitingOnBase.checks.join(', '), task.waitingOnBase.branch)}
           </div>
         ) : null}
         {task.queue ? <QueueLines queue={task.queue} /> : null}
         {task.retryAt ? (
-          <div className="mt-1 text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             {runsAgain(task.retryAt, Date.now(), t.time)}
           </div>
         ) : null}
-        {task.attempts > 1 ? (
-          <div className="mt-1 text-xs text-muted-foreground">{t.board.attempt(task.attempts)}</div>
-        ) : null}
-        <AgentPanel task={task} />
-        <div className="mt-auto pt-2">
+        <div className="mt-auto flex flex-col gap-1.5 pt-1.5">
+          <AgentPanel task={task} />
           <StageBadge
+            quiet
             stage={task.stage}
             integrated={task.integrated}
             waitingForChecks={task.waitingForChecks}
@@ -319,7 +296,7 @@ export function Card({ task }: { task: TaskCard }) {
             wrap
           />
         </div>
-      </Surface>
+      </div>
     </Link>
   )
 }
@@ -328,7 +305,7 @@ export function Card({ task }: { task: TaskCard }) {
  * Every column is the same width, full or empty, and they share the room equally, so the board looks the
  * same however many tasks there are. None goes below this: under it the board scrolls instead.
  */
-const COLUMN = 'minmax(176px, 1fr)'
+const COLUMN = 'minmax(152px, 1fr)'
 
 /**
  * The queued column in the order the worker serves it, with a line under the first ten so the head of the
@@ -355,34 +332,77 @@ function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
   )
 }
 
-function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: TaskCard[] }) {
+/** The colour of each column's dot: who has the task now, and whether it ended well. */
+const COLUMN_TONE: Record<ColumnId, Tone> = {
+  queued: 'neutral',
+  working: 'primary',
+  waiting: 'warning',
+  retrying: 'info',
+  merge: 'info',
+  review: 'success',
+  released: 'success',
+  resolved: 'success',
+  attention: 'destructive',
+}
+
+/**
+ * One column as a sheet: a heading strip with its dot, name and count, and its cards as rows parted by a
+ * hairline. The sheet does not clip, so the strip can stay at the top of the board's frame while the cards scroll.
+ */
+function Column({
+  id,
+  title,
+  tasks,
+  fill = false,
+}: {
+  id: ColumnId
+  title: string
+  tasks: TaskCard[]
+  /** The column keeps the height of the board and its cards scroll under its title. */
+  fill?: boolean
+}) {
   const { t } = useCopy()
   const head = tasks.filter((task) => topRank(task.queue) !== null).length
   return (
-    <section aria-label={title} className="min-w-0">
-      <h2 className="sticky top-0 z-10 mb-2 bg-background pb-1 text-sm font-semibold text-foreground">
-        <span className="block truncate">
-          {title} <span className="font-normal text-muted-foreground">{tasks.length}</span>
+    <section
+      aria-label={title}
+      className={`min-w-0 rounded-xl border border-border bg-card ${fill ? 'flex min-h-0 flex-col overflow-hidden' : ''}`}
+    >
+      <h2 className="sticky top-0 z-10 rounded-t-xl border-b border-border bg-card text-sm font-semibold text-foreground">
+        <span className="block rounded-t-xl bg-muted/40 px-3 py-2">
+          <span className="flex items-center gap-2">
+            <span
+              aria-hidden
+              className={`size-2.5 shrink-0 rounded-full ${TONE_DOT[COLUMN_TONE[id]]}`}
+            />
+            <span className="min-w-0 truncate">
+              {title}{' '}
+              <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
+                {tasks.length}
+              </span>
+            </span>
+          </span>
+          {id === 'merge' ? <MergeCounts tasks={tasks} /> : null}
         </span>
-        {id === 'merge' ? <MergeCounts tasks={tasks} /> : null}
       </h2>
-      <div className="space-y-2">
-        {tasks.map((task, i) => (
-          <div key={task.id}>
-            {i === head && head > 0 ? (
-              <div className="mb-2 flex items-center gap-2 text-[11px] text-muted-foreground">
-                <span className="h-px flex-1 bg-border" />
-                {t.board.restOfQueue}
-                <span className="h-px flex-1 bg-border" />
-              </div>
-            ) : null}
-            <Card task={task} />
-          </div>
-        ))}
-        {tasks.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t.board.nothingHere}</p>
-        ) : null}
-      </div>
+      {tasks.length === 0 ? (
+        <p className="px-3 py-3 text-xs text-muted-foreground">{t.board.nothingHere}</p>
+      ) : (
+        <ul className={`divide-y divide-border ${fill ? 'min-h-0 flex-1 overflow-y-auto' : ''}`}>
+          {tasks.map((task, i) => (
+            <li key={task.id}>
+              {i === head && head > 0 ? (
+                <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground">
+                  <span className="h-px flex-1 bg-border" />
+                  {t.board.restOfQueue}
+                  <span className="h-px flex-1 bg-border" />
+                </div>
+              ) : null}
+              <Card task={task} />
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }
@@ -392,7 +412,14 @@ function Column({ id, title, tasks }: { id: ColumnId; title: string; tasks: Task
  * frame when the screen is narrower than the columns need, so the sideways scrollbar stays at the bottom
  * of the screen where it can be found, and the column titles stay at the top.
  */
-export function Board({ tasks }: { tasks: TaskCard[] }) {
+export function Board({
+  tasks,
+  fill = false,
+}: {
+  tasks: TaskCard[]
+  /** The board takes the height its page leaves: each column scrolls by itself, and the page does not. */
+  fill?: boolean
+}) {
   const { t } = useCopy()
   const compact = useWidth() === 'compact'
   const [picked, pick] = useState<ColumnId>('waiting')
@@ -430,10 +457,16 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
     )
   }
   return (
-    <div className="max-h-[calc(100vh-170px)] overflow-auto pb-2">
+    <div
+      className={
+        fill
+          ? 'min-h-0 flex-1 overflow-x-auto pb-2'
+          : 'max-h-[calc(100vh-170px)] overflow-auto pb-2'
+      }
+    >
       {/* The columns are as tall as the tallest: a title sticks only inside its own column, so a short one would let it go. */}
       <div
-        className="grid gap-2.5"
+        className={`grid gap-2.5 ${fill ? 'h-full grid-rows-[minmax(0,1fr)]' : ''}`}
         style={{ gridTemplateColumns: `repeat(${COLUMNS.length}, ${COLUMN})` }}
       >
         {COLUMNS.map((column) => (
@@ -441,6 +474,7 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
             key={column.id}
             id={column.id}
             title={t.columns[column.id]}
+            fill={fill}
             tasks={ordered(
               column.id,
               tasks.filter((t) => t.column === column.id),
@@ -455,47 +489,77 @@ export function Board({ tasks }: { tasks: TaskCard[] }) {
 /** The same tasks as a table, for when the columns are too many to scan. */
 export function TaskList({ tasks }: { tasks: TaskCard[] }) {
   const { t } = useCopy()
+  // The table carries the name; the sheet around it is not a region of its own.
   return (
-    <Table aria-label={t.board.tasks}>
-      <Table.Header>
-        <Table.Row>
-          <Table.HeaderCell>{t.board.task}</Table.HeaderCell>
-          <Table.HeaderCell>{t.board.repository}</Table.HeaderCell>
-          <Table.HeaderCell>{t.board.stage}</Table.HeaderCell>
-          <Table.HeaderCell align="right">{t.board.cost}</Table.HeaderCell>
-          <Table.HeaderCell align="right">{t.board.updated}</Table.HeaderCell>
-        </Table.Row>
-      </Table.Header>
-      <Table.Body>
-        {tasks.map((task) => (
-          <Table.Row key={task.id}>
-            <Table.Cell>
-              <Link to={openTask(task.id)} className="font-medium text-foreground hover:underline">
-                {task.title}
-              </Link>
-              {task.mainRed ? (
-                <span className="ml-2 text-xs font-medium text-destructive">{t.board.mainRed}</span>
-              ) : null}
-            </Table.Cell>
-            <Table.Cell>
-              {task.repository} {itemName(task)}
-            </Table.Cell>
-            <Table.Cell>
-              <StageBadge
-                stage={task.stage}
-                integrated={task.integrated}
-                waitingForChecks={task.waitingForChecks}
-                resolved={task.resolved}
-                retryable={task.retryable}
-              />
-            </Table.Cell>
-            <Table.Cell align="right" numeric>
-              {money(task.costUsd)}
-            </Table.Cell>
-            <Table.Cell align="right">{ago(task.updatedAt, Date.now(), t.time)}</Table.Cell>
-          </Table.Row>
-        ))}
-      </Table.Body>
-    </Table>
+    <Surface title={<>{t.board.tasks}</>} icon={ListTodo} count={tasks.length}>
+      <div className="overflow-x-auto">
+        <table aria-label={t.board.tasks} className={TABLE.table}>
+          <thead className={TABLE.head}>
+            <tr>
+              <th className={TABLE.th}>{t.board.task}</th>
+              <th className={TABLE.th}>{t.board.repository}</th>
+              <th className={TABLE.th}>{t.board.stage}</th>
+              <th className={`${TABLE.th} text-right`}>{t.board.cost}</th>
+              <th className={`${TABLE.th} text-right`}>{t.board.updated}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((task) => {
+              // The checks have no agent; any other task shows the one on it, or the last one.
+              const seen = task.working?.step === 'checks' ? null : (task.working ?? task.lastAgent)
+              return (
+                <tr key={task.id} className={TABLE.row}>
+                  <td className={TABLE.td}>
+                    <span className="flex min-w-0 items-center gap-3">
+                      {seen ? (
+                        <AgentIcon agent={seen.agent} live={!!task.working} />
+                      ) : (
+                        <span aria-hidden className="size-7 shrink-0 rounded-md bg-muted/60" />
+                      )}
+                      <span className="min-w-0">
+                        <Link
+                          to={openTask(task.id)}
+                          className="font-medium text-foreground hover:underline"
+                        >
+                          {task.title}
+                        </Link>
+                        {task.mainRed ? (
+                          <span className="ml-2 text-xs font-medium text-destructive">
+                            {t.board.mainRed}
+                          </span>
+                        ) : null}
+                        {seen?.model ? (
+                          <span className="block truncate font-mono text-[11px] text-muted-foreground">
+                            {seen.model}
+                          </span>
+                        ) : null}
+                      </span>
+                    </span>
+                  </td>
+                  <td className={`${TABLE.td} font-mono text-xs text-muted-foreground`}>
+                    {task.repository} {itemName(task)}
+                  </td>
+                  <td className={TABLE.td}>
+                    <StageBadge
+                      stage={task.stage}
+                      integrated={task.integrated}
+                      waitingForChecks={task.waitingForChecks}
+                      resolved={task.resolved}
+                      retryable={task.retryable}
+                    />
+                  </td>
+                  <td className={TABLE.number}>{money(task.costUsd)}</td>
+                  <td
+                    className={`${TABLE.td} whitespace-nowrap text-right text-xs text-muted-foreground`}
+                  >
+                    {ago(task.updatedAt, Date.now(), t.time)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Surface>
   )
 }

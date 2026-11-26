@@ -488,6 +488,75 @@ describe('what changed between two branches, and the files of a branch', () => {
     ).rejects.toThrow(/404 comparing main with develop/)
   })
 
+  function filePages(pages: Record<string, unknown>[][]) {
+    const urls: string[] = []
+    const fetch = async (url: string) => {
+      urls.push(url.replace('https://api.github.com/repos/o/r', ''))
+      const page = Number(new URL(url).searchParams.get('page'))
+      return new Response(JSON.stringify(pages[page - 1] ?? []), { status: 200 })
+    }
+    return { fetch, urls }
+  }
+  const listed = (i: number) => ({ filename: `f${i}`, status: 'added', additions: 1, deletions: 0 })
+
+  it('lists the files of a pull request with their patches, and leaves the patch out of a file that has none', async () => {
+    const { fetch, urls } = filePages([
+      [
+        {
+          filename: 'a.ts',
+          status: 'modified',
+          additions: 2,
+          deletions: 1,
+          patch: '@@ -1 +1,2 @@',
+        },
+        {
+          filename: 'b.png',
+          status: 'renamed',
+          previous_filename: 'c.png',
+          additions: 0,
+          deletions: 0,
+        },
+      ],
+    ])
+
+    expect(await createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)).toEqual({
+      files: [
+        { path: 'a.ts', status: 'modified', additions: 2, deletions: 1, patch: '@@ -1 +1,2 @@' },
+        { path: 'b.png', status: 'renamed', previousPath: 'c.png', additions: 0, deletions: 0 },
+      ],
+      truncated: false,
+    })
+    expect(urls).toEqual(['/pulls/12/files?per_page=100&page=1'])
+  })
+
+  it('reads a second page after a full one', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => listed(i))
+    const { fetch, urls } = filePages([full, [listed(100)]])
+
+    const answer = await createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)
+
+    expect(answer.files).toHaveLength(101)
+    expect(answer.truncated).toBe(false)
+    expect(urls).toHaveLength(2)
+  })
+
+  it('says a pull request with more files than it reads was cut short', async () => {
+    const full = Array.from({ length: 100 }, (_, i) => listed(i))
+    const { fetch } = filePages([full, full, full, [listed(300)]])
+
+    const answer = await createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)
+
+    expect(answer.files).toHaveLength(300)
+    expect(answer.truncated).toBe(true)
+  })
+
+  it('throws when GitHub will not list the files of the pull request', async () => {
+    const { fetch } = fakeFetch({ 'GET /pulls/12/files': { status: 404 } })
+    await expect(createGithubApi(fetch).pullRequestFiles('o/r', 't', 12)).rejects.toThrow(
+      /404 listing the files of o\/r#12/,
+    )
+  })
+
   it('lists the files of a branch, without directories', async () => {
     const { fetch, calls } = fakeFetch({
       'GET /git/trees/develop': {

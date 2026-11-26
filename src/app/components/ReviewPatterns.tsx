@@ -1,9 +1,12 @@
 import { Badge, Button } from '@usetheo/ui'
+import { Repeat } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import type { ReviewPatternView } from '../../shared/knowledge'
 import { get, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
+
+import { READABLE, RowIcon } from './ui/Surface'
 
 /** The review patterns of one repository: their tasks, the counts around the note, and the offer of a rule. */
 export function ReviewPatterns({ repository }: { repository: string }) {
@@ -41,13 +44,30 @@ export function ReviewPatterns({ repository }: { repository: string }) {
   if (!patterns || patterns.length === 0) return null
   return (
     <section className="mt-4 border-t border-border pt-3" aria-label={c.label}>
-      <h3 className="text-sm font-medium">{c.label}</h3>
-      <p className="text-xs text-muted-foreground">{c.about}</p>
-      <ul className="mt-2 space-y-2">
+      <div className="flex items-center gap-2">
+        <Repeat aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+        <h3 className="text-sm font-semibold">{c.label}</h3>
+        <span className="font-mono text-xs tabular-nums text-muted-foreground">
+          {patterns.length}
+        </span>
+      </div>
+      <p className={`mt-1 text-xs text-muted-foreground ${READABLE}`}>{c.about}</p>
+      <ul className="mt-2 divide-y divide-border">
         {patterns.map((p) => (
-          <li key={p.id} className="text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">{p.className}</span>
+          <li key={p.id} className="flex flex-wrap items-center gap-3 py-2.5">
+            <RowIcon icon={Repeat} tone={p.noted ? 'success' : 'warning'} />
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{p.className}</span>
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {p.tasks.map((x) => `#${x.issueNumber}`).join(', ')}
+              </p>
+              <p className="text-xs">
+                {p.countBefore === null || p.countAfter === null
+                  ? c.measuring
+                  : `${c.before}: ${p.countBefore} ${c.after}: ${p.countAfter}`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
               <Badge variant="default">{c.tasks(p.tasks.length)}</Badge>
               <Badge variant={p.noted ? 'success' : 'warning'}>
                 {p.noted ? c.noted : c.notNoted}
@@ -70,14 +90,6 @@ export function ReviewPatterns({ repository }: { repository: string }) {
                 </Button>
               )}
             </div>
-            <p className="text-xs text-muted-foreground">
-              {p.tasks.map((x) => `#${x.issueNumber}`).join(', ')}
-            </p>
-            <p className="text-xs">
-              {p.countBefore === null || p.countAfter === null
-                ? c.measuring
-                : `${c.before}: ${p.countBefore} ${c.after}: ${p.countAfter}`}
-            </p>
           </li>
         ))}
       </ul>

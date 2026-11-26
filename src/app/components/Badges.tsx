@@ -1,4 +1,5 @@
 import { Badge } from '@usetheo/ui'
+import type React from 'react'
 
 import { mergeState, type Retryable, type Returned, type Stage } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
@@ -24,6 +25,41 @@ const TONE: Record<Stage, Variant> = {
   cancelled: 'default',
 }
 
+/** The dot of a quiet badge, by the colour the pill would have had. Delivered and gone is as quiet as not started. */
+const DOT: Record<Variant, string> = {
+  default: 'bg-muted-foreground/50',
+  primary: 'bg-primary',
+  accent: 'bg-muted-foreground/50',
+  success: 'bg-success',
+  warning: 'bg-warning',
+  destructive: 'bg-destructive',
+}
+
+/** A state as a dot and its words in normal case, for a card, where a pill in capitals is louder than the title. */
+function Quiet({
+  variant,
+  children,
+  label,
+  mono = false,
+}: {
+  variant: Variant
+  children: React.ReactNode
+  label?: string
+  mono?: boolean
+}) {
+  return (
+    <span
+      data-badge={variant}
+      aria-label={label}
+      title={label}
+      className={`inline-flex min-w-0 max-w-full items-center gap-1.5 text-xs text-foreground ${mono ? 'shrink-0 font-mono text-[11px] tabular-nums' : ''}`}
+    >
+      <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT[variant]}`} />
+      <span className="truncate first-letter:uppercase">{children}</span>
+    </span>
+  )
+}
+
 export function StageBadge({
   stage,
   integrated,
@@ -31,6 +67,7 @@ export function StageBadge({
   resolved,
   retryable,
   wrap = false,
+  quiet = false,
 }: {
   stage: Stage
   integrated?: boolean
@@ -41,6 +78,8 @@ export function StageBadge({
   retryable?: Retryable
   /** Let the label go to a second line, for a card too narrow to hold it. */
   wrap?: boolean
+  /** A dot and the words, in place of the pill. */
+  quiet?: boolean
 }) {
   const { t } = useCopy()
   // A failure that will pass by itself is a wait, not an alarm.
@@ -50,16 +89,18 @@ export function StageBadge({
     !resolved &&
     mergeState({ stage, integrated: !!integrated, waitingForChecks: !!waitingForChecks }) ===
       'awaiting_merge'
+  const label = stageLabel(
+    stage,
+    { integrated, waitingForChecks, awaitingMerge, resolved, retryable },
+    t.stages,
+  )
+  if (quiet) return <Quiet variant={variant}>{label}</Quiet>
   return (
     <Badge
       variant={variant}
       className={wrap ? 'max-w-full whitespace-normal leading-tight' : 'whitespace-nowrap'}
     >
-      {stageLabel(
-        stage,
-        { integrated, waitingForChecks, awaitingMerge, resolved, retryable },
-        t.stages,
-      )}
+      {label}
     </Badge>
   )
 }
@@ -81,14 +122,9 @@ export function Pass({ ok }: { ok: boolean }) {
 export function PriorityBadge({ priority }: { priority: number }) {
   const { t } = useCopy()
   return (
-    <Badge
-      variant={priorityTone(priority)}
-      aria-label={t.board.priority(priority)}
-      title={t.board.priority(priority)}
-      className="shrink-0 whitespace-nowrap tabular-nums"
-    >
+    <Quiet variant={priorityTone(priority)} label={t.board.priority(priority)} mono>
       {t.board.priorityBadge(priority)}
-    </Badge>
+    </Quiet>
   )
 }
 

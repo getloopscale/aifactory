@@ -1,10 +1,13 @@
 import { Button } from '@usetheo/ui'
+import { SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 
 import { securityEffort, type AgentRole, type AgentSettings } from '../../../shared/panel'
 import { put } from '../../lib/api'
 import { useCopy } from '../../lib/copy'
+import { AgentIcon } from '../floor/AgentIcon'
+import { READABLE, Surface } from '../ui/Surface'
 
 const SAME = ''
 
@@ -89,11 +92,11 @@ export function EngineChooser({
   }
 
   return (
-    <section
-      aria-label={t.engine.choice(ROLE_LABEL[role])}
-      className="space-y-3 rounded-xl border border-border bg-card p-4"
-    >
+    <Surface title={t.engine.choice(ROLE_LABEL[role])} icon={SlidersHorizontal} padded>
       <div className="flex flex-wrap items-end gap-3">
+        <span className="flex h-9 items-center">
+          <AgentIcon agent={engine} />
+        </span>
         <label className="block">
           <span className={caption}>{ROLE_LABEL[role]}</span>
           <select
@@ -161,18 +164,23 @@ export function EngineChooser({
         </Button>
       </div>
 
-      {picked?.note ? <p className="text-xs text-muted-foreground">{picked.note}</p> : null}
+      {picked?.note ? (
+        <p className={`text-xs text-muted-foreground ${READABLE}`}>{picked.note}</p>
+      ) : null}
       {offered.models.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t.engine.noModelList(engine)}</p>
       ) : null}
 
       {unavailable.length > 0 ? (
-        <ul className="space-y-1 text-xs text-muted-foreground">
+        <ul className="space-y-1.5 text-xs text-muted-foreground">
           {unavailable.map((o) => (
-            <li key={o.id}>
-              <span className="font-mono">{o.id}</span>
-              {t.engine.cannotChoose}
-              {o.problem}
+            <li key={o.id} className="flex items-center gap-2">
+              <AgentIcon agent={o.id} size="sm" />
+              <span>
+                <span className="font-mono">{o.id}</span>
+                {t.engine.cannotChoose}
+                {o.problem}
+              </span>
             </li>
           ))}
         </ul>
@@ -195,6 +203,6 @@ export function EngineChooser({
           {message.text}
         </p>
       ) : null}
-    </section>
+    </Surface>
   )
 }
