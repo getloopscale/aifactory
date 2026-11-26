@@ -16,6 +16,7 @@ import type {
 import { GuidePanel } from './components/guide/GuidePanel'
 import { Rail } from './components/shell/Rail'
 import { setupAttention } from './components/shell/SetupCount'
+import { Palette } from './components/shell/Palette'
 import { Sidebar } from './components/shell/Sidebar'
 import { StatusBar } from './components/shell/StatusBar'
 import { inWork, TopBar } from './components/shell/TopBar'
@@ -27,7 +28,8 @@ import { GuideProvider } from './lib/guide-state'
 import { useInstall } from './lib/install'
 import { useResource, type Resource } from './lib/live'
 import { useWidthClass, WidthContext, type WidthClass } from './lib/media'
-import { useEscape } from './lib/keys'
+import { GO_KEYS } from './lib/commands'
+import { useEscape, useShortcuts } from './lib/keys'
 
 /** The title and the favicon say how many items wait, for a tab the owner is not looking at. */
 function useTabSigns(count: number) {
@@ -206,6 +208,9 @@ export default function RootLayout() {
   )
 }
 
+const NOTHING = () => {}
+const NO_KEYS: Record<string, string> = {}
+
 function Shell() {
   const { t, adopt } = useCopy()
   const location = useLocation()
@@ -249,6 +254,14 @@ function Shell() {
   }, [me.data, onLogin, navigate])
 
   const signedIn = me.data?.owner === true
+  const [palette, setPalette] = useState(false)
+  const openPalette = useCallback(() => setPalette(true), [])
+  const goTo = useCallback((path: string) => void navigate(path), [navigate])
+  useShortcuts({
+    onPalette: signedIn ? openPalette : NOTHING,
+    go: signedIn ? GO_KEYS : NO_KEYS,
+    onGo: goTo,
+  })
 
   const items = inbox.data?.items
   const count = signedIn ? (items?.length ?? 0) : 0
@@ -327,7 +340,9 @@ function Shell() {
                 </div>
               ) : null}
               <div className="flex min-w-0 flex-1 flex-col">
-                {signedIn ? <TopBar onMenu={() => setOverlay(true)} pulse={pulseNow} /> : null}
+                {signedIn ? (
+                  <TopBar onMenu={() => setOverlay(true)} onSearch={openPalette} pulse={pulseNow} />
+                ) : null}
                 <main className="min-h-0 flex-1 overflow-y-auto">
                   <Page
                     signedIn={signedIn}
@@ -341,6 +356,7 @@ function Shell() {
                 ) : null}
               </div>
               {signedIn ? <GuidePanel /> : null}
+              {signedIn ? <Palette open={palette} onOpenChange={setPalette} /> : null}
             </div>
             <Attention
               announcement={attention.announcement}
