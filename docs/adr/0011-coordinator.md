@@ -91,7 +91,7 @@ which is the baseline, and says better, worse or no change.
 `evolve.ts` groups failures and handoffs by signature: the reason with numbers, commit ids and paths
 replaced. A signature seen on three or more tasks in seven days, not one of the designed waits (blocked by
 another issue, waiting for an answer), with no issue already filed for it, becomes an issue on
-`paulohenriquevn/aifactory` with the `factory` label: the signature, the tasks, their events and a repro.
+`getloopscale/aifactory` with the `factory` label: the signature, the tasks, their events and a repro.
 The `failure_signature` table remembers the issue. At most one such issue per pass and three per week.
 When the issue closes, the coordinator counts the signature in the seven days after the release that
 closed it against the seven days before it was filed, records both, and comments on the issue when the

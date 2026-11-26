@@ -248,7 +248,7 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
   for (const t of quiet) {
     const idle = now.getTime() - new Date(t.last).getTime()
     // A run whose worker still holds its job is alive, and a retry now would run the task twice
-    // (paulohenriquevn/aifactory#422); past the longest a run may take it is stalled all the same.
+    // (getloopscale/aifactory#422); past the longest a run may take it is stalled all the same.
     const alive = held.has(t.id) && idle <= MAX_RUN_MS
     if (idle > limits.stallMs && !alive) {
       found.push({

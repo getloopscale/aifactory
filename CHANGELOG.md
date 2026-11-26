@@ -59,6 +59,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The factory's repository is `getloopscale/aifactory`. A migration renames it in every table that keeps the name, the issues Evolve and the metrics file go to the new address, and a task recorded under `paulohenriquevn/aifactory` still counts as the factory's own work, so a change to its agents or its gates is held as before.
 - The inbox is the first place of the menu, open or folded, ahead of the floor and the board.
 - On a task's page the side with the tabs takes more than half of the width while it shows the changes, so a line of code fits without wrapping, and goes back to a third on any other tab. A button beside the tabs closes the side and leaves the page to the conversation; the same button, at the top of the page, opens it again on the tab it was showing.
 - The line that folds a turn of the agent says what the turn did when the agent works through a shell: a command that prints a file counts as a file read, one that searches counts as a search and one that writes a file counts as an edit, where every one of them used to count as a command.

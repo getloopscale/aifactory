@@ -22,7 +22,7 @@ import { claudeEvents, type AgentEvent } from './transcript'
 /**
  * The Claude Code the factory installs in every sandbox. Pinned, so a run never meets a CLI the factory was
  * not tested with, and installed by the harness, so a sandbox image does not have to carry it: the Docker
- * image is plain Node, and a run there found no `claude` at all (paulohenriquevn/aifactory#1).
+ * image is plain Node, and a run there found no `claude` at all (getloopscale/aifactory#1).
  */
 export const CLAUDE_CODE_VERSION = '2.1.319'
 /** Claude Code's sessions, under `$HOME`; its login is not here. */

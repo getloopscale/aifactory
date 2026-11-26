@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { selfCiRefusal } from './self-ci'
 
-const OWN = 'paulohenriquevn/aifactory'
+const OWN = 'getloopscale/aifactory'
 
 describe('selfCiRefusal', () => {
   it('refuses the factory repository with no required checks', () => {

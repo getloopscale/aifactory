@@ -194,7 +194,7 @@ export const BANDS: BandConfig = {
     // A slow drift breaks no sigma line, and it is the change nobody notices.
     eight_on_one_side: 'show',
   },
-  issueRepository: 'paulohenriquevn/aifactory',
+  issueRepository: 'getloopscale/aifactory',
 }
 
 /** How the last week of each indicator is compared with the weeks before a baseline date. */

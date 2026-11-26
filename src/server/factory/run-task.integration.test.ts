@@ -869,12 +869,9 @@ describe('runTask', () => {
 
   it("discloses the CI quality gates the checks left out on the factory's own repository", async () => {
     const id = await seedTask()
-    await getDb()
-      .update(task)
-      .set({ repository: 'paulohenriquevn/aifactory' })
-      .where(eq(task.id, id))
-    githubApi.repo('paulohenriquevn/aifactory').prepare()
-    githubApi.repo('paulohenriquevn/aifactory').nextNumber = 12
+    await getDb().update(task).set({ repository: 'getloopscale/aifactory' }).where(eq(task.id, id))
+    githubApi.repo('getloopscale/aifactory').prepare()
+    githubApi.repo('getloopscale/aifactory').nextNumber = 12
     await runTask(deps(new FakeSandbox(changed())), id)
 
     const check = seen.checkRuns[0] as { summary: string }

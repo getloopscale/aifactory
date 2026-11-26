@@ -12,7 +12,7 @@ const state = randomBytes(16).toString('hex')
 
 const manifest = {
   name: APP_NAME,
-  url: 'https://github.com/paulohenriquevn/aifactory',
+  url: 'https://github.com/getloopscale/aifactory',
   description: 'Turns issues labeled "factory" into verified pull requests.',
   public: false,
   redirect_url: `http://localhost:${PORT}/redirect`,

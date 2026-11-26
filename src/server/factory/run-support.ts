@@ -9,6 +9,7 @@ import type { CheckResult } from './evidence'
 import { MAX_ATTEMPTS, renderFindings, type Finding, type ReviewVerdict } from './review'
 import type { RunResult } from './run-types'
 import { quotaResumesAt } from './quota-reset'
+import { isFactoryRepository } from '../evals/cases'
 
 export const INSTANCE = 'work'
 export const GITCONFIG = '/tmp/factory.gitconfig'
@@ -146,14 +147,13 @@ export function checkSummary(rows: StoredCheck[], repository?: string): string {
 
 /** The quality gates the CI of the factory's own repository runs and the factory's checks may leave out. */
 const CI_QUALITY_GATES = ['coverage', 'crap', 'dup', 'mutation']
-const OWN_REPOSITORY = 'paulohenriquevn/aifactory'
 
 /**
  * The CI quality gates of `repository` that no passing recorded check established. Only commands whose
  * meaning is known count (`pnpm <gate>` or `pnpm quality`); any other command establishes nothing.
  */
 export function unestablishedGates(repository: string, rows: StoredCheck[]): string[] {
-  if (repository.toLowerCase() !== OWN_REPOSITORY) return []
+  if (!isFactoryRepository(repository)) return []
   const passed = new Set(rows.filter((r) => r.passed).map((r) => r.command.trim()))
   // Only the whole command counts: a wrapper, an argument or a masked exit status proves nothing.
   const ran = (gate: string) =>

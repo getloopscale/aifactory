@@ -12,7 +12,7 @@ const DAY_MS = 86_400_000
 
 export const EVOLVE = {
   /** The repository the issues go to, and the label that makes the factory take them. */
-  repository: 'paulohenriquevn/aifactory',
+  repository: 'getloopscale/aifactory',
   label: 'factory',
   /** How far back a pass looks for a signature, and the windows the effect compares. */
   windowDays: 7,

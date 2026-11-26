@@ -421,6 +421,13 @@
       "when": 1796039179100,
       "tag": "0062_improver",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1796125579100,
+      "tag": "0063_factory_repository_moved",
+      "breakpoints": true
     }
   ]
 }

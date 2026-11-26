@@ -318,7 +318,7 @@ export const CHANGESET_CHECK_PATH = '/tmp/factory-changeset-check.mjs'
  * reached the release branch and nothing was published (theokit-ui's i18n layer on 2026-11-11). A change to
  * a private or an ignored package passes with no changeset, and an added changeset that names no package
  * fails. `changeset status` could say neither: it counts private packages and takes an empty changeset as
- * an answer (paulohenriquevn/aifactory#67).
+ * an answer (getloopscale/aifactory#67).
  */
 export function withChangesetCheck(
   checks: CheckSpec[],
