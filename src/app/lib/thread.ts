@@ -289,8 +289,51 @@ export function threadRows(
   return rows
 }
 
+/** The `seq` of the first step a row shows; undefined for a row of the owner's conversation, which has none. */
+export function rowSeq(row: ThreadRow): number | undefined {
+  if (row.type === 'work' || row.type === 'worked') return row.steps[0]?.seq
+  const match = /^[psfd]-(\d+)$/.exec(row.key)
+  return match ? Number(match[1]) : undefined
+}
+
 /** The roles that have rows, the running one first. */
 export function threadRoles(rows: ThreadRow[], running?: ThreadRole): ThreadRole[] {
   const roles = [...new Set(rows.map((r) => r.role))]
   return roles.sort((a, b) => Number(b === running) - Number(a === running))
+}
+
+/** The transcript groups the passes it keeps under three roles. */
+const TRANSCRIPT_ROLE: Record<string, ThreadRole> = {
+  builder: 'builder',
+  planner: 'builder',
+  reviewer: 'reviewer',
+  security: 'reviewer',
+  lens: 'reviewer',
+  merger: 'merger',
+}
+
+/** Which tab a thread opens on and which row a pass points at, when a pass is asked for. */
+export function focusThread(a: {
+  rows: ThreadRow[]
+  roles: ThreadRole[]
+  picked?: ThreadRole
+  runs: { id: number; role: string; eventFrom?: number | null; eventTo?: number | null }[]
+  focusRun?: number
+  hasEvents: boolean
+}): { role: ThreadRole | undefined; shown: ThreadRow[]; target?: ThreadRow; passMissing: boolean } {
+  const focused = a.focusRun === undefined ? undefined : a.runs.find((r) => r.id === a.focusRun)
+  const focusRole = focused ? TRANSCRIPT_ROLE[focused.role] : undefined
+  const fallback = focusRole && a.roles.includes(focusRole) ? focusRole : a.roles[0]
+  const role = a.picked && a.roles.includes(a.picked) ? a.picked : fallback
+  const shown = a.rows.filter((r) => r.role === role)
+  // A pass recorded before its range was kept (or one whose steps are gone) cannot be pointed at.
+  const from = focused?.eventFrom ?? undefined
+  const to = focused?.eventTo ?? undefined
+  const inRange = (r: ThreadRow) => {
+    const seq = rowSeq(r)
+    return seq !== undefined && from !== undefined && to !== undefined && seq >= from && seq <= to
+  }
+  const target = focusRole === role ? shown.find(inRange) : undefined
+  const passMissing = a.focusRun !== undefined && !target && (a.hasEvents || from === undefined)
+  return { role, shown, target, passMissing }
 }

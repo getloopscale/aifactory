@@ -13,7 +13,7 @@ import {
   changePlanPrompt,
   givenPlanPrompt,
   implementPlanPrompt,
-  parseChangePlan,
+  parseNewChangePlan,
   planAgainPrompt,
   renderChangePlan,
   type ChangePlan,
@@ -60,6 +60,7 @@ import {
   blockingCount,
   OUTSIDE_THE_PLAN,
   parseVerdict,
+  withAcceptance,
   reviewAllowsRework,
   reviewPrompt,
   reworkPrompt,
@@ -284,7 +285,7 @@ class CaseRun {
       await this.agentCall(() => planner.run(this.backend, input)),
       'the agent did not finish the plan',
     )
-    this.plan = parseChangePlan(first.summary) ?? (await this.planAgain(planner, input.timeoutMs))
+    this.plan = parseNewChangePlan(first.summary) ?? (await this.planAgain(planner, input.timeoutMs))
     const pending = await must(this.backend, `git -C ${this.repoDir} status --porcelain`)
     if (pending.stdout.trim() === '') return false
     await must(this.backend, `git -C ${this.repoDir} reset --hard ${this.c.baseSha}`)
@@ -305,7 +306,7 @@ class CaseRun {
     )
     this.cost += again.costUsd ?? 0
     this.sessionId = again.sessionId ?? this.sessionId
-    const plan = again.ok ? parseChangePlan(again.summary) : undefined
+    const plan = again.ok ? parseNewChangePlan(again.summary) : undefined
     if (!plan) throw new Stopped(`the agent wrote no plan: ${oneLine(again.summary).slice(0, 300)}`)
     return plan
   }
@@ -494,7 +495,13 @@ class CaseRun {
         ...(this.risk ? { risk: this.risk } : {}),
         ...(this.earlier ? { earlier: this.earlier } : {}),
         builderSummary: this.reviewAnswer ?? this.summary,
-        ...(this.plan ? { plan: renderChangePlan(this.plan), unplanned } : {}),
+        ...(this.plan
+          ? {
+              plan: renderChangePlan(this.plan),
+              unplanned,
+              acceptance: this.plan.acceptance ?? [],
+            }
+          : {}),
       }),
     }
     const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
@@ -504,7 +511,7 @@ class CaseRun {
     await must(this.backend, `${this.git} reset --hard ${sha}`)
     await must(this.backend, `${this.git} clean -fd`)
     const verdict: ReviewVerdict = result.ok
-      ? parseVerdict(result.summary)
+      ? withAcceptance(parseVerdict(result.summary), this.plan?.acceptance, result.summary)
       : { verdict: 'invalid', summary: result.summary, findings: [] }
     this.reviews.push(verdict)
     return verdict

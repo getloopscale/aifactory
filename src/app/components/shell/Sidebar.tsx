@@ -4,6 +4,7 @@ import {
   Download,
   FolderGit2,
   HeartPulse,
+  History,
   Inbox,
   LayoutDashboard,
   ListChecks,
@@ -45,7 +46,7 @@ function Place({
   count,
   attention,
 }: {
-  id: GuideId | 'onboarding'
+  id: GuideId | 'onboarding' | 'history'
   to: string
   icon: Icon
   label: string
@@ -55,7 +56,7 @@ function Place({
   const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
-  const active = id === 'onboarding' ? pathname === to : place === id
+  const active = id === 'onboarding' || id === 'history' ? pathname.startsWith(to) : place === id
   return (
     <Link
       to={to}
@@ -271,6 +272,7 @@ export function Sidebar({
           <Place id="inbox" to="/inbox" icon={Inbox} label={t.places.inbox} count={waiting} />
           <Place id="health" to="/health" icon={HeartPulse} label={t.places.health} count={wrong} />
           <Place id="agents" to="/agents" icon={Bot} label={t.places.agents} />
+          <Place id="history" to="/history" icon={History} label={t.places.history} />
           <Place id="setup" to="/setup" icon={Settings2} label={t.places.setup} attention={setup} />
         </div>
       </nav>
