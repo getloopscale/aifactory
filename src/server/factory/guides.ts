@@ -25,6 +25,7 @@ import {
   setupTool,
   updateRepositoryTool,
 } from '../agents/tools/guide'
+import { HISTORY_TOOLS } from '../agents/tools/history'
 import { repoFileTool, repoTreeTool } from '../agents/tools/repo'
 
 import { buildAssistant, type AssistantSpec } from './assistant'
@@ -45,6 +46,7 @@ const ASKS = {
 }
 
 const ALL: Tools = {
+  ...HISTORY_TOOLS,
   factory_status: factoryStatusTool,
   list_tasks: listTasksTool,
   task_detail: taskDetailTool,
@@ -71,7 +73,9 @@ const ALL: Tools = {
 }
 
 /** What each guide may use. A guide has the tools of its own page and no others. */
-const TOOLS: Record<GuideId, string[]> = {
+const HISTORY = ['history_search', 'history_read']
+
+const TOOLS_OF: Record<GuideId, string[]> = {
   board: [
     'factory_status',
     'list_tasks',
@@ -89,6 +93,10 @@ const TOOLS: Record<GuideId, string[]> = {
   agents: ['list_agents', 'agent_prompt', 'update_agent_settings'],
   setup: ['setup_report'],
 }
+
+const TOOLS = Object.fromEntries(
+  Object.entries(TOOLS_OF).map(([id, names]) => [id, [...names, ...HISTORY]]),
+) as Record<GuideId, string[]>
 
 const pick = <T>(from: Record<string, T>, names: string[]) =>
   Object.fromEntries(names.map((name) => [name, from[name]]))

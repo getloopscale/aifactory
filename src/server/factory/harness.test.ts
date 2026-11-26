@@ -122,6 +122,19 @@ describe('claudeCodeHarness', () => {
   })
 })
 
+describe('claudeCodeHarness interactive', () => {
+  it('answers the command of its own CLI on a session, and refuses an id that is not a UUID', () => {
+    const harness = claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+    const id = '019a0000-0000-7000-8000-000000000001'
+    const command = harness.interactive?.(id)
+    expect(command).toContain(`$HOME/.local/bin/claude --resume ${id}`)
+    expect(command).toContain('ANTHROPIC_API_KEY=placeholder-not-a-secret')
+    expect(command).not.toContain('-p ')
+    expect(command).not.toContain('--dangerously-skip-permissions')
+    expect(() => harness.interactive?.('x; rm -rf /')).toThrow(/UUID/)
+  })
+})
+
 describe('claudeCodeHarness preparing a sandbox', () => {
   it('installs a pinned Claude Code, and runs that install rather than whatever is on the PATH', async () => {
     const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
@@ -226,6 +239,32 @@ describe('claudeCodeHarness plugin', () => {
     await harness.resume?.(backend, id, { ...input, role: 'builder' })
     expect(sandbox.backend.commands.at(-1)).toContain('--plugin-dir /tmp/factory-plugin-builder')
     expect(sandbox.backend.commands.at(-1)).toContain(`--resume ${id}`)
+  })
+
+  it('leaves a files-only pass the read tools and no shell, never the permission bypass', async () => {
+    const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    const harness = claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+    await harness.run(backend, {
+      prompt: 'P',
+      cwd: '/w',
+      timeoutMs: 5,
+      readFilesOnly: true,
+      readDirs: ['/tmp/pull-request', '/work/checkout'],
+    })
+    const command = sandbox.backend.commands.at(-1)!
+    expect(command).toContain('--tools Read,Grep,Glob --allowedTools Read,Grep,Glob')
+    expect(command).toContain('--add-dir /tmp/pull-request --add-dir /work/checkout')
+    await expect(
+      harness.run(backend, {
+        prompt: 'P',
+        cwd: '/w',
+        timeoutMs: 5,
+        readFilesOnly: true,
+        readDirs: ['/x; id'],
+      }),
+    ).rejects.toThrow('plain path')
+    expect(command).not.toContain('--dangerously-skip-permissions')
   })
 
   it('resumes an ask turn in plan mode, with no bypass, the prompt by file', async () => {

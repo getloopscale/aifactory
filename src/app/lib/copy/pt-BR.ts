@@ -16,6 +16,7 @@ const TRIED: DoctorTriedSentences = {
   events: () => 'ler os eventos que o GitHub App assina',
   runs: (v) => `ler as execuções que falharam em ${v.repo}`,
   sandboxes: () => 'listar os sandboxes que a conta tem ativos',
+  image: () => 'ler se o provedor de sandbox tem o template da imagem do repositório',
   token: (v) => `gerar um token para ${v.repo}`,
   merge_settings: (v) => `ler as configurações de merge de ${v.repo}`,
   proofs: (v) => `ler as provas dos checks de ${v.repo}`,
@@ -546,6 +547,17 @@ export const ptBR: Copy = {
     cost: (usd: string) => `custo ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `Uma mensagem do dono para o agente que trabalhou em "${title}" (issue #${issue} de ${repository}).`,
+    terminal: {
+      open: 'Abrir no terminal',
+      warning:
+        'Isto abre a própria CLI do agente na sessão que ele deixou, em um sandbox. Nada do que você mudar ali é commitado ou enviado. Termina quando você fecha, após 15 minutos sem uma tecla, ou após duas horas.',
+      back: 'Voltar ao chat',
+      connecting: 'Abrindo o terminal…',
+      ended: (reason: string) => `O terminal terminou (${reason}).`,
+      failed: (reason: string) => `O terminal não abriu: ${reason}`,
+      label: 'Terminal do agente',
+      noSession: 'O agente não guardou uma sessão para abrir.',
+    },
   },
   thread: {
     tabs: 'Agentes',
@@ -771,6 +783,14 @@ export const ptBR: Copy = {
           SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
             ? 'Construa o template do sandbox: node --env-file=.env.local scripts/build-e2b-template.mts. A tarefa tenta de novo sozinha quando o provedor o tiver.'
             : 'Ponha crédito no provedor de sandbox, ou corrija a chave dele no servidor. A tarefa tenta de novo sozinha quando o provedor aceitar.',
+      },
+      sandbox_image_missing: {
+        cause: (v) =>
+          `Este repositório usa a imagem de sandbox ${v.image}, e a conta do provedor ${v.provider} não tem o template dela, então uma execução não consegue começar.`,
+        repair: (v) =>
+          v.provider === 'e2b'
+            ? 'Construa o template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Ou escolha a imagem padrão na página do repositório.'
+            : 'Escolha a imagem padrão na página do repositório, ou construa a imagem no provedor de sandbox.',
       },
       provider_checks_failed: {
         cause: (v) =>
@@ -1701,6 +1721,7 @@ export const ptBR: Copy = {
     none: 'Nenhum plano foi escrito para esta tarefa.',
     by: (harness: string, sha: string) => `por ${harness} sobre ${sha}`,
     latestOf: (n: number) => ` · o último de ${n}`,
+    acceptance: 'Aceite',
     files: 'Arquivos',
     noFile: 'Nenhum arquivo: o construtor esperava que o código já fizesse o que a issue pede.',
     order: 'Ordem',

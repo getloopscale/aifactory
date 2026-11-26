@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { forbiddenPathsRule, FORBIDDEN_PATHS } from './harness'
 import { diffGuards, parseNameStatus, testScriptOf } from './guards'
 import {
+  withAcceptance,
   blockingCount,
   changedSinceCommand,
   notResolvedPrompt,
@@ -909,5 +910,79 @@ describe('resolutionReviewPrompt', () => {
     expect(prompt).toContain('abc1234..HEAD')
     expect(prompt).not.toContain('git diff')
     expect(prompt).toContain('not the pull request again')
+  })
+})
+
+describe('acceptance in the review', () => {
+  const acceptance = [
+    { id: 'A1', statement: 'it truncates', evidence: 'truncate.test.ts' },
+    { id: 'A2', statement: 'it refuses a negative max', evidence: 'truncate.test.ts' },
+  ]
+  const base = {
+    repo: 'o/r',
+    issueNumber: 1,
+    title: 't',
+    body: 'b',
+    branch: 'factory/1',
+    baseSha: 'abc1234',
+  }
+  const answer = (entries: unknown[], verdict = 'approve') =>
+    JSON.stringify({ verdict, summary: 's', findings: [], acceptance: entries })
+
+  it('puts every id and statement in the prompt', () => {
+    const prompt = reviewPrompt({ ...base, plan: '**Files**', acceptance })
+    for (const a of acceptance) {
+      expect(prompt).toContain(a.id)
+      expect(prompt).toContain(a.statement)
+    }
+    expect(prompt).toContain('"acceptance":[')
+  })
+
+  it('asks nothing of acceptance for a plan without it', () => {
+    const prompt = reviewPrompt({ ...base, plan: '**Files**', acceptance: [] })
+    expect(prompt).not.toContain('"acceptance"')
+  })
+
+  it('adds a major finding for an id marked not met, and an approval becomes changes', () => {
+    const text = answer([
+      { id: 'A1', met: true, where: 'x' },
+      { id: 'A2', met: false, where: 'nothing' },
+    ])
+    const read = withAcceptance(parseVerdict(text), acceptance, text)
+    expect(read.verdict).toBe('changes')
+    expect(read.findings).toHaveLength(1)
+    expect(read.findings[0]).toMatchObject({ severity: 'major' })
+    expect(read.findings[0]!.issue).toContain('A2')
+  })
+
+  it('adds the same finding for an id left out', () => {
+    const text = answer([{ id: 'A1', met: true, where: 'x' }])
+    const read = withAcceptance(parseVerdict(text), acceptance, text)
+    expect(read.verdict).toBe('changes')
+    expect(read.findings[0]!.issue).toContain('A2')
+  })
+
+  it('does not let a duplicate entry hide a not-met answer', () => {
+    const text = answer([
+      { id: 'A1', met: true },
+      { id: 'A2', met: false },
+      { id: 'A2', met: true },
+    ])
+    expect(withAcceptance(parseVerdict(text), acceptance, text).findings).toHaveLength(1)
+  })
+
+  it('leaves an approval alone when every id is met', () => {
+    const text = answer([
+      { id: 'A1', met: true },
+      { id: 'A2', met: true },
+    ])
+    const read = withAcceptance(parseVerdict(text), acceptance, text)
+    expect(read.verdict).toBe('approve')
+    expect(read.findings).toEqual([])
+  })
+
+  it('reviews a plan stored before the field as it was', () => {
+    const text = '{"verdict":"approve","summary":"s","findings":[]}'
+    expect(withAcceptance(parseVerdict(text), undefined, text).verdict).toBe('approve')
   })
 })

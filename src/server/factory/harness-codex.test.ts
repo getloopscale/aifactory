@@ -252,6 +252,15 @@ describe('codexHarness', () => {
     await expect(harness.prepare?.(backend)).rejects.toThrow(/codex did not install/)
   })
 
+  it('answers the command of its own CLI on a session, and refuses an id that is not a UUID', () => {
+    const harness = codexHarness({ kind: 'api-key', secret: 'k' })
+    const id = '019a0000-0000-7000-8000-000000000001'
+    expect(harness.interactive?.(id)).toBe(
+      `OPENAI_API_KEY=placeholder-not-a-secret $HOME/.local/bin/codex resume ${id}`,
+    )
+    expect(() => harness.interactive?.('x; rm -rf /')).toThrow(/UUID/)
+  })
+
   it('resumes a session by id, and refuses an id that is not a UUID', async () => {
     const harness = codexHarness({ kind: 'api-key', secret: 'k' })
     const sandbox = new FakeSandbox(() => ({ stdout: done }))
@@ -262,6 +271,16 @@ describe('codexHarness', () => {
     expect(sandbox.backend.commands.at(-1)).toContain(`exec resume ${id} --skip-git-repo-check`)
 
     await expect(harness.resume?.(backend, 'x; rm -rf /', input)).rejects.toThrow(/UUID/)
+  })
+
+  it('refuses a files-only pass, since it cannot take the shell away', async () => {
+    const harness = codexHarness({ kind: 'api-key', secret: 'k' })
+    const sandbox = new FakeSandbox(() => ({ stdout: done }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    await expect(harness.run(backend, { ...input, readFilesOnly: true })).rejects.toThrow(
+      /without a shell/,
+    )
+    expect(sandbox.backend.commands.some((c) => c.includes('codex exec'))).toBe(false)
   })
 
   it('resumes an ask turn read-only, with no bypass, the prompt by file', async () => {

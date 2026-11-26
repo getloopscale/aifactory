@@ -685,6 +685,23 @@ describe('proposing a review pattern as a rule', () => {
     expect(pulls()).toHaveLength(before)
   })
 
+  it('opens one pull request for three concurrent proposals of one pattern', async () => {
+    const { remote } = await knowledgeRepo([{ path: 'index.md', content: INDEX }])
+    const { d, pulls } = deps(remote)
+    await saveKnowledge(d, { repository: 'me/kb' })
+    const tasks = [await aTask(), await aTask(), await aTask()]
+    const row = await pattern(tasks.map((t) => t.id))
+
+    const results = await Promise.all([
+      proposePatternRule(d, row.id),
+      proposePatternRule(d, row.id),
+      proposePatternRule(d, row.id),
+    ])
+
+    expect(pulls()).toHaveLength(1)
+    expect(new Set(results.map((r) => r.url)).size).toBe(1)
+  })
+
   it('refuses without a knowledge repository, and stores no proposal when the pull request fails', async () => {
     const { remote } = await knowledgeRepo([{ path: 'index.md', content: INDEX }])
     const { d } = deps(remote)

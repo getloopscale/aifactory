@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { AGENT_GUIDES, LOCKFILES } from './doctor'
-import { firstFile } from './doctor-facts'
+import { firstFile, readImage } from './doctor-facts'
 
 const reader = (readFile: (...a: unknown[]) => Promise<string | undefined>) =>
   ({ api: { readFile }, name: 'o/r', token: 't' }) as unknown as Parameters<typeof firstFile>[0]
@@ -37,5 +37,49 @@ describe('firstFile', () => {
     const missing = await firstFile(reader(failing), LOCKFILES.slice(0, 2), 'workspace')
     expect(missing).toMatchObject({ read: false, error: 'GitHub answered 502' })
     expect(missing).toMatchObject({ tried: expect.stringContaining('pnpm-lock.yaml on workspace') })
+  })
+})
+
+describe('readImage', () => {
+  const provider = (imageAvailable?: () => Promise<boolean>) =>
+    ({ name: 'e2b', imageAvailable }) as unknown as Parameters<typeof readImage>[0]
+
+  it('reads whether the provider has the template of the browser image', async () => {
+    expect(
+      await readImage(
+        provider(async () => true),
+        'browser',
+      ),
+    ).toEqual({
+      read: true,
+      value: { name: 'browser', provider: 'e2b', available: true },
+    })
+    expect(
+      await readImage(
+        provider(async () => false),
+        'browser',
+      ),
+    ).toMatchObject({
+      read: true,
+      value: { available: false },
+    })
+  })
+
+  it('is not known when the read failed', async () => {
+    const failing = async () => {
+      throw new Error('403: forbidden')
+    }
+    expect(await readImage(provider(failing), 'browser')).toMatchObject({
+      read: false,
+      error: '403: forbidden',
+    })
+  })
+
+  it('reads nothing for the default image or a provider that cannot say', async () => {
+    const check = vi.fn(async () => true)
+    expect(await readImage(provider(check), undefined)).toBeUndefined()
+    expect(check).not.toHaveBeenCalled()
+    expect(await readImage(provider(), 'browser')).toBeUndefined()
+    expect(await readImage(undefined, 'browser')).toBeUndefined()
   })
 })

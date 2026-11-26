@@ -34,6 +34,13 @@ export type HarnessInput = {
   /** A conversation turn that may only read: the agent runs in its CLI's read-only mode and the factory pushes nothing. */
   ask?: boolean
   /**
+   * The agent reads files and runs nothing: no shell, no edit tool. Set for a pass over a stranger's code
+   * where the agent's credential is. A harness that cannot enforce it throws; none may ignore it.
+   */
+  readFilesOnly?: boolean
+  /** With `readFilesOnly`: directories outside `cwd` the agent may read (absolute, plain paths). */
+  readDirs?: string[]
+  /**
    * When given and the run is watched, the harness hands over the means to write to the pass while it works
    * (see `ActivePass`). A harness that cannot simply never attaches.
    */
@@ -120,6 +127,12 @@ export interface CodingHarness {
   run(backend: SandboxBackend, input: HarnessInput): Promise<HarnessResult>
   /** Continues a conversation `run` started, in the same sandbox or one restored from a snapshot. */
   resume?(backend: SandboxBackend, sessionId: string, input: HarnessInput): Promise<HarnessResult>
+  /**
+   * The command that starts this agent's own CLI, interactive, on a session `run` left, for a terminal under a
+   * pseudo-terminal. The working directory is the terminal's, not the command's. The id is checked
+   * (`assertSessionId`) before it is put in the command.
+   */
+  interactive?(sessionId: string): string
 }
 
 /** Whether a run can be watched: someone listens, and the sandbox hands output over as it comes. */

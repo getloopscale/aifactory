@@ -133,6 +133,8 @@ export type RunResult =
   | { status: 'cancelled'; stage: string; reason: string }
   /** The provider refused the sandbox for credit or spending: nothing failed, the job queues itself again. */
   | { status: 'deferred'; stage: string; reason: string }
+  /** A terminal holds the task's one writer: nothing failed, the job queues itself again until it closes. */
+  | { status: 'held'; stage: string; reason: string }
 
 type QuestionRow = typeof questionTable.$inferSelect
 

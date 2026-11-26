@@ -19,6 +19,7 @@ import {
 } from '../lib/thread'
 
 import { Assist } from './Assist'
+import { Terminal } from './Terminal'
 import { StepRow } from './Transcript'
 import { AgentIcon } from './floor/AgentIcon'
 import { Surface } from './ui/Surface'
@@ -202,10 +203,13 @@ export function Conversation({
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [picked, setPicked] = useState<ThreadRole>()
+  const [terminal, setTerminal] = useState<'builder' | 'reviewer' | 'merger'>()
   const [now, setNow] = useState(() => Date.now())
   const stuck = useRef(true)
   const scroller = useRef<HTMLDivElement>(null)
   const liveRole = LIVE[task.stage as keyof typeof LIVE] as 'builder' | 'reviewer' | undefined
+  const mayGuide = detail.guide?.available !== false
+  const sendMode = liveRole || !mayGuide ? 'ask' : mode
   const canWrite = liveRole !== undefined || CONVERSABLE.includes(task.stage)
   // The harness of the last pass of that role: Codex cannot read while it runs, so a message stops its step.
   const harnessOf = (role: string) =>
@@ -233,6 +237,7 @@ export function Conversation({
     const run = [...detail.runs].reverse().find((r) => r.role === of)
     return { harness: run?.harness ?? null, model: run?.model ?? null }
   }
+  const kept = detail.terminals?.find((k) => k.role === role)
   const pass = [...shown].reverse().find((r) => r.type === 'pass')
   const activity =
     pass && pass.type === 'pass' && pass.role === liveRole
@@ -265,9 +270,9 @@ export function Conversation({
     try {
       await post(`/api/panel/tasks/${task.id}/messages`, {
         text,
-        mode: liveRole ? 'ask' : mode,
+        mode: sendMode,
       })
-      setNotice(mode === 'guide' ? t.conversation.guided : t.conversation.sent)
+      setNotice(sendMode === 'guide' ? t.conversation.guided : t.conversation.sent)
       setText('')
       onDone()
     } catch (e) {
@@ -322,12 +327,33 @@ export function Conversation({
         ) : null}
       </div>
       {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
+      {terminal ? (
+        <Terminal taskId={task.id} role={terminal} onEnd={() => setTerminal(undefined)} />
+      ) : null}
+      {kept && !terminal ? (
+        <div className="mb-2">
+          <p className="mb-1 text-xs text-muted-foreground">{t.conversation.terminal.warning}</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!kept.available}
+            title={kept.available ? undefined : kept.reason}
+            onClick={() => setTerminal(kept.role)}
+          >
+            {t.conversation.terminal.open}
+          </Button>
+          {!kept.available && kept.reason ? (
+            <p className="mt-1 text-xs text-muted-foreground">{kept.reason}</p>
+          ) : null}
+        </div>
+      ) : null}
       {passMissing ? (
         <p role="status" className="mb-2 text-sm text-muted-foreground">
           {t.conversation.passMissing}
         </p>
       ) : null}
       <div
+        hidden={terminal !== undefined}
         ref={scroller}
         onScroll={(e) => {
           const box = e.currentTarget
@@ -361,7 +387,7 @@ export function Conversation({
         )}
         {activity ? <p className="mt-3 text-sm text-muted-foreground">{activity}</p> : null}
       </div>
-      {canWrite ? (
+      {terminal ? null : canWrite ? (
         <div>
           <div className="rounded-xl border border-border bg-background focus-within:border-foreground/40">
             <label className="block">
@@ -382,12 +408,12 @@ export function Conversation({
               {liveRole ? null : (
                 <select
                   aria-label={t.conversation.mode}
-                  value={mode}
+                  value={sendMode}
                   onChange={(e) => setMode(e.target.value as typeof mode)}
                   className="h-7 rounded-md border border-border bg-card px-1.5 text-xs text-foreground"
                 >
                   <option value="ask">{t.conversation.ask}</option>
-                  <option value="guide">{t.conversation.guide}</option>
+                  {mayGuide ? <option value="guide">{t.conversation.guide}</option> : null}
                 </select>
               )}
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
@@ -396,10 +422,16 @@ export function Conversation({
                     {t.conversation.runningHelp}
                     {stopsStep ? <> {t.conversation.stopsStep}</> : null}
                   </>
-                ) : mode === 'ask' ? (
-                  t.conversation.askHelp
                 ) : (
-                  t.conversation.guideHelp
+                  <>
+                    {sendMode === 'ask' ? t.conversation.askHelp : t.conversation.guideHelp}
+                    {!mayGuide && detail.guide?.reason ? (
+                      <>
+                        {' '}
+                        <span>{detail.guide.reason}</span>
+                      </>
+                    ) : null}
+                  </>
                 )}
               </span>
               <Button

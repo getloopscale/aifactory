@@ -54,6 +54,7 @@ describe('the transition table', () => {
       resolve: true,
       release: true,
       conversation: true,
+      open_terminal: true,
       retry_due: true,
       conflict_rerun: true,
       send_back_after_ci: true,
@@ -81,7 +82,7 @@ describe('the transition table', () => {
     }
     expect([...EVENTS].sort()).toEqual(Object.keys(events).sort())
     const pairs = EVENTS.flatMap((event) => TASK_STAGES.map((stage) => ({ event, stage })))
-    expect(pairs).toHaveLength(33 * 15)
+    expect(pairs).toHaveLength(34 * 15)
     for (const { event, stage } of pairs) {
       const declared = outcome({ stage }, event)
       expect(['action', 'ignored', 'refused'], `${stage} + ${event}`).toContain(declared?.kind)
@@ -631,6 +632,28 @@ describe('the stages a task may be in when what was decided is carried out', () 
     expect(stagesWhere('resolve', {})).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', { mergedSha: 'm' })).toEqual(['handoff', 'failed'])
     expect(stagesWhere('retry', {})).toEqual(['done', 'handoff', 'failed'])
+  })
+})
+
+describe('the owner opening a terminal on a stopped agent', () => {
+  it('acts only where the agent has stopped', () => {
+    expect(acting('open_terminal')).toEqual(
+      each(['waiting', 'done', 'handoff', 'failed'], 'open_terminal'),
+    )
+  })
+
+  it('refuses elsewhere with a reason a person reads', () => {
+    const others = elsewhere('open_terminal')
+    expect(others).toHaveLength(2)
+    for (const o of others) expect(o.kind).toBe('refused')
+  })
+
+  it('refuses a second terminal on the task', () => {
+    for (const stage of ['waiting', 'done', 'handoff', 'failed'] as const) {
+      expect(outcome({ stage, terminalOpen: true }, 'open_terminal')).toEqual(
+        refused('a terminal of this task is already open: close it first, a task has one writer'),
+      )
+    }
   })
 })
 

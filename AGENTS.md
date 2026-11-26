@@ -41,13 +41,14 @@ src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
-                    `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `conversation-recover`, `push-attention`)
+                    `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `improve`, `conversation-recover`, `push-attention`)
   metrics/          the factory's own indicators, their daily points and control bands (`config.ts`)
   push/             Web Push to the owner's devices: new inbox items (`notify.ts`, pure), the only network call (`send.ts`), the pass
   knowledge/        the owner's knowledge repository: mirror, sync, the slice each agent gets, notes
   db/               Postgres config, pool, Drizzle schema, health probe
   ingest/           GitHub delivery: decide, record (ingress + task), signed webhook handler
   coordinator/      the factory's exceptions: facts, recognition, one decision, applying it (ADR 0011)
+  improver/         the daily search for small maintenance work in each enabled repository (`improve` cron)
   scheduler/        the order of the queued runs and the readiness of newly queued issues
   factory/          one task end to end: sandbox, agent, push, stage history; the repository doctor
   github/           GitHub App auth (repository-scoped tokens) and issue reads
@@ -320,6 +321,22 @@ reads that file, not a convention.
   most one per pass and three per week, never a designed wait (`DESIGNED_WAITS`), nothing in `trial` but a
   log line, and a week after the issue closes it records both counts and comments when the signature still
   shows up.
+- **The improver proposes at most one small maintenance issue a day for each enabled repository, and opens no pull
+  request.** The `improve` cron (`FACTORY_IMPROVER_MODE`: `off`, `trial` by default, `auto`) runs once a day.
+  `improver/facts.ts` reads and decides nothing, `decide.ts` is pure and `apply.ts` is the only module with side
+  effects. A repository is skipped, with the reason recorded, when a task of it is queued, running, waiting for an
+  answer or for CI, its line is stopped, a task is held by a red base, the last issue the improver filed for it is
+  still open (or could not be read), it already got a proposal this UTC day, or the pass proposed for `PER_PASS` (3)
+  repositories; the repositories are taken in an order that moves one place a day. Otherwise the kind scouted least
+  recently for it (`IMPROVER_KINDS`: `duplicate_code`, `missing_test`, `stale_doc`) goes to a scout, which is the
+  planner agent through `runPlanner` (`factory/plan.ts`: sandbox, knowledge feed, read-only, no branch created) with
+  the instruction of the kind (`agents/prompts/improver.ts`), answering `{"found":true,"target","title","body","evidence"}`
+  or `{"found":false}`; an answer that does not parse is an `error` and files nothing. In `auto` the proposal is filed
+  through `fileOnce` as `improve:<kind>:<target>` on the repository, labelled `factory`, `improvement` and `priority:5`;
+  a signature is never reclaimed, so one whose issue closed without a merged pull request is never proposed again
+  (`failure_signature` is unique per repository and signature, and Evolve never reads an `improve:` one). Every
+  repository of every pass is one `improver_decision` row. No file under `improver/` merges or opens a pull request
+  (`merges-nothing.test.ts`). The prompts are under `agents/prompts/`, so the work on them is handed over for `pnpm evals:check`.
 - **A fix for a test that fails the repository's tasks goes ahead of them.** When one test fails on two tasks of a
   repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
   `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
@@ -440,6 +457,16 @@ reads that file, not a convention.
   merge (`adoptMergedHandoffs` in `factory/await-ci.ts`, the `merged_by_person` event): the pre-release is made as
   after the factory's own merge, and the release train or a person releases it and closes its issue. It starts no
   release itself.
+- **A terminal is only for a stopped agent, and it pushes nothing.** `open_terminal` (`factory/transitions.ts`) is
+  allowed where a stopped agent takes a message (`waiting`, `handoff`, `done`, `failed`). `factory/terminal-session.ts`
+  starts the harness's own CLI (`interactive(sessionId)`) on the role's kept session in a sandbox built like a
+  conversation's, with the knowledge feed, under a pseudo-terminal (`TerminalBackend`, `terminals()` in `sandbox.ts`;
+  usetheokit/theokit-sdk#1614). A task has one open `terminal_session` row (a unique index), which is its one writer:
+  `run-task`, `resume-task` and `conversation` jobs wait in the queue while it is open (`deferJobWhileTerminal`) and
+  `claimNext` takes no message. The session ends on a closed socket, 15 minutes without a key or two hours: the role's
+  session is saved, the sandbox stopped and the row closed, its cost null. Nothing the terminal changed in the checkout
+  is committed or pushed. The websocket (`ws/panel/terminal.ts`) refuses a caller who is not the owner or whose
+  `Origin` is not the panel's.
 - **A finished agent pass is exported to Looptrace by the `export-trace` job, never by the run.** `recordPass`
   (`trace/record.ts`) stores the `agent_run` row and, only when `FACTORY_TRACE_ENDPOINT` is set, queues the job under
   `trace-<run id>`; `trace/spans.ts` turns the stored, redacted steps into OTLP JSON with ids derived from the run and

@@ -62,7 +62,8 @@ export type Retryable = 'quota' | 'environment' | 'blocked' | 'base' | null
  * found`). Bound to the factory's own template name, so an application failure that says a template of its own
  * is missing is not taken for it.
  */
-export const SANDBOX_TEMPLATE_MISSING = /\b404: template 'aifactory-sandbox(?::[^']*)?' not found/i
+export const SANDBOX_TEMPLATE_MISSING =
+  /\b404: template 'aifactory-sandbox(?:-browser)?(?::[^']*)?' not found/i
 
 /**
  * The sandbox provider refusing every new sandbox until someone pays: E2B answers `403: team is blocked:
@@ -574,6 +575,8 @@ export type ChangePlanView = {
   id: number
   baseSha: string
   harness: string
+  /** Absent in a plan stored before the acceptance list existed. */
+  acceptance?: { id: string; statement: string; evidence: string }[]
   files: { path: string; why: string }[]
   order: string[]
   risks: string[]
@@ -618,6 +621,14 @@ export type CoordinatorActionView = {
   at: string
 }
 
+/** Whether the owner may open the agent's own CLI on the session a role kept, and why not when it may not. */
+export type TerminalView = {
+  role: 'builder' | 'reviewer' | 'merger'
+  engine: string
+  available: boolean
+  reason?: string
+}
+
 export type TaskDetail = {
   task: TaskCard
   /** A send-back of the owner waits in `intake` and can still be withdrawn. */
@@ -640,7 +651,14 @@ export type TaskDetail = {
   runs: RunView[]
   /** What the owner wrote to the task's agent, oldest first. */
   messages: MessageView[]
+  /** The kept sessions a terminal could open on, one per role. */
+  terminals?: TerminalView[]
+  /** Whether a message may guide the agent now, as `transitions.ts` says. No answer counts as available. */
+  guide?: GuideView
 }
+
+/** Whether the conversation box may offer `guide`, and why not. */
+export type GuideView = { available: boolean; reason?: string }
 
 /** What the inbox lists: a task that waits for a person, and why. */
 export type InboxItem = {

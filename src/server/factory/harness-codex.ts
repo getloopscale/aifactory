@@ -143,6 +143,11 @@ export function codexHarness(
     resume: string,
     seen?: (line: string) => void,
   ) {
+    if (input.readFilesOnly) {
+      throw new Error(
+        "Codex cannot be started without a shell, so it cannot review a stranger's code",
+      )
+    }
     // `cwd` is a path the factory built, and `resume` is checked to be a UUID.
     if (resume) assertSessionId(resume)
     return backend.uploadFile(PROMPT_FILE, prompt).then(() =>
@@ -275,6 +280,8 @@ export function codexHarness(
 
     run: (backend, input) => invoke(backend, input, ''),
     resume: async (backend, sessionId, input) => invoke(backend, input, assertSessionId(sessionId)),
+    interactive: (sessionId) =>
+      `${credential.kind === 'api-key' ? 'OPENAI_API_KEY=placeholder-not-a-secret ' : ''}${CODEX} resume ${assertSessionId(sessionId)}${model}${effort}`,
   }
 }
 

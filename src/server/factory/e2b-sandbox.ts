@@ -8,6 +8,7 @@ import {
   Sandbox,
   SandboxNotRunningError,
   SandboxUnreachableError,
+  Template,
   TimeoutError,
   type SandboxNetworkOpts,
   type SandboxNetworkRule,
@@ -31,6 +32,8 @@ import type {
   SandboxFile,
   SandboxSpec,
   StreamingOptions,
+  Terminal,
+  TerminalOptions,
 } from './sandbox'
 import { assertIsolated } from './sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
@@ -68,6 +71,43 @@ export const SANDBOX_ENV: Record<string, string> = {
   npm_config_nodedir: SANDBOX_TOOLCHAIN.nodeHeadersDir,
 }
 
+/** What the browser image's Dockerfile sets and E2B does not apply: a check finds Chromium instead of downloading one. */
+export const BROWSER_ENV: Record<string, string> = {
+  CHROME_BIN: '/usr/bin/chromium',
+  PUPPETEER_EXECUTABLE_PATH: '/usr/bin/chromium',
+  PUPPETEER_SKIP_DOWNLOAD: '1',
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1',
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: '/usr/bin/chromium',
+}
+
+/** The environment of a sandbox of an image. */
+type TagReader = (name: string) => Promise<{ tag: string }[]>
+
+/**
+ * Whether a template of the form `name:tag` has that tag on the account. Reads the tags of the name, which a
+ * lookup of the alias cannot say (it answers true for a 403, a template of another team). A 404 is a template
+ * that is not there; any other failure (a key, the network, a 403) throws, so the caller says it does not know.
+ */
+export async function templateTagExists(template: string, getTags: TagReader): Promise<boolean> {
+  const at = template.lastIndexOf(':')
+  const name = at < 0 ? template : template.slice(0, at)
+  const tag = at < 0 ? 'default' : template.slice(at + 1)
+  try {
+    return (await getTags(name)).some((found) => found.tag === tag)
+  } catch (error) {
+    if ((error as { statusCode?: number }).statusCode === 404) return false
+    throw error
+  }
+}
+
+export function envFor(image?: SandboxSpec['image']): Record<string, string> {
+  return image === 'browser' ? { ...SANDBOX_ENV, ...BROWSER_ENV } : SANDBOX_ENV
+}
+
+/** The template an image starts from. */
+export const templateFor = (image?: SandboxSpec['image']) =>
+  image === 'browser' ? E2B_BROWSER_TEMPLATE : E2B_TEMPLATE
+
 /**
  * The egress policy for a spec: only the listed domains, everything else denied, and the headers of a rule
  * attached by E2B's egress proxy outside the sandbox (credential brokering), so the secret never exists in
@@ -104,8 +144,9 @@ const realTiming: Timing = {
  */
 export class E2BBackend extends SandboxBackend {
   constructor(
-    private readonly sandbox: Pick<Sandbox, 'commands' | 'files'>,
+    private readonly sandbox: Pick<Sandbox, 'commands' | 'files'> & Partial<Pick<Sandbox, 'pty'>>,
     private readonly timing: Timing = realTiming,
+    private readonly env: Record<string, string> = SANDBOX_ENV,
   ) {
     super()
   }
@@ -122,6 +163,57 @@ export class E2BBackend extends SandboxBackend {
       )
     } finally {
       split.end()
+    }
+  }
+
+  /**
+   * `command` under a pseudo-terminal of E2B's `pty` (usetheokit/theokit-sdk#1614). The terminal is a shell that
+   * `exec`s the command, so the session ends with it. The command is a string the factory built, quoted here.
+   */
+  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+    const pty = this.sandbox.pty
+    if (!pty) throw new Error('this E2B sandbox has no pseudo-terminal')
+    const listeners: ((data: string) => void)[] = []
+    const decoder = new TextDecoder()
+    const handle = await pty.create({
+      cols: opts.cols,
+      rows: opts.rows,
+      user: USER,
+      cwd: opts.cwd ?? WORKDIR,
+      envs: { ...this.env, TERM: 'xterm-256color' },
+      timeoutMs: 0,
+      onData: (bytes) => {
+        const text = decoder.decode(bytes, { stream: true })
+        for (const listener of listeners) listener(text)
+      },
+    })
+    const encoder = new TextEncoder()
+    let ended = false
+    const finished = handle
+      .wait()
+      .then((done) => ({ exitCode: done.exitCode }))
+      .catch((error: unknown) => {
+        if (error instanceof CommandExitError) return { exitCode: error.exitCode }
+        throw error
+      })
+      .finally(() => {
+        ended = true
+      })
+    await pty.sendInput(handle.pid, encoder.encode(`exec sh -c ${shellEscapePosix(command)}\n`))
+    return {
+      write: (data) => {
+        if (!ended) void pty.sendInput(handle.pid, encoder.encode(data)).catch(() => {})
+      },
+      resize: async (cols, rows) => {
+        if (!ended) await pty.resize(handle.pid, { cols, rows })
+      },
+      onData: (listener) => {
+        listeners.push(listener)
+      },
+      wait: () => finished,
+      kill: async () => {
+        if (!ended) await pty.kill(handle.pid).catch(() => false)
+      },
     }
   }
 
@@ -261,7 +353,7 @@ const wrap = (
     await (after ??= gone())
   }
   return {
-    backend: new E2BBackend(sandbox),
+    backend: new E2BBackend(sandbox, undefined, envFor(spec.image)),
     stop: end,
     snapshot: async () => {
       const { snapshotId } = await sandbox.createSnapshot()
@@ -288,7 +380,7 @@ export function sandboxOptions(spec: SandboxSpec, env: NodeJS.ProcessEnv = proce
   return {
     apiKey: env.E2B_API_KEY,
     timeoutMs: Math.min(spec.timeoutMs, e2bMaxSessionMs(env)),
-    envs: SANDBOX_ENV,
+    envs: envFor(spec.image),
     network: networkFor(spec),
     metadata: metadataFor(spec.owner, THIS_PROCESS),
   }
@@ -330,14 +422,13 @@ export function e2bSandboxProvider(env: NodeJS.ProcessEnv = process.env): Isolat
     async killSandbox(id) {
       await Sandbox.kill(id, { apiKey: env.E2B_API_KEY })
     },
-    async create(spec) {
-      return wrap(
-        await Sandbox.create(
-          spec.image === 'browser' ? E2B_BROWSER_TEMPLATE : E2B_TEMPLATE,
-          options(spec),
-        ),
-        spec,
+    async imageAvailable(image) {
+      return templateTagExists(templateFor(image), (name) =>
+        Template.getTags(name, { apiKey: env.E2B_API_KEY }),
       )
+    },
+    async create(spec) {
+      return wrap(await Sandbox.create(templateFor(spec.image), options(spec)), spec)
     },
     async restore(snapshotId, spec) {
       const sandbox = await Sandbox.create(snapshotId, options(spec))

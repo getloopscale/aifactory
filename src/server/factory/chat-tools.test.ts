@@ -15,7 +15,14 @@ describe('the tools of the assistant', () => {
 
   it('reads the factory with tools that cannot change it', () => {
     const reading = CHAT_TOOLS.filter((t) => !(ACTING_TOOLS as readonly string[]).includes(t))
-    expect(reading).toEqual(['factory_status', 'list_tasks', 'task_detail', 'backlog_progress'])
+    expect(reading).toEqual([
+      'factory_status',
+      'list_tasks',
+      'task_detail',
+      'backlog_progress',
+      'history_search',
+      'history_read',
+    ])
   })
 
   it('has no shell, file or network tool of its own', () => {

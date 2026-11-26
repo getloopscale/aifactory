@@ -52,6 +52,12 @@ export function PlanSection({ plans }: { plans: ChangePlanView[] }) {
               {plans.length > 1 ? t.planSection.latestOf(plans.length) : ''}
             </span>
           </p>
+          <Items
+            title={t.planSection.acceptance}
+            items={(plan.acceptance ?? []).map(
+              (a) => `${a.id}: ${a.statement}${a.evidence ? ` (${a.evidence})` : ''}`,
+            )}
+          />
           <h3 className="mt-2 text-xs font-semibold text-muted-foreground">
             {t.planSection.files}
           </h3>

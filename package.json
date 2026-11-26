@@ -40,6 +40,7 @@
     "@theokit/ui": "^1.12.2",
     "@usetheo/ui": "^0.36.0",
     "@vercel/sandbox": "^3.9.1",
+    "@xterm/xterm": "^5.5.0",
     "drizzle-orm": "0.45.4",
     "e2b": "2.63.0",
     "hast-util-sanitize": "^5.0.2",
