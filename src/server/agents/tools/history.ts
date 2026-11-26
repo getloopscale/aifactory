@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { getDb } from '../../db'
 import { readHistory, TRANSCRIPT_WARNING } from '../../trace/history'
-import { searchHistory } from '../../trace/search'
+import { lookupTasks, searchPasses } from '../../trace/search'
 
 /** Both read only: a query to the database and GET requests to Looptrace, nothing written anywhere. */
 
@@ -21,10 +21,11 @@ export const historySearchTool = tool('history_search')
     }),
   )
   .execute(async (input) => {
-    const answer = await searchHistory(input)
+    const { query, ...filters } = input
+    const answer = await searchPasses({ q: query, ...filters }, lookupTasks(getDb()))
     if (!answer.enabled)
       return { note: 'History search is off: FACTORY_TRACE_ENDPOINT is not set.' }
-    return { note: TRANSCRIPT_WARNING, results: answer.hits }
+    return { note: TRANSCRIPT_WARNING, results: answer.results }
   })
   .build()
 
