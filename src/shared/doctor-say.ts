@@ -251,8 +251,10 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
   sandbox_image_missing: {
     cause: (v) =>
       `This repository uses the ${v.image} sandbox image, and the ${v.provider} account has no template for it, so a run cannot start.`,
-    repair: () =>
-      'Build the template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Or choose the default image on the page of the repository.',
+    repair: (v) =>
+      v.provider === 'e2b'
+        ? 'Build the template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Or choose the default image on the page of the repository.'
+        : 'Choose the default image on the page of the repository, or build the image on the sandbox provider.',
   },
   provider_checks_failed: {
     cause: (v) =>

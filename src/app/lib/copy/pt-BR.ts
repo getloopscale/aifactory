@@ -602,8 +602,10 @@ export const ptBR: Copy = {
       sandbox_image_missing: {
         cause: (v) =>
           `Este repositório usa a imagem de sandbox ${v.image}, e a conta do provedor ${v.provider} não tem o template dela, então uma execução não consegue começar.`,
-        repair: () =>
-          'Construa o template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Ou escolha a imagem padrão na página do repositório.',
+        repair: (v) =>
+          v.provider === 'e2b'
+            ? 'Construa o template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Ou escolha a imagem padrão na página do repositório.'
+            : 'Escolha a imagem padrão na página do repositório, ou construa a imagem no provedor de sandbox.',
       },
       provider_checks_failed: {
         cause: (v) =>

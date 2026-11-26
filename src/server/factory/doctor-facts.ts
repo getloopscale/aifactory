@@ -143,7 +143,7 @@ async function readSlots(
 }
 
 /** Whether the provider has the template of the repository's image. Nothing to read for the default image. */
-async function readImage(
+export async function readImage(
   provider: DoctorSources['sandboxes'],
   image: RepoConfig['sandboxImage'],
 ): Promise<SandboxFacts['image']> {

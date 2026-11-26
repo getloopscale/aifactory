@@ -9,7 +9,7 @@ import {
   TimeoutError,
 } from 'e2b'
 import { shellEscapePosix } from '@theokit/agents/sandbox'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   BROWSER_ENV,
@@ -20,6 +20,7 @@ import {
   networkFor,
   SANDBOX_ENV,
   sandboxOptions,
+  templateTagExists,
   UPLOAD_BATCH,
 } from './e2b-sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
@@ -383,6 +384,34 @@ describe('the browser image', () => {
     )
     await backend.openTerminal('true', { cols: 80, rows: 24 })
     expect(created[0]!.envs.CHROME_BIN).toBe('/usr/bin/chromium')
+  })
+})
+
+describe('templateTagExists', () => {
+  const error = (statusCode: number) =>
+    Object.assign(new Error(`${statusCode}: no`), { statusCode })
+
+  it('is true when the tag is on the template, and false when it is not', async () => {
+    const getTags = vi.fn(async () => [{ tag: 'default' }, { tag: '1' }])
+    expect(await templateTagExists('aifactory-sandbox-browser:1', getTags)).toBe(true)
+    expect(getTags).toHaveBeenCalledWith('aifactory-sandbox-browser')
+    expect(await templateTagExists('aifactory-sandbox-browser:2', getTags)).toBe(false)
+  })
+
+  it('is false for a template that is not there', async () => {
+    const missing = async () => {
+      throw error(404)
+    }
+    expect(await templateTagExists('aifactory-sandbox-browser:1', missing)).toBe(false)
+  })
+
+  it('throws for a refusal or a failure, so it is not said to exist or to be missing', async () => {
+    for (const code of [401, 403, 500]) {
+      const failing = async () => {
+        throw error(code)
+      }
+      await expect(templateTagExists('aifactory-sandbox-browser:1', failing)).rejects.toThrow()
+    }
   })
 })
 

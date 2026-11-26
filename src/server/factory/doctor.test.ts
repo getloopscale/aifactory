@@ -747,6 +747,8 @@ describe('sandbox', () => {
     expect(item.status).toBe('blocked')
     expect(item.id).toBe('sandbox')
     expect(item.repair).toContain('--browser')
+    const other = readOf({ name: 'browser', provider: 'vercel', available: false })
+    expect(sandboxItem(readOf({ image: other })).repair).not.toContain('build-e2b-template')
   })
 
   it('is fine when the template exists, and unknown when it could not be read', () => {

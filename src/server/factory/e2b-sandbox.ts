@@ -81,6 +81,25 @@ export const BROWSER_ENV: Record<string, string> = {
 }
 
 /** The environment of a sandbox of an image. */
+type TagReader = (name: string) => Promise<{ tag: string }[]>
+
+/**
+ * Whether a template of the form `name:tag` has that tag on the account. Reads the tags of the name, which a
+ * lookup of the alias cannot say (it answers true for a 403, a template of another team). A 404 is a template
+ * that is not there; any other failure (a key, the network, a 403) throws, so the caller says it does not know.
+ */
+export async function templateTagExists(template: string, getTags: TagReader): Promise<boolean> {
+  const at = template.lastIndexOf(':')
+  const name = at < 0 ? template : template.slice(0, at)
+  const tag = at < 0 ? 'default' : template.slice(at + 1)
+  try {
+    return (await getTags(name)).some((found) => found.tag === tag)
+  } catch (error) {
+    if ((error as { statusCode?: number }).statusCode === 404) return false
+    throw error
+  }
+}
+
 export function envFor(image?: SandboxSpec['image']): Record<string, string> {
   return image === 'browser' ? { ...SANDBOX_ENV, ...BROWSER_ENV } : SANDBOX_ENV
 }
@@ -404,7 +423,9 @@ export function e2bSandboxProvider(env: NodeJS.ProcessEnv = process.env): Isolat
       await Sandbox.kill(id, { apiKey: env.E2B_API_KEY })
     },
     async imageAvailable(image) {
-      return Template.exists(templateFor(image), { apiKey: env.E2B_API_KEY })
+      return templateTagExists(templateFor(image), (name) =>
+        Template.getTags(name, { apiKey: env.E2B_API_KEY }),
+      )
     },
     async create(spec) {
       return wrap(await Sandbox.create(templateFor(spec.image), options(spec)), spec)
