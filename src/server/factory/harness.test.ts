@@ -241,6 +241,32 @@ describe('claudeCodeHarness plugin', () => {
     expect(sandbox.backend.commands.at(-1)).toContain(`--resume ${id}`)
   })
 
+  it('leaves a files-only pass the read tools and no shell, never the permission bypass', async () => {
+    const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    const harness = claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+    await harness.run(backend, {
+      prompt: 'P',
+      cwd: '/w',
+      timeoutMs: 5,
+      readFilesOnly: true,
+      readDirs: ['/tmp/pull-request', '/work/checkout'],
+    })
+    const command = sandbox.backend.commands.at(-1)!
+    expect(command).toContain('--tools Read,Grep,Glob --allowedTools Read,Grep,Glob')
+    expect(command).toContain('--add-dir /tmp/pull-request --add-dir /work/checkout')
+    await expect(
+      harness.run(backend, {
+        prompt: 'P',
+        cwd: '/w',
+        timeoutMs: 5,
+        readFilesOnly: true,
+        readDirs: ['/x; id'],
+      }),
+    ).rejects.toThrow('plain path')
+    expect(command).not.toContain('--dangerously-skip-permissions')
+  })
+
   it('resumes an ask turn in plan mode, with no bypass, the prompt by file', async () => {
     const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))
     const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })

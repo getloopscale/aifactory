@@ -273,6 +273,16 @@ describe('codexHarness', () => {
     await expect(harness.resume?.(backend, 'x; rm -rf /', input)).rejects.toThrow(/UUID/)
   })
 
+  it('refuses a files-only pass, since it cannot take the shell away', async () => {
+    const harness = codexHarness({ kind: 'api-key', secret: 'k' })
+    const sandbox = new FakeSandbox(() => ({ stdout: done }))
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [{ domain: 'github.com' }] })
+    await expect(harness.run(backend, { ...input, readFilesOnly: true })).rejects.toThrow(
+      /without a shell/,
+    )
+    expect(sandbox.backend.commands.some((c) => c.includes('codex exec'))).toBe(false)
+  })
+
   it('resumes an ask turn read-only, with no bypass, the prompt by file', async () => {
     const harness = codexHarness({ kind: 'api-key', secret: 'k' })
     const sandbox = new FakeSandbox(() => ({ stdout: done }))
