@@ -31,6 +31,8 @@ import type {
   SandboxFile,
   SandboxSpec,
   StreamingOptions,
+  Terminal,
+  TerminalOptions,
 } from './sandbox'
 import { assertIsolated } from './sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
@@ -104,7 +106,7 @@ const realTiming: Timing = {
  */
 export class E2BBackend extends SandboxBackend {
   constructor(
-    private readonly sandbox: Pick<Sandbox, 'commands' | 'files'>,
+    private readonly sandbox: Pick<Sandbox, 'commands' | 'files'> & Partial<Pick<Sandbox, 'pty'>>,
     private readonly timing: Timing = realTiming,
   ) {
     super()
@@ -122,6 +124,57 @@ export class E2BBackend extends SandboxBackend {
       )
     } finally {
       split.end()
+    }
+  }
+
+  /**
+   * `command` under a pseudo-terminal of E2B's `pty` (usetheokit/theokit-sdk#1614). The terminal is a shell that
+   * `exec`s the command, so the session ends with it. The command is a string the factory built, quoted here.
+   */
+  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+    const pty = this.sandbox.pty
+    if (!pty) throw new Error('this E2B sandbox has no pseudo-terminal')
+    const listeners: ((data: string) => void)[] = []
+    const decoder = new TextDecoder()
+    const handle = await pty.create({
+      cols: opts.cols,
+      rows: opts.rows,
+      user: USER,
+      cwd: opts.cwd ?? WORKDIR,
+      envs: { ...SANDBOX_ENV, TERM: 'xterm-256color' },
+      timeoutMs: 0,
+      onData: (bytes) => {
+        const text = decoder.decode(bytes, { stream: true })
+        for (const listener of listeners) listener(text)
+      },
+    })
+    const encoder = new TextEncoder()
+    let ended = false
+    const finished = handle
+      .wait()
+      .then((done) => ({ exitCode: done.exitCode }))
+      .catch((error: unknown) => {
+        if (error instanceof CommandExitError) return { exitCode: error.exitCode }
+        throw error
+      })
+      .finally(() => {
+        ended = true
+      })
+    await pty.sendInput(handle.pid, encoder.encode(`exec sh -c ${shellEscapePosix(command)}\n`))
+    return {
+      write: (data) => {
+        if (!ended) void pty.sendInput(handle.pid, encoder.encode(data)).catch(() => {})
+      },
+      resize: async (cols, rows) => {
+        if (!ended) await pty.resize(handle.pid, { cols, rows })
+      },
+      onData: (listener) => {
+        listeners.push(listener)
+      },
+      wait: () => finished,
+      kill: async () => {
+        if (!ended) await pty.kill(handle.pid).catch(() => false)
+      },
     }
   }
 

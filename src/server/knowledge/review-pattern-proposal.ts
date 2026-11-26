@@ -1,5 +1,6 @@
 import { and, eq, inArray, isNull } from 'drizzle-orm'
 
+import { getPool } from '../db'
 import { reviewPattern, task } from '../db/schema'
 
 import { patternRulePath, renderPatternRule } from './format'
@@ -15,10 +16,31 @@ import { context, KnowledgeRefused, serialized, syncKnowledge, type KnowledgeDep
 /** The factory's branch for one pattern's rule. It is the factory's own, so it may be replaced. */
 export const patternBranch = (id: number) => `factory-rule-${id}`
 
+type Proposal = { url: string; path: string }
+
+/**
+ * One proposal per pattern at a time, on any process: a blocking advisory lock on one pool connection, so a second
+ * call waits, then reads the pattern again and finds the first one's pull request.
+ */
 export async function proposePatternRule(
   deps: KnowledgeDeps,
   patternId: number,
-): Promise<{ url: string; path: string }> {
+): Promise<Proposal> {
+  const client = await getPool().connect()
+  const key = `pattern-rule:${patternId}`
+  try {
+    await client.query('select pg_advisory_lock(hashtext($1))', [key])
+    try {
+      return await proposeLocked(deps, patternId)
+    } finally {
+      await client.query('select pg_advisory_unlock(hashtext($1))', [key])
+    }
+  } finally {
+    client.release()
+  }
+}
+
+async function proposeLocked(deps: KnowledgeDeps, patternId: number): Promise<Proposal> {
   const [pattern] = await deps.db
     .select()
     .from(reviewPattern)

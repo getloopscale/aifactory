@@ -16,6 +16,7 @@ import {
 } from '../lib/thread'
 
 import { Assist } from './Assist'
+import { Terminal } from './Terminal'
 import { StepRow } from './Transcript'
 
 /** The stages where the agent has stopped and the owner may write to it. The server decides again. */
@@ -132,6 +133,7 @@ export function Conversation({
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [picked, setPicked] = useState<ThreadRole>()
+  const [terminal, setTerminal] = useState<'builder' | 'reviewer' | 'merger'>()
   const [now, setNow] = useState(() => Date.now())
   const stuck = useRef(true)
   const scroller = useRef<HTMLDivElement>(null)
@@ -155,6 +157,7 @@ export function Conversation({
     focusRun,
     hasEvents: events.length > 0,
   })
+  const kept = detail.terminals?.find((k) => k.role === role)
   const pass = [...shown].reverse().find((r) => r.type === 'pass')
   const activity =
     pass && pass.type === 'pass' && pass.role === liveRole
@@ -222,12 +225,33 @@ export function Conversation({
         </div>
       ) : null}
       {error ? <p className="mb-2 text-sm text-destructive">{error}</p> : null}
+      {terminal ? (
+        <Terminal taskId={task.id} role={terminal} onEnd={() => setTerminal(undefined)} />
+      ) : null}
+      {kept && !terminal ? (
+        <div className="mb-2">
+          <p className="mb-1 text-xs text-muted-foreground">{t.conversation.terminal.warning}</p>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={!kept.available}
+            title={kept.available ? undefined : kept.reason}
+            onClick={() => setTerminal(kept.role)}
+          >
+            {t.conversation.terminal.open}
+          </Button>
+          {!kept.available && kept.reason ? (
+            <p className="mt-1 text-xs text-muted-foreground">{kept.reason}</p>
+          ) : null}
+        </div>
+      ) : null}
       {passMissing ? (
         <p role="status" className="mb-2 text-sm text-muted-foreground">
           {t.conversation.passMissing}
         </p>
       ) : null}
       <div
+        hidden={terminal !== undefined}
         ref={scroller}
         onScroll={(e) => {
           const box = e.currentTarget
@@ -256,7 +280,7 @@ export function Conversation({
         )}
         {activity ? <p className="mt-3 text-sm text-muted-foreground">{activity}</p> : null}
       </div>
-      {canWrite ? (
+      {terminal ? null : canWrite ? (
         <div>
           {liveRole ? (
             <p className="mb-2 text-sm text-muted-foreground">

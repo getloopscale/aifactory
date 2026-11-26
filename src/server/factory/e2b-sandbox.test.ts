@@ -386,3 +386,82 @@ describe('sandboxOptions', () => {
     expect(e2bSandboxLimit({ E2B_MAX_SANDBOXES: '100' })).toBe(100)
   })
 })
+
+describe('an E2B terminal', () => {
+  function fakePty() {
+    const sent: string[] = []
+    const resized: { cols: number; rows: number }[] = []
+    const killed: number[] = []
+    let finish!: () => void
+    const handle = {
+      pid: 42,
+      wait: () =>
+        new Promise((_, fail) => {
+          finish = () =>
+            fail(new CommandExitError({ exitCode: 3, error: 'x', stdout: '', stderr: '' }))
+        }),
+    }
+    let onData!: (b: Uint8Array) => void
+    const created: Record<string, unknown>[] = []
+    const pty = {
+      create: async (opts: { onData: typeof onData } & Record<string, unknown>) => {
+        onData = opts.onData
+        created.push(opts)
+        return handle
+      },
+      sendInput: async (_pid: number, data: Uint8Array) => {
+        sent.push(new TextDecoder().decode(data))
+      },
+      resize: async (_pid: number, size: { cols: number; rows: number }) => {
+        resized.push(size)
+      },
+      kill: async (pid: number) => {
+        killed.push(pid)
+        finish()
+        return true
+      },
+    }
+    return {
+      pty,
+      sent,
+      resized,
+      killed,
+      created,
+      print: (t: string) => onData(new TextEncoder().encode(t)),
+    }
+  }
+
+  it('execs the quoted command in a pty, relays bytes, resizes and kills it', async () => {
+    const f = fakePty()
+    const backend = new E2BBackend({ commands: {}, files: {}, pty: f.pty } as never)
+    const term = await backend.openTerminal("claude --resume 'a b'", {
+      cols: 100,
+      rows: 30,
+      cwd: '/work/r',
+    })
+    expect(f.created[0]).toMatchObject({ cols: 100, rows: 30, cwd: '/work/r', user: 'node' })
+    expect(f.sent[0]).toBe(`exec sh -c ${shellEscapePosix("claude --resume 'a b'")}\n`)
+
+    const seen: string[] = []
+    term.onData((d) => seen.push(d))
+    f.print('hi')
+    expect(seen).toEqual(['hi'])
+    term.write('ls\n')
+    await term.resize(120, 40)
+    expect(f.sent.at(-1)).toBe('ls\n')
+    expect(f.resized).toEqual([{ cols: 120, rows: 40 }])
+
+    await term.kill()
+    expect(f.killed).toEqual([42])
+    expect(await term.wait()).toEqual({ exitCode: 3 })
+    await term.kill()
+    expect(f.killed).toEqual([42])
+  })
+
+  it('says so when the sandbox has no pseudo-terminal', async () => {
+    const backend = new E2BBackend({ commands: {}, files: {} } as never)
+    await expect(backend.openTerminal('x', { cols: 1, rows: 1 })).rejects.toThrow(
+      /no pseudo-terminal/,
+    )
+  })
+})

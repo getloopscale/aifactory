@@ -120,6 +120,12 @@ export interface CodingHarness {
   run(backend: SandboxBackend, input: HarnessInput): Promise<HarnessResult>
   /** Continues a conversation `run` started, in the same sandbox or one restored from a snapshot. */
   resume?(backend: SandboxBackend, sessionId: string, input: HarnessInput): Promise<HarnessResult>
+  /**
+   * The command that starts this agent's own CLI, interactive, on a session `run` left, for a terminal under a
+   * pseudo-terminal. The working directory is the terminal's, not the command's. The id is checked
+   * (`assertSessionId`) before it is put in the command.
+   */
+  interactive?(sessionId: string): string
 }
 
 /** Whether a run can be watched: someone listens, and the sandbox hands output over as it comes. */

@@ -19,6 +19,8 @@ type PanelEvent =
   | 'release'
   /** The owner writes to the task's agent, in `ask` or `guide` mode (`Facts.conversation`). */
   | 'conversation'
+  /** The owner opens the stopped agent's own CLI on its kept session, in a terminal. */
+  | 'open_terminal'
 
 /**
  * What the factory does with no person asking. `retry_due` is a failure whose time to run again came
@@ -95,6 +97,8 @@ export type Action =
   | 'message_running_agent'
   /** The message goes to the agent as a send-back: the task returns to `build` through the loop's checks and review. */
   | 'guide_agent'
+  /** The agent's CLI is started interactive on its kept session, in a sandbox: nothing it does is pushed. */
+  | 'open_terminal'
 
 export type Outcome =
   | { kind: 'action'; action: Action }
@@ -127,6 +131,8 @@ export type Facts = {
   sendBackPending?: boolean
   /** How the owner's message is meant: `ask` only reads, `guide` may change the work. No mode counts as `ask`. */
   conversation?: 'ask' | 'guide'
+  /** A terminal of this task is open: the one writer a task has. */
+  terminalOpen?: boolean
 }
 
 type Rule = Outcome | ((task: Facts) => Outcome)
@@ -209,6 +215,15 @@ const converse =
     if (task.mergedSha || task.resolvedSha) return GUIDE_MERGED
     return task.branchGone ? GUIDE_NO_BRANCH : act('guide_agent')
   }
+
+const TERMINAL_OPEN = refuse(
+  'a terminal of this task is already open: close it first, a task has one writer',
+)
+const NOT_TERMINAL = refuse(
+  'a terminal opens only on the agent of a task that waits for an answer, was handed over, is done or failed',
+)
+/** A terminal is a writer on the session, so it opens only where the agent has stopped and no terminal is open. */
+const terminal: Rule = (task) => (task.terminalOpen ? TERMINAL_OPEN : act('open_terminal'))
 
 const NOT_WITHDRAWABLE = refuse('only a send-back that has not started can be withdrawn')
 const withdraw: Rule = (task) =>
@@ -362,6 +377,14 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     failed: converse(false),
     done: converse(true),
     handoff: converse(true),
+  },
+  open_terminal: {
+    ...each(['intake', ...WORKING], AGENT_RUNNING),
+    ...each(['released', 'cancelled'], NOT_TERMINAL),
+    waiting: terminal,
+    done: terminal,
+    handoff: terminal,
+    failed: terminal,
   },
   merge_base_by_owner: {
     ...each(
