@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { maintainHolds } from '../coordinator/queue-hold'
@@ -19,7 +19,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table theokit_jobs, line_incident, task, ingress restart identity cascade',
+    'truncate table loopzero_jobs, line_incident, task, ingress restart identity cascade',
   )
 })
 // An open incident holds the jobs of every suite that runs after this one on the same database.
@@ -76,7 +76,7 @@ const stop = (issueNumber: number) =>
 /** Whether the task's run waits for ever (held) rather than at the time it was queued for. */
 async function held(taskId: number): Promise<boolean> {
   const { rows } = await getPool().query<{ infinite: boolean }>(
-    "select available_at = 'infinity' as infinite from theokit_jobs where idempotency_key = $1",
+    "select available_at = 'infinity' as infinite from loopzero_jobs where idempotency_key = $1",
     [`task-${taskId}`],
   )
   return rows[0].infinite
@@ -154,7 +154,7 @@ describe('a stopped line', () => {
 })
 
 describe('a stopped line whose scope is fix first', () => {
-  // A red promotion held every run of usetheokit/theokit and theokit-sdk for hours while their fixes waited for
+  // A red promotion held every run of usetheokit/theokit and loopzero-sdk for hours while their fixes waited for
   // the promotion's CI, so the factory finished almost nothing (2026-11-19). The owner's flow integrates fast and
   // fixes the promotion on its way to develop.
   beforeEach(() => vi.stubEnv('FACTORY_LINE_STOP_SCOPE', 'fix_first'))

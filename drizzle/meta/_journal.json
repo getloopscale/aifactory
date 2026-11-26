@@ -428,6 +428,13 @@
       "when": 1796125579100,
       "tag": "0063_factory_repository_moved",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1796125580100,
+      "tag": "0064_framework_tables_renamed",
+      "breakpoints": true
     }
   ]
 }

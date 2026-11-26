@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { collectArtifacts, type CapturedArtifact } from './artifacts'
 import { must } from './run-support'

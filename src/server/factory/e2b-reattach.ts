@@ -1,4 +1,4 @@
-import { shellEscapePosix } from '@theokit/agents/sandbox'
+import { shellEscapePosix } from '@getloopscale/loopzero-agents/sandbox'
 import { CommandExitError, NotFoundError, SandboxError } from 'e2b'
 
 /**

@@ -728,7 +728,7 @@ describe('a docker terminal', () => {
     expect(joined).toContain(`'claude --resume x'\\''y'`)
 
     const seen: string[] = []
-    term.onData((d) => seen.push(d))
+    term.onData((d) => seen.push(Buffer.from(d).toString()))
     proc.stdout.emit('data', Buffer.from('hello'))
     expect(seen).toEqual(['hello'])
     term.write('ls\n')

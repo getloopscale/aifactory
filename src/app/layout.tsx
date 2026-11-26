@@ -1,7 +1,7 @@
-import '@theokit/ui/styles.css'
+import '@getloopscale/loopzero-ui/styles.css'
 import './globals.css'
 
-import { ThemeProvider } from '@theokit/ui'
+import { ThemeProvider } from '@getloopscale/loopzero-ui'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router'
 

@@ -1,6 +1,6 @@
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -54,7 +54,7 @@ import { jobBackend } from '../factory/job-backend'
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
-  // The board reads each queued card's place from TheoKit's job table, which its own migration creates.
+  // The board reads each queued card's place from LoopZero's job table, which its own migration creates.
   await jobBackend().migrate()
 })
 beforeEach(async () => {

@@ -16,16 +16,16 @@ const stopTimeoutMs = (text: string) => {
   if (!match) throw new Error('the unit sets no TimeoutStopSec in minutes')
   return Number(match[1]) * 60_000
 }
-// What theokit start still takes after the job: closing storage, then up to 25 s to exit.
+// What loopzero start still takes after the job: closing storage, then up to 25 s to exit.
 const AFTER_THE_JOB_MS = 30_000
 
 describe('a restart of a process that runs tasks', () => {
-  it('tells theokit how long to wait, in a key its config schema keeps', async () => {
-    // theokit before 0.79 dropped the key without a word, and the types did not catch it either.
+  it('tells loopzero how long to wait, in a key its config schema keeps', async () => {
+    // loopzero before 0.79 dropped the key without a word, and the types did not catch it either.
     vi.stubEnv('DATABASE_URL', 'postgres://factory:factory@localhost:1/factory')
     vi.stubEnv('FACTORY_JOBS', '')
     vi.resetModules()
-    const { default: loaded } = await import('../../../theo.config')
+    const { default: loaded } = await import('../../../loopzero.config')
     vi.unstubAllEnvs()
 
     expect(loaded.jobs?.worker.shutdownTimeoutMs).toBe(JOB_SHUTDOWN_WAIT_MS)
@@ -36,7 +36,7 @@ describe('a restart of a process that runs tasks', () => {
     vi.stubEnv('FACTORY_JOBS', '')
     vi.stubEnv('FACTORY_SERVER_ONLY', '1')
     vi.resetModules()
-    const { default: loaded } = await import('../../../theo.config')
+    const { default: loaded } = await import('../../../loopzero.config')
     vi.unstubAllEnvs()
 
     expect(loaded.jobs?.worker.enabled).toBe(false)
@@ -96,12 +96,12 @@ describe('a restart of a process that runs tasks', () => {
   it('leaves the migrations to the deploy and the main process, so workers starting together do not race on them', () => {
     const script = readFileSync('scripts/run-server.sh', 'utf8')
     expect(script).toMatch(
-      /^\[ "\$\{FACTORY_WORKER_ONLY:-\}" = 1 \] \|\| pnpm exec theokit db migrate$/m,
+      /^\[ "\$\{FACTORY_WORKER_ONLY:-\}" = 1 \] \|\| pnpm exec drizzle-kit migrate$/m,
     )
   })
 
-  it('reaches theokit itself: the script that starts it hands its process over, with no wrapper between', () => {
+  it('reaches loopzero itself: the script that starts it hands its process over, with no wrapper between', () => {
     const lines = readFileSync('scripts/run-server.sh', 'utf8').trim().split('\n')
-    expect(lines.at(-1)).toBe('exec node_modules/.bin/theokit start')
+    expect(lines.at(-1)).toBe('exec node_modules/.bin/loopzero start')
   })
 })

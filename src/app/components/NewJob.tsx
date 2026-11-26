@@ -1,4 +1,4 @@
-import { Button, Dialog, Input, Textarea } from '@usetheo/ui'
+import { Button, Dialog, Input, Textarea } from '@getloopscale/ui'
 import { useState } from 'react'
 
 import type { RepositoriesView } from '../../shared/panel'

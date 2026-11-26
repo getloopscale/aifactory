@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
 import { and, desc, eq } from 'drizzle-orm'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -86,12 +86,12 @@ const ANTHROPIC = 'sk-ant-key-must-not-leak'
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
-  // The board reads each queued card's place from TheoKit's job table, which its own migration creates.
+  // The board reads each queued card's place from LoopZero's job table, which its own migration creates.
   await jobBackend().migrate()
 })
 beforeEach(async () => {
   // No worker runs here: a test takes the merge-task job its run queued, and none is left for the next.
-  await getPool().query(`delete from theokit_jobs where name = 'merge-task'`)
+  await getPool().query(`delete from loopzero_jobs where name = 'merge-task'`)
   await getPool().query(
     'truncate table setting, promotion_wait, agent_event, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, repository restart identity cascade',
   )
@@ -225,7 +225,7 @@ const seen = {
 }
 
 /** A changeset that releases something: its front matter names a package. */
-const NAMED_CHANGESET = '---\n"@theokit/ui": patch\n---\n\nFixes the button.\n'
+const NAMED_CHANGESET = '---\n"@getloopscale/loopzero-ui": patch\n---\n\nFixes the button.\n'
 
 /** What `develop` holds on GitHub: the names in `.changeset`, and the other files with what each holds. */
 const develop = {
@@ -637,9 +637,9 @@ describe('runTask', () => {
   it('queues the merge of approved work ahead of every queued run, however old', async () => {
     // A merge takes seconds and delivers the work; a run takes up to an hour. Workers take the job whose
     // available_at is earliest, so a merge queued behind older runs waited for one of them to end.
-    await getPool().query(`delete from theokit_jobs where id = 'old-run'`)
+    await getPool().query(`delete from loopzero_jobs where id = 'old-run'`)
     await getPool().query(
-      `insert into theokit_jobs (id, name, input, max_attempts, available_at)
+      `insert into loopzero_jobs (id, name, input, max_attempts, available_at)
        values ('old-run', 'run-task', '{"taskId": 999}', 1, now() - interval '400 days')`,
     )
     const id = await seedTask()
@@ -647,10 +647,10 @@ describe('runTask', () => {
     await runOnly(deps(new FakeSandbox(changed())), id)
 
     const { rows } = await getPool().query<{ name: string }>(
-      `select name from theokit_jobs where name in ('merge-task', 'run-task')
+      `select name from loopzero_jobs where name in ('merge-task', 'run-task')
         and available_at <> 'infinity' order by available_at limit 1`,
     )
-    await getPool().query(`delete from theokit_jobs where id = 'old-run'`)
+    await getPool().query(`delete from loopzero_jobs where id = 'old-run'`)
     expect(rows[0]?.name).toBe('merge-task')
   })
 
@@ -2437,7 +2437,9 @@ describe('runTask review loop', () => {
       const id = await seedTask()
       const result = await runTask(
         deps(nothingChanged(), {
-          harness: saying('The change needs @theokit/sdk 9.9.9, which is not published yet.'),
+          harness: saying(
+            'The change needs @getloopscale/loopzero-sdk 9.9.9, which is not published yet.',
+          ),
         }),
         id,
       )
@@ -6313,18 +6315,18 @@ describe('release', () => {
     expect(seen.closed).toEqual([7])
   })
 
-  /** A changesets repository like theokit: a private root, one published package and one ignored app. */
+  /** A changesets repository like loopzero: a private root, one published package and one ignored app. */
   function changesetsMonorepo(changed: string[]) {
     onDevelop({ changesets: ['config.json', 'README.md'] })
     repo().compare('main', 'develop', changed.map(modified))
     onDevelop({
       tree: {
-        'package.json': '{"name":"theokit-monorepo","private":true}',
-        '.changeset/config.json': '{"ignore":["theoclaw"]}',
-        'packages/ui/package.json': '{"name":"@theokit/ui","version":"1.13.0"}',
+        'package.json': '{"name":"loopzero-monorepo","private":true}',
+        '.changeset/config.json': '{"ignore":["loopbot"]}',
+        'packages/ui/package.json': '{"name":"@getloopscale/loopzero-ui","version":"1.13.0"}',
         'packages/ui/src/index.ts': '',
-        'apps/theoclaw/package.json': '{"name":"theoclaw","version":"0.1.0"}',
-        'apps/theoclaw/src/a.ts': '',
+        'apps/loopbot/package.json': '{"name":"loopbot","version":"0.1.0"}',
+        'apps/loopbot/src/a.ts': '',
       },
     })
   }
@@ -6332,7 +6334,7 @@ describe('release', () => {
   it('releases as its own when develop has no changeset and changes only packages changesets never publishes', async () => {
     const id = await delivered()
     const contained = await integrated(8, 'inside01')
-    changesetsMonorepo(['apps/theoclaw/src/a.ts', 'pnpm-lock.yaml', '.github/workflows/ci.yml'])
+    changesetsMonorepo(['apps/loopbot/src/a.ts', 'pnpm-lock.yaml', '.github/workflows/ci.yml'])
     repo().tags.add('v1.2.0')
 
     const result = await release(dependencies(), id, { bump: 'minor', actor: 'human' })
@@ -6350,10 +6352,10 @@ describe('release', () => {
 
   it('refuses a release with no changeset when a package changesets publishes changed, and names it', async () => {
     const id = await delivered()
-    changesetsMonorepo(['apps/theoclaw/src/a.ts', 'packages/ui/src/index.ts'])
+    changesetsMonorepo(['apps/loopbot/src/a.ts', 'packages/ui/src/index.ts'])
 
     await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
-      /develop has no changeset, and it changes @theokit\/ui since main/,
+      /develop has no changeset, and it changes @getloopscale\/loopzero-ui since main/,
     )
     expect(seen.merges).toHaveLength(1)
     expect(await stageOf(id)).toBe('done')
@@ -6377,8 +6379,8 @@ describe('release', () => {
   it('releases as its own when the only changesets added name no package, and records no publication', async () => {
     const id = await delivered()
     // usetheokit/theokit on 2026-11-13: twelve empty changesets for a private app reached the release branch.
-    const empty = ['.changeset/theocode-a.md', '.changeset/theocode-b.md']
-    changesetsMonorepo(['apps/theoclaw/src/a.ts'])
+    const empty = ['.changeset/loopcode-a.md', '.changeset/loopcode-b.md']
+    changesetsMonorepo(['apps/loopbot/src/a.ts'])
     onDevelop({
       tree: {
         ...develop.tree,
@@ -6401,18 +6403,18 @@ describe('release', () => {
   it('still refuses, with only empty changesets added, when a package changesets publishes changed', async () => {
     const id = await delivered()
     changesetsMonorepo(['packages/ui/src/index.ts'])
-    onDevelop({ tree: { ...develop.tree, '.changeset/theocode-a.md': '---\n---\n' } })
-    repo().changes('main', 'develop').push(added('.changeset/theocode-a.md'))
+    onDevelop({ tree: { ...develop.tree, '.changeset/loopcode-a.md': '---\n---\n' } })
+    repo().changes('main', 'develop').push(added('.changeset/loopcode-a.md'))
 
     await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
-      /develop has no changeset, and it changes @theokit\/ui since main/,
+      /develop has no changeset, and it changes @getloopscale\/loopzero-ui since main/,
     )
     expect(await getDb().select().from(publication)).toEqual([])
   })
 
   it('does not count changesets the release branch already consumed: develop still holds them, none was added since the merge base', async () => {
     const id = await delivered()
-    // theokit-plugins after Version Packages #250: main deleted the changesets, develop kept them.
+    // loopzero-plugins after Version Packages #250: main deleted the changesets, develop kept them.
     changesetsMonorepo(['.github/workflows/ci.yml', 'CHANGELOG.md'])
     onDevelop({ changesets: ['config.json', 'README.md', 'wake-word-detector.md', 'brave-fox.md'] })
     repo().tags.add('v0.3.0')
@@ -6431,14 +6433,14 @@ describe('release', () => {
     onDevelop({ changesets: ['config.json', 'brave-fox.md'] })
 
     await expect(release(dependencies(), id, { bump: 'patch', actor: 'human' })).rejects.toThrow(
-      /develop has no changeset, and it changes @theokit\/ui since main/,
+      /develop has no changeset, and it changes @getloopscale\/loopzero-ui since main/,
     )
     expect(await getDb().select().from(publication)).toEqual([])
   })
 
   it('waits for the release branch checks as its own release, when only unpublished packages changed', async () => {
     const id = await delivered()
-    changesetsMonorepo(['apps/theoclaw/src/a.ts'])
+    changesetsMonorepo(['apps/loopbot/src/a.ts'])
     repo().required.set('main', ['CI'])
 
     const result = await release(dependencies(), id, { bump: 'patch', actor: 'human' })

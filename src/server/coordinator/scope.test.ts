@@ -321,7 +321,7 @@ describe('a draft that puts in scope what the factory cannot do', () => {
   it.each([
     ['Update .github/workflows/ci.yml to run the e2e job', 'a change under .github/'],
     ['Run npm publish for the new version', 'publishing a package'],
-    ['Publish the @theokit/ui package to npm', 'publishing a package'],
+    ['Publish the @getloopscale/loopzero-ui package to npm', 'publishing a package'],
     [
       'Edit the body of issue #1781 to drop the old criterion',
       'editing an issue or a pull request on GitHub',

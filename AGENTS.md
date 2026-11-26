@@ -4,10 +4,10 @@ Software factory that turns GitHub issues into verified pull requests. The plan,
 current state are in `docs/PLAN.md`; the decisions behind it are in `docs/adr/`.
 
 Context for coding agents working **on this repository**: Cursor, Copilot, Claude Code and
-TheoKit itself all read this file. It sits at the root and is discovered from any subdirectory, so
+LoopZero itself all read this file. It sits at the root and is discovered from any subdirectory, so
 it is the right place for what someone needs to know before changing code here.
 
-> **Not the same file as `.theokit/THEO.md`.** This one describes the codebase, for agents that
+> **Not the same file as `.loopzero/LOOPZERO.md`.** This one describes the codebase, for agents that
 > write it. That one describes your product, for the agent that talks to your users. Two audiences,
 > two files. See the table at the bottom.
 
@@ -56,10 +56,10 @@ src/server/         backend — never leaves the machine
                     of approved work, `prove-checks` proves proposed checks
   routes/           file-based HTTP
 src/shared/         contracts both sides import (`panel.ts` is what the panel API returns)
-.theokit/           agent context read at runtime (no rebuild)
+.loopzero/           agent context read at runtime (no rebuild)
 ```
 
-The paths are declared in `theo.config.ts`. Move them there if you move them at all: the framework
+The paths are declared in `loopzero.config.ts`. Move them there if you move them at all: the framework
 reads that file, not a convention.
 
 ## Conventions
@@ -68,14 +68,14 @@ reads that file, not a convention.
   a second agent means adding a second file, not registering anything.
 - **Sub-folders under `agents/` are semantic, not routes.** `tools/`, `skills/`, `prompts/` and
   `hooks/` are skipped by the route scanner, so `tools/weather.ts` never becomes an endpoint.
-- **TheoKit first.** Before adding a library or a mechanism, check what `theokit` already ships.
-  A gap becomes an issue on `usetheokit/theokit`, and a workaround cites it.
-- **One Postgres pool, owned by TheoKit.** Get it from `getPool()`, which goes through
+- **LoopZero first.** Before adding a library or a mechanism, check what `@getloopscale/loopzero` already ships.
+  A gap becomes an issue on `getloopscale/loopzero`, and a workaround cites it.
+- **One Postgres pool, owned by LoopZero.** Get it from `getPool()`, which goes through
   `getStorageManager().usePostgres`. Never `new pg.Pool` in application code: the manager drains
   it on shutdown and keeps the process alive when Postgres drops an idle connection.
-- **Jobs are TheoKit jobs.** Queue work with `ctx.queue` (`enqueueInTransaction` when it must commit
+- **Jobs are LoopZero jobs.** Queue work with `ctx.queue` (`enqueueInTransaction` when it must commit
   with a row), never a queue of our own. List each job in `types/jobs.d.ts`.
-- **Sandboxes are TheoKit `SandboxBackend`s.** An agent runs only in a sandbox built from an
+- **Sandboxes are LoopZero `SandboxBackend`s.** An agent runs only in a sandbox built from an
   explicit domain allowlist (`createIsolatedSandbox`). Credentials are attached by the firewall and
   never written to a command, a file or an env var inside the sandbox. Text that came from an issue
   reaches git by file, never through a shell.
@@ -92,7 +92,7 @@ reads that file, not a convention.
   reset time for a refusal for the limit. A cron that calls GitHub wraps its handler in `githubPass`, which logs
   `github_requests` per pass; one that only polls passes `waitsForLimit` and skips its passes while the
   installation's budget is under its reserve. A read that many tasks of one pass share goes through `passReads`.
-- **`src/server/jobs/` holds only jobs.** `theokit build` treats every file there as one and fails the
+- **`src/server/jobs/` holds only jobs.** `loopzero build` treats every file there as one and fails the
   build on a helper; a test guards it. Shared helpers live in `factory/`.
 - **A delivery is taken, routed or ignored, and `decideIngress` is the only place that says which.** An
   `issues` delivery that is labelled `factory`, or opened with the label, is taken and becomes a task. A
@@ -149,7 +149,7 @@ reads that file, not a convention.
 - **A block of a page is a `Surface`, and the theme is the panel's own.** `src/app/components/ui/Surface.tsx` holds the one look
   every page has (`PageHeader`, `Surface`, `Rows`, `Row`, `Stats`, `TABLE`); a new page is built from it. A state colours a
   dot, a tile or an icon and never a word (`palette.test.ts`). The theme is `src/app/theme.ts`, the LoopScale brand, and
-  `theo.config.ts` sets `ui: false` because TheoKit's automatic provider knows only the built-in themes: the layout mounts
+  `loopzero.config.ts` sets `ui: false` because LoopZero's automatic provider knows only the built-in themes: the layout mounts
   `ThemeProvider` and imports the styles itself.
 - **Every text box in the panel has an `<Assist>`.** `src/app/every-box.test.ts` fails when a file with a
   textarea has none. The premise is that the owner never has to be a programmer.
@@ -340,7 +340,7 @@ reads that file, not a convention.
 - **A fix for a test that fails the repository's tasks goes ahead of them.** When one test fails on two tasks of a
   repository within six hours and a queued task's issue names it, `queue_blocked` decides `prioritise`:
   `queue-facts.ts` reads, `queue-order.ts` decides, and `queue-apply.ts` moves only that task's pending
-  `run-task` job ahead of the repository's other pending jobs, by `available_at` in `theokit_jobs` (TheoKit has no
+  `run-task` job ahead of the repository's other pending jobs, by `available_at` in `loopzero_jobs` (LoopZero has no
   call for it, usetheokit/theokit#2117), and holds that repository's other pending jobs back until the fix is done (verified and reviewed, without waiting for its CI), fails, waits for an answer or is handed
   to a person (only a person moves it on from there, so the others do not wait on one). The failures of the same test on
   other tasks wait for the fix too (`isHeld`, over the exception and the reason of the failure the task is in now,
@@ -476,8 +476,8 @@ reads that file, not a convention.
   (`<task id>:<kind>`) to every subscription in `push_subscription`, recording it in `push_sent` until the item leaves
   the inbox (its time moves with every event of its task, so it never makes an item new; one that leaves and comes
   back is sent again); a 404 or 410 deletes the device, any other failure is retried next pass. `push/send.ts` is the only
-  module that calls the network and uses the `web-push` package because TheoKit ships no push sender (to be filed on
-  `usetheokit/theokit`). The private VAPID key is never logged or returned. A crash between the push service
+  module that calls the network and uses the `web-push` package because LoopZero ships no push sender (to be filed on
+  `getloopscale/loopzero`). The private VAPID key is never logged or returned. A crash between the push service
   accepting a message and its `push_sent` row can send it twice.
 - **Commits carry no co-author trailer.**
 - **Validate at the boundary.** A route validates input with Zod once, then trusts it.
@@ -486,11 +486,11 @@ reads that file, not a convention.
 
 ## The two context files
 
-|          | `AGENTS.md` (this file)                     | `.theokit/THEO.md`                  |
+|          | `AGENTS.md` (this file)                     | `.loopzero/LOOPZERO.md`             |
 | -------- | ------------------------------------------- | ----------------------------------- |
 | Audience | agents that **write** this code             | the agent your **users** talk to    |
 | Content  | commands, layout, conventions               | product facts, domain vocabulary    |
-| Read by  | many tools (root, walks up to the git root) | TheoKit only, this directory        |
+| Read by  | many tools (root, walks up to the git root) | LoopZero only, this directory       |
 | Priority | 10, anything else can override it           | 60, the strongest file-layer source |
 
-Because `THEO.md` wins conflicts, keep facts there and preferences here.
+Because `LOOPZERO.md` wins conflicts, keep facts there and preferences here.

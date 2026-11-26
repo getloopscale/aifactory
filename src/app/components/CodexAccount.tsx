@@ -1,4 +1,4 @@
-import { Button } from '@usetheo/ui'
+import { Button } from '@getloopscale/ui'
 import { useEffect, useState } from 'react'
 
 import type { CodexConnection } from '../../shared/panel'

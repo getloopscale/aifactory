@@ -1,5 +1,5 @@
-import { AgentErrorCard, ApprovalCard } from '@theokit/ui'
-import { Button } from '@usetheo/ui'
+import { AgentErrorCard, ApprovalCard } from '@getloopscale/loopzero-ui'
+import { Button } from '@getloopscale/ui'
 
 import type { RepositoriesView } from '../../../shared/panel'
 import { describeApproval } from '../../lib/chat'

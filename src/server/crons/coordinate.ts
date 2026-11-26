@@ -1,4 +1,4 @@
-import { defineCron } from 'theokit/server/cron'
+import { defineCron } from '@getloopscale/loopzero/server/cron'
 
 import { coordinate } from '../coordinator/coordinate'
 import { modelUnblocker } from '../coordinator/unblocker'

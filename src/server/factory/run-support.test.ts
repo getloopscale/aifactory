@@ -1,5 +1,5 @@
 import { FACTORY_SIGNATURE } from '../../shared/personas'
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {

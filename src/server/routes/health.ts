@@ -1,4 +1,4 @@
-import { route } from 'theokit/server/define'
+import { route } from '@getloopscale/loopzero/server/define'
 
 export const GET = route()
   // A liveness probe answers the same thing to everyone, so it is genuinely open.
@@ -7,6 +7,6 @@ export const GET = route()
   .handler(() => ({
     status: 'ok',
     timestamp: Date.now(),
-    framework: 'TheoKit',
+    framework: 'LoopZero',
   }))
   .build()

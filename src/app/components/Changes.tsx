@@ -1,4 +1,4 @@
-import { Button, Textarea } from '@usetheo/ui'
+import { Button, Textarea } from '@getloopscale/ui'
 import { ChevronDown, ChevronRight, FileDiff, MessageSquarePlus, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 

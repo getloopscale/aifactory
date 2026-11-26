@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {

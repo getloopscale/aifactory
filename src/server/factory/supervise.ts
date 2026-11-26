@@ -57,7 +57,7 @@ async function queuedJobs(db: Database, name: string, field: string) {
   try {
     const rows = await db.execute<{ id: string; failed: boolean; error: string | null }>(
       sql`select (input->>${field}) as id, (failed_at is not null) as failed, last_error as error
-          from theokit_jobs where name = ${name}`,
+          from loopzero_jobs where name = ${name}`,
     )
     return rows.rows
   } catch {
@@ -73,7 +73,7 @@ async function queuedJobs(db: Database, name: string, field: string) {
 async function heldTasks(db: Database, now: Date): Promise<Set<number>> {
   try {
     const rows = await db.execute<{ id: string }>(
-      sql`select distinct (input->>'taskId') as id from theokit_jobs
+      sql`select distinct (input->>'taskId') as id from loopzero_jobs
           where locked_until > ${now.toISOString()}::timestamptz and failed_at is null`,
     )
     return new Set(rows.rows.map((r) => Number(r.id)))
@@ -160,7 +160,7 @@ async function waitingQueues(db: Database, now: Date): Promise<QueueFacts[] | nu
       sql`with waiting as (
             select t.repository, t.id as task_id, j.available_at,
               greatest(j.created_at, coalesce((j.input->>'heldFrom')::timestamptz, j.available_at)) as since
-            from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
+            from loopzero_jobs j join task t on t.id = (j.input->>'taskId')::int
             where j.name = 'run-task' and j.failed_at is null
               and (j.locked_until is null or j.locked_until < ${now})
               and t.stage = 'intake'
@@ -184,7 +184,7 @@ async function waitingQueues(db: Database, now: Date): Promise<QueueFacts[] | nu
     }))
   } catch (error) {
     // The table is made when the worker first starts. Without it there is no queue to be stalled.
-    if (String(error).includes('theokit_jobs')) return null
+    if (String(error).includes('loopzero_jobs')) return null
     throw error
   }
 }

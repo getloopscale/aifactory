@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import {
   DEFAULT_CHECK_MS,

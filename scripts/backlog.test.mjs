@@ -23,7 +23,7 @@ const FIXTURE = `# BACKLOG
 
 > Registered 2026-10-31 by \`/backlog-item\` (slug: \`serve-tools\`).
 
-domain: theokit
+domain: loopzero
 repo: packages/theo
 status: raw
 evidence: .squad/records/discoveries/opportunities/serve-tools-opportunity.md
@@ -34,8 +34,8 @@ dod:
 
 ## B-2 - Signal gateway
 
-domain: theokit-gateways
-repo: theokit-gateways
+domain: loopzero-gateways
+repo: loopzero-gateways
 status: approved
 blocked_by: B-1, B-9
 dod:
@@ -45,24 +45,24 @@ dod_amendment_2026-10-31 (session): bullet 2 moved to B-5
 
 ## B-3 - Old thing
 
-domain: theokit
-repo: theokit
+domain: loopzero
+repo: loopzero
 status: shipped
 dod:
   - done
 
 ## B-4 - Change the release workflow
 
-domain: theokit
-repo: theokit
+domain: loopzero
+repo: loopzero
 status: triaged
 dod:
   - .github/workflows/release.yml no longer publishes twice
 
 ## B-5 - SDK retry
 
-domain: theokit
-repo: ../theokit-sdk
+domain: loopzero
+repo: ../loopzero-sdk
 status: triaged
 blocked_by: B-3
 dod:
@@ -78,7 +78,7 @@ describe('parseBacklog', () => {
     expect(byId('B-1')).toMatchObject({
       title: 'Serve tools over MCP',
       status: 'raw',
-      domain: 'theokit',
+      domain: 'loopzero',
       repo: 'packages/theo',
       slug: 'serve-tools',
       evidence: '.squad/records/discoveries/opportunities/serve-tools-opportunity.md',
@@ -106,11 +106,11 @@ describe('parseBacklog', () => {
 
 describe('repoFor', () => {
   it('sends each item to the repository it belongs in', () => {
-    expect(repoFor(byId('B-1'))).toBe('usetheokit/theokit')
-    expect(repoFor(byId('B-2'))).toBe('usetheokit/theokit-gateways')
-    expect(repoFor(byId('B-5'))).toBe('usetheokit/theokit-sdk')
-    expect(repoFor({ repo: 'theokit-sdk' })).toBe('usetheokit/theokit-sdk')
-    expect(repoFor({})).toBe('usetheokit/theokit')
+    expect(repoFor(byId('B-1'))).toBe('getloopscale/loopzero')
+    expect(repoFor(byId('B-2'))).toBe('getloopscale/loopzero-gateways')
+    expect(repoFor(byId('B-5'))).toBe('getloopscale/loopzero-sdk')
+    expect(repoFor({ repo: 'loopzero-sdk' })).toBe('getloopscale/loopzero-sdk')
+    expect(repoFor({})).toBe('getloopscale/loopzero')
   })
 })
 
@@ -449,7 +449,7 @@ describe('credentialStamp', () => {
 describe('settleKnown', () => {
   const backlog = parseBacklog(`## B-7 - Publish to npm
 
-repo: apps/theoclaw
+repo: apps/loopbot
 status: raw
 deferred_2026-11-02: owner decision (operator conversation): not published for now
 dod:
@@ -459,7 +459,7 @@ dod:
 
 > Registered 2026-10-20 by \`/backlog-item\` (slug: \`built\`).
 
-repo: theokit
+repo: loopzero
 status: approved
 dod:
   - it works

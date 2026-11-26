@@ -68,9 +68,9 @@ export function parseBacklog(text) {
 
 /** The GitHub repository an item belongs in. */
 export function repoFor(item) {
-  if (/theokit-sdk/.test(item.repo ?? '')) return 'usetheokit/theokit-sdk'
-  if (/theokit-gateways/.test(item.repo ?? '')) return 'usetheokit/theokit-gateways'
-  return 'usetheokit/theokit'
+  if (/loopzero-sdk/.test(item.repo ?? '')) return 'getloopscale/loopzero-sdk'
+  if (/loopzero-gateways/.test(item.repo ?? '')) return 'getloopscale/loopzero-gateways'
+  return 'getloopscale/loopzero'
 }
 
 /** Why the factory cannot do an item, or nothing when it can try. */

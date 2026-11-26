@@ -31,5 +31,5 @@ The three overlap enough that picking wrong is easy, and the difference is _when
 | a **personality**        | while the user has it active                 | **yes**, `usePersonality` |
 | a **rule**               | when the conversation touches matching paths | no, but it is just a file |
 
-Tone and stance belong in a personality. Facts about your domain belong in `THEO.md`. Instructions
+Tone and stance belong in a personality. Facts about your domain belong in `LOOPZERO.md`. Instructions
 about specific code belong in `rules/`.

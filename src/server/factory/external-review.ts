@@ -1,6 +1,6 @@
 import { posix } from 'node:path'
 
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { eq, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'

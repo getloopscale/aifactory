@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Input, Stepper, type StepperStepData } from '@usetheo/ui'
+import { Alert, Badge, Button, Input, Stepper, type StepperStepData } from '@getloopscale/ui'
 import {
   CircleAlert,
   CircleCheck,

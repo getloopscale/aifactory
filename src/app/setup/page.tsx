@@ -1,4 +1,4 @@
-import { Alert, Badge, Button } from '@usetheo/ui'
+import { Alert, Badge, Button } from '@getloopscale/ui'
 import { Link } from 'react-router'
 
 import type { SetupItem, SetupReport } from '../../shared/panel'

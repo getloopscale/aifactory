@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Input, Textarea } from '@usetheo/ui'
+import { Alert, Badge, Button, Input, Textarea } from '@getloopscale/ui'
 import { Building2, FolderGit2, GitBranch, Lock, Settings2, SlidersHorizontal } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'

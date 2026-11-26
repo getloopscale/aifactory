@@ -333,7 +333,9 @@ describe('the state the fake GitHub holds', () => {
     const made = await github.createRelease(REPO, 't', input)
     const again = await github.createRelease(REPO, 't', input)
     await github.createRelease(REPO, 't', { ...input, tag: 'pre/7-develop', prerelease: true })
-    github.repo(REPO).release({ tag: '@theokit/ui@1.13.0', publishedAt: new Date('2026-01-01') })
+    github
+      .repo(REPO)
+      .release({ tag: '@getloopscale/loopzero-ui@1.13.0', publishedAt: new Date('2026-01-01') })
 
     expect(again).toEqual(made)
     expect(made.url).toBe('https://github.com/paulo/app/releases/tag/v1.3.0')

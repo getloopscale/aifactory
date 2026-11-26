@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentEntry, AgentsView } from '../../shared/panel'
 import { PERSONAS } from '../../shared/personas'
 
-vi.mock('theokit/client', () => ({ Metadata: () => null }))
+vi.mock('@getloopscale/loopzero/client', () => ({ Metadata: () => null }))
 
 import Page from './page'
 import { CopyProvider, LANGUAGE_KEY } from '../lib/copy'
@@ -102,7 +102,7 @@ const view: AgentsView = {
   },
   shared: [
     {
-      id: 'theo',
+      id: 'loopzero',
       title: 'Contexto da fábrica',
       when: 'Junto de toda mensagem',
       text: 'What the factory is.',
@@ -148,7 +148,7 @@ const view: AgentsView = {
       group: 'panel',
       name: 'Assistente do chat',
       role: 'Conversa',
-      shared: ['theo'],
+      shared: ['loopzero'],
       tools: [
         { name: 'list_tasks', description: 'Lists tasks.', effect: 'reads' },
         { name: 'retry_task', description: 'Starts again.', effect: 'asks' },

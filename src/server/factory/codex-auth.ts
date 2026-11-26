@@ -14,11 +14,11 @@ import {
   type CredentialStoreConfig,
   type OAuthTokens,
   type StoredOAuthCredential,
-} from '@theokit/agents/auth'
-import { withFileLock } from '@theokit/sdk/persistence'
+} from '@getloopscale/loopzero-agents/auth'
+import { withFileLock } from '@getloopscale/loopzero-sdk/persistence'
 
 /**
- * The factory's own Codex login, kept in TheoKit's credential store. It is not the Codex login of the owner's
+ * The factory's own Codex login, kept in LoopZero's credential store. It is not the Codex login of the owner's
  * daily use, nor the assistant's ChatGPT login: a refresh token rotates, and two users of one login
  * invalidate each other. `FACTORY_CODEX_HOME` moves the folder, as it always has.
  */
@@ -69,7 +69,7 @@ type CliAuthFile = {
   tokens?: { id_token?: string; access_token?: string; refresh_token?: string; account_id?: string }
 }
 
-/** The Codex CLI's `auth.json` as a TheoKit credential, so the first read moves an old login over. */
+/** The Codex CLI's `auth.json` as a LoopZero credential, so the first read moves an old login over. */
 export function fromCliAuth(text: string): StoredOAuthCredential {
   const tokens = (JSON.parse(text) as CliAuthFile).tokens
   const exp = tokens?.access_token ? claimsOf(tokens.access_token).exp : undefined
@@ -126,13 +126,13 @@ function storedOrMigrated(env: Env): Promise<StoredOAuthCredential | undefined> 
 
 export type CodexAuthDeps = { env?: Env; fetch?: typeof fetch; now?: () => number }
 
-/** TheoKit's refresh for this store: cross-process lock, re-read inside it, retry on a transient failure. */
+/** LoopZero's refresh for this store: cross-process lock, re-read inside it, retry on a transient failure. */
 const provider = new AuthProvider(CODEX_PROVIDER.oauth, CODEX_STORE, {
   refreshBeforeMs: REFRESH_MARGIN_MS,
 })
 
 /**
- * The factory's Codex login with an access token that will outlast a run. The renewal is TheoKit's, which
+ * The factory's Codex login with an access token that will outlast a run. The renewal is LoopZero's, which
  * re-reads the file under its lock, so two runs never both spend the rotating refresh token and a renewal
  * never writes an old account over a login that just replaced it.
  */

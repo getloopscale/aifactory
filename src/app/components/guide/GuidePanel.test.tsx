@@ -24,7 +24,7 @@ type Agent = {
 const agents = new Map<string, Agent>()
 const changed = vi.fn()
 
-vi.mock('theokit/client', () => ({
+vi.mock('@getloopscale/loopzero/client', () => ({
   useAgent: (path: string) => {
     if (!agents.has(path)) agents.set(path, fresh())
     return agents.get(path)

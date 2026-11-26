@@ -309,7 +309,7 @@ function panelAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
     },
     when: `Na tela inicial. ${PANEL_WHERE}`,
     tools: toolsOf(CHAT_SPEC),
-    shared: ['theo', 'knowledge'],
+    shared: ['loopzero', 'knowledge'],
     source: [
       'src/server/agents/prompts/chat.ts',
       'src/server/factory/chat-agent.ts',
@@ -332,7 +332,7 @@ function panelAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
       },
       when: `No painel ao lado da página, pelo botão Guia. ${PANEL_WHERE}`,
       tools: toolsOf(spec),
-      shared: ['theo', 'knowledge'],
+      shared: ['loopzero', 'knowledge'],
       source: [
         'src/server/agents/prompts/guides.ts',
         'src/server/factory/guides.ts',
@@ -361,7 +361,7 @@ function panelAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
     },
     when: `Embaixo de cada caixa de texto do painel. Propõe um texto e nada muda até você apertar "Use this". ${PANEL_WHERE}`,
     tools: toolsOf({ tools: { propose: proposeTool }, asks: {} }),
-    shared: ['theo', 'knowledge'],
+    shared: ['loopzero', 'knowledge'],
     source: ['src/server/agents/assist.ts', 'src/server/agents/prompts/assist.ts'],
     prompts: [
       fixed(
@@ -388,7 +388,7 @@ function panelAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
       tools: { propose: proposeTool, repo_files: repoTreeTool, repo_file: repoFileTool },
       asks: {},
     }),
-    shared: ['theo', 'knowledge'],
+    shared: ['loopzero', 'knowledge'],
     source: ['src/server/agents/assist-setup.ts', 'src/server/agents/prompts/assist.ts'],
     prompts: [fixed('system', 'Instruções do sistema', 'Em toda chamada.', SETUP_INSTRUCTIONS)],
   }
@@ -406,10 +406,10 @@ function sharedContext(read: (path: string) => string): AgentPrompt[] {
   try {
     return [
       fixed(
-        'theo',
+        'loopzero',
         'Contexto da fábrica',
         'Junto de toda mensagem de todos os agentes do painel. Diz o que é a fábrica e o que faz um bom pedido.',
-        read('.theokit/THEO.md'),
+        read('.loopzero/LOOPZERO.md'),
       ),
       knowledge,
     ]

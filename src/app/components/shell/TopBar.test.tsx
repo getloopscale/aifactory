@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { ThemeProvider, builtinThemes } from '@theokit/ui'
+import { ThemeProvider, builtinThemes } from '@getloopscale/loopzero-ui'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'

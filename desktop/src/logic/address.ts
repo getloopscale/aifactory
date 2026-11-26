@@ -21,7 +21,7 @@ export function parseAddress(input: string): AddressCheck {
 export function isFactoryHealth(body: unknown): boolean {
   if (typeof body !== 'object' || body === null) return false
   const b = body as Record<string, unknown>
-  return b.status === 'ok' && b.framework === 'TheoKit'
+  return b.status === 'ok' && b.framework === 'LoopZero'
 }
 
 /** Checks an origin by reading its `/api/health`. `fetcher` is `fetch` in the app and a fake in tests. */

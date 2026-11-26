@@ -1,7 +1,7 @@
 import { Hand } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Textarea } from '@usetheo/ui'
+import { Button, Textarea } from '@getloopscale/ui'
 
 import type { TaskDetail } from '../../shared/panel'
 import { post } from '../lib/api'

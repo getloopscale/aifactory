@@ -10,7 +10,7 @@ Environment=FACTORY_SERVER_ONLY=1
 ExecStart=@ROOT@/scripts/run-server.sh
 Restart=always
 RestartSec=5
-# A stop signals only theokit, which closes storage and exits. It holds no run, so two minutes is plenty.
+# A stop signals only loopzero, which closes storage and exits. It holds no run, so two minutes is plenty.
 KillMode=mixed
 TimeoutStopSec=2min
 

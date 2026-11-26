@@ -39,12 +39,12 @@ describe('an E2B sandbox', () => {
     expect((await sh('pnpm --version')).exitCode).toBe(0)
   })
 
-  it('has the tools a project test suite calls, such as the seccomp tests of theokit-sdk', async () => {
-    // bwrap runs here, so theokit-sdk's sandbox tests run too, and they trace a process with strace.
+  it('has the tools a project test suite calls, such as the seccomp tests of loopzero-sdk', async () => {
+    // bwrap runs here, so loopzero-sdk's sandbox tests run too, and they trace a process with strace.
     expect((await sh('command -v bwrap strace')).stdout.trim().split('\n')).toHaveLength(2)
   })
 
-  // theocode's english-only check reads these paths, so the image must hold exactly what theokit's CI runner holds
+  // loopcode's english-only check reads these paths, so the image must hold exactly what loopzero's CI runner holds
   // (ci.yml prints its inventory). The failure message carries the listing, with sizes and link targets.
   it('holds, of the dictionary paths the checker reads, exactly the ones the CI runner holds', async () => {
     const probe = CHECKER_DICTIONARY_PATHS.map((p) => `test -e ${p} && echo ${p}`).join('; ')
@@ -110,7 +110,7 @@ describe('an E2B sandbox', () => {
     expect((await sh('cat /tmp/factory-prompt.md')).stdout).toBe('second')
   })
 
-  it('installs a native module without reaching nodejs.org, as theokit needs for better-sqlite3', async () => {
+  it('installs a native module without reaching nodejs.org, as loopzero needs for better-sqlite3', async () => {
     const install = await sh(
       'mkdir -p /work/native && cd /work/native && npm init -y >/dev/null && npm install better-sqlite3@12.11.1',
       360_000,

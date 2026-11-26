@@ -1,4 +1,4 @@
-import { AgentStreaming, ChatMessage, ChatThread } from '@theokit/ui'
+import { AgentStreaming, ChatMessage, ChatThread } from '@getloopscale/loopzero-ui'
 import { Check, Search, X } from 'lucide-react'
 import { Fragment, type ComponentType } from 'react'
 

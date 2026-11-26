@@ -1,5 +1,5 @@
 import { useLocation } from 'react-router'
-import { Metadata } from 'theokit/client'
+import { Metadata } from '@getloopscale/loopzero/client'
 
 import { ChatView } from './components/chat/ChatView'
 import { useCopy } from './lib/copy'

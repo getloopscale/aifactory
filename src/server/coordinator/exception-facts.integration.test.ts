@@ -1,5 +1,5 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -14,12 +14,12 @@ import { readExceptionFacts } from './exception-facts'
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
-  // A pass reads and keeps the holds of the `prioritise` playbook, which live in TheoKit's job table.
+  // A pass reads and keeps the holds of the `prioritise` playbook, which live in LoopZero's job table.
   await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table theokit_jobs, coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table loopzero_jobs, coordinator_action, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())

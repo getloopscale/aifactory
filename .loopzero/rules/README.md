@@ -1,7 +1,7 @@
 # Rules
 
 Markdown files here are **path-scoped instructions**: they enter the agent's context only when the
-conversation touches a file matching their `globs`. That is what separates a rule from `THEO.md`,
+conversation touches a file matching their `globs`. That is what separates a rule from `LOOPZERO.md`,
 which is always present.
 
 ```markdown
@@ -27,4 +27,4 @@ knowing about and easy to trigger by accident: a rule you meant to scope, whose 
 typo, becomes a rule that fires on every turn.
 
 Rules load at priority 45 — after `CLAUDE.md` (30) and `.cursor/rules` (40), before
-`.theokit/context` (50) and `THEO.md` (60).
+`.loopzero/context` (50) and `LOOPZERO.md` (60).

@@ -24,7 +24,7 @@ function serve(routes: Record<string, unknown>) {
       calls.push({
         url,
         method,
-        csrf: (init.headers as Record<string, string> | undefined)?.['x-theo-action'],
+        csrf: (init.headers as Record<string, string> | undefined)?.['x-loopzero-action'],
       })
       const body = routes[`${method} ${url}`]
       return new Response(JSON.stringify(body ?? {}), { status: body === undefined ? 404 : 200 })

@@ -1,4 +1,4 @@
-import { Badge } from '@usetheo/ui'
+import { Badge } from '@getloopscale/ui'
 import {
   Box,
   Eye,

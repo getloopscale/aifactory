@@ -1,8 +1,8 @@
 import { ArrowUp, ChevronRight, MessagesSquare, SquareTerminal } from 'lucide-react'
 import { useEffect, useRef, useState, type RefObject } from 'react'
 
-import { ChatMessageResponse } from '@theokit/ui'
-import { Button, Textarea } from '@usetheo/ui'
+import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
+import { Button, Textarea } from '@getloopscale/ui'
 
 import type { RunView, TaskDetail, TerminalView, TranscriptEvent } from '../../shared/panel'
 import { PERSONAS } from '../../shared/personas'

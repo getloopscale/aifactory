@@ -1,4 +1,4 @@
-import type { UIMessage } from 'theokit/client'
+import type { UIMessage } from '@getloopscale/loopzero/client'
 import { describe, expect, it } from 'vitest'
 
 import { agentFor, assistProblem, buildMessage, proposalOf } from './assist'

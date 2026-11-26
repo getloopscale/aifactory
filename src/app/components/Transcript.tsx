@@ -1,4 +1,4 @@
-import { ToolCallCard } from '@theokit/ui'
+import { ToolCallCard } from '@getloopscale/loopzero-ui'
 import { useEffect, useState } from 'react'
 
 import type { TranscriptEvent, TranscriptPage } from '../../shared/panel'

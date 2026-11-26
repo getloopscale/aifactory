@@ -21,8 +21,8 @@ single-tenant, com suporte a vários projetos.
   firewall do sandbox o injeta; só um fallback documentado coloca um token dentro.
 - O isolamento é fornecido por um `SandboxProvider` na nuvem. Sem isolamento, a
   execução é recusada; ambiente e acesso de saída usam allowlists.
-- A dependência do TheoKit vem do npm publicado, sem link para o checkout local.
-- Usar o máximo possível do TheoKit: verificar funcionalidades e pacotes do
+- A dependência do LoopZero vem do npm publicado, sem link para o checkout local.
+- Usar o máximo possível do LoopZero: verificar funcionalidades e pacotes do
   framework antes de adicionar bibliotecas ou mecanismos próprios. Lacunas devem
   ser registradas no framework antes de adotar um contorno documentado.
 - A fábrica entrega por **pré-release**: é ela que faz a entrega, e pode gerar uma pré-release sempre,
@@ -36,7 +36,7 @@ single-tenant, com suporte a vários projetos.
 
 ```text
 GitHub: issue com label factory
-  → webhook TheoKit: assinatura + deduplicação por delivery ID
+  → webhook LoopZero: assinatura + deduplicação por delivery ID
   → PostgreSQL: ingress → task
   → política de transição: aceita ou recusa com código e motivo
   → jobs persistidos: idempotência, lease, backoff e limite de concorrência
@@ -48,7 +48,7 @@ GitHub: issue com label factory
   → política de merge: off / trial / auto
   → vigia pós-merge → PR de revert se a main quebrar
 
-Painel TheoKit: board, timeline, custos, evidências e inbox
+Painel LoopZero: board, timeline, custos, evidências e inbox
 ```
 
 Princípios:
@@ -63,29 +63,29 @@ Princípios:
 Os marcos abaixo recuperam a proposta da sessão; os estados refletem o código
 local inspecionado em 2026-11-03.
 
-| Marco | Entrega                                                        | Critério de aceite                                                                                                                                                                                                      | Estado       |
-| ----- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| M0    | Fundação: TheoKit, PostgreSQL, Drizzle, CI, branch `workspace` | CI executa `theokit check` e testes, com resultado verde                                                                                                                                                                | Concluído    |
-| M1    | Ingestão                                                       | Uma issue com label `factory` gera exatamente uma task em `intake`; repetir o delivery não duplica                                                                                                                      | Concluído    |
-| M2    | Execução                                                       | Uma task de repositório de teste envia a branch `factory/<n>` e registra os estágios em ordem em `stage_event`                                                                                                          | Concluído    |
-| M3    | Evidência + PR                                                 | PR só abre com evidência verde no head SHA; teste demonstra que uma declaração do agente sem evidência não abre PR                                                                                                      | Concluído    |
-| M3b   | Vários agentes de código                                       | Claude Code e Codex rodam a mesma task pelo mesmo `CodingHarness`, por chave ou assinatura, com o segredo fora do sandbox; trocar o agente é configuração                                                               | Concluído    |
-| M4a   | Review independente + rodadas                                  | Checks vermelhos ou review que pede mudanças devolvem o trabalho à mesma sessão do agente; após três tentativas, PR em rascunho e comentário na issue; um PR só abre com evidência verde e aprovação                    | Concluído    |
-| M4b   | `waiting`                                                      | Pergunta do agente vira comentário na issue e a resposta de uma pessoa retoma a mesma sessão, num sandbox restaurado de snapshot                                                                                        | Concluído    |
-| M5    | Painel + inbox                                                 | Board, timeline, custo e evidência em tempo real via SSE; aprovar, pedir mudanças e tentar novamente pelo painel (local, com um dono)                                                                                   | Concluído    |
-| M6a   | Pré-release e release                                          | A fábrica gera uma pré-release para todo commit com checks verdes que chegou a um PR; um humano (painel) ou um agente (modo `auto`) promove a release, com o merge preso ao SHA entregue                                | Concluído    |
-| M6b   | Vigia da `main`                                                | Depois de um release, uma `main` vermelha gera um PR de revert (nunca um merge sozinho)                                                                                                                                 | Concluído    |
-| M7    | Saúde e qualidade                                              | Custo por execução, achados tipados do supervisor como `stalled` e `orphaned`, gates CRAP, duplicação e mutação                                                                                                         | Concluído    |
-| M8    | Operação contínua                                              | A fábrica volta sozinha depois de um reboot, recupera webhooks perdidos e tem backup restaurável do banco                                                                                                               | Concluído    |
-| M9    | Painel com os componentes do TheoKit UI                        | O painel usa `@usetheo/ui` e `@theokit/ui`, com quadro e lista, painel lateral e tela cheia                                                                                                                             | Concluído    |
-| M10   | Repositórios e configurações                                   | Só repositórios habilitados geram task; agentes, checks, domínios e release por repositório; primeiro projeto real                                                                                                      | Parcial      |
-| M11   | Novo job pelo painel                                           | O painel abre a issue com a label e a task nasce pelo caminho normal do webhook                                                                                                                                         | Concluído    |
-| M12   | Transcrição ao vivo                                            | O painel mostra o que o agente faz enquanto faz, e o transcript fica gravado                                                                                                                                            | Concluído    |
-| M13   | Conversa com os agentes                                        | O Paulo escreve para a instância que está implementando, ou para uma que parou, pelo painel                                                                                                                             | Não iniciado |
-| M14   | Painel acessível de fora                                       | O painel abre fora desta máquina, atrás de um acesso próprio, sem abrir o resto                                                                                                                                         | Não iniciado |
-| M15   | Painel como chat                                               | Menu lateral e abas Chat/Work no visual do ChatGPT, com um assistente conversacional (OpenRouter ou assinatura do ChatGPT) que lê a fábrica e só age com aprovação; conversas salvas no Postgres                        | Concluído    |
-| M16   | Um guia por página                                             | Quadro, Planos, Repositórios, Caixa de entrada, Saúde e Configuração têm cada um um especialista ao lado da página, que sabe onde o dono está, consulta os dados e só muda algo com aprovação, mostrando antes e depois | Concluído    |
-| M17   | Página Agentes                                                 | Uma página lista os agentes da fábrica (os que constroem e os que conversam), com o texto exato das instruções de cada um, o que podem fazer e o modelo configurado, lidos do código que roda, e tem o seu próprio guia | Concluído    |
+| Marco | Entrega                                                         | Critério de aceite                                                                                                                                                                                                      | Estado       |
+| ----- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| M0    | Fundação: LoopZero, PostgreSQL, Drizzle, CI, branch `workspace` | CI executa `loopzero check` e testes, com resultado verde                                                                                                                                                               | Concluído    |
+| M1    | Ingestão                                                        | Uma issue com label `factory` gera exatamente uma task em `intake`; repetir o delivery não duplica                                                                                                                      | Concluído    |
+| M2    | Execução                                                        | Uma task de repositório de teste envia a branch `factory/<n>` e registra os estágios em ordem em `stage_event`                                                                                                          | Concluído    |
+| M3    | Evidência + PR                                                  | PR só abre com evidência verde no head SHA; teste demonstra que uma declaração do agente sem evidência não abre PR                                                                                                      | Concluído    |
+| M3b   | Vários agentes de código                                        | Claude Code e Codex rodam a mesma task pelo mesmo `CodingHarness`, por chave ou assinatura, com o segredo fora do sandbox; trocar o agente é configuração                                                               | Concluído    |
+| M4a   | Review independente + rodadas                                   | Checks vermelhos ou review que pede mudanças devolvem o trabalho à mesma sessão do agente; após três tentativas, PR em rascunho e comentário na issue; um PR só abre com evidência verde e aprovação                    | Concluído    |
+| M4b   | `waiting`                                                       | Pergunta do agente vira comentário na issue e a resposta de uma pessoa retoma a mesma sessão, num sandbox restaurado de snapshot                                                                                        | Concluído    |
+| M5    | Painel + inbox                                                  | Board, timeline, custo e evidência em tempo real via SSE; aprovar, pedir mudanças e tentar novamente pelo painel (local, com um dono)                                                                                   | Concluído    |
+| M6a   | Pré-release e release                                           | A fábrica gera uma pré-release para todo commit com checks verdes que chegou a um PR; um humano (painel) ou um agente (modo `auto`) promove a release, com o merge preso ao SHA entregue                                | Concluído    |
+| M6b   | Vigia da `main`                                                 | Depois de um release, uma `main` vermelha gera um PR de revert (nunca um merge sozinho)                                                                                                                                 | Concluído    |
+| M7    | Saúde e qualidade                                               | Custo por execução, achados tipados do supervisor como `stalled` e `orphaned`, gates CRAP, duplicação e mutação                                                                                                         | Concluído    |
+| M8    | Operação contínua                                               | A fábrica volta sozinha depois de um reboot, recupera webhooks perdidos e tem backup restaurável do banco                                                                                                               | Concluído    |
+| M9    | Painel com os componentes do LoopZero UI                        | O painel usa `@getloopscale/ui` e `@getloopscale/loopzero-ui`, com quadro e lista, painel lateral e tela cheia                                                                                                          | Concluído    |
+| M10   | Repositórios e configurações                                    | Só repositórios habilitados geram task; agentes, checks, domínios e release por repositório; primeiro projeto real                                                                                                      | Parcial      |
+| M11   | Novo job pelo painel                                            | O painel abre a issue com a label e a task nasce pelo caminho normal do webhook                                                                                                                                         | Concluído    |
+| M12   | Transcrição ao vivo                                             | O painel mostra o que o agente faz enquanto faz, e o transcript fica gravado                                                                                                                                            | Concluído    |
+| M13   | Conversa com os agentes                                         | O Paulo escreve para a instância que está implementando, ou para uma que parou, pelo painel                                                                                                                             | Não iniciado |
+| M14   | Painel acessível de fora                                        | O painel abre fora desta máquina, atrás de um acesso próprio, sem abrir o resto                                                                                                                                         | Não iniciado |
+| M15   | Painel como chat                                                | Menu lateral e abas Chat/Work no visual do ChatGPT, com um assistente conversacional (OpenRouter ou assinatura do ChatGPT) que lê a fábrica e só age com aprovação; conversas salvas no Postgres                        | Concluído    |
+| M16   | Um guia por página                                              | Quadro, Planos, Repositórios, Caixa de entrada, Saúde e Configuração têm cada um um especialista ao lado da página, que sabe onde o dono está, consulta os dados e só muda algo com aprovação, mostrando antes e depois | Concluído    |
+| M17   | Página Agentes                                                  | Uma página lista os agentes da fábrica (os que constroem e os que conversam), com o texto exato das instruções de cada um, o que podem fazer e o modelo configurado, lidos do código que roda, e tem o seu próprio guia | Concluído    |
 
 As aprovações de ferramentas com efeitos externos seguem a convenção do
 `AGENTS.md`. A interação com o modo `auto` ficou definida pelo conceito de pré-release: o que a
@@ -95,7 +95,7 @@ por um humano ou por um veredito de agente no modo `auto`, que é opt-in e vem d
 ## Próximos marcos: operação, repositórios, painel e conversa
 
 Pedido do Paulo em 2026-11-04, depois de comparar o painel com o do `marshal-factory`: um painel mais
-completo, feito com os componentes do TheoKit UI, e a possibilidade de **conversar com os agentes pelo
+completo, feito com os componentes do LoopZero UI, e a possibilidade de **conversar com os agentes pelo
 sistema**, por exemplo com a instância que está implementando. Os marcos M8 a M14 cobrem isso, mais o que
 faltava para usar a fábrica de verdade (rodar sempre ligada, vários repositórios).
 
@@ -110,8 +110,8 @@ faltava para usar a fábrica de verdade (rodar sempre ligada, vários repositór
 - O agente roda como `claude -p --output-format json` ou `codex exec`, por um `execute` que bloqueia até o
   fim. A fábrica só vê o resultado final: nada do que o agente faz no meio é visível nem alcançável.
 - O Vercel Sandbox aceita comando destacado (`detached`), leitura dos logs em fluxo e escrita no stdin do
-  processo. O `SandboxBackend` do TheoKit expõe só `execute` e `uploadFile`. Isso é uma lacuna do
-  framework: vira issue em `usetheokit/theokit` antes do contorno, e o contorno é uma capacidade opcional
+  processo. O `SandboxBackend` do LoopZero expõe só `execute` e `uploadFile`. Isso é uma lacuna do
+  framework: vira issue em `getloopscale/loopzero` antes do contorno, e o contorno é uma capacidade opcional
   do `IsolatedSandbox`, como já é o `snapshot`.
 - O Claude Code tem `--input-format stream-json`, `--output-format stream-json`,
   `--include-partial-messages`, `--replay-user-messages`, `--resume` e `--fork-session`. O Codex tem
@@ -144,11 +144,11 @@ Critérios de aceite:
   `stage_event` que o banco de origem (um script de restauração roda isso).
 - Um dump de mais de 14 dias é removido, e um mais novo não.
 
-### M9: painel com os componentes do TheoKit UI
+### M9: painel com os componentes do LoopZero UI
 
-`@usetheo/ui` traz a estrutura (shell, navegação, tabela, diálogo, abas, aviso, estado vazio) e
-`@theokit/ui` traz as peças de agente (`RunStatusPill`, `AgentTimeline`, `ApprovalCard`, `ChatThread`,
-`ChatComposer`). Hoje o `@theokit/ui` só está instalado porque o Tailwind do TheoKit depende dele: nenhuma
+`@getloopscale/ui` traz a estrutura (shell, navegação, tabela, diálogo, abas, aviso, estado vazio) e
+`@getloopscale/loopzero-ui` traz as peças de agente (`RunStatusPill`, `AgentTimeline`, `ApprovalCard`, `ChatThread`,
+`ChatComposer`). Hoje o `@getloopscale/loopzero-ui` só está instalado porque o Tailwind do LoopZero depende dele: nenhuma
 tela usa um componente. O M9 troca o Tailwind escrito à mão pelos componentes, com o tema da biblioteca, e
 acrescenta o que o painel do `marshal-factory` tem de útil: quadro ou lista, painel lateral da task com
 tela cheia e filtro por repositório (o filtro só ganha opções no M10).
@@ -224,7 +224,7 @@ seguir.
 
 Entrega: a capacidade opcional `spawn` no `IsolatedSandbox` (comando destacado com leitura de logs em
 fluxo, escrita no stdin, espera e interrupção), implementada no adapter da Vercel, mais uma issue no
-TheoKit pedindo isso no `SandboxBackend`. O `CodingHarness` passa a aceitar um `onEvent`, e cada harness
+LoopZero pedindo isso no `SandboxBackend`. O `CodingHarness` passa a aceitar um `onEvent`, e cada harness
 traduz o seu fluxo para um `AgentEvent` nosso: mensagem do agente, uso de ferramenta (nome e entrada
 resumida), resultado da ferramenta (truncado), custo parcial e erro. A tabela `agent_event` guarda a
 sequência (task, execução, ordem, tipo, conteúdo truncado, hora) e o SSE do painel a repassa. O resultado
@@ -288,7 +288,7 @@ já estourou o plano Hobby uma vez; só o `waiting` continua usando snapshot. O 
 
 - Uma mensagem nunca pula o portão. Tudo o que muda o repositório passa por verificação e revisão no commit
   novo, e a conversa não aprova nada.
-- Só o dono escreve, pelo painel e com o cabeçalho `X-Theo-Action`. Cada mensagem fica gravada
+- Só o dono escreve, pelo painel e com o cabeçalho `X-LoopZero-Action`. Cada mensagem fica gravada
   (`agent_message`: autor, hora, texto, modo e entrega: pendente, entregue ou falhou).
 - Uma instância tem um escritor por vez. Duas mensagens seguidas entram em fila e são entregues em ordem,
   e a segunda não abre outro processo na mesma sessão.
@@ -297,7 +297,7 @@ já estourou o plano Hobby uma vez; só o `waiting` continua usando snapshot. O 
 - Uma mensagem não amplia a saída do sandbox nem o tempo da execução.
 
 **Interface.** O detalhe da task ganha uma aba Conversa, com `ChatThread` e `ChatComposer` do
-`@theokit/ui`: mostra o transcript do M12 com as mensagens do Paulo no meio, o estado da instância
+`@getloopscale/loopzero-ui`: mostra o transcript do M12 com as mensagens do Paulo no meio, o estado da instância
 (trabalhando, parada, esperando você), o botão Interromper, o seletor Perguntar ou Orientar, e uma aba
 para o builder e outra para o reviewer. A pergunta de uma task em `waiting` pode ser respondida no mesmo
 compositor, além de pelo comentário na issue; a primeira resposta vence.
@@ -416,7 +416,7 @@ valor equivalente e o painel o rotula assim.
 "Open in T3" gera um token de pareamento de 15 minutos para abrir a sessão no navegador e
 conduzir o agente. O Vercel Sandbox permite isso: o SDK 3.9.1 tem `ports`, `domain(porta)`,
 `snapshot` e `extendTimeout`. Não foi verificado se o T3 roda sem interface nesse sandbox, e a
-regra "TheoKit primeiro" manda ver antes o que o framework já oferece. Quem tiver o link executa
+regra "LoopZero primeiro" manda ver antes o que o framework já oferece. Quem tiver o link executa
 código no sandbox, que não guarda segredos, então o link deve ser curto e de uso único. A sessão
 no plano Hobby termina em 45 minutos. Fica depois do painel (M5), a menos que o Paulo peça antes.
 
@@ -475,17 +475,17 @@ funcionou. O E2B segue como segundo adapter.
 
 ## Ponto de retomada
 
-O M0 foi interrompido para corrigir problemas encontrados no TheoKit, seguindo a
+O M0 foi interrompido para corrigir problemas encontrados no LoopZero, seguindo a
 decisão de aproveitar o framework em vez de contorná-lo na fábrica. Com as correções
 publicadas e adotadas, ele foi concluído em 2026-11-03.
 
-A sessão relatou publicação do TheoKit 0.76.0 e correções em ORM e plugins.
-O lote seguinte (#1037, #1031, #1038 e #1051 de `usetheokit/theokit`) foi concluído
+A sessão relatou publicação do LoopZero 0.76.0 e correções em ORM e plugins.
+O lote seguinte (#1037, #1031, #1038 e #1051 de `getloopscale/loopzero`) foi concluído
 em 2026-10-31: `theokit@0.76.1` e `create-theokit@3.0.21` foram publicados,
 verificados como consumidor contra PostgreSQL real e as quatro issues foram
-fechadas com evidências. Veja o [registro da release](THEOKIT-RELEASE-0.76.1.md).
+fechadas com evidências. Veja o [registro da release](LOOPZERO-RELEASE-0.76.1.md).
 
-Entre 2026-10-31 e 2026-11-03 a auditoria de prontidão do TheoKit abriu, corrigiu e verificou
+Entre 2026-10-31 e 2026-11-03 a auditoria de prontidão do LoopZero abriu, corrigiu e verificou
 no pacote publicado as issues #1069 a #1079, #1086, #1096, #1097, #1100 a #1102 e #1123. A
 última versão é a `theokit@0.77.4`, que a fábrica adotou. Ficam fora da auditoria a
 documentação do site (`website#26` e `website#27`) e o que depende de contas do Paulo: a chave
@@ -493,20 +493,20 @@ da Anthropic para o Claude Code headless e o acesso do GitHub à fábrica.
 
 Estado local confirmado em 2026-11-03, com `theokit@0.77.4`:
 
-- Scaffold React/TheoKit com página inicial e rotas de liveness e readiness.
+- Scaffold React/LoopZero com página inicial e rotas de liveness e readiness.
 - PostgreSQL local via Compose. O pool vem de `getStorageManager().usePostgres`, e o
-  `theo.config.ts` monta o bloco `storage` a partir de `DATABASE_URL`.
+  `loopzero.config.ts` monta o bloco `storage` a partir de `DATABASE_URL`.
 - Tabelas `ingress` e `task` (migration `0000_ingest_and_task`) e o webhook
-  `POST /api/webhooks/github`. Ainda não há agentes nem jobs. No servidor real (`theokit start`)
+  `POST /api/webhooks/github`. Ainda não há agentes nem jobs. No servidor real (`loopzero start`)
   contra o Postgres do Compose, uma entrega assinada criou uma task em `intake`, a mesma entrega
   respondeu `duplicate` e a assinatura inválida respondeu 401.
-- Typecheck, lint, formatação, build e `theokit check` passam. Há 19 testes de unidade e 12 de
+- Typecheck, lint, formatação, build e `loopzero check` passam. Há 19 testes de unidade e 12 de
   integração, todos verdes contra o PostgreSQL do Compose.
 - ADRs 0001 a 0004 em `docs/adr/`, e CI em `.github/workflows/ci.yml`.
 - M2: `runTask` leva uma task a `factory/<n>` e registra os estágios em `stage_event`. Contra o
   GitHub, a Vercel e o Postgres reais, com um agente roteirizado no lugar do Claude (`pnpm
 test:e2e`), a issue #1 do playground virou uma branch `factory/1` enviada. A task e o job
-  `run-task` entram juntos, na mesma transação, e o worker do TheoKit executa o job. Pela URL
+  `run-task` entram juntos, na mesma transação, e o worker do LoopZero executa o job. Pela URL
   pública `factory.aquim.ai`, a label `factory` na issue #1 do playground levou o fluxo real,
   webhook do GitHub incluído, de `intake` a `done` em 31 segundos, por US$ 0,06: `factory/1` foi
   enviada pelo GitHub App e os 6 testes dela passam fora do sandbox. Com o Claude Code
@@ -563,7 +563,7 @@ commit_refs`), que não se repetiu; o push agora tenta até três vezes.
   primeiro, com checks e review de novo, e a aprovação antiga deixou de valer para o commit novo. Um
   pedido que não exigia mudança fez a task voltar a `done` com a resposta do agente na issue, em vez de
   falhar. Os testes que escrevem no banco passaram a usar `<nome>_test`, porque apagavam as tasks
-  reais. O Tailwind só funciona com `@theokit/ui` instalado, que agora é dependência.
+  reais. O Tailwind só funciona com `@getloopscale/loopzero-ui` instalado, que agora é dependência.
 - M6a: a entrega virou pré-release. Para todo commit com checks verdes que chegou a um PR, aprovado ou
   entregue a uma pessoa, a fábrica cria uma tag `pre/<issue>-<sha7>`, marcada como pré-release, com os
   checks, o veredito do review, as tentativas e o custo nas notas. Isso não pede licença e não mexe na
@@ -640,8 +640,8 @@ commit_refs`), que não se repetiu; o push agora tenta até três vezes.
   `kill -9` os trouxe de volta, e o Postgres voltou depois de o processo dele morrer. Não foi feito um
   reboot de verdade da máquina: o `linger`, o Docker habilitado e as unidades habilitadas cobrem o
   caminho, mas ele não foi exercitado.
-- M9, painel com os componentes do TheoKit UI: `@usetheo/ui` (estrutura: `Button`, `Badge`, `Card`,
-  `Table`, `Sheet`, `Input`, `Textarea`, `EmptyState`) e `@theokit/ui` (`ThemeProvider`, `ThemeSwitcher`)
+- M9, painel com os componentes do LoopZero UI: `@getloopscale/ui` (estrutura: `Button`, `Badge`, `Card`,
+  `Table`, `Sheet`, `Input`, `Textarea`, `EmptyState`) e `@getloopscale/loopzero-ui` (`ThemeProvider`, `ThemeSwitcher`)
   no lugar do Tailwind escrito à mão, com os tokens do tema. Quadro ou lista (a escolha fica guardada),
   painel lateral da task (`?task=7`), tela cheia (`?task=7&full=1`, Esc volta ao quadro) e o endereço
   `/tasks/7` mantido. Um achado de contraste: o `text-primary` dos links dava 2,9 sobre o cartão no
@@ -661,7 +661,7 @@ commit_refs`), que não se repetiu; o push agora tenta até três vezes.
   domínios extras no firewall, agentes e modo de release). Ao vivo, só pela interface (Chrome sem cabeça
   no painel): Setup, habilitar o playground, um plano de 2 issues por US$ 0,04, criar e iniciar, e em 80
   segundos dois PRs com pré-release; "New job" abriu a issue #48 sem a label e disse que esperava. O
-  playground foi limpo depois. Dois achados pelo caminho: o TheoKit quebra o build com duas páginas de
+  playground foi limpo depois. Dois achados pelo caminho: o LoopZero quebra o build com duas páginas de
   mesma pasta dinâmica (`tasks/[id]` e `plans/[id]`, usetheokit/theokit#1151; a pasta virou
   `[planId]`), e a lista de 120 repositórios levava 4,5 segundos, então ficou guardada por 15. O GitHub
   Projects ficou de fora: uma App não alcança o Project de uma conta pessoal. Falta do M10: a receita
@@ -680,7 +680,7 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
   que só ele contrata.
 - Alimentador do backlog e branch de release (2026-11-05, objetivo do Paulo: a fábrica implementar todos os
   itens do backlog, com o Codex). `scripts/backlog.mjs` (lógica pura, 27 testes) e `scripts/backlog-feed.mjs`
-  (o laço) transformam os 191 itens abertos do BACKLOG.md do theokit em issues autocontidas, por repositório
+  (o laço) transformam os 191 itens abertos do BACKLOG.md do loopzero em issues autocontidas, por repositório
   e na ordem dos bloqueios, e guardam o resultado de cada um. Ao medir os repositórios para habilitá-los
   apareceu um risco: a branch padrão dos gateways é `develop`, que é onde a fábrica avança a pré-release,
   então ela avançaria a branch de release sem decisão. Cada repositório ganhou `release_branch` (migration
@@ -690,10 +690,10 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
   os checks rodam só o que mudou (`--filter='[HEAD~1]'`, `vitest related`).
 - Primeira integração real em `workspace` (2026-11-05). O B-682 refeito contra `workspace`: PR `#1157`,
   checks verdes, review aprovado, e **a fábrica mergeou o PR sozinha** (commit `4fb965a`), por US$ 0,25. O
-  theokit mostrou o caso que os testes não tinham: `develop` é protegida ("Changes must be made through a
+  loopzero mostrou o caso que os testes não tinham: `develop` é protegida ("Changes must be made through a
   pull request, 7 of 7 required status checks"), então o avanço direto foi recusado (409) e a tag de
   pré-release ficou sobre o commit de `workspace`. Daí a regra nova: quando `develop` recusa, a fábrica abre,
-  ou reaproveita, um PR `workspace → develop` e só o abre. Antes de rodar, a base `workspace` do theokit foi
+  ou reaproveita, um PR `workspace → develop` e só o abre. Antes de rodar, a base `workspace` do loopzero foi
   medida num clone limpo (tipos, lint e os testes de MCP passam), e os arquivos do item são idênticos aos de
   `develop`. O PR antigo `#1155` (contra `develop`, recusado pelo `promotion-gate`) foi fechado e a
   pré-release dele removida.
@@ -710,7 +710,7 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
   avanço recusado de `develop` mantém o trabalho integrado e a tag sobre o commit de `workspace`; um trabalho
   entregue a uma pessoa nunca é mergeado; "pedir mudanças" é recusado para trabalho já integrado. Coluna
   nova `task.merged_sha` (migration 0012).
-- Primeira execução real sobre o backlog do theokit (2026-11-05). O item B-682 (servir uma lista de tools
+- Primeira execução real sobre o backlog do loopzero (2026-11-05). O item B-682 (servir uma lista de tools
   por MCP) virou a issue `usetheokit/theokit#1154`, escrita para se sustentar sozinha, e a fábrica a
   entregou: PR `#1155` contra `develop`, 4 arquivos (+278 −64), os 4 checks verdes (install, tests, types,
   lint), review independente aprovado na primeira rodada, pré-release `pre/1154-d8da4fa`, US$ 0,72 no
@@ -723,11 +723,11 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
   fábrica; (3) o repositório tem o `promotion-gate` (workflow compartilhado da organização): `develop` só
   aceita PR vindo da branch `workspace`, então o PR da fábrica (`factory/1154`) falha esse check mesmo
   estando correto. A App não tem a permissão `workflows` e não deve ter: workflows ficam para uma pessoa.
-  Decisão pendente do Paulo: a base do theokit deve ser `workspace` (onde o squad integra, e onde o
-  código do TheoClaw existe) em vez de `develop`. O PR #1155 não foi mergeado nem retargetado.
-- Branch de base por repositório (2026-11-05). Alimentar a fábrica com o backlog do theokit (a fábrica antiga, o
+  Decisão pendente do Paulo: a base do loopzero deve ser `workspace` (onde o squad integra, e onde o
+  código do LoopBot existe) em vez de `develop`. O PR #1155 não foi mergeado nem retargetado.
+- Branch de base por repositório (2026-11-05). Alimentar a fábrica com o backlog do loopzero (a fábrica antiga, o
   squad) esbarrou numa limitação medida: a fábrica sempre parte da branch padrão e abre o PR contra ela,
-  e o theokit integra em `develop` (a `main` só recebe release, e o `promotion-gate` roda nos PRs para
+  e o loopzero integra em `develop` (a `main` só recebe release, e o `promotion-gate` roda nos PRs para
   `develop`). Cada repositório ganhou uma coluna `base_branch` (migration 0011), um campo na página
   Repositories, validação do nome, e a base vale para o clone, o PR, o leitor do assistente de setup e o
   plano. Vazio mantém o comportamento antigo. Testado: a execução parte de `develop` e abre contra ela, e
@@ -737,10 +737,10 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
 - Assistente de escrita (2026-11-04, a pedido do Paulo: em todos os textarea um agente que faça da
   fábrica um super agente especializado nela, com a premissa de que o dono não precisa ser programador).
   Sob toda caixa de texto do painel há um botão ("Help me say it", "Improve this" ou "Set this up for me")
-  que chama um agente do TheoKit: `assist` escreve o objetivo de um plano, o job, cada issue e o pedido de
+  que chama um agente do LoopZero: `assist` escreve o objetivo de um plano, o job, cada issue e o pedido de
   mudanças, e `assist-setup` lê o projeto e preenche os checks e os domínios. O dono diz o que quer e o
   agente escreve o que a fábrica precisa, na língua do dono, sem fazer pergunta; nada muda até "Use this",
-  e dá para pedir outra versão em palavras. O que a fábrica é vive em `.theokit/THEO.md`. Ao vivo, no
+  e dá para pedir outra versão em palavras. O que a fábrica é vive em `.loopzero/LOOPZERO.md`. Ao vivo, no
   Chrome do dono: "quero um site onde meus clientes marcam hora comigo" virou um objetivo com o que o site
   deve ter, em português; o setup do `usetheokit/theodot` leu o CI e devolveu os checks. Três achados que os
   testes não davam: (1) o SDK dá a todo agente um shell próprio, e o assistente roda no processo do
@@ -753,7 +753,7 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
   sem assistente.
 - Transcrição ao vivo, M12 (2026-11-07). O construtor e o revisor gravam cada passo em `agent_event` enquanto
   trabalham: o Claude Code roda com `stream-json --verbose` e o Codex com `exec --json`, o sandbox Docker lê a
-  saída linha a linha (`executeStreaming`; o `SandboxBackend` do TheoKit só devolve no fim,
+  saída linha a linha (`executeStreaming`; o `SandboxBackend` do LoopZero só devolve no fim,
   usetheokit/theokit-sdk#883), e cada linha vira um passo redigido (formatos de token do GitHub, Anthropic,
   OpenAI e Vercel) e cortado em 8 KB. O painel recebe os passos pela mesma conexão SSE que já usava e lê o
   histórico de 500 em 500; um cron diário apaga o que passou de 30 dias. Observado ao vivo: a task 187 tinha
@@ -771,19 +771,19 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
   teste, e remover o webhook do playground, que pede o escopo `admin:repo_hook` que o `gh` desta máquina não
   tem.
 - Readiness sem `DATABASE_URL`: o servidor sobe e `/api/ready` responde 503 com o motivo. Com
-  uma URL que não é `postgres://`, o `theokit` recusa iniciar.
+  uma URL que não é `postgres://`, o `@getloopscale/loopzero` recusa iniciar.
 
 ## Próximas ações para concluir M0
 
-- [x] Confirmar a release publicada do TheoKit e a presença das correções necessárias.
-- [x] Adotar o TheoKit corrigido (`^0.77.4`) e migrar a gestão do banco para o caminho
+- [x] Confirmar a release publicada do LoopZero e a presença das correções necessárias.
+- [x] Adotar o LoopZero corrigido (`^0.77.4`) e migrar a gestão do banco para o caminho
       suportado, com teste contra PostgreSQL real e proteção contra erro em conexão ociosa.
 - [x] Resolver o contrato de `createPool`: o teste passou a exercitar o pool de `getPool()`.
 - [x] Definir o comportamento de readiness para configuração inválida do banco.
 - [x] Alinhar README e configuração com a fábrica.
 - [x] Registrar ADRs da arquitetura, base de conhecimento e sandbox; a do sandbox foi
       aceita depois do spike.
-- [x] Configurar o CI: formatação, `theokit check` (tipos, lint e scan), testes de unidade e de
+- [x] Configurar o CI: formatação, `loopzero check` (tipos, lint e scan), testes de unidade e de
       integração, e build.
 - [x] Confirmar o CI verde no GitHub após o primeiro push (run 41696481251, todos os passos).
 - [x] Iniciar M1 com persistência do ingress, task e deduplicação de deliveries.
@@ -793,5 +793,5 @@ exceeded`, com reset em 2026-12-01, e nenhum sandbox novo pôde ser criado: o al
 Recuperado da sessão Claude Code
 `d6692f50-0656-450e-9cf5-814e9a4c7fb7`, nas conversas de 2026-10-30 e 2026-10-31,
 e das memórias `aifactory-architecture-decisions.md` e
-`prefer-theokit-everything.md`. Este documento mantém o plano acessível sem
+`prefer-loopzero-everything.md`. Este documento mantém o plano acessível sem
 depender dos arquivos pessoais da sessão.

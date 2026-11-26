@@ -2,7 +2,7 @@
 export const MIN_AGENT_MS = 5 * 60_000
 
 /**
- * How long one check may take when the deps do not say. theokit-sdk's tests take 8 to 10 minutes on a busy
+ * How long one check may take when the deps do not say. loopzero-sdk's tests take 8 to 10 minutes on a busy
  * machine and were cut at 10 three times on 2026-11-11 (getloopscale/aifactory#24).
  */
 export const DEFAULT_CHECK_MS = 15 * 60_000

@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm'
-import type { QueueClient } from 'theokit/server/jobs'
+import type { QueueClient } from '@getloopscale/loopzero/server/jobs'
 import { drizzle } from 'drizzle-orm/node-postgres'
 
 import { holdNewJob } from '../coordinator/queue-hold'

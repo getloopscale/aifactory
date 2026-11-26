@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm'
-import { route } from 'theokit/server/define'
+import { route } from '@getloopscale/loopzero/server/define'
 import { z } from 'zod'
 
 import { getDb } from '../../../../db'

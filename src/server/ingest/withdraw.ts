@@ -28,7 +28,7 @@ const isWithdrawal = (intent: RoutedIntent): intent is Withdrawal => intent.kind
  */
 const deleteQueuedJobs = (tx: Database, taskId: number) =>
   tx.execute(
-    sql`delete from theokit_jobs
+    sql`delete from loopzero_jobs
         where name in ('run-task', 'merge-task', 'resume-task') and input->>'taskId' = ${String(taskId)}
           and failed_at is null and locked_until is null and attempts = 0`,
   )

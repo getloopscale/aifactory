@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
-import { SandboxBackend } from '@theokit/agents/sandbox'
+import { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 const run = promisify(execFile)
 

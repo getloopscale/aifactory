@@ -62,7 +62,7 @@ export const inTransactionForPlan: WorkDeps['inTransaction'] = async (work) => {
 }
 
 /** The table `jobBackend()` keeps its jobs in: it is given no other name. */
-const JOBS_TABLE = 'theokit_jobs'
+const JOBS_TABLE = 'loopzero_jobs'
 
 /** The same for the panel: a decision and the `run-task` it starts commit together. */
 export const inTransactionForRun: ActionDeps['inTransaction'] = async (work) => {

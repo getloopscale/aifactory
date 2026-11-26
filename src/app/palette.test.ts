@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { contrastRatio } from '@theokit/ui'
+import { contrastRatio } from '@getloopscale/loopzero-ui'
 import { describe, expect, it } from 'vitest'
 
 import { loopscale } from './theme'

@@ -1,11 +1,11 @@
 /**
- * JobRegistry augmentation: typed `ctx.queue.enqueue`. The registry lives in `theokit/server/jobs`,
+ * JobRegistry augmentation: typed `ctx.queue.enqueue`. The registry lives in `@getloopscale/loopzero/server/jobs`,
  * the module `QueueClient` comes from (usetheokit/theokit#1074).
  *
  * Each job is a file `src/server/jobs/<name>.ts` exporting `defineJob('<name>', ...)`, with its
  * input listed here.
  */
-declare module 'theokit/server/jobs' {
+declare module '@getloopscale/loopzero/server/jobs' {
   interface JobRegistry {
     /** Runs one task end to end: sandbox, agent, push of `factory/<issue>`. */
     'run-task': {
@@ -40,10 +40,10 @@ declare module 'theokit/server/jobs' {
   }
 }
 
-// `ctx.queue` exists on every route because `theo.config.ts` sets `jobs.backend`.
-declare module 'theokit/server/define' {
+// `ctx.queue` exists on every route because `loopzero.config.ts` sets `jobs.backend`.
+declare module '@getloopscale/loopzero/server/define' {
   interface RouteContext {
-    queue: import('theokit/server/jobs').QueueClient
+    queue: import('@getloopscale/loopzero/server/jobs').QueueClient
   }
 }
 

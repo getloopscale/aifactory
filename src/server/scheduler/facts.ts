@@ -14,7 +14,7 @@ import type { ReadinessVerdict } from './readiness'
 /**
  * What the scheduler reads, and nothing else: the queued `run-task` jobs, their issues as GitHub holds them
  * now, and the decisions already recorded. It decides nothing (`order.ts` and `readiness.ts` do). The queue
- * is TheoKit's `theokit_jobs`, which has no call to reorder it (https://github.com/usetheokit/theokit/issues/2117).
+ * is LoopZero's `loopzero_jobs`, which has no call to reorder it (https://github.com/usetheokit/theokit/issues/2117).
  */
 
 /** A `run-task` job no worker holds and that did not fail, of a task still in `intake`. */
@@ -61,7 +61,7 @@ export async function readQueuedRuns(db: Pick<Database, 'execute'>): Promise<Que
           date_trunc('milliseconds', j.available_at) as available_at,
           (j.available_at <= now() and not (j.input ? 'heldFrom')) as movable,
           not (j.input ?| array['decisionId', 'feedback', 'resume', 'mergeBase']) as first_run
-        from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
+        from loopzero_jobs j join task t on t.id = (j.input->>'taskId')::int
         where j.name = 'run-task' and j.failed_at is null
           and (j.locked_until is null or j.locked_until < now()) and t.stage = 'intake'
         order by j.available_at, j.id`,

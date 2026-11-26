@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 
 import { and, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -93,7 +93,7 @@ async function deleteBranch(branch: string) {
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
-  // The run queues its merge-task job in TheoKit's table, which its own migration creates.
+  // The run queues its merge-task job in LoopZero's table, which its own migration creates.
   await jobBackend().migrate()
   await getPool().query('truncate table stage_event, task, ingress restart identity cascade')
   await deleteBranch(`factory/${ISSUE}`)
