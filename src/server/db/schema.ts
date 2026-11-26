@@ -1209,19 +1209,24 @@ export const coordinatorAction = pgTable(
  * before the issue is opened and removed when opening fails, so two passes never file the same signature.
  * When the issue has been closed for a week, both counts and `measured_at` are recorded.
  */
-export const failureSignature = pgTable('failure_signature', {
-  id: serial('id').primaryKey(),
-  signature: text('signature').notNull().unique(),
-  /** The repository the issue was filed on. */
-  repository: text('repository').notNull(),
-  /** Empty only while the issue is being opened. */
-  issueNumber: integer('issue_number'),
-  filedAt: timestamp('filed_at', { withTimezone: true }).notNull().defaultNow(),
-  /** The signature's events in the week before `filed_at`, and in the week after the issue closed. */
-  countBefore: integer('count_before'),
-  countAfter: integer('count_after'),
-  measuredAt: timestamp('measured_at', { withTimezone: true }),
-})
+export const failureSignature = pgTable(
+  'failure_signature',
+  {
+    id: serial('id').primaryKey(),
+    signature: text('signature').notNull(),
+    /** The repository the issue was filed on. */
+    repository: text('repository').notNull(),
+    /** Empty only while the issue is being opened. */
+    issueNumber: integer('issue_number'),
+    filedAt: timestamp('filed_at', { withTimezone: true }).notNull().defaultNow(),
+    /** The signature's events in the week before `filed_at`, and in the week after the issue closed. */
+    countBefore: integer('count_before'),
+    countAfter: integer('count_after'),
+    measuredAt: timestamp('measured_at', { withTimezone: true }),
+  },
+  // One signature per repository: the improver's `improve:<kind>:<target>` can be the same in two of them.
+  (t) => [uniqueIndex('failure_signature_repository_signature').on(t.repository, t.signature)],
+)
 
 /**
  * A class of defect the reviewer found as blocking on enough tasks of one repository (`coordinator/review-pattern.ts`).
@@ -1310,6 +1315,29 @@ export const externalReview = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('external_review_pull_sha').on(t.repository, t.pullNumber, t.headSha)],
+)
+
+/** What the improver (`improver/`) decided for one repository on one pass. */
+export const IMPROVER_OUTCOMES = ['proposed', 'nothing_found', 'skipped', 'error'] as const
+
+export const improverDecision = pgTable(
+  'improver_decision',
+  {
+    id: serial('id').primaryKey(),
+    repository: text('repository').notNull(),
+    kind: text('kind').notNull(),
+    mode: text('mode', { enum: ['trial', 'auto'] }).notNull(),
+    outcome: text('outcome', { enum: IMPROVER_OUTCOMES }).notNull(),
+    reason: text('reason').notNull(),
+    /** `improve:<kind>:<target>`, for a proposal. */
+    signature: text('signature'),
+    /** The issue filed, in `auto`. */
+    issueNumber: integer('issue_number'),
+    /** What the scout proposed: title, body, target and evidence. */
+    proposal: jsonb('proposal'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('improver_decision_repository').on(t.repository, t.id)],
 )
 
 /** One browser the owner turned notifications on in. The endpoint is the browser's address at its push service. */
