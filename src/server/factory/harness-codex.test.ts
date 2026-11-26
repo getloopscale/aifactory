@@ -252,6 +252,15 @@ describe('codexHarness', () => {
     await expect(harness.prepare?.(backend)).rejects.toThrow(/codex did not install/)
   })
 
+  it('answers the command of its own CLI on a session, and refuses an id that is not a UUID', () => {
+    const harness = codexHarness({ kind: 'api-key', secret: 'k' })
+    const id = '019a0000-0000-7000-8000-000000000001'
+    expect(harness.interactive?.(id)).toBe(
+      `OPENAI_API_KEY=placeholder-not-a-secret $HOME/.local/bin/codex resume ${id}`,
+    )
+    expect(() => harness.interactive?.('x; rm -rf /')).toThrow(/UUID/)
+  })
+
   it('resumes a session by id, and refuses an id that is not a UUID', async () => {
     const harness = codexHarness({ kind: 'api-key', secret: 'k' })
     const sandbox = new FakeSandbox(() => ({ stdout: done }))

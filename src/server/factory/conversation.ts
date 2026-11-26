@@ -188,7 +188,12 @@ export async function deliverMessage(
 }
 
 type Repo = Awaited<ReturnType<typeof loadRepoConfig>>
-type Ready = { row: typeof task.$inferSelect; harness: CodingHarness; token: string; repo: Repo }
+export type Ready = {
+  row: typeof task.$inferSelect
+  harness: CodingHarness
+  token: string
+  repo: Repo
+}
 
 /** The task, its stored session and the harness of that session, or why the message cannot be delivered. */
 export async function readyToDeliver(deps: RunTaskDeps, message: Message): Promise<Ready | Ended> {
@@ -246,7 +251,7 @@ export async function settleTurn(
   return { delivery: 'delivered', answer: result.summary, costUsd }
 }
 
-async function sandboxSpecFor(deps: RunTaskDeps, ready: Ready): Promise<SandboxSpec> {
+export async function sandboxSpecFor(deps: RunTaskDeps, ready: Ready): Promise<SandboxSpec> {
   const { repo, token } = ready
   // The same limits as a run: the message widens neither the egress nor the time.
   const timeouts = resolveTimeouts(deps.timeouts ?? DEFAULT_TIMEOUTS, repo.runLimitMs)

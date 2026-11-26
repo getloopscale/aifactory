@@ -4,6 +4,7 @@ import type { Database } from '../db'
 import {
   agentMessage,
   agentRun,
+  agentSession,
   changePlan,
   coordinatorAction,
   decision,
@@ -32,7 +33,8 @@ import { readFacts, totalAdded, totalRemoved } from '../factory/change-size'
 import { readRisk } from '../factory/risk'
 import { retryAt } from '../factory/auto-retry'
 import { CONFLICT_NOTE_OPENING } from '../factory/merge-base'
-import { FREE_BASE_RUNS } from '../factory/transitions'
+import { FREE_BASE_RUNS, outcome } from '../factory/transitions'
+import { openTerminalOf } from '../factory/terminal-lock'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
@@ -54,6 +56,7 @@ import {
   type FindingView,
   type HealthReport,
   type MessageView,
+  type TerminalView,
   type RunView,
   type InboxItem,
   type QuestionView,
@@ -602,6 +605,13 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
     db.select().from(agentMessage).where(eq(agentMessage.taskId, id)).orderBy(asc(agentMessage.id)),
     db.select().from(testProof).where(eq(testProof.taskId, id)).orderBy(asc(testProof.id)),
   ])
+  const kept = await db
+    .select({ role: agentSession.role, harness: agentSession.harness })
+    .from(agentSession)
+    .where(eq(agentSession.taskId, id))
+    .orderBy(asc(agentSession.id))
+  const terminalOpen = (await openTerminalOf(db, id)) !== undefined
+  const mayOpen = outcome({ ...row, terminalOpen }, 'open_terminal')
   const withdrawable = row.stage === 'intake' && (await pendingSendBack(db, id)) !== undefined
   const shown = ofLatestVerification(checks, stored)
   return {
@@ -701,6 +711,12 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       costUsd: m.costUsd,
       at: iso(m.createdAt),
       answeredAt: m.answeredAt ? iso(m.answeredAt) : null,
+    })),
+    terminals: kept.map((k): TerminalView => ({
+      role: k.role as TerminalView['role'],
+      engine: k.harness,
+      available: mayOpen.kind === 'action',
+      ...(mayOpen.kind === 'action' ? {} : { reason: mayOpen.reason }),
     })),
     watches: watches.map((w): WatchView => ({
       id: w.id,

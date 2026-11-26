@@ -26,7 +26,7 @@ import { DEFAULT_TIMEOUTS, Run, type RunState } from './run'
 import { resolveTimeouts } from './run-limit'
 import { parkedOf, type Parked, type RunResult, type RunTaskDeps } from './run-types'
 import { Preparation } from './sandbox-prepared'
-import { enterRunStage, TaskCancelled } from './stages'
+import { enterRunStage, TaskCancelled, TerminalHeld } from './stages'
 
 export type { RunResult, RunTaskDeps } from './run-types'
 export { mergeEgress } from './run-support'
@@ -145,11 +145,27 @@ async function execute(
   } catch (error) {
     // A preparation that failed is logged with its step; one that ended was logged already.
     preparation?.log()
+    if (error instanceof TerminalHeld) return heldByTerminal(deps, error, resuming)
     const deferred = await deferOnRefusal(deps, taskId, state, error, resuming)
     return deferred ?? (await fail(deps, taskId, state, error, signal))
   } finally {
     await state.sandbox?.stop().catch(() => {})
   }
+}
+
+/** The answer a resume claimed is given back, and the job waits for the terminal to close. Nothing is recorded. */
+async function heldByTerminal(
+  deps: RunTaskDeps,
+  error: TerminalHeld,
+  resuming: Parked | undefined,
+): Promise<RunResult> {
+  if (resuming) {
+    await deps.db
+      .update(questionTable)
+      .set({ resumedAt: null })
+      .where(eq(questionTable.id, resuming.id))
+  }
+  return { status: 'held', stage: 'sandbox', reason: error.message }
 }
 
 /**

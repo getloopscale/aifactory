@@ -122,6 +122,19 @@ describe('claudeCodeHarness', () => {
   })
 })
 
+describe('claudeCodeHarness interactive', () => {
+  it('answers the command of its own CLI on a session, and refuses an id that is not a UUID', () => {
+    const harness = claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+    const id = '019a0000-0000-7000-8000-000000000001'
+    const command = harness.interactive?.(id)
+    expect(command).toContain(`$HOME/.local/bin/claude --resume ${id}`)
+    expect(command).toContain('ANTHROPIC_API_KEY=placeholder-not-a-secret')
+    expect(command).not.toContain('-p ')
+    expect(command).not.toContain('--dangerously-skip-permissions')
+    expect(() => harness.interactive?.('x; rm -rf /')).toThrow(/UUID/)
+  })
+})
+
 describe('claudeCodeHarness preparing a sandbox', () => {
   it('installs a pinned Claude Code, and runs that install rather than whatever is on the PATH', async () => {
     const sandbox = new FakeSandbox(() => ({ stdout: JSON.stringify({ result: 'ok' }) }))

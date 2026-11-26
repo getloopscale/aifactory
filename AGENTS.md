@@ -435,6 +435,16 @@ reads that file, not a convention.
   merge (`adoptMergedHandoffs` in `factory/await-ci.ts`, the `merged_by_person` event): the pre-release is made as
   after the factory's own merge, and the release train or a person releases it and closes its issue. It starts no
   release itself.
+- **A terminal is only for a stopped agent, and it pushes nothing.** `open_terminal` (`factory/transitions.ts`) is
+  allowed where a stopped agent takes a message (`waiting`, `handoff`, `done`, `failed`). `factory/terminal-session.ts`
+  starts the harness's own CLI (`interactive(sessionId)`) on the role's kept session in a sandbox built like a
+  conversation's, with the knowledge feed, under a pseudo-terminal (`TerminalBackend`, `terminals()` in `sandbox.ts`;
+  usetheokit/theokit-sdk#1614). A task has one open `terminal_session` row (a unique index), which is its one writer:
+  `run-task`, `resume-task` and `conversation` jobs wait in the queue while it is open (`deferJobWhileTerminal`) and
+  `claimNext` takes no message. The session ends on a closed socket, 15 minutes without a key or two hours: the role's
+  session is saved, the sandbox stopped and the row closed, its cost null. Nothing the terminal changed in the checkout
+  is committed or pushed. The websocket (`ws/panel/terminal.ts`) refuses a caller who is not the owner or whose
+  `Origin` is not the panel's.
 - **A finished agent pass is exported to Looptrace by the `export-trace` job, never by the run.** `recordPass`
   (`trace/record.ts`) stores the `agent_run` row and, only when `FACTORY_TRACE_ENDPOINT` is set, queues the job under
   `trace-<run id>`; `trace/spans.ts` turns the stored, redacted steps into OTLP JSON with ids derived from the run and

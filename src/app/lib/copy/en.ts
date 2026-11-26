@@ -285,6 +285,17 @@ export const en = {
     cost: (usd: string) => `cost ${usd}`,
     context: (title: string, issue: number, repository: string) =>
       `A message from the owner to the agent that worked on "${title}" (issue #${issue} of ${repository}).`,
+    terminal: {
+      open: 'Open in terminal',
+      warning:
+        "This opens the agent's own CLI on the session it left, in a sandbox. Nothing you change there is committed or pushed. It ends when you close it, after 15 minutes without a key, or after two hours.",
+      back: 'Back to the chat',
+      connecting: 'Opening the terminal…',
+      ended: (reason: string) => `The terminal ended (${reason}).`,
+      failed: (reason: string) => `The terminal did not open: ${reason}`,
+      label: 'Terminal of the agent',
+      noSession: 'The agent kept no session to open.',
+    },
   },
   thread: {
     tabs: 'Agents',

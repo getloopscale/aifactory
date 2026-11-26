@@ -54,6 +54,32 @@ export type StreamingBackend = SandboxBackend & {
 export const streams = (backend: SandboxBackend): backend is StreamingBackend =>
   typeof (backend as Partial<StreamingBackend>).executeStreaming === 'function'
 
+/** A terminal open in a sandbox: a command under a pseudo-terminal, its bytes both ways. */
+export type Terminal = {
+  /** Sends keystrokes (or pasted text) to the command. */
+  write(data: string): void
+  resize(cols: number, rows: number): Promise<void>
+  /** Called with each piece of what the command prints. */
+  onData(listener: (data: string) => void): void
+  /** Settles with the command's exit code when it ends, however it ended. */
+  wait(): Promise<{ exitCode: number }>
+  /** Ends the command. Safe to call when it already ended. */
+  kill(): Promise<void>
+}
+
+export type TerminalOptions = { cols: number; rows: number; cwd?: string }
+
+/**
+ * A backend that can run a command under a pseudo-terminal. `SandboxBackend` has none
+ * (usetheokit/theokit-sdk#1614), so a provider that can adds this, and a caller asks `terminals` before using it.
+ */
+export type TerminalBackend = SandboxBackend & {
+  openTerminal(command: string, opts: TerminalOptions): Promise<Terminal>
+}
+
+export const terminals = (backend: SandboxBackend): backend is TerminalBackend =>
+  typeof (backend as Partial<TerminalBackend>).openTerminal === 'function'
+
 /** A file to write into a sandbox: its absolute path there and what it holds. */
 export type SandboxFile = { path: string; content: string | Buffer }
 
