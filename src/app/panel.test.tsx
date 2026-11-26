@@ -1464,7 +1464,7 @@ describe('writing to the agent of a stopped task', () => {
     expect(calls[0]).toMatchObject({ body: { text: 'Use a Set.', mode: 'guide' } })
   })
 
-  it('shows the thread, with the answer and why a delivery failed', () => {
+  it('shows the thread, with the answer and why a delivery failed', async () => {
     const message = {
       author: 'owner',
       mode: 'ask' as const,
@@ -1498,7 +1498,8 @@ describe('writing to the agent of a stopped task', () => {
         onDone={noop}
       />,
     )
-    expect(screen.getByText('Yes.')).toBeTruthy()
+    // The agent's words are Markdown, drawn once its renderer has loaded.
+    expect(await screen.findByText('Yes.')).toBeTruthy()
     expect(screen.getByText('Not delivered: it broke')).toBeTruthy()
     expect(screen.getByText('Waiting for the agent to read it…')).toBeTruthy()
   })
@@ -1546,14 +1547,14 @@ describe('writing to the agent of a stopped task', () => {
       at: `2026-11-25T10:00:0${seq}Z`,
     }) as never
 
-  it('has a tab for each agent and shows only the rows of the one picked', () => {
+  it('has a tab for each agent and shows only the rows of the one picked', async () => {
     const events = [step(1, 'builder', 'message', null), step(2, 'reviewer', 'message', null)]
     render(<Conversation detail={detail()} events={events} onDone={noop} />)
     expect(screen.getAllByRole('tab').map((x) => x.textContent)).toEqual(['Builder', 'Reviewer'])
-    expect(screen.getByText(/builder message/)).toBeTruthy()
+    expect(await screen.findByText(/builder message/)).toBeTruthy()
     expect(screen.queryByText(/reviewer message/)).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Reviewer' }))
-    expect(screen.getByText(/reviewer message/)).toBeTruthy()
+    expect(await screen.findByText(/reviewer message/)).toBeTruthy()
     expect(screen.queryByText(/builder message/)).toBeNull()
   })
 

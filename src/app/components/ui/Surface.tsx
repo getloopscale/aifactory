@@ -132,9 +132,12 @@ export function Surface({
   action,
   label,
   padded = false,
+  fill = false,
   className = '',
   children,
 }: {
+  /** Takes the height its parent leaves, so what is inside scrolls and the block does not grow. */
+  fill?: boolean
   title?: ReactNode
   icon?: LucideIcon
   tone?: Tone
@@ -149,7 +152,7 @@ export function Surface({
   return (
     <section
       aria-label={label ?? (typeof title === 'string' ? title : undefined)}
-      className={`w-full overflow-hidden rounded-xl border border-border bg-card ${className}`}
+      className={`w-full overflow-hidden rounded-xl border border-border bg-card ${fill ? 'flex min-h-0 flex-1 flex-col' : ''} ${className}`}
     >
       {title ? (
         <SurfaceHeading
@@ -161,7 +164,13 @@ export function Surface({
           action={action}
         />
       ) : null}
-      {padded ? <div className="space-y-3 p-4">{children}</div> : children}
+      {padded ? (
+        <div className={`space-y-3 p-4 ${fill ? 'flex min-h-0 flex-1 flex-col' : ''}`}>
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </section>
   )
 }

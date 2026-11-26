@@ -287,6 +287,12 @@ export const ptBR: Copy = {
     remove: 'Apagar',
     confirmRemove: (title) => `Apagar "${title}"?`,
   },
+  statusBar: {
+    label: 'Estado da fábrica',
+    waiting: (count) => `${count} esperando você`,
+    wrong: (count) => `${count} para olhar`,
+    healthy: 'fábrica saudável',
+  },
   topBar: {
     part: 'Parte do app',
     openMenu: 'Abrir o menu',
@@ -450,6 +456,13 @@ export const ptBR: Copy = {
     close: 'Fechar',
   },
   task: {
+    tabs: {
+      label: 'Sobre esta tarefa',
+      activity: 'Atividade',
+      runs: 'Execuções',
+      evidence: 'Evidências',
+      reviews: 'Revisões',
+    },
     loading: 'Carregando…',
     attempts: (n: number) => `${n} de 3 tentativas`,
     preRelease: (tag: string) => `Pré-lançamento ${tag}`,
@@ -505,6 +518,8 @@ export const ptBR: Copy = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} em ${sha}`,
   },
   conversation: {
+    talkingTo: 'suas mensagens vão para este agente',
+    goesTo: (role) => `suas mensagens vão para o ${role}, não para este agente`,
     passMissing: 'Os passos dessa passagem não foram guardados, então a conversa abre no começo.',
     heading: 'Conversa',
     mode: 'Como falar',

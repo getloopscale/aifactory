@@ -14,6 +14,7 @@ export default function TaskPage() {
   return (
     <TaskDetailView
       id={id}
+      workbench
       focusRun={Number.isInteger(pass) && pass > 0 ? pass : undefined}
       above={
         <Link to="/work" className="text-sm text-muted-foreground hover:text-foreground">

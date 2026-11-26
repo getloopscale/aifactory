@@ -216,6 +216,12 @@ export const en = {
     remove: 'Delete',
     confirmRemove: (title: string) => `Delete "${title}"?`,
   },
+  statusBar: {
+    label: 'Status of the factory',
+    waiting: (count: number) => `${count} waiting for you`,
+    wrong: (count: number) => `${count} to look at`,
+    healthy: 'factory healthy',
+  },
   topBar: {
     part: 'Part of the app',
     openMenu: 'Open the menu',
@@ -379,6 +385,13 @@ export const en = {
     close: 'Close',
   },
   task: {
+    tabs: {
+      label: 'About this task',
+      activity: 'Activity',
+      runs: 'Runs',
+      evidence: 'Evidence',
+      reviews: 'Reviews',
+    },
     loading: 'Loading…',
     attempts: (n: number) => `${n} of 3 attempts`,
     preRelease: (tag: string) => `Pre-release ${tag}`,
@@ -434,6 +447,8 @@ export const en = {
     reviewedOn: (reviewer: string, sha: string) => `${reviewer} on ${sha}`,
   },
   conversation: {
+    talkingTo: 'your messages go to this agent',
+    goesTo: (role: string) => `your messages go to the ${role}, not to this agent`,
     passMissing: 'The steps of that pass are not kept, so the conversation opens at its start.',
     heading: 'Conversation',
     mode: 'How to talk',

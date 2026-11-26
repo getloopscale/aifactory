@@ -17,6 +17,7 @@ import { GuidePanel } from './components/guide/GuidePanel'
 import { Rail } from './components/shell/Rail'
 import { setupAttention } from './components/shell/SetupCount'
 import { Sidebar } from './components/shell/Sidebar'
+import { StatusBar } from './components/shell/StatusBar'
 import { inWork, TopBar } from './components/shell/TopBar'
 import { post } from './lib/api'
 import { nextAttention, type Announcement } from './lib/attention'
@@ -240,6 +241,13 @@ function Shell() {
                     <p className="p-6 text-sm text-muted-foreground">{t.layout.loading}</p>
                   )}
                 </main>
+                {signedIn && !compact ? (
+                  <StatusBar
+                    pulse={pulse.data ?? undefined}
+                    waiting={inbox.data?.items.length ?? 0}
+                    wrong={health.data?.findings.length ?? 0}
+                  />
+                ) : null}
               </div>
               {signedIn ? <GuidePanel /> : null}
             </div>
