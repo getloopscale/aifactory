@@ -435,6 +435,11 @@ reads that file, not a convention.
   merge (`adoptMergedHandoffs` in `factory/await-ci.ts`, the `merged_by_person` event): the pre-release is made as
   after the factory's own merge, and the release train or a person releases it and closes its issue. It starts no
   release itself.
+- **A finished agent pass is exported to Looptrace by the `export-trace` job, never by the run.** `recordPass`
+  (`trace/record.ts`) stores the `agent_run` row and, only when `FACTORY_TRACE_ENDPOINT` is set, queues the job under
+  `trace-<run id>`; `trace/spans.ts` turns the stored, redacted steps into OTLP JSON with ids derived from the run and
+  `seq`, and only the job calls `trace/export.ts` (a test fails if `factory/` imports it). `pnpm trace:backfill`
+  queues the retained passes again. Looptrace is never reachable through the tunnel: the spans hold private code.
 - **A push is sent once per item and device.** `push-attention` reads the inbox and sends each new item
   (`<task id>:<kind>`) to every subscription in `push_subscription`, recording it in `push_sent` until the item leaves
   the inbox (its time moves with every event of its task, so it never makes an item new; one that leaves and comes
