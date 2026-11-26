@@ -6,7 +6,11 @@ import { jsonObjects } from './review'
  * the tests that prove it, and what it leaves out. It is stored, shown in the pull request and the panel,
  * and given to the reviewer, who measures the diff against it.
  */
+export type Acceptance = { id: string; statement: string; evidence: string }
+
 export type ChangePlan = {
+  /** What the finished work must do, one behaviour each. A plan stored before ADR 0009's 2026-11-25 note has none. */
+  acceptance?: Acceptance[]
   files: { path: string; why: string }[]
   order: string[]
   risks: string[]
@@ -26,17 +30,18 @@ export function changePlanPrompt(input: Parameters<typeof buildPrompt>[0]): stri
 Do this in two turns. In this one, read the code and plan; you will be told to implement the plan in the next.
 - Do not create, edit or delete any file, and do not run anything that writes to the repository. You may read files and run read-only commands.
 - Do not ask a question in this turn. Write what is undecided under "risks", with the option you would take; you may ask in the next turn.
+- Start from the issue: state, one by one, what the finished work does, as "acceptance". Each entry has an id ("A1", "A2", ...), a statement of one behaviour, and the evidence that shows it: a test by name, a check, or a file and symbol. The reviewer holds the work against this list, so it must not be empty.
 - Name every file you expect to change, the tests included. A folder ending in "/" or a pattern with "*" may stand for several files.
 
 Finish with one JSON object on its own, and nothing after it:
 
-{"files":[{"path":"path/from/the/repository/root","why":"what changes there"}],"order":["first step","..."],"risks":["what could break, or what is undecided"],"proof":["the test or command that shows it works"],"outOfScope":["what the issue might suggest that you will not do"]}
+{"acceptance":[{"id":"A1","statement":"one behaviour the finished work has","evidence":"the test, check, or file and symbol that shows it"}],"files":[{"path":"path/from/the/repository/root","why":"what changes there"}],"order":["first step","..."],"risks":["what could break, or what is undecided"],"proof":["the test or command that shows it works"],"outOfScope":["what the issue might suggest that you will not do"]}
 `
 }
 
 /** When the planning turn ended without a plan that could be read. */
 export function planAgainPrompt(): string {
-  return 'Your answer had no plan that could be read. Do not change any file. Answer with the plan only, as one JSON object with "files", "order", "risks", "proof" and "outOfScope", and nothing after it.'
+  return 'Your answer had no plan that could be read. Do not change any file. Answer with the plan only, as one JSON object with "acceptance" (a list that is not empty), "files", "order", "risks", "proof" and "outOfScope", and nothing after it.'
 }
 
 /**
@@ -84,6 +89,31 @@ function texts(value: unknown, max = MAX_ITEMS): string[] {
     .map((item) => item.slice(0, TEXT_MAX))
 }
 
+const MAX_ACCEPTANCE = 30
+
+function acceptanceOf(value: unknown): Acceptance[] {
+  if (!Array.isArray(value)) return []
+  const entries: Acceptance[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'object' || entry === null) continue
+    const { id, statement, evidence } = entry as Record<string, unknown>
+    if (typeof id !== 'string' || id.trim() === '') continue
+    if (typeof statement !== 'string' || statement.trim() === '') continue
+    entries.push({
+      id: id.trim().slice(0, 20),
+      statement: statement.trim().slice(0, TEXT_MAX),
+      evidence: typeof evidence === 'string' ? evidence.trim().slice(0, TEXT_MAX) : '',
+    })
+  }
+  return entries.slice(0, MAX_ACCEPTANCE)
+}
+
+/** A plan from a planning turn: one that lists no acceptance is read as no plan, so the turn is asked again. */
+export function parseNewChangePlan(text: string): ChangePlan | undefined {
+  const plan = parseChangePlan(text)
+  return plan && (plan.acceptance?.length ?? 0) > 0 ? plan : undefined
+}
+
 /** A path inside the repository: relative, and never climbing out of it. */
 function insideRepository(path: string): boolean {
   return path !== '' && !path.startsWith('/') && !path.split('/').includes('..')
@@ -121,6 +151,7 @@ export function parseChangePlan(text: string): ChangePlan | undefined {
     }
     if (!Array.isArray(parsed.files)) continue
     return {
+      acceptance: acceptanceOf(parsed.acceptance),
       files: filesOf(parsed.files),
       order: texts(parsed.order),
       risks: texts(parsed.risks),
@@ -173,7 +204,11 @@ export function renderChangePlan(plan: ChangePlan): string {
     plan.files.length === 0
       ? ['No file: the builder expected the code to already do what the issue asks.']
       : plan.files.map((f) => `- \`${f.path}\`${f.why ? `: ${f.why}` : ''}`)
+  const acceptance = (plan.acceptance ?? []).map(
+    (a) => `- **${a.id}**: ${a.statement}${a.evidence ? ` (evidence: ${a.evidence})` : ''}`,
+  )
   return [
+    ...(acceptance.length > 0 ? ['**Acceptance**', '', ...acceptance, ''] : []),
     '**Files**',
     '',
     ...files,
