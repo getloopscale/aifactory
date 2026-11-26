@@ -170,3 +170,36 @@ export async function searchHistory(
   const hasMore = traces.length === PAGE_SIZE
   return { enabled: true, results, page: query.page, hasMore }
 }
+
+/** The most passes an assistant is given for one search. */
+export const SEARCH_LIMIT = 10
+
+/** At most `SEARCH_LIMIT` passes, whatever Looptrace lists, for the assistants' `history_search`. */
+export async function searchPasses(
+  query: Omit<HistoryQuery, 'page'>,
+  lookup: LookupTasks,
+  env: TraceEnv = process.env,
+  send: typeof fetch = fetch,
+): Promise<HistoryReport> {
+  const report = await searchHistory({ ...query, page: 1 }, lookup, env, send)
+  return report.enabled ? { ...report, results: report.results.slice(0, SEARCH_LIMIT) } : report
+}
+
+/** The OTLP JSON of one trace, or undefined when search is off or Looptrace does not have it. Reads only. */
+export async function fetchTrace(
+  traceId: string,
+  env: TraceEnv = process.env,
+  send: typeof fetch = fetch,
+): Promise<unknown | undefined> {
+  const base = traceEndpoint(env)
+  if (!base) return undefined
+  const token = env.FACTORY_TRACE_TOKEN?.trim()
+  const response = await send(`${base.replace(/\/+$/, '')}/${encodeURIComponent(traceId)}`, {
+    method: 'GET',
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (response.status === 404) return undefined
+  if (!response.ok) throw new Error(`the trace endpoint answered ${response.status}`)
+  return response.json()
+}
