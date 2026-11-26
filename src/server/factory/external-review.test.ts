@@ -6,6 +6,7 @@ import {
   plain,
   DESCRIPTION_FILE,
   DIFF_FILE,
+  MAX_DIFF_BYTES,
   REVIEWER_DIR,
   REVIEW_MARKER,
   reviewBody,
@@ -148,6 +149,7 @@ function setup(
     ok?: boolean
     prior?: string[]
     withoutUpdate?: boolean
+    diffBytes?: number
   } = {},
 ) {
   const log: string[] = []
@@ -166,6 +168,7 @@ function setup(
   }
   const sandbox = new FakeSandbox((command) => {
     log.push(command)
+    if (command.startsWith('wc -c')) return { stdout: `${opts.diffBytes ?? 1000}\n` }
     if (command.endsWith('rev-parse HEAD')) {
       return { stdout: log.some((c) => c.includes('checkout --detach')) ? `${SHA}\n` : `${BASE}\n` }
     }
@@ -289,7 +292,21 @@ describe('reviewExternalPull', () => {
     const t = setup()
     await reviewExternalPull(t.deps, 1)
     expect(t.prompts[0].readFilesOnly).toBe(true)
-    expect(t.log.findIndex((c) => c.includes(`> ${DIFF_FILE}`))).toBeGreaterThan(-1)
+    const checkout = t.log.find((c) => c.includes('checkout --detach'))!.split(' ')[2]
+    expect(t.prompts[0].readDirs).toEqual([checkout, '/tmp/pull-request'])
+    const written = t.log.findIndex((c) => c.includes(`> ${DIFF_FILE}`))
+    expect(written).toBeGreaterThan(-1)
+    expect(t.sandbox.egressUpdates.length).toBeGreaterThan(0)
+    // The agent's egress opens only after the diff is written: the log holds the sandbox's commands in order,
+    // and the reviewer's own commands come after the last update.
+    expect(t.log.indexOf('prepare')).toBeGreaterThan(written)
+  })
+
+  it('posts nothing for a diff larger than the reviewer reads whole', async () => {
+    const t = setup({ diffBytes: MAX_DIFF_BYTES + 1 })
+    await expect(reviewExternalPull(t.deps, 1)).rejects.toThrow('larger than')
+    expect(t.prompts).toHaveLength(0)
+    expect(t.posted).toHaveLength(0)
   })
 
   it('records the run without a task, with its cost', async () => {

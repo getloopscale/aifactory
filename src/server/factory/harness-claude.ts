@@ -86,7 +86,14 @@ export function claudeCredentialFromEnv(env: NodeJS.ProcessEnv): ClaudeCredentia
 const READ_ONLY_TOOLS = 'Read,Grep,Glob'
 
 function permissionFlags(input: HarnessInput): string {
-  if (input.readFilesOnly) return `--tools ${READ_ONLY_TOOLS} --permission-mode dontAsk`
+  if (input.readFilesOnly) {
+    // `dontAsk` denies a read outside the working directory unless it is named here.
+    const dirs = (input.readDirs ?? []).map((d) => {
+      if (!/^\/[\w./-]+$/.test(d)) throw new Error(`readable directory "${d}" is not a plain path`)
+      return ` --add-dir ${d}`
+    })
+    return `--tools ${READ_ONLY_TOOLS} --allowedTools ${READ_ONLY_TOOLS} --permission-mode dontAsk${dirs.join('')}`
+  }
   return input.ask ? '--permission-mode plan' : '--dangerously-skip-permissions'
 }
 

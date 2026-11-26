@@ -1,3 +1,5 @@
+import { posix } from 'node:path'
+
 import type { SandboxBackend } from '@theokit/agents/sandbox'
 import { eq, sql } from 'drizzle-orm'
 
@@ -94,6 +96,8 @@ const INSTANCE = 'external-review'
 /** Where the reviewer works: an empty directory, so no setting, hook or instruction file of the pull request is loaded. */
 export const REVIEWER_DIR = '/tmp/reviewer'
 /** The diff of the pull request, written before the agent starts: the agent has no shell to ask git. */
+/** The most of a diff the reviewer reads: a larger one fails the review rather than being cut. */
+export const MAX_DIFF_BYTES = 400_000
 export const DIFF_FILE = '/tmp/pull-request/change.diff'
 const REGISTRY = { domain: 'registry.npmjs.org' }
 const SANDBOX_MS = 60 * 60_000
@@ -220,6 +224,11 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
     )
     if (diff.exitCode !== 0)
       throw new Error(`could not write the diff: ${diff.stderr.slice(0, 300)}`)
+    // A diff the reviewer cannot read whole is never reviewed as if it were: nothing is posted for it.
+    const size = await backend.execute(`wc -c < ${DIFF_FILE}`)
+    if (!(Number(size.stdout.trim()) <= MAX_DIFF_BYTES)) {
+      throw new Error(`the diff is larger than ${MAX_DIFF_BYTES} bytes or could not be measured`)
+    }
     await reading.sandbox.updateEgress!([REGISTRY, ...agentEgress])
     await reviewer.prepare?.(backend)
     await backend.uploadFile(DESCRIPTION_FILE, `# ${row.title}\n\n${row.body}\n`)
@@ -232,6 +241,7 @@ async function review(deps: ExternalReviewDeps, row: typeof externalReview.$infe
         timeoutMs: deps.reviewMs ?? DEFAULT_REVIEW_MS,
         role: 'reviewer',
         readFilesOnly: true,
+        readDirs: [repoDir, posix.dirname(DESCRIPTION_FILE)],
         prompt: pullRequestReviewPrompt({
           diffFile: DIFF_FILE,
           repo,
