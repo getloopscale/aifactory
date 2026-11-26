@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
 import { ingress, pushSubscription, stageEvent, task } from '../db/schema'
+import { jobBackend } from '../factory/job-backend'
 
 import { pushConfig } from './config'
 import { baselineSubscription, pushPass } from './pass'
@@ -21,6 +22,7 @@ const config = pushConfig({
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
   await getPool().query(
