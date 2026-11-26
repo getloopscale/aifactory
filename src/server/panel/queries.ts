@@ -34,6 +34,7 @@ import { readRisk } from '../factory/risk'
 import { retryAt } from '../factory/auto-retry'
 import { CONFLICT_NOTE_OPENING } from '../factory/merge-base'
 import { FREE_BASE_RUNS, outcome } from '../factory/transitions'
+import { guideAvailability } from './guide-availability'
 import { openTerminalOf } from '../factory/terminal-lock'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
@@ -712,6 +713,7 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       at: iso(m.createdAt),
       answeredAt: m.answeredAt ? iso(m.answeredAt) : null,
     })),
+    guide: guideAvailability(row),
     terminals: kept.map((k): TerminalView => ({
       role: k.role as TerminalView['role'],
       engine: k.harness,

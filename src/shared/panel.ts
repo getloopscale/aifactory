@@ -653,7 +653,12 @@ export type TaskDetail = {
   messages: MessageView[]
   /** The kept sessions a terminal could open on, one per role. */
   terminals?: TerminalView[]
+  /** Whether a message may guide the agent now, as `transitions.ts` says. No answer counts as available. */
+  guide?: GuideView
 }
+
+/** Whether the conversation box may offer `guide`, and why not. */
+export type GuideView = { available: boolean; reason?: string }
 
 /** What the inbox lists: a task that waits for a person, and why. */
 export type InboxItem = {
