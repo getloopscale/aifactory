@@ -686,6 +686,8 @@ export async function taskDetail(db: Database, id: number): Promise<TaskDetail |
       ok: r.ok,
       quota: r.quota,
       conversation: r.conversation,
+      eventFrom: r.eventFrom,
+      eventTo: r.eventTo,
       at: iso(r.at),
     })),
     messages: messages.map((m): MessageView => ({
