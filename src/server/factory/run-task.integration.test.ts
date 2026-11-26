@@ -2810,7 +2810,10 @@ describe('runTask planning before it builds', () => {
     const id = await seedTask()
     const builder = planningBuilder([`Read it.\n${JSON.stringify(plan)}`])
 
-    await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+    await runTask(
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     const runs = await getDb()
       .select()
@@ -2828,7 +2831,10 @@ describe('runTask planning before it builds', () => {
     const id = await seedTask()
     const builder = planningBuilder([`Read it.\n${JSON.stringify(plan)}`])
 
-    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     expect(result).toMatchObject({ status: 'done' })
     const stages = await stagesOf(id)
@@ -2864,7 +2870,12 @@ describe('runTask planning before it builds', () => {
     }
 
     const result = await runTask(
-      deps(twoFiles(), { harness: builder, planner: () => planner, planFirst: true }),
+      deps(twoFiles(), {
+        harness: builder,
+        reviewer: approvingPlan(),
+        planner: () => planner,
+        planFirst: true,
+      }),
       id,
     )
 
@@ -3051,7 +3062,10 @@ describe('runTask planning before it builds', () => {
     const sandbox = twoFiles()
     const builder = planningBuilder([JSON.stringify(plan)], true)
 
-    await runTask(deps(sandbox, { harness: builder, planFirst: true }), id)
+    await runTask(
+      deps(sandbox, { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     const commands = sandbox.backend.commands
     const reset = commands.findIndex((c) => c.includes('reset --hard abc123def'))
@@ -3065,7 +3079,10 @@ describe('runTask planning before it builds', () => {
     const id = await seedTask()
     const builder = planningBuilder(['I will look around.', 'Still thinking.'])
 
-    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     expect(result).toMatchObject({ status: 'failed', stage: 'plan' })
     expect(result.status === 'failed' && result.error).toContain('the agent wrote no plan')
@@ -3079,7 +3096,10 @@ describe('runTask planning before it builds', () => {
     const bare = JSON.stringify({ ...plan, acceptance: [] })
     const builder = planningBuilder([bare, bare])
 
-    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     expect(result).toMatchObject({ status: 'failed', stage: 'plan' })
     expect(result.status === 'failed' && result.error).toContain('the agent wrote no plan')
@@ -3094,7 +3114,10 @@ describe('runTask planning before it builds', () => {
       JSON.stringify(plan),
     ])
 
-    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     expect(result).toMatchObject({ status: 'done' })
     expect(builder.resumed).toHaveLength(2)
@@ -3128,7 +3151,10 @@ describe('runTask planning before it builds', () => {
     const id = await seedTask()
     const builder = planningBuilder(['I will look around.', JSON.stringify(plan)])
 
-    const result = await runTask(deps(twoFiles(), { harness: builder, planFirst: true }), id)
+    const result = await runTask(
+      deps(twoFiles(), { harness: builder, reviewer: approvingPlan(), planFirst: true }),
+      id,
+    )
 
     expect(result).toMatchObject({ status: 'done' })
     expect(builder.resumed[1]).toContain('Implement the plan')
