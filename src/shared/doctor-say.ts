@@ -22,6 +22,7 @@ export const DOCTOR_SAY_CODES = [
   'recipe_problem',
   'recipe_pending',
   'sandbox_refused',
+  'sandbox_image_missing',
   'provider_checks_failed',
   'provider_checks_untried',
   'agent_guide_missing',
@@ -63,6 +64,7 @@ export const DOCTOR_TRIED_CODES = [
   'events',
   'runs',
   'sandboxes',
+  'image',
   'token',
   'merge_settings',
   'proofs',
@@ -88,6 +90,7 @@ export const DOCTOR_TRIED_EN: DoctorTriedSentences = {
   events: () => 'reading the events the GitHub App subscribes to',
   runs: (v) => `reading the failed runs of ${v.repo}`,
   sandboxes: () => 'reading the sandboxes the account has up',
+  image: () => 'reading whether the sandbox provider has the template of the repository image',
   token: (v) => `minting a token for ${v.repo}`,
   merge_settings: (v) => `reading the merge settings of ${v.repo}`,
   proofs: (v) => `reading the proofs of the checks of ${v.repo}`,
@@ -244,6 +247,14 @@ export const DOCTOR_SAY_EN: DoctorSentences = {
       SANDBOX_TEMPLATE_MISSING.test(v.error ?? '')
         ? 'Build the sandbox template: node --env-file=.env.local scripts/build-e2b-template.mts. The task retries itself once the provider has it.'
         : 'Add credit to the sandbox provider, or fix its key on the server. The task retries itself once the provider accepts.',
+  },
+  sandbox_image_missing: {
+    cause: (v) =>
+      `This repository uses the ${v.image} sandbox image, and the ${v.provider} account has no template for it, so a run cannot start.`,
+    repair: (v) =>
+      v.provider === 'e2b'
+        ? 'Build the template: node --env-file=.env.local scripts/build-e2b-template.mts --browser. Or choose the default image on the page of the repository.'
+        : 'Choose the default image on the page of the repository, or build the image on the sandbox provider.',
   },
   provider_checks_failed: {
     cause: (v) =>
