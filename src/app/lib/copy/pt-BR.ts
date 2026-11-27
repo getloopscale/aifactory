@@ -2018,6 +2018,17 @@ export const ptBR: Copy = {
       sending: 'Enviando…',
       message: 'Mensagem para o agente',
       placeholder: 'Escreva para o agente',
+      plan: {
+        title: 'O agente propôs um plano',
+        accept: 'Aceitar',
+        revise: 'Revisar',
+        reject: 'Rejeitar',
+        answered: { accept: 'Aceito', revise: 'Revisado', reject: 'Rejeitado' },
+        reviseLabel: 'O que deve mudar no plano?',
+        sendRevision: 'Enviar revisão',
+        cancel: 'Cancelar',
+        sending: 'Enviando…',
+      },
       stateLine: {
         idle: 'Pronta para a próxima mensagem.',
         queued: 'Na fila: o agente começa logo.',

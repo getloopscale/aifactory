@@ -6,6 +6,7 @@ import { errorMessage } from '../factory/error-message'
 import { untilSlotFree } from '../factory/sandbox-slot'
 import type { agentRun } from '../db/schema'
 
+import { planPrompt } from '../agents/prompts/code-plan'
 import { turnMarker, type Claim, type NewCodeEvent } from './store'
 import { codeCapReached } from './slots'
 import { revertChanges } from './readonly-workspace'
@@ -53,7 +54,7 @@ export type TurnResult =
   | { status: 'capped' }
   /** The provider refused a sandbox for credit or spending: the job queues itself again after the pause. */
   | { status: 'deferred' }
-  | { status: 'idle' | 'failed'; sessionId: string }
+  | { status: 'idle' | 'waiting_input' | 'failed'; sessionId: string }
 
 export const AGENT_TIMEOUT_MS = 60 * 60_000
 
@@ -65,7 +66,8 @@ const KINDS: Partial<Record<string, CodeEventKind>> = {
 }
 
 /** Appends what the harness reports one after the other, whatever the speed it reports at. */
-function serialWriter(store: TurnStore, sessionId: string) {
+function serialWriter(store: TurnStore, sessionId: string, holdMessages = false) {
+  let lastMessage = ''
   let chain: Promise<unknown> = Promise.resolve()
   let failure: unknown
   return {
@@ -73,6 +75,11 @@ function serialWriter(store: TurnStore, sessionId: string) {
       const kind = KINDS[event.kind]
       // The harness's own cost event is ignored: the turn writes one from the final result.
       if (!kind) return
+      // A plan turn's answer is the plan: it is kept as one `plan` event, so the messages are not shown twice.
+      if (holdMessages && kind === 'agent_message') {
+        lastMessage = event.content
+        return
+      }
       chain = chain
         .then(
           () =>
@@ -82,6 +89,7 @@ function serialWriter(store: TurnStore, sessionId: string) {
           failure = error
         })
     },
+    lastMessage: () => lastMessage,
     async drain() {
       await chain
       if (failure) throw failure
@@ -146,6 +154,7 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let result: HarnessResult | undefined
   let failure: string | undefined
   let marked = false
+  let plan = ''
   try {
     await store.move(sessionId, 'turn_started')
     await store.append(sessionId, {
@@ -154,9 +163,10 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
       tool: session.mode,
     })
     marked = true
-    const writer = serialWriter(store, sessionId)
+    const planning = session.mode === 'plan'
+    const writer = serialWriter(store, sessionId, planning)
     const input: HarnessInput = {
-      prompt: message.content,
+      prompt: planning ? planPrompt(message.content) : message.content,
       cwd: workspace.repoDir,
       timeoutMs: deps.agentTimeoutMs ?? AGENT_TIMEOUT_MS,
       onEvent: writer.onEvent,
@@ -174,6 +184,10 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
       await writer.drain()
     }
     if (!result.ok) failure = failureText(result)
+    else if (planning) {
+      plan = (result.summary || writer.lastMessage()).trim()
+      if (!plan) failure = 'The agent answered with no plan.'
+    }
   } catch (error) {
     failure = errorMessage(error)
   }
@@ -223,6 +237,11 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
         kind: 'cost',
         content: JSON.stringify({ costUsd: result.costUsd ?? null }),
       })
+      if (plan) {
+        await store.append(sessionId, { kind: 'plan', content: plan })
+        await store.move(sessionId, 'plan_proposed')
+        return { status: 'waiting_input', sessionId }
+      }
       await store.move(sessionId, 'turn_ended')
       return { status: 'idle', sessionId }
     }
