@@ -4,6 +4,9 @@ import type { CodeState } from '../../shared/code'
  * What happens to a code session for every state it can be in and every event that can reach it. Nothing
  * here reads or writes anything. A new state or event does not compile until every pair it adds has a row.
  *
+ * `turn_released` gives a claimed turn back (the provider refused a sandbox, or the worker holding the claim went
+ * quiet): the session is `queued` again and its message is still unanswered.
+ *
  * `turn_started` comes twice in a turn: a worker takes a queued turn (`queued` to `starting`, the sandbox
  * comes up), then the agent starts working (`starting` to `running`).
  */
@@ -18,6 +21,7 @@ export const CODE_EVENTS = [
   'idle_timeout',
   'end',
   'turn_failed',
+  'turn_released',
 ] as const
 export type CodeTransitionEvent = (typeof CODE_EVENTS)[number]
 
@@ -47,6 +51,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: to('stopped'),
     end: to('ended'),
     turn_failed: refused(NO_TURN),
+    turn_released: refused(NO_TURN),
   },
   queued: {
     message: refused(BUSY),
@@ -58,6 +63,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored('The session has work waiting, so it is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
+    turn_released: ignored('The turn is already waiting.'),
   },
   starting: {
     message: refused(BUSY),
@@ -69,6 +75,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored('The session is starting, so it is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
+    turn_released: to('queued'),
   },
   running: {
     message: refused(BUSY),
@@ -80,6 +87,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored('The agent is working, so the session is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
+    turn_released: to('queued'),
   },
   waiting_input: {
     message: refused('The agent waits for an answer to its plan. Answer it first.'),
@@ -91,6 +99,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored('A plan waits for the owner, so the session stays as it is.'),
     end: to('ended'),
     turn_failed: refused(NO_TURN),
+    turn_released: refused(NO_TURN),
   },
   stopped: {
     message: to('queued'),
@@ -102,6 +111,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored('The session is already stopped.'),
     end: to('ended'),
     turn_failed: ignored('The session is stopped.'),
+    turn_released: ignored('The session is stopped.'),
   },
   ended: {
     message: refused(GONE),
@@ -113,6 +123,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored(GONE),
     end: ignored('The session has already ended.'),
     turn_failed: ignored(GONE),
+    turn_released: ignored(GONE),
   },
   failed: {
     message: to('queued'),
@@ -124,6 +135,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     idle_timeout: ignored('The last turn failed, so the session is not idle.'),
     end: to('ended'),
     turn_failed: ignored('The last turn already failed.'),
+    turn_released: ignored('The last turn failed.'),
   },
 }
 
