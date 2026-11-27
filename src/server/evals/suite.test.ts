@@ -418,6 +418,25 @@ describe('checkBeforeDeploy', () => {
     expect(checked.reasons).toEqual(['the run left 1 quick case(s) unmeasured: b'])
   })
 
+  it('names a case the environment failed as not measured, and does not say the agents did worse', async () => {
+    const killed = {
+      ...result('b', 0.5),
+      passed: false,
+      reason:
+        '[unavailable] the connection to sandbox x ended before the stream completed: The sandbox was killed or reached its end of life while the request was in flight.',
+    }
+    const checked = await checkBeforeDeploy({
+      baseline,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      runQuick: async () => [result('a', 0.5), killed, result('c', 0.5), result('d', 0.5)],
+    })
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons.join()).toMatch(/the environment failed 1 .*\bb\b/)
+    expect(checked.reasons.join()).not.toMatch(/got worse|pass rate fell/)
+  })
+
   it('refuses a run worse than the baseline, with the reason', async () => {
     const checked = await checkBeforeDeploy({
       baseline,

@@ -2,7 +2,7 @@ import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
 import pg from 'pg'
 import { getStorageManager, type PostgresFactory } from '@getloopscale/loopzero/server/storage'
 
-import { DATABASE_NAME } from './config'
+import { DATABASE_NAME, LEASE_DATABASE_NAME, readLeaseUrl } from './config'
 import * as schema from './schema'
 
 export { DatabaseConfigError, readDatabaseUrl } from './config'
@@ -26,4 +26,19 @@ export const createPool: PostgresFactory = (server, db) => {
 
 export function getDb(): Database {
   return drizzle(getPool(), { schema })
+}
+
+/**
+ * Where a sandbox lease is recorded: the lease database of a deploy's evaluation when one is configured, else
+ * the main one. `main` and `lease` open the databases, so a caller can tell which one was chosen.
+ */
+export function getLeaseDb(
+  env: NodeJS.ProcessEnv = process.env,
+  main: () => Database = getDb,
+  lease: () => Database = () =>
+    drizzle(getStorageManager().usePostgres(LEASE_DATABASE_NAME, createPool) as pg.Pool, {
+      schema,
+    }),
+): Database {
+  return readLeaseUrl(env) ? lease() : main()
 }

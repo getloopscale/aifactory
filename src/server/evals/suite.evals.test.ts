@@ -16,7 +16,7 @@ import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, readDatabaseUrl } from '../db'
-import { storageFromUrl } from '../db/config'
+import { readLeaseUrl, storageFromUrl } from '../db/config'
 import { integrationBranch } from '../factory/branches'
 import { factoryDeps, githubAppFromEnv } from '../factory/deps'
 import { optionsFor } from '../factory/engine-models'
@@ -54,7 +54,7 @@ const mode = env.EVALS_MODE ?? 'run'
 const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf8' }).trim()
 const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) as T
 
-beforeAll(() => getStorageManager().configure(storageFromUrl(readDatabaseUrl())))
+beforeAll(() => getStorageManager().configure(storageFromUrl(readDatabaseUrl(), readLeaseUrl())))
 afterAll(() => getStorageManager().dispose())
 
 /** The factory's agents and sandbox, with a knowledge base that records no delivery in the database. */

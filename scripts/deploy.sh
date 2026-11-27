@@ -75,8 +75,9 @@ fi
 
 # When a prompt, an agent or a model changed since evals/baseline.json, the quick cases run again on real
 # agents and must do no worse than the baseline (docs/adr/0008). Nothing changed, nothing runs.
-if ! DATABASE_URL="$eval_url" pnpm evals:check; then
-  echo "the agents did worse than the baseline (see above); nothing was built or restarted" >&2
+# The sandboxes' lease goes to the production database, where the running service's supervisor looks for it.
+if ! FACTORY_LEASE_DATABASE_URL="$DATABASE_URL" DATABASE_URL="$eval_url" pnpm evals:check; then
+  echo "the evaluation failed (see above): the agents did worse than the baseline, or the environment failed a case and the run measured too little; nothing was built or restarted" >&2
   exit 1
 fi
 drop_eval
