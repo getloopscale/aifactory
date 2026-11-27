@@ -68,7 +68,10 @@ function Place({
   const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
-  const active = id === 'onboarding' || id === 'history' || id === 'code' ? pathname.startsWith(to) : place === id
+  const active =
+    id === 'onboarding' || id === 'history' || id === 'code'
+      ? pathname.startsWith(to)
+      : place === id
   return (
     <Link
       to={to}

@@ -76,7 +76,8 @@ function Place({
   const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
-  const active = id === 'history' || id === 'floor' || id === 'code' ? pathname.startsWith(to) : place === id
+  const active =
+    id === 'history' || id === 'floor' || id === 'code' ? pathname.startsWith(to) : place === id
   const tone = attention?.tone ?? (count ? mark : undefined)
   const said = attention ? attention.count : count
   return (
