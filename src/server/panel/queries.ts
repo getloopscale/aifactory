@@ -398,23 +398,23 @@ async function reportedModels(db: Database, ids: number[]): Promise<Map<number, 
 }
 
 /**
- * The model each role's agent reported on its latest pass, for a role the owner chose no model for. A role
+ * The model each agent reported on its latest pass of a task in each role, for a role the owner chose no model for. A role
  * that never ran, or whose agent names no model, has none.
  */
 export async function roleModels(db: Database): Promise<RoleModels> {
   const latest = await db
-    .selectDistinctOn([agentRun.role], {
+    .selectDistinctOn([agentRun.role, agentRun.harness], {
       role: agentRun.role,
       harness: agentRun.harness,
       model: agentRun.model,
     })
     .from(agentRun)
-    .where(NAMED_MODEL)
-    .orderBy(agentRun.role, desc(agentRun.id))
+    .where(and(NAMED_MODEL, isNotNull(agentRun.taskId)))
+    .orderBy(agentRun.role, agentRun.harness, desc(agentRun.at), desc(agentRun.id))
   // A pass may have a role the owner chooses no agent for (a review lens): it has no row on the crew.
-  const models: Partial<Record<string, { agent: string; model: string }>> = {}
+  const models: Partial<Record<string, Record<string, string>>> = {}
   for (const row of latest)
-    if (row.model !== null) models[row.role] = { agent: row.harness, model: row.model }
+    if (row.model !== null) (models[row.role] ??= {})[row.harness] = row.model
   return models as RoleModels
 }
 

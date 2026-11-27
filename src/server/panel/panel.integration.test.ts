@@ -43,7 +43,7 @@ import {
   sendBackConflictAutomatically,
   type ActionDeps,
 } from './actions'
-import { coordinatorActions, health, inbox, listTasks, taskDetail } from './queries'
+import { coordinatorActions, health, inbox, listTasks, roleModels, taskDetail } from './queries'
 import { runContinuation } from '../factory/run-support'
 import { sendBackWithdrawn } from '../factory/send-back'
 import { retryWaiting, runConflictRetries, runDueRetries } from './retry-waiting'
@@ -283,6 +283,42 @@ describe('listTasks', () => {
     expect(cards.get(work)).toMatchObject({ column: 'attention', retryable: null })
     expect(cards.get(healed)).toMatchObject({ column: 'attention', retryable: null })
     expect(cards.get(running)).toMatchObject({ column: 'working', retryable: null })
+  })
+})
+
+describe('roleModels', () => {
+  const pass = (taskId: number | null, over: Partial<typeof agentRun.$inferInsert>) =>
+    getDb()
+      .insert(agentRun)
+      .values({
+        taskId,
+        role: 'builder',
+        harness: 'claude-code',
+        attempt: 1,
+        durationMs: 1000,
+        ok: true,
+        ...over,
+      })
+
+  it('names the latest model of each agent in each role, from task passes only', async () => {
+    const id = await seed('done')
+    const at = (h: number) => new Date(Date.UTC(2026, 10, 27, h))
+    await pass(id, { model: 'old', at: at(1) })
+    await pass(id, { model: 'claude-sonnet-5-5', at: at(2) })
+    await pass(id, { model: null, at: at(3) })
+    await pass(id, { model: 'default', at: at(4) })
+    await pass(id, { harness: 'codex', model: 'gpt-6.1-sol', at: at(2) })
+    await pass(id, { role: 'security', model: 'claude-sonnet-5-5', at: at(2) })
+    await pass(null, { model: 'external', at: at(5) })
+
+    expect(await roleModels(getDb())).toEqual({
+      builder: { 'claude-code': 'claude-sonnet-5-5', codex: 'gpt-6.1-sol' },
+      security: { 'claude-code': 'claude-sonnet-5-5' },
+    })
+  })
+
+  it('has nothing for a role that never ran', async () => {
+    expect(await roleModels(getDb())).toEqual({})
   })
 })
 
