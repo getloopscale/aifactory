@@ -295,4 +295,82 @@ describe('runTurn', () => {
       ['error', 'acme/a'],
     ])
   })
+
+  it('restores a stopped session from its snapshot, with no clone', async () => {
+    const t = setup('code', undefined, { snapshotId: 'snap-9' })
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.sandbox.restored).toEqual(['snap-9'])
+    expect(t.sandbox.backend.commands.some((c) => c.includes('clone'))).toBe(false)
+  })
+
+  it('queues the turn again at the code cap, without an error event', async () => {
+    const t = setup()
+    await t.sandbox.create({
+      owner: { owner: 'code', sessionId: 'other' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    t.deps.codeCap = 1
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'capped' })
+    expect(t.session.state).toBe('queued')
+    expect(t.events.map((e) => e.kind)).toEqual(['user_message'])
+    expect(t.sandbox.specs).toHaveLength(1)
+  })
+
+  it('applies the cap when the retained sandbox of the session is gone', async () => {
+    const t = setup('code', undefined, { sandboxId: 'sbx-dead' })
+    await t.sandbox.create({
+      owner: { owner: 'code', sessionId: 'other' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    t.deps.codeCap = 1
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'capped' })
+    expect(t.session.state).toBe('queued')
+    expect(t.events.map((e) => e.kind)).toEqual(['user_message'])
+    expect(t.sandbox.specs).toHaveLength(1)
+  })
+
+  it('reconnects to a retained sandbox at the cap, since it takes no new slot', async () => {
+    const t = setup('code', undefined, { sandboxId: 'sbx-1' })
+    await t.sandbox.create({
+      owner: { owner: 'code', sessionId: 's1' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    t.deps.codeCap = 1
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.sandbox.reconnected).toEqual(['sbx-1'])
+  })
+
+  it('counts and claims the cap in one step, so two sessions starting together start one workspace', async () => {
+    const a = setup()
+    const b = setup()
+    b.deps.workspace.sandbox = a.deps.workspace.sandbox
+    let tail: Promise<unknown> = Promise.resolve()
+    const lock: NonNullable<TurnDeps['underCapLock']> = (work) => {
+      const run = tail.then(work)
+      tail = run.catch(() => undefined)
+      return run
+    }
+    for (const t of [a, b]) {
+      t.deps.codeCap = 1
+      t.deps.keepWorkspace = true
+      t.deps.underCapLock = lock
+    }
+    const results = await Promise.all([runTurn(a.deps, 's1'), runTurn(b.deps, 's1')])
+    expect(results.map((r) => r.status).sort()).toEqual(['capped', 'idle'])
+    expect(a.sandbox.specs).toHaveLength(1)
+  })
+
+  it('leaves the sandbox up when asked to, for the idle cron to close', async () => {
+    const t = setup()
+    t.deps.keepWorkspace = true
+    const saved: (string | null)[] = []
+    t.deps.workspace.store.saveSandbox = async (_id, sandboxId) => void saved.push(sandboxId)
+    await runTurn(t.deps, 's1')
+    expect(t.sandbox.snapshots).toEqual([])
+    expect([...t.sandbox.up.keys()]).toEqual(['sbx-1'])
+    expect(saved).toEqual(['sbx-1', 'sbx-1'])
+  })
 })

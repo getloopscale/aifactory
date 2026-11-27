@@ -348,6 +348,7 @@ const wrap = (
     await (after ??= gone())
   }
   return {
+    id: sandbox.sandboxId,
     backend: new E2BBackend(sandbox, undefined, envFor(spec.image)),
     stop: end,
     snapshot: async () => {
@@ -416,6 +417,9 @@ export function e2bSandboxProvider(env: NodeJS.ProcessEnv = process.env): Isolat
     },
     async killSandbox(id) {
       await Sandbox.kill(id, { apiKey: env.E2B_API_KEY })
+    },
+    async reconnect(sandboxId, spec) {
+      return wrap(await Sandbox.connect(sandboxId, { apiKey: env.E2B_API_KEY }), spec)
     },
     async imageAvailable(image) {
       return templateTagExists(templateFor(image), (name) =>

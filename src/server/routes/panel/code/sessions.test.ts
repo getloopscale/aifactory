@@ -1,7 +1,14 @@
 import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/server/define'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { appendEvent, createSession, getSession, listSessions, setMode } from '../../../code/store'
+import {
+  appendEvent,
+  createSession,
+  getSession,
+  listSessions,
+  recordMessage,
+  setMode,
+} from '../../../code/store'
 import { getDb } from '../../../db'
 import { canStart, harnessRegistry } from '../../../factory/harness-registry'
 
@@ -105,13 +112,26 @@ describe('the handlers', () => {
   })
 
   it('answers 404 to a message for a session that does not exist', async () => {
-    vi.mocked(getSession).mockResolvedValue(undefined)
+    vi.mocked(recordMessage).mockResolvedValue({ kind: 'not_found' })
     const response = (await run(message, {
       params: { id: 'nope' },
       body: { content: 'hi' },
     })) as Response
     expect(response.status).toBe(404)
-    expect(appendEvent).not.toHaveBeenCalled()
+    expect(response.status).toBe(404)
+  })
+
+  it('answers 409 to a message a session cannot take', async () => {
+    vi.mocked(recordMessage).mockResolvedValue({
+      kind: 'refused',
+      reason: 'busy',
+      state: 'running',
+    })
+    const response = (await run(message, {
+      params: { id: 's' },
+      body: { content: 'hi' },
+    })) as Response
+    expect(response.status).toBe(409)
   })
 
   it('rejects a blank or oversized message', () => {
@@ -120,13 +140,12 @@ describe('the handlers', () => {
     expect(schema(message).safeParse({ content: 'ok' }).success).toBe(true)
   })
 
-  it('records the message as a user_message event of a known session', async () => {
-    vi.mocked(getSession).mockResolvedValue({ id: 's' } as never)
-    vi.mocked(appendEvent).mockResolvedValue({ seq: 1 } as never)
+  it('records the message, the move and the job in one call', async () => {
+    vi.mocked(recordMessage).mockResolvedValue({ kind: 'queued', event: { seq: 1 } as never })
     expect(await run(message, { params: { id: 's' }, body: { content: 'hi' } })).toEqual({
       event: { seq: 1 },
     })
-    expect(appendEvent).toHaveBeenCalledWith('s', { kind: 'user_message', content: 'hi' })
+    expect(recordMessage).toHaveBeenCalledWith('s', 'hi')
   })
 
   it('validates the mode of a PATCH and answers 404 for an unknown session', async () => {
