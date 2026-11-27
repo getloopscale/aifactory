@@ -229,7 +229,6 @@ async function openInbox(
       return 'delivered'
     },
     async cancel() {
-      if (closed && cancelled) return
       cancelled = true
       close()
       // `[c]` keeps the pattern from matching this command's own shell.

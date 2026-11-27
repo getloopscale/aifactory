@@ -220,6 +220,44 @@ describe('sending a message', () => {
     expect(await jobs()).toBe(0)
   })
 
+  it('queues exactly one turn when two turns end at once', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    const ended = await Promise.all([endTurn(s.id), endTurn(s.id)])
+    expect(ended.filter((r) => r?.queued)).toHaveLength(1)
+    expect(await jobs()).toBe(1)
+  })
+
+  it('never loses a message sent while the turn ends: it is answered by a queued turn or is the next one', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const s = await aSession(`race-${round}`)
+      await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+      const [sent] = await Promise.all([sendMessage(s.id, 'hi'), endTurn(s.id)])
+      const after = await getSession(s.id)
+      if (sent.kind === 'sent') {
+        // Either the end saw it (queued, one job) or it came after the end (queued by the message, one job).
+        expect(after?.state).toBe('queued')
+      } else {
+        expect(after?.state).toBe('idle')
+      }
+      const queued = await getPool().query(
+        `select 1 from loopzero_jobs where name = 'code-turn' and input->>'sessionId' = $1`,
+        [s.id],
+      )
+      expect(queued.rowCount).toBe(1)
+    }
+  })
+
+  it('queues one turn for a message sent twice during a turn that ends after them', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await Promise.all([sendMessage(s.id, 'a'), sendMessage(s.id, 'b')])
+    expect(await jobs()).toBe(0)
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    expect(await jobs()).toBe(1)
+  })
+
   it('marks only a running turn to stop, and clears the mark when the turn ends', async () => {
     const s = await aSession()
     expect(await requestStop(s.id)).toMatchObject({ kind: 'refused', state: 'idle' })

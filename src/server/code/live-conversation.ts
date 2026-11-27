@@ -52,9 +52,12 @@ export function watchControls(
     if (!stopAsked && (await store.stopRequested(sessionId))) {
       stopAsked = true
       resolveStopped()
-      if (pass) await cancel(pass)
     }
-    if (stopAsked) return
+    if (stopAsked) {
+      // Every tick until the pass settles: a cancel that came before the agent's process ran found nothing to end.
+      if (pass) await cancel(pass)
+      return
+    }
     while (!over && pass) {
       const message = await store.pending(sessionId)
       if (!message) return
@@ -69,6 +72,8 @@ export function watchControls(
         over = true
         return
       }
+      // At least once: if this write fails after `send` succeeded, the message stays unanswered and the turn that
+      // ends queues it again, so the agent may get it twice. The reverse (never delivered) cannot happen.
       await store.append(sessionId, { kind: 'state', content: turnMarker(message.seq) })
     }
   }

@@ -51,7 +51,13 @@ function memory(mode: CodeMode = 'code', extra: Partial<CodeSession> = {}) {
     },
     async end() {
       const out = transition(session.state, 'turn_ended')
-      if (out.action === 'move') session.state = out.state
+      if (out.action !== 'move') return
+      session.state = out.state
+      // Like `endTurn`: a message no pass took is queued for the next turn.
+      const taken = new Set(events.filter((e) => e.kind === 'state').map((e) => e.content))
+      const waiting = events.some((e) => e.kind === 'user_message' && !taken.has(`turn:${e.seq}`))
+      const next = transition(session.state, 'message')
+      if (waiting && next.action === 'move') session.state = next.state
     },
     async stopRequested() {
       return control.stop
@@ -214,6 +220,28 @@ describe('runTurn controls', () => {
     t.deps.controlPollMs = 5
     await runTurn(t.deps, 's1')
     expect((await t.store.pending('s1'))?.content).toBe('later')
+    // The turn that ended leaves the session queued for it, not idle.
+    expect(t.session.state).toBe('queued')
+  })
+
+  it('queues the next turn for a message that arrives as the pass ends', async () => {
+    const t: ReturnType<typeof setup> = setup('code', async () => {
+      // Stored after the last tick could have seen it, before the turn settles.
+      t.events.push({
+        sessionId: 's1',
+        seq: t.events.length + 1,
+        kind: 'user_message',
+        tool: null,
+        content: 'at the end',
+        at: new Date(),
+      })
+      return { ok: true, summary: 'done' }
+    })
+    t.deps.controlPollMs = 60_000
+    await runTurn(t.deps, 's1')
+    expect(t.session.state).toBe('queued')
+    expect(t.events.filter((e) => e.content === 'turn:3')).toHaveLength(0)
+    expect((await t.store.pending('s1'))?.content).toBe('at the end')
   })
 })
 

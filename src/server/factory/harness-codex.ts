@@ -209,6 +209,8 @@ export function codexHarness(
     let total: HarnessResult | undefined
     try {
       for (;;) {
+        // A stop that came before the process ran: there is nothing to end, and nothing is started.
+        if (cancelled) return merged(total, { ok: false, summary: 'Stopped.' }, session)
         const run = await once(backend, input, prompt, session, (line) => {
           const id = threadOf(line)
           if (id) session = id
