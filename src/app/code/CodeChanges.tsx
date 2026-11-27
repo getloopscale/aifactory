@@ -52,7 +52,8 @@ function Line({ line }: { line: CodeDiffLine }) {
   )
 }
 
-function Hunks({ file }: { file: CodeDiffFile }) {
+/** The diff of one file: its hunks with the line numbers of both sides, long unchanged runs folded. */
+export function Hunks({ file }: { file: CodeDiffFile }) {
   const { t } = useCopy()
   const [shown, setShown] = useState<Set<string>>(new Set())
   const hunks = useMemo(() => file.hunks.map((h) => ({ ...h, pieces: foldHunk(h.lines) })), [file])

@@ -1979,7 +1979,21 @@ export const ptBR: Copy = {
     mode: 'Modo',
     modes: { ask: 'Perguntar', plan: 'Planejar', code: 'Codar' },
     message: 'Primeira mensagem',
-    messagePlaceholder: 'O que o agente deve fazer?',
+    messagePlaceholder: 'Descreva uma mudança, pergunte sobre o código ou cole um erro',
+    hero: 'O que o agente deve fazer?',
+    heroAbout:
+      'Uma sessão é uma branch própria em um sandbox. Você conversa, o agente trabalha lá e você lê cada mudança ao lado da conversa.',
+    editor: {
+      resizeSide: 'Redimensionar a barra lateral',
+      resizeEditor: 'Redimensionar o agente e o editor',
+      tabs: 'Editores abertos',
+      close: (name: string) => `Fechar ${name}`,
+      diffTab: (name: string) => `${name} (mudanças)`,
+      side: 'Barra lateral',
+      status: 'Estado da sessão',
+    },
+    filter: 'Filtrar sessões',
+    noMatch: 'Nenhuma sessão corresponde.',
     start: 'Iniciar',
     retry: 'Enviar a mensagem de novo',
     states: {
@@ -2057,7 +2071,8 @@ export const ptBR: Copy = {
       sending: 'Enviando…',
       stop: 'Parar',
       message: 'Mensagem para o agente',
-      placeholder: 'Escreva para o agente',
+      placeholder: 'Responda, peça uma mudança ou digite @ para citar um arquivo',
+      by: 'Agente desta sessão',
       plan: {
         title: 'O agente propôs um plano',
         accept: 'Aceitar',
