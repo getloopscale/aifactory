@@ -805,12 +805,13 @@ de verdade (ADR 0008).
 A baseline de 2026-11-11 passou cinco de cinco casos, com custo médio de US$ 0,35 por caso nos agentes, e
 levou 32 minutos. Somando o sandbox, a rodada custou US$ 1,98.
 
-**Pendente (#688).** A meta é que a checagem rápida termine em menos de 20 minutos, num host ocioso. Isso
-ainda não foi medido: a baseline não foi regravada com o conjunto rápido novo (a seleção a partir dos casos
-que passaram e a concorrência são do #684) e nenhum tempo de `pnpm evals:check` foi registrado. Falta, numa
-máquina com Postgres, credenciais e sandbox: `EVALS_BASELINE=1 pnpm evals`, conferir que todo caso rápido
-de `evals/cases.json` está em `evals/baseline.json`, e cronometrar `pnpm evals:check` com `eval_check`
-`ran=true`, anotando aqui o host, a carga e o tempo. Até lá, o número de 32 minutos acima é o único medido.
+Com o conjunto rápido do #684 (cinco casos que passaram na baseline, todos ao mesmo tempo), a checagem de
+2026-11-27 passou cinco de cinco em 35 min 46 s, contra 41 a 55 minutos do conjunto anterior. A baseline de
+2026-11-26 já tinha os cinco casos medidos, então não foi regravada. O tempo da checagem é o do caso mais
+longo: quatro casos terminaram em 1, 3, 9 e 17 minutos, e `usetheokit/theokit-sdk#938` levou 35, contra 11
+na baseline. O host não estava ocioso (carga 12, com outra checagem rodando ao mesmo tempo nos últimos sete
+minutos), então a meta de menos de 20 minutos num host ocioso (#688) não foi confirmada nem descartada por
+essa rodada.
 
 ## O painel
 
