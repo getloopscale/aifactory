@@ -6,7 +6,7 @@
 //   EVALS_SET       quick | all (run; default quick)
 //   EVALS_CASES     comma-separated case ids, instead of a set
 //   EVALS_BUDGET_USD    no case starts once this is spent (default 15)
-//   EVALS_CONCURRENCY   cases at a time (default 2)
+//   EVALS_CONCURRENCY   cases at a time (check: the quick set, bounded by the free sandbox slots; run: 2)
 //   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
