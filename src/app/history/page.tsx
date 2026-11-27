@@ -5,7 +5,8 @@ import { HISTORY_ROLES, type HistoryReport } from '../../shared/panel'
 import { ApiError, get } from '../lib/api'
 import { Pane, Workbench } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
-import { ago, itemName, money } from '../lib/format'
+import { ItemId } from '../components/ui/ItemId'
+import { ago, money } from '../lib/format'
 import { useResource } from '../lib/live'
 
 type Filters = { q: string; repository: string; role: string; from: string; to: string }
@@ -159,7 +160,8 @@ export default function HistoryPage() {
                   className="rounded-lg border border-border bg-card p-4"
                 >
                   <div className="text-sm font-semibold">
-                    {r.repository} {itemName(r)} · {r.title}
+                    <ItemId item={r} /> {r.title}{' '}
+                    <span className="font-normal text-muted-foreground">· {r.repository}</span>
                   </div>
                   <div className="mt-1 text-xs text-muted-foreground">
                     {[
