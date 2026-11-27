@@ -73,3 +73,26 @@ export const toSessionWire = (s: CodeSession): CodeSessionWire => ({
 })
 
 export const toEventWire = (e: CodeEvent): CodeEventWire => ({ ...e, at: e.at.toISOString() })
+
+/** One line of a hunk, with the number it has on each side it appears on. */
+export type CodeDiffLine =
+  | { kind: 'context'; text: string; oldLine: number; newLine: number }
+  | { kind: 'add'; text: string; newLine: number }
+  | { kind: 'del'; text: string; oldLine: number }
+
+export type CodeDiffHunk = { header: string; lines: CodeDiffLine[] }
+
+export type CodeDiffFile = {
+  path: string
+  added: number
+  removed: number
+  /** A binary file has counts of 0 and no hunks. */
+  binary: boolean
+  hunks: CodeDiffHunk[]
+}
+
+/** What a workspace changed against the merge base with its base branch. */
+export type CodeDiff = { files: CodeDiffFile[] }
+
+/** The diff route's answer: `live` when it was read from the running workspace, else the last one stored. */
+export type CodeDiffResponse = { diff: CodeDiff; live: boolean; capturedAt: string | null }

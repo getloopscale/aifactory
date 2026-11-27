@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useSyncExternalStore } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -47,17 +48,38 @@ vi.mock('../lib/live', () => ({
     reload: () => {},
   }),
 }))
-vi.mock('../lib/api', () => ({ post: vi.fn() }))
+vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn() }))
+const feed = vi.hoisted(() => {
+  const listeners = new Set<() => void>()
+  let extra: unknown[] = []
+  return {
+    subscribe: (l: () => void) => (listeners.add(l), () => listeners.delete(l)),
+    snapshot: () => extra,
+    add(event: unknown) {
+      extra = [...extra, event]
+      for (const l of listeners) l()
+    },
+    reset() {
+      extra = []
+    },
+  }
+})
 vi.mock('../lib/code-session', () => ({
-  useCodeSession: (id: string) => ({
-    session: { ...session(id, 'Open one', '2026-11-27T09:00:00Z'), repository: 'acme/shop' },
-    events: [{ sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' }],
-    error: undefined,
-  }),
+  useCodeSession: (id: string) => {
+    const extra = useSyncExternalStore(feed.subscribe, feed.snapshot)
+    return {
+      session: { ...session(id, 'Open one', '2026-11-27T09:00:00Z'), repository: 'acme/shop' },
+      events: [
+        { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
+        ...extra,
+      ],
+      error: undefined,
+    }
+  },
 }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 
-import { post } from '../lib/api'
+import { get, post } from '../lib/api'
 
 import Session from './[id]/page'
 import Page from './page'
@@ -65,6 +87,9 @@ import Page from './page'
 beforeEach(() => {
   window.localStorage.clear()
   vi.mocked(post).mockReset()
+  vi.mocked(get).mockReset()
+  vi.mocked(get).mockResolvedValue({ diff: { files: [] }, live: true, capturedAt: null })
+  feed.reset()
 })
 afterEach(cleanup)
 
@@ -160,5 +185,52 @@ describe('the code page on a compact width', () => {
     fireEvent.click(screen.getByRole('button', { name: en.code.retry }))
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/code/abc'))
     expect(post).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe('the side panel of an open session', () => {
+  const diff = (n: number) => ({
+    diff: {
+      files: Array.from({ length: n }, (_, i) => ({
+        path: `f${i}.ts`,
+        added: 1,
+        removed: 0,
+        binary: false,
+        hunks: [],
+      })),
+    },
+    live: true,
+    capturedAt: null,
+  })
+
+  it('shows Changes first, reads the diff and says when there is none', async () => {
+    show('en', '/code/new')
+    expect(await screen.findByText(en.code.changes.empty)).toBeDefined()
+    expect(screen.getByRole('tab', { name: new RegExp(en.code.changes.title) })).toBeDefined()
+    expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/new/diff')
+  })
+
+  it('shows and hides the panel on Ctrl+Shift+D, from a text box too', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const box = screen.getByLabelText(en.code.conversation.message)
+    fireEvent.keyDown(box, { key: 'D', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('tablist', { name: en.code.changes.tabs })).toBeNull()
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true })
+    expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
+  })
+
+  it('reads the diff again when a turn ends', async () => {
+    vi.mocked(get).mockResolvedValueOnce(diff(0)).mockResolvedValueOnce(diff(2))
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    expect(get).toHaveBeenCalledTimes(1)
+    act(() =>
+      feed.add({ sessionId: 'new', seq: 2, kind: 'state', tool: null, content: 'idle', at: '' }),
+    )
+    expect(await screen.findByText('f1.ts')).toBeDefined()
+    expect(get).toHaveBeenCalledTimes(2)
   })
 })

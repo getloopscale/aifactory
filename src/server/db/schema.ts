@@ -15,7 +15,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
-import { CODE_EVENT_KINDS, CODE_MODES, CODE_STATES } from '../../shared/code'
+import { CODE_EVENT_KINDS, CODE_MODES, CODE_STATES, type CodeDiff } from '../../shared/code'
 import type { DoctorReport, ProvenCheck, ProviderProofs, StoredProof } from '../../shared/panel'
 
 /** Raw bytes: a file a check wrote. */
@@ -646,6 +646,9 @@ export const codeSession = pgTable('code_session', {
   sandboxId: text('sandbox_id'),
   snapshotId: text('snapshot_id'),
   agentSessionId: text('agent_session_id'),
+  /** The last diff read from the workspace when a turn ended, kept for a session whose sandbox is stopped. */
+  lastDiff: jsonb('last_diff').$type<CodeDiff>(),
+  lastDiffAt: timestamp('last_diff_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
