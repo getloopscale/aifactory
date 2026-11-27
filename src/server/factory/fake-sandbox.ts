@@ -132,6 +132,7 @@ export class FakeSandbox implements IsolatedSandboxProvider {
   /** The sandboxes that are up, as a listing says: created and not stopped. */
   up = new Map<string, ListedSandbox>()
   killed: string[] = []
+  reconnected: string[] = []
   private created = 0
 
   constructor(
@@ -154,6 +155,7 @@ export class FakeSandbox implements IsolatedSandboxProvider {
       metadata: metadataFor(spec.owner, THIS_PROCESS),
     })
     return {
+      id,
       backend: this.backend,
       stop: async () => {
         this.stopped += 1
@@ -173,6 +175,26 @@ export class FakeSandbox implements IsolatedSandboxProvider {
   async restore(snapshotId: string, spec: SandboxSpec): Promise<IsolatedSandbox> {
     this.restored.push(snapshotId)
     return this.create(spec)
+  }
+
+  /** Connects to a sandbox that is up; one that is not is refused, as a provider would. */
+  async reconnect(sandboxId: string, _spec: SandboxSpec): Promise<IsolatedSandbox> {
+    if (!this.up.has(sandboxId)) throw new Error(`sandbox ${sandboxId} is not running`)
+    this.reconnected.push(sandboxId)
+    return {
+      id: sandboxId,
+      backend: this.backend,
+      stop: async () => {
+        this.stopped += 1
+        this.up.delete(sandboxId)
+      },
+      snapshot: async () => {
+        const id = `snap-${this.snapshots.length + 1}`
+        this.snapshots.push(id)
+        this.up.delete(sandboxId)
+        return id
+      },
+    }
   }
 
   async listSandboxes(): Promise<ListedSandbox[]> {
