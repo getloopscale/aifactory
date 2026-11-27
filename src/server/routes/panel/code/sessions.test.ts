@@ -2,28 +2,29 @@ import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/se
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  appendEvent,
   createSession,
   getSession,
   listSessions,
-  recordMessage,
-  setMode,
+  moveSession,
+  sendMessage,
+  updateSession,
 } from '../../../code/store'
 import { getDb } from '../../../db'
-import { canStart, harnessRegistry } from '../../../factory/harness-registry'
+import { DEFAULT_HARNESS, canStart, harnessRegistry } from '../../../factory/harness-registry'
 
 vi.mock('../../../code/store')
 vi.mock('../../../db', () => ({ getDb: vi.fn() }))
 vi.mock('../../../factory/harness-registry', () => ({
+  DEFAULT_HARNESS: 'claude-code',
   canStart: vi.fn(),
   harnessRegistry: vi.fn(),
 }))
 
 let enabledRepository = true
 
+import { DELETE, GET as one, PATCH } from './sessions/[id]'
 import { POST as message } from './sessions/[id]/messages'
 import { GET, POST } from './sessions'
-import { PATCH } from './[id]'
 
 const input = (subject: { id: string } | null) => ({
   subject,
@@ -36,7 +37,9 @@ describe.each([
   ['GET /api/panel/code/sessions', GET],
   ['POST /api/panel/code/sessions', POST],
   ['POST /api/panel/code/sessions/:id/messages', message],
-  ['PATCH /api/panel/code/:id', PATCH],
+  ['GET /api/panel/code/sessions/:id', one],
+  ['PATCH /api/panel/code/sessions/:id', PATCH],
+  ['DELETE /api/panel/code/sessions/:id', DELETE],
 ])('%s', (_name, handler) => {
   const policy = handler.policy as RoutePolicy<unknown, unknown, unknown>
 
@@ -66,7 +69,9 @@ describe('the handlers', () => {
     vi.mocked(harnessRegistry).mockReturnValue({ codex: vi.fn(), 'claude-code': vi.fn() })
     vi.mocked(getDb).mockReturnValue({
       select: () => ({
-        from: () => ({ where: async () => (enabledRepository ? [{ id: 1 }] : []) }),
+        from: () => ({
+          where: async () => (enabledRepository ? [{ id: 1, baseBranch: null }] : []),
+        }),
       }),
     } as never)
   })
@@ -81,7 +86,8 @@ describe('the handlers', () => {
   it('refuses a repository that is not enabled with 409 and stores nothing', async () => {
     enabledRepository = false
     const response = (await run(POST, { body: valid })) as Response
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(400)
+    expect(JSON.stringify(await response.json())).toContain('acme/shop')
     expect(createSession).not.toHaveBeenCalled()
   })
 
@@ -105,6 +111,23 @@ describe('the handlers', () => {
     expect(stored.workBranch).toMatch(/^code\/[0-9a-f]{8}$/)
   })
 
+  it('defaults the base branch, the agent and the mode', async () => {
+    vi.mocked(harnessRegistry).mockReturnValue({ [DEFAULT_HARNESS]: vi.fn() })
+    vi.mocked(canStart).mockReturnValue(true)
+    vi.mocked(createSession).mockResolvedValue({ id: 'new' } as never)
+    const body = (POST.body as unknown as { parse: (v: unknown) => unknown }).parse({
+      repository: 'acme/shop',
+      model: 'm1',
+    })
+    await run(POST, { body })
+    expect(vi.mocked(createSession).mock.calls[0]![0]).toMatchObject({
+      baseBranch: 'workspace',
+      harness: DEFAULT_HARNESS,
+      mode: 'ask',
+      model: 'm1',
+    })
+  })
+
   it('refuses a body that is not a session', () => {
     expect(schema(POST).safeParse({ ...valid, mode: 'nope' }).success).toBe(false)
     expect(schema(POST).safeParse({ ...valid, baseBranch: '' }).success).toBe(false)
@@ -112,61 +135,72 @@ describe('the handlers', () => {
   })
 
   it('answers 404 to a message for a session that does not exist', async () => {
-    vi.mocked(recordMessage).mockResolvedValue({ kind: 'not_found' })
+    vi.mocked(sendMessage).mockResolvedValue({ kind: 'not_found' })
     const response = (await run(message, {
       params: { id: 'nope' },
-      body: { content: 'hi' },
+      body: { text: 'hi' },
     })) as Response
-    expect(response.status).toBe(404)
     expect(response.status).toBe(404)
   })
 
-  it('answers 409 to a message a session cannot take', async () => {
-    vi.mocked(recordMessage).mockResolvedValue({
+  it('answers 409 with the reason when the state refuses the message', async () => {
+    vi.mocked(sendMessage).mockResolvedValue({
       kind: 'refused',
-      reason: 'busy',
-      state: 'running',
+      reason: 'The session has ended.',
+      state: 'ended',
     })
-    const response = (await run(message, {
-      params: { id: 's' },
-      body: { content: 'hi' },
-    })) as Response
+    const response = (await run(message, { params: { id: 's' }, body: { text: 'hi' } })) as Response
     expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ message: 'The session has ended.' })
   })
 
   it('rejects a blank or oversized message', () => {
-    expect(schema(message).safeParse({ content: '   ' }).success).toBe(false)
-    expect(schema(message).safeParse({ content: 'x'.repeat(20_001) }).success).toBe(false)
-    expect(schema(message).safeParse({ content: 'ok' }).success).toBe(true)
+    expect(schema(message).safeParse({ text: '   ' }).success).toBe(false)
+    expect(schema(message).safeParse({ text: 'x'.repeat(20_001) }).success).toBe(false)
+    expect(schema(message).safeParse({ content: 'ok' }).success).toBe(false)
+    expect(schema(message).safeParse({ text: 'ok' }).success).toBe(true)
   })
 
-  it('records the message, the move and the job in one call', async () => {
-    vi.mocked(recordMessage).mockResolvedValue({ kind: 'queued', event: { seq: 1 } as never })
-    expect(await run(message, { params: { id: 's' }, body: { content: 'hi' } })).toEqual({
-      event: { seq: 1 },
+  it('stores the message and answers with its event', async () => {
+    const at = new Date('2026-11-27T00:00:00Z')
+    vi.mocked(sendMessage).mockResolvedValue({
+      kind: 'sent',
+      event: { sessionId: 's', seq: 1, kind: 'user_message', tool: null, content: 'hi', at },
+      session: {} as never,
     })
-    expect(recordMessage).toHaveBeenCalledWith('s', 'hi')
+    const out = (await run(message, { params: { id: 's' }, body: { text: 'hi' } })) as {
+      event: { seq: number }
+    }
+    expect(out.event.seq).toBe(1)
+    expect(sendMessage).toHaveBeenCalledWith('s', 'hi')
   })
 
-  it('validates the mode of a PATCH and answers 404 for an unknown session', async () => {
+  const stored = { id: 's', mode: 'plan', createdAt: new Date(0), updatedAt: new Date(0) } as never
+
+  it('validates a PATCH and answers 404 for an unknown session', async () => {
     expect(schema(PATCH).safeParse({ mode: 'plan' }).success).toBe(true)
     expect(schema(PATCH).safeParse({ mode: 'root' }).success).toBe(false)
-    vi.mocked(setMode).mockResolvedValueOnce(undefined)
+    expect(schema(PATCH).safeParse({}).success).toBe(false)
+    vi.mocked(updateSession).mockResolvedValueOnce(undefined)
     const response = (await run(PATCH, { params: { id: 'x' }, body: { mode: 'ask' } })) as Response
     expect(response.status).toBe(404)
   })
 
   it('saves the mode and answers the session', async () => {
-    vi.mocked(setMode).mockResolvedValueOnce({
-      id: 's',
-      mode: 'plan',
-      createdAt: new Date(0),
-      updatedAt: new Date(0),
-    } as never)
+    vi.mocked(updateSession).mockResolvedValueOnce(stored)
     expect(await run(PATCH, { params: { id: 's' }, body: { mode: 'plan' } })).toMatchObject({
       id: 's',
       mode: 'plan',
     })
-    expect(setMode).toHaveBeenCalledWith('s', 'plan')
+    expect(updateSession).toHaveBeenCalledWith('s', { mode: 'plan' })
+  })
+
+  it('reads one session and ends one', async () => {
+    vi.mocked(getSession).mockResolvedValueOnce(undefined)
+    expect(((await run(one, { params: { id: 'x' } })) as Response).status).toBe(404)
+    vi.mocked(getSession).mockResolvedValue(stored)
+    expect(await run(one, { params: { id: 's' } })).toMatchObject({ id: 's' })
+    await run(DELETE, { params: { id: 's' } })
+    expect(moveSession).toHaveBeenCalledWith('s', 'end')
   })
 })

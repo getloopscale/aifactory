@@ -11,7 +11,6 @@ import {
   appendEvent,
   claimTurn,
   moveSession,
-  recordMessage,
   turnMarker,
   CLAIM_STALE_MS,
   createSession,
@@ -19,7 +18,9 @@ import {
   getSession,
   listSessions,
   renameSession,
+  sendMessage,
   setMode,
+  updateSession,
 } from './store'
 
 beforeAll(async () => {
@@ -156,29 +157,63 @@ describe("a session's turn", () => {
   })
 })
 
-describe('recordMessage', () => {
-  it('writes the event, the move and one job together, once per message', async () => {
-    const { id } = await aSession()
-    const result = await recordMessage(id, 'hi')
-    expect(result.kind).toBe('queued')
-    expect((await getSession(id))?.state).toBe('queued')
-    const jobs = await getPool().query('select 1 from loopzero_jobs where idempotency_key = $1', [
-      `code-message-${id}-1`,
-    ])
-    expect(jobs.rowCount).toBe(1)
+describe('sending a message', () => {
+  const jobs = async () =>
+    (await getPool().query("select 1 from loopzero_jobs where name = 'code-turn'")).rowCount
+
+  it('stores one event, queues the session and one code-turn job', async () => {
+    const s = await aSession()
+    const result = await sendMessage(s.id, 'hello')
+    expect(result).toMatchObject({ kind: 'sent', event: { seq: 1, kind: 'user_message' } })
+    expect((await getSession(s.id))?.state).toBe('queued')
+    expect(await jobs()).toBe(1)
   })
 
-  it('refuses a running session and writes nothing', async () => {
-    const { id } = await aSession()
-    await getPool().query(`update code_session set state = 'running' where id = $1`, [id])
-    expect((await recordMessage(id, 'hi')).kind).toBe('refused')
-    expect(await eventsAfter(id, 0, 10)).toEqual([])
-    expect((await recordMessage('missing', 'hi')).kind).toBe('not_found')
+  it('refuses a message to a queued or ended session and stores nothing', async () => {
+    const s = await aSession()
+    await sendMessage(s.id, 'one')
+    expect((await sendMessage(s.id, 'two')).kind).toBe('refused')
+    const e = await aSession('e')
+    await moveSession(e.id, 'end')
+    expect((await sendMessage(e.id, 'hi')).kind).toBe('refused')
+    expect(await eventsAfter(e.id, 0, 10)).toEqual([])
+    expect((await eventsAfter(s.id, 0, 10)).length).toBe(1)
+    expect((await sendMessage('missing', 'hi')).kind).toBe('not_found')
   })
 
-  it('takes a message for a stopped session', async () => {
-    const { id } = await aSession()
-    await getPool().query(`update code_session set state = 'stopped' where id = $1`, [id])
-    expect((await recordMessage(id, 'hi')).kind).toBe('queued')
+  it('takes a message for a stopped session and queues it', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'stopped' where id = $1`, [s.id])
+    expect((await sendMessage(s.id, 'hi')).kind).toBe('sent')
+    expect((await getSession(s.id))?.state).toBe('queued')
+  })
+
+  it('refuses a running session with its state and writes nothing', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'refused', state: 'running' })
+    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+  })
+
+  it('stores no event when the job cannot be queued', async () => {
+    const s = await aSession()
+    const backend = jobBackend()
+    const original = backend.enqueueInTransaction.bind(backend)
+    backend.enqueueInTransaction = () => Promise.reject(new Error('queue down'))
+    try {
+      await expect(sendMessage(s.id, 'hi')).rejects.toThrow('queue down')
+    } finally {
+      backend.enqueueInTransaction = original
+    }
+    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+    expect((await getSession(s.id))?.state).toBe('idle')
+  })
+
+  it('updates the title, mode and model', async () => {
+    const s = await aSession()
+    expect(await updateSession(s.id, { mode: 'plan', model: 'm' })).toMatchObject({
+      mode: 'plan',
+      model: 'm',
+    })
   })
 })

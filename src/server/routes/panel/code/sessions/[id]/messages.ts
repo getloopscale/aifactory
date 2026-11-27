@@ -1,16 +1,17 @@
 import { route } from '@getloopscale/loopzero/server/define'
 import { z } from 'zod'
 
-import { recordMessage } from '../../../../../code/store'
+import { toEventWire } from '../../../../../../shared/code'
+import { sendMessage } from '../../../../../code/store'
 import { ownerOnly } from '../../../../../panel/policy'
 
-/** Records a message of the owner on a session and queues its turn; a stopped session is restored by that turn. */
+/** Stores a message of the owner and queues the turn that answers it, together. */
 export const POST = route()
   .policy(ownerOnly)
   .params(z.object({ id: z.string().min(1).max(100) }))
-  .body(z.object({ content: z.string().trim().min(1).max(20_000) }))
+  .body(z.object({ text: z.string().trim().min(1).max(20_000) }))
   .handler(async ({ params, body }) => {
-    const result = await recordMessage(params.id, body.content)
+    const result = await sendMessage(params.id, body.text)
     if (result.kind === 'not_found') {
       return Response.json({ error: 'not_found', message: 'No such session.' }, { status: 404 })
     }
@@ -20,6 +21,6 @@ export const POST = route()
         { status: 409 },
       )
     }
-    return { event: result.event }
+    return { event: toEventWire(result.event) }
   })
   .build()

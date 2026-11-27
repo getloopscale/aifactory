@@ -8,7 +8,8 @@ import { CODE_MODES } from '../../../../shared/code'
 import { createSession, listSessions } from '../../../code/store'
 import { getDb } from '../../../db'
 import { repository } from '../../../db/schema'
-import { canStart, harnessRegistry } from '../../../factory/harness-registry'
+import { integrationBranch } from '../../../factory/branches'
+import { DEFAULT_HARNESS, canStart, harnessRegistry } from '../../../factory/harness-registry'
 import { ownerOnly } from '../../../panel/policy'
 
 /** The agents that could start now: the ones whose credential is there. */
@@ -29,35 +30,38 @@ export const POST = route()
   .body(
     z.object({
       repository: z.string().min(3).max(200),
-      baseBranch: z.string().min(1).max(200),
-      harness: z.string().min(1).max(60),
-      mode: z.enum(CODE_MODES),
+      baseBranch: z.string().min(1).max(200).optional(),
+      harness: z.string().min(1).max(60).optional(),
+      model: z.string().min(1).max(100).optional(),
+      mode: z.enum(CODE_MODES).default('ask'),
       title: z.string().max(200).optional(),
     }),
   )
   .handler(async ({ body }) => {
     const [enabled] = await getDb()
-      .select({ id: repository.id })
+      .select({ id: repository.id, baseBranch: repository.baseBranch })
       .from(repository)
       .where(and(eq(repository.fullName, body.repository), eq(repository.enabled, true)))
     if (!enabled) {
       return Response.json(
         { error: 'refused', message: `${body.repository} is not an enabled repository.` },
-        { status: 409 },
+        { status: 400 },
       )
     }
-    if (!startable().includes(body.harness)) {
+    const harness = body.harness ?? DEFAULT_HARNESS
+    if (!startable().includes(harness)) {
       return Response.json(
-        { error: 'refused', message: `The agent ${body.harness} cannot start now.` },
+        { error: 'refused', message: `The agent ${harness} cannot start now.` },
         { status: 409 },
       )
     }
     const session = await createSession({
       title: body.title?.trim() || body.repository,
       repository: body.repository,
-      baseBranch: body.baseBranch,
+      baseBranch: body.baseBranch ?? integrationBranch(enabled),
       workBranch: `code/${randomUUID().slice(0, 8)}`,
-      harness: body.harness,
+      harness,
+      model: body.model,
       mode: body.mode,
     })
     return { session }

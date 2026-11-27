@@ -97,7 +97,7 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
         id = made.session.id
         setCreated(id)
       }
-      await post(`/api/panel/code/sessions/${id}/messages`, { content: message })
+      await post(`/api/panel/code/sessions/${id}/messages`, { text: message })
       void navigate(`/code/${id}`)
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))
