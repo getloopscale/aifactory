@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodeEventWire, CodeSessionWire, CodeState } from '../../shared/code'
 import { en } from '../lib/copy/en'
 
-vi.mock('../lib/api', () => ({ post: vi.fn(), patch: vi.fn() }))
+vi.mock('../lib/api', () => ({ post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 vi.mock('@getloopscale/loopzero-ui', () => ({
   ChatMessageResponse: ({ text }: { text: string }) => <div data-testid="md">{text}</div>,
 }))
 
-import { patch, post } from '../lib/api'
+import { del, patch, post } from '../lib/api'
 
 import { CodeConversation, linkPaths, mentionAt } from './CodeConversation'
 
@@ -44,6 +44,7 @@ const ev = (
 beforeEach(() => {
   vi.mocked(post).mockReset()
   vi.mocked(patch).mockReset()
+  vi.mocked(del).mockReset()
 })
 afterEach(cleanup)
 
@@ -342,5 +343,122 @@ describe('a plan', () => {
         text: 'add tests',
       }),
     )
+  })
+})
+
+describe('slash commands', () => {
+  const type = (value: string) => {
+    const box = screen.getByLabelText(c.message)
+    fireEvent.change(box, { target: { value } })
+    return box as HTMLTextAreaElement
+  }
+
+  it('selects /plan on /pl, and Enter saves the mode and clears the box', async () => {
+    vi.mocked(patch).mockResolvedValueOnce({ mode: 'plan' })
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    const box = type('/pl')
+    const options = screen.getAllByRole('option')
+    expect(options).toHaveLength(1)
+    expect(options[0]!.getAttribute('aria-selected')).toBe('true')
+    expect(options[0]!.textContent).toContain(c.commands.about.plan)
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(box.value).toBe('')
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { mode: 'plan' }),
+    )
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('moves with the arrows and closes on Escape without sending', () => {
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    const box = type('/')
+    const selected = () =>
+      screen.getAllByRole('option').findIndex((o) => o.getAttribute('aria-selected') === 'true')
+    expect(selected()).toBe(0)
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    expect(selected()).toBe(1)
+    fireEvent.keyDown(box, { key: 'ArrowUp' })
+    fireEvent.keyDown(box, { key: 'ArrowUp' })
+    expect(selected()).toBe(screen.getAllByRole('option').length - 1)
+    fireEvent.keyDown(box, { key: 'Escape' })
+    expect(screen.queryByRole('option')).toBeNull()
+    expect(box.value).toBe('/')
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('sets ask through the same handler, and refuses the mode it is already in', async () => {
+    vi.mocked(patch).mockResolvedValue({ mode: 'ask' })
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    let box = type('/code')
+    expect(screen.getByRole('option').getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('option').textContent).toContain(c.commands.reasons.sameMode)
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(patch).not.toHaveBeenCalled()
+    expect(box.value).toBe('/code')
+    box = type('/ask')
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { mode: 'ask' }),
+    )
+  })
+
+  it('lists /stop disabled with its reason while no turn runs, and runs it while one does', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    const { rerender } = render(<CodeConversation session={session('idle')} events={[]} />)
+    let box = type('/stop')
+    expect(screen.getByRole('option').getAttribute('aria-disabled')).toBe('true')
+    expect(screen.getByRole('option').textContent).toContain(c.commands.reasons.notRunning)
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(post).not.toHaveBeenCalled()
+    rerender(<CodeConversation session={session('running')} events={[]} />)
+    box = screen.getByLabelText(c.message) as HTMLTextAreaElement
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/stop', {}))
+  })
+
+  it('opens the model and rename editors and saves them', async () => {
+    vi.mocked(patch).mockResolvedValue({ title: 'New', mode: 'code' })
+    const onRenamed = vi.fn()
+    render(<CodeConversation session={session('idle')} events={[]} onRenamed={onRenamed} />)
+    fireEvent.keyDown(type('/model'), { key: 'Enter' })
+    fireEvent.change(screen.getByLabelText(c.commands.model), { target: { value: 'gpt-x' } })
+    fireEvent.click(screen.getByRole('button', { name: c.commands.save }))
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { model: 'gpt-x' }),
+    )
+    await waitFor(() => expect(screen.queryByLabelText(c.commands.model)).toBeNull())
+    fireEvent.keyDown(type('/rename'), { key: 'Enter' })
+    fireEvent.change(screen.getByLabelText(c.commands.rename), { target: { value: 'New' } })
+    fireEvent.click(screen.getByRole('button', { name: c.commands.save }))
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { title: 'New' }),
+    )
+    await waitFor(() => expect(onRenamed).toHaveBeenCalledWith('New'))
+  })
+
+  it('ends the session with /end, and refuses it once ended', async () => {
+    vi.mocked(del).mockResolvedValue({})
+    const { unmount } = render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.keyDown(type('/end'), { key: 'Enter' })
+    await waitFor(() => expect(del).toHaveBeenCalledWith('/api/panel/code/sessions/s1'))
+    unmount()
+    render(<CodeConversation session={session('ended')} events={[]} />)
+    type('/end')
+    expect(screen.getByRole('option').textContent).toContain(c.commands.reasons.ended)
+  })
+
+  it('sends text that starts with a slash and matches no command', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    const box = type('/usr/bin is where')
+    expect(screen.queryByRole('option')).toBeNull()
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/messages', {
+        text: '/usr/bin is where',
+      }),
+    )
+    type('/nope')
+    expect(screen.queryByRole('option')).toBeNull()
   })
 })

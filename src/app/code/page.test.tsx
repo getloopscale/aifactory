@@ -240,6 +240,28 @@ describe('the side panel of an open session', () => {
     expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
   })
 
+  it('toggles Changes and Files from the slash commands', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const box = screen.getByLabelText(en.code.conversation.message)
+    const tabs = () => screen.queryByRole('tablist', { name: en.code.changes.tabs })
+    const run = (name: string) => {
+      fireEvent.change(box, { target: { value: `/${name}` } })
+      fireEvent.keyDown(box, { key: 'Enter' })
+    }
+    run('diff')
+    expect(tabs()).toBeNull()
+    expect((box as HTMLTextAreaElement).value).toBe('')
+    run('diff')
+    expect(tabs()).not.toBeNull()
+    run('files')
+    expect(screen.getByRole('tab', { name: en.code.files.tab }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    run('files')
+    expect(tabs()).toBeNull()
+  })
+
   it('reads the diff again when a turn ends', async () => {
     vi.mocked(get).mockImplementation(async (path: string) =>
       path.endsWith('/files') ? { files: [] } : diffs.shift(),
