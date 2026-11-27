@@ -296,7 +296,12 @@ function PlanCard({
               >
                 {c.reject}
               </Button>
-              <Button size="sm" variant="secondary" disabled={busy} onClick={() => setRevising(true)}>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setRevising(true)}
+              >
                 {c.revise}
               </Button>
               <Button size="sm" disabled={busy} onClick={() => void answer('accept')}>
