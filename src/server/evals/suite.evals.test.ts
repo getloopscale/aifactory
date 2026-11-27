@@ -125,9 +125,13 @@ async function freeSandboxSlots(cases: EvalCase[]): Promise<number | undefined> 
   try {
     const { sandbox } = await evalDeps(cases[0].repository, cases[0].labels)
     const provider = sandbox as Partial<SlotSource> | undefined
-    if (!provider?.listSandboxes || !provider.maxSandboxes) return undefined
+    if (!provider?.listSandboxes || !provider.maxSandboxes) {
+      console.warn('evals: the sandbox provider cannot say its free slots; the check runs one case at a time')
+      return undefined
+    }
     return provider.maxSandboxes - (await provider.listSandboxes()).length
-  } catch {
+  } catch (error) {
+    console.warn(`evals: could not read the free sandbox slots (${String(error)}); running one case at a time`)
     return undefined
   }
 }
