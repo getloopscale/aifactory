@@ -17,6 +17,7 @@ export type SandboxOwner =
   | { owner: 'review-pull-request'; repository: string; pull: number }
   | { owner: 'plan'; planId: number }
   | { owner: 'improve'; repository: string; kind: string }
+  | { owner: 'code'; sessionId: string }
 
 /** A sandbox as the provider lists it: what it was created with, and when. */
 export type ListedSandbox = { id: string; startedAt: Date; metadata: Record<string, string> }
@@ -104,6 +105,8 @@ export type SandboxFile = { path: string; content: string | Buffer }
  */
 export type IsolatedSandbox = {
   backend: SandboxBackend
+  /** The provider's id of the sandbox, when it has one a later `reconnect` can use. */
+  id?: string
   stop(): Promise<void>
   /**
    * Saves the disk and stops the sandbox, and returns what `restore` needs. The sandbox is gone
@@ -137,6 +140,8 @@ export interface IsolatedSandboxProvider {
   listSandboxes?(): Promise<ListedSandbox[]>
   /** Stops a sandbox by id. */
   killSandbox?(id: string): Promise<void>
+  /** Connects to a sandbox that is still up, by the id `IsolatedSandbox.id` gave, so it can be snapshotted or stopped. */
+  reconnect?(sandboxId: string, spec: SandboxSpec): Promise<IsolatedSandbox>
   /** Whether the template or image a spec of this image starts from exists on the provider, read without starting a sandbox. */
   imageAvailable?(image: SandboxImage): Promise<boolean>
   /** How many sandboxes the account may have up at once, when the plan says. */

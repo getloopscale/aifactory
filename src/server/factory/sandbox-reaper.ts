@@ -48,6 +48,8 @@ export type ReaperFacts = {
   graceMs: number
   tasks: Map<number, { stage: string; run: string | null }>
   leases: Map<string, LeaseFact>
+  /** The code sessions the listing names, by id. A session that is not here is gone. */
+  codeSessions: Map<string, { state: string }>
 }
 
 export type Kill = { id: string; reason: string }
@@ -65,6 +67,13 @@ function taskReason(m: Record<string, string>, facts: ReaperFacts): string | nul
     return `task ${m.taskId} is in ${row.stage}, which holds no sandbox`
   }
   return row.run === m.run ? null : `task ${m.taskId} is on another run than ${m.run}`
+}
+
+function codeReason(m: Record<string, string>, facts: ReaperFacts): string | null {
+  if (m.owner !== 'code') return null
+  const row = facts.codeSessions.get(m.sessionId)
+  if (!row) return `code session ${m.sessionId} does not exist`
+  return row.state === 'ended' ? `code session ${m.sessionId} has ended` : null
 }
 
 /**
@@ -97,7 +106,7 @@ function judge(s: ListedSandbox, facts: ReaperFacts): Judgement {
   }
   // Another application's sandbox on the same account, whatever words it uses: not the factory's to stop.
   if (m.app !== FACTORY_APP) return null
-  const reason = taskReason(m, facts)
+  const reason = taskReason(m, facts) ?? codeReason(m, facts)
   return reason ? { kill: reason } : leaseJudgement(m, facts)
 }
 
