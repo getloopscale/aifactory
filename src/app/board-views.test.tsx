@@ -263,19 +263,31 @@ describe('the risk of a task on its card', () => {
       vi.fn(async () => new Response(JSON.stringify({ tasks: cards }), { status: 200 })),
     )
 
-  it('shows the level, with the reasons naming the file and the pattern', async () => {
+  it('shows the level as a meter that says the level and the reasons, in no coloured word', async () => {
     const reason = 'drizzle/0049_x.sql matches high: drizzle/**'
     tasks(card(1, { risk: { sha: 'a', level: 'high', reasons: [reason] } }))
     at('/work')
-    await waitFor(() => expect(screen.getByText(en.board.risk.high)).toBeDefined())
-    expect(screen.getByText(en.board.risk.high).getAttribute('title')).toBe(reason)
+    const meter = await screen.findByRole('img', { name: `${en.board.risk.high}; ${reason}` })
+    expect(meter.getAttribute('data-risk')).toBe('high')
+    expect(meter.querySelectorAll('.bg-destructive')).toHaveLength(3)
+    expect(screen.queryByText(en.board.risk.high)).toBeNull()
+  })
+
+  it.each([
+    ['low', 1],
+    ['medium', 2],
+  ] as const)('fills %s as %i of the three bars', async (level, filled) => {
+    tasks(card(1, { risk: { sha: 'a', level, reasons: [] } }))
+    at('/work')
+    const meter = await screen.findByRole('img', { name: en.board.risk[level] })
+    expect(meter.querySelectorAll('.bg-border')).toHaveLength(3 - filled)
   })
 
   it('shows no level for a task from before it was recorded, or with none', async () => {
     tasks(card(1), card(2, { risk: null }))
     at('/work')
     await waitFor(() => expect(screen.getByText('Task 2')).toBeDefined())
-    for (const label of Object.values(en.board.risk)) expect(screen.queryByText(label)).toBeNull()
+    expect(document.querySelector('[data-risk]')).toBeNull()
   })
 })
 
