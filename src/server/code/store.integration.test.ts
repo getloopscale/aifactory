@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
+import { jobBackend } from '../factory/job-backend'
 import { EVENT_MAX_BYTES } from '../factory/transcript'
 
 import {
@@ -21,14 +22,14 @@ import {
   setMode,
   updateSession,
 } from './store'
-import { jobBackend } from '../factory/job-backend'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
-  await getPool().query('truncate table code_event, code_session')
+  await getPool().query('truncate table code_event, code_session, loopzero_jobs')
 })
 afterAll(() => getStorageManager().dispose())
 
@@ -178,6 +179,20 @@ describe('sending a message', () => {
     expect(await eventsAfter(e.id, 0, 10)).toEqual([])
     expect((await eventsAfter(s.id, 0, 10)).length).toBe(1)
     expect((await sendMessage('missing', 'hi')).kind).toBe('not_found')
+  })
+
+  it('takes a message for a stopped session and queues it', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'stopped' where id = $1`, [s.id])
+    expect((await sendMessage(s.id, 'hi')).kind).toBe('sent')
+    expect((await getSession(s.id))?.state).toBe('queued')
+  })
+
+  it('refuses a running session with its state and writes nothing', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'refused', state: 'running' })
+    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
   })
 
   it('stores no event when the job cannot be queued', async () => {

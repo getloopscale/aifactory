@@ -4,7 +4,10 @@ import { once } from 'node:events'
 import { describe, expect, it } from 'vitest'
 
 import { identityOf, processStart, THIS_PROCESS } from './sandbox-lease'
-import { processState } from './sandbox-reaper-facts'
+import type { Database } from '../db'
+import { codeSession } from '../db/schema'
+
+import { processState, readReaperFacts } from './sandbox-reaper-facts'
 
 const lease = { host: 'here', pid: 42, started: '100' }
 
@@ -56,5 +59,30 @@ describe('processStart', () => {
       throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
     }) as never
     expect(processStart(42, read)).toBeNull()
+  })
+})
+
+describe('readReaperFacts', () => {
+  const owned = (sessionId: string) => ({
+    id: `sbx-${sessionId}`,
+    startedAt: new Date(),
+    metadata: { app: 'aifactory', owner: 'code', sessionId },
+  })
+  const dbWith = (sessions: { id: string; state: string }[]) =>
+    ({
+      select: () => ({
+        from: (table: unknown) => ({
+          where: async () => (table === codeSession ? sessions : []),
+        }),
+      }),
+    }) as unknown as Database
+
+  it('reads the session a code sandbox names, and nothing for one that is gone', async () => {
+    const facts = await readReaperFacts(dbWith([{ id: 'here', state: 'ended' }]), [
+      owned('here'),
+      owned('gone'),
+    ])
+    expect(facts.codeSessions.get('here')).toEqual({ state: 'ended' })
+    expect(facts.codeSessions.has('gone')).toBe(false)
   })
 })

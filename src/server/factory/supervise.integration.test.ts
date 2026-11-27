@@ -8,7 +8,16 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { finding, ingress, lineIncident, question, stageEvent, task, watch } from '../db/schema'
+import {
+  codeSession,
+  finding,
+  ingress,
+  lineIncident,
+  question,
+  stageEvent,
+  task,
+  watch,
+} from '../db/schema'
 
 import { FakeSandbox } from './fake-sandbox'
 import type { SandboxOwner } from './sandbox'
@@ -426,6 +435,32 @@ describe('snapshots nothing needs', () => {
     expect(await keys({ listSnapshots: async () => [snap('snap-done', 90)] })).toEqual([
       'orphaned:snapshot:snap-done',
     ])
+  })
+
+  it('keeps the snapshot of a stopped code session and flags the one of an ended session', async () => {
+    const row = (id: string, state: 'stopped' | 'ended') => ({
+      id,
+      title: 't',
+      repository: 'acme/app',
+      baseBranch: 'workspace',
+      workBranch: `code/${id}`,
+      harness: 'codex',
+      mode: 'code' as const,
+      state,
+      snapshotId: `snap-${id}`,
+    })
+    await getDb()
+      .insert(codeSession)
+      .values([row('kept', 'stopped'), row('freed', 'ended')])
+    try {
+      expect(
+        await keys({
+          listSnapshots: async () => [snap('snap-kept', 90), snap('snap-freed', 90)],
+        }),
+      ).toEqual(['orphaned:snapshot:snap-freed'])
+    } finally {
+      await getDb().delete(codeSession)
+    }
   })
 })
 

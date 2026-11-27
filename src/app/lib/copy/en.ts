@@ -1675,6 +1675,18 @@ export const en = {
       unchanged: (n: number) => (n === 1 ? 'Show 1 unchanged line' : `Show ${n} unchanged lines`),
       stored: 'From the end of the last turn.',
     },
+    files: {
+      tab: 'Files',
+      filter: 'Filter files',
+      tree: 'Workspace files',
+      loading: 'Reading the files…',
+      empty: 'No files in the workspace',
+      noMatch: 'No file matches',
+      viewerOf: (path: string) => `Contents of ${path}`,
+      truncated: (n: number) => `Showing the first ${n} bytes: the file is longer.`,
+      mentions: 'Files to mention',
+      openFile: (path: string) => `Open ${path}`,
+    },
     conversation: {
       label: 'Conversation',
       empty: 'Nothing was said or done yet.',
@@ -1705,7 +1717,8 @@ export const en = {
         starting: 'Starting the agent…',
         running: 'The agent is working…',
         waiting_input: 'Waiting for you.',
-        stopped: 'Stopped. A message starts it again.',
+        stopped:
+          'Stopped to free its workspace. The next message restores it and starts the agent again.',
         ended: 'The session has ended.',
         failed: 'The last turn failed. A message tries again.',
       },

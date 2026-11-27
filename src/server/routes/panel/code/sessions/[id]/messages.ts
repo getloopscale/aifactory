@@ -16,7 +16,10 @@ export const POST = route()
       return Response.json({ error: 'not_found', message: 'No such session.' }, { status: 404 })
     }
     if (result.kind === 'refused') {
-      return Response.json({ error: 'refused', message: result.reason }, { status: 409 })
+      return Response.json(
+        { error: 'refused', message: result.reason, state: result.state },
+        { status: 409 },
+      )
     }
     return { event: toEventWire(result.event) }
   })

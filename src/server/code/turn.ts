@@ -7,8 +7,15 @@ import { untilSlotFree } from '../factory/sandbox-slot'
 import type { agentRun } from '../db/schema'
 
 import { turnMarker, type Claim, type NewCodeEvent } from './store'
+import { codeCapReached } from './slots'
 import { revertChanges } from './readonly-workspace'
-import { closeWorkspace, openWorkspace, type WorkspaceDeps } from './workspace'
+import {
+  closeWorkspace,
+  openWorkspace,
+  retainWorkspace,
+  WorkspaceCapped,
+  type WorkspaceDeps,
+} from './workspace'
 
 /** What a turn reads and writes in the database, so a test can stand in for it. */
 export type TurnStore = {
@@ -28,6 +35,12 @@ export type TurnDeps = {
   /** Remembers a refusal of the sandbox provider for credit or spending, so no run starts a sandbox for a while. */
   onRefusal(error: string): Promise<void>
   agentTimeoutMs?: number
+  /** How many code workspaces may be up; a turn that would start one over it waits in the queue. Absent is no cap. */
+  codeCap?: number
+  /** Runs `work` alone among the turns of every process, so the cap is counted and claimed in one step. */
+  underCapLock?<T>(work: () => Promise<T>): Promise<T>
+  /** Leaves the sandbox up after a turn that worked, for the idle cron to close. */
+  keepWorkspace?: boolean
   slotWait?: Parameters<typeof untilSlotFree>[1]
   signal?: AbortSignal
 }
@@ -36,6 +49,8 @@ export type TurnResult =
   | { status: 'nothing' }
   /** Another turn of the session runs: the job queues itself again. */
   | { status: 'busy' }
+  /** The code workspaces up fill the cap: the job queues itself again, and the session waits `queued`. */
+  | { status: 'capped' }
   /** The provider refused a sandbox for credit or spending: the job queues itself again after the pause. */
   | { status: 'deferred' }
   | { status: 'idle' | 'failed'; sessionId: string }
@@ -97,7 +112,26 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   try {
     harness = deps.harnessFor(session)
     await untilSlotFree(deps.workspace.sandbox, { ...deps.slotWait, signal: deps.signal })
-    workspace = await openWorkspace({ ...deps.workspace, harness }, session)
+    // The count and the sandbox it counts are one step: the lock is held until the workspace is up.
+    const lock = deps.underCapLock ?? ((work) => work())
+    const opened = await lock(async () => {
+      // The cap is asked only when a new sandbox is needed: a session whose retained sandbox is still up needs none.
+      const mayStart =
+        deps.codeCap === undefined
+          ? undefined
+          : async () => !(await codeCapReached(deps.workspace.sandbox, deps.codeCap!))
+      try {
+        return await openWorkspace({ ...deps.workspace, harness, mayStart }, session)
+      } catch (error) {
+        if (error instanceof WorkspaceCapped) return undefined
+        throw error
+      }
+    })
+    if (!opened) {
+      await store.move(sessionId, 'turn_released')
+      return { status: 'capped' }
+    }
+    workspace = opened
   } catch (error) {
     const reason = errorMessage(error)
     if (SANDBOX_PROVIDER_BLOCKED.test(reason)) {
@@ -168,7 +202,14 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   }
 
   try {
-    await closeWorkspace(deps.workspace, session, workspace)
+    const keep =
+      deps.keepWorkspace &&
+      failure === undefined &&
+      result?.ok &&
+      workspace.sandbox.id &&
+      deps.workspace.sandbox.reconnect
+    if (keep) await retainWorkspace(deps.workspace, session, workspace)
+    else await closeWorkspace(deps.workspace, session, workspace)
   } catch (error) {
     console.warn(`code_workspace_not_saved session=${sessionId}: ${errorMessage(error)}`)
   }

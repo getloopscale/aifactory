@@ -1,7 +1,14 @@
 import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/server/define'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createSession, listSessions, sendMessage } from '../../../code/store'
+import {
+  createSession,
+  getSession,
+  listSessions,
+  moveSession,
+  sendMessage,
+  updateSession,
+} from '../../../code/store'
 import { getDb } from '../../../db'
 import { DEFAULT_HARNESS, canStart, harnessRegistry } from '../../../factory/harness-registry'
 
@@ -15,6 +22,7 @@ vi.mock('../../../factory/harness-registry', () => ({
 
 let enabledRepository = true
 
+import { DELETE, GET as one, PATCH } from './sessions/[id]'
 import { POST as message } from './sessions/[id]/messages'
 import { GET, POST } from './sessions'
 
@@ -29,6 +37,9 @@ describe.each([
   ['GET /api/panel/code/sessions', GET],
   ['POST /api/panel/code/sessions', POST],
   ['POST /api/panel/code/sessions/:id/messages', message],
+  ['GET /api/panel/code/sessions/:id', one],
+  ['PATCH /api/panel/code/sessions/:id', PATCH],
+  ['DELETE /api/panel/code/sessions/:id', DELETE],
 ])('%s', (_name, handler) => {
   const policy = handler.policy as RoutePolicy<unknown, unknown, unknown>
 
@@ -158,5 +169,34 @@ describe('the handlers', () => {
     }
     expect(out.event.seq).toBe(1)
     expect(sendMessage).toHaveBeenCalledWith('s', 'hi')
+  })
+
+  const stored = { id: 's', mode: 'plan', createdAt: new Date(0), updatedAt: new Date(0) } as never
+
+  it('validates a PATCH and answers 404 for an unknown session', async () => {
+    expect(schema(PATCH).safeParse({ mode: 'plan' }).success).toBe(true)
+    expect(schema(PATCH).safeParse({ mode: 'root' }).success).toBe(false)
+    expect(schema(PATCH).safeParse({}).success).toBe(false)
+    vi.mocked(updateSession).mockResolvedValueOnce(undefined)
+    const response = (await run(PATCH, { params: { id: 'x' }, body: { mode: 'ask' } })) as Response
+    expect(response.status).toBe(404)
+  })
+
+  it('saves the mode and answers the session', async () => {
+    vi.mocked(updateSession).mockResolvedValueOnce(stored)
+    expect(await run(PATCH, { params: { id: 's' }, body: { mode: 'plan' } })).toMatchObject({
+      id: 's',
+      mode: 'plan',
+    })
+    expect(updateSession).toHaveBeenCalledWith('s', { mode: 'plan' })
+  })
+
+  it('reads one session and ends one', async () => {
+    vi.mocked(getSession).mockResolvedValueOnce(undefined)
+    expect(((await run(one, { params: { id: 'x' } })) as Response).status).toBe(404)
+    vi.mocked(getSession).mockResolvedValue(stored)
+    expect(await run(one, { params: { id: 's' } })).toMatchObject({ id: 's' })
+    await run(DELETE, { params: { id: 's' } })
+    expect(moveSession).toHaveBeenCalledWith('s', 'end')
   })
 })

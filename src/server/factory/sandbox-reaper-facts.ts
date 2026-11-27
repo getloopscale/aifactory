@@ -5,7 +5,7 @@ import { hostname } from 'node:os'
 import { inArray } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { sandboxLease, task } from '../db/schema'
+import { codeSession, sandboxLease, task } from '../db/schema'
 
 import type { ListedSandbox } from './sandbox'
 import { processStart } from './sandbox-lease'
@@ -53,12 +53,23 @@ export async function readReaperFacts(
       listing.filter((s) => s.metadata.owner === 'task').map((s) => Number(s.metadata.taskId)),
     ),
   ].filter(Number.isInteger)
+  const codeIds = [
+    ...new Set(
+      listing.flatMap((s) => (s.metadata.owner === 'code' ? (s.metadata.sessionId ?? []) : [])),
+    ),
+  ]
   const leaseIds = [...new Set(listing.flatMap((s) => s.metadata.lease ?? []))]
   const rows = taskIds.length
     ? await db
         .select({ id: task.id, stage: task.stage, run: task.sandboxRun })
         .from(task)
         .where(inArray(task.id, taskIds))
+    : []
+  const sessions = codeIds.length
+    ? await db
+        .select({ id: codeSession.id, state: codeSession.state })
+        .from(codeSession)
+        .where(inArray(codeSession.id, codeIds))
     : []
   const leases = leaseIds.length
     ? await db.select().from(sandboxLease).where(inArray(sandboxLease.id, leaseIds))
@@ -67,6 +78,7 @@ export async function readReaperFacts(
     now,
     graceMs: SANDBOX_GRACE_MS,
     tasks: new Map(rows.map((r) => [r.id, { stage: r.stage, run: r.run }])),
+    codeSessions: new Map(sessions.map((r) => [r.id, { state: r.state }])),
     leases: new Map(
       leases.map((l) => [
         l.id,

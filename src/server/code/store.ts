@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
+import { drizzle } from 'drizzle-orm/node-postgres'
 import { alias } from 'drizzle-orm/pg-core'
 
 import type {
@@ -11,12 +12,10 @@ import type {
   CodeSession,
   CodeState,
 } from '../../shared/code'
-import { drizzle } from 'drizzle-orm/node-postgres'
-
 import { getDb, getPool, type Database } from '../db'
 import * as schema from '../db/schema'
-import { jobBackend } from '../factory/job-backend'
 import { codeEvent, codeSession } from '../db/schema'
+import { jobBackend } from '../factory/job-backend'
 import { toStored } from '../factory/transcript'
 
 import { transition, type CodeTransitionEvent } from './transitions'
@@ -98,6 +97,11 @@ export async function saveWorkspaceSnapshot(
   return row
 }
 
+/** Says which sandbox is up for the session, or that none is. */
+export async function saveSandboxId(id: string, sandboxId: string | null): Promise<void> {
+  await getDb().update(codeSession).set({ sandboxId }).where(eq(codeSession.id, id))
+}
+
 /** Keeps the diff read from a workspace when a turn ended; the last one stays until a later read replaces it. */
 export async function saveLastDiff(id: string, diff: CodeDiff): Promise<void> {
   await getDb()
@@ -122,39 +126,44 @@ export async function loadLastDiff(
  * transaction, so two writers never read the same last `seq`. The content is redacted and cut like a transcript's.
  */
 export async function appendEvent(sessionId: string, event: NewCodeEvent): Promise<CodeEvent> {
+  return getDb().transaction((tx) => insertEvent(tx, sessionId, event))
+}
+
+type Tx = Pick<Database, 'select' | 'insert' | 'update'>
+
+/** The body of `appendEvent`, in the caller's transaction. */
+async function insertEvent(tx: Tx, sessionId: string, event: NewCodeEvent): Promise<CodeEvent> {
   const content = toStored({ kind: 'message', content: event.content }).content
-  return getDb().transaction(async (tx) => {
-    const locked = await tx
-      .select({ id: codeSession.id })
-      .from(codeSession)
-      .where(eq(codeSession.id, sessionId))
-      .for('update')
-    if (locked.length === 0) throw new Error(`Code session ${sessionId} does not exist.`)
-    const [last] = await tx
-      .select({ seq: sql<number>`coalesce(max(${codeEvent.seq}), 0)::int` })
-      .from(codeEvent)
-      .where(eq(codeEvent.sessionId, sessionId))
-    const [row] = await tx
-      .insert(codeEvent)
-      .values({
-        sessionId,
-        seq: (last?.seq ?? 0) + 1,
-        kind: event.kind,
-        tool: event.tool ?? null,
-        content,
-      })
-      .returning()
-    await tx
-      .update(codeSession)
-      .set({ updatedAt: sql`clock_timestamp()` })
-      .where(eq(codeSession.id, sessionId))
-    return row!
-  })
+  const locked = await tx
+    .select({ id: codeSession.id })
+    .from(codeSession)
+    .where(eq(codeSession.id, sessionId))
+    .for('update')
+  if (locked.length === 0) throw new Error(`Code session ${sessionId} does not exist.`)
+  const [last] = await tx
+    .select({ seq: sql<number>`coalesce(max(${codeEvent.seq}), 0)::int` })
+    .from(codeEvent)
+    .where(eq(codeEvent.sessionId, sessionId))
+  const [row] = await tx
+    .insert(codeEvent)
+    .values({
+      sessionId,
+      seq: (last?.seq ?? 0) + 1,
+      kind: event.kind,
+      tool: event.tool ?? null,
+      content,
+    })
+    .returning()
+  await tx
+    .update(codeSession)
+    .set({ updatedAt: sql`clock_timestamp()` })
+    .where(eq(codeSession.id, sessionId))
+  return row!
 }
 
 export type MessageResult =
   | { kind: 'sent'; event: CodeEvent; session: CodeSession }
-  | { kind: 'refused'; reason: string }
+  | { kind: 'refused'; reason: string; state: CodeState }
   | { kind: 'not_found' }
 
 /**
@@ -175,7 +184,7 @@ export async function sendMessage(sessionId: string, text: string): Promise<Mess
       if (!session) return { kind: 'not_found' as const }
       const outcome = transition(session.state, 'message')
       if (outcome.action !== 'move') {
-        return { kind: 'refused' as const, reason: outcome.reason }
+        return { kind: 'refused' as const, reason: outcome.reason, state: session.state }
       }
       const [last] = await tx
         .select({ seq: sql<number>`coalesce(max(${codeEvent.seq}), 0)::int` })
@@ -345,4 +354,61 @@ export async function saveAgentSession(
     .update(codeSession)
     .set({ agentSessionId, agentSessionHarness: harness, updatedAt: sql`now()` })
     .where(eq(codeSession.id, sessionId))
+}
+
+/** Sessions that are `idle` and had no event since `cutoff`: the ones whose workspace may be closed. */
+export function idleSessions(cutoff: Date): Promise<CodeSession[]> {
+  return getDb()
+    .select()
+    .from(codeSession)
+    .where(and(eq(codeSession.state, 'idle'), lt(codeSession.updatedAt, cutoff)))
+}
+
+/**
+ * Closes an idle session's workspace under the row's lock, so a message waits for it instead of racing it. The
+ * state and the last event are read again; `close` returns the snapshot to keep (the session's own when it made
+ * none), and the session ends `stopped` through `transitions.ts` with no sandbox id.
+ */
+export async function closeIdleSession(
+  sessionId: string,
+  cutoff: Date,
+  close: (session: CodeSession) => Promise<string | null>,
+): Promise<boolean> {
+  return getDb().transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(codeSession)
+      .where(eq(codeSession.id, sessionId))
+      .for('update')
+    if (!session || session.updatedAt.getTime() >= cutoff.getTime()) return false
+    const outcome = transition(session.state, 'idle_timeout')
+    if (outcome.action !== 'move') return false
+    const snapshotId = await close(session)
+    await tx
+      .update(codeSession)
+      .set({ state: outcome.state, snapshotId, sandboxId: null, updatedAt: sql`now()` })
+      .where(eq(codeSession.id, sessionId))
+    return true
+  })
+}
+
+/** Ended sessions that still hold a snapshot or a sandbox. */
+export function endedWithWorkspace(): Promise<CodeSession[]> {
+  return getDb()
+    .select()
+    .from(codeSession)
+    .where(
+      and(
+        eq(codeSession.state, 'ended'),
+        or(isNotNull(codeSession.snapshotId), isNotNull(codeSession.sandboxId)),
+      ),
+    )
+}
+
+/** Forgets what an ended session held, once it was freed. */
+export async function clearWorkspace(sessionId: string): Promise<void> {
+  await getDb()
+    .update(codeSession)
+    .set({ snapshotId: null, sandboxId: null })
+    .where(and(eq(codeSession.id, sessionId), eq(codeSession.state, 'ended')))
 }

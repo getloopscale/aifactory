@@ -3,7 +3,13 @@ import { ArrowLeft, Plus } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 
-import type { CodeDiffResponse, CodeEventWire, CodeMode, CodeSession } from '../../shared/code'
+import type {
+  CodeDiffResponse,
+  CodeEventWire,
+  CodeFilesResponse,
+  CodeMode,
+  CodeSession,
+} from '../../shared/code'
 import { CODE_MODES } from '../../shared/code'
 import type { RepositoriesView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
@@ -27,6 +33,7 @@ import { useWidth } from '../lib/media'
 
 import { CodeChanges } from './CodeChanges'
 import { CodeConversation } from './CodeConversation'
+import { CodeFiles } from './CodeFiles'
 
 /** A session as the API sends it: the dates are text. */
 type SessionView = Omit<CodeSession, 'createdAt' | 'updatedAt'> & {
@@ -275,10 +282,58 @@ function useCodeDiff(id: string, turn: number) {
   return state.id === id ? state : { id }
 }
 
-/** The panel beside the conversation. Changes is its first tab. */
-function SidePanel({ id, turn }: { id: string; turn: number }) {
+/** The files of a session's workspace, read again when a turn ends and when the id changes. */
+function useCodeFiles(id: string, turn: number) {
+  const [state, setState] = useState<{ id: string; files?: string[]; error?: string }>({ id })
+  useEffect(() => {
+    let alive = true
+    get<CodeFilesResponse>(`/api/panel/code/sessions/${encodeURIComponent(id)}/files`).then(
+      (data) => alive && setState({ id, files: data.files }),
+      (e: unknown) =>
+        alive &&
+        setState((v) => ({
+          id,
+          files: v.id === id ? v.files : undefined,
+          error: e instanceof Error ? e.message : String(e),
+        })),
+    )
+    return () => {
+      alive = false
+    }
+  }, [id, turn])
+  return state.id === id ? state : { id }
+}
+
+type Tab = 'changes' | 'files'
+
+const TAB = 'flex h-9 items-center border-b-2 px-2.5 text-[13px] font-medium text-foreground'
+
+/** The panel beside the conversation: Changes and Files. */
+function SidePanel({
+  id,
+  turn,
+  tab,
+  onTab,
+  files,
+  filesError,
+  selected,
+  onSelect,
+}: {
+  id: string
+  turn: number
+  tab: Tab
+  onTab: (tab: Tab) => void
+  files: string[] | undefined
+  filesError: string | undefined
+  selected: string | undefined
+  onSelect: (path: string) => void
+}) {
   const { t } = useCopy()
   const { data, error } = useCodeDiff(id, turn)
+  const tabs: Array<[Tab, string]> = [
+    ['changes', t.code.changes.title],
+    ['files', t.code.files.tab],
+  ]
   return (
     <Surface title={t.code.changes.panel} label={t.code.changes.panel}>
       <div
@@ -286,39 +341,55 @@ function SidePanel({ id, turn }: { id: string; turn: number }) {
         aria-label={t.code.changes.tabs}
         className="flex gap-1 border-b border-border px-2"
       >
-        <button
-          type="button"
-          role="tab"
-          aria-selected
-          className="-mb-px flex h-9 items-center border-b-2 border-primary px-2.5 text-[13px] font-medium text-foreground"
-        >
-          {t.code.changes.title}
-          {data && data.diff.files.length > 0 ? (
-            <span className="ml-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
-              {data.diff.files.length}
-            </span>
-          ) : null}
-        </button>
+        {tabs.map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => onTab(key)}
+            className={`-mb-px ${TAB} ${tab === key ? 'border-primary' : 'border-transparent text-muted-foreground'}`}
+          >
+            {label}
+            {key === 'changes' && data && data.diff.files.length > 0 ? (
+              <span className="ml-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {data.diff.files.length}
+              </span>
+            ) : null}
+          </button>
+        ))}
       </div>
       <div
         role="tabpanel"
-        aria-label={t.code.changes.title}
+        aria-label={tab === 'files' ? t.code.files.tab : t.code.changes.title}
         className="max-h-[calc(100vh-18rem)] overflow-y-auto"
       >
-        {error ? (
-          <p role="alert" className="px-4 py-3 text-sm text-destructive">
-            {error}
-          </p>
-        ) : null}
-        {data ? (
+        {tab === 'files' ? (
+          <CodeFiles
+            sessionId={id}
+            files={files}
+            error={filesError}
+            selected={selected}
+            onSelect={onSelect}
+          />
+        ) : (
           <>
-            <CodeChanges diff={data.diff} />
-            {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
-              <Quiet>{t.code.changes.stored}</Quiet>
+            {error ? (
+              <p role="alert" className="px-4 py-3 text-sm text-destructive">
+                {error}
+              </p>
             ) : null}
+            {data ? (
+              <>
+                <CodeChanges diff={data.diff} />
+                {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
+                  <Quiet>{t.code.changes.stored}</Quiet>
+                ) : null}
+              </>
+            ) : error ? null : (
+              <Quiet role="status">{t.code.changes.loading}</Quiet>
+            )}
           </>
-        ) : error ? null : (
-          <Quiet role="status">{t.code.changes.loading}</Quiet>
         )}
       </div>
     </Surface>
@@ -331,17 +402,37 @@ function OpenSession({ id }: { id: string }) {
   const compact = useWidth() === 'compact'
   const { session, events, error } = useCodeSession(id)
   const [panel, setPanel] = useState(true)
+  const [tab, setTab] = useState<Tab>('changes')
+  const [selected, setSelected] = useState<string>()
+  const turn = lastStateSeq(events)
+  const { files, error: filesError } = useCodeFiles(id, turn)
   const toggle = useCallback(() => setPanel((p) => !p), [])
+  const showFiles = useCallback(() => {
+    setPanel(true)
+    setTab('files')
+  }, [])
+  const openFile = useCallback(
+    (path: string) => {
+      setSelected(path)
+      showFiles()
+    },
+    [showFiles],
+  )
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
-      if (event.ctrlKey && event.shiftKey && !event.altKey && event.key.toLowerCase() === 'd') {
+      if (!event.ctrlKey || !event.shiftKey || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'd') {
         event.preventDefault()
         toggle()
+      } else if (key === 'f') {
+        event.preventDefault()
+        showFiles()
       }
     }
     window.addEventListener('keydown', listener)
     return () => window.removeEventListener('keydown', listener)
-  }, [toggle])
+  }, [toggle, showFiles])
   if (!session) return <Quiet>{error ?? t.code.conversation.loading}</Quiet>
   return (
     <div className={panel && !compact ? 'grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4' : ''}>
@@ -370,13 +461,28 @@ function OpenSession({ id }: { id: string }) {
             </p>
           ) : null}
           <div className="min-h-0 flex-1">
-            <CodeConversation key={session.id} session={session} events={events} />
+            <CodeConversation
+              key={session.id}
+              session={session}
+              events={events}
+              files={files}
+              onOpenFile={openFile}
+            />
           </div>
         </div>
       </Surface>
       {panel ? (
         <div className={compact ? 'mt-4' : ''}>
-          <SidePanel id={id} turn={lastStateSeq(events)} />
+          <SidePanel
+            id={id}
+            turn={turn}
+            tab={tab}
+            onTab={setTab}
+            files={files}
+            filesError={filesError}
+            selected={selected}
+            onSelect={setSelected}
+          />
         </div>
       ) : null}
     </div>

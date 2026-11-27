@@ -9,7 +9,7 @@ import { en } from '../lib/copy/en'
 import { ptBR } from '../lib/copy/pt-BR'
 import { WidthContext, type WidthClass } from '../lib/media'
 
-const session = (id: string, title: string, updatedAt: string) => ({
+const session = (id: string, title: string, updatedAt: string, state = 'running') => ({
   id,
   title,
   repository: 'acme/shop',
@@ -18,7 +18,7 @@ const session = (id: string, title: string, updatedAt: string) => ({
   harness: 'codex',
   model: null,
   mode: 'code',
-  state: 'running',
+  state,
   createdAt: updatedAt,
   updatedAt,
 })
@@ -39,7 +39,7 @@ vi.mock('../lib/live', () => ({
         }
       : {
           sessions: [
-            session('old', 'Older one', '2026-11-27T08:00:00Z'),
+            session('old', 'Older one', '2026-11-27T08:00:00Z', 'stopped'),
             session('new', 'Newer one', '2026-11-27T09:00:00Z'),
           ],
           harnesses: ['claude-code', 'codex'],
@@ -68,7 +68,10 @@ vi.mock('../lib/code-session', () => ({
   useCodeSession: (id: string) => {
     const extra = useSyncExternalStore(feed.subscribe, feed.snapshot)
     return {
-      session: { ...session(id, 'Open one', '2026-11-27T09:00:00Z'), repository: 'acme/shop' },
+      session: {
+        ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
+        repository: 'acme/shop',
+      },
       events: [
         { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
         ...extra,
@@ -88,7 +91,14 @@ beforeEach(() => {
   window.localStorage.clear()
   vi.mocked(post).mockReset()
   vi.mocked(get).mockReset()
-  vi.mocked(get).mockResolvedValue({ diff: { files: [] }, live: true, capturedAt: null })
+  vi.mocked(get).mockImplementation(async (path: string) => {
+    if (path.endsWith('/files')) return { files: ['README.md', 'src/app.ts'] }
+    if (path.includes('/file?path=')) {
+      const name = decodeURIComponent(path.split('path=')[1]!)
+      return { path: name, content: `first of ${name}\nsecond\n`, truncated: false, limit: 262144 }
+    }
+    return { diff: { files: [] }, live: true, capturedAt: null }
+  })
   feed.reset()
 })
 afterEach(cleanup)
@@ -129,11 +139,19 @@ describe.each([
     expect(screen.getByLabelText(t.code.agent)).toBeDefined()
     expect(screen.getByLabelText(t.code.mode)).toBeDefined()
     const dots = screen.getAllByRole('img', { name: t.code.states.running })
-    expect(dots).toHaveLength(2)
+    expect(dots).toHaveLength(1)
     expect(dots[0]!.className).toContain('bg-primary')
     expect(dots[0]!.textContent).toBe('')
+    expect(screen.getAllByRole('img', { name: t.code.states.stopped })).toHaveLength(1)
     const repos = screen.getByLabelText(t.code.repository) as HTMLSelectElement
     expect([...repos.options].map((o) => o.value)).toEqual(['acme/shop'])
+  })
+
+  it('says on a stopped session that the next message restores it', () => {
+    show(language, '/code/asleep')
+    expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe(
+      'status',
+    )
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
@@ -223,14 +241,49 @@ describe('the side panel of an open session', () => {
   })
 
   it('reads the diff again when a turn ends', async () => {
-    vi.mocked(get).mockResolvedValueOnce(diff(0)).mockResolvedValueOnce(diff(2))
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diffs.shift(),
+    )
+    const diffs = [diff(0), diff(2)]
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
-    expect(get).toHaveBeenCalledTimes(1)
     act(() =>
       feed.add({ sessionId: 'new', seq: 2, kind: 'state', tool: null, content: 'idle', at: '' }),
     )
     expect(await screen.findByText('f1.ts')).toBeDefined()
-    expect(get).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+  })
+
+  it('shows Files on Ctrl+Shift+F, even with the panel hidden, and opens a file with line numbers', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'F', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('tab', { name: en.code.files.tab }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'README.md' }))
+    expect(await screen.findByText('first of README.md')).toBeDefined()
+    expect(document.querySelector('[data-line="2"]')?.textContent).toBe('2second')
+  })
+
+  it('opens in the viewer a path an agent names', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() =>
+      feed.add({
+        sessionId: 'new',
+        seq: 2,
+        kind: 'agent_message',
+        tool: null,
+        content: 'I changed src/app.ts for you.',
+        at: '',
+      }),
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'src/app.ts' }))
+    expect(await screen.findByText('first of src/app.ts')).toBeDefined()
+    expect(screen.getByRole('tab', { name: en.code.files.tab }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
   })
 })

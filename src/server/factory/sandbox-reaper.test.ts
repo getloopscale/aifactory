@@ -33,6 +33,7 @@ const facts = (over: Partial<ReaperFacts> = {}): ReaperFacts => ({
   now: NOW,
   graceMs: SANDBOX_GRACE_MS,
   tasks: new Map(),
+  codeSessions: new Map(),
   leases: new Map([['live', lease()]]),
   ...over,
 })
@@ -54,6 +55,20 @@ describe('metadataFor', () => {
       lease: 'l',
     })
     expect(metadataFor(undefined, { host: 'h', lease: 'l' })).toEqual({})
+  })
+})
+
+describe('code workspaces', () => {
+  const code = (sessionId: string) => made({ owner: 'code', sessionId })
+  it('kills one whose session ended or is gone, and keeps one whose session lives', () => {
+    const f = facts({
+      codeSessions: new Map([
+        ['a', { state: 'ended' }],
+        ['b', { state: 'idle' }],
+      ]),
+    })
+    const listing = [sbx('s-a', code('a')), sbx('s-b', code('b')), sbx('s-c', code('c'))]
+    expect(killed(listing, f)).toEqual(['s-a', 's-c'])
   })
 })
 
