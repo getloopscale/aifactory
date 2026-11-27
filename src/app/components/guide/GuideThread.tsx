@@ -1,4 +1,3 @@
-import { ScrollArea } from '@getloopscale/ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAgent } from '@getloopscale/loopzero/client'
 
@@ -21,7 +20,8 @@ import { ChatgptConnect } from '../chat/ChatgptConnect'
 import { ModelPicker } from '../chat/ModelPicker'
 import { Messages } from '../chat/Messages'
 import { Pending } from '../chat/Pending'
-import { PillComposer } from '../chat/PillComposer'
+import { FollowScroll } from '../chat/FollowScroll'
+import { MessageBox } from '../chat/MessageBox'
 
 function Chips({
   title,
@@ -123,7 +123,7 @@ export function GuideThread({
 
   return (
     <div className={active ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
-      <ScrollArea className="min-h-0 flex-1">
+      <FollowScroll count={messages.length} watch={messages} className="min-h-0 flex-1">
         <div className="px-5 py-5">
           {messages.length === 0 ? (
             <div>
@@ -136,11 +136,11 @@ export function GuideThread({
             <Messages messages={messages} running={running} model={guide.name} />
           )}
         </div>
-      </ScrollArea>
+      </FollowScroll>
       <div className="px-4 pb-4">
         <Pending conversation={agent} />
         {needsConnection ? <ChatgptConnect onConnected={recheck} /> : null}
-        <PillComposer
+        <MessageBox
           starts={[]}
           value={value}
           onValueChange={setValue}
@@ -148,7 +148,7 @@ export function GuideThread({
           running={running}
           onStop={() => agent.abort()}
           placeholder={t.guide.placeholder}
-          trailing={<ModelPicker model={model} onChange={changeModel} />}
+          trailing={<ModelPicker model={model} onChange={changeModel} use="guide" />}
         />
         {guide.note ? <p className="mt-2 px-3 text-xs text-foreground/50">{guide.note}</p> : null}
       </div>

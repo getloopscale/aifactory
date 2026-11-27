@@ -81,7 +81,7 @@ local inspecionado em 2026-11-03.
 | M10   | Repositórios e configurações                                    | Só repositórios habilitados geram task; agentes, checks, domínios e release por repositório; primeiro projeto real                                                                                                      | Parcial      |
 | M11   | Novo job pelo painel                                            | O painel abre a issue com a label e a task nasce pelo caminho normal do webhook                                                                                                                                         | Concluído    |
 | M12   | Transcrição ao vivo                                             | O painel mostra o que o agente faz enquanto faz, e o transcript fica gravado                                                                                                                                            | Concluído    |
-| M13   | Conversa com os agentes                                         | O Paulo escreve para a instância que está implementando, ou para uma que parou, pelo painel                                                                                                                             | Não iniciado |
+| M13   | Conversa com os agentes                                         | O Paulo escreve para a instância que está implementando, ou para uma que parou, pelo painel                                                                                                                             | Parcial      |
 | M14   | Painel acessível de fora                                        | O painel abre fora desta máquina, atrás de um acesso próprio, sem abrir o resto                                                                                                                                         | Não iniciado |
 | M15   | Painel como chat                                                | Menu lateral e abas Chat/Work no visual do ChatGPT, com um assistente conversacional (OpenRouter ou assinatura do ChatGPT) que lê a fábrica e só age com aprovação; conversas salvas no Postgres                        | Concluído    |
 | M16   | Um guia por página                                              | Quadro, Planos, Repositórios, Caixa de entrada, Saúde e Configuração têm cada um um especialista ao lado da página, que sabe onde o dono está, consulta os dados e só muda algo com aprovação, mostrando antes e depois | Concluído    |
@@ -248,6 +248,10 @@ Critérios de aceite:
 ### M13: conversa com os agentes
 
 > Verified 2026-11-25 in `docs/adr/0013-agent-conversation.md`; the spikes forced two changes: Codex has no delivery to a running process, and a parallel `--resume` is not delivery.
+>
+> Merged into `workspace` by 2026-11-25: the CLI session kept in the database (#526), writing to a stopped agent in
+> ask or guide mode (#527), and delivery to a working agent (#528). The live acceptance criteria below have no
+> recorded run yet.
 
 O Paulo escreve para um agente pelo painel. Há dois casos, e eles têm mecânicas diferentes.
 

@@ -1,5 +1,6 @@
 import { ArrowUp, ChevronRight, MessagesSquare, SquareTerminal } from 'lucide-react'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { FOLLOWING, follows } from './chat/FollowScroll'
 
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
 import { Button, Textarea } from '@getloopscale/ui'
@@ -24,9 +25,10 @@ import { Terminal } from './Terminal'
 import { StepRow } from './Transcript'
 import { AgentIcon } from './floor/AgentIcon'
 import { Surface } from './ui/Surface'
+import { enterSends } from '../lib/enter-sends'
 
 /** The stages where the agent has stopped and the owner may write to it. The server decides again. */
-export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed']
+export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed', 'released', 'cancelled']
 /** The stages where a pass takes a message while it works, and the role whose pass it is. */
 export const LIVE = { build: 'builder', review: 'reviewer' } as const
 
@@ -293,15 +295,17 @@ function Thread({
   stuck: RefObject<boolean>
 }) {
   const { t } = useCopy()
+  const lastTop = useRef(0)
   return (
     <div
       hidden={hidden}
       ref={scroller}
       onScroll={(e) => {
         const box = e.currentTarget
-        stuck.current = box.scrollHeight - box.scrollTop - box.clientHeight < 24
+        stuck.current = follows(stuck.current, box, lastTop.current)
+        lastTop.current = box.scrollTop
       }}
-      className={`overflow-y-auto pr-2 ${tall ? 'min-h-0 flex-1' : 'max-h-[32rem]'}`}
+      className={`${FOLLOWING} pr-2 ${tall ? 'min-h-0 flex-1' : 'max-h-[32rem]'}`}
     >
       {shown.length === 0 ? (
         <p className="text-sm text-muted-foreground">
@@ -389,16 +393,16 @@ function Composer({
       <div className="rounded-xl border border-border bg-background focus-within:border-foreground/40">
         <label className="block">
           <span className="sr-only">{t.conversation.label}</span>
-          <Textarea
+          {/* A plain textarea: the library's has a fill and corners of its own, which drew a box inside this one. */}
+          <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !busy && text.trim() !== '')
-                void send()
-            }}
+            onKeyDown={enterSends(() => {
+              if (!busy && text.trim() !== '') void send()
+            })}
             rows={1}
             placeholder={t.conversation.placeholder}
-            className="field-sizing-content max-h-40 min-h-9 w-full resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+            className="field-sizing-content block max-h-[40vh] min-h-6 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground"
           />
         </label>
         <div className="flex items-center gap-2 px-2 pb-2">
@@ -543,10 +547,30 @@ export function Conversation({
     return () => clearInterval(timer)
   }, [liveRole])
 
-  useEffect(() => {
+  // What the owner just sent, and the thread of another agent, are read from the end, wherever the box was.
+  const sent = messages.length
+  const lastSent = useRef(sent)
+  const lastRole = useRef(role)
+  useLayoutEffect(() => {
+    if (sent > lastSent.current || role !== lastRole.current) stuck.current = true
+    lastSent.current = sent
+    lastRole.current = role
     const box = scroller.current
     if (box && stuck.current) box.scrollTop = box.scrollHeight
-  }, [shown.length, activity])
+  }, [shown.length, activity, sent, role])
+
+  // A row can grow with no new row: an answer that renders, a folded pass that opens, the box under it resizing.
+  useLayoutEffect(() => {
+    const box = scroller.current
+    const inner = box?.firstElementChild
+    if (!box || !inner || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (stuck.current) box.scrollTop = box.scrollHeight
+    })
+    observer.observe(inner)
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [role, shown.length === 0])
 
   useEffect(() => {
     if (!target) return

@@ -459,7 +459,17 @@ export type TaskCard = {
   working: AgentStep | null
   /** The agent that planned, built or reviewed the task last; null before any did. */
   lastAgent: AgentSeen | null
+  /** The labels the item had when it reached the factory, without the one that asks for the work; absent on a card built without them. */
+  labels?: string[]
+  /** Who opened the item: a person, the factory itself (a plan, a follow-up, a proposal) or Linear. */
+  origin?: CardOrigin
+  /** How many checks passed on the commit the task is at; null when none ran there. */
+  checks?: CardChecks | null
 }
+
+export type CardOrigin = 'person' | 'factory' | 'linear'
+
+export type CardChecks = { passed: number; total: number }
 
 /** An agent by the name the factory knows it by (`claude-code`, `codex`, ...), and the model it ran with. */
 export type AgentSeen = {
@@ -967,6 +977,9 @@ export type ChatSummary = {
 
 /** Which agent answers: the OpenRouter one, or the one that uses the owner's ChatGPT (Codex) subscription. */
 export type ChatModel = 'openrouter' | 'codex'
+
+/** The model behind each choice of the picker, for the chat and for the guides of the pages, as the owner reads it. */
+export type ChatModels = Record<'chat' | 'guide', Record<ChatModel, string>>
 
 /** A message as the page renders it: an id, a role, and parts (text, tool calls, ...). */
 export type ChatMessageView = {

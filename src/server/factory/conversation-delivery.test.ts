@@ -203,10 +203,31 @@ describe('delivering a message', () => {
     expect((await deliverMessage(busy.deps, message)).delivery).toBe('failed')
   })
 
-  it('fails a message when the task kept no session, or another harness kept it', async () => {
+  it('answers in a new session, told what the task was, when the task kept none', async () => {
     mocks.stored = undefined
-    const none = setup([[taskRow()]], repo(false))
-    expect((await deliverMessage(none.deps, message)).reason).toContain('no session')
+    const sandbox = new FakeSandbox((command) => {
+      if (command.includes('--permission-mode plan')) {
+        return {
+          stdout: JSON.stringify({ result: 'the answer', total_cost_usd: 0.5, session_id: 's2' }),
+        }
+      }
+      if (command.includes('rev-parse HEAD')) return { stdout: 'abc\n' }
+      return {}
+    })
+    const { deps } = setup([[taskRow()], undefined, undefined, [taskRow()]], sandbox, {
+      githubApi: { branchHead: async () => undefined } as never,
+    })
+    const ended = await deliverMessage(deps, message)
+    expect(ended).toMatchObject({ delivery: 'delivered', answer: 'the answer' })
+    expect(sandbox.backend.commands.some((c) => c.includes('--resume'))).toBe(false)
+    const prompt = sandbox.backend.files.get('/tmp/factory-prompt.md') ?? ''
+    expect(prompt).toContain('You have no memory of that work')
+    expect(prompt).toContain('what did you do?')
+    // The session of the answer is kept, so the next question continues from it.
+    expect(mocks.saved.length).toBeGreaterThan(0)
+  })
+
+  it('fails a message when another harness kept the session', async () => {
     mocks.stored = { harness: 'codex' }
     const other = setup([[taskRow()]], repo(false))
     expect((await deliverMessage(other.deps, message)).reason).toContain("codex's")

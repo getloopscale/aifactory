@@ -5,6 +5,7 @@ import { eq, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
 import { repository, task } from '../db/schema'
+import { laneOf, type Lane } from '../../shared/lanes'
 import { type Column } from '../../shared/panel'
 import { listTasks, taskDetail } from '../panel/queries'
 
@@ -24,6 +25,16 @@ const COLUMN_TITLES: Record<Column, string> = {
   attention: 'Needs a person',
 }
 const columnTitle = (column: Column) => COLUMN_TITLES[column] ?? column
+
+/** The six lanes the board draws, by the title the screen writes. A lane groups the finer states above. */
+const LANE_TITLES: Record<Lane, string> = {
+  todo: 'To do',
+  needs_you: 'Needs you',
+  running: 'Running',
+  ready: 'Ready',
+  done: 'Done',
+  cancelled: 'Cancelled',
+}
 
 const cut = (value: unknown, max = TEXT_MAX) =>
   typeof value === 'string' ? value.replace(/\s+/g, ' ').slice(0, max) : value
@@ -71,9 +82,15 @@ export async function findTasks(db: Database, filter: TaskFilter) {
   const cards = await listTasks(db)
   return cards
     .filter((c) => !filter.stage || c.stage === filter.stage)
-    .filter(
-      (c) => !filter.column || columnTitle(c.column).toLowerCase() === filter.column.toLowerCase(),
-    )
+    .filter((c) => {
+      // A lane of the screen or the finer state inside it: the owner says the first, the assistant may need the second.
+      const wanted = filter.column?.toLowerCase()
+      return (
+        !wanted ||
+        LANE_TITLES[laneOf(c)].toLowerCase() === wanted ||
+        columnTitle(c.column).toLowerCase() === wanted
+      )
+    })
     .filter(
       (c) =>
         !filter.repository || c.repository.toLowerCase().includes(filter.repository.toLowerCase()),
@@ -86,6 +103,7 @@ export async function findTasks(db: Database, filter: TaskFilter) {
       issue: c.issueNumber,
       title: cut(c.title, 120),
       stage: c.stage,
+      lane: LANE_TITLES[laneOf(c)],
       column: columnTitle(c.column),
       integrated: c.integrated,
       willRetryBecause: c.retryable,

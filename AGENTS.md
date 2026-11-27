@@ -15,15 +15,15 @@ it is the right place for what someone needs to know before changing code here.
 
 | What                 | Command                                                      |
 | -------------------- | ------------------------------------------------------------ |
-| Run in development   | `npm run dev`                                                |
+| Run in development   | `pnpm dev`                                                   |
 | Publish a change     | `scripts/deploy.sh` (build, restart server, workers, feeder) |
-| Build for production | `npm run build`                                              |
-| Serve the build      | `npm start`                                                  |
-| Tests (unit)         | `npm test`                                                   |
-| Tests (Postgres)     | `npm run test:integration`                                   |
-| Types                | `npm run typecheck`                                          |
-| Lint / format        | `npm run lint` · `npm run format:check`                      |
-| Quality gates        | `npm run quality` (coverage, CRAP, duplication, mutation)    |
+| Build for production | `pnpm build`                                                 |
+| Serve the build      | `pnpm start`                                                 |
+| Tests (unit)         | `pnpm test`                                                  |
+| Tests (Postgres)     | `pnpm test:integration`                                      |
+| Types                | `pnpm typecheck`                                             |
+| Lint / format        | `pnpm lint` · `pnpm format:check`                            |
+| Quality gates        | `pnpm quality` (coverage, CRAP, duplication, mutation)       |
 
 The integration suite needs Postgres (`docker compose up -d`) and `DATABASE_URL` exported; it fails
 without it on purpose. It never touches that database: a setup file points the suites at
@@ -38,7 +38,8 @@ suite, so a formatting slip fails the build rather than surfacing in review.
 ```
 src/app/            frontend — the only half that reaches a browser
 src/server/         backend — never leaves the machine
-  agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
+  agents/           the assistants that run in the server process (`chat`, a guide for each panel page, `assist`,
+                    `assist-setup`, each with a `-codex` twin except the last two), their tools, prompts and hooks
   code/             Code Mode: a session's workspace, its event log and its turns (ADR 0014; planned)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
@@ -53,10 +54,18 @@ src/server/         backend — never leaves the machine
   scheduler/        the order of the queued runs and the readiness of newly queued issues
   factory/          one task end to end: sandbox, agent, push, stage history; the repository doctor
   github/           GitHub App auth (repository-scoped tokens) and issue reads
-  jobs/             defineJob files; `run-task` runs a task, `merge-task` opens and integrates the pull request
-                    of approved work, `prove-checks` proves proposed checks
+  jobs/             defineJob files; `run-task` runs a task, `resume-task` continues one whose question was answered,
+                    `merge-task` opens and integrates the pull request of approved work, `conversation` delivers the
+                    owner's messages to a stopped task's agent, `plan-run` splits a goal into issues,
+                    `review-pull-request` reviews a pull request the factory did not open, `prove-checks` proves
+                    proposed checks
+  line/             a stopped line: the decision over a red promotion and the `line_incident` reads and writes
+  work-source/      what the factory asks of a tracker that is not GitHub (`contract.ts`), and which one a task uses
+  linear/           Linear as a work source: signed webhook, GraphQL client, a rate-limit gate of its own
+  evals/            the evaluation suite: cases from delivered tasks, `run-case.ts`, the comparison with the baseline
   routes/           file-based HTTP
 src/shared/         contracts both sides import (`panel.ts` is what the panel API returns)
+src/test/           helpers the suites share: the test database, a fake GitHub, a local sandbox backend
 .loopzero/           agent context read at runtime (no rebuild)
 ```
 
