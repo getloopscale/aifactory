@@ -90,10 +90,11 @@ jobs:
   # The tests must catch changes to the logic: mutation score of the decision code at 90 or more. Its own job,
   # beside `quality`, because it is the slowest gate and grows with every module added to `stryker.config.json`:
   # inside `quality` it ran after coverage and hit that job's limit on slower runners (#181). It runs only unit
-  # tests (`vitest.stryker.config.ts`), so it needs no database.
+  # tests (`vitest.stryker.config.ts`), so it needs no database. The limit leaves room over the slowest runs: on
+  # 2026-11-27 they took 24 to 38 minutes, and a limit of 40 cancelled one that would have passed.
   mutation:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
