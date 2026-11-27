@@ -258,7 +258,11 @@ export function CodeConversation({
   const box = useRef<HTMLTextAreaElement>(null)
   const place = useRef<number | undefined>(undefined)
   const mention = menuOff ? undefined : mentionAt(text, caret)
-  const options = useMemo(() => (mention ? mentionMatches(files, mention.query) : []))
+  const query = mention?.query
+  const options = useMemo(
+    () => (query === undefined ? [] : mentionMatches(files, query)),
+    [files, query],
+  )
   const choose = (path: string) => {
     if (!mention) return
     const end = mention.start + 1 + mention.query.length
