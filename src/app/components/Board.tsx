@@ -1,3 +1,4 @@
+import { Tooltip } from '@getloopscale/ui'
 import { Bot, FlaskConical as FlaskIcon, ListTodo, User } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
@@ -269,6 +270,49 @@ function Origin({ origin }: { origin: NonNullable<TaskCard['origin']> }) {
   )
 }
 
+const RISK_BARS = { low: 1, medium: 2, high: 3 }
+const RISK_FILL = { low: 'bg-muted-foreground', medium: 'bg-warning', high: 'bg-destructive' }
+
+/**
+ * The risk of the change as three bars, like a signal: one, two or three filled, in the colour of the level. The
+ * level and the reasons are in the tooltip and in the label a screen reader says, so no word carries the colour.
+ */
+export function RiskMeter({ risk }: { risk: NonNullable<TaskCard['risk']> }) {
+  const { t } = useCopy()
+  const filled = RISK_BARS[risk.level]
+  const label = t.board.risk[risk.level]
+  return (
+    <Tooltip
+      delayDuration={150}
+      label={
+        <span className="block max-w-64 text-left">
+          <span className="block font-medium">{label}</span>
+          {risk.reasons.map((reason) => (
+            <span key={reason} className="block text-muted-foreground">
+              {reason}
+            </span>
+          ))}
+        </span>
+      }
+    >
+      <span
+        role="img"
+        data-risk={risk.level}
+        aria-label={[label, ...risk.reasons].join('; ')}
+        className="inline-flex h-3 items-end gap-px"
+      >
+        {[1, 2, 3].map((bar) => (
+          <span
+            key={bar}
+            aria-hidden
+            className={`w-[3px] rounded-[1px] ${bar === 1 ? 'h-1' : bar === 2 ? 'h-2' : 'h-3'} ${bar <= filled ? RISK_FILL[risk.level] : 'bg-border'}`}
+          />
+        ))}
+      </span>
+    </Tooltip>
+  )
+}
+
 export function Card({ task, need }: { task: TaskCard; need?: Need }) {
   const { t } = useCopy()
   // The card whose task is open beside the board.
@@ -325,14 +369,7 @@ export function Card({ task, need }: { task: TaskCard; need?: Need }) {
               +{task.change.added} −{task.change.removed}
             </span>
           ) : null}
-          {task.risk ? (
-            <span
-              className={task.risk.level === 'high' ? 'font-medium text-destructive' : undefined}
-              title={t.board.riskReasons(task.risk.reasons)}
-            >
-              {t.board.risk[task.risk.level]}
-            </span>
-          ) : null}
+          {task.risk ? <RiskMeter risk={task.risk} /> : null}
           {task.checks ? (
             <span data-checks={task.checks.passed === task.checks.total ? 'passed' : 'failed'}>
               <span
