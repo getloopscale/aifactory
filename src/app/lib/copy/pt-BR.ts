@@ -1996,6 +1996,12 @@ export const ptBR: Copy = {
       failed: 'Falhou',
       noOutput: 'Sem saída.',
       running: 'Ainda sem resultado.',
+      modeLabel: 'Modo',
+      modeAbout: {
+        ask: 'Responde perguntas sobre o código. Não altera nada.',
+        plan: 'Lê o código e escreve um plano. Não altera nada.',
+        code: 'Lê, edita arquivos e roda comandos no checkout.',
+      },
       send: 'Enviar',
       sending: 'Enviando…',
       message: 'Mensagem para o agente',
