@@ -377,7 +377,10 @@ reads that file, not a convention.
   input) whose issue has no verdict for its current title and body (`bodyHash`), a judge built by `buildAssistant`
   (`judge.ts`, the prompt in `agents/prompts/readiness.ts`) answers `ready` or `needs_refinement`, with what is missing
   and one question. An answer that does not parse is `ready` with its error recorded, and a judge that throws records
-  nothing. In `auto` a `needs_refinement` task asks `transitions.ts` (`needs_refinement`, `ask_owner`), its queued run
+  nothing. A free worker takes a new task's run before any pass sees it, so the `run-task` job judges a first run
+  itself before any sandbox starts (`scheduler/start-readiness.ts`, the cron's own steps with the job it holds: nothing
+  is withdrawn, the task row is locked in `intake`); there a judge that throws or answers past `JUDGE_TIMEOUT_MS` is
+  recorded as `ready` with its error, and the run starts. In `auto` a `needs_refinement` task asks `transitions.ts` (`needs_refinement`, `ask_owner`), its queued run
   is deleted, the question goes on the issue with `questionComment`, a `question` row with `origin` `readiness` and no
   sandbox is stored and the task enters `waiting`, all in one transaction; `poll-answers` takes the answer, puts the
   task back in `intake` and queues its first run, whose prompt carries the answers (`clarifications`). Then the order:

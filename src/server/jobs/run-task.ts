@@ -12,6 +12,7 @@ import { deferJobAfterRefusal, deferJobWhilePaused } from '../factory/provider-p
 import { sendBackWithdrawn } from '../factory/send-back'
 import { runTask } from '../factory/run-task'
 import { runContinuation } from '../factory/run-support'
+import { startReadiness } from '../scheduler/start-readiness'
 
 export default defineJob('run-task', {
   input: z.object({
@@ -47,6 +48,12 @@ export default defineJob('run-task', {
 
     // The lease is two minutes and a run up to half an hour: renew it while the run is alive.
     await withLeaseHeartbeat(extendLease, async () => {
+      // A first run's issue is judged before any sandbox starts, even when no pass of the scheduler saw it queued;
+      // in `auto` a task that is not ready is held back here and this job ends.
+      if (await startReadiness(input.taskId, input)) {
+        console.log(JSON.stringify({ event: 'task_held', taskId: input.taskId, why: 'readiness' }))
+        return
+      }
       const [decided] = input.decisionId
         ? await getDb().select().from(decision).where(eq(decision.id, input.decisionId))
         : []

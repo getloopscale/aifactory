@@ -6,7 +6,6 @@ import {
   Clock,
   Eye,
   FlaskConical,
-  History,
   PackageCheck,
   PanelRightClose,
   PanelRightOpen,
@@ -28,6 +27,7 @@ import { PlanSection } from './PlanSection'
 import { WatchPanel } from './WatchPanel'
 import { Conversation } from './Conversation'
 import { Changes } from './Changes'
+import { TaskTimeline } from './TaskTimeline'
 import { TaskActions, actionsOf } from './TaskActions'
 import { useTranscript } from './Transcript'
 import { AgentIcon } from './floor/AgentIcon'
@@ -43,7 +43,7 @@ import {
   TABLE,
 } from './ui/Surface'
 import { ItemId } from './ui/ItemId'
-import { ago, describeEvent, money, shortSha } from '../lib/format'
+import { ago, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { CI_TONE } from './Ci'
 import { useResource } from '../lib/live'
@@ -52,7 +52,7 @@ import { useWidth } from '../lib/media'
 /** Inside the frame of a tabbed task, the well its blocks sit in, under the head. */
 const WELL = 'flex min-w-0 flex-col gap-3 bg-background px-3 pb-3'
 
-const TASK_TABS = ['activity', 'changes', 'runs', 'evidence', 'reviews'] as const
+const TASK_TABS = ['timeline', 'activity', 'changes', 'runs', 'evidence', 'reviews'] as const
 /** In one column the conversation is a tab too, and the first. */
 const PANES = ['conversation', ...TASK_TABS] as const
 type TaskTab = (typeof PANES)[number]
@@ -151,7 +151,7 @@ function arrange(a: { workbench: boolean; wide: boolean; tabbed: boolean; picked
   const beside = a.workbench && a.wide && !a.tabbed
   /** Tabs take the place of the stack, beside the conversation or over it. */
   const split = beside || a.tabbed
-  const tab: TaskTab = a.picked ?? (a.tabbed ? 'conversation' : 'activity')
+  const tab: TaskTab = a.picked ?? (a.tabbed ? 'conversation' : 'timeline')
   const talking = a.tabbed && tab === 'conversation'
   const layout: Layout = beside ? 'workbench' : a.tabbed ? 'tabbed' : 'stack'
   return { layout, beside, split, tab, talking }
@@ -636,7 +636,8 @@ export function TaskDetailView({
 
   const counts: Record<TaskTab, number> = {
     conversation: 0,
-    activity: detail.timeline.length,
+    timeline: detail.timeline.length,
+    activity: detail.watches.length + detail.coordinatorActions.length + detail.deliveries.length,
     // What the pull request changes is read from GitHub only once the tab is opened, so it has no count.
     changes: 0,
     runs: detail.runs.length,
@@ -689,6 +690,9 @@ export function TaskDetailView({
             <SideToggle closed={false} onToggle={() => setClosed(true)} />
           </div>
         ) : null}
+        <TaskPane id="timeline" active={tab} split={split}>
+          <TaskTimeline events={detail.timeline} />
+        </TaskPane>
         <TaskPane id="activity" active={tab} split={split}>
           <WatchPanel watches={detail.watches} onDone={resource.reload} />
 
@@ -701,19 +705,6 @@ export function TaskDetailView({
           <PullRequestChecks ci={detail.task.ci} />
 
           <Deliveries deliveries={detail.deliveries} />
-
-          <Surface title={t.task.timeline} icon={History}>
-            <ol className="divide-y divide-border">
-              {detail.timeline.map((event) => (
-                <Row
-                  key={event.id}
-                  title={event.stage}
-                  detail={describeEvent(event, t.events) || undefined}
-                  trail={ago(event.at, Date.now(), t.time)}
-                />
-              ))}
-            </ol>
-          </Surface>
         </TaskPane>
         <TaskPane id="changes" active={tab} split={split}>
           <Changes
