@@ -59,6 +59,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The count on the Setup entry of the menu has the shape of the one on Inbox and Health: the same corners, size and monospaced digits, on a tint of its tone. It was a round pill with a ring
 - The factory runs on LoopZero, the framework TheoKit became: `@getloopscale/loopzero` in place of `theokit`, `@getloopscale/loopzero-sdk`, `-agents` and `-ui` in place of `@theokit/sdk`, `@theokit/agents` and `@theokit/ui`, and `@getloopscale/ui` in place of `@usetheo/ui`. The configuration is `loopzero.config.ts`, the agent context and the build are in `.loopzero/` (`LOOPZERO.md` holds the product facts), the command is `loopzero`, and a request that changes something carries `X-LoopZero-Action`. A build of the old framework left in `.theokit/` is no longer read and may be deleted
 - A migration renames the framework's tables to the names LoopZero uses, `theokit_jobs` to `loopzero_jobs` and `theokit_cron_runs` to `loopzero_cron_runs`, with their indexes, so the queued jobs are kept. A server or a worker of the old build that is still running after the migration fails to reach the queue until it is restarted on the new build, so stop them first where that matters
 - A sandbox provider opens a terminal and writes files in a batch through the SDK's own `SandboxBackend` contract (`openTerminal`, `uploadFiles`), which the factory used to add beside it. A terminal hands over bytes, and what a command prints before anyone listens is kept for the first listener
