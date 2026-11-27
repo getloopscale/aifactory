@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 
 import { stageEvent, task } from '../db/schema'
 import { rerunsAfterConflict } from '../factory/auto-retry'
-import { openAmong, openBlockersOf, type BlockerReads } from '../factory/blocker-check'
+import { integrated, openAmong, openBlockersOf, type BlockerReads } from '../factory/blocker-check'
 import { BlockedByOpenIssues, nameOf, refOf, type IssueRef } from '../factory/blockers'
 import { errorMessage } from '../factory/error-message'
 import { fetchIssue } from '../github/issues'
@@ -47,11 +47,14 @@ export async function runDueRetries(
   deps: ActionDeps & Pick<BlockerReads, 'fetchIssue'>,
   { limit, now = new Date() }: { limit: number; now?: Date },
 ): Promise<{ started: number; skipped: number; waiting: number }> {
-  const due = (await listTasks(deps.db))
-    .filter(
-      (c) => c.stage === 'failed' && c.retryAt !== null && Date.parse(c.retryAt) <= now.getTime(),
-    )
-    .sort((a, b) => Date.parse(a.retryAt!) - Date.parse(b.retryAt!))
+  const failed = (await listTasks(deps.db)).filter(
+    (c) => c.stage === 'failed' && c.retryAt !== null,
+  )
+  const due: typeof failed = []
+  for (const c of failed) {
+    if (Date.parse(c.retryAt!) <= now.getTime() || (await blockerIntegrated(deps, c))) due.push(c)
+  }
+  due.sort((a, b) => Date.parse(a.retryAt!) - Date.parse(b.retryAt!))
   let started = 0
   let skipped = 0
   let waiting = 0
@@ -70,6 +73,43 @@ export async function runDueRetries(
     }
   }
   return { started, skipped, waiting }
+}
+
+/** The blockers a task's last failure recorded, as references. Entries that are not names are ignored. */
+function recordedBlockers(detail: unknown): IssueRef[] {
+  const recorded = (detail as { blockedBy?: unknown } | null)?.blockedBy
+  if (!Array.isArray(recorded)) return []
+  return recorded.flatMap((n) => {
+    const ref = typeof n === 'string' ? refOf(n) : undefined
+    return ref ? [ref] : []
+  })
+}
+
+/**
+ * Whether a blocked task that is not due by time has a recorded blocker of its own repository that the factory
+ * integrated, so its blockers are worth reading now. Reads only the database, never GitHub.
+ */
+async function blockerIntegrated(
+  deps: Pick<ActionDeps, 'db'>,
+  card: { id: number; retryable: unknown },
+): Promise<boolean> {
+  if (card.retryable !== 'blocked') return false
+  const [row] = await deps.db.select().from(task).where(eq(task.id, card.id))
+  if (!row) return false
+  const [failure] = await deps.db
+    .select({ detail: stageEvent.detail })
+    .from(stageEvent)
+    .where(and(eq(stageEvent.taskId, card.id), eq(stageEvent.stage, 'failed')))
+    .orderBy(desc(stageEvent.id))
+    .limit(1)
+  for (const ref of recordedBlockers(failure?.detail)) {
+    if (
+      ref.repository === row.repository &&
+      (await integrated(deps.db, ref.repository, ref.number))
+    )
+      return true
+  }
+  return false
 }
 
 /**
