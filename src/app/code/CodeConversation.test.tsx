@@ -123,7 +123,7 @@ describe('the conversation', () => {
     fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() => expect(box.value).toBe(''))
     expect(post).toHaveBeenLastCalledWith('/api/panel/code/sessions/s1/messages', {
-      content: 'go',
+      text: 'go',
     })
   })
 })

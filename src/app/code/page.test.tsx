@@ -130,7 +130,7 @@ describe.each([
       mode: 'code',
     })
     expect(post).toHaveBeenNthCalledWith(2, '/api/panel/code/sessions/abc/messages', {
-      content: 'fix it\n',
+      text: 'fix it\n',
     })
   })
 })

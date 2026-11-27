@@ -199,7 +199,7 @@ export function CodeConversation({
     setBusy(true)
     setProblem(undefined)
     try {
-      await post(`/api/panel/code/sessions/${session.id}/messages`, { content })
+      await post(`/api/panel/code/sessions/${session.id}/messages`, { text: content })
       setText('')
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))

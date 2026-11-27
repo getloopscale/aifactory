@@ -17,7 +17,10 @@ import {
   getSession,
   listSessions,
   renameSession,
+  sendMessage,
+  updateSession,
 } from './store'
+import { jobBackend } from '../factory/job-backend'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -139,5 +142,52 @@ describe("a session's turn", () => {
     expect((await claimTurn(s.id)).kind).toBe('busy')
     const later = new Date(Date.now() + CLAIM_STALE_MS + 1000)
     expect((await claimTurn(s.id, later)).kind).toBe('claimed')
+  })
+})
+
+describe('sending a message', () => {
+  const jobs = async () =>
+    (await getPool().query("select 1 from loopzero_jobs where name = 'code-turn'")).rowCount
+
+  it('stores one event, queues the session and one code-turn job', async () => {
+    const s = await aSession()
+    const result = await sendMessage(s.id, 'hello')
+    expect(result).toMatchObject({ kind: 'sent', event: { seq: 1, kind: 'user_message' } })
+    expect((await getSession(s.id))?.state).toBe('queued')
+    expect(await jobs()).toBe(1)
+  })
+
+  it('refuses a message to a queued or ended session and stores nothing', async () => {
+    const s = await aSession()
+    await sendMessage(s.id, 'one')
+    expect((await sendMessage(s.id, 'two')).kind).toBe('refused')
+    const e = await aSession('e')
+    await moveSession(e.id, 'end')
+    expect((await sendMessage(e.id, 'hi')).kind).toBe('refused')
+    expect(await eventsAfter(e.id, 0, 10)).toEqual([])
+    expect((await eventsAfter(s.id, 0, 10)).length).toBe(1)
+    expect((await sendMessage('missing', 'hi')).kind).toBe('not_found')
+  })
+
+  it('stores no event when the job cannot be queued', async () => {
+    const s = await aSession()
+    const backend = jobBackend()
+    const original = backend.enqueueInTransaction.bind(backend)
+    backend.enqueueInTransaction = () => Promise.reject(new Error('queue down'))
+    try {
+      await expect(sendMessage(s.id, 'hi')).rejects.toThrow('queue down')
+    } finally {
+      backend.enqueueInTransaction = original
+    }
+    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+    expect((await getSession(s.id))?.state).toBe('idle')
+  })
+
+  it('updates the title, mode and model', async () => {
+    const s = await aSession()
+    expect(await updateSession(s.id, { mode: 'plan', model: 'm' })).toMatchObject({
+      mode: 'plan',
+      model: 'm',
+    })
   })
 })

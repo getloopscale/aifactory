@@ -4,7 +4,11 @@ import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 
 import type { CodeEvent, CodeEventKind, CodeMode, CodeSession, CodeState } from '../../shared/code'
-import { getDb, type Database } from '../db'
+import { drizzle } from 'drizzle-orm/node-postgres'
+
+import { getDb, getPool, type Database } from '../db'
+import * as schema from '../db/schema'
+import { jobBackend } from '../factory/job-backend'
 import { codeEvent, codeSession } from '../db/schema'
 import { toStored } from '../factory/transcript'
 
@@ -110,6 +114,71 @@ export async function appendEvent(sessionId: string, event: NewCodeEvent): Promi
       .where(eq(codeSession.id, sessionId))
     return row!
   })
+}
+
+export type MessageResult =
+  | { kind: 'sent'; event: CodeEvent; session: CodeSession }
+  | { kind: 'refused'; reason: string }
+  | { kind: 'not_found' }
+
+/**
+ * Stores the owner's message and queues its `code-turn` in one transaction, on one connection, under the session's
+ * row lock. `transitions.ts` is asked first: a refusal stores nothing. If the job cannot be queued, the event and
+ * the new state roll back with it.
+ */
+export async function sendMessage(sessionId: string, text: string): Promise<MessageResult> {
+  const content = toStored({ kind: 'message', content: text }).content
+  const client = await getPool().connect()
+  try {
+    return await drizzle(client, { schema }).transaction(async (tx) => {
+      const [session] = await tx
+        .select()
+        .from(codeSession)
+        .where(eq(codeSession.id, sessionId))
+        .for('update')
+      if (!session) return { kind: 'not_found' as const }
+      const outcome = transition(session.state, 'message')
+      if (outcome.action !== 'move') {
+        return { kind: 'refused' as const, reason: outcome.reason }
+      }
+      const [last] = await tx
+        .select({ seq: sql<number>`coalesce(max(${codeEvent.seq}), 0)::int` })
+        .from(codeEvent)
+        .where(eq(codeEvent.sessionId, sessionId))
+      const [event] = await tx
+        .insert(codeEvent)
+        .values({ sessionId, seq: (last?.seq ?? 0) + 1, kind: 'user_message', tool: null, content })
+        .returning()
+      const [moved] = await tx
+        .update(codeSession)
+        .set({ state: outcome.state, updatedAt: sql`clock_timestamp()` })
+        .where(eq(codeSession.id, sessionId))
+        .returning()
+      await jobBackend().enqueueInTransaction(client, {
+        name: 'code-turn',
+        input: { sessionId },
+        idempotencyKey: `code-turn-${sessionId}-${event!.seq}`,
+      })
+      return { kind: 'sent' as const, event: event!, session: moved! }
+    })
+  } finally {
+    client.release()
+  }
+}
+
+export type SessionChanges = { title?: string; mode?: CodeMode; model?: string | null }
+
+/** Changes what the owner may edit of a session. */
+export async function updateSession(
+  id: string,
+  changes: SessionChanges,
+): Promise<CodeSession | undefined> {
+  const [row] = await getDb()
+    .update(codeSession)
+    .set({ ...changes, updatedAt: sql`now()` })
+    .where(eq(codeSession.id, id))
+    .returning()
+  return row
 }
 
 /** The events after `seq`, oldest first, at most `limit`. */
