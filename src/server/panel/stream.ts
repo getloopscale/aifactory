@@ -1,15 +1,44 @@
-import { desc, gt } from 'drizzle-orm'
+import { and, desc, eq, gt, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { agentEvent, stageEvent } from '../db/schema'
+import { agentEvent, codeEvent, stageEvent } from '../db/schema'
 import { toTranscriptEvent } from '../factory/transcript-store'
+import { toEventWire } from '../../shared/code'
 import type { Stage, StreamEvent } from '../../shared/panel'
 
 const encoder = new TextEncoder()
 const frame = (event: StreamEvent) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
 
 /** Where the stream is in each table it follows: the id of the last row it sent. */
-type Cursor = { stage: number; agent: number }
+type Cursor = { stage: number; agent: number; code: Map<string, number> }
+
+/** The newest `seq` of every code session. `seq` is per session, so each one has a cursor of its own. */
+async function codeHeads(db: Database): Promise<Map<string, number>> {
+  const rows = await db
+    .select({ sessionId: codeEvent.sessionId, seq: sql<number>`max(${codeEvent.seq})::int` })
+    .from(codeEvent)
+    .groupBy(codeEvent.sessionId)
+  return new Map(rows.map((r) => [r.sessionId, r.seq]))
+}
+
+/** The committed code events past each session's cursor, which moves past them. */
+export async function codeSince(db: Database, cursor: Map<string, number>): Promise<StreamEvent[]> {
+  const heads = await codeHeads(db)
+  const out: StreamEvent[] = []
+  for (const [sessionId, head] of heads) {
+    const from = cursor.get(sessionId) ?? 0
+    if (head <= from) continue
+    const rows = await db
+      .select()
+      .from(codeEvent)
+      .where(and(eq(codeEvent.sessionId, sessionId), gt(codeEvent.seq, from)))
+      .orderBy(codeEvent.seq)
+      .limit(500)
+    cursor.set(sessionId, rows.at(-1)?.seq ?? from)
+    for (const r of rows) out.push({ type: 'code', sessionId, event: toEventWire(r) })
+  }
+  return out
+}
 
 async function newest(db: Database): Promise<Cursor> {
   const [stage] = await db
@@ -22,7 +51,7 @@ async function newest(db: Database): Promise<Cursor> {
     .from(agentEvent)
     .orderBy(desc(agentEvent.id))
     .limit(1)
-  return { stage: stage?.id ?? 0, agent: agent?.id ?? 0 }
+  return { stage: stage?.id ?? 0, agent: agent?.id ?? 0, code: await codeHeads(db) }
 }
 
 /** What happened after the cursor, stages first, and the cursor moved past it. */
@@ -46,6 +75,7 @@ async function since(db: Database, cursor: Cursor): Promise<StreamEvent[]> {
     .limit(500)
   cursor.stage = stages.at(-1)?.id ?? cursor.stage
   cursor.agent = steps.at(-1)?.id ?? cursor.agent
+  const code = await codeSince(db, cursor.code)
   return [
     ...stages.map((r): StreamEvent => ({
       type: 'stage',
@@ -58,6 +88,7 @@ async function since(db: Database, cursor: Cursor): Promise<StreamEvent[]> {
       taskId: r.taskId,
       event: toTranscriptEvent(r),
     })),
+    ...code,
   ]
 }
 

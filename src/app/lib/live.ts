@@ -7,6 +7,7 @@ import { ApiError, get } from './api'
 type Listener = (event: StreamEvent) => void
 
 const listeners = new Set<Listener>()
+const openListeners = new Set<() => void>()
 let source: EventSource | undefined
 
 /**
@@ -17,6 +18,9 @@ export function subscribe(listener: Listener): () => void {
   listeners.add(listener)
   if (!source && typeof EventSource !== 'undefined') {
     source = new EventSource('/api/panel/stream')
+    source.onopen = () => {
+      for (const each of openListeners) each()
+    }
     source.onmessage = (message) => {
       const event = JSON.parse(message.data) as StreamEvent
       for (const each of listeners) each(event)
@@ -28,6 +32,14 @@ export function subscribe(listener: Listener): () => void {
       source?.close()
       source = undefined
     }
+  }
+}
+
+/** Calls `listener` each time the shared stream connects or reconnects: what came in the gap is read again. */
+export function onStreamOpen(listener: () => void): () => void {
+  openListeners.add(listener)
+  return () => {
+    openListeners.delete(listener)
   }
 }
 
