@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,6 +10,7 @@ import {
   E2B_USD_PER_MS,
   agentSetup,
   checkBeforeDeploy,
+  baselineResultsFor,
   checkConcurrency,
   checkFromTestStart,
   fromTestStart,
@@ -569,5 +570,22 @@ describe('checkConcurrency', () => {
 
   it('keeps an explicit override whatever the slots', () => {
     expect(checkConcurrency({ override: '2', cases: 5, freeSlots: 10 })).toBe(2)
+  })
+})
+
+describe('checkConcurrency with a bad override', () => {
+  it.each(['abc', '0', '-1', '1.5'])('refuses "%s" instead of running with NaN', (value) => {
+    expect(() => checkConcurrency({ override: value, cases: 5, freeSlots: 10 })).toThrow(
+      'EVALS_CONCURRENCY',
+    )
+  })
+})
+
+describe('baselineResultsFor', () => {
+  it('has no results when the baseline file does not exist yet, and reads them when it does', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baseline-'))
+    expect(baselineResultsFor(join(dir, 'baseline.json'))).toEqual([])
+    writeFileSync(join(dir, 'baseline.json'), JSON.stringify(baseline))
+    expect(baselineResultsFor(join(dir, 'baseline.json')).map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
   })
 })

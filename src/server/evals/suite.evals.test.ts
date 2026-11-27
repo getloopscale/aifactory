@@ -38,6 +38,7 @@ import {
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
+  baselineResultsFor,
   checkConcurrency,
   checkFromTestStart,
   fromTestStart,
@@ -235,7 +236,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
         }),
       )
     }
-    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5), readJson<Baseline>(BASELINE).results))
+    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5), baselineResultsFor(BASELINE)))
     expect(cases.length).toBeGreaterThan(0)
   })
 })

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { SECURITY_EFFORT_CEILING } from '../../shared/panel'
@@ -130,6 +130,15 @@ export function startMarginFor(sandboxLimitsMs: number[]): number {
 }
 
 /**
+ * The results `markQuick` reads. With no baseline file yet (the first collection of cases) no case is measured,
+ * so none is quick: record the baseline, then collect again.
+ */
+export function baselineResultsFor(path: string): CaseResult[] {
+  if (!existsSync(path)) return []
+  return (JSON.parse(readFileSync(path, 'utf8')) as Baseline).results
+}
+
+/**
  * How many cases the check runs at once (#684): `EVALS_CONCURRENCY` when set, else the size of the quick set, no
  * more than the sandbox slots free now. When the provider cannot say how many are free, or none is, one: that case
  * waits for its slot instead of the run assuming capacity.
@@ -139,7 +148,12 @@ export function checkConcurrency(input: {
   cases: number
   freeSlots?: number
 }): number {
-  if (input.override !== undefined && input.override !== '') return Number(input.override)
+  if (input.override !== undefined && input.override !== '') {
+    const given = Number(input.override)
+    if (!Number.isInteger(given) || given < 1)
+      throw new Error(`EVALS_CONCURRENCY must be a whole number of at least 1, got "${input.override}"`)
+    return given
+  }
   const free = input.freeSlots
   if (free === undefined || !Number.isFinite(free) || free < 1) return 1
   return Math.max(1, Math.min(input.cases, Math.floor(free)))
