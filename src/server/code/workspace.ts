@@ -1,7 +1,7 @@
 import { shellEscapePosix, type SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { sql } from 'drizzle-orm'
 
-import type { CodeSession } from '../../shared/code'
+import type { CodeDiff, CodeSession } from '../../shared/code'
 import type { Database } from '../db'
 import { repository } from '../db/schema'
 import { githubEgress } from '../factory/credential-renewal'
@@ -20,7 +20,8 @@ import { KnowledgeFeed } from '../knowledge/feed'
 import type { KnowledgeSource } from '../knowledge/source'
 import { loadKnowledgeConfig } from '../knowledge/store'
 
-import { saveWorkspaceSnapshot } from './store'
+import { readWorkspaceDiff } from './diff'
+import { saveLastDiff, saveWorkspaceSnapshot } from './store'
 
 /** How long the sandbox of a code session may live. Idle timeouts and limits are not this module's. */
 export const WORKSPACE_TIMEOUT_MS = 2 * 60 * 60_000
@@ -44,6 +45,8 @@ export type WorkspaceStore = {
   knowledgeRepository(): Promise<string | undefined>
   /** Keeps the snapshot on the session and clears its sandbox id. */
   saveSnapshot(sessionId: string, snapshotId: string): Promise<unknown>
+  /** Keeps the diff of the workspace for the session; a later one replaces it. */
+  saveDiff(sessionId: string, diff: CodeDiff): Promise<unknown>
 }
 
 export type WorkspaceDeps = {
@@ -76,7 +79,15 @@ export function workspaceStore(db: Database): WorkspaceStore {
       return (await loadKnowledgeConfig(db))?.repository
     },
     saveSnapshot: saveWorkspaceSnapshot,
+    saveDiff: saveLastDiff,
   }
+}
+
+/** The workspaces that are open in this process, by session id, so the diff route can read the live one. */
+const open = new Map<string, { workspace: Workspace; baseBranch: string }>()
+
+export function liveWorkspace(sessionId: string) {
+  return open.get(sessionId)
 }
 
 type Opening = Pick<CodeSession, 'id' | 'repository' | 'baseBranch' | 'workBranch' | 'snapshotId'>
@@ -124,7 +135,9 @@ export async function openWorkspace(deps: WorkspaceDeps, session: Opening): Prom
       : await checkout(backend, session)
     await deps.harness.prepare?.(backend)
     const feed = await KnowledgeFeed.open(deps.knowledge, backend, session.repository, {})
-    return { sandbox: feed.attachTo(created), backend, repoDir, feed }
+    const workspace = { sandbox: feed.attachTo(created), backend, repoDir, feed }
+    open.set(session.id, { workspace, baseBranch: session.baseBranch })
+    return workspace
   } catch (error) {
     await created.stop().catch(() => undefined)
     throw error
@@ -158,16 +171,35 @@ async function run(backend: SandboxBackend, command: string): Promise<string> {
 }
 
 /**
+ * Reads the diff and keeps it before the workspace goes away. A read or a save that fails keeps the diff stored
+ * before and is reported, never an empty replacement; it does not stop the workspace from being saved.
+ */
+async function captureDiff(
+  deps: Pick<WorkspaceDeps, 'store'>,
+  session: Pick<CodeSession, 'id' | 'baseBranch'>,
+  workspace: Workspace,
+): Promise<void> {
+  try {
+    const diff = await readWorkspaceDiff(workspace.backend, workspace.repoDir, session.baseBranch)
+    await deps.store.saveDiff(session.id, diff)
+  } catch (error) {
+    console.warn(`code session ${session.id}: the diff was not kept: ${errorMessage(error)}`)
+  }
+}
+
+/**
  * Saves the disk, keeps the snapshot id on the session and stops the sandbox. A provider's snapshot stops the
  * sandbox itself, so a stop that fails after a saved snapshot is not an error. When the snapshot cannot be kept
  * the sandbox is stopped anyway, the error is thrown and the session is not marked saved.
  */
 export async function closeWorkspace(
   deps: Pick<WorkspaceDeps, 'store'>,
-  session: Pick<CodeSession, 'id'>,
+  session: Pick<CodeSession, 'id' | 'baseBranch'>,
   workspace: Workspace,
 ): Promise<string> {
   const { sandbox } = workspace
+  await captureDiff(deps, session, workspace)
+  open.delete(session.id)
   workspace.feed.stop()
   if (!sandbox.snapshot) {
     await sandbox.stop().catch(() => undefined)
