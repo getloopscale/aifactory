@@ -144,7 +144,7 @@ describe('the handlers', () => {
   })
 
   it('answers 409 with the reason when the state refuses the message', async () => {
-    vi.mocked(sendMessage).mockResolvedValue({ kind: 'refused', reason: 'The session has ended.' })
+    vi.mocked(sendMessage).mockResolvedValue({ kind: 'refused', reason: 'The session has ended.', state: 'ended' })
     const response = (await run(message, { params: { id: 's' }, body: { text: 'hi' } })) as Response
     expect(response.status).toBe(409)
     expect(await response.json()).toMatchObject({ message: 'The session has ended.' })

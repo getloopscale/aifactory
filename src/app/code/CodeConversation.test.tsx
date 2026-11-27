@@ -242,7 +242,7 @@ describe('mentioning a file', () => {
     fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/messages', {
-        content: 'read @README.md',
+        text: 'read @README.md',
       }),
     )
   })
