@@ -81,7 +81,7 @@ export function PillComposer({
               <Plus className="size-5" />
             </button>
           </DropdownMenu.Trigger>
-          <DropdownMenu.Content align="start" side="top" className="min-w-56">
+          <DropdownMenu.Content align="start" side="top" sideOffset={18} className="min-w-56">
             {starts.map(({ icon: Icon, label, text }) => (
               <DropdownMenu.Item
                 key={label}

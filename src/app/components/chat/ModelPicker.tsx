@@ -27,7 +27,7 @@ export function ModelPicker({
           <ChevronDown className="size-4" />
         </button>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" side="top" className="min-w-64">
+      <DropdownMenu.Content align="end" side="top" sideOffset={18} className="min-w-64">
         {MODELS.map((m) => (
           <DropdownMenu.Item key={m.id} onSelect={() => onChange(m.id)} className="items-start">
             <span className="flex-1">

@@ -96,6 +96,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A menu or a popover has the theme's border. In the dark theme it was drawn with a bright outline, the colour of its text, as was every other border with no colour of its own. The menus of the message box open clear of the box instead of over its edge
 - A run pushes the commit it made even when the agent left HEAD detached from the task's branch. It pushed the branch name, so the push sent nothing and exited 0, and the run then verified a commit GitHub never received and failed creating its check run (#463)
 - The sandbox image installs the American English and Brazilian Portuguese word lists (`wamerican`, `wbrazilian`), so a repository check that reads `/usr/share/dict`, such as the TheoCode english-only lint of usetheokit/theokit, can pass and be proven in the sandbox. The E2B template is `aifactory-sandbox:6` and the Docker image `aifactory-sandbox:5` (#168)
 - A task released by a changesets publication that failed for itself (its release run published nothing) is now released by the next release that publishes every package its merge changed, and its issue is closed with the version. Before, only the tasks of a superseded publication or a failed tag were carried, so such an issue stayed open after its fix was on npm. When a person already closed the issue, the release records the task as released and leaves no comment (#431)
