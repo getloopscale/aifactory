@@ -277,7 +277,7 @@ export function Card({ task, need }: { task: TaskCard; need?: Need }) {
     <Link
       to={openTask(task.id)}
       aria-current={current ? 'true' : undefined}
-      className={`relative block hover:bg-muted/40 focus-visible:outline-2 focus-visible:outline-ring ${current ? 'bg-muted/60' : ''}`}
+      className={`relative block overflow-hidden rounded-lg border bg-background hover:border-muted-foreground/40 focus-visible:outline-2 focus-visible:outline-ring ${current ? 'border-primary/60 bg-muted/40' : 'border-border'}`}
     >
       <div
         data-lead-border={task.leadTime?.running ? task.leadTime.status : undefined}
@@ -413,8 +413,8 @@ const LANE_TONE: Record<Lane, Tone> = {
 }
 
 /**
- * One column as a sheet: a heading strip with its dot, name and count, and its cards as rows parted by a
- * hairline. The sheet does not clip, so the strip can stay at the top of the board's frame while the cards scroll.
+ * One column as a sheet: a heading strip with its dot, name and count, and each card a box of its own with room
+ * around it. The sheet does not clip, so the strip can stay at the top of the board's frame while the cards scroll.
  */
 function Column({
   id,
@@ -457,11 +457,11 @@ function Column({
       {tasks.length === 0 ? (
         <p className="px-3 py-3 text-xs text-muted-foreground">{t.board.nothingHere}</p>
       ) : (
-        <ul className={`divide-y divide-border ${fill ? 'min-h-0 flex-1 overflow-y-auto' : ''}`}>
+        <ul className={`flex flex-col gap-2 p-2 ${fill ? 'min-h-0 flex-1 overflow-y-auto' : ''}`}>
           {tasks.map((task, i) => (
             <li key={task.id}>
               {i === head && head > 0 ? (
-                <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1 text-[11px] text-muted-foreground">
+                <div className="mb-2 flex items-center gap-2 px-1 text-[11px] text-muted-foreground">
                   <span className="h-px flex-1 bg-border" />
                   {t.board.restOfQueue}
                   <span className="h-px flex-1 bg-border" />
