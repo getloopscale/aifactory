@@ -26,13 +26,14 @@ const COLUMN_TITLES: Record<Column, string> = {
 }
 const columnTitle = (column: Column) => COLUMN_TITLES[column] ?? column
 
-/** The six lanes the board draws, by the title the screen writes. A lane groups the finer states above. */
+/** The lanes the board draws, by the title the screen writes. A lane groups the finer states above. */
 const LANE_TITLES: Record<Lane, string> = {
-  todo: 'To do',
   needs_you: 'Needs you',
-  running: 'Running',
-  ready: 'Ready',
-  done: 'Done',
+  todo: 'To do',
+  building: 'Building',
+  integrating: 'Integrating',
+  awaiting_release: 'Awaiting release',
+  released: 'Released',
   cancelled: 'Cancelled',
 }
 

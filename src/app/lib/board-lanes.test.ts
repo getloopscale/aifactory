@@ -28,20 +28,20 @@ const card = (over: Partial<TaskCard>): TaskCard =>
   }) as TaskCard
 
 describe('laneOf', () => {
-  it('puts every column of the server in one of the six lanes', () => {
+  it('puts every column of the server in one of the seven lanes', () => {
     const lanes = COLUMNS.map(({ id }) => laneOf({ stage: 'build', column: id }))
     expect(lanes).toEqual([
       'todo',
-      'running',
+      'building',
       'needs_you',
-      'running',
-      'running',
-      'ready',
-      'done',
-      'done',
+      'todo',
+      'integrating',
+      'awaiting_release',
+      'released',
+      'released',
       'needs_you',
     ])
-    expect(LANES).toHaveLength(6)
+    expect(LANES).toHaveLength(7)
   })
 
   it('keeps a cancelled task out of the lane of what needs the owner', () => {
