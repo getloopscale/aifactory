@@ -46,6 +46,7 @@ describe('the choice of agent, kept in the panel', () => {
       reviewer: null,
       merger: null,
       security: null,
+      lens: null,
     })
     const env = await effectiveEnv(getDb(), { FACTORY_HARNESS: 'codex' })
     expect(env.FACTORY_HARNESS).toBe('codex')
@@ -73,6 +74,7 @@ describe('the choice of agent, kept in the panel', () => {
       reviewer: 'claude-code',
       merger: null,
       security: null,
+      lens: null,
     })
     await saveChosen(getDb(), { reviewer: null }, ready)
     expect(await loadChosen(getDb())).toEqual({
@@ -81,6 +83,7 @@ describe('the choice of agent, kept in the panel', () => {
       reviewer: null,
       merger: null,
       security: null,
+      lens: null,
     })
     await saveChosen(getDb(), {}, ready)
     expect((await loadChosen(getDb())).builder).toBe('claude-code')
@@ -108,6 +111,7 @@ describe('the choice of agent, kept in the panel', () => {
       reviewer: null,
       merger: null,
       security: null,
+      lens: null,
     })
   })
 
@@ -137,6 +141,7 @@ describe('the choice of agent, kept in the panel', () => {
       reviewer: 'codex',
       merger: null,
       security: null,
+      lens: null,
     })
     expect(settings.effective).toEqual({
       builder: 'claude-code',
@@ -144,6 +149,7 @@ describe('the choice of agent, kept in the panel', () => {
       reviewer: 'codex',
       merger: 'claude-code',
       security: 'claude-code',
+      lens: 'codex',
     })
     expect(settings.repositoriesWithOwn).toEqual([
       { repository: 'o/own', builder: 'codex', reviewer: null },
@@ -246,6 +252,7 @@ describe('the model and the effort, kept in the panel', () => {
       reviewer: null,
       merger: null,
       security: null,
+      lens: null,
     })
   })
 
@@ -279,6 +286,35 @@ describe('the model and the effort, kept in the panel', () => {
     const env = await effectiveEnv(getDb(), ready)
     expect(env.FACTORY_MODEL_BUILDER).toBe('claude-code:opus')
     expect(env.FACTORY_MODEL_REVIEWER).toBe('codex:gpt-6-luna')
+  })
+
+  it("saves the lens apart from the reviewer, and checks a lens that follows the reviewer against the reviewer's agent (#701)", async () => {
+    await saveChosen(getDb(), { reviewer: 'codex' }, ready, read)
+    await saveChosen(
+      getDb(),
+      { models: { lens: 'gpt-6-luna' }, efforts: { lens: 'low' } },
+      ready,
+      read,
+    )
+    let env = await effectiveEnv(getDb(), ready)
+    expect(env.FACTORY_MODEL_LENS).toBe('codex:gpt-6-luna')
+    expect(env.FACTORY_EFFORT_LENS).toBe('codex:low')
+    expect(optionsFor(env, 'lens', 'codex')).toEqual({ model: 'gpt-6-luna', effort: 'low' })
+    await expect(saveChosen(getDb(), { models: { lens: 'opus' } }, ready, read)).rejects.toThrow(
+      /not a model codex offers/,
+    )
+    await saveChosen(getDb(), { lens: 'claude-code', models: { lens: 'opus' } }, ready, read)
+    env = await effectiveEnv(getDb(), ready)
+    expect(env.FACTORY_LENS).toBe('claude-code')
+    expect(env.FACTORY_REVIEWER).toBe('codex')
+    expect((await loadChosen(getDb())).lens).toBe('claude-code')
+    const changes = (await listSettingChanges(getDb())).filter((c) => c.role === 'lens')
+    expect(changes.map((c) => [c.field, c.newValue])).toEqual([
+      ['model', 'codex:gpt-6-luna'],
+      ['effort', 'codex:low'],
+      ['engine', 'claude-code'],
+      ['model', 'claude-code:opus'],
+    ])
   })
 
   it("checks a planner that follows the builder against the builder's agent", async () => {
@@ -337,6 +373,7 @@ describe('the model and the effort, kept in the panel', () => {
       reviewer: null,
       merger: null,
       security: null,
+      lens: null,
     })
   })
 

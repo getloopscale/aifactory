@@ -23,6 +23,7 @@ export const ROLE_ENV: Record<AgentRole, string> = {
   reviewer: 'FACTORY_REVIEWER',
   merger: 'FACTORY_MERGER',
   security: 'FACTORY_SECURITY',
+  lens: 'FACTORY_LENS',
 }
 
 const ROLES = Object.keys(ROLE_ENV) as AgentRole[]
@@ -49,6 +50,7 @@ const nobody = (): Chosen => ({
   reviewer: null,
   merger: null,
   security: null,
+  lens: null,
 })
 
 /** What the owner saved, the model and the effort still tagged with the agent they were chosen for. */
@@ -92,7 +94,7 @@ export async function effectiveEnv(
 
 /**
  * The role's agent as the factory resolves it: the choice, else the environment, else the default. The planner's
- * default is `DEFAULT_PLANNER` when it can start, else the builder.
+ * default is `DEFAULT_PLANNER` when it can start, else the builder; the lens's is the reviewer.
  */
 export function effectiveOf(
   env: NodeJS.ProcessEnv,
@@ -100,12 +102,15 @@ export function effectiveOf(
     canStart(harnessRegistry(withClaudeToken(env)), name),
 ): Record<AgentRole, string> {
   const builder = env.FACTORY_HARNESS || DEFAULT_HARNESS
+  const reviewer = env.FACTORY_REVIEWER || builder
   return {
     builder,
     planner: env.FACTORY_PLANNER || defaultPlannerName(builder, ready),
-    reviewer: env.FACTORY_REVIEWER || builder,
+    reviewer,
     merger: env.FACTORY_MERGER || builder,
     security: env.FACTORY_SECURITY || builder,
+    // The lens follows the reviewer, not the builder: with nothing chosen it is the reviewer's agent (#701).
+    lens: env.FACTORY_LENS || reviewer,
   }
 }
 

@@ -266,6 +266,7 @@ function setupChanges(before: AgentSetup, now: AgentSetup): string[] {
 /**
  * Which agents a run gets and the model and effort each is told to use, `default` when nothing is set. A
  * planner apart from the builder is part of the setup, and so is a merger the owner chose apart from the builder; one that is the builder adds nothing.
+ * A lens agent of its own (#701) is part of it too; a lens that is the reviewer adds nothing.
  */
 export function agentSetup(
   env: NodeJS.ProcessEnv,
@@ -273,13 +274,15 @@ export function agentSetup(
   reviewer: string,
   options: (
     env: NodeJS.ProcessEnv,
-    role: 'builder' | 'reviewer' | 'planner' | 'merger' | 'security',
+    role: 'builder' | 'reviewer' | 'planner' | 'merger' | 'security' | 'lens',
     engine: string,
   ) => { model?: string; effort?: string },
   planner?: string,
   merger?: string,
   /** The security reviewer's agent, whose effort is pinned at the highest its model offers. */
   security?: string,
+  /** The lens's agent when it is not the reviewer (`deps.lens`). */
+  lens?: string,
 ): AgentSetup {
   const b = options(env, 'builder', builder)
   const r = options(env, 'reviewer', reviewer)
@@ -303,6 +306,13 @@ export function agentSetup(
           security,
           securityModel: options(env, 'security', security).model ?? 'default',
           securityEffort: `pinned, at most ${SECURITY_EFFORT_CEILING}`,
+        }
+      : {}),
+    ...(lens
+      ? {
+          lens,
+          lensModel: options(env, 'lens', lens).model ?? 'default',
+          lensEffort: options(env, 'lens', lens).effort ?? 'default',
         }
       : {}),
   }

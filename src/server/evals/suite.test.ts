@@ -57,6 +57,21 @@ describe('agentSetup with a merger apart from the builder', () => {
   })
 })
 
+describe('agentSetup with a lens apart from the reviewer', () => {
+  it('names the lens with its own model and effort, and adds nothing when the reviewer runs it (#701)', () => {
+    const options = (_env: NodeJS.ProcessEnv, role: string) =>
+      role === 'lens' ? { model: 'gpt-6.1-terra', effort: 'low' } : {}
+    const args = [{}, 'claude-code', 'claude-code', options, undefined, undefined, undefined] as const
+
+    expect(agentSetup(...args, 'codex')).toMatchObject({
+      lens: 'codex',
+      lensModel: 'gpt-6.1-terra',
+      lensEffort: 'low',
+    })
+    expect(agentSetup(...args)).not.toHaveProperty('lens')
+  })
+})
+
 describe('agentSetup with a planner apart from the builder', () => {
   it('names the planner with its own model and effort', () => {
     const setup = agentSetup(

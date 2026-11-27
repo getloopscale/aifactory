@@ -60,6 +60,7 @@ export const en = {
         reviewer: 'Reviews',
         security: 'Security',
         merger: 'Merges',
+        lens: 'Lens',
       },
     },
     tree: { heading: 'Open work', empty: 'Nothing open.' },
@@ -1192,6 +1193,7 @@ export const en = {
       reviewer: 'Coding agent of the Reviewer',
       merger: 'Coding agent of the Merger',
       security: 'Coding agent of the Security reviewer',
+      lens: 'Coding agent of the Lens',
     },
     roleName: {
       builder: 'Builder',
@@ -1199,6 +1201,7 @@ export const en = {
       reviewer: 'Reviewer',
       merger: 'Merger',
       security: 'Security reviewer',
+      lens: 'Lens',
     },
     pinnedEffort: (level: string) =>
       `Always ${level}, the highest that keeps a review inside its time and cost; it cannot be lowered`,
@@ -1206,6 +1209,8 @@ export const en = {
       'The highest effort of this model is not known, so the security review will not run',
     choice: (label: string) => `Choice: ${label}`,
     sameAsBuilder: (builder: string) => `Same as the Builder (${builder})`,
+    sameAsReviewer: (reviewer: string) =>
+      `Same as the Reviewer (${reviewer}), with its model and effort`,
     unavailable: ' (unavailable)',
     model: 'Model',
     modelOf: (role: string) => `Model of the ${role}`,
@@ -1446,6 +1451,7 @@ export const en = {
         reviewer: 'Reviewer',
         merger: 'Merger',
         security: 'Security reviewer',
+        lens: 'Lens',
       },
       backToDefault: (role: string) =>
         `- ${role}: back to the default (the same agent as the Builder)`,

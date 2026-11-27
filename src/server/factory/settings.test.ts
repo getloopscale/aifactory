@@ -18,6 +18,7 @@ describe('which agent a role uses', () => {
       reviewer: 'FACTORY_REVIEWER',
       merger: 'FACTORY_MERGER',
       security: 'FACTORY_SECURITY',
+      lens: 'FACTORY_LENS',
     })
   })
 
@@ -28,6 +29,7 @@ describe('which agent a role uses', () => {
       reviewer: 'claude-code',
       merger: 'claude-code',
       security: 'claude-code',
+      lens: 'claude-code',
     })
   })
 
@@ -38,6 +40,7 @@ describe('which agent a role uses', () => {
       reviewer: 'claude-code',
       merger: 'claude-code',
       security: 'claude-code',
+      lens: 'claude-code',
     })
   })
 
@@ -48,6 +51,7 @@ describe('which agent a role uses', () => {
       reviewer: 'codex',
       merger: 'codex',
       security: 'codex',
+      lens: 'codex',
     })
     expect(
       effectiveOf({ FACTORY_HARNESS: 'codex', FACTORY_REVIEWER: 'claude-code' }, cannotStart),
@@ -57,6 +61,7 @@ describe('which agent a role uses', () => {
       reviewer: 'claude-code',
       merger: 'codex',
       security: 'codex',
+      lens: 'claude-code',
     })
     expect(effectiveOf({ FACTORY_PLANNER: 'codex' }, cannotStart).planner).toBe('codex')
     expect(effectiveOf({ FACTORY_MERGER: 'codex' }, cannotStart).merger).toBe('codex')
@@ -66,7 +71,20 @@ describe('which agent a role uses', () => {
       reviewer: 'claude-code',
       merger: 'claude-code',
       security: 'claude-code',
+      lens: 'claude-code',
     })
+  })
+})
+
+describe('the lens', () => {
+  it('follows the reviewer, not the builder, until it is given an agent of its own (#701)', () => {
+    expect(effectiveOf({ FACTORY_REVIEWER: 'codex' }, cannotStart).lens).toBe('codex')
+    expect(
+      effectiveOf({ FACTORY_HARNESS: 'codex', FACTORY_REVIEWER: 'claude-code' }, cannotStart).lens,
+    ).toBe('claude-code')
+    expect(
+      effectiveOf({ FACTORY_REVIEWER: 'claude-code', FACTORY_LENS: 'codex' }, cannotStart),
+    ).toMatchObject({ reviewer: 'claude-code', lens: 'codex' })
   })
 })
 

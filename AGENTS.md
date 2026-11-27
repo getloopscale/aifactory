@@ -396,7 +396,9 @@ reads that file, not a convention.
 - **A lens is a read-only review of approved work, one entry of `LENSES`.** `factory/lens-review.ts` holds the closed
   list (now `docs`: it reports only a statement in a document the change makes false, or a file, command or symbol the
   change adds that a document's index lists its siblings of). `Run.lensed` runs each lens after the security review and
-  before `merge`, as the reviewer's agent in a fresh session with no edits, and stores its answer as a `review` row
+  before `merge`, in a fresh session with no edits, on the `lens` role's agent (`lensFor` in `factory/deps.ts`: the Agents
+  page or `FACTORY_LENS`, `FACTORY_MODEL_LENS`, `FACTORY_EFFORT_LENS`; with nothing chosen, the reviewer's agent, model
+  and effort), and stores its answer as a `review` row
   whose `reviewer` starts with `lens:` (reads of "the last review" skip those rows); its cost is an `agent_run` of role
   `lens`. `FACTORY_LENS_MODE` is `off`, `trial` (the default: run and record, send nothing back) or `auto`: a blocking
   finding then sends the builder back once (`MAX_LENS_REWORKS`), and what it still finds goes into the pull request body

@@ -35,6 +35,7 @@ describe('the catalog of agents', () => {
       'reviewer',
       'merger',
       'security',
+      'lens',
       'planner',
       'chat',
       ...GUIDE_IDS.map((id) => `guide-${id}`),
@@ -43,6 +44,7 @@ describe('the catalog of agents', () => {
     ])
     expect(new Set(agents.map((a) => a.id)).size).toBe(agents.length)
     expect(agents.filter((a) => a.group === 'factory').map((a) => a.runsIn)).toEqual([
+      'sandbox',
       'sandbox',
       'sandbox',
       'sandbox',
@@ -226,6 +228,26 @@ describe('the catalog of agents', () => {
       'openrouter/a/b',
     )
     expect(agent('chat').engine.change).toContain('FACTORY_CHAT_MODEL')
+  })
+
+  it("names the lens's own agent, and says it follows the reviewer when it has none (#701)", () => {
+    expect(agent('lens', { FACTORY_REVIEWER: 'codex' }).engine.value).toBe(
+      'codex · modelo padrão (o mesmo agente do revisor, numa sessão nova)',
+    )
+    expect(
+      agent('lens', {
+        FACTORY_REVIEWER: 'codex',
+        FACTORY_MODEL_REVIEWER: 'codex:gpt-6-luna',
+        FACTORY_EFFORT_REVIEWER: 'codex:low',
+      }).engine.value,
+    ).toBe('codex · gpt-6-luna · esforço low (o mesmo agente do revisor, numa sessão nova)')
+    expect(
+      agent('lens', { FACTORY_LENS: 'claude-code', FACTORY_MODEL_LENS: 'claude-code:sonnet' })
+        .engine.value,
+    ).toBe('claude-code · sonnet')
+    expect(agent('lens').engine.change).toContain('FACTORY_LENS')
+    expect(agent('lens').prompts.map((p) => p.id)).toEqual(['lens-docs'])
+    expect(agent('reviewer').prompts.map((p) => p.id)).toEqual(['review'])
   })
 
   it('says the model of a panel agent is changed in the environment and needs a restart, and a builder one is not', () => {
