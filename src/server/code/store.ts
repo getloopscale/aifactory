@@ -3,7 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 
-import type { CodeEvent, CodeEventKind, CodeMode, CodeSession, CodeState } from '../../shared/code'
+import type {
+  CodeDiff,
+  CodeEvent,
+  CodeEventKind,
+  CodeMode,
+  CodeSession,
+  CodeState,
+} from '../../shared/code'
 import { getDb, type Database } from '../db'
 import { codeEvent, codeSession } from '../db/schema'
 import { toStored } from '../factory/transcript'
@@ -75,6 +82,25 @@ export async function saveWorkspaceSnapshot(
     .where(eq(codeSession.id, id))
     .returning()
   return row
+}
+
+/** Keeps the diff read from a workspace when a turn ended; the last one stays until a later read replaces it. */
+export async function saveLastDiff(id: string, diff: CodeDiff): Promise<void> {
+  await getDb()
+    .update(codeSession)
+    .set({ lastDiff: diff, lastDiffAt: sql`now()` })
+    .where(eq(codeSession.id, id))
+}
+
+/** The last diff stored for a session, with when it was read. */
+export async function loadLastDiff(
+  id: string,
+): Promise<{ diff: CodeDiff; at: Date | null } | undefined> {
+  const [row] = await getDb()
+    .select({ diff: codeSession.lastDiff, at: codeSession.lastDiffAt })
+    .from(codeSession)
+    .where(eq(codeSession.id, id))
+  return row?.diff ? { diff: row.diff, at: row.at } : undefined
 }
 
 /**
