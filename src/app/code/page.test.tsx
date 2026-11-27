@@ -68,7 +68,10 @@ vi.mock('../lib/code-session', () => ({
   useCodeSession: (id: string) => {
     const extra = useSyncExternalStore(feed.subscribe, feed.snapshot)
     return {
-      session: { ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'), repository: 'acme/shop' },
+      session: {
+        ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
+        repository: 'acme/shop',
+      },
       events: [
         { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
         ...extra,
@@ -139,7 +142,9 @@ describe.each([
 
   it('says on a stopped session that the next message restores it', () => {
     show(language, '/code/asleep')
-    expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe('status')
+    expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe(
+      'status',
+    )
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
