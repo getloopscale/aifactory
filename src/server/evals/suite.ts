@@ -288,8 +288,18 @@ export async function checkBeforeDeploy(input: {
   const compared = compareWithBaseline(results, input.baseline)
   // A quick case the run left is not measured, so the gate cannot say it did not regress.
   const unmeasured = `the run left ${skipped.length} quick case(s) unmeasured: ${skipped.join(', ')}`
-  const reasons = skipped.length > 0 ? [unmeasured, ...compared.reasons] : compared.reasons
-  return { ran: true, ok: compared.ok && skipped.length === 0, reasons, changed }
+  // A case the environment failed ("[unavailable]", a killed sandbox) says nothing about the agents, and the
+  // quick set is incomplete without it: the gate stops and names the environment, not the agents.
+  const environment = results.filter(failedForEnvironment).map((r) => r.id)
+  const failed = `the environment failed ${environment.length} quick case(s), which are not measured: ${environment.join(', ')}`
+  const reasons = [
+    ...(skipped.length > 0 ? [unmeasured] : []),
+    ...(environment.length > 0 && !compared.reasons.some((r) => r.startsWith('the environment failed'))
+      ? [failed]
+      : []),
+    ...compared.reasons,
+  ]
+  return { ran: true, ok: reasons.length === 0, reasons, changed }
 }
 
 export type RunOutcome = {
