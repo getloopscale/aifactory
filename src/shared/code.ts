@@ -41,6 +41,8 @@ export type CodeSession = {
   sandboxId: string | null
   snapshotId: string | null
   agentSessionId: string | null
+  /** The harness that produced `agentSessionId`. */
+  agentSessionHarness: string | null
   createdAt: Date
   updatedAt: Date
 }

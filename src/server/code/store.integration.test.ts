@@ -8,6 +8,8 @@ import { EVENT_MAX_BYTES } from '../factory/transcript'
 
 import {
   appendEvent,
+  claimTurn,
+  moveSession,
   createSession,
   eventsAfter,
   getSession,
@@ -88,5 +90,29 @@ describe('code events', () => {
       await appendEvent(s.id, { kind: 'agent_message', content: `m${i}` })
     expect((await eventsAfter(s.id, 5, 10)).map((e) => e.seq)).toEqual([6, 7, 8, 9, 10, 11, 12])
     expect((await eventsAfter(s.id, 5, 3)).map((e) => e.seq)).toEqual([6, 7, 8])
+  })
+})
+
+describe("a session's turn", () => {
+  it('is claimed by one worker, for the oldest message no turn answered', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'first' })
+    await moveSession(s.id, 'message')
+    const [a, b] = await Promise.all([claimTurn(s.id), claimTurn(s.id)])
+    const kinds = [a.kind, b.kind].sort()
+    expect(kinds).toEqual(['busy', 'claimed'])
+    const claimed = a.kind === 'claimed' ? a : b
+    expect(claimed.kind === 'claimed' && claimed.message.content).toBe('first')
+    expect((await getSession(s.id))?.state).toBe('starting')
+  })
+
+  it('treats a message after the last cost or error as unanswered', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await appendEvent(s.id, { kind: 'error', content: 'failed' })
+    await appendEvent(s.id, { kind: 'user_message', content: 'two' })
+    await moveSession(s.id, 'message')
+    const claim = await claimTurn(s.id)
+    expect(claim.kind === 'claimed' && claim.message.content).toBe('two')
   })
 })
