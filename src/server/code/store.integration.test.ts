@@ -11,6 +11,9 @@ import {
   answerPlan,
   appendEvent,
   claimTurn,
+  endTurn,
+  requestStop,
+  stopRequested,
   moveSession,
   turnMarker,
   CLAIM_STALE_MS,
@@ -189,11 +192,83 @@ describe('sending a message', () => {
     expect((await getSession(s.id))?.state).toBe('queued')
   })
 
-  it('refuses a running session with its state and writes nothing', async () => {
+  it('stores a message for a running turn unanswered, with no job', async () => {
     const s = await aSession()
     await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
-    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'refused', state: 'running' })
-    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'sent' })
+    expect((await getSession(s.id))?.state).toBe('running')
+    expect(await jobs()).toBe(0)
+  })
+
+  it('queues one turn for a message the pass was not handed, when the turn ends', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    expect((await getSession(s.id))?.state).toBe('queued')
+    expect(await jobs()).toBe(1)
+    expect(await endTurn(s.id)).toBeUndefined()
+    expect(await jobs()).toBe(1)
+  })
+
+  it('ends idle with no job when the message was handed to the pass', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
+    expect(await endTurn(s.id)).toEqual({ queued: false })
+    expect((await getSession(s.id))?.state).toBe('idle')
+    expect(await jobs()).toBe(0)
+  })
+
+  it('queues exactly one turn when two turns end at once', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    const ended = await Promise.all([endTurn(s.id), endTurn(s.id)])
+    expect(ended.filter((r) => r?.queued)).toHaveLength(1)
+    expect(await jobs()).toBe(1)
+  })
+
+  it('never loses a message sent while the turn ends: it is answered by a queued turn or is the next one', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const s = await aSession(`race-${round}`)
+      await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+      const [sent] = await Promise.all([sendMessage(s.id, 'hi'), endTurn(s.id)])
+      const after = await getSession(s.id)
+      if (sent.kind === 'sent') {
+        // Either the end saw it (queued, one job) or it came after the end (queued by the message, one job).
+        expect(after?.state).toBe('queued')
+      } else {
+        expect(after?.state).toBe('idle')
+      }
+      const queued = await getPool().query(
+        `select 1 from loopzero_jobs where name = 'code-turn' and input->>'sessionId' = $1`,
+        [s.id],
+      )
+      expect(queued.rowCount).toBe(1)
+    }
+  })
+
+  it('queues one turn for a message sent twice during a turn that ends after them', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await Promise.all([sendMessage(s.id, 'a'), sendMessage(s.id, 'b')])
+    expect(await jobs()).toBe(0)
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    expect(await jobs()).toBe(1)
+  })
+
+  it('marks only a running turn to stop, and clears the mark when the turn ends', async () => {
+    const s = await aSession()
+    expect(await requestStop(s.id)).toMatchObject({ kind: 'refused', state: 'idle' })
+    expect(await requestStop('missing')).toEqual({ kind: 'not_found' })
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    expect(await requestStop(s.id)).toEqual({ kind: 'requested' })
+    expect(await stopRequested(s.id)).toBe(true)
+    await endTurn(s.id)
+    expect(await stopRequested(s.id)).toBe(false)
+    expect((await getSession(s.id))?.state).toBe('idle')
   })
 
   it('stores no event when the job cannot be queued', async () => {

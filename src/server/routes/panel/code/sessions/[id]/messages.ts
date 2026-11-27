@@ -5,7 +5,10 @@ import { toEventWire } from '../../../../../../shared/code'
 import { sendMessage } from '../../../../../code/store'
 import { ownerOnly } from '../../../../../panel/policy'
 
-/** Stores a message of the owner and queues the turn that answers it, together. */
+/**
+ * Stores a message of the owner and queues the turn that answers it, together. While a turn runs the message is
+ * stored unanswered and no job is queued: the pass is handed it live, or the turn that ends queues the next one.
+ */
 export const POST = route()
   .policy(ownerOnly)
   .params(z.object({ id: z.string().min(1).max(100) }))

@@ -2016,6 +2016,7 @@ export const ptBR: Copy = {
       },
       send: 'Enviar',
       sending: 'Enviando…',
+      stop: 'Parar',
       message: 'Mensagem para o agente',
       placeholder: 'Escreva para o agente',
       plan: {
@@ -2043,7 +2044,6 @@ export const ptBR: Copy = {
       refused: {
         queued: 'Já há uma mensagem esperando o agente. Espere ela começar.',
         starting: 'O agente está iniciando. Espere o fim do turno.',
-        running: 'O agente está trabalhando na última mensagem. Espere terminar.',
         waiting_input: 'O agente espera uma resposta ao plano. Responda primeiro.',
         ended: 'A sessão terminou.',
       },

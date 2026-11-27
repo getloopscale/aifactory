@@ -2,7 +2,16 @@ import { defineJob } from '@getloopscale/loopzero/server/jobs'
 import { z } from 'zod'
 
 import { runTurn, type TurnDeps } from '../code/turn'
-import { appendEvent, claimTurn, moveSession, touchSession, saveAgentSession } from '../code/store'
+import {
+  appendEvent,
+  claimTurn,
+  endTurn,
+  moveSession,
+  saveAgentSession,
+  stopRequested,
+  touchSession,
+  unansweredMessage,
+} from '../code/store'
 import { codeMaxSandboxes, underCapLock } from '../code/slots'
 import { workspaceStore } from '../code/workspace'
 import { getDb } from '../db'
@@ -37,6 +46,9 @@ export default defineJob('code-turn', {
         claim: claimTurn,
         append: appendEvent,
         move: moveSession,
+        end: endTurn,
+        stopRequested,
+        pending: (id) => unansweredMessage(id),
         saveAgentSession,
       },
       workspace: {

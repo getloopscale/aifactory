@@ -654,6 +654,8 @@ export const codeSession = pgTable('code_session', {
   lastDiffAt: timestamp('last_diff_at', { withTimezone: true }),
   /** The harness that produced `agentSessionId`: another harness cannot resume it. */
   agentSessionHarness: text('agent_session_harness'),
+  /** When the owner asked the running turn to stop; the process that holds the pass ends it and clears this. */
+  stopRequestedAt: timestamp('stop_requested_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
