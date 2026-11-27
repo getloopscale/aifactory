@@ -59,6 +59,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The owner can ask the agent of a task that was released or cancelled, as of one that is done: the box of its conversation takes a message, and the answer comes from the session the builder kept. It was closed there, so a delivered task could only be read. Guiding stays for work that is done or handed over
 - The model picker of the message box names the model, as the server is configured: the chosen one on its button, without its vendor (`gemini-2.5-flash`), and each choice's in full in its menu, the chat's in the chat and the guides' in a guide. It named only the provider, so the model had to be looked up in the environment file
 - The message box of the chat and of the guide has the shape of the box a task's agent is written to: square corners with the panel's border, the text over the whole width, and under it a row with the "+", the model and the send button. The text grows to two fifths of the window before it scrolls. It was a pill with the text squeezed between the buttons, eight lines tall
 - The count on the Setup entry of the menu has the shape of the one on Inbox and Health: the same corners, size and monospaced digits, on a tint of its tone. It was a round pill with a ring

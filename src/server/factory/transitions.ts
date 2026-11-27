@@ -189,9 +189,6 @@ const onBranch = (task: Facts) =>
   act(task.branchGone ? 'start_from_integration_branch' : 'continue_on_branch')
 const sendBack: Rule = (task) => (task.mergedSha ? ALREADY_INTEGRATED : onBranch(task))
 
-const NOT_CONVERSABLE = refuse(
-  'the owner can write only to the agent of a task that waits for an answer, was handed over, is done or failed',
-)
 const AGENT_RUNNING = refuse(
   'the agent of this task is working: wait until it stops, then write to it',
 )
@@ -372,7 +369,10 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     ),
     ...each([...LIVE_STAGES], act('message_running_agent')),
     merge: MERGING,
-    ...each(['released', 'cancelled'], NOT_CONVERSABLE),
+    // A task that ended still has what its agent did to be asked about. Nothing there can be guided: the work
+    // is released, or was withdrawn.
+    released: converse(false),
+    cancelled: converse(false),
     waiting: converse(false),
     failed: converse(false),
     done: converse(true),

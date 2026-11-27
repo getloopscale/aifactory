@@ -26,7 +26,7 @@ import { AgentIcon } from './floor/AgentIcon'
 import { Surface } from './ui/Surface'
 
 /** The stages where the agent has stopped and the owner may write to it. The server decides again. */
-export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed']
+export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed', 'released', 'cancelled']
 /** The stages where a pass takes a message while it works, and the role whose pass it is. */
 export const LIVE = { build: 'builder', review: 'reviewer' } as const
 
