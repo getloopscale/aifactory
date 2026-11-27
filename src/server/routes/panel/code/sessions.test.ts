@@ -2,6 +2,7 @@ import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/se
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  answerPlan,
   createSession,
   getSession,
   listSessions,
@@ -24,6 +25,7 @@ let enabledRepository = true
 
 import { DELETE, GET as one, PATCH } from './sessions/[id]'
 import { POST as message } from './sessions/[id]/messages'
+import { POST as planAnswer } from './sessions/[id]/plan-answer'
 import { GET, POST } from './sessions'
 
 const input = (subject: { id: string } | null) => ({
@@ -37,6 +39,7 @@ describe.each([
   ['GET /api/panel/code/sessions', GET],
   ['POST /api/panel/code/sessions', POST],
   ['POST /api/panel/code/sessions/:id/messages', message],
+  ['POST /api/panel/code/sessions/:id/plan-answer', planAnswer],
   ['GET /api/panel/code/sessions/:id', one],
   ['PATCH /api/panel/code/sessions/:id', PATCH],
   ['DELETE /api/panel/code/sessions/:id', DELETE],
@@ -202,5 +205,48 @@ describe('the handlers', () => {
     expect(await run(one, { params: { id: 's' } })).toMatchObject({ id: 's' })
     await run(DELETE, { params: { id: 's' } })
     expect(moveSession).toHaveBeenCalledWith('s', 'end')
+  })
+})
+
+describe('POST plan-answer', () => {
+  type Call = (i: { body?: unknown; params?: unknown }) => Promise<unknown>
+  const run = (body: unknown) =>
+    (planAnswer.handler as unknown as Call)({ params: { id: 's' }, body })
+  const parse = (v: unknown) =>
+    (planAnswer.body as { safeParse: (v: unknown) => { success: boolean } }).safeParse(v).success
+  const stored = { id: 's', mode: 'code', createdAt: new Date(0), updatedAt: new Date(0) } as never
+
+  beforeEach(() => vi.resetAllMocks())
+
+  it('needs the plan, a known answer and text for a revision', () => {
+    expect(parse({ plan: 3, answer: 'accept' })).toBe(true)
+    expect(parse({ plan: 3, answer: 'revise', text: 'more tests' })).toBe(true)
+    expect(parse({ plan: 3, answer: 'revise', text: ' ' })).toBe(false)
+    expect(parse({ plan: 3, answer: 'maybe' })).toBe(false)
+    expect(parse({ answer: 'accept' })).toBe(false)
+  })
+
+  it('answers an accepted plan with the queued turn', async () => {
+    vi.mocked(answerPlan).mockResolvedValue({ kind: 'answered', session: stored, queued: true })
+    expect(await run({ plan: 3, answer: 'accept' })).toMatchObject({ queued: true })
+    expect(answerPlan).toHaveBeenCalledWith('s', 3, { answer: 'accept' })
+  })
+
+  it('passes the text of a revision and answers a rejection with nothing queued', async () => {
+    vi.mocked(answerPlan).mockResolvedValue({ kind: 'answered', session: stored, queued: false })
+    await run({ plan: 3, answer: 'revise', text: 'more' })
+    expect(answerPlan).toHaveBeenCalledWith('s', 3, { answer: 'revise', text: 'more' })
+    expect(await run({ plan: 3, answer: 'reject' })).toMatchObject({ queued: false })
+  })
+
+  it('answers 409 for a plan already answered and 404 for no session', async () => {
+    vi.mocked(answerPlan).mockResolvedValue({
+      kind: 'refused',
+      reason: 'No plan.',
+      state: 'queued',
+    })
+    expect(((await run({ plan: 3, answer: 'accept' })) as Response).status).toBe(409)
+    vi.mocked(answerPlan).mockResolvedValue({ kind: 'not_found' })
+    expect(((await run({ plan: 3, answer: 'accept' })) as Response).status).toBe(404)
   })
 })

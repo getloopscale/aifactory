@@ -101,7 +101,7 @@ export function useCodeSession(id: string): CodeSessionView {
       const next = lastContiguous([...bySeq.values()].sort((a, b) => a.seq - b.seq)) + 1
       add([e])
       if (e.seq > next) void catchUp()
-      if (e.kind === 'state') void readSession()
+      if (e.kind === 'state' || e.kind === 'plan') void readSession()
     })
     const unopen = onStreamOpen(() => {
       void catchUp()

@@ -147,6 +147,23 @@ describe('useCodeSession', () => {
     expect(urls.slice(before).some((u) => u.includes('/events?after=1'))).toBe(true)
   })
 
+  it('reads the session again when a plan arrives', async () => {
+    let state = 'running'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/events'))
+          return new Response(JSON.stringify({ events: [], more: false }))
+        return new Response(JSON.stringify({ id: 's', state }))
+      }),
+    )
+    const { result } = renderHook(() => useCodeSession('s'))
+    await waitFor(() => expect(result.current.session?.state).toBe('running'))
+    state = 'waiting_input'
+    pushEvent({ ...ev(1), kind: 'plan' })
+    await waitFor(() => expect(result.current.session?.state).toBe('waiting_input'))
+  })
+
   it('keeps an event that arrives while a catch-up is in flight, and reads what it missed', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((r) => (release = r))
