@@ -355,3 +355,50 @@ describe('the agents page', () => {
     expect(await screen.findByText('Não consegui carregar os agentes')).toBeDefined()
   })
 })
+
+describe('the model a role runs on when none is chosen', () => {
+  const security = entry({
+    id: 'security',
+    group: 'factory',
+    name: 'Revisor de segurança',
+    runsIn: 'sandbox',
+    engine: { value: 'codex · modelo padrão · esforço fixo', change: 'x' },
+  })
+  const agentsView = { ...view, agents: [security] }
+
+  function showWith(models: unknown) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (url: string) =>
+          new Response(JSON.stringify(url.endsWith('/models') ? { models } : agentsView)),
+      ),
+    )
+    render(
+      <MemoryRouter initialEntries={['/agents?agent=security']}>
+        <Page />
+      </MemoryRouter>,
+    )
+  }
+
+  it('names the model the role last reported, and the fixed effort of the model', async () => {
+    showWith({ security: { codex: 'gpt-6.1-sol', 'claude-code': 'claude-sonnet-5-5' } })
+    await screen.findByText(
+      `codex · ${ptBR.engine.summaryDefault('gpt-6.1-sol')} · ${ptBR.engine.summaryEffort('high')}`,
+    )
+    expect(
+      within(screen.getByLabelText(ptBR.engine.modelOf(ptBR.engine.roleName.security))).getByRole(
+        'option',
+        { name: ptBR.engine.agentDefaultToday('gpt-6.1-sol') },
+      ),
+    ).toBeDefined()
+  })
+
+  it('says the model is not known yet when the agent of the role never reported one', async () => {
+    showWith({ security: { 'claude-code': 'claude-sonnet-5-5' } })
+    await screen.findByText(
+      `codex · ${ptBR.engine.summaryDefault()} · ${ptBR.engine.summaryEffort('high')}`,
+    )
+    expect(screen.getByRole('option', { name: ptBR.engine.agentDefaultUnknown })).toBeDefined()
+  })
+})

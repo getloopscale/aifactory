@@ -45,6 +45,7 @@ export const en = {
       delivered: 'delivered',
     },
     defaultModel: 'default model',
+    modelUnknown: 'model not known yet',
     now: {
       heading: 'Working now',
       idle: 'No agent is working right now.',
@@ -316,6 +317,12 @@ export const en = {
       linear: 'from Linear',
     },
     checksPassed: (passed: number, total: number) => `checks ${passed}/${total}`,
+    ci: {
+      running: (done: number, total: number) => `CI ${done}/${total}`,
+      passed: 'CI passed',
+      failed: (first: string, more: number) =>
+        more > 0 ? `CI failed: ${first} and ${more} more` : `CI failed: ${first}`,
+    },
     restOfQueue: 'rest of the queue',
     priority: (n: number) => `priority ${n}`,
     priorityBadge: (n: number) => `P${n}`,
@@ -454,6 +461,8 @@ export const en = {
     questions: 'Questions',
     replyHint: 'Reply in a comment on the issue, as someone with write access.',
     answered: (by: string, answer: string) => `${by} answered: ${answer}`,
+    ciChecks: 'GitHub checks',
+    ciState: { running: 'running', passed: 'passed', failed: 'failed' },
     deliveries: 'Deliveries',
     deliveryRelease: 'Release',
     deliveryPreRelease: 'Pre-release',
@@ -1212,6 +1221,11 @@ export const en = {
     model: 'Model',
     modelOf: (role: string) => `Model of the ${role}`,
     agentDefault: "Agent's default",
+    agentDefaultToday: (model: string) => `Agent's default (today: ${model})`,
+    agentDefaultUnknown: "Agent's default (model not known yet)",
+    summaryDefault: (model?: string) =>
+      model ? `default model (today: ${model})` : 'default model (not known yet)',
+    summaryEffort: (level?: string) => (level ? `effort ${level} (fixed)` : 'effort not known'),
     effort: 'Effort',
     effortOf: (role: string) => `Effort of the ${role}`,
     default: 'Default',
@@ -1279,6 +1293,7 @@ export const en = {
       health: 'Guide of Health',
       agents: 'Guide of Agents',
       setup: 'Guide of Setup',
+      code: 'Guide of Code Mode',
     },
     board: {
       about: 'Here you follow every task of the factory, from the queue to delivery.',
@@ -1335,6 +1350,16 @@ export const en = {
       understand: ['What is each item for?', 'What is missing for the factory to work?'],
       act: [{ text: 'Guide me through the next step.' }],
       note: 'Never paste keys or passwords here.',
+    },
+    code: {
+      about:
+        'Here you write code with an agent in a sandbox, on a branch of its own. The guide reads your sessions; it changes nothing.',
+      understand: [
+        'What is the difference between Ask, Plan and Code?',
+        'What happens to the work of a session?',
+      ],
+      act: [{ text: 'What is each of my sessions doing now?' }],
+      note: 'The guide only reads: sending messages and opening pull requests is done on the page.',
     },
     open: {
       task: (id: number) => ({

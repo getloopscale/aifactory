@@ -96,7 +96,7 @@ const BROKEN_CONCLUSIONS = new Set(['failure', 'timed_out', 'action_required', '
 const MAX_CHECK_PAGES = 20
 
 export type CommitChecks = {
-  checkRuns: { name: string; status: string; conclusion: string | null }[]
+  checkRuns: { name: string; status: string; conclusion: string | null; url?: string }[]
   /** The combined state of the older commit statuses. `none` when there are no statuses at all. */
   statuses: 'success' | 'failure' | 'error' | 'pending' | 'none'
   /** Each commit status by its context, the latest state of each. */
@@ -1017,6 +1017,7 @@ export function createGithubApi(
         name: string
         status: string
         conclusion: string | null
+        html_url?: string | null
         app?: { slug?: string } | null
         check_suite?: { id?: number } | null
       }>(
@@ -1057,6 +1058,7 @@ export function createGithubApi(
           name: r.name,
           status: r.status,
           conclusion: r.conclusion,
+          ...(r.html_url ? { url: r.html_url } : {}),
         })),
         statuses: combined.body.total_count === 0 ? ('none' as const) : state,
         statusContexts: combined.items.map((s) => ({ context: s.context, state: s.state })),

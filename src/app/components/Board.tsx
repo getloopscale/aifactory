@@ -28,6 +28,7 @@ import {
 } from '../lib/format'
 
 import { PriorityBadge, ReturnedBadge, StageBadge } from './Badges'
+import { CiSummary } from './Ci'
 import { AgentIcon } from './floor/AgentIcon'
 import { ItemId } from './ui/ItemId'
 import { Surface, TABLE, TONE_DOT, type Tone } from './ui/Surface'
@@ -379,6 +380,7 @@ export function Card({ task, need }: { task: TaskCard; need?: Need }) {
               {t.board.checksPassed(task.checks.passed, task.checks.total)}
             </span>
           ) : null}
+          {task.ci ? <CiSummary ci={task.ci} /> : null}
           {task.attempts > 1 ? <span>{t.board.attempt(task.attempts)}</span> : null}
         </div>
         {task.waitingOnBase ? (

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useSearchParams } from 'react-router'
 import { Metadata } from '@getloopscale/loopzero/client'
 
-import type { AgentsView } from '../../shared/panel'
+import type { AgentsView, RoleModels } from '../../shared/panel'
 import { AgentDetail } from '../components/agents/AgentDetail'
 import { AgentList } from '../components/agents/AgentList'
 import { PageHeader, Pane, Quiet, Surface, Workbench } from '../components/ui/Surface'
@@ -18,6 +18,10 @@ export default function AgentsPage() {
   const { data, error, reload } = useResource<AgentsView>('/api/panel/agents', {
     stream: false,
     everyMs: 60_000,
+  })
+  const ran = useResource<{ models: RoleModels }>('/api/panel/agents/models', {
+    stream: false,
+    everyMs: 120_000,
   })
   const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
@@ -87,6 +91,7 @@ export default function AgentsPage() {
                   shared={data.shared}
                   settings={data.settings}
                   query={query}
+                  reported={ran.data?.models}
                   onSettingsSaved={reload}
                 />
               ) : null}

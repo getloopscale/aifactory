@@ -1863,3 +1863,38 @@ describe('reviews of a pull request', () => {
     ).toEqual(['ours'])
   })
 })
+
+describe('commitChecks links', () => {
+  it('keeps the address of each check run', async () => {
+    const { fetch } = fakeFetch({
+      'GET /commits/abc/check-runs': {
+        status: 200,
+        body: {
+          total_count: 2,
+          check_runs: [
+            {
+              name: 'check',
+              status: 'completed',
+              conclusion: 'success',
+              html_url: 'https://github.com/o/r/runs/1',
+            },
+            { name: 'quality', status: 'in_progress', conclusion: null },
+          ],
+        },
+      },
+      'GET /commits/abc/status': { status: 200, body: { state: 'pending', total_count: 0 } },
+    })
+
+    const checks = await createGithubApi(fetch, noWait).commitChecks('o/r', 't', 'abc')
+
+    expect(checks.checkRuns).toEqual([
+      {
+        name: 'check',
+        status: 'completed',
+        conclusion: 'success',
+        url: 'https://github.com/o/r/runs/1',
+      },
+      { name: 'quality', status: 'in_progress', conclusion: null },
+    ])
+  })
+})

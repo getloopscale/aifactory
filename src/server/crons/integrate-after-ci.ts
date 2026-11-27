@@ -9,6 +9,7 @@ import {
   pollPromotionWaits,
   promoteResolvedWork,
 } from '../factory/promotion-merge'
+import { refreshPullRequestCi } from '../factory/pull-request-ci'
 import { passLine } from '../factory/pass-line'
 import { mainProcessOnly } from '../factory/worker-only'
 import { createPromotionApi } from '../github/promotion-api'
@@ -79,6 +80,8 @@ export default defineCron('integrate-after-ci', {
             () => adoptMergedHandoffs({ ...github, releaseMode: releaseModeFromEnv(process.env) }),
           ],
           ['release_after_ci', () => pollAwaitingReleases(github)],
+          // Last: the board's CI state is a display, so it never delays a merge or a release.
+          ['pull_request_ci', () => refreshPullRequestCi(github)],
         ]
         // In this order: a promotion GitHub merged ends its hold, so the integrations it held go in on this pass.
         for (const [event, pass] of passes) {

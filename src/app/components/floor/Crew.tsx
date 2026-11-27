@@ -24,10 +24,10 @@ export function Crew() {
   })
   /** The model the owner chose for the role, else the one its agent last reported running with. */
   const modelOf = (role: AgentRole, agent: string) => {
-    const last = ran.data?.models[role]
     return (
       settings.data?.settings.chosenModel[role] ??
-      (last?.agent === agent ? last.model : t.floor.defaultModel)
+      ran.data?.models[role]?.[agent] ??
+      t.floor.modelUnknown
     )
   }
   return (

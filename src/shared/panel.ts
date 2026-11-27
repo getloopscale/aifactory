@@ -390,6 +390,21 @@ export type HealthReport = {
   findings: FindingView[]
 }
 
+export type CiState = 'running' | 'passed' | 'failed'
+
+/**
+ * The GitHub checks of the pull request's head, as the factory last read them (not the sandbox's checks).
+ * `done` of `total` is how many of the checks known at that read had finished.
+ */
+export type PullRequestCi = {
+  state: CiState
+  done: number
+  total: number
+  /** The names of the checks that failed, in the order GitHub listed them. */
+  failed: string[]
+  checks: { name: string; state: CiState; url: string | null }[]
+}
+
 export type TaskCard = {
   id: number
   repository: string
@@ -421,6 +436,8 @@ export type TaskCard = {
    * and the factory finishes the integration then. It is not a merge GitHub refused.
    */
   waitingForChecks: boolean
+  /** The state of the pull request's GitHub checks; null or absent when it has no pull request or no check reported. */
+  ci?: PullRequestCi | null
   /**
    * The task waits because the required checks it failed fail on the head of the integration branch too:
    * which checks, on which branch, and since when. Null when nothing holds it.
@@ -1042,8 +1059,12 @@ export type AgentsView = {
   settings: AgentSettings
 }
 
-/** The agent and the model each role's latest pass reported; a role that never ran has no entry. */
-export type RoleModels = Partial<Record<AgentRole, { agent: string; model: string }>>
+/** The model each agent last reported on a pass of a task, by role and then by agent; none where it never named one. */
+export type RoleModels = Partial<Record<AgentRole, Record<string, string>>>
+
+/** What the catalog writes where no model is chosen, and where the security effort is fixed; the page puts the localized text in their place. */
+export const DEFAULT_MODEL_WORD = 'modelo padrão'
+export const FIXED_EFFORT_WORD = 'esforço fixo'
 
 /** The roles of a coding agent (the security role's effort is pinned at the highest, never chosen) that the owner can give to one agent or another. */
 export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'

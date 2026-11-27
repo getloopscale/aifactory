@@ -117,6 +117,7 @@ export const ptBR: Copy = {
       delivered: 'entregue',
     },
     defaultModel: 'modelo padrão',
+    modelUnknown: 'modelo ainda não conhecido',
     now: {
       heading: 'Trabalhando agora',
       idle: 'Nenhum agente trabalhando agora.',
@@ -388,6 +389,12 @@ export const ptBR: Copy = {
       linear: 'do Linear',
     },
     checksPassed: (passed: number, total: number) => `checks ${passed}/${total}`,
+    ci: {
+      running: (done: number, total: number) => `CI ${done}/${total}`,
+      passed: 'CI passou',
+      failed: (first: string, more: number) =>
+        more > 0 ? `CI falhou: ${first} e mais ${more}` : `CI falhou: ${first}`,
+    },
     restOfQueue: 'resto da fila',
     priority: (n: number) => `prioridade ${n}`,
     priorityBadge: (n: number) => `P${n}`,
@@ -526,6 +533,8 @@ export const ptBR: Copy = {
     questions: 'Perguntas',
     replyHint: 'Responda em um comentário na issue, como alguém com permissão de escrita.',
     answered: (by: string, answer: string) => `${by} respondeu: ${answer}`,
+    ciChecks: 'Checks do GitHub',
+    ciState: { running: 'em andamento', passed: 'passou', failed: 'falhou' },
     deliveries: 'Entregas',
     deliveryRelease: 'Lançamento',
     deliveryPreRelease: 'Pré-lançamento',
@@ -1514,6 +1523,12 @@ export const ptBR: Copy = {
     model: 'Modelo',
     modelOf: (role: string) => `Modelo do ${role}`,
     agentDefault: 'Padrão do agente',
+    agentDefaultToday: (model: string) => `Padrão do agente (hoje: ${model})`,
+    agentDefaultUnknown: 'Padrão do agente (modelo ainda não conhecido)',
+    summaryDefault: (model?: string) =>
+      model ? `modelo padrão (hoje: ${model})` : 'modelo padrão (ainda não conhecido)',
+    summaryEffort: (level?: string) =>
+      level ? `esforço ${level} (fixo)` : 'esforço não conhecido',
     effort: 'Esforço',
     effortOf: (role: string) => `Esforço do ${role}`,
     default: 'Padrão',
@@ -1580,6 +1595,7 @@ export const ptBR: Copy = {
       health: 'Guia da Saúde',
       agents: 'Guia dos Agentes',
       setup: 'Guia da Configuração',
+      code: 'Guia do Code Mode',
     },
     board: {
       about: 'Aqui você acompanha cada tarefa da fábrica, da fila até a entrega.',
@@ -1639,6 +1655,16 @@ export const ptBR: Copy = {
       understand: ['Para que serve cada item?', 'O que falta para a fábrica funcionar?'],
       act: [{ text: 'Me guie no próximo passo.' }],
       note: 'Nunca cole chaves ou senhas aqui.',
+    },
+    code: {
+      about:
+        'Aqui você escreve código com um agente num sandbox, numa branch própria. O guia lê suas sessões; não muda nada.',
+      understand: [
+        'Qual a diferença entre Ask, Plan e Code?',
+        'O que acontece com o trabalho de uma sessão?',
+      ],
+      act: [{ text: 'O que cada uma das minhas sessões está fazendo agora?' }],
+      note: 'O guia só lê: enviar mensagens e abrir pull requests é na própria página.',
     },
     open: {
       task: (id: number) => ({

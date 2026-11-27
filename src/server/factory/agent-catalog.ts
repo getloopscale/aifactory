@@ -4,7 +4,15 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { GUIDE_IDS, GUIDE_NAMES, type GuideId } from '../../shared/guides'
-import type { AgentEntry, AgentPrompt, AgentRole, AgentsView, AgentTool } from '../../shared/panel'
+import {
+  DEFAULT_MODEL_WORD,
+  FIXED_EFFORT_WORD,
+  type AgentEntry,
+  type AgentPrompt,
+  type AgentRole,
+  type AgentsView,
+  type AgentTool,
+} from '../../shared/panel'
 import { PERSONAS } from '../../shared/personas'
 import { ASSIST_INSTRUCTIONS, SETUP_INSTRUCTIONS } from '../agents/prompts/assist'
 import { mergerPrompt } from '../agents/prompts/merger'
@@ -76,7 +84,7 @@ const KNOWLEDGE_TOOL: AgentTool = {
 /** The agent of a role with the model and the effort it is told to use, or "default" where nothing is set. */
 function engineValue(env: NodeJS.ProcessEnv, role: AgentRole, engine: string): string {
   const { model, effort } = optionsFor(env, role, engine)
-  return `${engine} · ${model ?? 'modelo padrão'}${effort ? ` · esforço ${effort}` : ''}`
+  return `${engine} · ${model ?? DEFAULT_MODEL_WORD}${effort ? ` · esforço ${effort}` : ''}`
 }
 
 /** The agents that build, review and plan. They run in a sandbox the factory makes for each run. */
@@ -231,7 +239,7 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
       role: 'Depois que o revisor aprova, lê a mudança só pela segurança: segredos, dependências vulneráveis, injeção, autorização. Não edita nada. Um achado do piso determinístico bloqueia a tarefa, e nenhum agente pode dispensá-lo.',
       runsIn: 'sandbox',
       engine: {
-        value: `${engineValue(env, 'security', env.FACTORY_SECURITY || builder).replace(/ · esforço .*$/, '')} · esforço máximo do modelo (fixo)${env.FACTORY_SECURITY ? '' : ' (o mesmo agente do construtor, numa sessão nova)'}`,
+        value: `${engineValue(env, 'security', env.FACTORY_SECURITY || builder).replace(/ · esforço .*$/, '')} · ${FIXED_EFFORT_WORD}${env.FACTORY_SECURITY ? '' : ' (o mesmo agente do construtor, numa sessão nova)'}`,
         change:
           'Aqui mesmo, na página Agentes, só o agente e o modelo. O esforço é sempre o mais alto que o modelo oferece e não pode ser baixado.',
       },

@@ -3,7 +3,12 @@ import { SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'
 
-import { securityEffort, type AgentRole, type AgentSettings } from '../../../shared/panel'
+import {
+  securityEffort,
+  type AgentRole,
+  type AgentSettings,
+  type RoleModels,
+} from '../../../shared/panel'
 import { put } from '../../lib/api'
 import { useCopy } from '../../lib/copy'
 import { AgentIcon } from '../floor/AgentIcon'
@@ -24,10 +29,13 @@ const caption = 'mb-1 block text-xs font-medium uppercase tracking-wide text-mut
 export function EngineChooser({
   role,
   settings,
+  reported,
   onSaved,
 }: {
   role: AgentRole
   settings: AgentSettings
+  /** The model each agent last reported per role; the agent's default is named from it. */
+  reported?: RoleModels
   onSaved: () => void
 }) {
   const { t } = useCopy()
@@ -55,6 +63,7 @@ export function EngineChooser({
   const offered = settings.engines[engine] ?? { models: [], efforts: [] }
   const picked = offered.models.find((m) => m.id === model)
   const levels = picked?.efforts ?? offered.efforts
+  const reportedModel = reported?.[role]?.[engine]
 
   function chooseEngine(next: string) {
     setValue(next)
@@ -124,7 +133,11 @@ export function EngineChooser({
             value={model}
             onChange={(e) => chooseModel(e.target.value)}
           >
-            <option value={SAME}>{t.engine.agentDefault}</option>
+            <option value={SAME}>
+              {reportedModel
+                ? t.engine.agentDefaultToday(reportedModel)
+                : t.engine.agentDefaultUnknown}
+            </option>
             {offered.models.map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
