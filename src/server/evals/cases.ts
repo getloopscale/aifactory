@@ -156,6 +156,14 @@ export const QUALITY_GATES = [
   '.jscpd.json',
   '.github/workflows/',
   'src/server/factory/test-weakening.ts',
+  'src/server/evals/cases.ts',
+  'src/server/evals/run-case.ts',
+  'src/server/evals/suite.ts',
+  'src/server/evals/compare.ts',
+  'src/server/evals/suite.evals.test.ts',
+  'evals/baseline.json',
+  'evals/cases.json',
+  'scripts/deploy.sh',
 ]
 
 /** The paths among `changed` that belong to the agents' configuration. */
@@ -208,9 +216,10 @@ export function heldForReview(
   own?: string,
 ): string[] {
   if (!isFactoryRepository(repository, own)) return []
-  return changed.filter(
-    (path) =>
-      !isTest(path) &&
-      QUALITY_GATES.some((gate) => (gate.endsWith('/') ? path.startsWith(gate) : path === gate)),
+  // A test is held only when a gate names it exactly; one under a gate's folder is not.
+  return changed.filter((path) =>
+    QUALITY_GATES.some((gate) =>
+      gate.endsWith('/') ? !isTest(path) && path.startsWith(gate) : path === gate,
+    ),
   )
 }

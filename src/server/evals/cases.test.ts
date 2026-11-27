@@ -210,6 +210,23 @@ describe('the change the factory holds for the owner to review', () => {
     ])
   })
 
+  it('holds the evaluation lists, the suite and the deploy check, each on its own', () => {
+    for (const path of [
+      'src/server/evals/cases.ts',
+      'src/server/evals/run-case.ts',
+      'src/server/evals/suite.ts',
+      'src/server/evals/compare.ts',
+      'src/server/evals/suite.evals.test.ts',
+      'evals/baseline.json',
+      'evals/cases.json',
+      'scripts/deploy.sh',
+    ]) {
+      expect(heldForReview(FACTORY_REPOSITORY, [path])).toEqual([path])
+      expect(heldForReview('usetheokit/theokit-sdk', [path])).toEqual([])
+    }
+    expect(heldForReview(FACTORY_REPOSITORY, ['src/server/evals/cases.test.ts'])).toEqual([])
+  })
+
   it('is nothing for a change that leaves the gates alone', () => {
     expect(heldForReview(FACTORY_REPOSITORY, ['src/server/factory/run.ts', 'README.md'])).toEqual([])
   })
