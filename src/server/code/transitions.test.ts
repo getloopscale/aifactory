@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CODE_STATES } from '../../shared/code'
 
-import { CODE_EVENTS, CODE_TRANSITIONS, transition } from './transitions'
+import { CODE_EVENTS, CODE_TRANSITIONS, planAnswerOutcome, transition } from './transitions'
 
 describe('code session transitions', () => {
   it('has a row for every pair of state and event', () => {
@@ -72,5 +72,20 @@ describe('code session transitions', () => {
     expect(transition('idle', 'idle_timeout')).toEqual({ action: 'move', state: 'stopped' })
     expect(transition('running', 'idle_timeout').action).toBe('ignored')
     expect(transition('running', 'turn_failed')).toEqual({ action: 'move', state: 'failed' })
+  })
+
+  it('queues an accepted or revised plan, returns a rejected one to idle, and refuses any other state', () => {
+    expect(planAnswerOutcome('waiting_input', 'accept')).toEqual({
+      action: 'move',
+      state: 'queued',
+    })
+    expect(planAnswerOutcome('waiting_input', 'revise')).toEqual({
+      action: 'move',
+      state: 'queued',
+    })
+    expect(planAnswerOutcome('waiting_input', 'reject')).toEqual({ action: 'move', state: 'idle' })
+    for (const state of CODE_STATES.filter((x) => x !== 'waiting_input')) {
+      expect(planAnswerOutcome(state, 'reject').action).toBe('refused')
+    }
   })
 })

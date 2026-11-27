@@ -18,7 +18,13 @@ import { codeEvent, codeSession } from '../db/schema'
 import { jobBackend } from '../factory/job-backend'
 import { toStored } from '../factory/transcript'
 
-import { transition, type CodeTransitionEvent } from './transitions'
+import { acceptedPlanMessage } from '../agents/prompts/code-plan'
+import {
+  planAnswerOutcome,
+  transition,
+  type CodeTransitionEvent,
+  type PlanAnswer,
+} from './transitions'
 
 /** Storage of a code session and its numbered events. State changes go through `transitions.ts`, not here. */
 
@@ -205,6 +211,88 @@ export async function sendMessage(sessionId: string, text: string): Promise<Mess
         idempotencyKey: `code-turn-${sessionId}-${event!.seq}`,
       })
       return { kind: 'sent' as const, event: event!, session: moved! }
+    })
+  } finally {
+    client.release()
+  }
+}
+
+/** The `state` event that says a plan was answered, and how. */
+export const planAnswerMarker = (planSeq: number, answer: PlanAnswer) => `plan:${planSeq}:${answer}`
+
+export type PlanAnswerInput =
+  { answer: 'accept' } | { answer: 'revise'; text: string } | { answer: 'reject' }
+
+export type PlanAnswerResult =
+  | { kind: 'answered'; session: CodeSession; queued: boolean }
+  | { kind: 'refused'; reason: string; state: CodeState }
+  | { kind: 'not_found' }
+
+/**
+ * Answers the plan at `planSeq`, under the session's row lock. `transitions.ts` (`plan_answered`) is asked first, and
+ * only the session's last plan may be answered: a second answer finds the session no longer waiting, a stale
+ * `planSeq` finds another plan. The answer is a `state` event; accept (mode `code`, the plan as the message) and
+ * revise (the owner's text, mode unchanged) store the message and queue its `code-turn` in the same transaction,
+ * reject queues nothing and returns the session to `idle`.
+ */
+export async function answerPlan(
+  sessionId: string,
+  planSeq: number,
+  input: PlanAnswerInput,
+): Promise<PlanAnswerResult> {
+  const client = await getPool().connect()
+  try {
+    return await drizzle(client, { schema }).transaction(async (tx) => {
+      const [session] = await tx
+        .select()
+        .from(codeSession)
+        .where(eq(codeSession.id, sessionId))
+        .for('update')
+      if (!session) return { kind: 'not_found' as const }
+      const outcome = planAnswerOutcome(session.state, input.answer)
+      if (outcome.action !== 'move') {
+        return { kind: 'refused' as const, reason: outcome.reason, state: session.state }
+      }
+      const [plan] = await tx
+        .select({ seq: codeEvent.seq, content: codeEvent.content })
+        .from(codeEvent)
+        .where(and(eq(codeEvent.sessionId, sessionId), eq(codeEvent.kind, 'plan')))
+        .orderBy(desc(codeEvent.seq))
+        .limit(1)
+      if (!plan || plan.seq !== planSeq) {
+        return {
+          kind: 'refused' as const,
+          reason: 'That plan is not the one waiting for an answer.',
+          state: session.state,
+        }
+      }
+      await insertEvent(tx, sessionId, {
+        kind: 'state',
+        content: planAnswerMarker(plan.seq, input.answer),
+      })
+      let message: string | undefined
+      if (input.answer === 'accept') message = acceptedPlanMessage(plan.content)
+      if (input.answer === 'revise') message = input.text
+      const event = message
+        ? await insertEvent(tx, sessionId, { kind: 'user_message', content: message })
+        : undefined
+      const [moved] = await tx
+        .update(codeSession)
+        .set({
+          state: outcome.state,
+          ...(input.answer === 'accept' ? { mode: 'code' as const } : {}),
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(eq(codeSession.id, sessionId))
+        .returning()
+      if (event) {
+        await jobBackend().enqueueInTransaction(client, {
+          name: 'code-turn',
+          input: { sessionId },
+          idempotencyKey: `code-turn-${sessionId}-${event.seq}`,
+        })
+      }
+      return { kind: 'answered' as const, session: moved!, queued: event !== undefined }
     })
   } finally {
     client.release()

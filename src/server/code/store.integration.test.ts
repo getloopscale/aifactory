@@ -8,6 +8,7 @@ import { jobBackend } from '../factory/job-backend'
 import { EVENT_MAX_BYTES } from '../factory/transcript'
 
 import {
+  answerPlan,
   appendEvent,
   claimTurn,
   moveSession,
@@ -215,5 +216,55 @@ describe('sending a message', () => {
       mode: 'plan',
       model: 'm',
     })
+  })
+})
+
+describe('answering a plan', () => {
+  async function waitingWithPlan() {
+    const s = await aSession()
+    await updateSession(s.id, { mode: 'plan' })
+    await appendEvent(s.id, { kind: 'user_message', content: 'plan it' })
+    const plan = await appendEvent(s.id, { kind: 'plan', content: '## What exists' })
+    await getPool().query("update code_session set state = 'waiting_input' where id = $1", [s.id])
+    return { id: s.id, seq: plan.seq }
+  }
+  const jobs = async () =>
+    (await getPool().query("select 1 from loopzero_jobs where name = 'code-turn'")).rowCount
+
+  it('accepts: switches to code and queues one turn whose message is the plan', async () => {
+    const { id, seq } = await waitingWithPlan()
+    const result = await answerPlan(id, seq, { answer: 'accept' })
+    expect(result).toMatchObject({ kind: 'answered', queued: true })
+    expect(await getSession(id)).toMatchObject({ mode: 'code', state: 'queued' })
+    const events = await eventsAfter(id, seq, 10)
+    expect(events[0]).toMatchObject({ kind: 'state', content: `plan:${seq}:accept` })
+    expect(events[1]!.content).toContain('## What exists')
+    expect(await jobs()).toBe(1)
+  })
+
+  it('revises: sends the text in plan mode', async () => {
+    const { id, seq } = await waitingWithPlan()
+    await answerPlan(id, seq, { answer: 'revise', text: 'add tests' })
+    expect(await getSession(id)).toMatchObject({ mode: 'plan', state: 'queued' })
+    expect((await eventsAfter(id, seq, 10))[1]).toMatchObject({
+      kind: 'user_message',
+      content: 'add tests',
+    })
+    expect(await jobs()).toBe(1)
+  })
+
+  it('rejects: records it, goes idle in plan mode and queues nothing', async () => {
+    const { id, seq } = await waitingWithPlan()
+    await answerPlan(id, seq, { answer: 'reject' })
+    expect(await getSession(id)).toMatchObject({ mode: 'plan', state: 'idle' })
+    expect(await jobs()).toBe(0)
+  })
+
+  it('refuses a second answer and a stale plan, with no second job', async () => {
+    const { id, seq } = await waitingWithPlan()
+    expect((await answerPlan(id, seq + 5, { answer: 'accept' })).kind).toBe('refused')
+    await answerPlan(id, seq, { answer: 'accept' })
+    expect((await answerPlan(id, seq, { answer: 'accept' })).kind).toBe('refused')
+    expect(await jobs()).toBe(1)
   })
 })

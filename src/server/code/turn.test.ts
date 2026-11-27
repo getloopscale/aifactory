@@ -213,6 +213,27 @@ describe('runTurn', () => {
     expect(t.events.some((e) => e.kind === 'error')).toBe(false)
   })
 
+  it('asks plan mode for a plan and ends with one plan event, waiting for the owner', async () => {
+    const t = setup('plan', (input) => {
+      input.onEvent?.({ kind: 'message', content: 'thinking aloud' })
+      return { ok: true, summary: '## What exists\nx', costUsd: 0.1 }
+    })
+    const result = await runTurn(t.deps, 's1')
+    expect(result.status).toBe('waiting_input')
+    expect(t.run.mock.calls[0]![1].prompt).toContain('## What I will not do')
+    expect(t.run.mock.calls[0]![1].prompt).toContain('do it')
+    expect(t.events.filter((e) => e.kind === 'plan')).toHaveLength(1)
+    expect(t.events.find((e) => e.kind === 'plan')?.content).toBe('## What exists\nx')
+    expect(t.events.some((e) => e.kind === 'agent_message')).toBe(false)
+    expect(t.session.state).toBe('waiting_input')
+  })
+
+  it('fails a plan turn that answers with nothing', async () => {
+    const t = setup('plan', () => ({ ok: true, summary: '  ' }))
+    expect((await runTurn(t.deps, 's1')).status).toBe('failed')
+    expect(t.events.some((e) => e.kind === 'plan')).toBe(false)
+  })
+
   it('records the mode the turn ran in on its state event', async () => {
     const t = setup('plan')
     await runTurn(t.deps, 's1')
