@@ -89,18 +89,28 @@ export function selectCandidates(
 }
 
 /**
- * Marks `count` cases as the quick set run before a deploy: the shortest of each repository in turn, so the
- * set is cheap and still reaches every repository it can.
+ * Marks up to `count` cases as the quick set run before a deploy. Only a case that passed in the baseline
+ * (`baseline`, its measured duration) can be quick: one that failed there, or is not there, cannot tell a
+ * regression from the baseline and costs its whole duration. The fastest passing case of each repository comes
+ * first, then the next of each; within a turn the shortest measured duration goes first. A set with fewer
+ * eligible cases than `count` stays short: a gap is never filled with a case the baseline did not measure.
  */
-export function markQuick(cases: EvalCase[], count: number): EvalCase[] {
-  const groups = byRepository(cases)
-  for (const [key, group] of groups) {
-    groups.set(
-      key,
-      [...group].sort((a, b) => a.original.durationMs - b.original.durationMs),
-    )
+export function markQuick(
+  cases: EvalCase[],
+  count: number,
+  baseline: { id: string; passed: boolean; durationMs: number }[],
+): EvalCase[] {
+  const measured = new Map(baseline.filter((r) => r.passed).map((r) => [r.id, r.durationMs]))
+  const eligible = cases.filter((c) => measured.has(c.id))
+  const ranked: { id: string; turn: number; durationMs: number }[] = []
+  for (const group of byRepository(eligible).values()) {
+    group
+      .map((c) => ({ id: c.id, durationMs: measured.get(c.id)! }))
+      .sort((a, b) => a.durationMs - b.durationMs || a.id.localeCompare(b.id))
+      .forEach((c, turn) => ranked.push({ ...c, turn }))
   }
-  const quick = new Set(inTurn(groups, count).map((c) => c.id))
+  ranked.sort((a, b) => a.turn - b.turn || a.durationMs - b.durationMs || a.id.localeCompare(b.id))
+  const quick = new Set(ranked.slice(0, count).map((c) => c.id))
   return cases.map((c) => ({ ...c, quick: quick.has(c.id) }))
 }
 
@@ -156,6 +166,15 @@ export const QUALITY_GATES = [
   '.jscpd.json',
   '.github/workflows/',
   'src/server/factory/test-weakening.ts',
+  'src/server/evals/cases.ts',
+  'src/server/evals/run-case.ts',
+  'src/server/evals/check-receipt.ts',
+  'src/server/evals/suite.ts',
+  'src/server/evals/compare.ts',
+  'src/server/evals/suite.evals.test.ts',
+  'evals/baseline.json',
+  'evals/cases.json',
+  'scripts/deploy.sh',
 ]
 
 /** The paths among `changed` that belong to the agents' configuration. */
@@ -208,9 +227,10 @@ export function heldForReview(
   own?: string,
 ): string[] {
   if (!isFactoryRepository(repository, own)) return []
-  return changed.filter(
-    (path) =>
-      !isTest(path) &&
-      QUALITY_GATES.some((gate) => (gate.endsWith('/') ? path.startsWith(gate) : path === gate)),
+  // A test is held only when a gate names it exactly; one under a gate's folder is not.
+  return changed.filter((path) =>
+    QUALITY_GATES.some((gate) =>
+      gate.endsWith('/') ? !isTest(path) && path.startsWith(gate) : path === gate,
+    ),
   )
 }

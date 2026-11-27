@@ -11,6 +11,7 @@ export const GROUP_OF: Record<GuideId, 'operation' | 'factory'> = {
   agents: 'factory',
   health: 'factory',
   setup: 'factory',
+  code: 'operation',
 }
 
 const FLOOR_VIEWS = ['attention', 'decisions', 'projects'] as const

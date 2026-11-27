@@ -6,11 +6,12 @@
 //   EVALS_SET       quick | all (run; default quick)
 //   EVALS_CASES     comma-separated case ids, instead of a set
 //   EVALS_BUDGET_USD    no case starts once this is spent (default 15)
-//   EVALS_CONCURRENCY   cases at a time (default 2)
+//   EVALS_CONCURRENCY   cases at a time (check: the quick set, bounded by the free sandbox slots; run: 2)
 //   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -21,6 +22,7 @@ import { integrationBranch } from '../factory/branches'
 import { factoryDeps, githubAppFromEnv } from '../factory/deps'
 import { optionsFor } from '../factory/engine-models'
 import { DEFAULT_TIMEOUTS } from '../factory/run'
+import type { SlotSource } from '../factory/sandbox-slot'
 import { resolveTimeouts } from '../factory/run-limit'
 import { labelsWithRepoChoice, loadRepoConfig } from '../factory/repo-config'
 import { effectiveEnv } from '../factory/settings'
@@ -29,6 +31,12 @@ import { modelReadinessJudge } from '../scheduler/judge'
 import { parseReadiness, readinessMessage } from '../scheduler/readiness'
 import type { KnowledgeSource } from '../knowledge/source'
 
+import {
+  findPass,
+  fingerprint,
+  receiptsFolder,
+  recordPass,
+} from './check-receipt'
 import { markQuick, selectCandidates, type EvalCase } from './cases'
 import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } from './compare'
 import { deliveredCandidates, toCase } from './extract'
@@ -37,8 +45,11 @@ import {
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
-  checkFromTestStart,
+  baselineResultsFor,
+  checkConcurrency,
+  checkWithRecord,
   fromTestStart,
+  parseConcurrency,
   parseMarginMinutes,
   runSuiteFromTestStart,
   spentOn,
@@ -115,7 +126,32 @@ async function startMargin(cases: EvalCase[]): Promise<number> {
   return startMarginFor(limits)
 }
 
+/** The sandbox slots free now, or undefined when the provider cannot say (the check then starts one worker). */
+async function freeSandboxSlots(cases: EvalCase[]): Promise<number | undefined> {
+  if (cases.length === 0) return undefined
+  try {
+    const { sandbox } = await evalDeps(cases[0].repository, cases[0].labels)
+    const provider = sandbox as Partial<SlotSource> | undefined
+    if (!provider?.listSandboxes || !provider.maxSandboxes) {
+      console.warn('evals: the sandbox provider cannot say its free slots; the check runs one case at a time')
+      return undefined
+    }
+    return provider.maxSandboxes - (await provider.listSandboxes()).length
+  } catch (error) {
+    console.warn(`evals: could not read the free sandbox slots (${String(error)}); running one case at a time`)
+    return undefined
+  }
+}
+
 async function runCases(cases: EvalCase[], testStartedAt: number) {
+  const concurrency =
+    mode === 'check'
+      ? checkConcurrency({
+          override: env.EVALS_CONCURRENCY,
+          cases: cases.length,
+          freeSlots: await freeSandboxSlots(cases),
+        })
+      : parseConcurrency(env.EVALS_CONCURRENCY ?? '2')
   // A bad value fails the run at once; only the read of the repositories' limits can be cut short.
   const margin =
     env.EVALS_START_MARGIN_MIN !== undefined
@@ -149,7 +185,7 @@ async function runCases(cases: EvalCase[], testStartedAt: number) {
     },
     {
       budgetUsd: Number(env.EVALS_BUDGET_USD ?? 15),
-      concurrency: Number(env.EVALS_CONCURRENCY ?? 2),
+      concurrency,
       sandboxUsdPerMs: E2B_USD_PER_MS,
       // Counted from the test's start, setup included, as vitest counts its timeout; a case that hangs is
       // abandoned a little before it.
@@ -212,7 +248,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
         }),
       )
     }
-    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5)))
+    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5), baselineResultsFor(BASELINE)))
     expect(cases.length).toBeGreaterThan(0)
   })
 })
@@ -242,8 +278,12 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
   }, SUITE_TIMEOUT_MS)
 })
 
+const receipts = () =>
+  receiptsFolder(process.cwd(), resolve(process.cwd(), git('rev-parse', '--git-common-dir')))
+
 describe.runIf(mode === 'check')('the agent configuration', () => {
   it('is no worse than the baseline when it changed since then', async () => {
+    // The decisions (reuse, the judge, what is recorded) are in `checkWithRecord`, which suite.test.ts proves.
     const checked = await fromTestStart((testStartedAt) => {
       const baseline = readJson<Baseline>(BASELINE)
       const changedPaths = [
@@ -251,14 +291,35 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
         ...git('diff', '--name-only', 'HEAD').split('\n'),
       ].filter(Boolean)
       const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
-      return checkFromTestStart(testStartedAt, {
+      return checkWithRecord(testStartedAt, {
         baseline,
+        quickIds: quick.map((c) => c.id),
         changedPaths,
+        quickCases: quick.length,
+        judgeCases: blockedIssues.length,
         readSetup: () => currentSetup(quick),
         runQuick: async (startedAt) => {
           const { results, skipped } = await runCases(quick, startedAt)
           return { results, skipped }
         },
+        runJudge: async () => {
+          const failures: string[] = []
+          for (const issue of blockedIssues)
+            await answersBlocked(issue).catch((e: Error) =>
+              failures.push(`${issue.name}: ${e.message}`),
+            )
+          return failures
+        },
+        fingerprint: (setup) =>
+          fingerprint({
+            root: process.cwd(),
+            setup,
+            baseline: readFileSync(BASELINE, 'utf8'),
+            cases: readFileSync(CASES, 'utf8'),
+          }),
+        find: (print) => findPass(receipts(), print),
+        record: (pass) => recordPass(receipts(), pass),
+        commit: () => git('rev-parse', 'HEAD'),
       })
     })
     console.log(JSON.stringify({ event: 'eval_check', ...checked }))
@@ -267,34 +328,36 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
   })
 })
 
+const blockedIssues = [
+  {
+    name: 'a fix under .github/',
+    title: 'The release workflow publishes with the wrong token',
+    body: 'The job `publish` in `.github/workflows/release.yml` reads `NPM_TOKEN` from the wrong secret.\nChange it to `NPM_PUBLISH_TOKEN` and the release workflow publishes again.\nDone when the next release run passes.',
+    mentions: /\.github|workflow/i,
+  },
+  {
+    name: 'an unpublished package version',
+    title: 'Use the new gateway API from @getloopscale/loopzero-sdk 99.0.0',
+    body: 'Upgrade `@getloopscale/loopzero-sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@getloopscale/loopzero-sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
+    mentions: /@getloopscale\/loopzero-sdk/i,
+  },
+]
+async function answersBlocked({
+  title,
+  body,
+  mentions,
+}: (typeof blockedIssues)[number]): Promise<void> {
+  const answer = await modelReadinessJudge()(
+    readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
+  )
+  const read = parseReadiness(answer.response)
+  expect(read.verdict).toBe('blocked')
+  expect(read.missing).toMatch(mentions)
+}
+
 // The readiness judge on issues that cannot be done where they run (#238). The judge is a model, so only a live
 // answer shows that its prompt gets them: a fix under `.github/`, and a package version that is not published.
-describe.runIf(mode === 'check' || mode === 'judge')('the readiness judge', () => {
-  const blockedIssues = [
-    {
-      name: 'a fix under .github/',
-      title: 'The release workflow publishes with the wrong token',
-      body: 'The job `publish` in `.github/workflows/release.yml` reads `NPM_TOKEN` from the wrong secret.\nChange it to `NPM_PUBLISH_TOKEN` and the release workflow publishes again.\nDone when the next release run passes.',
-      mentions: /\.github|workflow/i,
-    },
-    {
-      name: 'an unpublished package version',
-      title: 'Use the new gateway API from @getloopscale/loopzero-sdk 99.0.0',
-      body: 'Upgrade `@getloopscale/loopzero-sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@getloopscale/loopzero-sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
-      mentions: /@getloopscale\/loopzero-sdk/i,
-    },
-  ]
-  it.each(blockedIssues)(
-    'answers blocked for $name',
-    async ({ title, body, mentions }) => {
-      const judge = modelReadinessJudge()
-      const answer = await judge(
-        readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
-      )
-      const read = parseReadiness(answer.response)
-      expect(read.verdict).toBe('blocked')
-      expect(read.missing).toMatch(mentions)
-    },
-    300_000,
-  )
+// In `check` mode the judge runs inside the check above, so that a pass is recorded only when it passed too.
+describe.runIf(mode === 'judge')('the readiness judge', () => {
+  it.each(blockedIssues)('answers blocked for $name', (issue) => answersBlocked(issue), 300_000)
 })

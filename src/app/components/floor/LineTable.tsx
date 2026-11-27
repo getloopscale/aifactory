@@ -5,7 +5,8 @@ import { Link, useSearchParams } from 'react-router'
 import type { TaskCard } from '../../../shared/panel'
 import { useCopy } from '../../lib/copy'
 import { LANES, laneOf, shortRepository, type FloorState } from '../../lib/floor'
-import { ago, itemName, money } from '../../lib/format'
+import { ItemId } from '../ui/ItemId'
+import { ago, money } from '../../lib/format'
 
 import { AgentIcon } from './AgentIcon'
 import { LANE_ICON, STEP_ICON } from './icons'
@@ -164,11 +165,13 @@ export function LineRow({
         <span className="flex min-w-0 items-center gap-3">
           <Tool task={task} />
           <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{task.title}</span>
+            <span className="flex min-w-0 items-baseline gap-1.5 text-sm font-medium">
+              <ItemId item={task} />
+              <span className="truncate">{task.title}</span>
+            </span>
             <span className="block truncate font-mono text-[11px] text-muted-foreground">
               {seen?.model ? <span className="text-foreground/80">{seen.model} · </span> : null}
-              {shortRepository(task.repository)} {itemName(task)} ·{' '}
-              {ago(task.updatedAt, Date.now(), t.time)}
+              {shortRepository(task.repository)} · {ago(task.updatedAt, Date.now(), t.time)}
               {task.attempts > 1 ? ` · ${t.floor.attempts(task.attempts)}` : ''}
             </span>
           </span>

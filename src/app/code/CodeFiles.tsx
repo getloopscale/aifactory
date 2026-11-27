@@ -97,7 +97,16 @@ function Branch({
 }
 
 /** The text of one file, read-only, with the number of each line. */
-export function FileViewer({ sessionId, path }: { sessionId: string; path: string }) {
+export function FileViewer({
+  sessionId,
+  path,
+  fill = false,
+}: {
+  sessionId: string
+  path: string
+  /** In an editor pane: no heading of its own, and as tall as the pane. */
+  fill?: boolean
+}) {
   const { t } = useCopy()
   const f = t.code.files
   const [state, setState] = useState<{
@@ -126,8 +135,14 @@ export function FileViewer({ sessionId, path }: { sessionId: string; path: strin
     return all
   }, [current.file])
   return (
-    <div role="region" aria-label={f.viewerOf(path)} className="border-t border-border">
-      <p className="break-all px-3 py-1.5 font-mono text-xs text-muted-foreground">{path}</p>
+    <div
+      role="region"
+      aria-label={f.viewerOf(path)}
+      className={fill ? 'flex h-full min-h-0 flex-col' : 'border-t border-border'}
+    >
+      {fill ? null : (
+        <p className="break-all px-3 py-1.5 font-mono text-xs text-muted-foreground">{path}</p>
+      )}
       {current.error ? (
         <p role="alert" className="px-3 py-2 text-sm text-destructive">
           {current.error}
@@ -141,7 +156,9 @@ export function FileViewer({ sessionId, path }: { sessionId: string; path: strin
               {f.truncated(current.file.limit)}
             </p>
           ) : null}
-          <div className="max-h-96 overflow-auto bg-background font-mono text-xs leading-5">
+          <div
+            className={`overflow-auto bg-background font-mono text-xs leading-5 [scrollbar-width:thin] ${fill ? 'min-h-0 flex-1 py-1' : 'max-h-96'}`}
+          >
             {lines.map((line, i) => (
               <div key={i} data-line={i + 1} className="grid grid-cols-[3rem_minmax(0,1fr)]">
                 <span className="select-none pr-2 text-right tabular-nums text-muted-foreground">
@@ -164,12 +181,15 @@ export function CodeFiles({
   error,
   selected,
   onSelect,
+  bare = false,
 }: {
   sessionId: string
   files: string[] | undefined
   error: string | undefined
   selected: string | undefined
   onSelect: (path: string) => void
+  /** Only the tree, as tall as it needs: the file opens somewhere else. */
+  bare?: boolean
 }) {
   const { t } = useCopy()
   const f = t.code.files
@@ -208,7 +228,11 @@ export function CodeFiles({
       ) : shown.length === 0 ? (
         <Quiet>{filtering ? f.noMatch : f.empty}</Quiet>
       ) : (
-        <ul role="tree" aria-label={f.tree} className="max-h-64 overflow-y-auto pb-2">
+        <ul
+          role="tree"
+          aria-label={f.tree}
+          className={bare ? 'pb-2' : 'max-h-64 overflow-y-auto pb-2'}
+        >
           <Branch
             node={tree}
             depth={0}
@@ -219,7 +243,7 @@ export function CodeFiles({
           />
         </ul>
       )}
-      {selected ? <FileViewer sessionId={sessionId} path={selected} /> : null}
+      {selected && !bare ? <FileViewer sessionId={sessionId} path={selected} /> : null}
     </div>
   )
 }

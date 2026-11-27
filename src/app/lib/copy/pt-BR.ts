@@ -117,6 +117,7 @@ export const ptBR: Copy = {
       delivered: 'entregue',
     },
     defaultModel: 'modelo padrão',
+    modelUnknown: 'modelo ainda não conhecido',
     now: {
       heading: 'Trabalhando agora',
       idle: 'Nenhum agente trabalhando agora.',
@@ -1503,6 +1504,12 @@ export const ptBR: Copy = {
     model: 'Modelo',
     modelOf: (role: string) => `Modelo do ${role}`,
     agentDefault: 'Padrão do agente',
+    agentDefaultToday: (model: string) => `Padrão do agente (hoje: ${model})`,
+    agentDefaultUnknown: 'Padrão do agente (modelo ainda não conhecido)',
+    summaryDefault: (model?: string) =>
+      model ? `modelo padrão (hoje: ${model})` : 'modelo padrão (ainda não conhecido)',
+    summaryEffort: (level?: string) =>
+      level ? `esforço ${level} (fixo)` : 'esforço não conhecido',
     effort: 'Esforço',
     effortOf: (role: string) => `Esforço do ${role}`,
     default: 'Padrão',
@@ -1569,6 +1576,7 @@ export const ptBR: Copy = {
       health: 'Guia da Saúde',
       agents: 'Guia dos Agentes',
       setup: 'Guia da Configuração',
+      code: 'Guia do Code Mode',
     },
     board: {
       about: 'Aqui você acompanha cada tarefa da fábrica, da fila até a entrega.',
@@ -1628,6 +1636,16 @@ export const ptBR: Copy = {
       understand: ['Para que serve cada item?', 'O que falta para a fábrica funcionar?'],
       act: [{ text: 'Me guie no próximo passo.' }],
       note: 'Nunca cole chaves ou senhas aqui.',
+    },
+    code: {
+      about:
+        'Aqui você escreve código com um agente num sandbox, numa branch própria. O guia lê suas sessões; não muda nada.',
+      understand: [
+        'Qual a diferença entre Ask, Plan e Code?',
+        'O que acontece com o trabalho de uma sessão?',
+      ],
+      act: [{ text: 'O que cada uma das minhas sessões está fazendo agora?' }],
+      note: 'O guia só lê: enviar mensagens e abrir pull requests é na própria página.',
     },
     open: {
       task: (id: number) => ({
@@ -1961,7 +1979,21 @@ export const ptBR: Copy = {
     mode: 'Modo',
     modes: { ask: 'Perguntar', plan: 'Planejar', code: 'Codar' },
     message: 'Primeira mensagem',
-    messagePlaceholder: 'O que o agente deve fazer?',
+    messagePlaceholder: 'Descreva uma mudança, pergunte sobre o código ou cole um erro',
+    hero: 'O que o agente deve fazer?',
+    heroAbout:
+      'Uma sessão é uma branch própria em um sandbox. Você conversa, o agente trabalha lá e você lê cada mudança ao lado da conversa.',
+    editor: {
+      resizeSide: 'Redimensionar a barra lateral',
+      resizeEditor: 'Redimensionar o agente e o editor',
+      tabs: 'Editores abertos',
+      close: (name: string) => `Fechar ${name}`,
+      diffTab: (name: string) => `${name} (mudanças)`,
+      side: 'Barra lateral',
+      status: 'Estado da sessão',
+    },
+    filter: 'Filtrar sessões',
+    noMatch: 'Nenhuma sessão corresponde.',
     start: 'Iniciar',
     retry: 'Enviar a mensagem de novo',
     states: {
@@ -2039,7 +2071,8 @@ export const ptBR: Copy = {
       sending: 'Enviando…',
       stop: 'Parar',
       message: 'Mensagem para o agente',
-      placeholder: 'Escreva para o agente',
+      placeholder: 'Responda, peça uma mudança ou digite @ para citar um arquivo',
+      by: 'Agente desta sessão',
       plan: {
         title: 'O agente propôs um plano',
         accept: 'Aceitar',

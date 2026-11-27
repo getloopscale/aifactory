@@ -25,7 +25,7 @@
       "attempts": 1,
       "mergedSha": "7648d071d5f653a8611f4248e582ecf0d32d0085"
     },
-    "quick": false
+    "quick": true
   },
   {
     "id": "usetheokit/theokit#1731",
@@ -180,7 +180,7 @@
       "attempts": 1,
       "mergedSha": "1732d5db902f6f6693ea9268f77cc6ba65731d90"
     },
-    "quick": true
+    "quick": false
   },
   {
     "id": "usetheokit/theokit-sdk#985",
@@ -276,7 +276,7 @@
       "attempts": 1,
       "mergedSha": "9f78bcaa57a69194a2d29e30fc37812981b45e61"
     },
-    "quick": false
+    "quick": true
   },
   {
     "id": "paulohenriquevn/aifactory-playground#61",
@@ -304,7 +304,7 @@
       "attempts": 1,
       "mergedSha": "ddcebf190e5f0e821fc5cd99c7734ec30d79fbf9"
     },
-    "quick": true
+    "quick": false
   },
   {
     "id": "usetheokit/theokit#1726",
@@ -405,7 +405,7 @@
       "attempts": 1,
       "mergedSha": "55cd22584f0c9e3dc8f5ead45eb7b9fe3049f9f7"
     },
-    "quick": false
+    "quick": true
   },
   {
     "id": "usetheokit/theokit-sdk#981",
@@ -598,7 +598,7 @@
       "attempts": 1,
       "mergedSha": "5db4bf0502ea22888f4e306477899caca09befe2"
     },
-    "quick": true
+    "quick": false
   },
   {
     "id": "usetheokit/theokit-sdk#975",
@@ -653,7 +653,7 @@
       "attempts": 1,
       "mergedSha": "6ab9adaaf54f44477ac548bc050d528797b2383f"
     },
-    "quick": true
+    "quick": false
   },
   {
     "id": "usetheokit/theokit-ui#172",
@@ -739,7 +739,7 @@
       "attempts": 1,
       "mergedSha": "bd4e050dd571aaa1ebafde4432a6bd7551bc0733"
     },
-    "quick": false
+    "quick": true
   },
   {
     "id": "usetheokit/theokit-gateways#347",
@@ -1033,7 +1033,7 @@
       "attempts": 1,
       "mergedSha": "d291a3be51cad6d04513b9cc9cbf01e009efa17a"
     },
-    "quick": true
+    "quick": false
   },
   {
     "id": "usetheokit/theokit-gateways#341",
@@ -1415,7 +1415,7 @@
       "attempts": 1,
       "mergedSha": "f4f87f0382796e539a2a4e682ac3c2c567e653cc"
     },
-    "quick": false
+    "quick": true
   },
   {
     "id": "paulohenriquevn/aifactory-playground#9001",

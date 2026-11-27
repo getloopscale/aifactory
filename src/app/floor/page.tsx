@@ -14,7 +14,8 @@ import { TaskDetailView } from '../components/TaskDetail'
 import { useCopy } from '../lib/copy'
 import { useWidth } from '../lib/media'
 import { shortRepository, splitInbox, stateOf, type FloorState } from '../lib/floor'
-import { ago, itemName, stepLine } from '../lib/format'
+import { ItemId } from '../components/ui/ItemId'
+import { ago, stepLine } from '../lib/format'
 import { useResource } from '../lib/live'
 
 /** The groups of the list, in the order the owner reads them: what needs them first, what is done last. */
@@ -235,7 +236,7 @@ export default function FloorPage() {
                             </span>
                           </span>
                           <span className="block truncate text-xs text-foreground/80">
-                            {shortRepository(row.repository)} {itemName(row)} {row.title}
+                            <ItemId item={row} /> {shortRepository(row.repository)} {row.title}
                           </span>
                         </span>
                       </Link>

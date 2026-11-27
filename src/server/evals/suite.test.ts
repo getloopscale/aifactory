@@ -1,16 +1,21 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import type { Pass } from './check-receipt'
 import type { Baseline, CaseResult } from './compare'
 import {
   DEFAULT_START_MARGIN_MS,
   E2B_USD_PER_MS,
   agentSetup,
   checkBeforeDeploy,
+  baselineResultsFor,
+  checkConcurrency,
+  parseConcurrency,
   checkFromTestStart,
+  checkWithRecord,
   fromTestStart,
   runSuite,
   writeRunOutcome,
@@ -353,6 +358,7 @@ describe('checkBeforeDeploy', () => {
   it('runs nothing when no file of the agent configuration changed and the setup is the same', async () => {
     let ran = false
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/app/page.tsx'],
       setup: { builder: 'claude-code', model: 'opus' },
@@ -368,6 +374,7 @@ describe('checkBeforeDeploy', () => {
 
   it('runs the quick set when a prompt changed, and passes a run as good as the baseline', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
@@ -383,6 +390,7 @@ describe('checkBeforeDeploy', () => {
 
   it('counts a different model as a change, though no file changed', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: [],
       setup: { builder: 'claude-code', model: 'sonnet' },
@@ -394,6 +402,7 @@ describe('checkBeforeDeploy', () => {
 
   it('names every setting that changed, in the order of their names', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline: { ...baseline, setup: { reviewer: 'codex', builder: 'claude-code' } },
       changedPaths: [],
       setup: { reviewer: 'claude-code', builder: 'codex' },
@@ -408,6 +417,7 @@ describe('checkBeforeDeploy', () => {
 
   it('refuses a partial quick run, naming the cases left, though the ones that ran are as good', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
@@ -426,6 +436,7 @@ describe('checkBeforeDeploy', () => {
         '[unavailable] the connection to sandbox x ended before the stream completed: The sandbox was killed or reached its end of life while the request was in flight.',
     }
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
@@ -439,6 +450,7 @@ describe('checkBeforeDeploy', () => {
 
   it('refuses a run worse than the baseline, with the reason', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       setup: baseline.setup,
@@ -449,6 +461,7 @@ describe('checkBeforeDeploy', () => {
       ran: true,
       ok: false,
       reasons: [
+        '4 quick case(s) passed in the baseline and failed now: a, b, c, d',
         'the pass rate fell from 100% to 0%',
         'no case ran to a verdict in both runs, so the cost could not be compared',
       ],
@@ -463,6 +476,7 @@ describe('checkFromTestStart', () => {
     let ran = false
 
     const checking = checkFromTestStart(testStartedAt, {
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       readSetup: () => new Promise<never>(() => {}),
@@ -481,6 +495,7 @@ describe('checkFromTestStart', () => {
     const given: number[] = []
 
     const checked = await checkFromTestStart(testStartedAt, {
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       readSetup: async () => baseline.setup,
@@ -508,5 +523,177 @@ describe('fromTestStart', () => {
     )
 
     expect(startedAt).toBe(1_000)
+  })
+})
+
+describe('checkBeforeDeploy with the quick set named', () => {
+  const run = (quickIds: string[], results: CaseResult[]) =>
+    checkBeforeDeploy({
+      baseline,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      quickIds,
+      runQuick: async () => results,
+    })
+
+  it('fails when one quick case that passed in the baseline fails now', async () => {
+    const checked = await run(['a', 'b', 'c', 'd'], [
+      result('a', 0.5),
+      result('b', 0.5),
+      result('c', 0.5),
+      { ...result('d', 0.5), passed: false, reason: 'checks failed: tests' },
+    ])
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons.join('\n')).toContain('passed in the baseline and failed now: d')
+  })
+
+  it('refuses a quick case the baseline did not pass or does not have', async () => {
+    const failing = {
+      ...baseline,
+      results: [{ ...result('a', 0.5), passed: false }, result('b', 0.5)],
+    }
+    const checked = await checkBeforeDeploy({
+      baseline: failing,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      quickIds: ['a', 'b', 'z'],
+      runQuick: async () => [result('b', 0.5)],
+    })
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons.join('\n')).toContain('did not pass in the baseline: a, z')
+  })
+})
+
+describe('checkConcurrency', () => {
+  it('runs the whole quick set at once when the slots allow it', () => {
+    expect(checkConcurrency({ cases: 5, freeSlots: 10 })).toBe(5)
+  })
+
+  it('is bounded by the free slots', () => {
+    expect(checkConcurrency({ cases: 5, freeSlots: 3 })).toBe(3)
+  })
+
+  it('starts one worker when the free slots are unknown or none', () => {
+    expect(checkConcurrency({ cases: 5 })).toBe(1)
+    expect(checkConcurrency({ cases: 5, freeSlots: 0 })).toBe(1)
+    expect(checkConcurrency({ cases: 5, freeSlots: Number.NaN })).toBe(1)
+  })
+
+  it('keeps an explicit override whatever the slots', () => {
+    expect(checkConcurrency({ override: '2', cases: 5, freeSlots: 10 })).toBe(2)
+  })
+})
+
+describe('checkConcurrency with a bad override', () => {
+  it.each(['abc', '0', '-1', '1.5'])('refuses "%s" instead of running with NaN', (value) => {
+    expect(() => checkConcurrency({ override: value, cases: 5, freeSlots: 10 })).toThrow(
+      'EVALS_CONCURRENCY',
+    )
+  })
+})
+
+describe('baselineResultsFor', () => {
+  it('has no results when the baseline file does not exist yet, and reads them when it does', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'baseline-'))
+    expect(baselineResultsFor(join(dir, 'baseline.json'))).toEqual([])
+    writeFileSync(join(dir, 'baseline.json'), JSON.stringify(baseline))
+    expect(baselineResultsFor(join(dir, 'baseline.json')).map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
+describe('parseConcurrency', () => {
+  it('reads a whole number and refuses anything else, for the run and baseline modes too', () => {
+    expect(parseConcurrency('3')).toBe(3)
+    for (const bad of ['abc', '0', '-2', '2.5', ' ']) expect(() => parseConcurrency(bad)).toThrow('EVALS_CONCURRENCY')
+  })
+})
+
+describe('checkWithRecord', () => {
+  const harness = (over: Record<string, unknown> = {}) => {
+    const log = { quick: 0, judge: 0, records: [] as Pass[], prints: 0 }
+    const input = {
+      baseline,
+      changedPaths: ['src/server/agents/chat.ts'],
+      quickIds: baseline.results.map((r) => r.id),
+      quickCases: 1,
+      judgeCases: 2,
+      readSetup: async () => baseline.setup,
+      runQuick: async () => {
+        log.quick++
+        return { results: baseline.results as CaseResult[], skipped: [] as string[] }
+      },
+      runJudge: async () => {
+        log.judge++
+        return [] as string[]
+      },
+      fingerprint: () => `print-${log.prints++ > 0 && over.moves ? 'moved' : 'one'}`,
+      find: (_: string): Pass | undefined => undefined,
+      record: (pass: Pass) => log.records.push(pass),
+      commit: () => 'abc',
+      ...over,
+    }
+    return { log, input }
+  }
+  const run = (input: ReturnType<typeof harness>['input']) => checkWithRecord(Date.now(), input)
+
+  it('accepts a recorded pass, runs no case and says which', async () => {
+    const pass = { fingerprint: 'print-one' } as Pass
+    const { log, input } = harness({ find: () => pass })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ran: false, ok: true, accepted: 'print-one' })
+    expect([log.quick, log.judge]).toEqual([0, 0])
+  })
+
+  it('runs the quick set and the judge on a miss and records the pass', async () => {
+    const { log, input } = harness()
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ran: true, ok: true, recorded: true })
+    expect([log.quick, log.judge]).toEqual([1, 1])
+    expect(log.records).toMatchObject([{ fingerprint: 'print-one', quickCases: 1, judgeCases: 2 }])
+  })
+
+  it('fails and records nothing when a judge case fails', async () => {
+    const { log, input } = harness({ runJudge: async () => ['a fix under .github/: wrong'] })
+    const checked = await run(input)
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons).toEqual(['the readiness judge: a fix under .github/: wrong'])
+    expect(log.records).toEqual([])
+  })
+
+  it('records nothing for a quick set that left a case', async () => {
+    const { log, input } = harness({
+      runQuick: async () => ({ results: baseline.results as CaseResult[], skipped: ['x'] }),
+    })
+    const checked = await run(input)
+    expect(checked.ok).toBe(false)
+    expect(log.records).toEqual([])
+  })
+
+  it('records nothing when nothing changed, since no case was measured', async () => {
+    const { log, input } = harness({ changedPaths: [] })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ran: false, recorded: false })
+    expect([log.quick, log.judge, log.records.length]).toEqual([0, 0, 0])
+  })
+
+  it('records nothing when the inputs changed during the run', async () => {
+    const { log, input } = harness({ moves: true })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ok: true, recorded: false })
+    expect(checked.notRecorded).toMatch(/changed during the run/)
+    expect(log.records).toEqual([])
+  })
+
+  it('does not fail the check when the record cannot be written', async () => {
+    const { input } = harness({
+      record: () => {
+        throw new Error('read-only')
+      },
+    })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ok: true, recorded: false })
+    expect(checked.notRecorded).toMatch(/read-only/)
   })
 })

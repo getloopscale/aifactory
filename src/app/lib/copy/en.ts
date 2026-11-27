@@ -45,6 +45,7 @@ export const en = {
       delivered: 'delivered',
     },
     defaultModel: 'default model',
+    modelUnknown: 'model not known yet',
     now: {
       heading: 'Working now',
       idle: 'No agent is working right now.',
@@ -1201,6 +1202,11 @@ export const en = {
     model: 'Model',
     modelOf: (role: string) => `Model of the ${role}`,
     agentDefault: "Agent's default",
+    agentDefaultToday: (model: string) => `Agent's default (today: ${model})`,
+    agentDefaultUnknown: "Agent's default (model not known yet)",
+    summaryDefault: (model?: string) =>
+      model ? `default model (today: ${model})` : 'default model (not known yet)',
+    summaryEffort: (level?: string) => (level ? `effort ${level} (fixed)` : 'effort not known'),
     effort: 'Effort',
     effortOf: (role: string) => `Effort of the ${role}`,
     default: 'Default',
@@ -1268,6 +1274,7 @@ export const en = {
       health: 'Guide of Health',
       agents: 'Guide of Agents',
       setup: 'Guide of Setup',
+      code: 'Guide of Code Mode',
     },
     board: {
       about: 'Here you follow every task of the factory, from the queue to delivery.',
@@ -1324,6 +1331,16 @@ export const en = {
       understand: ['What is each item for?', 'What is missing for the factory to work?'],
       act: [{ text: 'Guide me through the next step.' }],
       note: 'Never paste keys or passwords here.',
+    },
+    code: {
+      about:
+        'Here you write code with an agent in a sandbox, on a branch of its own. The guide reads your sessions; it changes nothing.',
+      understand: [
+        'What is the difference between Ask, Plan and Code?',
+        'What happens to the work of a session?',
+      ],
+      act: [{ text: 'What is each of my sessions doing now?' }],
+      note: 'The guide only reads: sending messages and opening pull requests is done on the page.',
     },
     open: {
       task: (id: number) => ({
@@ -1655,7 +1672,21 @@ export const en = {
     mode: 'Mode',
     modes: { ask: 'Ask', plan: 'Plan', code: 'Code' },
     message: 'First message',
-    messagePlaceholder: 'What should the agent do?',
+    messagePlaceholder: 'Describe a change, ask about the code, or paste an error',
+    hero: 'What should the agent do?',
+    heroAbout:
+      'A session is a branch of its own in a sandbox. You talk, the agent works there, and you read every change beside the conversation.',
+    editor: {
+      resizeSide: 'Resize the side bar',
+      resizeEditor: 'Resize the agent and the editor',
+      tabs: 'Open editors',
+      close: (name: string) => `Close ${name}`,
+      diffTab: (name: string) => `${name} (changes)`,
+      side: 'Side bar',
+      status: 'Session status',
+    },
+    filter: 'Filter sessions',
+    noMatch: 'No session matches.',
     start: 'Start',
     retry: 'Send the message again',
     states: {
@@ -1732,7 +1763,8 @@ export const en = {
       sending: 'Sending…',
       stop: 'Stop',
       message: 'Message to the agent',
-      placeholder: 'Write to the agent',
+      placeholder: 'Reply, ask for a change, or type @ to name a file',
+      by: 'Agent of this session',
       plan: {
         title: 'The agent proposed a plan',
         accept: 'Accept',

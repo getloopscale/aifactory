@@ -18,7 +18,6 @@ import {
   ago,
   duration,
   inQueueOrder,
-  itemName,
   lastAgentLine,
   money,
   runsAgain,
@@ -29,6 +28,7 @@ import {
 
 import { PriorityBadge, ReturnedBadge, StageBadge } from './Badges'
 import { AgentIcon } from './floor/AgentIcon'
+import { ItemId } from './ui/ItemId'
 import { Surface, TABLE, TONE_DOT, type Tone } from './ui/Surface'
 
 /** The board's address with a task open in the side panel. */
@@ -286,8 +286,9 @@ export function Card({ task, need }: { task: TaskCard; need?: Need }) {
         <div className="flex items-baseline gap-2 font-mono text-[11px] text-muted-foreground">
           <Rank queue={task.queue} />
           {task.origin ? <Origin origin={task.origin} /> : null}
-          <span className="min-w-0 flex-1 truncate" title={`${task.repository} ${itemName(task)}`}>
-            {task.repository.split('/').pop()} {itemName(task)}
+          <ItemId item={task} />
+          <span className="min-w-0 flex-1 truncate" title={task.repository}>
+            {task.repository.split('/').pop()}
           </span>
           <span className="shrink-0 tabular-nums">
             {task.costUsd >= 0.005 ? `${money(task.costUsd)} · ` : ''}
@@ -606,6 +607,7 @@ export function TaskList({ tasks }: { tasks: TaskCard[] }) {
                         <span aria-hidden className="size-7 shrink-0 rounded-md bg-muted/60" />
                       )}
                       <span className="min-w-0">
+                        <ItemId item={task} />{' '}
                         <Link
                           to={openTask(task.id)}
                           className="font-medium text-foreground hover:underline"
@@ -626,7 +628,7 @@ export function TaskList({ tasks }: { tasks: TaskCard[] }) {
                     </span>
                   </td>
                   <td className={`${TABLE.td} font-mono text-xs text-muted-foreground`}>
-                    {task.repository} {itemName(task)}
+                    {task.repository}
                   </td>
                   <td className={TABLE.td}>
                     <StageBadge

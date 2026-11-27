@@ -40,7 +40,7 @@ src/app/            frontend — the only half that reaches a browser
 src/server/         backend — never leaves the machine
   agents/           the assistants that run in the server process (`chat`, a guide for each panel page, `assist`,
                     `assist-setup`, each with a `-codex` twin except the last two), their tools, prompts and hooks
-  code/             Code Mode: a session's workspace, its event log and its turns (ADR 0014; planned)
+  code/             Code Mode: a session's workspace, its event log and its turns (ADR 0014)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
                     `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `improve`, `conversation-recover`, `push-attention`)
@@ -402,6 +402,12 @@ reads that file, not a convention.
   finding then sends the builder back once (`MAX_LENS_REWORKS`), and what it still finds goes into the pull request body
   as notes. A lens never hands work over and never fails a task; an answer that does not parse is recorded `invalid`.
   `evals/run-case.ts` takes the same step. A new lens is a new entry, and its prompt is agent configuration.
+- **A code session runs only in a sandbox, a turn is a job, and nothing under `code/` merges.** Code Mode (ADR 0014)
+  starts its agent in a sandbox from `createIsolatedSandbox`, never in the server process. A message is a `code-turn` job
+  (one writer per session, waiting in the queue for a sandbox slot). The mode (`ask`, `plan`, `code`) is enforced where
+  the harness starts (`HarnessInput.ask` makes it read-only), never by the prompt alone. What leaves a session is a
+  pushed branch and a draft pull request; `code/merges-nothing.test.ts` fails if a file there calls a merge. Its guide
+  (`guide-code`) reads sessions and events and writes nothing.
 - **The factory opens a revert and never merges it.** `watch-main` may open a pull request that
   reverts a release when its merge commit goes red. Nothing in `factory/watch.ts` calls a merge, and a
   test fails if it does.

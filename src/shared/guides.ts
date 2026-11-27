@@ -10,6 +10,7 @@ export const GUIDE_IDS = [
   'health',
   'agents',
   'setup',
+  'code',
 ] as const
 
 export type GuideId = (typeof GUIDE_IDS)[number]
@@ -23,6 +24,7 @@ export const GUIDE_NAMES: Record<GuideId, string> = {
   health: 'Guia da Saúde',
   agents: 'Guia dos Agentes',
   setup: 'Guia da Configuração',
+  code: 'Guia do Code Mode',
 }
 
 /** Where the agent of a guide is served: one per model, as for the chat. */

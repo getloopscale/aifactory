@@ -12,7 +12,16 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 
-import type { AgentEntry, AgentPrompt, AgentRole, AgentSettings } from '../../../shared/panel'
+import {
+  DEFAULT_MODEL_WORD,
+  FIXED_EFFORT_WORD,
+  securityEffort,
+  type AgentEntry,
+  type AgentPrompt,
+  type AgentRole,
+  type AgentSettings,
+  type RoleModels,
+} from '../../../shared/panel'
 
 import { useCopy } from '../../lib/copy'
 import { READABLE, Row, RowIcon, Rows, STACK, Surface, type Tone } from '../ui/Surface'
@@ -54,12 +63,14 @@ export function AgentDetail({
   shared,
   settings,
   query,
+  reported,
   onSettingsSaved,
 }: {
   agent: AgentEntry
   shared: AgentPrompt[]
   settings: AgentSettings
   query: string
+  reported?: RoleModels
   onSettingsSaved: () => void
 }) {
   const { t } = useCopy()
@@ -67,6 +78,17 @@ export function AgentDetail({
   const [chosen, setChosen] = useState(0)
   const index = Math.min(chosen, agent.prompts.length - 1)
   const prompt = agent.prompts[index]
+  let engineText = agent.engine.value
+  if (role) {
+    // The catalog writes the model and the effort in a fixed word where the page can say more than it knows.
+    const engine = settings.effective[role]
+    const model = settings.chosenModel[role]
+    const offered = settings.engines[engine]
+    const levels = offered?.models.find((m) => m.id === model)?.efforts ?? offered?.efforts ?? []
+    engineText = engineText
+      .replace(DEFAULT_MODEL_WORD, () => t.engine.summaryDefault(reported?.[role]?.[engine]))
+      .replace(FIXED_EFFORT_WORD, () => t.engine.summaryEffort(securityEffort(levels)))
+  }
   const context = shared.filter((s) => agent.shared.includes(s.id))
 
   return (
@@ -84,7 +106,7 @@ export function AgentDetail({
         <dl className="grid gap-5 border-t border-border p-4 md:grid-cols-2">
           <Fact label={t.agents.when}>{agent.when}</Fact>
           <Fact label={t.agents.engine}>
-            <span className="font-mono text-[13px]">{agent.engine.value}</span>
+            <span className="font-mono text-[13px]">{engineText}</span>
             <span className="mt-1 block text-xs text-muted-foreground">
               {t.agents.howToChange(agent.engine.change)}
             </span>
@@ -119,6 +141,7 @@ export function AgentDetail({
           key={`${role}:${settings.chosen[role]}:${settings.effective[role]}:${settings.chosenModel[role]}:${settings.chosenEffort[role]}`}
           role={role}
           settings={settings}
+          reported={reported}
           onSaved={onSettingsSaved}
         />
       ) : null}

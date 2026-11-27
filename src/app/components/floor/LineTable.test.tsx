@@ -57,7 +57,9 @@ describe('a row of the line', () => {
     const link = row(card({ title: 'Add truncate', issueNumber: 7, updatedAt: minutesAgo(5) }))
 
     expect(screen.getByText('Add truncate')).toBeDefined()
-    expect(link.textContent).toContain('app #7 · 5m ago')
+    expect(link.querySelector('[data-item-id]')?.textContent).toBe('#7')
+    expect(link.textContent).toContain('#7Add truncate')
+    expect(link.textContent).toContain('app · 5m ago')
   })
 
   it('shows the model of the agent at work and the step it is in', () => {
@@ -68,7 +70,7 @@ describe('a row of the line', () => {
 
     const link = row(task)
 
-    expect(link.textContent).toContain('opus-9 · app #7')
+    expect(link.textContent).toContain('opus-9 · app ·')
     expect(screen.getByRole('img', { name: 'Claude Code' })).toBeDefined()
     expect(screen.getByRole('img', { name: 'Build, building' })).toBeDefined()
   })
@@ -76,7 +78,7 @@ describe('a row of the line', () => {
   it('shows the model of the agent that worked last on a task nobody works on', () => {
     const link = row(card({ stage: 'review', lastAgent: { agent: 'codex', model: 'gpt-9' } }))
 
-    expect(link.textContent).toContain('gpt-9 · app #7')
+    expect(link.textContent).toContain('gpt-9 · app ·')
     expect(screen.getByRole('img', { name: 'Codex' })).toBeDefined()
     expect(screen.getByRole('img', { name: 'Review, moving' })).toBeDefined()
   })
@@ -85,7 +87,7 @@ describe('a row of the line', () => {
     const link = row(card({ lastAgent: { agent: 'codex', model: null } }))
 
     expect(link.textContent).not.toContain(' · app')
-    expect(link.textContent).toContain('app #7')
+    expect(link.textContent).toContain('app ·')
   })
 
   it('shows neither an agent nor a model while the factory runs the checks', () => {
