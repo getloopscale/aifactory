@@ -250,9 +250,11 @@ export async function closeWorkspace(
  */
 export async function retainWorkspace(
   deps: Pick<WorkspaceDeps, 'store'>,
-  session: Pick<CodeSession, 'id'>,
+  session: Pick<CodeSession, 'id' | 'baseBranch'>,
   workspace: Workspace,
 ): Promise<void> {
+  await captureDiff(deps, session, workspace)
+  open.delete(session.id)
   workspace.feed.stop()
   if (!workspace.sandbox.id) throw new Error('the sandbox has no id to reconnect to')
   await deps.store.saveSandbox?.(session.id, workspace.sandbox.id)

@@ -7,6 +7,7 @@ import {
   closeWorkspace,
   liveWorkspace,
   openWorkspace,
+  retainWorkspace,
   WorkspaceRefused,
   type WorkspaceDeps,
   type WorkspaceStore,
@@ -158,5 +159,18 @@ describe('closeWorkspace', () => {
     const workspace = await openWorkspace(deps, session)
     await expect(closeWorkspace(deps, session, workspace)).rejects.toThrow('db down')
     expect(sandbox.stopped).toBe(1)
+  })
+})
+
+describe('retainWorkspace', () => {
+  it('keeps the diff and forgets the open workspace', async () => {
+    const saveSandbox = vi.fn(async () => undefined)
+    const { deps, saveDiff } = setup({ saveSandbox })
+    const workspace = await openWorkspace(deps, session)
+    await retainWorkspace(deps, session, workspace)
+    expect(saveDiff).toHaveBeenCalledWith('s1', {
+      files: [expect.objectContaining({ path: 'a.txt' })],
+    })
+    expect(liveWorkspace('s1')).toBeUndefined()
   })
 })
