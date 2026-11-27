@@ -175,9 +175,7 @@ describe('following the end', () => {
     for (const m of ['ask', 'plan', 'code'] as const)
       expect(screen.getByText(c.modeAbout[m])).toBeDefined()
     fireEvent.click(screen.getByRole('radio', { name: new RegExp(en.code.modes.plan) }))
-    await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'plan' }),
-    )
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'plan' }))
     await screen.findByText(`${c.modeLabel}: ${en.code.modes.plan}`)
   })
 
@@ -188,9 +186,7 @@ describe('following the end', () => {
     expect(patch).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: c.modeLabel }))
     fireEvent.keyDown(window, { key: '3' })
-    await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'code' }),
-    )
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'code' }))
   })
 
   it('says so when the mode cannot be saved and keeps the old one', async () => {
