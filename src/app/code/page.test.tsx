@@ -88,7 +88,14 @@ beforeEach(() => {
   window.localStorage.clear()
   vi.mocked(post).mockReset()
   vi.mocked(get).mockReset()
-  vi.mocked(get).mockResolvedValue({ diff: { files: [] }, live: true, capturedAt: null })
+  vi.mocked(get).mockImplementation(async (path: string) => {
+    if (path.endsWith('/files')) return { files: ['README.md', 'src/app.ts'] }
+    if (path.includes('/file?path=')) {
+      const name = decodeURIComponent(path.split('path=')[1]!)
+      return { path: name, content: `first of ${name}\nsecond\n`, truncated: false, limit: 262144 }
+    }
+    return { diff: { files: [] }, live: true, capturedAt: null }
+  })
   feed.reset()
 })
 afterEach(cleanup)
@@ -223,14 +230,49 @@ describe('the side panel of an open session', () => {
   })
 
   it('reads the diff again when a turn ends', async () => {
-    vi.mocked(get).mockResolvedValueOnce(diff(0)).mockResolvedValueOnce(diff(2))
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diffs.shift(),
+    )
+    const diffs = [diff(0), diff(2)]
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
-    expect(get).toHaveBeenCalledTimes(1)
     act(() =>
       feed.add({ sessionId: 'new', seq: 2, kind: 'state', tool: null, content: 'idle', at: '' }),
     )
     expect(await screen.findByText('f1.ts')).toBeDefined()
-    expect(get).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+  })
+
+  it('shows Files on Ctrl+Shift+F, even with the panel hidden, and opens a file with line numbers', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
+    fireEvent.keyDown(window, { key: 'F', ctrlKey: true, shiftKey: true })
+    expect(screen.getByRole('tab', { name: en.code.files.tab }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'README.md' }))
+    expect(await screen.findByText('first of README.md')).toBeDefined()
+    expect(document.querySelector('[data-line="2"]')?.textContent).toBe('2second')
+  })
+
+  it('opens in the viewer a path an agent names', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() =>
+      feed.add({
+        sessionId: 'new',
+        seq: 2,
+        kind: 'agent_message',
+        tool: null,
+        content: 'I changed src/app.ts for you.',
+        at: '',
+      }),
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'src/app.ts' }))
+    expect(await screen.findByText('first of src/app.ts')).toBeDefined()
+    expect(screen.getByRole('tab', { name: en.code.files.tab }).getAttribute('aria-selected')).toBe(
+      'true',
+    )
   })
 })
