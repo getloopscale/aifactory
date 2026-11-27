@@ -31,6 +31,9 @@ type Refusing = (typeof REFUSING)[number]
 const refuses = (state: CodeState): state is Refusing =>
   (REFUSING as readonly string[]).includes(state)
 
+export type PlanAnswer = 'accept' | 'revise' | 'reject'
+const ANSWER = /^plan:(\d+):(accept|revise|reject)$/
+
 /** A tool call as one card: what it was asked, and what came back, when something did. */
 export type ToolCard = {
   type: 'tool'
@@ -43,14 +46,29 @@ export type ToolCard = {
 export type Row =
   | { type: 'user'; seq: number; text: string }
   | { type: 'agent'; seq: number; text: string }
+  | { type: 'plan'; seq: number; text: string; answer: PlanAnswer | undefined; last: boolean }
   | ToolCard
   | { type: 'tools'; seq: number; cards: ToolCard[] }
 
 /** A tool result joins the call right before it; one with no call is a card of its own. */
 export function cardsOf(events: CodeEventWire[]): Array<Row> {
   const rows: Row[] = []
+  const answers = new Map<number, PlanAnswer>()
   for (const e of events) {
-    if (e.kind === 'user_message') rows.push({ type: 'user', seq: e.seq, text: e.content })
+    const m = e.kind === 'state' ? ANSWER.exec(e.content) : null
+    if (m) answers.set(Number(m[1]), m[2] as PlanAnswer)
+  }
+  const lastPlan = events.filter((e) => e.kind === 'plan').pop()?.seq
+  for (const e of events) {
+    if (e.kind === 'plan')
+      rows.push({
+        type: 'plan',
+        seq: e.seq,
+        text: e.content,
+        answer: answers.get(e.seq),
+        last: e.seq === lastPlan,
+      })
+    else if (e.kind === 'user_message') rows.push({ type: 'user', seq: e.seq, text: e.content })
     else if (e.kind === 'agent_message') rows.push({ type: 'agent', seq: e.seq, text: e.content })
     else if (e.kind === 'tool_use')
       rows.push({
@@ -187,6 +205,118 @@ function Group({ cards }: { cards: ToolCard[] }) {
       </button>
       {open ? cards.map((c) => <Card key={c.seq} card={c} />) : null}
     </div>
+  )
+}
+
+/** A plan the agent proposed; Reject, Revise and Accept are only on the last one, while it waits for an answer. */
+function PlanCard({
+  sessionId,
+  row,
+  files,
+  repository,
+  waiting,
+}: {
+  sessionId: string
+  row: Extract<Row, { type: 'plan' }>
+  files: string[]
+  repository: string
+  waiting: boolean
+}) {
+  const { t } = useCopy()
+  const c = t.code.conversation.plan
+  const [revising, setRevising] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string>()
+  const open = row.last && row.answer === undefined && waiting
+
+  async function answer(which: PlanAnswer) {
+    if (busy) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await post(`/api/panel/code/sessions/${encodeURIComponent(sessionId)}/plan-answer`, {
+        plan: row.seq,
+        answer: which,
+        ...(which === 'revise' ? { text: text.trim() } : {}),
+      })
+      setRevising(false)
+      setText('')
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section aria-label={c.title} className="space-y-2 rounded-lg border border-border bg-card p-3">
+      <h3 className="text-sm font-semibold">{c.title}</h3>
+      <ChatMessageResponse text={linkPaths(row.text, files)} className="text-sm" />
+      {row.answer ? (
+        <p className="text-xs text-muted-foreground">{c.answered[row.answer]}</p>
+      ) : null}
+      {open ? (
+        <div className="space-y-2">
+          {revising ? (
+            <div className="space-y-2">
+              <Textarea
+                aria-label={c.reviseLabel}
+                value={text}
+                rows={3}
+                onChange={(e) => setText(e.target.value)}
+                className="w-full"
+              />
+              <Assist
+                kind="changes"
+                text={text}
+                repository={repository}
+                onUse={(p) => setText(p.text)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={busy || text.trim() === ''}
+                  onClick={() => void answer('revise')}
+                >
+                  {busy ? c.sending : c.sendRevision}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setRevising(false)}>
+                  {c.cancel}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void answer('reject')}
+              >
+                {c.reject}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setRevising(true)}
+              >
+                {c.revise}
+              </Button>
+              <Button size="sm" disabled={busy} onClick={() => void answer('accept')}>
+                {c.accept}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
+      {problem ? (
+        <p role="alert" className="text-sm text-destructive">
+          {problem}
+        </p>
+      ) : null}
+    </section>
   )
 }
 
@@ -436,6 +566,15 @@ export function CodeConversation({
               <div key={row.seq} className="max-w-[90%]" onClick={openLink}>
                 <ChatMessageResponse text={linkPaths(row.text, files)} className="text-sm" />
               </div>
+            ) : row.type === 'plan' ? (
+              <PlanCard
+                key={row.seq}
+                sessionId={session.id}
+                row={row}
+                files={files}
+                repository={session.repository}
+                waiting={session.state === 'waiting_input'}
+              />
             ) : row.type === 'tools' ? (
               <Group key={row.seq} cards={row.cards} />
             ) : (

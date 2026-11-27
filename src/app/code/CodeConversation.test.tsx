@@ -286,3 +286,61 @@ describe('linkPaths', () => {
     expect(linkPaths(text, files)).toBe(text)
   })
 })
+
+describe('a plan', () => {
+  const plans = [
+    ev(1, 'user_message', 'plan it'),
+    ev(2, 'plan', '## What exists\nold'),
+    ev(3, 'state', 'plan:2:reject'),
+    ev(4, 'user_message', 'again'),
+    ev(5, 'plan', '## What exists\nnew'),
+  ]
+
+  it('shows the three buttons on the last plan only', () => {
+    render(<CodeConversation session={session('waiting_input')} events={plans} />)
+    expect(screen.getAllByText(c.plan.title)).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: c.plan.accept })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: c.plan.revise })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: c.plan.reject })).toHaveLength(1)
+    expect(screen.getByText(c.plan.answered.reject)).toBeTruthy()
+  })
+
+  it('shows no button once the last plan is answered', () => {
+    render(
+      <CodeConversation
+        session={session('queued')}
+        events={[...plans, ev(6, 'state', 'plan:5:accept')]}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: c.plan.accept })).toBeNull()
+  })
+
+  it('accepts the plan by its sequence number', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    render(<CodeConversation session={session('waiting_input')} events={plans} />)
+    fireEvent.click(screen.getByRole('button', { name: c.plan.accept }))
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/plan-answer', {
+        plan: 5,
+        answer: 'accept',
+      }),
+    )
+  })
+
+  it('sends the typed text as the revision', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    render(<CodeConversation session={session('waiting_input')} events={plans} />)
+    fireEvent.click(screen.getByRole('button', { name: c.plan.revise }))
+    fireEvent.change(screen.getByLabelText(c.plan.reviseLabel), {
+      target: { value: ' add tests ' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: c.plan.sendRevision }))
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/plan-answer', {
+        plan: 5,
+        answer: 'revise',
+        text: 'add tests',
+      }),
+    )
+  })
+})

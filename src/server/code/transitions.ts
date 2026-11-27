@@ -145,3 +145,16 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
 
 export const transition = (state: CodeState, event: CodeTransitionEvent): CodeOutcome =>
   CODE_TRANSITIONS[state][event]
+
+/** The three answers the owner gives to a plan. */
+export const PLAN_ANSWERS = ['accept', 'revise', 'reject'] as const
+export type PlanAnswer = (typeof PLAN_ANSWERS)[number]
+
+/**
+ * `plan_answered` for one answer: accepting or revising queues the next turn, rejecting returns the session to
+ * `idle`. Anything the table does not move stays refused or ignored.
+ */
+export const planAnswerOutcome = (state: CodeState, answer: PlanAnswer): CodeOutcome => {
+  const outcome = transition(state, 'plan_answered')
+  return outcome.action === 'move' && answer === 'reject' ? to('idle') : outcome
+}

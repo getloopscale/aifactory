@@ -1712,6 +1712,17 @@ export const en = {
       stop: 'Stop',
       message: 'Message to the agent',
       placeholder: 'Write to the agent',
+      plan: {
+        title: 'The agent proposed a plan',
+        accept: 'Accept',
+        revise: 'Revise',
+        reject: 'Reject',
+        answered: { accept: 'Accepted', revise: 'Revised', reject: 'Rejected' },
+        reviseLabel: 'What should change in the plan?',
+        sendRevision: 'Send revision',
+        cancel: 'Cancel',
+        sending: 'Sending…',
+      },
       stateLine: {
         idle: 'Ready for your next message.',
         queued: 'Queued: the agent starts soon.',

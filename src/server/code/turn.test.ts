@@ -166,6 +166,28 @@ describe('runTurn controls', () => {
     expect(t.events.map((e) => e.content)).toContain('stopped by the owner')
   })
 
+  it('proposes no plan for a plan turn the owner stopped, and leaves the session idle', async () => {
+    let release!: (r: HarnessResult) => void
+    const t = setup('plan', (input) => {
+      input.live?.attach({
+        interrupts: false,
+        send: async () => 'delivered',
+        cancel: async () => release({ ok: true, summary: 'Half a plan.', sessionId: 'agent-9' }),
+      })
+      return new Promise<HarnessResult>((resolve) => {
+        release = resolve
+      })
+    })
+    t.deps.controlPollMs = 5
+    const turn = runTurn(t.deps, 's1')
+    await vi.waitFor(() => expect(t.session.state).toBe('running'))
+    t.control.stop = true
+    expect(await turn).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.session.state).toBe('idle')
+    expect(t.events.some((e) => e.kind === 'plan')).toBe(false)
+    expect(t.events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
   it('hands a message stored during the turn to a pass that can be written to, once', async () => {
     const sent: string[] = []
     let finish!: () => void
@@ -343,6 +365,27 @@ describe('runTurn', () => {
     await runTurn(t.deps, 's1')
     expect(t.sandbox.backend.commands.some((c) => c.includes('restore'))).toBe(false)
     expect(t.events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
+  it('asks plan mode for a plan and ends with one plan event, waiting for the owner', async () => {
+    const t = setup('plan', (input) => {
+      input.onEvent?.({ kind: 'message', content: 'thinking aloud' })
+      return { ok: true, summary: '## What exists\nx', costUsd: 0.1 }
+    })
+    const result = await runTurn(t.deps, 's1')
+    expect(result.status).toBe('waiting_input')
+    expect(t.run.mock.calls[0]![1].prompt).toContain('## What I will not do')
+    expect(t.run.mock.calls[0]![1].prompt).toContain('do it')
+    expect(t.events.filter((e) => e.kind === 'plan')).toHaveLength(1)
+    expect(t.events.find((e) => e.kind === 'plan')?.content).toBe('## What exists\nx')
+    expect(t.events.some((e) => e.kind === 'agent_message')).toBe(false)
+    expect(t.session.state).toBe('waiting_input')
+  })
+
+  it('fails a plan turn that answers with nothing', async () => {
+    const t = setup('plan', () => ({ ok: true, summary: '  ' }))
+    expect((await runTurn(t.deps, 's1')).status).toBe('failed')
+    expect(t.events.some((e) => e.kind === 'plan')).toBe(false)
   })
 
   it('records the mode the turn ran in on its state event', async () => {
