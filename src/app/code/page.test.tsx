@@ -292,6 +292,22 @@ describe('the side panel of an open session', () => {
     expect(screen.queryByRole('tablist', { name: en.code.editor.tabs })).toBeNull()
   })
 
+  it('puts a handle between the side bar, the agent and the editor, each only while its pane shows', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diff(1),
+    )
+    show('en', '/code/new')
+    await screen.findByRole('tab', { name: en.code.editor.diffTab('f0.ts') })
+    expect(screen.getByRole('separator', { name: en.code.editor.resizeSide })).toBeDefined()
+    expect(screen.getByRole('separator', { name: en.code.editor.resizeEditor })).toBeDefined()
+    fireEvent.click(
+      screen.getByRole('button', { name: en.code.editor.close(en.code.editor.diffTab('f0.ts')) }),
+    )
+    expect(screen.queryByRole('separator', { name: en.code.editor.resizeEditor })).toBeNull()
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('separator', { name: en.code.editor.resizeSide })).toBeNull()
+  })
+
   it('reads the diff again when a turn ends', async () => {
     vi.mocked(get).mockImplementation(async (path: string) =>
       path.endsWith('/files') ? { files: [] } : diffs.shift(),

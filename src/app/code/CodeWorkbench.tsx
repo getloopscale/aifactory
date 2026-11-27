@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels'
 import { Link, useNavigate } from 'react-router'
 
 import type {
@@ -681,7 +682,26 @@ function ActivityBar({
   )
 }
 
-/** The frame of the IDE: icons, side bar, the agent, the editor, and a line of status under them. */
+/**
+ * The line between two panes: drag it, or focus it and use the arrows, to give one pane the width of the other.
+ * A double click puts the pane back at the width it starts with. The line is one pixel; its handle is wider.
+ */
+function Divider({ label }: { label: string }) {
+  return (
+    <Separator
+      aria-label={label}
+      title={label}
+      className="relative w-px shrink-0 bg-border outline-none after:absolute after:inset-y-0 after:-left-1 after:w-2 after:content-[''] focus-visible:bg-ring data-[separator=active]:bg-primary data-[separator=hover]:bg-primary"
+    />
+  )
+}
+
+/**
+ * The frame of the IDE: icons, then the side bar, the agent and the editor as panes whose widths the owner
+ * drags, and a line of status under them. The widths are kept per set of panes that is showing, so hiding the
+ * side bar or closing the last file does not lose them. The panes come from `react-resizable-panels` because
+ * `@getloopscale/ui` ships none (getloopscale/loopzero#3).
+ */
 function Frame({
   activity,
   side,
@@ -697,39 +717,62 @@ function Frame({
   status: ReactNode
 }) {
   const { t } = useCopy()
+  const e = t.code.editor
+  const main = agent ?? editor
+  const right = agent ? editor : undefined
+  const panelIds = [...(side ? ['side'] : []), 'main', ...(right ? ['editor'] : [])]
+  const layout = useDefaultLayout({ id: 'code-ide', panelIds })
   return (
     <div data-layout="ide" className="flex h-full min-h-0 flex-col bg-background">
       <h1 className="sr-only">{t.code.heading}</h1>
       <div className="flex min-h-0 flex-1">
         {activity}
-        {side ? (
-          <aside
-            aria-label={t.code.editor.side}
-            className="flex w-64 shrink-0 flex-col border-r border-border bg-card"
-          >
-            {side}
-          </aside>
-        ) : null}
-        {agent ? (
-          <>
-            <section
-              aria-label={t.code.conversation.agent}
-              className="flex min-w-0 flex-1 flex-col"
-            >
-              {agent}
-            </section>
-            {editor ? (
-              <div className="flex w-[min(760px,46%)] shrink-0 flex-col border-l border-border">
-                {editor}
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <div className="flex min-w-0 flex-1 flex-col">{editor}</div>
-        )}
+        <Group
+          orientation="horizontal"
+          defaultLayout={layout.defaultLayout}
+          onLayoutChanged={layout.onLayoutChanged}
+          className="min-w-0 flex-1"
+        >
+          {side ? (
+            <>
+              <Panel
+                id="side"
+                defaultSize="264px"
+                minSize="200px"
+                maxSize="45%"
+                groupResizeBehavior="preserve-pixel-size"
+              >
+                <aside aria-label={e.side} className="flex h-full min-w-0 flex-col bg-card">
+                  {side}
+                </aside>
+              </Panel>
+              <Divider label={e.resizeSide} />
+            </>
+          ) : null}
+          <Panel id="main" minSize="340px">
+            {agent ? (
+              <section
+                aria-label={t.code.conversation.agent}
+                className="flex h-full min-w-0 flex-col"
+              >
+                {agent}
+              </section>
+            ) : (
+              <div className="flex h-full min-w-0 flex-col">{main}</div>
+            )}
+          </Panel>
+          {right ? (
+            <>
+              <Divider label={e.resizeEditor} />
+              <Panel id="editor" defaultSize="46%" minSize="280px">
+                <div className="flex h-full min-w-0 flex-col">{right}</div>
+              </Panel>
+            </>
+          ) : null}
+        </Group>
       </div>
       <footer
-        aria-label={t.code.editor.status}
+        aria-label={e.status}
         className="flex h-6 shrink-0 items-center gap-4 border-t border-border bg-card pl-3 pr-20 font-mono text-[11px] text-muted-foreground"
       >
         {status}

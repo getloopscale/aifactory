@@ -1650,6 +1650,8 @@ export const en = {
     heroAbout:
       'A session is a branch of its own in a sandbox. You talk, the agent works there, and you read every change beside the conversation.',
     editor: {
+      resizeSide: 'Resize the side bar',
+      resizeEditor: 'Resize the agent and the editor',
       tabs: 'Open editors',
       close: (name: string) => `Close ${name}`,
       diffTab: (name: string) => `${name} (changes)`,

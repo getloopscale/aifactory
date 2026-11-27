@@ -1956,6 +1956,8 @@ export const ptBR: Copy = {
     heroAbout:
       'Uma sessão é uma branch própria em um sandbox. Você conversa, o agente trabalha lá e você lê cada mudança ao lado da conversa.',
     editor: {
+      resizeSide: 'Redimensionar a barra lateral',
+      resizeEditor: 'Redimensionar o agente e o editor',
       tabs: 'Editores abertos',
       close: (name: string) => `Fechar ${name}`,
       diffTab: (name: string) => `${name} (mudanças)`,
