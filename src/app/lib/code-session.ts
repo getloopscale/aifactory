@@ -34,6 +34,8 @@ export function useCodeSession(id: string): CodeSessionView {
   })
 
   useEffect(() => {
+    // Another session starts empty: nothing of the previous one stays on screen while its reads run.
+    setView({ session: undefined, events: [], error: undefined })
     let alive = true
     const bySeq = new Map<number, CodeEventWire>()
     let busy = false

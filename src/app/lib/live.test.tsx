@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { announceChange, useResource } from './live'
+import { announceChange, onStreamOpen, subscribe, useResource } from './live'
 
 afterEach(() => {
   cleanup()
@@ -35,5 +35,31 @@ describe('announceChange', () => {
     announceChange()
     await new Promise((r) => setTimeout(r, 20))
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('onStreamOpen', () => {
+  it('fires each time the shared stream connects, and stops after its cleanup', () => {
+    const sources: { onopen?: () => void; onmessage?: unknown; close: () => void }[] = []
+    vi.stubGlobal(
+      'EventSource',
+      class {
+        onopen?: () => void
+        close() {}
+        constructor() {
+          sources.push(this)
+        }
+      },
+    )
+    const opened = vi.fn()
+    const stop = onStreamOpen(opened)
+    const leave = subscribe(() => {})
+    sources[0]!.onopen?.()
+    sources[0]!.onopen?.()
+    expect(opened).toHaveBeenCalledTimes(2)
+    stop()
+    sources[0]!.onopen?.()
+    expect(opened).toHaveBeenCalledTimes(2)
+    leave()
   })
 })
