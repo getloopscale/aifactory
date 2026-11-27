@@ -369,6 +369,53 @@ describe('a watched Codex run', () => {
   })
 })
 
+describe('cancelling a watched Codex pass', () => {
+  const thread = line({ type: 'thread.started', thread_id: '019a0000-0000-7000-8000-000000000001' })
+  const execs = (sandbox: FakeSandbox) =>
+    sandbox.backend.commands.filter((c) => c.includes('exec') && !c.includes('pkill'))
+
+  it('ends the step, keeps the thread and does not resume', async () => {
+    let pass: { cancel?: () => Promise<void> } | undefined
+    const sandbox = new FakeSandbox(
+      (command) => {
+        if (command.includes('pkill')) return {}
+        void pass?.cancel?.()
+        return { stdout: thread, exitCode: 143 }
+      },
+      { streaming: true },
+    )
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [] })
+    const result = await codexHarness({ kind: 'api-key', secret: 'sk-real' }).run(backend, {
+      prompt: 'P',
+      cwd: '/work',
+      timeoutMs: 5,
+      onEvent: () => {},
+      live: { attach: (p) => (pass = p) },
+    })
+    expect(result).toMatchObject({
+      ok: false,
+      summary: 'Stopped.',
+      sessionId: '019a0000-0000-7000-8000-000000000001',
+    })
+    expect(execs(sandbox)).toHaveLength(1)
+    expect(sandbox.backend.commands.some((c) => c.includes("pkill -f '[c]odex exec'"))).toBe(true)
+  })
+
+  it('starts nothing when the stop came before the process ran', async () => {
+    const sandbox = new FakeSandbox(() => ({ stdout: thread }), { streaming: true })
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [] })
+    const result = await codexHarness({ kind: 'api-key', secret: 'sk-real' }).run(backend, {
+      prompt: 'P',
+      cwd: '/work',
+      timeoutMs: 5,
+      onEvent: () => {},
+      live: { attach: (p) => void p.cancel?.() },
+    })
+    expect(result).toMatchObject({ ok: false, summary: 'Stopped.' })
+    expect(execs(sandbox)).toHaveLength(0)
+  })
+})
+
 describe('a login the provider refused', () => {
   const refusal = line({
     type: 'turn.failed',

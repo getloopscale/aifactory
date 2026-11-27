@@ -26,7 +26,7 @@ import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
 
 /** The states in which the server refuses a message (`transitions.ts`, `message`); the others take one. */
-const REFUSING = ['queued', 'starting', 'running', 'waiting_input', 'ended'] as const
+const REFUSING = ['queued', 'starting', 'waiting_input', 'ended'] as const
 type Refusing = (typeof REFUSING)[number]
 const refuses = (state: CodeState): state is Refusing =>
   (REFUSING as readonly string[]).includes(state)
@@ -519,6 +519,21 @@ export function CodeConversation({
   }
   const refusal = refuses(session.state) ? c.refused[session.state] : undefined
   const blocked = busy || refusal !== undefined
+  // While a turn runs and nothing is typed, the box offers Stop; a typed message is sent to the running turn.
+  const stopping = session.state === 'running' && text.trim() === ''
+
+  async function stop() {
+    if (busy) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await post(`/api/panel/code/sessions/${encodeURIComponent(session.id)}/stop`, {})
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function send() {
     const content = text.trim()
@@ -613,9 +628,15 @@ export function CodeConversation({
             placeholder={c.placeholder}
             className="w-full"
           />
-          <Button size="sm" disabled={blocked || text.trim() === ''} onClick={() => void send()}>
-            {busy ? c.sending : c.send}
-          </Button>
+          {stopping ? (
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => void stop()}>
+              {c.stop}
+            </Button>
+          ) : (
+            <Button size="sm" disabled={blocked || text.trim() === ''} onClick={() => void send()}>
+              {busy ? c.sending : c.send}
+            </Button>
+          )}
         </div>
         <ModeSelector session={session} />
         <Assist

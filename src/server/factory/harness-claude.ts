@@ -115,16 +115,26 @@ export function claudeCodeHarness(
     const inbox = live ? await openInbox(backend, input.prompt, live) : undefined
     // `cwd` is a path the factory built (see run-task), never text from the issue.
     let result: Awaited<ReturnType<typeof executeAgent>>
+    const events = inbox ? (line: string) => inbox.seen(line) : claudeEvents
+    const seenSession = (line: string) => {
+      const id = sessionOf(line)
+      if (id) lastSession = id
+      return events(line)
+    }
+    let lastSession: string | undefined
     try {
       result = await executeAgent(
         backend,
         `cd ${input.cwd} && ${inbox ? `${inbox.reader} | ` : ''}${variable}=placeholder-not-a-secret CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1 ${CLAUDE} -p ${inbox ? '--input-format stream-json ' : ''}--output-format ${format} ${permissionFlags(input)}${model}${effort}${plugin}${flags}${inbox ? '' : ` < ${PROMPT_FILE}`}`,
         input,
-        inbox ? (line) => inbox.seen(line) : claudeEvents,
+        seenSession,
       )
     } finally {
       // Whatever ended the pass (a timeout, a dead sandbox), the `tail` and the inbox files do not outlive it.
       inbox?.end()
+    }
+    if (inbox?.cancelled()) {
+      return { ok: false, summary: 'Stopped.', ...(lastSession ? { sessionId: lastSession } : {}) }
     }
     return parseClaudeResult(result.exitCode, resultLine(result.stdout), result.stderr)
   }
@@ -157,6 +167,17 @@ export function claudeCodeHarness(
   }
 }
 
+/** The session id a line of Claude's stream names, when it names one. */
+function sessionOf(line: string): string | undefined {
+  try {
+    const value: unknown = JSON.parse(line)
+    const id = (value as { session_id?: unknown } | null)?.session_id
+    return typeof id === 'string' && id !== '' ? id : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** One message as Claude Code reads it on its input: a JSON line, never text in a shell. */
 export function userLine(text: string): string {
   return `${JSON.stringify({ type: 'user', message: { role: 'user', content: text } })}\n`
@@ -179,6 +200,7 @@ async function openInbox(
   let results = 0
   let closed = false
   let appended = 0
+  let cancelled = false
 
   const close = () => {
     if (closed) return
@@ -206,8 +228,15 @@ async function openInbox(
       }
       return 'delivered'
     },
+    async cancel() {
+      cancelled = true
+      close()
+      // `[c]` keeps the pattern from matching this command's own shell.
+      await backend.execute(`pkill -f '[c]laude -p'`).catch(() => undefined)
+    },
   })
   return {
+    cancelled: () => cancelled,
     reader,
     seen(line: string): AgentEvent[] {
       if (isResult(line)) {

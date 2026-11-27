@@ -205,12 +205,94 @@ export async function sendMessage(sessionId: string, text: string): Promise<Mess
         .set({ state: outcome.state, updatedAt: sql`clock_timestamp()` })
         .where(eq(codeSession.id, sessionId))
         .returning()
-      await jobBackend().enqueueInTransaction(client, {
-        name: 'code-turn',
-        input: { sessionId },
-        idempotencyKey: `code-turn-${sessionId}-${event!.seq}`,
-      })
+      // A message to a running turn stays unanswered: the pass is handed it live, or the turn that ends queues it.
+      if (session.state !== 'running') await enqueueTurn(client, sessionId, event!.seq)
       return { kind: 'sent' as const, event: event!, session: moved! }
+    })
+  } finally {
+    client.release()
+  }
+}
+
+function enqueueTurn(
+  client: Parameters<ReturnType<typeof jobBackend>['enqueueInTransaction']>[0],
+  sessionId: string,
+  seq: number,
+) {
+  return jobBackend().enqueueInTransaction(client, {
+    name: 'code-turn',
+    input: { sessionId },
+    idempotencyKey: `code-turn-${sessionId}-${seq}`,
+  })
+}
+
+export type StopResult =
+  | { kind: 'requested' }
+  | { kind: 'refused'; reason: string; state: CodeState }
+  | { kind: 'not_found' }
+
+/**
+ * Marks the running turn to stop, under the row's lock. Only a running turn takes it (`transitions.ts`, `stop`);
+ * the process that holds the pass reads the mark, ends the pass and moves the session.
+ */
+export async function requestStop(sessionId: string): Promise<StopResult> {
+  return getDb().transaction(async (tx) => {
+    const [session] = await tx
+      .select({ state: codeSession.state })
+      .from(codeSession)
+      .where(eq(codeSession.id, sessionId))
+      .for('update')
+    if (!session) return { kind: 'not_found' as const }
+    const outcome = transition(session.state, 'stop')
+    if (outcome.action !== 'move') {
+      return { kind: 'refused' as const, reason: outcome.reason, state: session.state }
+    }
+    await tx
+      .update(codeSession)
+      .set({ stopRequestedAt: sql`clock_timestamp()` })
+      .where(eq(codeSession.id, sessionId))
+    return { kind: 'requested' as const }
+  })
+}
+
+/** Whether the owner asked the session's running turn to stop. */
+export async function stopRequested(sessionId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ at: codeSession.stopRequestedAt })
+    .from(codeSession)
+    .where(eq(codeSession.id, sessionId))
+  return row?.at != null
+}
+
+/**
+ * Ends the running turn: the session goes `idle` and the stop mark is cleared, under the row's lock. A message
+ * that arrived during the turn and was not handed to the pass is still unanswered: the session is queued for it
+ * and its `code-turn` is queued, in the same transaction, so a message is never left without a turn nor given two.
+ */
+export async function endTurn(sessionId: string): Promise<{ queued: boolean } | undefined> {
+  const client = await getPool().connect()
+  try {
+    return await drizzle(client, { schema }).transaction(async (tx) => {
+      const [session] = await tx
+        .select({ state: codeSession.state })
+        .from(codeSession)
+        .where(eq(codeSession.id, sessionId))
+        .for('update')
+      if (!session) return undefined
+      const ended = transition(session.state, 'turn_ended')
+      if (ended.action !== 'move') return undefined
+      const pending = await unansweredMessage(sessionId, tx)
+      const next = pending ? transition(ended.state, 'message') : undefined
+      const state = next?.action === 'move' ? next.state : ended.state
+      await tx
+        .update(codeSession)
+        .set({ state, stopRequestedAt: null, updatedAt: sql`now()` })
+        .where(eq(codeSession.id, sessionId))
+      if (pending && next?.action === 'move') {
+        await enqueueTurn(client, sessionId, pending.seq)
+        return { queued: true }
+      }
+      return { queued: false }
     })
   } finally {
     client.release()
@@ -395,7 +477,7 @@ export async function claimTurn(sessionId: string, now = new Date()): Promise<Cl
     if (!message || outcome.action !== 'move') return { kind: 'nothing' }
     const [moved] = await tx
       .update(codeSession)
-      .set({ state: outcome.state, updatedAt: sql`now()` })
+      .set({ state: outcome.state, stopRequestedAt: null, updatedAt: sql`now()` })
       .where(eq(codeSession.id, sessionId))
       .returning()
     return { kind: 'claimed', session: moved!, message }

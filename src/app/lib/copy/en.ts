@@ -1709,6 +1709,7 @@ export const en = {
       },
       send: 'Send',
       sending: 'Sending…',
+      stop: 'Stop',
       message: 'Message to the agent',
       placeholder: 'Write to the agent',
       plan: {
@@ -1736,7 +1737,6 @@ export const en = {
       refused: {
         queued: 'A message is already waiting for the agent. Wait for it to start.',
         starting: 'The agent is starting. Wait for it to finish its turn.',
-        running: 'The agent is working on the last message. Wait for it to finish.',
         waiting_input: 'The agent waits for an answer to its plan. Answer it first.',
         ended: 'The session has ended.',
       },

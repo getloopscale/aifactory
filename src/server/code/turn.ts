@@ -8,6 +8,7 @@ import type { agentRun } from '../db/schema'
 
 import { planPrompt } from '../agents/prompts/code-plan'
 import { turnMarker, type Claim, type NewCodeEvent } from './store'
+import { CONTROL_POLL_MS, watchControls } from './live-conversation'
 import { codeCapReached } from './slots'
 import { revertChanges } from './readonly-workspace'
 import {
@@ -23,6 +24,11 @@ export type TurnStore = {
   claim(sessionId: string): Promise<Claim>
   append(sessionId: string, event: NewCodeEvent): Promise<CodeEvent>
   move(sessionId: string, event: CodeTransitionEvent): Promise<unknown>
+  /** Ends the running turn: idle, or queued for a message that no pass was handed. */
+  end(sessionId: string): Promise<unknown>
+  stopRequested(sessionId: string): Promise<boolean>
+  /** The oldest user message no turn took. */
+  pending(sessionId: string): Promise<CodeEvent | undefined>
   saveAgentSession(sessionId: string, agentSessionId: string, harness: string): Promise<void>
 }
 
@@ -42,6 +48,10 @@ export type TurnDeps = {
   underCapLock?<T>(work: () => Promise<T>): Promise<T>
   /** Leaves the sandbox up after a turn that worked, for the idle cron to close. */
   keepWorkspace?: boolean
+  /** How often a running turn looks for a stop or a message. */
+  controlPollMs?: number
+  /** How long a stopped pass gets to hand back its result before the turn goes on without it. */
+  stopGraceMs?: number
   slotWait?: Parameters<typeof untilSlotFree>[1]
   signal?: AbortSignal
 }
@@ -57,6 +67,15 @@ export type TurnResult =
   | { status: 'idle' | 'waiting_input' | 'failed'; sessionId: string }
 
 export const AGENT_TIMEOUT_MS = 60 * 60_000
+export const STOP_GRACE_MS = 15_000
+
+/** The `state` event of a turn the owner stopped. */
+export const STOPPED_BY_OWNER = 'stopped by the owner'
+
+const sleep = (ms: number) =>
+  new Promise<undefined>((resolve) => {
+    ;(setTimeout(resolve, ms) as unknown as { unref(): void }).unref()
+  })
 
 const KINDS: Partial<Record<string, CodeEventKind>> = {
   message: 'agent_message',
@@ -175,6 +194,68 @@ async function saveWorkspace(
   }
 }
 
+/** Starts the pass: on the agent's own session when the harness that made it can resume it, afresh otherwise. */
+function startPass(
+  harness: CodingHarness,
+  session: CodeSession,
+  workspace: Workspace,
+  input: HarnessInput,
+): Promise<HarnessResult> {
+  const resumable =
+    session.agentSessionId &&
+    harness.resume &&
+    (session.agentSessionHarness ?? harness.name) === harness.name
+  const pass = resumable
+    ? harness.resume!(workspace.backend, session.agentSessionId!, input)
+    : harness.run(workspace.backend, input)
+  // Whichever way the race with a stop ends, a pass that fails later is not an unhandled rejection.
+  pass.catch(() => undefined)
+  return pass
+}
+
+/**
+ * Waits for the pass or for the owner's stop, whichever comes first. A stopped pass was asked to end (`cancel`)
+ * and gets `graceMs` to say what session it had; one that says nothing in time has no result.
+ */
+async function untilEndOrStop(
+  pass: Promise<HarnessResult>,
+  stop: Promise<unknown>,
+  graceMs: number,
+): Promise<{ result: HarnessResult | undefined; stopped: boolean }> {
+  const first = await Promise.race([pass, stop.then(() => 'stop' as const)])
+  if (first !== 'stop') return { result: first, stopped: false }
+  const result = await Promise.race([pass, sleep(graceMs)]).catch(() => undefined)
+  return { result, stopped: true }
+}
+
+/**
+ * Ends a turn that did not fail: says the owner stopped it when they did, keeps the cost, and either proposes the
+ * plan and waits for the owner or leaves the session idle.
+ */
+async function endWell(
+  deps: TurnDeps,
+  sessionId: string,
+  result: HarnessResult | undefined,
+  stopped: boolean,
+  plan: string,
+): Promise<TurnResult> {
+  const { store } = deps
+  if (stopped) await store.append(sessionId, { kind: 'state', content: STOPPED_BY_OWNER })
+  if (result) {
+    await store.append(sessionId, {
+      kind: 'cost',
+      content: JSON.stringify({ costUsd: result.costUsd ?? null }),
+    })
+  }
+  if (plan) {
+    await store.append(sessionId, { kind: 'plan', content: plan })
+    await store.move(sessionId, 'plan_proposed')
+    return { status: 'waiting_input', sessionId }
+  }
+  await store.end(sessionId)
+  return { status: 'idle', sessionId }
+}
+
 /**
  * One turn of a code session: takes the oldest unanswered message, runs the session's harness on it in the
  * workspace and writes each step to the session's events. The session ends `idle`, or `failed` with an `error`.
@@ -210,7 +291,9 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let result: HarnessResult | undefined
   let failure: string | undefined
   let marked = false
+  let stopped = false
   let plan = ''
+  const control = watchControls(store, sessionId, deps.controlPollMs ?? CONTROL_POLL_MS)
   try {
     await store.move(sessionId, 'turn_started')
     await store.append(sessionId, {
@@ -226,48 +309,44 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
       cwd: workspace.repoDir,
       timeoutMs: deps.agentTimeoutMs ?? AGENT_TIMEOUT_MS,
       onEvent: writer.onEvent,
+      live: control.live,
       ...(session.mode === 'code' ? {} : { ask: true }),
     }
-    const resumable =
-      session.agentSessionId &&
-      harness.resume &&
-      (session.agentSessionHarness ?? harness.name) === harness.name
+    const pass = startPass(harness, session, workspace, input)
     try {
-      result = resumable
-        ? await harness.resume!(workspace.backend, session.agentSessionId!, input)
-        : await harness.run(workspace.backend, input)
+      ;({ result, stopped } = await untilEndOrStop(
+        pass,
+        control.stopped,
+        deps.stopGraceMs ?? STOP_GRACE_MS,
+      ))
     } finally {
+      await control.end()
       await writer.drain()
     }
-    if (!result.ok) failure = failureText(result)
-    else if (planning) {
-      plan = (result.summary || writer.lastMessage()).trim()
-      if (!plan) failure = 'The agent answered with no plan.'
+    if (result && !stopped) {
+      if (!result.ok) failure = failureText(result)
+      else if (planning) {
+        plan = (result.summary || writer.lastMessage()).trim()
+        if (!plan) failure = 'The agent answered with no plan.'
+      }
     }
   } catch (error) {
     failure = errorMessage(error)
+    await control.end()
   }
 
   const notReverted = await putBackReadOnly(deps, session, workspace)
   if (notReverted !== undefined) return fail(deps, sessionId, message, notReverted, marked)
-  await saveWorkspace(deps, session, workspace, failure === undefined && result?.ok === true)
+  // A stopped pass that said what session it had is as good to keep as one that ended well.
+  const wentWell = failure === undefined && (stopped ? result !== undefined : result?.ok === true)
+  await saveWorkspace(deps, session, workspace, wentWell)
 
   try {
     if (result) {
       await recordResult(deps, session, message, harness, result, Date.now() - started)
     }
-    if (failure === undefined && result) {
-      await store.append(sessionId, {
-        kind: 'cost',
-        content: JSON.stringify({ costUsd: result.costUsd ?? null }),
-      })
-      if (plan) {
-        await store.append(sessionId, { kind: 'plan', content: plan })
-        await store.move(sessionId, 'plan_proposed')
-        return { status: 'waiting_input', sessionId }
-      }
-      await store.move(sessionId, 'turn_ended')
-      return { status: 'idle', sessionId }
+    if (failure === undefined && (result || stopped)) {
+      return await endWell(deps, sessionId, result, stopped, plan)
     }
   } catch (error) {
     // A step after the pass failed: the session must not stay claimed, or its later turns wait for ever.
