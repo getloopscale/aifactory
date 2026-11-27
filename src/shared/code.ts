@@ -53,3 +53,23 @@ export type CodeEvent = {
   content: string
   at: Date
 }
+
+/** A session as the API sends it: JSON carries dates as strings. */
+export type CodeSessionWire = Omit<CodeSession, 'createdAt' | 'updatedAt'> & {
+  createdAt: string
+  updatedAt: string
+}
+
+/** An event as the API and the stream send it. */
+export type CodeEventWire = Omit<CodeEvent, 'at'> & { at: string }
+
+/** A page of a session's events after a `seq`, oldest first. */
+export type CodeEventPage = { events: CodeEventWire[]; more: boolean }
+
+export const toSessionWire = (s: CodeSession): CodeSessionWire => ({
+  ...s,
+  createdAt: s.createdAt.toISOString(),
+  updatedAt: s.updatedAt.toISOString(),
+})
+
+export const toEventWire = (e: CodeEvent): CodeEventWire => ({ ...e, at: e.at.toISOString() })
