@@ -27,6 +27,8 @@ describe('the guide of a page', () => {
   it('is picked by where the owner is, for every page of the menu but the chat', () => {
     const at = (path: string) => guideFor(path, en)?.id
     expect(at('/work')).toBe('board')
+    expect(at('/code')).toBe('code')
+    expect(at('/code/abc')).toBe('code')
     expect(at('/tasks/12')).toBe('board')
     expect(at('/plans')).toBe('plans')
     expect(at('/plans/4')).toBe('plans')

@@ -31,6 +31,7 @@ const AGENT_PLACE: Record<GuideId, string> = {
   health: 'Saúde',
   agents: 'Agentes',
   setup: 'Configuração',
+  code: 'Code Mode',
 }
 
 /** The guide of a place, with what the owner reads of it taken from the dictionary of their language. */
@@ -60,6 +61,7 @@ const PLACES: [RegExp, GuideId][] = [
   [/^\/health(\/|$)/, 'health'],
   [/^\/agents(\/|$)/, 'agents'],
   [/^\/setup(\/|$)/, 'setup'],
+  [/^\/code(\/|$)/, 'code'],
 ]
 
 /** Which guide the page the owner is on has, or none: the chat is the general assistant and has no guide. */
