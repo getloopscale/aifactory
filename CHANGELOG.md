@@ -99,6 +99,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A conversation opens at its end after a refresh, in the chat, the guide and a task. While the page loaded, the box grew and was moved to the end in steps, and a scroll event of one of those steps was read as the owner scrolling away, so the conversation sometimes stayed in the middle. Only the owner moving up stops it from following now.
 - The conversation of a task stays at its end: it opens there, goes there when the owner sends a message or picks another agent's tab, and follows an answer that grows. It followed only a new row, so a sent message could land out of sight. Scrolling up to read still stops it.
 - What the owner asks a stopped agent shows in the builder's tab, where the answer comes from. After a review it showed under the reviewer, so the box of the builder's tab seemed to send nothing.
 - The box of a task's conversation is one box again. Its text field had a fill and corners of its own inside the bordered box, so it read as two fields. A long message there grows to two fifths of the window, as in the chat

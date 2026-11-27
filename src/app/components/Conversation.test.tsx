@@ -130,6 +130,8 @@ describe('the scroll of the conversation', () => {
     const view = render(<Conversation detail={detail} events={events} onDone={() => {}} />)
     const box = view.container.querySelector('.overflow-y-auto') as HTMLElement
     sized(box, 2000)
+    box.scrollTop = 1700
+    fireEvent.scroll(box)
     box.scrollTop = 100
     fireEvent.scroll(box)
 
@@ -147,6 +149,8 @@ describe('the scroll of the conversation', () => {
     const view = render(<Conversation detail={detail} events={events} onDone={() => {}} />)
     const box = view.container.querySelector('.overflow-y-auto') as HTMLElement
     sized(box, 2000)
+    box.scrollTop = 1700
+    fireEvent.scroll(box)
     box.scrollTop = 100
     fireEvent.scroll(box)
 

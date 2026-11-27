@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { atEnd, FollowScroll, NEAR_END } from './FollowScroll'
+import { atEnd, FollowScroll, follows, NEAR_END } from './FollowScroll'
 
 afterEach(cleanup)
 
@@ -44,6 +44,8 @@ describe('the scroller of a conversation', () => {
     const { container, rerender } = render(view(1, 'a'))
     const box = container.firstElementChild as HTMLElement
     sized(box, 1000)
+    box.scrollTop = 600
+    fireEvent.scroll(box)
     box.scrollTop = 100
     fireEvent.scroll(box)
     sized(box, 1400)
@@ -66,5 +68,29 @@ describe('the scroller of a conversation', () => {
     sized(box, 1200)
     rerender(view(3, 'a new question'))
     expect(box.scrollTop).toBe(1200)
+  })
+})
+
+describe('follows', () => {
+  const box = (scrollTop: number, scrollHeight = 2000) => ({
+    scrollHeight,
+    scrollTop,
+    clientHeight: 400,
+  })
+
+  it('keeps following when the box grew under it and it was moved only part of the way', () => {
+    expect(follows(true, box(1310, 2470), 548)).toBe(true)
+  })
+
+  it('stops when the reader moved up', () => {
+    expect(follows(true, box(900), 1600)).toBe(false)
+  })
+
+  it('starts again once the reader is back at the end', () => {
+    expect(follows(false, box(1600), 900)).toBe(true)
+  })
+
+  it('stays stopped while the reader moves down without reaching the end', () => {
+    expect(follows(false, box(1000), 900)).toBe(false)
   })
 })

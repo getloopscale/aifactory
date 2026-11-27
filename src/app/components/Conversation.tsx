@@ -1,6 +1,6 @@
 import { ArrowUp, ChevronRight, MessagesSquare, SquareTerminal } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { atEnd } from './chat/FollowScroll'
+import { FOLLOWING, follows } from './chat/FollowScroll'
 
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
 import { Button, Textarea } from '@getloopscale/ui'
@@ -295,15 +295,17 @@ function Thread({
   stuck: RefObject<boolean>
 }) {
   const { t } = useCopy()
+  const lastTop = useRef(0)
   return (
     <div
       hidden={hidden}
       ref={scroller}
       onScroll={(e) => {
         const box = e.currentTarget
-        stuck.current = atEnd(box)
+        stuck.current = follows(stuck.current, box, lastTop.current)
+        lastTop.current = box.scrollTop
       }}
-      className={`overflow-y-auto pr-2 ${tall ? 'min-h-0 flex-1' : 'max-h-[32rem]'}`}
+      className={`${FOLLOWING} pr-2 ${tall ? 'min-h-0 flex-1' : 'max-h-[32rem]'}`}
     >
       {shown.length === 0 ? (
         <p className="text-sm text-muted-foreground">
