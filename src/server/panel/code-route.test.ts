@@ -120,6 +120,21 @@ describe('updating and ending a session', () => {
     ).toBe(404)
   })
 
+  it('saves a mode and answers 404 when the session is missing', async () => {
+    store.updateSession.mockResolvedValue(session)
+    await run(UPDATE, { params: { id: 's' }, body: { mode: 'plan' } })
+    expect(store.updateSession).toHaveBeenCalledWith('s', { mode: 'plan' })
+    store.updateSession.mockResolvedValue(undefined)
+    const res = (await run(UPDATE, { params: { id: 'x' }, body: { mode: 'plan' } })) as Response
+    expect(res.status).toBe(404)
+  })
+
+  it('refuses an unknown mode and an empty model', () => {
+    expect(bodySchema(UPDATE).safeParse({ mode: 'yolo' }).success).toBe(false)
+    expect(bodySchema(UPDATE).safeParse({ model: '' }).success).toBe(false)
+    expect(bodySchema(UPDATE).safeParse({ mode: 'ask' }).success).toBe(true)
+  })
+
   it('ends a session', async () => {
     store.getSession.mockResolvedValue(session)
     await run(END, { params: { id: 's' } })

@@ -199,7 +199,7 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
     setProblem(undefined)
     try {
       const saved = await patch<{ mode: CodeMode }>(
-        `/api/panel/code/${encodeURIComponent(session.id)}`,
+        `/api/panel/code/sessions/${encodeURIComponent(session.id)}`,
         {
           mode: next,
         },
