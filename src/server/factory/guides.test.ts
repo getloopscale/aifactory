@@ -131,7 +131,7 @@ describe('the guides', () => {
         FACTORY_GUIDE_MODEL: 'openrouter/x/guide',
       }),
     ).toBe('openrouter/x/guide')
-    expect(guideCodexModel({})).toBe('openai-chatgpt/gpt-5.4')
+    expect(guideCodexModel({})).toBe('openai-chatgpt/gpt-6.2-sol')
     expect(guideCodexModel({ FACTORY_CHAT_CODEX_MODEL: 'openai-chatgpt/y' })).toBe(
       'openai-chatgpt/y',
     )

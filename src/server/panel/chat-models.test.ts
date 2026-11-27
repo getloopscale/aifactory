@@ -8,7 +8,7 @@ import { chatModels, modelName } from './chat-models'
 describe('modelName', () => {
   it('drops the provider the framework routes by and keeps the rest', () => {
     expect(modelName('openrouter/google/gemini-2.5-flash')).toBe('google/gemini-2.5-flash')
-    expect(modelName('openai-chatgpt/gpt-5.4')).toBe('gpt-5.4')
+    expect(modelName('openai-chatgpt/gpt-6.2-sol')).toBe('gpt-6.2-sol')
     expect(modelName('anthropic/claude-sonnet-4-6')).toBe('anthropic/claude-sonnet-4-6')
   })
 })
@@ -16,8 +16,8 @@ describe('modelName', () => {
 describe('chatModels', () => {
   it('names the defaults when nothing is set', () => {
     expect(chatModels({})).toEqual({
-      chat: { openrouter: 'google/gemini-2.5-flash', codex: 'gpt-5.4' },
-      guide: { openrouter: 'openai/gpt-4.1-mini', codex: 'gpt-5.4' },
+      chat: { openrouter: 'google/gemini-2.5-flash', codex: 'gpt-6.2-sol' },
+      guide: { openrouter: 'openai/gpt-4.1-mini', codex: 'gpt-6.2-sol' },
     })
   })
 
