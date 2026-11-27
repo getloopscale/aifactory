@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, gt, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 
 import type { CodeEvent, CodeEventKind, CodeMode, CodeSession, CodeState } from '../../shared/code'
 import { getDb, type Database } from '../db'
@@ -129,38 +130,50 @@ export type Claim =
   /** Nothing is waiting: the session is not queued or its message was answered. */
   | { kind: 'nothing' }
 
+/** The `state` event a turn writes for the message it took, and what marks that message answered. */
+export const turnMarker = (messageSeq: number) => `turn:${messageSeq}`
+
+/** A turn that wrote nothing and renewed nothing for this long lost its worker; another job may take the claim. */
+export const CLAIM_STALE_MS = 10 * 60_000
+
 /**
- * The oldest user message no turn answered: the first one after the last `cost` or `error` event, which are
- * what a turn that ended leaves (a turn that failed leaves its `error`, so a new message is not blocked by it).
+ * The oldest user message no turn took: one that no `state` event names (`turn:<seq>`). A message that arrived while
+ * a turn ran is still unanswered when that turn ends, whatever events were written after it.
  */
 export async function unansweredMessage(
   sessionId: string,
   db: Pick<Database, 'select'> = getDb(),
 ): Promise<CodeEvent | undefined> {
-  const [ended] = await db
-    .select({ seq: sql<number>`coalesce(max(${codeEvent.seq}), 0)::int` })
-    .from(codeEvent)
-    .where(and(eq(codeEvent.sessionId, sessionId), inArray(codeEvent.kind, ['cost', 'error'])))
+  const marker = alias(codeEvent, 'marker')
   const [row] = await db
-    .select()
+    .select({ event: codeEvent })
     .from(codeEvent)
+    .leftJoin(
+      marker,
+      and(
+        eq(marker.sessionId, codeEvent.sessionId),
+        eq(marker.kind, 'state'),
+        eq(marker.content, sql`'turn:' || ${codeEvent.seq}::text`),
+      ),
+    )
     .where(
       and(
         eq(codeEvent.sessionId, sessionId),
         eq(codeEvent.kind, 'user_message'),
-        gt(codeEvent.seq, ended?.seq ?? 0),
+        isNull(marker.seq),
       ),
     )
     .orderBy(asc(codeEvent.seq))
     .limit(1)
-  return row
+  return row?.event
 }
 
 /**
  * Takes the session's turn: under the row's lock, a `queued` session with an unanswered message moves to
- * `starting` through `transitions.ts`. The state is the writer claim, so two jobs never both get it.
+ * `starting` through `transitions.ts`. The state is the writer claim, so two jobs never both get it. A claim
+ * nothing touched for `CLAIM_STALE_MS` belongs to a worker that is gone: it is given back first.
  */
-export async function claimTurn(sessionId: string): Promise<Claim> {
+export async function claimTurn(sessionId: string, now = new Date()): Promise<Claim> {
   return getDb().transaction(async (tx) => {
     const [session] = await tx
       .select()
@@ -168,9 +181,15 @@ export async function claimTurn(sessionId: string): Promise<Claim> {
       .where(eq(codeSession.id, sessionId))
       .for('update')
     if (!session) return { kind: 'nothing' }
-    if (session.state === 'starting' || session.state === 'running') return { kind: 'busy' }
+    let state = session.state
+    if (state === 'starting' || state === 'running') {
+      if (now.getTime() - session.updatedAt.getTime() < CLAIM_STALE_MS) return { kind: 'busy' }
+      const released = transition(state, 'turn_released')
+      if (released.action !== 'move') return { kind: 'busy' }
+      state = released.state
+    }
     const message = await unansweredMessage(sessionId, tx)
-    const outcome = transition(session.state, 'turn_started')
+    const outcome = transition(state, 'turn_started')
     if (!message || outcome.action !== 'move') return { kind: 'nothing' }
     const [moved] = await tx
       .update(codeSession)
@@ -203,12 +222,12 @@ export async function moveSession(
   })
 }
 
-/** Gives a claimed turn back (provider refusal): the session is `queued` again, the message still unanswered. */
-export async function releaseClaim(sessionId: string): Promise<void> {
+/** Says the worker holding the claim is alive: the claim is stale only when this stops. */
+export async function touchSession(sessionId: string): Promise<void> {
   await getDb()
     .update(codeSession)
-    .set({ state: 'queued', updatedAt: sql`now()` })
-    .where(and(eq(codeSession.id, sessionId), eq(codeSession.state, 'starting')))
+    .set({ updatedAt: sql`now()` })
+    .where(and(eq(codeSession.id, sessionId), inArray(codeSession.state, ['starting', 'running'])))
 }
 
 /** Keeps what the harness needs to continue the conversation, and which harness it belongs to. */

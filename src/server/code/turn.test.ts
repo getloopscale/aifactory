@@ -48,9 +48,6 @@ function memory(mode: CodeMode = 'code', extra: Partial<CodeSession> = {}) {
       const out = transition(session.state, event)
       if (out.action === 'move') session.state = out.state
     },
-    async release() {
-      session.state = 'queued'
-    },
     async saveAgentSession(_id, agentSessionId, harness) {
       session.agentSessionId = agentSessionId
       session.agentSessionHarness = harness
@@ -204,5 +201,34 @@ describe('runTurn', () => {
     expect(await runTurn(t.deps, 's1')).toEqual({ status: 'deferred' })
     expect(t.session.state).toBe('queued')
     expect(t.onRefusal).toHaveBeenCalled()
+  })
+
+  it('marks the message it took, so one that arrives later is not answered by it', async () => {
+    const t = setup()
+    await runTurn(t.deps, 's1')
+    expect(t.events[1]).toMatchObject({ kind: 'state', content: 'turn:1' })
+  })
+
+  it('fails the session, with the message marked answered, when a step after the pass throws', async () => {
+    const t = setup()
+    const append = t.store.append.bind(t.store)
+    t.store.append = async (id, e) => {
+      if (e.kind === 'cost') throw new Error('disk full')
+      return append(id, e)
+    }
+    expect((await runTurn(t.deps, 's1')).status).toBe('failed')
+    expect(t.session.state).toBe('failed')
+    expect(t.events.at(-1)).toMatchObject({ kind: 'error', content: 'disk full' })
+  })
+
+  it('fails the session, with the message marked, when the workspace cannot open', async () => {
+    const t = setup()
+    t.deps.workspace.store.enabled = async () => false
+    expect((await runTurn(t.deps, 's1')).status).toBe('failed')
+    expect(t.events.map((e) => [e.kind, e.content.slice(0, 6)])).toEqual([
+      ['user_message', 'do it'],
+      ['state', 'turn:1'],
+      ['error', 'acme/a'],
+    ])
   })
 })

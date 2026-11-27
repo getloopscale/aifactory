@@ -2,7 +2,7 @@ import { defineJob } from '@getloopscale/loopzero/server/jobs'
 import { z } from 'zod'
 
 import { runTurn, type TurnDeps } from '../code/turn'
-import { appendEvent, claimTurn, moveSession, releaseClaim, saveAgentSession } from '../code/store'
+import { appendEvent, claimTurn, moveSession, touchSession, saveAgentSession } from '../code/store'
 import { workspaceStore } from '../code/workspace'
 import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
@@ -36,7 +36,6 @@ export default defineJob('code-turn', {
         claim: claimTurn,
         append: appendEvent,
         move: moveSession,
-        release: releaseClaim,
         saveAgentSession,
       },
       workspace: {
@@ -54,7 +53,13 @@ export default defineJob('code-turn', {
       onRefusal: (error) => pauseOnRefusal(getDb(), error),
       signal,
     }
-    const result = await withLeaseHeartbeat(extendLease, () => runTurn(deps, input.sessionId))
+    const result = await withLeaseHeartbeat(
+      async (seconds) => {
+        await extendLease(seconds)
+        await touchSession(input.sessionId)
+      },
+      () => runTurn(deps, input.sessionId),
+    )
     if (result.status === 'busy') {
       // Another turn of the session writes; this one queues itself again behind it.
       await jobBackend().enqueue({

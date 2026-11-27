@@ -6,7 +6,7 @@ import { errorMessage } from '../factory/error-message'
 import { untilSlotFree } from '../factory/sandbox-slot'
 import type { agentRun } from '../db/schema'
 
-import type { Claim, NewCodeEvent } from './store'
+import { turnMarker, type Claim, type NewCodeEvent } from './store'
 import { closeWorkspace, openWorkspace, type WorkspaceDeps } from './workspace'
 
 /** What a turn reads and writes in the database, so a test can stand in for it. */
@@ -14,8 +14,6 @@ export type TurnStore = {
   claim(sessionId: string): Promise<Claim>
   append(sessionId: string, event: NewCodeEvent): Promise<CodeEvent>
   move(sessionId: string, event: CodeTransitionEvent): Promise<unknown>
-  /** Gives the claimed turn back: the session is queued again. */
-  release(sessionId: string): Promise<void>
   saveAgentSession(sessionId: string, agentSessionId: string, harness: string): Promise<void>
 }
 
@@ -103,18 +101,20 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
     const reason = errorMessage(error)
     if (SANDBOX_PROVIDER_BLOCKED.test(reason)) {
       await deps.onRefusal(reason)
-      await store.release(sessionId)
+      await store.move(sessionId, 'turn_released')
       return { status: 'deferred' }
     }
-    return fail(deps, sessionId, reason)
+    return fail(deps, sessionId, message, reason)
   }
 
   const started = Date.now()
   let result: HarnessResult | undefined
   let failure: string | undefined
+  let marked = false
   try {
     await store.move(sessionId, 'turn_started')
-    await store.append(sessionId, { kind: 'state', content: 'running' })
+    await store.append(sessionId, { kind: 'state', content: turnMarker(message.seq) })
+    marked = true
     const writer = serialWriter(store, sessionId)
     const input: HarnessInput = {
       prompt: message.content,
@@ -145,16 +145,23 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
     console.warn(`code_workspace_not_saved session=${sessionId}: ${errorMessage(error)}`)
   }
 
-  if (result) {
-    await recordResult(deps, session, message, harness, result, Date.now() - started)
+  try {
+    if (result) {
+      await recordResult(deps, session, message, harness, result, Date.now() - started)
+    }
+    if (failure === undefined && result) {
+      await store.append(sessionId, {
+        kind: 'cost',
+        content: JSON.stringify({ costUsd: result.costUsd ?? null }),
+      })
+      await store.move(sessionId, 'turn_ended')
+      return { status: 'idle', sessionId }
+    }
+  } catch (error) {
+    // A step after the pass failed: the session must not stay claimed, or its later turns wait for ever.
+    failure = errorMessage(error)
   }
-  if (failure !== undefined || !result) return fail(deps, sessionId, failure ?? 'The turn failed.')
-  await store.append(sessionId, {
-    kind: 'cost',
-    content: JSON.stringify({ costUsd: result.costUsd ?? null }),
-  })
-  await store.move(sessionId, 'turn_ended')
-  return { status: 'idle', sessionId }
+  return fail(deps, sessionId, message, failure ?? 'The turn failed.', marked)
 }
 
 async function recordResult(
@@ -187,8 +194,24 @@ async function recordResult(
   })
 }
 
-async function fail(deps: TurnDeps, sessionId: string, reason: string): Promise<TurnResult> {
-  await deps.store.append(sessionId, { kind: 'error', content: reason })
-  await deps.store.move(sessionId, 'turn_failed')
+/**
+ * Ends the turn as failed. The message counts as answered (the marker names it, written first when the turn did
+ * not get to write it), so the next message is not held behind it. When writing the error itself fails the
+ * session is still moved, and the write's error is thrown after.
+ */
+async function fail(
+  deps: TurnDeps,
+  sessionId: string,
+  message: CodeEvent,
+  reason: string,
+  marked = false,
+): Promise<TurnResult> {
+  const { store } = deps
+  try {
+    if (!marked) await store.append(sessionId, { kind: 'state', content: turnMarker(message.seq) })
+    await store.append(sessionId, { kind: 'error', content: reason })
+  } finally {
+    await store.move(sessionId, 'turn_failed')
+  }
   return { status: 'failed', sessionId }
 }

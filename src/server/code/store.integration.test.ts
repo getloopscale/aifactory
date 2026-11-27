@@ -10,6 +10,8 @@ import {
   appendEvent,
   claimTurn,
   moveSession,
+  turnMarker,
+  CLAIM_STALE_MS,
   createSession,
   eventsAfter,
   getSession,
@@ -114,5 +116,27 @@ describe("a session's turn", () => {
     await moveSession(s.id, 'message')
     const claim = await claimTurn(s.id)
     expect(claim.kind === 'claimed' && claim.message.content).toBe('two')
+  })
+
+  it('keeps a message that arrived during a turn unanswered when the turn ends', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
+    await appendEvent(s.id, { kind: 'user_message', content: 'late' })
+    await appendEvent(s.id, { kind: 'error', content: 'streamed by the harness' })
+    await appendEvent(s.id, { kind: 'cost', content: '{}' })
+    await moveSession(s.id, 'message')
+    const claim = await claimTurn(s.id)
+    expect(claim.kind === 'claimed' && claim.message.content).toBe('late')
+  })
+
+  it('takes a claim nothing touched for the stale time, and not before', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await moveSession(s.id, 'message')
+    await claimTurn(s.id)
+    expect((await claimTurn(s.id)).kind).toBe('busy')
+    const later = new Date(Date.now() + CLAIM_STALE_MS + 1000)
+    expect((await claimTurn(s.id, later)).kind).toBe('claimed')
   })
 })
