@@ -89,6 +89,12 @@ describe('every agent of the factory reads the knowledge base', () => {
     }
   })
 
+  it('in a sandbox: the workspace of a code session is among the starters, and opens the feed', () => {
+    const file = sources().find((f) => f.path.endsWith('code/workspace.ts'))
+    expect(file?.text).toMatch(/\bcreateIsolatedSandbox\(/)
+    expect(file?.text).toContain('KnowledgeFeed.open(')
+  })
+
   it('in a sandbox: a file excused from the feed runs no agent there', () => {
     const excused = sources().filter((f) => NO_AGENT.includes(f.path))
     expect(excused.map((f) => f.path)).toEqual(NO_AGENT)

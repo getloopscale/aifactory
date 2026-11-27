@@ -61,6 +61,19 @@ export async function renameSession(id: string, title: string): Promise<CodeSess
   return row
 }
 
+/** Keeps the snapshot of a closed workspace and clears the sandbox id: no sandbox is up for the session any more. */
+export async function saveWorkspaceSnapshot(
+  id: string,
+  snapshotId: string,
+): Promise<CodeSession | undefined> {
+  const [row] = await getDb()
+    .update(codeSession)
+    .set({ snapshotId, sandboxId: null, updatedAt: sql`now()` })
+    .where(eq(codeSession.id, id))
+    .returning()
+  return row
+}
+
 /**
  * Appends an event with the next `seq` of its session (1 for the first). The session row is locked for the
  * transaction, so two writers never read the same last `seq`. The content is redacted and cut like a transcript's.
