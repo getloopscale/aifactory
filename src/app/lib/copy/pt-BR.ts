@@ -1958,7 +1958,6 @@ export const ptBR: Copy = {
     editor: {
       tabs: 'Editores abertos',
       close: (name: string) => `Fechar ${name}`,
-      empty: 'Abra uma mudança ou um arquivo na barra lateral para ler aqui.',
       diffTab: (name: string) => `${name} (mudanças)`,
       side: 'Barra lateral',
       status: 'Estado da sessão',

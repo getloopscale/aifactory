@@ -272,7 +272,7 @@ describe('the side panel of an open session', () => {
     expect(screen.getByText(en.code.changes.empty)).toBeDefined()
   })
 
-  it('opens the first change by itself, and a tab closes back to an empty editor', async () => {
+  it('opens the first change by itself, and closing the last tab leaves the agent alone', async () => {
     vi.mocked(get).mockImplementation(async (path: string) =>
       path.endsWith('/files') ? { files: [] } : diff(2),
     )
@@ -289,7 +289,7 @@ describe('the side panel of an open session', () => {
       fireEvent.click(
         screen.getByRole('button', { name: en.code.editor.close(en.code.editor.diffTab(name)) }),
       )
-    expect(screen.getByText(en.code.editor.empty)).toBeDefined()
+    expect(screen.queryByRole('tablist', { name: en.code.editor.tabs })).toBeNull()
   })
 
   it('reads the diff again when a turn ends', async () => {

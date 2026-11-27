@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   ArrowUp,
   Bot,
-  Code2,
   Files,
   FileText,
   FolderGit2,
@@ -682,7 +681,7 @@ function ActivityBar({
   )
 }
 
-/** The frame of the IDE: icons, side bar, the editor, the agent, and a line of status under them. */
+/** The frame of the IDE: icons, side bar, the agent, the editor, and a line of status under them. */
 function Frame({
   activity,
   side,
@@ -692,7 +691,8 @@ function Frame({
 }: {
   activity: ReactNode
   side?: ReactNode
-  editor: ReactNode
+  /** With an agent, the editor is the pane at its right, and is left out while nothing is open in it. */
+  editor?: ReactNode
   agent?: ReactNode
   status: ReactNode
 }) {
@@ -710,15 +710,23 @@ function Frame({
             {side}
           </aside>
         ) : null}
-        <div className="flex min-w-0 flex-1 flex-col">{editor}</div>
         {agent ? (
-          <section
-            aria-label={t.code.conversation.agent}
-            className="flex w-[min(460px,38%)] shrink-0 flex-col border-l border-border bg-card"
-          >
-            {agent}
-          </section>
-        ) : null}
+          <>
+            <section
+              aria-label={t.code.conversation.agent}
+              className="flex min-w-0 flex-1 flex-col"
+            >
+              {agent}
+            </section>
+            {editor ? (
+              <div className="flex w-[min(760px,46%)] shrink-0 flex-col border-l border-border">
+                {editor}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="flex min-w-0 flex-1 flex-col">{editor}</div>
+        )}
       </div>
       <footer
         aria-label={t.code.editor.status}
@@ -799,14 +807,7 @@ function Editor({
   const { t } = useCopy()
   const e = t.code.editor
   const shown = tabs.find((tab) => tabKey(tab) === active)
-  if (!shown) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
-        <Code2 aria-hidden className="size-10 stroke-muted-foreground/40" />
-        <p className="max-w-xs text-sm text-muted-foreground">{e.empty}</p>
-      </div>
-    )
-  }
+  if (!shown) return null
   const file = shown.kind === 'diff' ? diff?.diff.files.find((f) => f.path === shown.path) : null
   return (
     <>
@@ -870,7 +871,7 @@ function Editor({
   )
 }
 
-/** An open session as an IDE: what it changed and its files at the left, the editor, and the agent at the right. */
+/** An open session as an IDE: its changes and files at the left, the agent in the middle, the editor at the right. */
 function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   const { t } = useCopy()
   const { session, events, error } = useCodeSession(id)
@@ -971,19 +972,21 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
       activity={<ActivityBar view={view} onView={pick} changed={changed.length} session />}
       side={side}
       editor={
-        <Editor
-          id={id}
-          tabs={tabs}
-          active={active}
-          diff={diff}
-          onActive={setActive}
-          onClose={close}
-        />
+        shown ? (
+          <Editor
+            id={id}
+            tabs={tabs}
+            active={active}
+            diff={diff}
+            onActive={setActive}
+            onClose={close}
+          />
+        ) : undefined
       }
       agent={
         session ? (
           <>
-            <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+            <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
               <span className={SIDE_TITLE}>{t.code.conversation.agent}</span>
               <span className="min-w-0 truncate text-xs font-medium" title={session.title}>
                 {session.title}

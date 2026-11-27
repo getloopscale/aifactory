@@ -1652,7 +1652,6 @@ export const en = {
     editor: {
       tabs: 'Open editors',
       close: (name: string) => `Close ${name}`,
-      empty: 'Open a change or a file from the side bar to read it here.',
       diffTab: (name: string) => `${name} (changes)`,
       side: 'Side bar',
       status: 'Session status',
