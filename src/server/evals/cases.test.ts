@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
@@ -81,26 +82,58 @@ const evalCase = (id: string, repository: string, durationMs: number): EvalCase 
 })
 
 describe('markQuick', () => {
-  it('marks the shortest case of each repository in turn, so the quick set is cheap and still varied', () => {
+  const ok = (id: string, durationMs: number, passed = true) => ({ id, passed, durationMs })
+
+  it('marks the fastest passing case of each repository, the quickest repositories first', () => {
     const cases = [
-      evalCase('a1', 'o/a', 500),
-      evalCase('a2', 'o/a', 100),
-      evalCase('b1', 'o/b', 300),
-      evalCase('c1', 'o/c', 900),
-      evalCase('c2', 'o/c', 200),
+      evalCase('a1', 'o/a', 1),
+      evalCase('a2', 'o/a', 1),
+      evalCase('b1', 'o/b', 1),
+      evalCase('c1', 'o/c', 1),
+      evalCase('c2', 'o/c', 1),
     ]
+    const baseline = [ok('a1', 500), ok('a2', 100), ok('b1', 300), ok('c1', 900), ok('c2', 200)]
 
-    const marked = markQuick(cases, 4)
+    const marked = markQuick(cases, 2, baseline)
 
-    // c1 is left out: the fourth turn goes back to o/a, whose next shortest is a1.
-    expect(marked.filter((c) => c.quick).map((c) => c.id)).toEqual(['a1', 'a2', 'b1', 'c2'])
+    expect(marked.filter((c) => c.quick).map((c) => c.id)).toEqual(['a2', 'c2'])
     expect(marked.map((c) => c.id)).toEqual(cases.map((c) => c.id))
   })
 
-  it('clears a quick mark a case had before', () => {
-    const cases = [evalCase('a1', 'o/a', 500), { ...evalCase('b1', 'o/b', 100), quick: true }]
+  it('goes back to a repository for its next case only when every repository gave one', () => {
+    const cases = [evalCase('a1', 'o/a', 1), evalCase('a2', 'o/a', 1), evalCase('b1', 'o/b', 1)]
+    const baseline = [ok('a1', 10), ok('a2', 20), ok('b1', 900)]
 
-    expect(markQuick(cases, 1).map((c) => c.quick)).toEqual([true, false])
+    const marked = markQuick(cases, 3, baseline)
+
+    expect(marked.map((c) => c.quick)).toEqual([true, true, true])
+    expect(markQuick(cases, 2, baseline).map((c) => c.quick)).toEqual([true, false, true])
+  })
+
+  it('never marks a case that failed in the baseline or is not in it, and does not fill the gap', () => {
+    const cases = [evalCase('a1', 'o/a', 1), evalCase('b1', 'o/b', 1), evalCase('c1', 'o/c', 1)]
+    const baseline = [ok('a1', 10, false), ok('b1', 50)]
+
+    expect(markQuick(cases, 3, baseline).map((c) => c.quick)).toEqual([false, true, false])
+  })
+
+  it('clears a quick mark a case had before', () => {
+    const cases = [evalCase('a1', 'o/a', 1), { ...evalCase('b1', 'o/b', 1), quick: true }]
+
+    expect(markQuick(cases, 1, [ok('a1', 5), ok('b1', 9)]).map((c) => c.quick)).toEqual([true, false])
+  })
+
+  it('keeps the committed quick set to five passing, measured cases of the baseline', () => {
+    const root = join(__dirname, '../../..')
+    const all = JSON.parse(readFileSync(join(root, 'evals/cases.json'), 'utf8')) as EvalCase[]
+    const base = JSON.parse(readFileSync(join(root, 'evals/baseline.json'), 'utf8')) as {
+      results: { id: string; passed: boolean; durationMs: number }[]
+    }
+    const quick = all.filter((c) => c.quick).map((c) => c.id)
+
+    expect(quick).toHaveLength(5)
+    for (const id of quick) expect(base.results.find((r) => r.id === id)?.passed).toBe(true)
+    expect(markQuick(all, 5, base.results).filter((c) => c.quick).map((c) => c.id)).toEqual(quick)
   })
 })
 

@@ -10,6 +10,7 @@ import {
   E2B_USD_PER_MS,
   agentSetup,
   checkBeforeDeploy,
+  checkConcurrency,
   checkFromTestStart,
   fromTestStart,
   runSuite,
@@ -508,5 +509,65 @@ describe('fromTestStart', () => {
     )
 
     expect(startedAt).toBe(1_000)
+  })
+})
+
+describe('checkBeforeDeploy with the quick set named', () => {
+  const run = (quickIds: string[], results: CaseResult[]) =>
+    checkBeforeDeploy({
+      baseline,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      quickIds,
+      runQuick: async () => results,
+    })
+
+  it('fails when one quick case that passed in the baseline fails now', async () => {
+    const checked = await run(['a', 'b', 'c', 'd'], [
+      result('a', 0.5),
+      result('b', 0.5),
+      result('c', 0.5),
+      { ...result('d', 0.5), passed: false, reason: 'checks failed: tests' },
+    ])
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons.join('\n')).toContain('passed in the baseline and failed now: d')
+  })
+
+  it('refuses a quick case the baseline did not pass or does not have', async () => {
+    const failing = {
+      ...baseline,
+      results: [{ ...result('a', 0.5), passed: false }, result('b', 0.5)],
+    }
+    const checked = await checkBeforeDeploy({
+      baseline: failing,
+      changedPaths: ['src/server/factory/review.ts'],
+      setup: baseline.setup,
+      quickIds: ['a', 'b', 'z'],
+      runQuick: async () => [result('b', 0.5)],
+    })
+
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons.join('\n')).toContain('did not pass in the baseline: a, z')
+  })
+})
+
+describe('checkConcurrency', () => {
+  it('runs the whole quick set at once when the slots allow it', () => {
+    expect(checkConcurrency({ cases: 5, freeSlots: 10 })).toBe(5)
+  })
+
+  it('is bounded by the free slots', () => {
+    expect(checkConcurrency({ cases: 5, freeSlots: 3 })).toBe(3)
+  })
+
+  it('starts one worker when the free slots are unknown or none', () => {
+    expect(checkConcurrency({ cases: 5 })).toBe(1)
+    expect(checkConcurrency({ cases: 5, freeSlots: 0 })).toBe(1)
+    expect(checkConcurrency({ cases: 5, freeSlots: Number.NaN })).toBe(1)
+  })
+
+  it('keeps an explicit override whatever the slots', () => {
+    expect(checkConcurrency({ override: '2', cases: 5, freeSlots: 10 })).toBe(2)
   })
 })

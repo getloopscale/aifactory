@@ -21,6 +21,7 @@ import { integrationBranch } from '../factory/branches'
 import { factoryDeps, githubAppFromEnv } from '../factory/deps'
 import { optionsFor } from '../factory/engine-models'
 import { DEFAULT_TIMEOUTS } from '../factory/run'
+import type { SlotSource } from '../factory/sandbox-slot'
 import { resolveTimeouts } from '../factory/run-limit'
 import { labelsWithRepoChoice, loadRepoConfig } from '../factory/repo-config'
 import { effectiveEnv } from '../factory/settings'
@@ -37,6 +38,7 @@ import {
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
+  checkConcurrency,
   checkFromTestStart,
   fromTestStart,
   parseMarginMinutes,
@@ -115,7 +117,28 @@ async function startMargin(cases: EvalCase[]): Promise<number> {
   return startMarginFor(limits)
 }
 
+/** The sandbox slots free now, or undefined when the provider cannot say (the check then starts one worker). */
+async function freeSandboxSlots(cases: EvalCase[]): Promise<number | undefined> {
+  if (cases.length === 0) return undefined
+  try {
+    const { sandbox } = await evalDeps(cases[0].repository, cases[0].labels)
+    const provider = sandbox as Partial<SlotSource> | undefined
+    if (!provider?.listSandboxes || !provider.maxSandboxes) return undefined
+    return provider.maxSandboxes - (await provider.listSandboxes()).length
+  } catch {
+    return undefined
+  }
+}
+
 async function runCases(cases: EvalCase[], testStartedAt: number) {
+  const concurrency =
+    mode === 'check'
+      ? checkConcurrency({
+          override: env.EVALS_CONCURRENCY,
+          cases: cases.length,
+          freeSlots: await freeSandboxSlots(cases),
+        })
+      : Number(env.EVALS_CONCURRENCY ?? 2)
   // A bad value fails the run at once; only the read of the repositories' limits can be cut short.
   const margin =
     env.EVALS_START_MARGIN_MIN !== undefined
@@ -149,7 +172,7 @@ async function runCases(cases: EvalCase[], testStartedAt: number) {
     },
     {
       budgetUsd: Number(env.EVALS_BUDGET_USD ?? 15),
-      concurrency: Number(env.EVALS_CONCURRENCY ?? 2),
+      concurrency,
       sandboxUsdPerMs: E2B_USD_PER_MS,
       // Counted from the test's start, setup included, as vitest counts its timeout; a case that hangs is
       // abandoned a little before it.
@@ -212,7 +235,7 @@ describe.runIf(mode === 'cases')('the cases', () => {
         }),
       )
     }
-    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5)))
+    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5), readJson<Baseline>(BASELINE).results))
     expect(cases.length).toBeGreaterThan(0)
   })
 })
@@ -253,6 +276,7 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
       const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
       return checkFromTestStart(testStartedAt, {
         baseline,
+        quickIds: quick.map((c) => c.id),
         changedPaths,
         readSetup: () => currentSetup(quick),
         runQuick: async (startedAt) => {
