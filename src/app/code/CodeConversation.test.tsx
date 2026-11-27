@@ -30,6 +30,7 @@ const session = (state: CodeState): CodeSessionWire => ({
   sandboxId: null,
   snapshotId: null,
   agentSessionId: null,
+  agentSessionHarness: null,
   createdAt: '',
   updatedAt: '',
 })
