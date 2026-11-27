@@ -1965,6 +1965,23 @@ export const ptBR: Copy = {
       failed: 'Falhou',
     },
     missing: 'Esta sessão não existe.',
+    changes: {
+      panel: 'Painel lateral',
+      tabs: 'Abas do painel',
+      title: 'Alterações',
+      show: 'Mostrar o painel lateral',
+      hide: 'Esconder o painel lateral',
+      loading: 'Lendo as alterações…',
+      empty: 'Nenhuma alteração ainda',
+      files: 'Arquivos alterados',
+      binary: 'Arquivo binário',
+      lines: (added: number, removed: number) => `+${added} −${removed}`,
+      open: (path: string) => `Abrir as alterações de ${path}`,
+      diffOf: (path: string) => `Alterações de ${path}`,
+      unchanged: (n: number) =>
+        n === 1 ? 'Mostrar 1 linha sem alteração' : `Mostrar ${n} linhas sem alteração`,
+      stored: 'Do fim do último turno.',
+    },
     conversation: {
       label: 'Conversa',
       empty: 'Nada foi dito ou feito ainda.',
