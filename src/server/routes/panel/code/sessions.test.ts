@@ -1,11 +1,19 @@
 import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/server/define'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { appendEvent, createSession, getSession, listSessions } from '../../../code/store'
+import {
+  appendEvent,
+  createSession,
+  getSession,
+  listSessions,
+  moveSession,
+} from '../../../code/store'
 import { getDb } from '../../../db'
 import { canStart, harnessRegistry } from '../../../factory/harness-registry'
 
 vi.mock('../../../code/store')
+const enqueue = vi.fn(async () => undefined)
+vi.mock('../../../factory/job-backend', () => ({ jobBackend: () => ({ enqueue }) }))
 vi.mock('../../../db', () => ({ getDb: vi.fn() }))
 vi.mock('../../../factory/harness-registry', () => ({
   canStart: vi.fn(),
@@ -119,11 +127,13 @@ describe('the handlers', () => {
   })
 
   it('records the message as a user_message event of a known session', async () => {
-    vi.mocked(getSession).mockResolvedValue({ id: 's' } as never)
+    vi.mocked(getSession).mockResolvedValue({ id: 's', state: 'idle' } as never)
     vi.mocked(appendEvent).mockResolvedValue({ seq: 1 } as never)
     expect(await run(message, { params: { id: 's' }, body: { content: 'hi' } })).toEqual({
       event: { seq: 1 },
     })
     expect(appendEvent).toHaveBeenCalledWith('s', { kind: 'user_message', content: 'hi' })
+    expect(moveSession).toHaveBeenCalledWith('s', 'message')
+    expect(enqueue).toHaveBeenCalledWith({ name: 'code-turn', input: { sessionId: 's' } })
   })
 })
