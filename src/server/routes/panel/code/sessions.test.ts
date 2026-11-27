@@ -6,6 +6,7 @@ import {
   getSession,
   listSessions,
   moveSession,
+  requestStop,
   sendMessage,
   updateSession,
 } from '../../../code/store'
@@ -24,6 +25,7 @@ let enabledRepository = true
 
 import { DELETE, GET as one, PATCH } from './sessions/[id]'
 import { POST as message } from './sessions/[id]/messages'
+import { POST as stop } from './sessions/[id]/stop'
 import { GET, POST } from './sessions'
 
 const input = (subject: { id: string } | null) => ({
@@ -37,6 +39,7 @@ describe.each([
   ['GET /api/panel/code/sessions', GET],
   ['POST /api/panel/code/sessions', POST],
   ['POST /api/panel/code/sessions/:id/messages', message],
+  ['POST /api/panel/code/sessions/:id/stop', stop],
   ['GET /api/panel/code/sessions/:id', one],
   ['PATCH /api/panel/code/sessions/:id', PATCH],
   ['DELETE /api/panel/code/sessions/:id', DELETE],
@@ -173,6 +176,21 @@ describe('the handlers', () => {
     }
     expect(out.event.seq).toBe(1)
     expect(sendMessage).toHaveBeenCalledWith('s', 'hi')
+  })
+
+  it('asks the running turn to stop, and answers 409 or 404 when it cannot', async () => {
+    vi.mocked(requestStop).mockResolvedValueOnce({ kind: 'requested' })
+    expect(await run(stop, { params: { id: 's' } })).toEqual({ stopping: true })
+    vi.mocked(requestStop).mockResolvedValueOnce({
+      kind: 'refused',
+      reason: 'No turn is running.',
+      state: 'idle',
+    })
+    const refused = (await run(stop, { params: { id: 's' } })) as Response
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toMatchObject({ message: 'No turn is running.', state: 'idle' })
+    vi.mocked(requestStop).mockResolvedValueOnce({ kind: 'not_found' })
+    expect(((await run(stop, { params: { id: 'x' } })) as Response).status).toBe(404)
   })
 
   const stored = { id: 's', mode: 'plan', createdAt: new Date(0), updatedAt: new Date(0) } as never

@@ -7,6 +7,10 @@ import type { CodeState } from '../../shared/code'
  * `turn_released` gives a claimed turn back (the provider refused a sandbox, or the worker holding the claim went
  * quiet): the session is `queued` again and its message is still unanswered.
  *
+ * `message` in `running` keeps the state: the message is stored unanswered, and the pass is handed it live or the
+ * turn that ends queues the next one (`endTurn` in `store.ts`). `stop` in `running` names the state the session
+ * ends in; it does not move it, since the process that holds the pass ends the turn and `turn_ended` moves it.
+ *
  * `turn_started` comes twice in a turn: a worker takes a queued turn (`queued` to `starting`, the sandbox
  * comes up), then the agent starts working (`starting` to `running`).
  */
@@ -47,7 +51,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: ignored(NO_TURN),
     plan_proposed: refused(NO_TURN),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: to('stopped'),
     end: to('ended'),
     turn_failed: refused(NO_TURN),
@@ -59,7 +63,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: refused(NO_TURN),
     plan_proposed: refused(NO_TURN),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('The session has work waiting, so it is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
@@ -71,19 +75,19 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: refused(NO_TURN),
     plan_proposed: refused(NO_TURN),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('The session is starting, so it is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: to('queued'),
   },
   running: {
-    message: refused(BUSY),
+    message: to('running'),
     turn_started: ignored('The turn is already running.'),
     turn_ended: to('idle'),
     plan_proposed: to('waiting_input'),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: to('idle'),
     idle_timeout: ignored('The agent is working, so the session is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
@@ -95,7 +99,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: refused(NO_TURN),
     plan_proposed: refused('A plan is already waiting for an answer.'),
     plan_answered: to('queued'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('A plan waits for the owner, so the session stays as it is.'),
     end: to('ended'),
     turn_failed: refused(NO_TURN),
@@ -131,7 +135,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: ignored('The last turn failed.'),
     plan_proposed: ignored('The last turn failed.'),
     plan_answered: refused('The last turn failed. Send a message to try again.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('The last turn failed, so the session is not idle.'),
     end: to('ended'),
     turn_failed: ignored('The last turn already failed.'),

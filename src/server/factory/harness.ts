@@ -57,6 +57,11 @@ export type ActivePass = {
   /** Delivering stops the step that is running (Codex), so the composer says so before sending. */
   readonly interrupts: boolean
   send(text: string): Promise<'delivered' | 'ended'>
+  /**
+   * Stops the agent's process and leaves the sandbox and its files as they are. The pass then returns what it
+   * has, with the session id it saw, and is not restarted. A harness that cannot do it leaves this out.
+   */
+  cancel?(): Promise<void>
 }
 
 const count = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0

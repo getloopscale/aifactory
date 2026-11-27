@@ -107,12 +107,29 @@ describe('the conversation', () => {
     expect(screen.queryByText(c.lines(0, 0))).toBeNull()
   })
 
-  it('shows the working line and a disabled send while running', () => {
-    render(<CodeConversation session={session('running')} events={[]} />)
+  it('shows Stop in place of Send only while running with an empty box', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    const { rerender } = render(<CodeConversation session={session('running')} events={[]} />)
     expect(screen.getByRole('status').textContent).toBe(c.stateLine.running)
-    expect(screen.getByText(c.refused.running)).toBeDefined()
-    expect((screen.getByRole('button', { name: c.send }) as HTMLButtonElement).disabled).toBe(true)
-    expect((screen.getByLabelText(c.message) as HTMLTextAreaElement).disabled).toBe(true)
+    expect(screen.queryByRole('button', { name: c.send })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: c.stop }))
+    await waitFor(() => expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/stop', {}))
+    rerender(<CodeConversation session={session('idle')} events={[]} />)
+    expect(screen.queryByRole('button', { name: c.stop })).toBeNull()
+    expect(screen.getByRole('button', { name: c.send })).toBeDefined()
+  })
+
+  it('sends a typed message to a running turn', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    render(<CodeConversation session={session('running')} events={[]} />)
+    fireEvent.change(screen.getByLabelText(c.message), { target: { value: 'also this' } })
+    expect(screen.queryByRole('button', { name: c.stop })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: c.send }))
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/messages', {
+        text: 'also this',
+      }),
+    )
   })
 
   it('sends on Enter and keeps the draft when the request fails', async () => {

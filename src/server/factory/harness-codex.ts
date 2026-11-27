@@ -187,6 +187,7 @@ export function codexHarness(
     let session = resume
     let waiting: string | undefined
     let over = false
+    let cancelled = false
     live.attach({
       interrupts: true,
       async send(text) {
@@ -197,6 +198,11 @@ export function codexHarness(
         // `[c]` keeps the pattern from matching this command's own shell.
         await backend.execute(`pkill -f '[c]odex exec'`)
         return 'delivered'
+      },
+      async cancel() {
+        cancelled = true
+        waiting = undefined
+        await backend.execute(`pkill -f '[c]odex exec'`)
       },
     })
     let prompt = input.prompt
@@ -209,6 +215,10 @@ export function codexHarness(
         })
         const parsed = parseCodexResult(run.exitCode, run.stdout, run.stderr)
         session = parsed.sessionId ?? session
+        if (cancelled) {
+          over = true
+          return merged(total, { ok: false, summary: 'Stopped.' }, session)
+        }
         const message = waiting
         waiting = undefined
         if (message === undefined) {

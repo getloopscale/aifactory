@@ -10,6 +10,9 @@ import { EVENT_MAX_BYTES } from '../factory/transcript'
 import {
   appendEvent,
   claimTurn,
+  endTurn,
+  requestStop,
+  stopRequested,
   moveSession,
   turnMarker,
   CLAIM_STALE_MS,
@@ -188,11 +191,45 @@ describe('sending a message', () => {
     expect((await getSession(s.id))?.state).toBe('queued')
   })
 
-  it('refuses a running session with its state and writes nothing', async () => {
+  it('stores a message for a running turn unanswered, with no job', async () => {
     const s = await aSession()
     await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
-    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'refused', state: 'running' })
-    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'sent' })
+    expect((await getSession(s.id))?.state).toBe('running')
+    expect(await jobs()).toBe(0)
+  })
+
+  it('queues one turn for a message the pass was not handed, when the turn ends', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    expect((await getSession(s.id))?.state).toBe('queued')
+    expect(await jobs()).toBe(1)
+    expect(await endTurn(s.id)).toBeUndefined()
+    expect(await jobs()).toBe(1)
+  })
+
+  it('ends idle with no job when the message was handed to the pass', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
+    expect(await endTurn(s.id)).toEqual({ queued: false })
+    expect((await getSession(s.id))?.state).toBe('idle')
+    expect(await jobs()).toBe(0)
+  })
+
+  it('marks only a running turn to stop, and clears the mark when the turn ends', async () => {
+    const s = await aSession()
+    expect(await requestStop(s.id)).toMatchObject({ kind: 'refused', state: 'idle' })
+    expect(await requestStop('missing')).toEqual({ kind: 'not_found' })
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    expect(await requestStop(s.id)).toEqual({ kind: 'requested' })
+    expect(await stopRequested(s.id)).toBe(true)
+    await endTurn(s.id)
+    expect(await stopRequested(s.id)).toBe(false)
+    expect((await getSession(s.id))?.state).toBe('idle')
   })
 
   it('stores no event when the job cannot be queued', async () => {

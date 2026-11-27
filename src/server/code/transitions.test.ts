@@ -62,10 +62,23 @@ describe('code session transitions', () => {
     for (const event of CODE_EVENTS) expect(transition('ended', event).action).not.toBe('move')
   })
 
-  it('refuses a message while the agent works and ignores a late event', () => {
-    expect(transition('running', 'message').action).toBe('refused')
+  it('refuses a message while a turn waits to run and ignores a late event', () => {
+    for (const from of ['queued', 'starting'] as const) {
+      expect(transition(from, 'message').action).toBe('refused')
+    }
     expect(transition('stopped', 'turn_ended').action).toBe('ignored')
     expect(transition('stopped', 'stop').action).toBe('ignored')
+  })
+
+  it('takes a message while the turn runs, without moving the session', () => {
+    expect(transition('running', 'message')).toEqual({ action: 'move', state: 'running' })
+  })
+
+  it('takes a stop only from a running turn, which ends idle', () => {
+    expect(transition('running', 'stop')).toEqual({ action: 'move', state: 'idle' })
+    for (const from of CODE_STATES.filter((s) => s !== 'running')) {
+      expect(transition(from, 'stop').action, from).not.toBe('move')
+    }
   })
 
   it('stops an idle session on timeout and fails an active turn', () => {
