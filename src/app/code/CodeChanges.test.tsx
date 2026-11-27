@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { CodeDiff, CodeDiffLine } from '../../shared/code'
 import { CopyProvider } from '../lib/copy'
 import { en } from '../lib/copy/en'
 
-import { CodeChanges, foldHunk } from './CodeChanges'
+vi.mock('../lib/api', () => ({ post: vi.fn() }))
+vi.mock('../components/Assist', () => ({
+  Assist: ({ kind }: { kind: string }) => <p>assist {kind}</p>,
+}))
+
+import { post } from '../lib/api'
+
+import { CodeChanges, foldHunk, PullRequestForm } from './CodeChanges'
 
 afterEach(cleanup)
 
@@ -99,5 +106,54 @@ describe('CodeChanges', () => {
     const pieces = foldHunk([ctx(1), ctx(2), { kind: 'add', text: 'x', newLine: 3 }])
     expect(pieces.map((p) => p.fold)).toEqual([false, false, false])
     expect(foldHunk(Array.from({ length: 7 }, (_, i) => ctx(i)))).toHaveLength(1)
+  })
+})
+
+describe('the pull request form', () => {
+  const form = (props: Partial<Parameters<typeof PullRequestForm>[0]> = {}) =>
+    render(
+      <CopyProvider>
+        <PullRequestForm sessionId="s 1" repository="acme/app" hasChanges {...props} />
+      </CopyProvider>,
+    )
+  const copy = en.code.changes.pullRequest
+
+  it('offers an assistant for the title and for the body', () => {
+    form()
+    expect(screen.getAllByText(/^assist /)).toHaveLength(2)
+  })
+
+  it('sends the title and the body, then shows the link', async () => {
+    vi.mocked(post).mockResolvedValue({ number: 7, url: 'https://github.com/acme/app/pull/7' })
+    form()
+    expect((screen.getByRole('button', { name: copy.open }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
+    fireEvent.change(screen.getByLabelText(copy.title), { target: { value: ' Add a ' } })
+    fireEvent.change(screen.getByLabelText(copy.body), { target: { value: 'Why' } })
+    fireEvent.click(screen.getByRole('button', { name: copy.open }))
+    const link = await screen.findByRole('link', { name: copy.link(7) })
+    expect(link.getAttribute('href')).toBe('https://github.com/acme/app/pull/7')
+    expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s%201/pull-request', {
+      title: 'Add a',
+      body: 'Why',
+    })
+  })
+
+  it('says why it failed and keeps what was typed', async () => {
+    vi.mocked(post).mockRejectedValue(new Error('The work changes .github/workflows/ci.yml'))
+    form()
+    fireEvent.change(screen.getByLabelText(copy.title), { target: { value: 'T' } })
+    fireEvent.click(screen.getByRole('button', { name: copy.open }))
+    expect((await screen.findByRole('alert')).textContent).toContain('ci.yml')
+    expect((screen.getByLabelText(copy.title) as HTMLInputElement).value).toBe('T')
+  })
+
+  it('shows the link of a pull request opened before, and cannot send with no change', () => {
+    form({ existing: { number: 3, url: 'https://github.com/acme/app/pull/3' }, hasChanges: false })
+    expect(screen.getByRole('link', { name: copy.link(3) })).toBeDefined()
+    expect((screen.getByRole('button', { name: copy.again }) as HTMLButtonElement).disabled).toBe(
+      true,
+    )
   })
 })

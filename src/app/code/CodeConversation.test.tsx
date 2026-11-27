@@ -31,6 +31,8 @@ const session = (state: CodeState): CodeSessionWire => ({
   snapshotId: null,
   agentSessionId: null,
   agentSessionHarness: null,
+  pullRequestUrl: null,
+  pullRequestNumber: null,
   createdAt: '',
   updatedAt: '',
 })

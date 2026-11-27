@@ -43,6 +43,9 @@ export type CodeSession = {
   agentSessionId: string | null
   /** The harness that produced `agentSessionId`. */
   agentSessionHarness: string | null
+  /** The draft pull request opened from the work branch, once there is one. */
+  pullRequestUrl: string | null
+  pullRequestNumber: number | null
   createdAt: Date
   updatedAt: Date
 }
@@ -109,3 +112,6 @@ export type CodeFileResponse = {
   truncated: boolean
   limit: number
 }
+
+/** The pull request a session opened: the same one every time it is asked again. */
+export type CodePullRequestResponse = { number: number; url: string; draft: boolean }

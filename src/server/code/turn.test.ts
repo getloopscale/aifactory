@@ -22,6 +22,8 @@ function memory(mode: CodeMode = 'code', extra: Partial<CodeSession> = {}) {
     snapshotId: null,
     agentSessionId: null,
     agentSessionHarness: null,
+    pullRequestUrl: null,
+    pullRequestNumber: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...extra,

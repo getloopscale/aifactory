@@ -22,11 +22,19 @@ vi.mock('../../../factory/harness-registry', () => ({
   harnessRegistry: vi.fn(),
 }))
 
+vi.mock('../../../code/pull-request-wiring', () => ({ pullRequestDeps: vi.fn(async () => ({})) }))
+vi.mock('../../../code/pull-request', async (original) => ({
+  ...(await original<typeof import('../../../code/pull-request')>()),
+  openSessionPullRequest: vi.fn(),
+}))
+
 let enabledRepository = true
 
 import { DELETE, GET as one, PATCH } from './sessions/[id]'
 import { POST as message } from './sessions/[id]/messages'
 import { POST as stop } from './sessions/[id]/stop'
+import { POST as pullRequest } from './sessions/[id]/pull-request'
+import { openSessionPullRequest, PullRequestRefused } from '../../../code/pull-request'
 import { POST as planAnswer } from './sessions/[id]/plan-answer'
 import { GET, POST } from './sessions'
 
@@ -42,6 +50,7 @@ describe.each([
   ['POST /api/panel/code/sessions', POST],
   ['POST /api/panel/code/sessions/:id/messages', message],
   ['POST /api/panel/code/sessions/:id/stop', stop],
+  ['POST /api/panel/code/sessions/:id/pull-request', pullRequest],
   ['POST /api/panel/code/sessions/:id/plan-answer', planAnswer],
   ['GET /api/panel/code/sessions/:id', one],
   ['PATCH /api/panel/code/sessions/:id', PATCH],
@@ -194,6 +203,27 @@ describe('the handlers', () => {
     expect(await refused.json()).toMatchObject({ message: 'No turn is running.', state: 'idle' })
     vi.mocked(requestStop).mockResolvedValueOnce({ kind: 'not_found' })
     expect(((await run(stop, { params: { id: 'x' } })) as Response).status).toBe(404)
+  })
+
+  it('opens the pull request, and maps a refusal, a missing session and a failure to 400, 404 and 502', async () => {
+    const body = { title: 'T', body: 'B' }
+    vi.mocked(getSession).mockResolvedValue({ id: 's' } as never)
+    vi.mocked(openSessionPullRequest).mockResolvedValueOnce({ number: 7, url: 'u', draft: true })
+    expect(await run(pullRequest, { params: { id: 's' }, body })).toEqual({
+      number: 7,
+      url: 'u',
+      draft: true,
+    })
+    vi.mocked(openSessionPullRequest).mockRejectedValueOnce(
+      new PullRequestRefused(400, 'The work changes .github/workflows/ci.yml'),
+    )
+    const refused = (await run(pullRequest, { params: { id: 's' }, body })) as Response
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toMatchObject({ message: expect.stringContaining('ci.yml') })
+    vi.mocked(openSessionPullRequest).mockRejectedValueOnce(new Error('boom'))
+    expect(((await run(pullRequest, { params: { id: 's' }, body })) as Response).status).toBe(502)
+    vi.mocked(getSession).mockResolvedValue(undefined)
+    expect(((await run(pullRequest, { params: { id: 'x' }, body })) as Response).status).toBe(404)
   })
 
   const stored = { id: 's', mode: 'plan', createdAt: new Date(0), updatedAt: new Date(0) } as never

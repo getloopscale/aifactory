@@ -463,6 +463,13 @@
       "when": 1796211983100,
       "tag": "0068_code_session_stop",
       "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1796298383100,
+      "tag": "0069_code_session_pull_request",
+      "breakpoints": true
     }
   ]
 }

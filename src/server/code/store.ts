@@ -103,6 +103,14 @@ export async function saveWorkspaceSnapshot(
   return row
 }
 
+/** Keeps the pull request opened from the session's work branch. */
+export async function savePullRequest(id: string, number: number, url: string): Promise<void> {
+  await getDb()
+    .update(codeSession)
+    .set({ pullRequestNumber: number, pullRequestUrl: url, updatedAt: sql`now()` })
+    .where(eq(codeSession.id, id))
+}
+
 /** Says which sandbox is up for the session, or that none is. */
 export async function saveSandboxId(id: string, sandboxId: string | null): Promise<void> {
   await getDb().update(codeSession).set({ sandboxId }).where(eq(codeSession.id, id))
