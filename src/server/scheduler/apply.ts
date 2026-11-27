@@ -81,8 +81,38 @@ export type AskDeps = {
   api: Pick<GithubApi, 'commentOnIssue'>
 }
 
-/** The queued run whose issue is not ready. */
-export type AskedRun = { taskId: number; jobId: string; repository: string; issueNumber: number }
+/**
+ * The run whose issue is not ready. `jobId` is its queued job, which a hold withdraws; null is a run the caller
+ * already holds (a worker that took the job judges it before it starts, `start-readiness.ts`): nothing is
+ * withdrawn, the task row is locked in `intake` instead and the worker ends its own job.
+ */
+export type AskedRun = {
+  taskId: number
+  jobId: string | null
+  repository: string
+  issueNumber: number
+}
+
+const TAKEN_FIRST = 'its queued run was taken, held or withdrawn first'
+const LEFT_INTAKE = 'the task left intake first'
+
+/**
+ * Takes the run for a hold, in the hold's transaction: withdraws its queued job while the scheduler may still
+ * change it, or, for a run the caller holds, locks the task while it is still in `intake`.
+ */
+async function takeRun(tx: Pick<Database, 'execute'>, run: AskedRun): Promise<boolean> {
+  const taken =
+    run.jobId === null
+      ? await tx.execute(
+          sql`select 1 from task where task.id = ${run.taskId} and task.stage = 'intake' for update`,
+        )
+      : await tx.execute(
+          sql`delete from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
+        )
+  return (taken.rowCount ?? 0) > 0
+}
+
+const notTaken = (run: AskedRun) => (run.jobId === null ? LEFT_INTAKE : TAKEN_FIRST)
 
 export type Asked = { asked: true; questionId: number } | { asked: false; reason: string }
 
@@ -113,12 +143,7 @@ export async function askOwner(
   const { token } = await deps.github.installationToken(run.repository)
   const text = readinessQuestion(readiness)
   return deps.db.transaction(async (tx) => {
-    const withdrawn = await tx.execute(
-      sql`delete from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
-    )
-    if ((withdrawn.rowCount ?? 0) === 0) {
-      return { asked: false, reason: 'its queued run was taken, held or withdrawn first' } as const
-    }
+    if (!(await takeRun(tx, run))) return { asked: false, reason: notTaken(run) } as const
     const commentId = await deps.api.commentOnIssue(
       run.repository,
       token,
@@ -166,15 +191,7 @@ export async function blockTask(
   })
   const reason = new BlockedByOpenIssues(refs)
   return deps.db.transaction(async (tx) => {
-    const withdrawn = await tx.execute(
-      sql`delete from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
-    )
-    if ((withdrawn.rowCount ?? 0) === 0) {
-      return {
-        blocked: false,
-        reason: 'its queued run was taken, held or withdrawn first',
-      } as const
-    }
+    if (!(await takeRun(tx, run))) return { blocked: false, reason: notTaken(run) } as const
     await enterStage(tx as never, run.taskId, 'failed', {
       failedAt: 'intake',
       error: reason.message,
@@ -217,11 +234,12 @@ export async function applyAcceptance(
     .where(eq(task.id, run.taskId))
   const allowed = outcome({ stage: row?.stage ?? 'cancelled' }, 'needs_refinement')
   if (allowed.kind !== 'action') return { drafted: false, reason: allowed.reason }
-  const queued = await deps.db.execute(
-    sql`select 1 from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE}`,
-  )
-  if ((queued.rowCount ?? 0) === 0) {
-    return { drafted: false, reason: 'its queued run was taken, held or withdrawn first' }
+  // A run the caller holds goes on after the draft; a queued one must still be the scheduler's to keep.
+  if (run.jobId !== null) {
+    const queued = await deps.db.execute(
+      sql`select 1 from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE}`,
+    )
+    if ((queued.rowCount ?? 0) === 0) return { drafted: false, reason: TAKEN_FIRST }
   }
   const { token } = await deps.github.installationToken(run.repository)
   const current = await deps.readIssue(run.repository, run.issueNumber, token)

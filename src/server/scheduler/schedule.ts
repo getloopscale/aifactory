@@ -12,6 +12,7 @@ import {
   blockTask,
   recordDecision,
   type AskDeps,
+  type AskedRun,
   type DraftDeps,
 } from './apply'
 import {
@@ -58,7 +59,12 @@ import {
 export type SchedulerDeps = FactsDeps &
   AskDeps &
   Partial<Pick<DraftDeps, 'issues'>> &
-  Pick<BlockerReads, 'fetchIssue'> & { judge: ReadinessJudge; drafter?: AcceptanceDrafter }
+  Pick<BlockerReads, 'fetchIssue'> & {
+    judge: ReadinessJudge
+    drafter?: AcceptanceDrafter
+    /** How long a verdict is waited for (`JUDGE_TIMEOUT_MS` by default). */
+    judgeTimeoutMs?: number
+  }
 
 export type ScheduleResult = {
   judged: number
@@ -79,25 +85,66 @@ type ReadRun = QueuedRunWithIssue & { issue: { read: true } }
 
 const isRead = (run: QueuedRunWithIssue): run is ReadRun => run.issue.read
 
-/** Has the judge read the issue and records its verdict; a judge that throws records nothing and is logged. */
+/**
+ * A run whose issue is judged: a queued one the scheduler read (`jobId`), or one a worker holds (`jobId` null,
+ * `start-readiness.ts`).
+ */
+export type JudgedRun = AskedRun & { issue: { value: { title: string; body: string } } }
+
+/** The longest a verdict is waited for. A worker's run waits for it, so it is bounded; a later answer is dropped. */
+export const JUDGE_TIMEOUT_MS = 90_000
+
+/** The judge's answer, or why there is none: it threw, or did not answer within `ms`. */
+export async function answerWithin(
+  judge: ReadinessJudge,
+  message: string,
+  ms: number,
+): Promise<{ response: string; cost: number } | { error: string }> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<{ error: string }>((resolve) => {
+    timer = setTimeout(() => resolve({ error: `the judge did not answer within ${ms} ms` }), ms)
+  })
+  try {
+    return await Promise.race([
+      judge(message).catch((error: unknown) => ({ error: errorMessage(error) })),
+      late,
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Has the judge read the issue and records its verdict. A judge that throws or times out is logged; for a queued
+ * run it records nothing (the next pass judges again), while a run a worker holds is about to start, so the
+ * failure is recorded as a `ready` verdict with its error and the run is not held. When a concurrent pass recorded
+ * the same version first, its verdict is the one used.
+ */
 async function judge(
   deps: SchedulerDeps,
-  run: ReadRun,
+  run: JudgedRun,
   head: string,
   mode: Active,
 ): Promise<ReadinessRecord | undefined> {
   const { title, body } = run.issue.value
-  let answer: { response: string; cost: number }
-  try {
-    answer = await deps.judge(
-      readinessMessage({ repository: run.repository, issueNumber: run.issueNumber, title, body }),
-    )
-  } catch (error) {
-    log('schedule_judge_failed', { taskId: run.taskId, error: errorMessage(error) })
-    return undefined
+  const answer = await answerWithin(
+    deps.judge,
+    readinessMessage({ repository: run.repository, issueNumber: run.issueNumber, title, body }),
+    deps.judgeTimeoutMs ?? JUDGE_TIMEOUT_MS,
+  )
+  if ('error' in answer) {
+    log('schedule_judge_failed', { taskId: run.taskId, error: answer.error })
+    if (run.jobId !== null) return undefined
   }
-  const readiness = parseReadiness(answer.response)
-  const detail = { ...readiness, costUsd: answer.cost }
+  const detail =
+    'error' in answer
+      ? {
+          verdict: 'ready' as const,
+          missing: '',
+          question: '',
+          error: `the judge failed: ${answer.error}`,
+        }
+      : { ...parseReadiness(answer.response), costUsd: answer.cost }
   const id = await recordDecision(deps.db, {
     taskId: run.taskId,
     kind: 'readiness',
@@ -105,13 +152,15 @@ async function judge(
     head,
     detail,
   })
-  return id === undefined ? undefined : { ...readiness, id }
+  if (id !== undefined) return { ...detail, id }
+  const recorded = await readRecordedReadiness(deps.db, [run.taskId])
+  return recorded.get(readinessKey(run.taskId, head))
 }
 
 /** Has the drafter write the criteria of a `no_acceptance` verdict and stores them on its decision row. */
 async function draftFor(
   deps: SchedulerDeps & { drafter: AcceptanceDrafter },
-  run: ReadRun,
+  run: JudgedRun,
   verdict: ReadinessRecord,
 ): Promise<ReadinessRecord> {
   const { title, body } = run.issue.value
@@ -144,7 +193,7 @@ async function draftFor(
  */
 async function appliedDraft(
   deps: SchedulerDeps,
-  run: ReadRun,
+  run: JudgedRun,
   verdict: ReadinessRecord,
 ): Promise<'none' | 'done' | 'skip'> {
   if (!deps.issues || !verdict.draft || verdict.draft.length === 0) return 'none'
@@ -170,7 +219,7 @@ async function appliedDraft(
  */
 async function blockedByIssues(
   deps: SchedulerDeps,
-  run: ReadRun,
+  run: JudgedRun,
   verdict: ReadinessRecord,
 ): Promise<boolean> {
   const named = (verdict.blockedBy ?? []).flatMap((n) => {
@@ -197,7 +246,7 @@ async function blockedByIssues(
 /** Judges one queued issue when its current body was not judged, and asks the owner in `auto` when needed. */
 async function readinessOf(
   deps: SchedulerDeps,
-  run: ReadRun,
+  run: JudgedRun,
   recorded: Map<string, ReadinessRecord>,
   mode: Active,
   result: ScheduleResult,
@@ -231,6 +280,20 @@ async function readinessOf(
   const asked = await askOwner(deps, run, verdict!, verdict!.id)
   if (!asked.asked) log('schedule_not_asked', { taskId: run.taskId, reason: asked.reason })
   return asked.asked
+}
+
+/**
+ * The readiness of one run a worker holds, before it starts: the verdict recorded for the issue's current title
+ * and body, or the judge's, and in `auto` the hold it calls for. True when the task is held back.
+ */
+export async function readinessOfHeldRun(
+  deps: SchedulerDeps,
+  run: JudgedRun & { jobId: null },
+  mode: Active,
+): Promise<boolean> {
+  const recorded = await readRecordedReadiness(deps.db, [run.taskId])
+  const result: ScheduleResult = { judged: 0, asked: 0, recorded: 0, moved: 0, failed: 0 }
+  return readinessOf(deps, run, recorded, mode, result)
 }
 
 /** The readiness step: the tasks held back for the owner in this pass. */

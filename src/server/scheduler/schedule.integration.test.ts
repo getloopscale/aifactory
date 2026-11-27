@@ -11,7 +11,7 @@ import { jobBackend } from '../factory/job-backend'
 import { pollAnswers } from '../factory/waiting'
 import { queueViews } from '../panel/queue-view'
 
-import { alone, schedule, type SchedulerDeps } from './schedule'
+import { alone, readinessOfHeldRun, schedule, type SchedulerDeps } from './schedule'
 
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
@@ -607,6 +607,156 @@ describe('an issue that lacks only an acceptance criterion', () => {
     expect(drafter.writes).toEqual([])
     expect(api.repo(REPO).issue(t.issue).body).toBe('The owner rewrote this.')
     expect(await stageOf(t.id)).toBe('intake')
+  })
+})
+
+describe('the readiness of a run a worker took before any pass saw it queued (#706)', () => {
+  /** The run as the worker holds it: its job locked, its issue as GitHub holds it now. */
+  async function held(t: { id: number; issue: number }) {
+    await enqueue(t.id, 0, { lockedFor: 2 })
+    const issue = await api.readIssue(REPO, t.issue)
+    return {
+      taskId: t.id,
+      jobId: null,
+      repository: REPO,
+      issueNumber: t.issue,
+      issue: { value: issue },
+    }
+  }
+  const readiness = async () => (await decisions()).filter((d) => d.kind === 'readiness')
+
+  it('in trial, records a verdict for the current title and body and lets the run start', async () => {
+    const t = await seed({ body: 'Make it better.' })
+    judge.answers.set(t.issue, NOT_READY)
+
+    expect(await readinessOfHeldRun(deps(), await held(t), 'trial')).toBe(false)
+
+    const [verdict] = await readiness()
+    expect(verdict).toMatchObject({ taskId: t.id, mode: 'trial' })
+    expect(verdict.detail).toMatchObject({ verdict: 'needs_refinement' })
+    expect(await stageOf(t.id)).toBe('intake')
+    expect(api.callsTo('commentOnIssue')).toEqual([])
+  })
+
+  it('in auto, asks the owner before a sandbox starts and leaves the worker its own job', async () => {
+    const t = await seed({ body: 'Make it better.' })
+    judge.answers.set(t.issue, NOT_READY)
+
+    expect(await readinessOfHeldRun(deps(), await held(t), 'auto')).toBe(true)
+
+    expect(await stageOf(t.id)).toBe('waiting')
+    expect(api.callsTo('commentOnIssue')).toHaveLength(1)
+    const [asked] = await getDb().select().from(question)
+    expect((await readiness())[0].detail).toMatchObject({ questionId: asked.id })
+    expect((await jobs()).map((j) => j.id)).toEqual([`job-${t.id}`])
+  })
+
+  it('in auto, fails a task blocked by an open issue at intake', async () => {
+    const t = await seed()
+    judge.answers.set(
+      t.issue,
+      `{"verdict":"blocked","missing":"#9000 is open","question":"","blockedBy":["${REPO}#9000"]}`,
+    )
+    const open = {
+      ...deps(),
+      fetchIssue: async (_repo: string, number: number) => ({
+        number,
+        title: 't',
+        body: '',
+        labels: [],
+        state: 'open' as const,
+      }),
+    }
+
+    expect(await readinessOfHeldRun(open, await held(t), 'auto')).toBe(true)
+
+    expect(await stageOf(t.id)).toBe('failed')
+  })
+
+  it('holds nothing for a task that left intake while it was judged', async () => {
+    const t = await seed({ body: 'Make it better.' })
+    judge.answers.set(t.issue, NOT_READY)
+    const run = await held(t)
+    await getDb().update(task).set({ stage: 'build' }).where(eq(task.id, t.id))
+
+    expect(await readinessOfHeldRun(deps(), run, 'auto')).toBe(false)
+    expect(api.callsTo('commentOnIssue')).toEqual([])
+  })
+
+  it.each([
+    ['throws', { judgeTimeoutMs: 1_000 }, 'the judge failed: the model is down'],
+    [
+      'does not answer in time',
+      { judgeTimeoutMs: 20 },
+      'the judge failed: the judge did not answer within 20 ms',
+    ],
+  ])('lets the run start with the error recorded when the judge %s', async (name, over, error) => {
+    const t = await seed()
+    const d: SchedulerDeps = { ...deps(), ...over }
+    if (name === 'throws') judge.fails = 'the model is down'
+    else d.judge = () => new Promise(() => {})
+
+    expect(await readinessOfHeldRun(d, await held(t), 'auto')).toBe(false)
+
+    const [verdict] = await readiness()
+    expect(verdict.detail).toMatchObject({ verdict: 'ready', error })
+    expect(await stageOf(t.id)).toBe('intake')
+  })
+
+  it('uses the verdict a pass recorded first, judging nothing again, and still holds in auto', async () => {
+    const t = await seed({ body: 'Make it better.' })
+    judge.answers.set(t.issue, NOT_READY)
+    await enqueue(t.id, 30)
+    await schedule(deps(), { order: 'off', readiness: 'trial' })
+    // The worker takes the job the pass judged.
+    await getPool().query(
+      `update loopzero_jobs set locked_until = now() + interval '2 minutes', attempts = 1`,
+    )
+    const issue = await api.readIssue(REPO, t.issue)
+    const run = {
+      taskId: t.id,
+      jobId: null,
+      repository: REPO,
+      issueNumber: t.issue,
+      issue: { value: issue },
+    }
+
+    expect(await readinessOfHeldRun(deps(), run, 'auto')).toBe(true)
+
+    expect(judge.asked).toHaveLength(1)
+    expect(await readiness()).toHaveLength(1)
+    expect(await stageOf(t.id)).toBe('waiting')
+  })
+
+  it('reuses one verdict when a pass and the worker judge the same issue at once', async () => {
+    const t = await seed()
+    await enqueue(t.id, 30)
+    const issue = await api.readIssue(REPO, t.issue)
+    const run = {
+      taskId: t.id,
+      jobId: null,
+      repository: REPO,
+      issueNumber: t.issue,
+      issue: { value: issue },
+    }
+
+    await Promise.all([
+      schedule(deps(), { order: 'off', readiness: 'trial' }),
+      readinessOfHeldRun(deps(), run, 'trial'),
+    ])
+
+    expect(await readiness()).toHaveLength(1)
+  })
+
+  it('orders nothing for a run a worker holds once it is judged', async () => {
+    const t = await seed()
+    const run = await held(t)
+
+    expect(await readinessOfHeldRun(deps(), run, 'auto')).toBe(false)
+    await schedule(deps(), AUTO)
+
+    expect(await readiness()).toHaveLength(1)
+    expect((await decisions()).filter((d) => d.kind === 'order')).toEqual([])
   })
 })
 
