@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-librar
 import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { PillComposer, tallest } from './PillComposer'
+import { MessageBox, tallest } from './MessageBox'
 import { CopyProvider, LANGUAGE_KEY } from '../../lib/copy'
 import { ptBR } from '../../lib/copy/pt-BR'
 // The owner's language is Portuguese here; the dictionary keys say what is on the screen.
@@ -12,7 +12,7 @@ const render = (ui: ReactElement) => rtlRender(ui, { wrapper: CopyProvider })
 
 afterEach(cleanup)
 
-const mount = (over: Partial<Parameters<typeof PillComposer>[0]> = {}) => {
+const mount = (over: Partial<Parameters<typeof MessageBox>[0]> = {}) => {
   const props = {
     value: '',
     onValueChange: vi.fn(),
@@ -21,7 +21,7 @@ const mount = (over: Partial<Parameters<typeof PillComposer>[0]> = {}) => {
     onStop: vi.fn(),
     ...over,
   }
-  render(<PillComposer {...props} />)
+  render(<MessageBox {...props} />)
   return props
 }
 
@@ -85,22 +85,16 @@ describe('the message box', () => {
     expect(screen.getByText('modelo')).toBeDefined()
   })
 
-  it('gives a message of more than one line the whole width, and one row again once it is empty', () => {
-    const props = {
-      onValueChange: vi.fn(),
-      onSubmit: vi.fn(),
-      running: false,
-      onStop: vi.fn(),
-    }
-    const { rerender } = render(<PillComposer {...props} value="oi" />)
-    const form = () => screen.getByLabelText(ptBR.composer.message).closest('form')!
-    expect(form().dataset.tall).toBeUndefined()
-    rerender(<PillComposer {...props} value={'uma linha\noutra linha'} />)
-    expect(form().dataset.tall).toBe('true')
-    rerender(<PillComposer {...props} value="curta" />)
-    expect(form().dataset.tall).toBe('true')
-    rerender(<PillComposer {...props} value="" />)
-    expect(form().dataset.tall).toBeUndefined()
+  it('keeps the text over the row of its controls, so they never take its width', () => {
+    mount({ trailing: <span>modelo</span> })
+    const box = screen.getByLabelText(ptBR.composer.message)
+    const row = screen
+      .getByRole('button', { name: ptBR.composer.send })
+      .closest('div')!.parentElement!
+    expect(box.parentElement).toBe(row.parentElement)
+    expect(box.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(row.contains(screen.getByText('modelo'))).toBe(true)
+    expect(row.contains(screen.getByRole('button', { name: ptBR.composer.moreActions }))).toBe(true)
   })
 
   it('grows to the height of the text and stops at the tallest it may be', () => {

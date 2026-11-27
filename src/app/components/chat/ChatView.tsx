@@ -14,7 +14,7 @@ import { ChatgptConnect } from './ChatgptConnect'
 import { ModelPicker } from './ModelPicker'
 import { Messages } from './Messages'
 import { Pending } from './Pending'
-import { PillComposer } from './PillComposer'
+import { MessageBox } from './MessageBox'
 
 /**
  * A conversation with the factory's assistant, or the empty one that starts a new. What was said before
@@ -112,7 +112,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
     <div className="w-full">
       <Pending conversation={agent} />
       {needsConnection ? <ChatgptConnect onConnected={checkConnection} /> : null}
-      <PillComposer
+      <MessageBox
         value={value}
         onValueChange={setValue}
         onSubmit={send}

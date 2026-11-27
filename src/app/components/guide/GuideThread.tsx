@@ -21,7 +21,7 @@ import { ChatgptConnect } from '../chat/ChatgptConnect'
 import { ModelPicker } from '../chat/ModelPicker'
 import { Messages } from '../chat/Messages'
 import { Pending } from '../chat/Pending'
-import { PillComposer } from '../chat/PillComposer'
+import { MessageBox } from '../chat/MessageBox'
 
 function Chips({
   title,
@@ -140,7 +140,7 @@ export function GuideThread({
       <div className="px-4 pb-4">
         <Pending conversation={agent} />
         {needsConnection ? <ChatgptConnect onConnected={recheck} /> : null}
-        <PillComposer
+        <MessageBox
           starts={[]}
           value={value}
           onValueChange={setValue}

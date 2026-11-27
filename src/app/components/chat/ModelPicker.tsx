@@ -6,7 +6,13 @@ import { MODELS } from '../../lib/chat'
 import { useCopy } from '../../lib/copy'
 import { useResource } from '../../lib/live'
 
-/** Which agent answers, as a small menu in the composer. Each choice names the model behind it once the server said it. */
+import { TOOL } from './MessageBox'
+
+/** A model without its vendor, which is what fits on a button: `google/gemini-2.5-flash` is `gemini-2.5-flash`. */
+export const shortModel = (model: string) => model.slice(model.lastIndexOf('/') + 1)
+
+/** Which agent answers, as a small menu in the composer. The button names the model of the choice made, without its vendor, and
+ * each choice names its model in full, once the server said them. */
 export function ModelPicker({
   model,
   onChange,
@@ -25,24 +31,23 @@ export function ModelPicker({
   })
   const behind = data?.[use]
   const current = MODELS.find((m) => m.id === model) ?? MODELS[0]
+  const said = behind?.[current.id]
   return (
     <DropdownMenu>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
           aria-label={t.chat.model}
-          className="flex items-center gap-1 rounded-full px-3 py-1.5 text-[14px] text-foreground/80 hover:bg-muted/60"
+          title={said ? `${current.name} · ${said}` : current.name}
+          className={`${TOOL} min-w-0 px-2`}
         >
-          {current.name}
-          {behind && use === 'chat' ? (
-            <span className="hidden font-mono text-xs text-foreground/50 sm:inline">
-              {behind[current.id]}
-            </span>
-          ) : null}
-          <ChevronDown className="size-4" />
+          <span className={`truncate ${said ? 'font-mono' : ''}`}>
+            {said ? shortModel(said) : current.name}
+          </span>
+          <ChevronDown className="size-3.5 shrink-0" />
         </button>
       </DropdownMenu.Trigger>
-      <DropdownMenu.Content align="end" side="top" sideOffset={18} className="min-w-64">
+      <DropdownMenu.Content align="end" side="top" sideOffset={6} className="min-w-64">
         {MODELS.map((m) => (
           <DropdownMenu.Item key={m.id} onSelect={() => onChange(m.id)} className="items-start">
             <span className="flex-1">
