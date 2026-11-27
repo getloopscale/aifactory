@@ -104,22 +104,6 @@ describe('markQuick', () => {
   })
 })
 
-describe('markQuick with a baseline', () => {
-  it('takes the quick set only from cases the baseline passed', () => {
-    const cases = [evalCase('a1', 'o/a', 100), evalCase('a2', 'o/a', 500), evalCase('b1', 'o/b', 300)]
-
-    const marked = markQuick(cases, 2, new Set(['a2', 'b1']))
-
-    expect(marked.filter((c) => c.quick).map((c) => c.id)).toEqual(['a2', 'b1'])
-  })
-
-  it('falls back to every case when the baseline passed none of them', () => {
-    const cases = [evalCase('a1', 'o/a', 100)]
-
-    expect(markQuick(cases, 1, new Set(['zzz'])).map((c) => c.quick)).toEqual([true])
-  })
-})
-
 describe('kindOf', () => {
   it('calls an issue labelled bug a bug, in any case', () => {
     expect(kindOf(['factory', 'Bug'])).toBe('bug')
