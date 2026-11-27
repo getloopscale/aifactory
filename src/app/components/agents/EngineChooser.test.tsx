@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentSettings } from '../../../shared/panel'
+import type { AgentSettings, RoleModels } from '../../../shared/panel'
 
 import { en } from '../../lib/copy/en'
 
@@ -76,13 +76,14 @@ function mount(
   role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
   s = settings(),
   answer = new Response('{}'),
+  reported?: RoleModels,
 ) {
   const fetchMock = vi.fn(async () => answer)
   vi.stubGlobal('fetch', fetchMock)
   const onSaved = vi.fn()
   render(
     <MemoryRouter>
-      <EngineChooser role={role} settings={s} onSaved={onSaved} />
+      <EngineChooser role={role} settings={s} reported={reported} onSaved={onSaved} />
     </MemoryRouter>,
   )
   return { fetchMock, onSaved }
@@ -218,7 +219,7 @@ describe('choosing the model and the effort', () => {
   it('offers the models of the agent in use, with its own default first', () => {
     mount('builder')
     expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([
-      e.agentDefault,
+      e.agentDefaultUnknown,
       'GPT-6.1-Sol',
       'GPT-6-Luna',
     ])
@@ -289,7 +290,11 @@ describe('choosing the model and the effort', () => {
       }),
     )
     choose(e.roleLabel.builder, 'claude-code')
-    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault, 'Sonnet', 'Opus'])
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([
+      e.agentDefaultUnknown,
+      'Sonnet',
+      'Opus',
+    ])
     expect((screen.getByLabelText(e.modelOf(e.roleName.builder)) as HTMLSelectElement).value).toBe(
       '',
     )
@@ -299,7 +304,7 @@ describe('choosing the model and the effort', () => {
   it('follows the agent of the builder for a planner that has none of its own', () => {
     mount('planner')
     expect(optionsOf(e.modelOf(e.roleName.planner))).toEqual([
-      e.agentDefault,
+      e.agentDefaultUnknown,
       'GPT-6.1-Sol',
       'GPT-6-Luna',
     ])
@@ -359,13 +364,13 @@ describe('choosing the model and the effort', () => {
         engines: { 'claude-code': { models: [], efforts: [] }, codex: { models: [], efforts: [] } },
       }),
     )
-    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault])
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefaultUnknown])
     expect(screen.getByText(e.noModelList('codex'))).toBeDefined()
   })
 
   it('copes with an agent the page has no list for', () => {
     mount('builder', settings({ engines: {} }))
-    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefault])
+    expect(optionsOf(e.modelOf(e.roleName.builder))).toEqual([e.agentDefaultUnknown])
   })
 
   it('shows the security role at the highest effort of its model, with no control to lower it', async () => {
@@ -389,5 +394,57 @@ describe('choosing the model and the effort', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
     expect(JSON.parse(String(init.body))).not.toHaveProperty('efforts')
+  })
+})
+
+describe('the model an agent runs on by default', () => {
+  const label = en.engine.modelOf(en.engine.roleName.builder)
+
+  it('names the model the chosen agent last reported, and follows a change of agent', () => {
+    mount('builder', settings(), undefined, {
+      builder: { codex: 'gpt-6.1-sol', 'claude-code': 'claude-sonnet-5-5' },
+    })
+    expect(optionsOf(label)[0]).toBe(e.agentDefaultToday('gpt-6.1-sol'))
+    choose(e.roleLabel.builder, 'claude-code')
+    expect(optionsOf(label)[0]).toBe(e.agentDefaultToday('claude-sonnet-5-5'))
+  })
+
+  it('says it is not known, and never shows the previous agent model, when the agent reported none', () => {
+    mount('builder', settings(), undefined, { builder: { 'claude-code': 'claude-sonnet-5-5' } })
+    expect(optionsOf(label)[0]).toBe(e.agentDefaultUnknown)
+  })
+
+  it('still saves no model for the default', async () => {
+    const { fetchMock } = mount(
+      'builder',
+      settings({
+        chosenModel: {
+          builder: 'gpt-6-luna',
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+        },
+      }),
+      undefined,
+      {
+        builder: { codex: 'gpt-6.1-sol' },
+      },
+    )
+    expect((screen.getByLabelText(label) as HTMLSelectElement).value).toBe('gpt-6-luna')
+    choose(label, '')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body,
+    )
+    expect(body.models).toEqual({ builder: null })
+  })
+
+  it('shows the fixed effort of the security role from the levels of its model', () => {
+    mount('security')
+    expect(screen.getByLabelText(e.effortOf(e.roleName.security)).textContent).toBe(
+      e.pinnedEffort('high'),
+    )
   })
 })

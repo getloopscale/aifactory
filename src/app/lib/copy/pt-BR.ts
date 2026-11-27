@@ -117,6 +117,7 @@ export const ptBR: Copy = {
       delivered: 'entregue',
     },
     defaultModel: 'modelo padrão',
+    modelUnknown: 'modelo ainda não conhecido',
     now: {
       heading: 'Trabalhando agora',
       idle: 'Nenhum agente trabalhando agora.',
@@ -1503,6 +1504,12 @@ export const ptBR: Copy = {
     model: 'Modelo',
     modelOf: (role: string) => `Modelo do ${role}`,
     agentDefault: 'Padrão do agente',
+    agentDefaultToday: (model: string) => `Padrão do agente (hoje: ${model})`,
+    agentDefaultUnknown: 'Padrão do agente (modelo ainda não conhecido)',
+    summaryDefault: (model?: string) =>
+      model ? `modelo padrão (hoje: ${model})` : 'modelo padrão (ainda não conhecido)',
+    summaryEffort: (level?: string) =>
+      level ? `esforço ${level} (fixo)` : 'esforço não conhecido',
     effort: 'Esforço',
     effortOf: (role: string) => `Esforço do ${role}`,
     default: 'Padrão',
