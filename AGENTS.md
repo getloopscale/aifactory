@@ -40,6 +40,7 @@ src/app/            frontend — the only half that reaches a browser
 src/server/         backend — never leaves the machine
   agents/           the assistants that run in the server process (`chat`, a guide for each panel page, `assist`,
                     `assist-setup`, each with a `-codex` twin except the last two), their tools, prompts and hooks
+  code/             Code Mode: a session's workspace, its event log and its turns (ADR 0014; planned)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
                     `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `improve`, `conversation-recover`, `push-attention`)
