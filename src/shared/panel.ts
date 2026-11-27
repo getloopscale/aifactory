@@ -1,3 +1,4 @@
+import type { CodeEventWire } from './code'
 import type { Persona } from './personas'
 
 import type { DoctorSay } from './doctor-say'
@@ -715,6 +716,7 @@ export type TranscriptPage = { events: TranscriptEvent[]; more: boolean }
 export type StreamEvent =
   | { type: 'stage'; taskId: number; stage: Stage; at: string }
   | { type: 'agent'; taskId: number; event: TranscriptEvent }
+  | { type: 'code'; sessionId: string; event: CodeEventWire }
 
 export type RiskLevel = 'low' | 'medium' | 'high'
 
