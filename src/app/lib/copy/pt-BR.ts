@@ -509,6 +509,7 @@ export const ptBR: Copy = {
     tabs: {
       conversation: 'Conversa',
       label: 'Sobre esta tarefa',
+      timeline: 'Linha do tempo',
       activity: 'Atividade',
       changes: 'Mudanças',
       hide: 'Esconder os detalhes',
@@ -530,6 +531,16 @@ export const ptBR: Copy = {
     deliveryPreRelease: 'Pré-lançamento',
     deliveryMeta: (sha: string, actor: string, when: string) => `em ${sha} por ${actor} · ${when}`,
     timeline: 'Linha do tempo',
+    timelineView: {
+      where: 'Para onde foi o tempo',
+      groups: {
+        queue: 'Na fila',
+        agent: 'Agentes',
+        integration: 'Integração',
+        person: 'Esperando uma pessoa',
+      },
+      sofar: (time: string) => `${time} até agora`,
+    },
     transcript: 'O que os agentes fizeram',
     executions: 'Execuções',
     role: 'Papel',

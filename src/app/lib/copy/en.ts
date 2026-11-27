@@ -437,6 +437,7 @@ export const en = {
     tabs: {
       conversation: 'Conversation',
       label: 'About this task',
+      timeline: 'Timeline',
       activity: 'Activity',
       changes: 'Changes',
       hide: 'Hide the details',
@@ -458,6 +459,16 @@ export const en = {
     deliveryPreRelease: 'Pre-release',
     deliveryMeta: (sha: string, actor: string, when: string) => `on ${sha} by ${actor} · ${when}`,
     timeline: 'Timeline',
+    timelineView: {
+      where: 'Where the time went',
+      groups: {
+        queue: 'In line',
+        agent: 'Agents',
+        integration: 'Integration',
+        person: 'Waiting for a person',
+      },
+      sofar: (time: string) => `${time} so far`,
+    },
     transcript: 'What the agents did',
     executions: 'Executions',
     role: 'Role',
