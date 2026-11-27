@@ -21,9 +21,17 @@ import {
 import { Assist } from '../components/Assist'
 import { FollowScroll } from '../components/chat/FollowScroll'
 import { TONE_DOT } from '../components/ui/Surface'
-import { patch, post } from '../lib/api'
+import { del, patch, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
+
+import {
+  COMMAND_TEXT,
+  commandRefusal,
+  matchCommands,
+  type CodeCommand,
+  type CommandAction,
+} from './code-commands'
 
 /** The states in which the server refuses a message (`transitions.ts`, `message`); the others take one. */
 const REFUSING = ['queued', 'starting', 'waiting_input', 'ended'] as const
@@ -371,33 +379,21 @@ export function linkPaths(text: string, files: string[]): string {
 }
 
 /** Ask, Plan and Code, one line each; keys 1, 2 and 3 pick one while the list is open. */
-function ModeSelector({ session }: { session: CodeSessionWire }) {
+function ModeSelector({
+  mode,
+  saving,
+  onPick,
+}: {
+  mode: CodeMode
+  saving: boolean
+  onPick: (mode: CodeMode) => void
+}) {
   const { t } = useCopy()
   const c = t.code.conversation
   const [open, setOpen] = useState(false)
-  const [mode, setMode] = useState<CodeMode>(session.mode)
-  const [saving, setSaving] = useState(false)
-  const [problem, setProblem] = useState<string>()
-  useEffect(() => setMode(session.mode), [session.mode])
-
-  async function pick(next: CodeMode) {
+  const pick = (next: CodeMode) => {
     setOpen(false)
-    if (saving || next === mode) return
-    setSaving(true)
-    setProblem(undefined)
-    try {
-      const saved = await patch<{ mode: CodeMode }>(
-        `/api/panel/code/sessions/${encodeURIComponent(session.id)}`,
-        {
-          mode: next,
-        },
-      )
-      setMode(saved.mode)
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
+    onPick(next)
   }
 
   useEffect(() => {
@@ -406,7 +402,7 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
       const target = e.target as HTMLElement | null
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
       const picked = CODE_MODES[Number(e.key) - 1]
-      if (picked) void pick(picked)
+      if (picked) pick(picked)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -433,7 +429,7 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
               type="button"
               role="radio"
               aria-checked={m === mode}
-              onClick={() => void pick(m)}
+              onClick={() => pick(m)}
               className="flex w-full items-baseline gap-2 rounded-md border border-border px-2 py-1 text-left"
             >
               <span className="font-mono text-muted-foreground">{i + 1}</span>
@@ -442,11 +438,6 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
             </button>
           ))}
         </div>
-      ) : null}
-      {problem ? (
-        <p role="alert" className="text-destructive">
-          {problem}
-        </p>
       ) : null}
     </div>
   )
@@ -458,12 +449,18 @@ export function CodeConversation({
   events,
   files = [],
   onOpenFile,
+  onPanel,
+  onRenamed,
 }: {
   session: CodeSessionWire
   events: CodeEventWire[]
   /** The files of the workspace, for `@` and for the paths an agent names. */
   files?: string[]
   onOpenFile?: (path: string) => void
+  /** `/diff` and `/files`: show or hide that tab of the side panel. */
+  onPanel?: (tab: 'changes' | 'files') => void
+  /** The title the session was renamed to. */
+  onRenamed?: (title: string) => void
 }) {
   const { t } = useCopy()
   const c = { ...t.code.conversation, mentions: t.code.files.mentions }
@@ -474,6 +471,11 @@ export function CodeConversation({
   const [caret, setCaret] = useState(0)
   const [active, setActive] = useState(0)
   const [menuOff, setMenuOff] = useState(false)
+  const [mode, setMode] = useState<CodeMode>(session.mode)
+  const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState<'model' | 'rename'>()
+  const [draft, setDraft] = useState('')
+  useEffect(() => setMode(session.mode), [session.mode])
   const box = useRef<HTMLTextAreaElement>(null)
   const place = useRef<number | undefined>(undefined)
   const mention = menuOff ? undefined : mentionAt(text, caret)
@@ -509,6 +511,28 @@ export function CodeConversation({
     event.preventDefault()
     return true
   }
+  const slash = menuOff ? undefined : COMMAND_TEXT.exec(text)
+  const typed = slash?.[1]
+  const commands = useMemo(() => (typed === undefined ? [] : matchCommands(typed)), [typed])
+  const commandAt = Math.min(active, commands.length - 1)
+  const view = { state: session.state, mode }
+  const reasonOf = (command: CodeCommand) => {
+    const reason = commandRefusal(command.action, view)
+    return reason ? c.commands.reasons[reason] : undefined
+  }
+  const slashKeys = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (commands.length === 0 || event.nativeEvent.isComposing) return false
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      const step = event.key === 'ArrowDown' ? 1 : commands.length - 1
+      setActive((commandAt + step) % commands.length)
+    } else if (event.key === 'Enter') {
+      const picked = commands[commandAt]!
+      if (!reasonOf(picked)) runCommand(picked.action)
+    } else if (event.key === 'Escape') setMenuOff(true)
+    else return false
+    event.preventDefault()
+    return true
+  }
   const sendOnEnter = enterSends(() => void send())
   const openLink = (event: MouseEvent) => {
     const link = (event.target as HTMLElement).closest('a')
@@ -521,6 +545,69 @@ export function CodeConversation({
   const blocked = busy || refusal !== undefined
   // While a turn runs and nothing is typed, the box offers Stop; a typed message is sent to the running turn.
   const stopping = session.state === 'running' && text.trim() === ''
+
+  async function saveSession(
+    body: { mode: CodeMode } | { model: string | null } | { title: string },
+  ) {
+    if (saving) return false
+    setSaving(true)
+    setProblem(undefined)
+    try {
+      const saved = await patch<CodeSessionWire>(
+        `/api/panel/code/sessions/${encodeURIComponent(session.id)}`,
+        body,
+      )
+      if ('mode' in body) setMode(saved.mode)
+      if ('title' in body) onRenamed?.(saved.title)
+      return true
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const pickMode = (next: CodeMode) => {
+    if (next !== mode) void saveSession({ mode: next })
+  }
+
+  async function submitEditor() {
+    const value = draft.trim()
+    if (editing === 'rename' && value === '') return
+    const done = await saveSession(
+      editing === 'rename' ? { title: value } : { model: value === '' ? null : value },
+    )
+    if (done) setEditing(undefined)
+  }
+
+  async function endSession() {
+    if (busy) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await del(`/api/panel/code/sessions/${encodeURIComponent(session.id)}`)
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Runs a command through the same handler as the control it shortcuts, and clears the box. */
+  function runCommand(action: CommandAction) {
+    setText('')
+    setMenuOff(false)
+    setActive(0)
+    if (action.kind === 'mode') pickMode(action.mode)
+    else if (action.kind === 'panel') onPanel?.(action.tab)
+    else if (action.kind === 'stop') void stop()
+    else if (action.kind === 'end') void endSession()
+    else {
+      setDraft(action.kind === 'model' ? (session.model ?? '') : session.title)
+      setEditing(action.kind)
+    }
+  }
 
   async function stop() {
     if (busy) return
@@ -609,11 +696,42 @@ export function CodeConversation({
               ))}
             </ul>
           ) : null}
+          {commands.length > 0 ? (
+            <ul
+              role="listbox"
+              aria-label={c.commands.list}
+              className="absolute bottom-full left-0 z-10 mb-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 text-xs shadow-md"
+            >
+              {commands.map((command, i) => {
+                const reason = reasonOf(command)
+                return (
+                  <li
+                    key={command.name}
+                    role="option"
+                    aria-selected={i === commandAt}
+                    aria-disabled={reason !== undefined}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      if (!reason) runCommand(command.action)
+                    }}
+                    className={`px-3 py-1 ${reason ? 'text-muted-foreground' : 'cursor-pointer'} ${
+                      i === commandAt ? 'bg-muted' : ''
+                    }`}
+                  >
+                    <span className="font-mono font-semibold">/{command.name}</span>{' '}
+                    <span className="text-muted-foreground">
+                      {c.commands.about[command.name]}
+                      {reason ? ` (${reason})` : ''}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
           <Textarea
             ref={box}
             aria-label={c.message}
             value={text}
-            disabled={refusal !== undefined}
             onChange={(e) => {
               setText(e.target.value)
               setCaret(e.target.selectionStart)
@@ -622,7 +740,7 @@ export function CodeConversation({
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={(e) => {
-              if (!menuKeys(e)) sendOnEnter(e)
+              if (!slashKeys(e) && !menuKeys(e)) sendOnEnter(e)
             }}
             rows={3}
             placeholder={c.placeholder}
@@ -638,7 +756,38 @@ export function CodeConversation({
             </Button>
           )}
         </div>
-        <ModeSelector session={session} />
+        {editing ? (
+          <form
+            className="flex items-center gap-2 text-xs"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void submitEditor()
+            }}
+          >
+            <label className="flex flex-1 items-center gap-2">
+              {c.commands[editing]}
+              <input
+                autoFocus
+                value={draft}
+                placeholder={editing === 'model' ? c.commands.modelHint : undefined}
+                onChange={(e) => setDraft(e.target.value)}
+                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
+              />
+            </label>
+            <Button type="submit" size="sm" disabled={saving}>
+              {c.commands.save}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              onClick={() => setEditing(undefined)}
+            >
+              {c.commands.cancel}
+            </Button>
+          </form>
+        ) : null}
+        <ModeSelector mode={mode} saving={saving} onPick={pickMode} />
         <Assist
           kind="changes"
           text={text}
