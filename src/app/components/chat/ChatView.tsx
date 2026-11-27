@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router'
 import { useAgent } from '@getloopscale/loopzero/client'
 
 import type { ChatMessageView, ChatModel } from '../../../shared/panel'
-import { AGENT_PATH, chatApi, displayed, promptWith } from '../../lib/chat'
+import { AGENT_PATH, chatApi, displayed, handedOver, handOver, promptWith } from '../../lib/chat'
 import { useChatgptConnection } from '../../lib/chatgpt-connection'
 import { useChats } from '../../lib/chats'
 import { useCopy } from '../../lib/copy'
@@ -25,9 +25,11 @@ export function ChatView({ chatId }: { chatId?: string }) {
   const navigate = useNavigate()
   const { t } = useCopy()
   const { reload } = useChats()
-  const [model, setModel] = useState<ChatModel>('openrouter')
-  const [restored, setRestored] = useState<ChatMessageView[]>([])
-  const [loading, setLoading] = useState(chatId !== undefined)
+  // The conversation this page continues, when the page before it kept it a moment ago: nothing to load.
+  const [handed] = useState(() => handedOver(chatId))
+  const [model, setModel] = useState<ChatModel>(handed?.model ?? 'openrouter')
+  const [restored, setRestored] = useState<ChatMessageView[]>(handed?.messages ?? [])
+  const [loading, setLoading] = useState(chatId !== undefined && !handed)
   const [loadError, setLoadError] = useState(false)
   const [value, setValue] = useState('')
   const { needsConnection, recheck: checkConnection } = useChatgptConnection(model)
@@ -52,7 +54,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
   latest.current = messages
 
   useEffect(() => {
-    if (!chatId) return
+    if (!chatId || handed) return
     let alive = true
     chatApi
       .load(chatId)
@@ -66,13 +68,14 @@ export function ChatView({ chatId }: { chatId?: string }) {
     return () => {
       alive = false
     }
-  }, [chatId])
+  }, [chatId, handed])
 
   /** Keeps the conversation: creates it the first time, and sends the owner to its address. */
   const keep = useCallback(async () => {
     let target = chatId
     if (!target) target = (await chatApi.create(model)).id
     await chatApi.save(target, latest.current)
+    handOver(target, latest.current, model)
     reload()
     if (!chatId) void navigate(`/chat/${target}`, { replace: true })
   }, [chatId, model, navigate, reload])

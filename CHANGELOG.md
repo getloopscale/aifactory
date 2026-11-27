@@ -97,6 +97,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The chat and the guides answer again on the ChatGPT subscription. Their model there was `gpt-5.4`, which a ChatGPT account no longer serves, so every answer ended in "An error occurred"; it is `gpt-6.2-sol` now, and `FACTORY_CHAT_CODEX_MODEL` still chooses another
+- The first answer of a new conversation stays on the page when the conversation gets its address. The page there started by loading what had just been kept, so the answer vanished and came back
 - The chat and the guide of a page stay at the end of the conversation while an answer arrives, and go there when a message is sent. Scrolling up to read stops that until the reader is back at the end. The page used to stay where it was, so a long answer was written out of sight
 - A menu or a popover has the theme's border. In the dark theme it was drawn with a bright outline, the colour of its text, as was every other border with no colour of its own. The menus of the message box open clear of the box instead of over its edge
 - A run pushes the commit it made even when the agent left HEAD detached from the task's branch. It pushed the branch name, so the push sent nothing and exited 0, and the run then verified a commit GitHub never received and failed creating its check run (#463)
