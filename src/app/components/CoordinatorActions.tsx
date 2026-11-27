@@ -2,7 +2,8 @@ import { Link } from 'react-router'
 
 import type { CoordinatorActionView } from '../../shared/panel'
 import { useCopy } from '../lib/copy'
-import { ago, itemName } from '../lib/format'
+import { ItemId } from './ui/ItemId'
+import { ago } from '../lib/format'
 
 import { actionIcon } from './floor/icons'
 import { READABLE, Row, RowIcon, Rows, type Tone } from './ui/Surface'
@@ -44,7 +45,7 @@ export function CoordinatorActions({
           meta={
             withTask ? (
               <Link to={`/tasks/${a.taskId}`} className="underline underline-offset-2">
-                {a.repository} {itemName(a)} · {a.title}
+                <ItemId item={a} /> {a.repository} · {a.title}
               </Link>
             ) : undefined
           }

@@ -220,7 +220,8 @@ describe('the attention view of the floor', () => {
 
     const row = await handled('Failed one')
     expect(await row.findByText('Sent back with the output')).toBeDefined()
-    expect(row.getByText(/app #7 · send_back ·/)).toBeDefined()
+    expect(row.getByText(/app · send_back ·/)).toBeDefined()
+    expect(row.getByText('#7')).toBeDefined()
     expect(screen.queryByText('An older reason')).toBeNull()
   })
 

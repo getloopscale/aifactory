@@ -18,7 +18,8 @@ import {
 } from '../../components/ui/Surface'
 import { useCopy } from '../../lib/copy'
 import { ownerTasks, shortRepository } from '../../lib/floor'
-import { ago, itemName } from '../../lib/format'
+import { ItemId } from '../../components/ui/ItemId'
+import { ago } from '../../lib/format'
 import { useResource } from '../../lib/live'
 
 const SEEN_KEY = 'aifactory.floor.decisionsSeen'
@@ -119,7 +120,7 @@ export default function FloorDecisionsPage() {
                     title={row.title}
                     meta={
                       <>
-                        {shortRepository(row.repository)} {itemName(row)} · {row.action} ·{' '}
+                        <ItemId item={row} /> {shortRepository(row.repository)} · {row.action} ·{' '}
                         {row.exceptionKind}
                       </>
                     }
