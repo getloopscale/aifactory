@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-librar
 import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { PillComposer } from './PillComposer'
+import { PillComposer, tallest } from './PillComposer'
 import { CopyProvider, LANGUAGE_KEY } from '../../lib/copy'
 import { ptBR } from '../../lib/copy/pt-BR'
 // The owner's language is Portuguese here; the dictionary keys say what is on the screen.
@@ -83,5 +83,43 @@ describe('the message box', () => {
   it('shows what it is given at the right', () => {
     mount({ trailing: <span>modelo</span> })
     expect(screen.getByText('modelo')).toBeDefined()
+  })
+
+  it('gives a message of more than one line the whole width, and one row again once it is empty', () => {
+    const props = {
+      onValueChange: vi.fn(),
+      onSubmit: vi.fn(),
+      running: false,
+      onStop: vi.fn(),
+    }
+    const { rerender } = render(<PillComposer {...props} value="oi" />)
+    const form = () => screen.getByLabelText(ptBR.composer.message).closest('form')!
+    expect(form().dataset.tall).toBeUndefined()
+    rerender(<PillComposer {...props} value={'uma linha\noutra linha'} />)
+    expect(form().dataset.tall).toBe('true')
+    rerender(<PillComposer {...props} value="curta" />)
+    expect(form().dataset.tall).toBe('true')
+    rerender(<PillComposer {...props} value="" />)
+    expect(form().dataset.tall).toBeUndefined()
+  })
+
+  it('grows to the height of the text and stops at the tallest it may be', () => {
+    const scrollHeight = vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get')
+    scrollHeight.mockReturnValue(120)
+    mount({ value: 'texto' })
+    const box = screen.getByLabelText(ptBR.composer.message)
+    expect(box.style.height).toBe('120px')
+    cleanup()
+    scrollHeight.mockReturnValue(1800)
+    mount({ value: 'texto longo' })
+    expect(screen.getByLabelText(ptBR.composer.message).style.height).toBe(
+      `${tallest(window.innerHeight)}px`,
+    )
+    scrollHeight.mockRestore()
+  })
+
+  it('lets the text have eight lines in a short window and two fifths of a tall one', () => {
+    expect(tallest(400)).toBe(192)
+    expect(tallest(1000)).toBe(400)
   })
 })

@@ -1,14 +1,22 @@
 import { DropdownMenu } from '@getloopscale/ui'
 import { ArrowUp, ListChecks, Plus, Square, TriangleAlert, FilePlus2 } from 'lucide-react'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
 import { useCopy } from '../../lib/copy'
 
 type Start = { icon: typeof FilePlus2; label: string; text: string }
 
+/** One line of the text and the padding above and below it, in pixels. */
+const LINE = 24
+const ONE_LINE = LINE + 12
+
+/** How tall the text may grow before it scrolls: eight lines, or two fifths of a taller window. */
+export const tallest = (windowHeight: number) => Math.max(8 * LINE, Math.round(windowHeight * 0.4))
+
 /**
- * The box a message is written in: one row that grows with the text, the "+" at the left, the model and
- * the send button at the right. Enter sends and Shift+Enter breaks the line.
+ * The box a message is written in. A short message is one row: the "+" at the left, the model and the send
+ * button at the right. A message of more than one line takes the whole width, with those under it, so a long
+ * text is not squeezed between the buttons. Enter sends and Shift+Enter breaks the line.
  */
 export function PillComposer({
   starts: given,
@@ -39,14 +47,19 @@ export function PillComposer({
   ]
   const box = useRef<HTMLTextAreaElement>(null)
   const canSend = value.trim() !== '' && !running
+  // Whether the text has its own row. It keeps it until the box is empty: going back as soon as the text fits one
+  // line again would change the width the text wraps at, and the box would flip between the two.
+  const [tall, setTall] = useState(false)
 
-  // The box is one line until the text needs more, and stops growing at eight.
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = box.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 8 * 24)}px`
-  }, [value])
+    const needed = el.scrollHeight
+    el.style.height = `${Math.min(needed, tallest(window.innerHeight))}px`
+    if (value === '') setTall(false)
+    else if (needed > ONE_LINE || value.includes('\n')) setTall(true)
+  }, [value, tall])
 
   return (
     <form
@@ -54,7 +67,8 @@ export function PillComposer({
         e.preventDefault()
         if (canSend) onSubmit(value)
       }}
-      className="flex items-end gap-1 rounded-[28px] border border-border bg-card px-2.5 py-2"
+      data-tall={tall || undefined}
+      className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-end gap-x-1 border border-border bg-card px-2.5 py-2 focus-within:border-foreground/30 ${tall ? 'gap-y-1 rounded-3xl' : 'rounded-[28px]'}`}
     >
       {starts.length > 0 ? (
         <DropdownMenu>
@@ -62,7 +76,7 @@ export function PillComposer({
             <button
               type="button"
               aria-label={t.composer.moreActions}
-              className="mb-0.5 shrink-0 rounded-full p-2 text-foreground/80 hover:bg-muted/60"
+              className={`mb-0.5 shrink-0 rounded-full p-2 text-foreground/80 hover:bg-muted/60 ${tall ? 'col-start-1 row-start-2' : ''}`}
             >
               <Plus className="size-5" />
             </button>
@@ -96,9 +110,11 @@ export function PillComposer({
             if (canSend) onSubmit(value)
           }
         }}
-        className="max-h-48 min-h-6 flex-1 resize-none self-center bg-transparent px-2 py-1.5 text-[15px] leading-6 text-foreground outline-none placeholder:text-foreground/45"
+        className={`min-h-6 w-full resize-none self-center bg-transparent py-1.5 text-[15px] leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-foreground/45 ${tall ? 'col-span-full row-start-1 px-3 pt-2' : 'col-start-2 px-2'}`}
       />
-      <div className="mb-0.5 flex shrink-0 items-center gap-1">
+      <div
+        className={`col-start-3 mb-0.5 flex shrink-0 items-center gap-1 ${tall ? 'row-start-2' : ''}`}
+      >
         {trailing}
         {running ? (
           <button
