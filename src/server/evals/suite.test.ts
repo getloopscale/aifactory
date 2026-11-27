@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import type { Pass } from './check-receipt'
 import type { Baseline, CaseResult } from './compare'
 import {
   DEFAULT_START_MARGIN_MS,
@@ -14,6 +15,7 @@ import {
   checkConcurrency,
   parseConcurrency,
   checkFromTestStart,
+  checkWithRecord,
   fromTestStart,
   runSuite,
   writeRunOutcome,
@@ -605,5 +607,93 @@ describe('parseConcurrency', () => {
   it('reads a whole number and refuses anything else, for the run and baseline modes too', () => {
     expect(parseConcurrency('3')).toBe(3)
     for (const bad of ['abc', '0', '-2', '2.5', ' ']) expect(() => parseConcurrency(bad)).toThrow('EVALS_CONCURRENCY')
+  })
+})
+
+describe('checkWithRecord', () => {
+  const harness = (over: Record<string, unknown> = {}) => {
+    const log = { quick: 0, judge: 0, records: [] as Pass[], prints: 0 }
+    const input = {
+      baseline,
+      changedPaths: ['src/server/agents/chat.ts'],
+      quickIds: baseline.results.map((r) => r.id),
+      quickCases: 1,
+      judgeCases: 2,
+      readSetup: async () => baseline.setup,
+      runQuick: async () => {
+        log.quick++
+        return { results: baseline.results as CaseResult[], skipped: [] as string[] }
+      },
+      runJudge: async () => {
+        log.judge++
+        return [] as string[]
+      },
+      fingerprint: () => `print-${log.prints++ > 0 && over.moves ? 'moved' : 'one'}`,
+      find: (_: string): Pass | undefined => undefined,
+      record: (pass: Pass) => log.records.push(pass),
+      commit: () => 'abc',
+      ...over,
+    }
+    return { log, input }
+  }
+  const run = (input: ReturnType<typeof harness>['input']) => checkWithRecord(Date.now(), input)
+
+  it('accepts a recorded pass, runs no case and says which', async () => {
+    const pass = { fingerprint: 'print-one' } as Pass
+    const { log, input } = harness({ find: () => pass })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ran: false, ok: true, accepted: 'print-one' })
+    expect([log.quick, log.judge]).toEqual([0, 0])
+  })
+
+  it('runs the quick set and the judge on a miss and records the pass', async () => {
+    const { log, input } = harness()
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ran: true, ok: true, recorded: true })
+    expect([log.quick, log.judge]).toEqual([1, 1])
+    expect(log.records).toMatchObject([{ fingerprint: 'print-one', quickCases: 1, judgeCases: 2 }])
+  })
+
+  it('fails and records nothing when a judge case fails', async () => {
+    const { log, input } = harness({ runJudge: async () => ['a fix under .github/: wrong'] })
+    const checked = await run(input)
+    expect(checked.ok).toBe(false)
+    expect(checked.reasons).toEqual(['the readiness judge: a fix under .github/: wrong'])
+    expect(log.records).toEqual([])
+  })
+
+  it('records nothing for a quick set that left a case', async () => {
+    const { log, input } = harness({
+      runQuick: async () => ({ results: baseline.results as CaseResult[], skipped: ['x'] }),
+    })
+    const checked = await run(input)
+    expect(checked.ok).toBe(false)
+    expect(log.records).toEqual([])
+  })
+
+  it('records nothing when nothing changed, since no case was measured', async () => {
+    const { log, input } = harness({ changedPaths: [] })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ran: false, recorded: false })
+    expect([log.quick, log.judge, log.records.length]).toEqual([0, 0, 0])
+  })
+
+  it('records nothing when the inputs changed during the run', async () => {
+    const { log, input } = harness({ moves: true })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ok: true, recorded: false })
+    expect(checked.notRecorded).toMatch(/changed during the run/)
+    expect(log.records).toEqual([])
+  })
+
+  it('does not fail the check when the record cannot be written', async () => {
+    const { input } = harness({
+      record: () => {
+        throw new Error('read-only')
+      },
+    })
+    const checked = await run(input)
+    expect(checked).toMatchObject({ ok: true, recorded: false })
+    expect(checked.notRecorded).toMatch(/read-only/)
   })
 })

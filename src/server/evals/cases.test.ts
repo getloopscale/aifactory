@@ -299,3 +299,17 @@ describe('the factory after its repository moved', () => {
     expect(heldForReview(FORMER_FACTORY_REPOSITORIES[0], [gate], 'paulo/app')).toEqual([])
   })
 })
+
+describe('the check that gates a deploy', () => {
+  it('is a quality gate, so a change to it is handed over for review', () => {
+    expect(heldForReview(FACTORY_REPOSITORY, ['src/server/evals/check-receipt.ts'])).toEqual([
+      'src/server/evals/check-receipt.ts',
+    ])
+  })
+
+  it('holds the flow that decides and writes a record, which lives in suite.ts', () => {
+    expect(heldForReview(FACTORY_REPOSITORY, ['src/server/evals/suite.ts'])).toEqual([
+      'src/server/evals/suite.ts',
+    ])
+  })
+})

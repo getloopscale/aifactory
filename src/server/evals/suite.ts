@@ -3,6 +3,7 @@ import { dirname } from 'node:path'
 
 import { SECURITY_EFFORT_CEILING } from '../../shared/panel'
 import { agentConfigurationChanged } from './cases'
+import { completePass, RECEIPT_VERSION, type Pass } from './check-receipt'
 import {
   compareWithBaseline,
   failedForEnvironment,
@@ -67,6 +68,20 @@ export function fromTestStart<T>(
   return steps(now())
 }
 
+/** The agent setup, read under the suite's abandon time: a read that hangs fails with its reason. */
+async function readSetupInTime(
+  testStartedAt: number,
+  readSetup: () => Promise<AgentSetup>,
+  now: () => number,
+): Promise<AgentSetup> {
+  const { abandonAtMs } = suiteTimes(testStartedAt)
+  return settleBy(readSetup(), abandonAtMs - now(), () => {
+    throw new Error(
+      `the agent setup was not read before the suite's abandon time (${new Date(abandonAtMs).toISOString()}); no quick case ran`,
+    )
+  })
+}
+
 /**
  * The check mode from the moment its test started: the agent setup is read under the same abandon time the cases
  * get, so a read that hangs fails the test with its reason before vitest's timeout, and the quick set runs against
@@ -81,12 +96,7 @@ export async function checkFromTestStart(
   },
 ): Promise<DeployCheck> {
   const { readSetup, runQuick, now = Date.now, ...rest } = input
-  const { abandonAtMs } = suiteTimes(testStartedAt)
-  const setup = await settleBy(readSetup(), abandonAtMs - now(), () => {
-    throw new Error(
-      `the agent setup was not read before the suite's abandon time (${new Date(abandonAtMs).toISOString()}); no quick case ran`,
-    )
-  })
+  const setup = await readSetupInTime(testStartedAt, readSetup, now)
   return checkBeforeDeploy({ ...rest, setup, runQuick: () => runQuick(testStartedAt) })
 }
 
@@ -385,4 +395,81 @@ export function writeRunOutcome(
   mkdirSync(dirname(path), { recursive: true })
   writeJson(path, outcome)
   return outcome
+}
+
+export type RecordedCheck = DeployCheck & {
+  /** The fingerprint of the recorded pass this check accepted, so no case ran. */
+  accepted?: string
+  /** Whether this run left a record of its own pass, and why not when it did not. */
+  recorded?: boolean
+  notRecorded?: string
+}
+
+/**
+ * The check with the record of passes around it (docs/adr/0008). A fingerprint that matches a recorded pass
+ * accepts it and runs nothing. Otherwise the check and the readiness judge run, and a pass is recorded only
+ * when both completed whole and the fingerprint, taken again, is still the one the run started with.
+ * `runJudge` answers the failures of the judge's cases; this is the only place that writes a record.
+ */
+export async function checkWithRecord(
+  testStartedAt: number,
+  input: Omit<Parameters<typeof checkFromTestStart>[1], 'readSetup'> & {
+    readSetup: () => Promise<AgentSetup>
+    quickCases: number
+    judgeCases: number
+    runJudge: () => Promise<string[]>
+    fingerprint: (setup: AgentSetup) => string
+    find: (fingerprint: string) => Pass | undefined
+    record: (pass: Pass) => void
+    commit: () => string
+  },
+): Promise<RecordedCheck> {
+  const now = input.now ?? Date.now
+  const setup = await readSetupInTime(testStartedAt, input.readSetup, now)
+  const start = input.fingerprint(setup)
+  const found = input.find(start)
+  if (found) return { ran: false, ok: true, reasons: [], changed: [], accepted: found.fingerprint }
+  let skipped = 0
+  const checked = await checkFromTestStart(testStartedAt, {
+    ...input,
+    readSetup: async () => setup,
+    runQuick: async (at) => {
+      const ran = await input.runQuick(at)
+      skipped = ran.skipped.length
+      return ran
+    },
+  })
+  if (!checked.ran || !checked.ok) return { ...checked, recorded: false, notRecorded: 'no complete measured pass' }
+  const failures = await input.runJudge()
+  if (failures.length > 0)
+    return {
+      ...checked,
+      ok: false,
+      reasons: [...checked.reasons, ...failures.map((f) => `the readiness judge: ${f}`)],
+      recorded: false,
+      notRecorded: 'the readiness judge failed',
+    }
+  const complete = completePass({
+    ...checked,
+    quickCases: input.quickCases,
+    skipped,
+    judgeCases: input.judgeCases,
+    judgePassed: input.judgeCases,
+  })
+  if (!complete) return { ...checked, recorded: false, notRecorded: 'the check was not complete' }
+  if (input.fingerprint(setup) !== start)
+    return { ...checked, recorded: false, notRecorded: 'the inputs changed during the run' }
+  try {
+    input.record({
+      version: RECEIPT_VERSION,
+      fingerprint: start,
+      commit: input.commit(),
+      completedAt: new Date(now()).toISOString(),
+      quickCases: input.quickCases,
+      judgeCases: input.judgeCases,
+    })
+  } catch (error) {
+    return { ...checked, recorded: false, notRecorded: `the record could not be written: ${String(error)}` }
+  }
+  return { ...checked, recorded: true }
 }

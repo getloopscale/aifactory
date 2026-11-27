@@ -353,12 +353,22 @@ export const en = {
     updated: 'Updated',
   },
   lanes: {
-    todo: 'To do',
     needs_you: 'Needs you',
-    running: 'Running',
-    ready: 'Ready',
-    done: 'Done',
+    todo: 'To do',
+    building: 'Building',
+    integrating: 'Integrating',
+    awaiting_release: 'Awaiting release',
+    released: 'Released',
     cancelled: 'Cancelled',
+  },
+  laneAbout: {
+    needs_you: 'Stopped until you decide',
+    todo: 'Waiting for a run',
+    building: 'Agent builds, checks, reviews',
+    integrating: 'Approved: pull request and CI',
+    awaiting_release: 'Merged, waiting for a release',
+    released: 'In a release',
+    cancelled: 'Issue closed or unlabelled',
   },
   columns: {
     queued: 'Queued',
@@ -1258,6 +1268,7 @@ export const en = {
       health: 'Guide of Health',
       agents: 'Guide of Agents',
       setup: 'Guide of Setup',
+      code: 'Guide of Code Mode',
     },
     board: {
       about: 'Here you follow every task of the factory, from the queue to delivery.',
@@ -1314,6 +1325,16 @@ export const en = {
       understand: ['What is each item for?', 'What is missing for the factory to work?'],
       act: [{ text: 'Guide me through the next step.' }],
       note: 'Never paste keys or passwords here.',
+    },
+    code: {
+      about:
+        'Here you write code with an agent in a sandbox, on a branch of its own. The guide reads your sessions; it changes nothing.',
+      understand: [
+        'What is the difference between Ask, Plan and Code?',
+        'What happens to the work of a session?',
+      ],
+      act: [{ text: 'What is each of my sessions doing now?' }],
+      note: 'The guide only reads: sending messages and opening pull requests is done on the page.',
     },
     open: {
       task: (id: number) => ({

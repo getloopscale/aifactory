@@ -86,6 +86,7 @@ local inspecionado em 2026-11-03.
 | M15   | Painel como chat                                                | Menu lateral e abas Chat/Work no visual do ChatGPT, com um assistente conversacional (OpenRouter ou assinatura do ChatGPT) que lê a fábrica e só age com aprovação; conversas salvas no Postgres                        | Concluído    |
 | M16   | Um guia por página                                              | Quadro, Planos, Repositórios, Caixa de entrada, Saúde e Configuração têm cada um um especialista ao lado da página, que sabe onde o dono está, consulta os dados e só muda algo com aprovação, mostrando antes e depois | Concluído    |
 | M17   | Página Agentes                                                  | Uma página lista os agentes da fábrica (os que constroem e os que conversam), com o texto exato das instruções de cada um, o que podem fazer e o modelo configurado, lidos do código que roda, e tem o seu próprio guia | Concluído    |
+| M18   | Code Mode                                                       | Uma página `/code` abre sessões com um agente num sandbox, em modos Ask, Plan e Code, cada turno um job, e deixa uma branch e um PR em rascunho; nunca faz merge, e tem o seu próprio guia (somente leitura)            | Parcial      |
 
 As aprovações de ferramentas com efeitos externos seguem a convenção do
 `AGENTS.md`. A interação com o modo `auto` ficou definida pelo conceito de pré-release: o que a
@@ -321,6 +322,25 @@ Critérios de aceite:
 - Um pedido sem sessão do dono recebe 401 e nada é entregue.
 - O custo de uma conversa aparece em Health, separado do build e da revisão.
 - A sessão restaurada num sandbox novo responde sobre algo dito antes da restauração (S3).
+
+### M18: Code Mode
+
+Decisão em `docs/adr/0014-code-mode.md`; acompanhamento na issue #619.
+
+**Entregue** (no código desta branch):
+
+- Sessões com um log numerado de eventos (`code_event`), lidas por sequência pelas rotas de `/api/panel/code`.
+- Um workspace por sessão, num sandbox isolado, com snapshot ao parar e restauração na mensagem seguinte.
+- Três modos, Ask, Plan e Code; Ask e Plan rodam o agente somente leitura, imposto onde o harness inicia.
+- Cada turno é um job (`code-turn`), um escritor por sessão, esperando na fila por vaga de sandbox.
+- Diff, arquivos, PR em rascunho a partir da sessão; nada em `src/server/code/` faz merge (teste).
+- Um guia para a página, `guide-code` e seu gêmeo `-codex`, com ferramentas só de leitura.
+
+**Em aberto:**
+
+- O harness LoopCode, quando `@getloopscale/loopcode` for publicado (getloopscale/loopzero#2).
+- Verificar com cada harness real que o modo somente leitura impede toda escrita.
+- Passar `pnpm evals:check` contra a linha de base para o guia novo (a mudança é entregue como PR em rascunho).
 
 ### M14: painel acessível de fora
 

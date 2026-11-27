@@ -166,6 +166,9 @@ export const QUALITY_GATES = [
   '.jscpd.json',
   '.github/workflows/',
   'src/server/factory/test-weakening.ts',
+  'src/server/evals/check-receipt.ts',
+  'src/server/evals/suite.ts',
+  'src/server/evals/compare.ts',
 ]
 
 /** The paths among `changed` that belong to the agents' configuration. */

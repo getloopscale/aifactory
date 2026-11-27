@@ -425,12 +425,22 @@ export const ptBR: Copy = {
     updated: 'Atualizada',
   },
   lanes: {
-    todo: 'A fazer',
     needs_you: 'Precisa de você',
-    running: 'Em andamento',
-    ready: 'Pronto',
-    done: 'Entregue',
+    todo: 'A fazer',
+    building: 'Em construção',
+    integrating: 'Integrando',
+    awaiting_release: 'Aguardando release',
+    released: 'Publicada',
     cancelled: 'Cancelada',
+  },
+  laneAbout: {
+    needs_you: 'Parada até você decidir',
+    todo: 'Esperando uma execução',
+    building: 'Agente constrói, checa e revisa',
+    integrating: 'Aprovada: pull request e CI',
+    awaiting_release: 'Integrada, esperando a release',
+    released: 'Numa release',
+    cancelled: 'Issue fechada ou sem rótulo',
   },
   columns: {
     queued: 'Na fila',
@@ -1559,6 +1569,7 @@ export const ptBR: Copy = {
       health: 'Guia da Saúde',
       agents: 'Guia dos Agentes',
       setup: 'Guia da Configuração',
+      code: 'Guia do Code Mode',
     },
     board: {
       about: 'Aqui você acompanha cada tarefa da fábrica, da fila até a entrega.',
@@ -1618,6 +1629,16 @@ export const ptBR: Copy = {
       understand: ['Para que serve cada item?', 'O que falta para a fábrica funcionar?'],
       act: [{ text: 'Me guie no próximo passo.' }],
       note: 'Nunca cole chaves ou senhas aqui.',
+    },
+    code: {
+      about:
+        'Aqui você escreve código com um agente num sandbox, numa branch própria. O guia lê suas sessões; não muda nada.',
+      understand: [
+        'Qual a diferença entre Ask, Plan e Code?',
+        'O que acontece com o trabalho de uma sessão?',
+      ],
+      act: [{ text: 'O que cada uma das minhas sessões está fazendo agora?' }],
+      note: 'O guia só lê: enviar mensagens e abrir pull requests é na própria página.',
     },
     open: {
       task: (id: number) => ({

@@ -106,10 +106,13 @@ describe('findTasks and describeTask', () => {
       willRetryBecause: null,
     })
     expect(await findTasks(getDb(), { column: 'Released' })).toEqual([])
-    // The lane the screen draws holds the finer states: a task that will retry itself is in Running.
-    expect((await findTasks(getDb(), { column: 'running' })).map((t) => t.column)).toContain(
+    // The lane the screen draws holds the finer states: a task that will retry itself waits in To do.
+    expect((await findTasks(getDb(), { column: 'to do' })).map((t) => t.column)).toContain(
       'Will retry itself',
     )
+    expect((await findTasks(getDb(), { column: 'Building' })).map((t) => t.column)).toEqual([
+      'Working',
+    ])
     expect((await findTasks(getDb(), { column: 'Needs you' }))[0]).toMatchObject({
       lane: 'Needs you',
       column: 'Needs a person',
