@@ -71,6 +71,8 @@ vi.mock('../lib/code-session', () => ({
       session: {
         ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
         repository: 'acme/shop',
+        pullRequestUrl: id === 'asleep' ? 'https://github.com/acme/shop/pull/9' : null,
+        pullRequestNumber: id === 'asleep' ? 9 : null,
       },
       events: [
         { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
@@ -152,6 +154,15 @@ describe.each([
     expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe(
       'status',
     )
+  })
+
+  it('shows the pull request form in the Changes panel, with the link of the one already opened', async () => {
+    show(language, '/code/asleep')
+    const link = await screen.findByRole('link', {
+      name: t.code.changes.pullRequest.link(9),
+    })
+    expect(link.getAttribute('href')).toBe('https://github.com/acme/shop/pull/9')
+    expect(screen.getByLabelText(t.code.changes.pullRequest.title)).toBeDefined()
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {

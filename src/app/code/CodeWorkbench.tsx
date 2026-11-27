@@ -31,7 +31,7 @@ import { useResource } from '../lib/live'
 import { useCodeSession } from '../lib/code-session'
 import { useWidth } from '../lib/media'
 
-import { CodeChanges } from './CodeChanges'
+import { CodeChanges, PullRequestForm } from './CodeChanges'
 import { CodeConversation } from './CodeConversation'
 import { CodeFiles } from './CodeFiles'
 
@@ -311,6 +311,8 @@ const TAB = 'flex h-9 items-center border-b-2 px-2.5 text-[13px] font-medium tex
 /** The panel beside the conversation: Changes and Files. */
 function SidePanel({
   id,
+  repository,
+  pullRequest,
   turn,
   tab,
   onTab,
@@ -320,6 +322,8 @@ function SidePanel({
   onSelect,
 }: {
   id: string
+  repository: string
+  pullRequest: { number: number; url: string } | undefined
   turn: number
   tab: Tab
   onTab: (tab: Tab) => void
@@ -382,6 +386,13 @@ function SidePanel({
             {data ? (
               <>
                 <CodeChanges diff={data.diff} />
+                <PullRequestForm
+                  key={id}
+                  sessionId={id}
+                  repository={repository}
+                  existing={pullRequest}
+                  hasChanges={data.diff.files.length > 0}
+                />
                 {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
                   <Quiet>{t.code.changes.stored}</Quiet>
                 ) : null}
@@ -490,6 +501,12 @@ function OpenSession({ id }: { id: string }) {
         <div className={compact ? 'mt-4' : ''}>
           <SidePanel
             id={id}
+            repository={session.repository}
+            pullRequest={
+              session.pullRequestUrl && session.pullRequestNumber
+                ? { number: session.pullRequestNumber, url: session.pullRequestUrl }
+                : undefined
+            }
             turn={turn}
             tab={tab}
             onTab={setTab}
