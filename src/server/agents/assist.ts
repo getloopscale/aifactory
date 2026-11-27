@@ -14,7 +14,7 @@ export const policy = ownerOnly
 /**
  * The assistant of the panel, served at `POST /api/agents/assist` and used by `useAgent`. It turns what a
  * person says in plain words into what the factory needs (a goal, an issue, a request for changes) and
- * offers it through `propose`. What the factory is lives in `.theokit/THEO.md`, which the framework
+ * offers it through `propose`. What the factory is lives in `.loopzero/LOOPZERO.md`, which the framework
  * prepends to every turn. Of the factory it reads only the knowledge base, like every assistant; the one
  * that reads a repository is `assist-setup`.
  *

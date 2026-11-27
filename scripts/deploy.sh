@@ -2,7 +2,7 @@
 # Builds and restarts the service, the workers and the feeder, then waits for the server to answer. The
 # tunnel is not touched.
 #
-# A restart does not cut the runs in progress: systemd signals theokit only (KillMode=mixed), which stops
+# A restart does not cut the runs in progress: systemd signals loopzero only (KillMode=mixed), which stops
 # taking jobs, waits for the run it is on (up to four hours, see src/server/factory/drain.ts) and exits.
 # The workers are restarted without waiting for that (--no-block): each one comes back on the new build once
 # its run ends, and the deploy, which holds no lock past its own commands, never waits hours behind a run.

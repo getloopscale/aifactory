@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { persistOAuthTokens } from '@theokit/agents/auth'
+import { persistOAuthTokens } from '@getloopscale/loopzero-agents/auth'
 
 import {
   CODEX_STORE,
@@ -68,7 +68,7 @@ const answering = (body: object, status = 200) =>
   (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch
 
 describe('fromCliAuth', () => {
-  it('turns the Codex CLI login into a TheoKit credential, ID token included', () => {
+  it('turns the Codex CLI login into a LoopZero credential, ID token included', () => {
     const access = accessExpiring(5 * 86_400_000)
     expect(fromCliAuth(cliAuth(access))).toEqual({
       type: 'oauth',
@@ -102,7 +102,7 @@ describe('freshCodexLogin', () => {
 
   it('uses the stored token while it has more than the margin left, without calling out', async () => {
     const env = newHome()
-    // TheoKit renews within the margin plus the SDK's one-minute skew, so two minutes is clear of both.
+    // LoopZero renews within the margin plus the SDK's one-minute skew, so two minutes is clear of both.
     writeCliLogin(env, accessExpiring(REFRESH_MARGIN_MS + 120_000))
     await expect(freshCodexLogin({ env, fetch: refusing, now: () => NOW })).resolves.toMatchObject({
       idToken: ID_TOKEN,

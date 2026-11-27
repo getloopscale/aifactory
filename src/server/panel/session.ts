@@ -5,8 +5,8 @@ import {
   createSessionManager,
   createSessionManagerWeb,
   recordAttempt,
-} from 'theokit/server/auth'
-import { InMemoryStore } from 'theokit/server/rate-limit'
+} from '@getloopscale/loopzero/server/auth'
+import { InMemoryStore } from '@getloopscale/loopzero/server/rate-limit'
 
 /** Who the panel lets in: its one owner, who proves it with the token in `FACTORY_PANEL_TOKEN`. */
 export type PanelSession = { owner: true }

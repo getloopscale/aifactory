@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { DatabaseConfigError, storageFromEnv, storageFromUrl } from './config'
 
 describe('storageFromUrl', () => {
-  it('splits the URL into the server and database TheoKit expects', () => {
+  it('splits the URL into the server and database LoopZero expects', () => {
     expect(storageFromUrl('postgres://factory:s3cret@db.internal:54329/factory')).toEqual({
       servers: {
         primary: { host: 'db.internal', port: 54329, user: 'factory', password: 's3cret' },

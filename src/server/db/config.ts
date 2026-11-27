@@ -1,4 +1,4 @@
-import type { StorageConfig } from 'theokit/server/storage'
+import type { StorageConfig } from '@getloopscale/loopzero/server/storage'
 import { z } from 'zod'
 
 const databaseEnvSchema = z.object({
@@ -22,11 +22,11 @@ export function readDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return parsed.data.DATABASE_URL
 }
 
-/** The name `usePostgres` takes, and the key of the database in `theo.config.ts`. */
+/** The name `usePostgres` takes, and the key of the database in `loopzero.config.ts`. */
 export const DATABASE_NAME = 'main'
 
 /**
- * TheoKit's `storage` block takes credentials as fields and reads no connection string, so the
+ * LoopZero's `storage` block takes credentials as fields and reads no connection string, so the
  * URL the rest of the tooling shares (`drizzle-kit`, `.env`) is split here, once.
  */
 export function storageFromUrl(url: string): StorageConfig {
@@ -50,7 +50,7 @@ export function storageFromUrl(url: string): StorageConfig {
 }
 
 /**
- * The `storage` block for `theo.config.ts`. A missing `DATABASE_URL` yields no block, so a build
+ * The `storage` block for `loopzero.config.ts`. A missing `DATABASE_URL` yields no block, so a build
  * that never touches the database still works and readiness reports the gap; a URL that is set
  * but malformed fails here, at startup.
  */

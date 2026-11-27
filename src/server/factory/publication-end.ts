@@ -27,7 +27,7 @@ export type Ending = { wait: string } | { failed: string } | { released: string 
 
 /**
  * Ends a publication whose release run finished without opening a Version Packages pull request, which it
- * does when no changeset waits on the release branch (theokit-plugins after #269: the changesets the factory
+ * does when no changeset waits on the release branch (loopzero-plugins after #269: the changesets the factory
  * counted had been consumed by an earlier release). Nothing was published, so the publication would wait
  * forever. It waits while the grace window lasts, while a check on the promoted commit still runs, and
  * while none has reported. Then:
@@ -80,7 +80,7 @@ export async function endWithoutVersionPullRequest(
 /**
  * Opens the Version Packages pull request from the version branch when the release workflow pushed it on
  * the promotion and opened none, which it does where the organisation does not let Actions open pull requests
- * (usetheokit/theokit). The next pass finds it and merges it once its checks are green.
+ * (getloopscale/loopzero). The next pass finds it and merges it once its checks are green.
  */
 export async function openFromVersionBranch(
   deps: Pick<EndDeps, 'api'>,

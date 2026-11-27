@@ -2,7 +2,7 @@
 // Queues the export of every agent pass that still has steps, oldest first. Run it again as often as you
 // like: a pass has one job key, and its ids are the same each time. Needs DATABASE_URL and
 // FACTORY_TRACE_ENDPOINT, like the server.
-import { PostgresJobBackend } from 'theokit/server/jobs'
+import { PostgresJobBackend } from '@getloopscale/loopzero/server/jobs'
 import pg from 'pg'
 
 /** The passes with a task that have at least one step of their task, role and attempt. */

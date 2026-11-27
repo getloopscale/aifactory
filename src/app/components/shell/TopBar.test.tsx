@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { ThemeProvider, builtinThemes } from '@theokit/ui'
+import { ThemeProvider, builtinThemes } from '@getloopscale/loopzero-ui'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -163,5 +163,29 @@ describe('the bar on a phone', () => {
     render(bar('compact'))
     fireEvent.click(screen.getByRole('button', { name: ptBR.topBar.openMenu }))
     expect(onMenu).toHaveBeenCalled()
+  })
+})
+
+describe('the search of the bar', () => {
+  it('opens the palette and says the key that does the same', () => {
+    const onSearch = vi.fn()
+    render(
+      <CopyProvider>
+        <ThemeProvider themes={builtinThemes} defaultTheme="violet-forge" defaultMode="dark">
+          <MemoryRouter initialEntries={['/work']}>
+            <TopBar onSearch={onSearch} />
+          </MemoryRouter>
+        </ThemeProvider>
+      </CopyProvider>,
+    )
+    const button = screen.getByRole('button', { name: t.palette.open })
+    expect(button.textContent).toContain(t.palette.key)
+    fireEvent.click(button)
+    expect(onSearch).toHaveBeenCalledOnce()
+  })
+
+  it('is not there for a page that has no palette', () => {
+    mount('/work')
+    expect(screen.queryByRole('button', { name: t.palette.open })).toBeNull()
   })
 })

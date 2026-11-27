@@ -29,7 +29,7 @@ describe('agentTimeLeft', () => {
   })
 
   it('gives a check room for a suite that takes ten minutes on a busy machine', () => {
-    // theokit-sdk's tests took 8 to 10 minutes and were cut at 10 three times on 2026-11-11 (#24).
+    // loopzero-sdk's tests took 8 to 10 minutes and were cut at 10 three times on 2026-11-11 (#24).
     expect(DEFAULT_CHECK_MS).toBeGreaterThanOrEqual(15 * MIN)
   })
 

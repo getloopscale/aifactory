@@ -23,11 +23,11 @@ import { ACCEPTANCE_HEADING, acceptanceSection, bodyHash, type Readiness } from 
  */
 
 /** A job the scheduler may still change: due, held by nobody, never taken, of a task still in `intake`. */
-const MOVABLE = sql`theokit_jobs.name = 'run-task' and theokit_jobs.failed_at is null
-  and theokit_jobs.attempts = 0
-  and (theokit_jobs.locked_until is null or theokit_jobs.locked_until < now())
-  and theokit_jobs.available_at <= now() and not (theokit_jobs.input ? 'heldFrom')
-  and exists (select 1 from task t where t.id = (theokit_jobs.input->>'taskId')::int and t.stage = 'intake')`
+const MOVABLE = sql`loopzero_jobs.name = 'run-task' and loopzero_jobs.failed_at is null
+  and loopzero_jobs.attempts = 0
+  and (loopzero_jobs.locked_until is null or loopzero_jobs.locked_until < now())
+  and loopzero_jobs.available_at <= now() and not (loopzero_jobs.input ? 'heldFrom')
+  and exists (select 1 from task t where t.id = (loopzero_jobs.input->>'taskId')::int and t.stage = 'intake')`
 
 export type SchedulerDecisionRow = typeof schedulerDecision.$inferInsert
 
@@ -62,14 +62,14 @@ export async function applyOrder(db: Database, moved: Placement[]): Promise<Set<
   return db.transaction(async (tx) => {
     await tx.execute(HOLD_LOCK)
     const written = await tx.execute<{ id: string }>(
-      sql`update theokit_jobs set available_at = src.available_at
+      sql`update loopzero_jobs set available_at = src.available_at
           from (values ${pairs}) as m(id, source, decided_from)
-            join theokit_jobs src on src.id = m.source
-          where theokit_jobs.id = m.id
-            and date_trunc('milliseconds', theokit_jobs.available_at) = m.decided_from
-            and theokit_jobs.available_at is distinct from src.available_at
+            join loopzero_jobs src on src.id = m.source
+          where loopzero_jobs.id = m.id
+            and date_trunc('milliseconds', loopzero_jobs.available_at) = m.decided_from
+            and loopzero_jobs.available_at is distinct from src.available_at
             and ${MOVABLE}
-          returning theokit_jobs.id`,
+          returning loopzero_jobs.id`,
     )
     return new Set(written.rows.map((r) => r.id))
   })
@@ -114,7 +114,7 @@ export async function askOwner(
   const text = readinessQuestion(readiness)
   return deps.db.transaction(async (tx) => {
     const withdrawn = await tx.execute(
-      sql`delete from theokit_jobs where theokit_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
+      sql`delete from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
     )
     if ((withdrawn.rowCount ?? 0) === 0) {
       return { asked: false, reason: 'its queued run was taken, held or withdrawn first' } as const
@@ -167,7 +167,7 @@ export async function blockTask(
   const reason = new BlockedByOpenIssues(refs)
   return deps.db.transaction(async (tx) => {
     const withdrawn = await tx.execute(
-      sql`delete from theokit_jobs where theokit_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
+      sql`delete from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE} returning id`,
     )
     if ((withdrawn.rowCount ?? 0) === 0) {
       return {
@@ -218,7 +218,7 @@ export async function applyAcceptance(
   const allowed = outcome({ stage: row?.stage ?? 'cancelled' }, 'needs_refinement')
   if (allowed.kind !== 'action') return { drafted: false, reason: allowed.reason }
   const queued = await deps.db.execute(
-    sql`select 1 from theokit_jobs where theokit_jobs.id = ${run.jobId} and ${MOVABLE}`,
+    sql`select 1 from loopzero_jobs where loopzero_jobs.id = ${run.jobId} and ${MOVABLE}`,
   )
   if ((queued.rowCount ?? 0) === 0) {
     return { drafted: false, reason: 'its queued run was taken, held or withdrawn first' }

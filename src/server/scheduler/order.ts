@@ -7,7 +7,7 @@ import { declaredBlockers } from '../factory/blockers'
  * then the oldest. Work already under way finishes first: a run sent back for a conflict that waited behind
  * every new issue would find the base moved again and conflict again. The order is applied by giving the sorted runs the `available_at` times the
  * queue already had, so no run becomes available earlier than the earliest of them and the queue's timing
- * does not change: TheoKit's worker takes the job with the earliest `available_at` that is due.
+ * does not change: LoopZero's worker takes the job with the earliest `available_at` that is due.
  */
 
 /** A queued `run-task` job the scheduler may move, with what its issue says about its place. */

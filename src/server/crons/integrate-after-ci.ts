@@ -1,4 +1,4 @@
-import { defineCron } from 'theokit/server/cron'
+import { defineCron } from '@getloopscale/loopzero/server/cron'
 
 import { coordinatorModeFromEnv } from '../coordinator/mode'
 import { adoptMergedHandoffs, pollAwaitingIntegrations } from '../factory/await-ci'

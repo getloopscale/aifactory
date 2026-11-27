@@ -166,18 +166,21 @@ importers:
 
   .:
     dependencies:
-      '@theokit/agents':
-        specifier: ^16.3.0
-        version: 16.3.0(@theokit/http@2.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7))(proper-lockfile@4.1.2)(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(ws@8.22.0)(zod@4.6.7)
-      '@theokit/sdk':
-        specifier: ^5.14.0
-        version: 5.14.0(proper-lockfile@4.1.2)(ws@8.22.0)
-      '@theokit/ui':
-        specifier: ^1.12.2
-        version: 1.12.2(@tailwindcss/vite@4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@usetheo/ui@0.36.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3))(hast-util-sanitize@5.0.2)(hast-util-to-jsx-runtime@2.3.7(supports-color@7.2.0))(mdast-util-from-markdown@2.1.0(supports-color@7.2.0))(mdast-util-gfm@3.1.0(supports-color@7.2.0))(mdast-util-to-hast@13.2.2)(micromark-extension-gfm@3.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)(typescript@5.9.3)(unist-util-visit-parents@6.1.0)(unist-util-visit@5.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)
-      '@usetheo/ui':
-        specifier: ^0.36.0
-        version: 0.36.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)
+      '@getloopscale/loopzero':
+        specifier: ^0.1.0
+        version: 0.1.0(74b469c7148f8c83cf8b0a1c13cb303b)
+      '@getloopscale/loopzero-agents':
+        specifier: ^0.1.0
+        version: 0.1.0(@getloopscale/loopzero-http@0.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7))(proper-lockfile@4.1.2)(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(ws@8.22.0)(zod@4.6.7)
+      '@getloopscale/loopzero-sdk':
+        specifier: ^0.1.0
+        version: 0.1.0(proper-lockfile@4.1.2)(ws@8.22.0)
+      '@getloopscale/loopzero-ui':
+        specifier: ^0.1.0
+        version: 0.1.0(@getloopscale/ui@0.38.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3))(@tailwindcss/vite@4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(hast-util-sanitize@5.0.2)(hast-util-to-jsx-runtime@2.3.7(supports-color@7.2.0))(mdast-util-from-markdown@2.1.0(supports-color@7.2.0))(mdast-util-gfm@3.1.0(supports-color@7.2.0))(mdast-util-to-hast@13.2.2)(micromark-extension-gfm@3.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)(typescript@5.9.3)(unist-util-visit-parents@6.1.0)(unist-util-visit@5.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)
+      '@getloopscale/ui':
+        specifier: ^0.38.0
+        version: 0.38.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)
       '@vercel/sandbox':
         specifier: ^3.9.1
         version: 3.9.1
@@ -226,9 +229,6 @@ importers:
       react-router:
         specifier: ^7.0.0
         version: 7.18.5(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      theokit:
-        specifier: ^0.79.0
-        version: 0.79.0(c0b0143bd04176b2f8614a8b9d7022a6)
       web-push:
         specifier: ^4.0.0
         version: 4.0.0(supports-color@7.2.0)
@@ -1214,6 +1214,243 @@ packages:
   '@floating-ui/utils@0.2.12':
     resolution: {integrity: sha512-HpCo8tmWzLVad5s2d19EhAz5zqrrQ6s69qd6moPMQvkOuSwDT1YgRfWSVuc4ennqrgv3OHppiOGMQ7oC13yIww==}
 
+  '@getloopscale/loopzero-agents@0.1.0':
+    resolution: {integrity: sha512-xjdPQlLrNQiU79V4ysW1Kt8VOE00TJ7nq85RrwUDvt0Jc4oucWaxQpntoHtadbjZzIOe4PdR150MPkUJ9kySlw==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@getloopscale/loopzero-http': '>=0.1.0 <1.0.0'
+      '@jitl/quickjs-wasmfile-release-sync': 0.32.0
+      quickjs-emscripten-core: 0.32.0
+      react: '>=18'
+      ws: '>=8'
+      zod: ^4.2.0
+    peerDependenciesMeta:
+      '@jitl/quickjs-wasmfile-release-sync':
+        optional: true
+      quickjs-emscripten-core:
+        optional: true
+      react:
+        optional: true
+      ws:
+        optional: true
+
+  '@getloopscale/loopzero-http@0.1.0':
+    resolution: {integrity: sha512-M72AwPOBSh0ykadLxVtigA1K8PtrPjSzXe9eDn+tFPujMUIN3oVq3geEhoGYdH0KxDdz3eI2Y6ucxWEc2Nc2+A==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@getloopscale/loopzero-di': '>=0.1.0 <1.0.0'
+      '@swc/core': '>=1.3.0'
+      react: '>=18.0.0'
+      react-dom: '>=18.0.0'
+      reflect-metadata: ^0.2.2
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      '@getloopscale/loopzero-di':
+        optional: true
+      '@swc/core':
+        optional: true
+      react:
+        optional: true
+      react-dom:
+        optional: true
+
+  '@getloopscale/loopzero-presenter@0.1.0':
+    resolution: {integrity: sha512-hAukVZgGjqAn5UQArs2d7gxU0R4HySfOzJZebwgdYgM/Qet2aq0/FVtM1yAGfAT3Xm6vs7visp5uxJMjATs5nQ==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@getloopscale/loopzero-sdk': '>=0.1.0 <1.0.0'
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      '@getloopscale/loopzero-sdk':
+        optional: true
+      zod:
+        optional: true
+
+  '@getloopscale/loopzero-sdk-tools@0.1.0':
+    resolution: {integrity: sha512-KegYhT3deMhjqTmFHZcRm1NtH4U8QfEmBTcwExBe7sNrai5SL23uh0EBX0qzbhigryhVTAqh3PnaEigLNKVL5A==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@getloopscale/loopzero-sdk': '>=0.1.0 <1.0.0'
+      mammoth: ^1.13.0
+      simple-git: ^4.0.1
+      unpdf: ^2.1.0
+      vitest: '>=2.0.0'
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      mammoth:
+        optional: true
+      simple-git:
+        optional: true
+      unpdf:
+        optional: true
+      vitest:
+        optional: true
+
+  '@getloopscale/loopzero-sdk@0.1.0':
+    resolution: {integrity: sha512-KsNmQpVMQDhCXFdFj8JnAESEquKGNgMOZyWAxwCgwhc+OpZx6JiguJweu88GWjvL3diIsHJDPBpWA51DBdaOJA==}
+    engines: {node: '>=22.12.0'}
+    peerDependencies:
+      '@lancedb/lancedb': ^0.30.0
+      '@opentelemetry/api': ^1.9.0
+      '@opentelemetry/exporter-metrics-otlp-http': ^0.223.0
+      '@opentelemetry/exporter-prometheus': ^0.223.0
+      '@opentelemetry/exporter-trace-otlp-http': ^0.223.0
+      '@opentelemetry/resources': ^2.0.0
+      '@opentelemetry/sdk-logs': ^0.223.0
+      '@opentelemetry/sdk-metrics': ^2.0.0
+      '@opentelemetry/sdk-trace-base': ^2.0.0
+      '@types/ws': '>=8.0.0'
+      better-sqlite3: ^12.0.0
+      onnxruntime-node: '>=1.17.0'
+      proper-lockfile: ^4.1.2
+      sqlite-vec: ^0.1.0
+      ws: '>=8.0.0'
+    peerDependenciesMeta:
+      '@lancedb/lancedb':
+        optional: true
+      '@opentelemetry/api':
+        optional: true
+      '@opentelemetry/exporter-metrics-otlp-http':
+        optional: true
+      '@opentelemetry/exporter-prometheus':
+        optional: true
+      '@opentelemetry/exporter-trace-otlp-http':
+        optional: true
+      '@opentelemetry/resources':
+        optional: true
+      '@opentelemetry/sdk-logs':
+        optional: true
+      '@opentelemetry/sdk-metrics':
+        optional: true
+      '@opentelemetry/sdk-trace-base':
+        optional: true
+      '@types/ws':
+        optional: true
+      better-sqlite3:
+        optional: true
+      onnxruntime-node:
+        optional: true
+      proper-lockfile:
+        optional: true
+      sqlite-vec:
+        optional: true
+      ws:
+        optional: true
+
+  '@getloopscale/loopzero-ui@0.1.0':
+    resolution: {integrity: sha512-ly0ZZrGaKe8nKanlm8+1pvgs8SjHwUVRPYaZEg7PJIQxEkjDYkLlCHtjPoceUuNiJxrcnoKN6ILxRctJ1AG3ag==}
+    engines: {node: '>=22.12.0', pnpm: '>=10.34.1'}
+    peerDependencies:
+      '@getloopscale/ui': '>=0.37.1 <1'
+      '@tailwindcss/vite': ^4.0.0
+      hast-util-from-html: ^2.0.0
+      hast-util-sanitize: ^5.0.0
+      hast-util-to-jsx-runtime: ^2.0.0
+      katex: ^0.16.0
+      mdast-util-from-markdown: ^2.0.0
+      mdast-util-gfm: ^3.0.0
+      mdast-util-math: ^3.0.0
+      mdast-util-to-hast: ^13.0.0
+      mermaid: ^11.0.0
+      micromark-extension-gfm: ^3.0.0
+      micromark-extension-math: ^3.0.0
+      perfect-freehand: ^1.2.0
+      react: '>=18.2.0 <20'
+      react-dom: '>=18.2.0 <20'
+      roughjs: ^4.6.0
+      shiki: ^1.0.0
+      tailwindcss: ^4.0.0
+      unist-util-visit: ^5.0.0
+      unist-util-visit-parents: ^6.0.0
+      vite: ^6.0.0 || ^7.0.0
+      yaml: ^2.0.0
+    peerDependenciesMeta:
+      '@tailwindcss/vite':
+        optional: true
+      hast-util-from-html:
+        optional: true
+      hast-util-sanitize:
+        optional: true
+      hast-util-to-jsx-runtime:
+        optional: true
+      katex:
+        optional: true
+      mdast-util-from-markdown:
+        optional: true
+      mdast-util-gfm:
+        optional: true
+      mdast-util-math:
+        optional: true
+      mdast-util-to-hast:
+        optional: true
+      mermaid:
+        optional: true
+      micromark-extension-gfm:
+        optional: true
+      micromark-extension-math:
+        optional: true
+      perfect-freehand:
+        optional: true
+      roughjs:
+        optional: true
+      shiki:
+        optional: true
+      tailwindcss:
+        optional: true
+      unist-util-visit:
+        optional: true
+      unist-util-visit-parents:
+        optional: true
+      vite:
+        optional: true
+      yaml:
+        optional: true
+
+  '@getloopscale/loopzero@0.1.0':
+    resolution: {integrity: sha512-BsnW7HPUNVyquWl+Raqz/6rZGkkU3vMSRZgOv3zWdWpgu3JIgcJ4/ON+o6P+1I8Fmwk2At/k5Xtm2pDqLFG+vw==}
+    engines: {node: '>=22.12.0'}
+    hasBin: true
+    peerDependencies:
+      '@getloopscale/loopzero-sdk': '>=0.1.0 <1.0.0'
+      '@getloopscale/loopzero-ui': ^0.1.0
+      '@vitejs/plugin-react': ^4.7.0
+      db0: ^0.3.0
+      react: ^19.0.0
+      react-dom: ^19.0.0
+      react-router: ^7.0.0 || ^8.0.0
+      tsx: ^4.22.4
+      typescript: ^5.9.3
+      unstorage: ^1.10.0
+      vite: ^7.3.7
+      ws: ^8.20.1
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      '@getloopscale/loopzero-sdk':
+        optional: true
+      '@getloopscale/loopzero-ui':
+        optional: true
+      '@vitejs/plugin-react':
+        optional: true
+      db0:
+        optional: true
+      tsx:
+        optional: true
+      typescript:
+        optional: true
+      unstorage:
+        optional: true
+      vite:
+        optional: true
+      ws:
+        optional: true
+
+  '@getloopscale/ui@0.38.0':
+    resolution: {integrity: sha512-15T/wUgVuL9eQdDGYE2hkxUTQ0Hk7YcjDg674102HiLtiFv6/bOxjoyiQlOWl3PqdZtmYPO6geB12BiutglVSw==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      react: '>=18'
+      react-dom: '>=18'
+
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
     engines: {node: '>=18.18.0'}
@@ -2179,151 +2416,6 @@ packages:
       '@types/react-dom':
         optional: true
 
-  '@theokit/agents@16.3.0':
-    resolution: {integrity: sha512-L17FFktbLXVsDV7TmhtW9IFPvzX3iMFdJFE/8dh02bIytDmFh+WWdvGL6xKmNfCh7cea9FxFPrfeaKdim2Smag==}
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      '@theokit/http': '>=2.1.0-next.0'
-      react: '>=18'
-      zod: ^4.0.0
-    peerDependenciesMeta:
-      react:
-        optional: true
-
-  '@theokit/http@2.3.1':
-    resolution: {integrity: sha512-vpz07NcJnu019HdDIIP+E4jGZ7GHPraSt+0WOdI+1KeKQad4sA6zcLMDjHzuioRnaNyuAWTiV4kdQRE6kIzgUQ==}
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      '@swc/core': '>=1.3.0'
-      react: '>=18.0.0'
-      react-dom: '>=18.0.0'
-      reflect-metadata: ^0.2.2
-      zod: ^4.0.0
-    peerDependenciesMeta:
-      '@swc/core':
-        optional: true
-      react:
-        optional: true
-      react-dom:
-        optional: true
-
-  '@theokit/presenter@0.10.0':
-    resolution: {integrity: sha512-isnmEsYpYhNnHfN9Jv5nulZLSISFFynoHtChArrpqJ2KYdGioQ0SJS/MnsvD4Ycl774voP0JvYj+FvJi2mtPyg==}
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      '@theokit/sdk': ^5.3.0
-      zod: ^4.0.0
-
-  '@theokit/sdk-tools@0.27.6':
-    resolution: {integrity: sha512-eVBgcJsY/5VQeXJrmswg1O4TbxhHCgQuEQ1zB+LHwPxIrnKlvr2VvaxMZKuA6w7ZYRQXEuZgiKt/mecPHIuC9w==}
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      '@theokit/sdk': '>=5.0.0-next.1'
-      simple-git: ^4.0.1
-      vitest: '>=2.0.0'
-      zod: ^4.0.0
-    peerDependenciesMeta:
-      simple-git:
-        optional: true
-      vitest:
-        optional: true
-
-  '@theokit/sdk@5.14.0':
-    resolution: {integrity: sha512-a5U0pCfr/MNqWNWa1lEaFQ8W6MEKucsLksPQLcs/Dtx3H5ePjXP03OaFPUijRmqc1MDfFbzsFJVt9AwFJwUEMg==}
-    engines: {node: '>=22.12.0'}
-    peerDependencies:
-      '@lancedb/lancedb': ^0.30.0
-      '@opentelemetry/api': ^1.9.0
-      '@types/ws': '>=8.0.0'
-      better-sqlite3: ^12.0.0
-      proper-lockfile: ^4.1.2
-      sqlite-vec: ^0.1.0
-      ws: '>=8.0.0'
-    peerDependenciesMeta:
-      '@lancedb/lancedb':
-        optional: true
-      '@opentelemetry/api':
-        optional: true
-      '@types/ws':
-        optional: true
-      better-sqlite3:
-        optional: true
-      proper-lockfile:
-        optional: true
-      sqlite-vec:
-        optional: true
-      ws:
-        optional: true
-
-  '@theokit/ui@1.12.2':
-    resolution: {integrity: sha512-HAzgCjyMEh3HA3lJy6nIOETBhOzNinq/Y3hd3vDP/xa20zU8FhzqMli0pIsfO+9Ml91wiAUwoOylk3sB6E2vXw==}
-    engines: {node: '>=22.12.0', pnpm: '>=10.34.1'}
-    peerDependencies:
-      '@tailwindcss/vite': ^4.0.0
-      '@usetheo/ui': '>=0.22.0 <1'
-      hast-util-from-html: ^2.0.0
-      hast-util-sanitize: ^5.0.0
-      hast-util-to-jsx-runtime: ^2.0.0
-      katex: ^0.16.0
-      mdast-util-from-markdown: ^2.0.0
-      mdast-util-gfm: ^3.0.0
-      mdast-util-math: ^3.0.0
-      mdast-util-to-hast: ^13.0.0
-      mermaid: ^11.0.0
-      micromark-extension-gfm: ^3.0.0
-      micromark-extension-math: ^3.0.0
-      perfect-freehand: ^1.2.0
-      react: '>=18.2.0 <20'
-      react-dom: '>=18.2.0 <20'
-      roughjs: ^4.6.0
-      shiki: ^1.0.0
-      tailwindcss: ^4.0.0
-      unist-util-visit: ^5.0.0
-      unist-util-visit-parents: ^6.0.0
-      vite: ^6.0.0 || ^7.0.0
-      yaml: ^2.0.0
-    peerDependenciesMeta:
-      '@tailwindcss/vite':
-        optional: true
-      hast-util-from-html:
-        optional: true
-      hast-util-sanitize:
-        optional: true
-      hast-util-to-jsx-runtime:
-        optional: true
-      katex:
-        optional: true
-      mdast-util-from-markdown:
-        optional: true
-      mdast-util-gfm:
-        optional: true
-      mdast-util-math:
-        optional: true
-      mdast-util-to-hast:
-        optional: true
-      mermaid:
-        optional: true
-      micromark-extension-gfm:
-        optional: true
-      micromark-extension-math:
-        optional: true
-      perfect-freehand:
-        optional: true
-      roughjs:
-        optional: true
-      shiki:
-        optional: true
-      tailwindcss:
-        optional: true
-      unist-util-visit:
-        optional: true
-      unist-util-visit-parents:
-        optional: true
-      vite:
-        optional: true
-      yaml:
-        optional: true
-
   '@types/aria-query@5.0.4':
     resolution: {integrity: sha512-rfT93uj5s0PRL7EzccGMs3brplhcrghnDoV26NqKhCAS1hVo+WdNsPvE/yb6ilfr5hi2MEk6d5EWJTKdxg8jVw==}
 
@@ -2478,13 +2570,6 @@ packages:
   '@ungap/structured-clone@1.4.0':
     resolution: {integrity: sha512-1mEZtMKPM09vDmQt5y7YvmN2+DFTP7Tg0EWXdic8/C6VRnpb33e4ghisCIE3WZjsE2N8mf+QV1Zqh7ZFYLWInQ==}
 
-  '@usetheo/ui@0.36.0':
-    resolution: {integrity: sha512-ljMqsrYkR5fxH4uhrYalD3Xr83I3Gda50YlTQh5rnPgpUv5ioVsTvfW4tQL9MiIjtCnMlQODevgx277QV/7nyA==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      react: '>=18'
-      react-dom: '>=18'
-
   '@vercel/cli-config@0.3.1':
     resolution: {integrity: sha512-sISbygqlFXYb8qfPu/+2Cf/A8IjrlAuZePdag3EDQr2PRA455s7UZtl9Ro674CWsB/saBRmz3jEkw0YsQs8OoQ==}
 
@@ -2550,12 +2635,12 @@ packages:
   '@workflow/serde@4.1.0-beta.2':
     resolution: {integrity: sha512-8kkeoQKLDaKXefjV5dbhBj2aErfKp1Mc4pb6tj8144cF+Em5SPbyMbyLCHp+BVrFfFVCBluCtMx+jjvaFVZGww==}
 
-  '@xterm/xterm@5.5.0':
-    resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
-
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
+
+  '@xterm/xterm@5.5.0':
+    resolution: {integrity: sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==}
 
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
@@ -2981,6 +3066,10 @@ packages:
 
   diff-match-patch@1.0.5:
     resolution: {integrity: sha512-IayShXAgj/QMXgB0IWmKx+rOPuGMhqm5w6jvFxmVenXKIzRqTAAsbBPT3kWQeGANj3jGgvcvv4yK6SxqYmikgw==}
+
+  diff@8.0.4:
+    resolution: {integrity: sha512-DPi0FmjiSU5EvQV0++GFDOJ9ASQUVFh5kD+OzOnYdi7n3Wpm9hWWGfB/O2blfHcMVTL5WkQXSnRiK9makhrcnw==}
+    engines: {node: '>=0.3.1'}
 
   dir-compare@4.2.0:
     resolution: {integrity: sha512-2xMCmOoMrdQIPHdsTawECdNPwlVFB9zGcz3kuhmBO6U3oU+UQjsue0i8ayLKpgBcm+hcXPMVSGUN9d+pvJ6+VQ==}
@@ -4284,6 +4373,9 @@ packages:
     resolution: {integrity: sha512-GQ2EWRpQV8/o+Aw8YqtfZZPfNRWZYkbidE9k5rpl/hC3vtHHBfGm2Ifi6qWV+coDGkrUKZAxE3Lot5kcsRlh+g==}
     engines: {node: '>=6'}
 
+  parse-diff@0.12.0:
+    resolution: {integrity: sha512-2Xr5mW4Bqd4CqYq2zttfw/RZraK+KcRuJvNkJzbDk3ea67Ap525XeTvBdtDE5tigJMVzIx/DMUzsShAf6+5SCA==}
+
   parse-entities@4.0.2:
     resolution: {integrity: sha512-GG2AQYWoLgL877gQIKeRPGO1xF9+eG1ujIb5soS5gPvLQ1y2o8FL90w2QWNdf9I361Mpp7726c+lj3U0qK1uGw==}
 
@@ -4819,32 +4911,6 @@ packages:
   text-decoder@1.2.7:
     resolution: {integrity: sha512-vlLytXkeP4xvEq2otHeJfSQIRyWxo/oZGEbXrtEEF9Hnmrdly59sUbzZ/QgyWuLYHctCHxFF4tRQZNQ9k60ExQ==}
 
-  theokit@0.79.0:
-    resolution: {integrity: sha512-p475LcA8SxI08ks1ConsDSfy+xJVm5Gu/y5RJfz1srNKFNcMylsUcUYNHwdmgDekJ7yNeuEQT+6Gmkxd42NyFA==}
-    engines: {node: '>=22.12.0'}
-    hasBin: true
-    peerDependencies:
-      '@theokit/sdk': ^5.13.0
-      '@theokit/ui': ^1.1.0
-      db0: ^0.3.0
-      react: ^19.0.0
-      react-dom: ^19.0.0
-      react-router: ^7.0.0 || ^8.0.0
-      unstorage: ^1.10.0
-      ws: ^8.20.1
-      zod: ^4.0.0
-    peerDependenciesMeta:
-      '@theokit/sdk':
-        optional: true
-      '@theokit/ui':
-        optional: true
-      db0:
-        optional: true
-      unstorage:
-        optional: true
-      ws:
-        optional: true
-
   tiny-async-pool@1.3.0:
     resolution: {integrity: sha512-01EAw5EDrcVrdgyCLgoSPvqznC0sVxDSVeiOz09FUpjh71G79VCqneOr+xvt7T1r76CF6ZZfPjHorN2+d+3mqA==}
 
@@ -5244,6 +5310,11 @@ packages:
     resolution: {integrity: sha512-YgvUTfwqyc7UXVMrB+SImsVYSmTS8X/tSrtdNZMImM+n7+QTriRXyXim0mBrTXNeqzVF0KWGgHPeiyViFFrNDw==}
     engines: {node: '>=18'}
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
   yaml@2.9.1:
     resolution: {integrity: sha512-3NxN8+78OdzbT7C/WjGsyfPAtJaN3FNDsWxv7Y7mcDsT/oOmgW8BpyQQFFBnvZE3j9Y2Sdz1ULFLezL7Eb2yFw==}
     engines: {node: '>= 14.6'}
@@ -5300,7 +5371,8 @@ snapshots:
       '@babel/helper-validator-identifier': 8.0.6
       js-tokens: 10.0.0
 
-  '@babel/compat-data@7.29.7': {}
+  '@babel/compat-data@7.29.7':
+    optional: true
 
   '@babel/compat-data@8.0.5': {}
 
@@ -5323,6 +5395,7 @@ snapshots:
       semver: 6.3.1
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   '@babel/core@8.0.10':
     dependencies:
@@ -5350,6 +5423,7 @@ snapshots:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
       jsesc: 3.1.0
+    optional: true
 
   '@babel/generator@8.0.10':
     dependencies:
@@ -5380,6 +5454,7 @@ snapshots:
       browserslist: 4.29.5
       lru-cache: 5.1.1
       semver: 6.3.1
+    optional: true
 
   '@babel/helper-compilation-targets@8.0.7':
     dependencies:
@@ -5400,7 +5475,8 @@ snapshots:
       '@babel/traverse': 8.0.10
       verkit: 0.5.0
 
-  '@babel/helper-globals@7.29.7': {}
+  '@babel/helper-globals@7.29.7':
+    optional: true
 
   '@babel/helper-globals@8.0.6': {}
 
@@ -5415,6 +5491,7 @@ snapshots:
       '@babel/types': 7.29.11
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   '@babel/helper-module-imports@8.0.0':
     dependencies:
@@ -5429,6 +5506,7 @@ snapshots:
       '@babel/traverse': 7.29.12(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   '@babel/helper-module-transforms@8.1.0(@babel/core@8.0.10)':
     dependencies:
@@ -5441,7 +5519,8 @@ snapshots:
     dependencies:
       '@babel/types': 8.1.0
 
-  '@babel/helper-plugin-utils@7.29.7': {}
+  '@babel/helper-plugin-utils@7.29.7':
+    optional: true
 
   '@babel/helper-plugin-utils@8.0.1(@babel/core@8.0.10)':
     dependencies:
@@ -5467,7 +5546,8 @@ snapshots:
 
   '@babel/helper-validator-identifier@8.0.6': {}
 
-  '@babel/helper-validator-option@7.29.7': {}
+  '@babel/helper-validator-option@7.29.7':
+    optional: true
 
   '@babel/helper-validator-option@8.0.0': {}
 
@@ -5475,6 +5555,7 @@ snapshots:
     dependencies:
       '@babel/template': 7.29.7
       '@babel/types': 7.29.11
+    optional: true
 
   '@babel/helpers@8.1.0':
     dependencies:
@@ -5546,11 +5627,13 @@ snapshots:
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/helper-plugin-utils': 7.29.7
+    optional: true
 
   '@babel/plugin-transform-react-jsx-source@7.29.7(@babel/core@7.29.7(supports-color@7.2.0))':
     dependencies:
       '@babel/core': 7.29.7(supports-color@7.2.0)
       '@babel/helper-plugin-utils': 7.29.7
+    optional: true
 
   '@babel/plugin-transform-react-jsx@8.0.1(@babel/core@8.0.10)':
     dependencies:
@@ -5601,6 +5684,7 @@ snapshots:
       '@babel/code-frame': 7.29.7
       '@babel/parser': 7.29.12
       '@babel/types': 7.29.11
+    optional: true
 
   '@babel/template@8.0.0':
     dependencies:
@@ -5619,6 +5703,7 @@ snapshots:
       debug: 4.4.3(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   '@babel/traverse@8.0.10':
     dependencies:
@@ -6075,6 +6160,182 @@ snapshots:
       react-dom: 19.3.1(react@19.3.1)
 
   '@floating-ui/utils@0.2.12': {}
+
+  '@getloopscale/loopzero-agents@0.1.0(@getloopscale/loopzero-http@0.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7))(proper-lockfile@4.1.2)(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(ws@8.22.0)(zod@4.6.7)':
+    dependencies:
+      '@getloopscale/loopzero-http': 0.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7)
+      '@getloopscale/loopzero-presenter': 0.1.0(@getloopscale/loopzero-sdk@0.1.0(proper-lockfile@4.1.2)(ws@8.22.0))(zod@4.6.7)
+      '@getloopscale/loopzero-sdk': 0.1.0(proper-lockfile@4.1.2)(ws@8.22.0)
+      '@getloopscale/loopzero-sdk-tools': 0.1.0(@getloopscale/loopzero-sdk@0.1.0(proper-lockfile@4.1.2)(ws@8.22.0))(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.7)
+      yaml: 2.9.0
+      zod: 4.6.7
+    optionalDependencies:
+      react: 19.3.1
+      ws: 8.22.0
+    transitivePeerDependencies:
+      - '@lancedb/lancedb'
+      - '@opentelemetry/api'
+      - '@opentelemetry/exporter-metrics-otlp-http'
+      - '@opentelemetry/exporter-prometheus'
+      - '@opentelemetry/exporter-trace-otlp-http'
+      - '@opentelemetry/resources'
+      - '@opentelemetry/sdk-logs'
+      - '@opentelemetry/sdk-metrics'
+      - '@opentelemetry/sdk-trace-base'
+      - '@types/ws'
+      - better-sqlite3
+      - mammoth
+      - onnxruntime-node
+      - proper-lockfile
+      - simple-git
+      - sqlite-vec
+      - unpdf
+      - vitest
+
+  '@getloopscale/loopzero-http@0.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7)':
+    dependencies:
+      reflect-metadata: 0.2.2
+      zod: 4.6.7
+    optionalDependencies:
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+
+  '@getloopscale/loopzero-presenter@0.1.0(@getloopscale/loopzero-sdk@0.1.0(proper-lockfile@4.1.2)(ws@8.22.0))(zod@4.6.7)':
+    dependencies:
+      diff: 8.0.4
+      parse-diff: 0.12.0
+    optionalDependencies:
+      '@getloopscale/loopzero-sdk': 0.1.0(proper-lockfile@4.1.2)(ws@8.22.0)
+      zod: 4.6.7
+
+  '@getloopscale/loopzero-sdk-tools@0.1.0(@getloopscale/loopzero-sdk@0.1.0(proper-lockfile@4.1.2)(ws@8.22.0))(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.7)':
+    dependencies:
+      '@getloopscale/loopzero-sdk': 0.1.0(proper-lockfile@4.1.2)(ws@8.22.0)
+      zod: 4.6.7
+    optionalDependencies:
+      vitest: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1)
+
+  '@getloopscale/loopzero-sdk@0.1.0(proper-lockfile@4.1.2)(ws@8.22.0)':
+    dependencies:
+      croner: 9.1.0
+      jsonrepair: 3.15.0
+      zod: 4.6.7
+    optionalDependencies:
+      proper-lockfile: 4.1.2
+      ws: 8.22.0
+
+  '@getloopscale/loopzero-ui@0.1.0(@getloopscale/ui@0.38.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3))(@tailwindcss/vite@4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(hast-util-sanitize@5.0.2)(hast-util-to-jsx-runtime@2.3.7(supports-color@7.2.0))(mdast-util-from-markdown@2.1.0(supports-color@7.2.0))(mdast-util-gfm@3.1.0(supports-color@7.2.0))(mdast-util-to-hast@13.2.2)(micromark-extension-gfm@3.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)(typescript@5.9.3)(unist-util-visit-parents@6.1.0)(unist-util-visit@5.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)':
+    dependencies:
+      '@getloopscale/ui': 0.38.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)
+      '@radix-ui/react-dropdown-menu': 2.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      class-variance-authority: 0.7.1
+      clsx: 2.1.1
+      lucide-react: 0.471.2(react@19.3.1)
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+      tailwind-merge: 2.6.1
+      tailwindcss-animate: 1.0.7(tailwindcss@4.3.3)
+      valibot: 1.5.0(typescript@5.9.3)
+      zod: 4.6.7
+    optionalDependencies:
+      '@tailwindcss/vite': 4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
+      hast-util-sanitize: 5.0.2
+      hast-util-to-jsx-runtime: 2.3.7(supports-color@7.2.0)
+      mdast-util-from-markdown: 2.1.0(supports-color@7.2.0)
+      mdast-util-gfm: 3.1.0(supports-color@7.2.0)
+      mdast-util-to-hast: 13.2.2
+      micromark-extension-gfm: 3.0.0
+      tailwindcss: 4.3.3
+      unist-util-visit: 5.2.0
+      unist-util-visit-parents: 6.1.0
+      vite: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
+      yaml: 2.9.1
+    transitivePeerDependencies:
+      - '@types/react'
+      - '@types/react-dom'
+      - typescript
+
+  '@getloopscale/loopzero@0.1.0(74b469c7148f8c83cf8b0a1c13cb303b)':
+    dependencies:
+      '@getloopscale/loopzero-agents': 0.1.0(@getloopscale/loopzero-http@0.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7))(proper-lockfile@4.1.2)(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(ws@8.22.0)(zod@4.6.7)
+      '@getloopscale/loopzero-http': 0.1.0(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7)
+      '@getloopscale/loopzero-presenter': 0.1.0(@getloopscale/loopzero-sdk@0.1.0(proper-lockfile@4.1.2)(ws@8.22.0))(zod@4.6.7)
+      busboy: 1.6.0
+      cac: 6.7.14
+      cron-parser: 5.10.2
+      devalue: 5.9.4
+      dotenv: 16.6.1
+      dotenv-expand: 11.0.7
+      goober: 2.1.19(csstype@3.2.3)
+      picomatch: 4.0.7
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+      react-router: 7.18.5(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      reflect-metadata: 0.2.2
+      superjson: 2.2.6
+      zod: 4.6.7
+    optionalDependencies:
+      '@getloopscale/loopzero-sdk': 0.1.0(proper-lockfile@4.1.2)(ws@8.22.0)
+      '@getloopscale/loopzero-ui': 0.1.0(@getloopscale/ui@0.38.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3))(@tailwindcss/vite@4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(hast-util-sanitize@5.0.2)(hast-util-to-jsx-runtime@2.3.7(supports-color@7.2.0))(mdast-util-from-markdown@2.1.0(supports-color@7.2.0))(mdast-util-gfm@3.1.0(supports-color@7.2.0))(mdast-util-to-hast@13.2.2)(micromark-extension-gfm@3.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)(typescript@5.9.3)(unist-util-visit-parents@6.1.0)(unist-util-visit@5.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)
+      '@vitejs/plugin-react': 4.7.0(supports-color@7.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
+      tsx: 4.23.15
+      typescript: 5.9.3
+      vite: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
+      ws: 8.22.0
+    transitivePeerDependencies:
+      - '@getloopscale/loopzero-di'
+      - '@jitl/quickjs-wasmfile-release-sync'
+      - '@lancedb/lancedb'
+      - '@opentelemetry/api'
+      - '@opentelemetry/exporter-metrics-otlp-http'
+      - '@opentelemetry/exporter-prometheus'
+      - '@opentelemetry/exporter-trace-otlp-http'
+      - '@opentelemetry/resources'
+      - '@opentelemetry/sdk-logs'
+      - '@opentelemetry/sdk-metrics'
+      - '@opentelemetry/sdk-trace-base'
+      - '@swc/core'
+      - '@types/ws'
+      - better-sqlite3
+      - csstype
+      - mammoth
+      - onnxruntime-node
+      - proper-lockfile
+      - quickjs-emscripten-core
+      - simple-git
+      - sqlite-vec
+      - unpdf
+      - vitest
+
+  '@getloopscale/ui@0.38.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)':
+    dependencies:
+      '@radix-ui/react-avatar': 1.3.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-checkbox': 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dialog': 1.3.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-dropdown-menu': 2.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-label': 2.1.17(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-radio-group': 1.5.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-scroll-area': 1.4.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-select': 2.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-slider': 1.6.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-slot': 1.5.0(@types/react@19.3.0)(react@19.3.1)
+      '@radix-ui/react-switch': 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-tabs': 1.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-toast': 1.3.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@radix-ui/react-tooltip': 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@tanstack/react-virtual': 3.14.25(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      class-variance-authority: 0.7.1
+      clsx: 2.1.1
+      cmdk: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      lucide-react: 0.471.2(react@19.3.1)
+      react: 19.3.1
+      react-dom: 19.3.1(react@19.3.1)
+      tailwind-merge: 2.6.1
+      tailwindcss-animate: 1.0.7(tailwindcss@4.3.3)
+    transitivePeerDependencies:
+      - '@types/react'
+      - '@types/react-dom'
+      - tailwindcss
 
   '@humanfs/core@0.19.2':
     dependencies:
@@ -6764,7 +7025,8 @@ snapshots:
 
   '@radix-ui/rect@1.1.3': {}
 
-  '@rolldown/pluginutils@1.0.0-beta.27': {}
+  '@rolldown/pluginutils@1.0.0-beta.27':
+    optional: true
 
   '@rollup/rollup-android-arm-eabi@4.66.0':
     optional: true
@@ -7014,86 +7276,6 @@ snapshots:
       '@types/react': 19.3.0
       '@types/react-dom': 19.3.0(@types/react@19.3.0)
 
-  '@theokit/agents@16.3.0(@theokit/http@2.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7))(proper-lockfile@4.1.2)(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(ws@8.22.0)(zod@4.6.7)':
-    dependencies:
-      '@theokit/http': 2.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7)
-      '@theokit/presenter': 0.10.0(@theokit/sdk@5.14.0(proper-lockfile@4.1.2)(ws@8.22.0))(zod@4.6.7)
-      '@theokit/sdk': 5.14.0(proper-lockfile@4.1.2)(ws@8.22.0)
-      '@theokit/sdk-tools': 0.27.6(@theokit/sdk@5.14.0(proper-lockfile@4.1.2)(ws@8.22.0))(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.7)
-      zod: 4.6.7
-    optionalDependencies:
-      react: 19.3.1
-    transitivePeerDependencies:
-      - '@lancedb/lancedb'
-      - '@opentelemetry/api'
-      - '@types/ws'
-      - better-sqlite3
-      - proper-lockfile
-      - simple-git
-      - sqlite-vec
-      - vitest
-      - ws
-
-  '@theokit/http@2.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7)':
-    dependencies:
-      reflect-metadata: 0.2.2
-      zod: 4.6.7
-    optionalDependencies:
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-
-  '@theokit/presenter@0.10.0(@theokit/sdk@5.14.0(proper-lockfile@4.1.2)(ws@8.22.0))(zod@4.6.7)':
-    dependencies:
-      '@theokit/sdk': 5.14.0(proper-lockfile@4.1.2)(ws@8.22.0)
-      zod: 4.6.7
-
-  '@theokit/sdk-tools@0.27.6(@theokit/sdk@5.14.0(proper-lockfile@4.1.2)(ws@8.22.0))(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(zod@4.6.7)':
-    dependencies:
-      '@theokit/sdk': 5.14.0(proper-lockfile@4.1.2)(ws@8.22.0)
-      zod: 4.6.7
-    optionalDependencies:
-      vitest: 3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1)
-
-  '@theokit/sdk@5.14.0(proper-lockfile@4.1.2)(ws@8.22.0)':
-    dependencies:
-      croner: 9.1.0
-      jsonrepair: 3.15.0
-      zod: 4.6.7
-    optionalDependencies:
-      proper-lockfile: 4.1.2
-      ws: 8.22.0
-
-  '@theokit/ui@1.12.2(@tailwindcss/vite@4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@usetheo/ui@0.36.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3))(hast-util-sanitize@5.0.2)(hast-util-to-jsx-runtime@2.3.7(supports-color@7.2.0))(mdast-util-from-markdown@2.1.0(supports-color@7.2.0))(mdast-util-gfm@3.1.0(supports-color@7.2.0))(mdast-util-to-hast@13.2.2)(micromark-extension-gfm@3.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)(typescript@5.9.3)(unist-util-visit-parents@6.1.0)(unist-util-visit@5.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)':
-    dependencies:
-      '@radix-ui/react-dropdown-menu': 2.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@usetheo/ui': 0.36.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)
-      class-variance-authority: 0.7.1
-      clsx: 2.1.1
-      lucide-react: 0.471.2(react@19.3.1)
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-      tailwind-merge: 2.6.1
-      tailwindcss-animate: 1.0.7(tailwindcss@4.3.3)
-      valibot: 1.5.0(typescript@5.9.3)
-      zod: 4.6.7
-    optionalDependencies:
-      '@tailwindcss/vite': 4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
-      hast-util-sanitize: 5.0.2
-      hast-util-to-jsx-runtime: 2.3.7(supports-color@7.2.0)
-      mdast-util-from-markdown: 2.1.0(supports-color@7.2.0)
-      mdast-util-gfm: 3.1.0(supports-color@7.2.0)
-      mdast-util-to-hast: 13.2.2
-      micromark-extension-gfm: 3.0.0
-      tailwindcss: 4.3.3
-      unist-util-visit: 5.2.0
-      unist-util-visit-parents: 6.1.0
-      vite: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
-      yaml: 2.9.1
-    transitivePeerDependencies:
-      - '@types/react'
-      - '@types/react-dom'
-      - typescript
-
   '@types/aria-query@5.0.4': {}
 
   '@types/babel__core@7.20.5':
@@ -7103,19 +7285,23 @@ snapshots:
       '@types/babel__generator': 7.27.0
       '@types/babel__template': 7.4.4
       '@types/babel__traverse': 7.28.0
+    optional: true
 
   '@types/babel__generator@7.27.0':
     dependencies:
       '@babel/types': 7.29.11
+    optional: true
 
   '@types/babel__template@7.4.4':
     dependencies:
       '@babel/parser': 7.29.12
       '@babel/types': 7.29.11
+    optional: true
 
   '@types/babel__traverse@7.28.0':
     dependencies:
       '@babel/types': 7.29.11
+    optional: true
 
   '@types/cacheable-request@6.0.3':
     dependencies:
@@ -7296,36 +7482,6 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@usetheo/ui@0.36.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)':
-    dependencies:
-      '@radix-ui/react-avatar': 1.3.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-checkbox': 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-dialog': 1.3.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-dropdown-menu': 2.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-label': 2.1.17(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-radio-group': 1.5.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-scroll-area': 1.4.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-select': 2.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-slider': 1.6.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-slot': 1.5.0(@types/react@19.3.0)(react@19.3.1)
-      '@radix-ui/react-switch': 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-tabs': 1.2.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-toast': 1.3.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@radix-ui/react-tooltip': 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      '@tanstack/react-virtual': 3.14.25(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      class-variance-authority: 0.7.1
-      clsx: 2.1.1
-      cmdk: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      lucide-react: 0.471.2(react@19.3.1)
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-      tailwind-merge: 2.6.1
-      tailwindcss-animate: 1.0.7(tailwindcss@4.3.3)
-    transitivePeerDependencies:
-      - '@types/react'
-      - '@types/react-dom'
-      - tailwindcss
-
   '@vercel/cli-config@0.3.1':
     dependencies:
       xdg-app-paths: 5.1.0
@@ -7373,6 +7529,7 @@ snapshots:
       vite: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   '@vitest/coverage-v8@3.2.7(supports-color@7.2.0)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
@@ -7437,9 +7594,9 @@ snapshots:
 
   '@workflow/serde@4.1.0-beta.2': {}
 
-  '@xterm/xterm@5.5.0': {}
-
   '@xmldom/xmldom@0.8.15': {}
+
+  '@xterm/xterm@5.5.0': {}
 
   abbrev@4.0.0: {}
 
@@ -7864,6 +8021,8 @@ snapshots:
       dequal: 2.0.3
 
   diff-match-patch@1.0.5: {}
+
+  diff@8.0.4: {}
 
   dir-compare@4.2.0:
     dependencies:
@@ -8863,6 +9022,7 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
+    optional: true
 
   lru-cache@6.0.0:
     dependencies:
@@ -9414,6 +9574,8 @@ snapshots:
     dependencies:
       callsites: 3.1.0
 
+  parse-diff@0.12.0: {}
+
   parse-entities@4.0.2:
     dependencies:
       '@types/unist': 2.0.11
@@ -9592,7 +9754,8 @@ snapshots:
 
   react-is@17.0.2: {}
 
-  react-refresh@0.17.0: {}
+  react-refresh@0.17.0:
+    optional: true
 
   react-remove-scroll-bar@2.3.8(@types/react@19.3.0)(react@19.3.1):
     dependencies:
@@ -9947,56 +10110,6 @@ snapshots:
       b4a: 1.9.0
     transitivePeerDependencies:
       - react-native-b4a
-
-  theokit@0.79.0(c0b0143bd04176b2f8614a8b9d7022a6):
-    dependencies:
-      '@theokit/agents': 16.3.0(@theokit/http@2.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7))(proper-lockfile@4.1.2)(react@19.3.1)(vitest@3.2.7(@types/debug@4.1.13)(@types/node@22.20.5)(jiti@2.7.0)(jsdom@25.0.1(supports-color@7.2.0))(lightningcss@1.32.0)(supports-color@7.2.0)(tsx@4.23.15)(yaml@2.9.1))(ws@8.22.0)(zod@4.6.7)
-      '@theokit/http': 2.3.1(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(reflect-metadata@0.2.2)(zod@4.6.7)
-      '@theokit/presenter': 0.10.0(@theokit/sdk@5.14.0(proper-lockfile@4.1.2)(ws@8.22.0))(zod@4.6.7)
-      '@vitejs/plugin-react': 4.7.0(supports-color@7.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))
-      busboy: 1.6.0
-      cac: 6.7.14
-      cron-parser: 5.10.2
-      devalue: 5.9.4
-      dotenv: 16.6.1
-      dotenv-expand: 11.0.7
-      goober: 2.1.19(csstype@3.2.3)
-      picomatch: 4.0.7
-      react: 19.3.1
-      react-dom: 19.3.1(react@19.3.1)
-      react-router: 7.18.5(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
-      reflect-metadata: 0.2.2
-      superjson: 2.2.6
-      tsx: 4.23.15
-      typescript: 5.9.3
-      vite: 7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)
-      zod: 4.6.7
-    optionalDependencies:
-      '@theokit/sdk': 5.14.0(proper-lockfile@4.1.2)(ws@8.22.0)
-      '@theokit/ui': 1.12.2(@tailwindcss/vite@4.3.3(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1)))(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(@usetheo/ui@0.36.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3))(hast-util-sanitize@5.0.2)(hast-util-to-jsx-runtime@2.3.7(supports-color@7.2.0))(mdast-util-from-markdown@2.1.0(supports-color@7.2.0))(mdast-util-gfm@3.1.0(supports-color@7.2.0))(mdast-util-to-hast@13.2.2)(micromark-extension-gfm@3.0.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)(tailwindcss@4.3.3)(typescript@5.9.3)(unist-util-visit-parents@6.1.0)(unist-util-visit@5.2.0)(vite@7.3.7(@types/node@22.20.5)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)(yaml@2.9.1))(yaml@2.9.1)
-      ws: 8.22.0
-    transitivePeerDependencies:
-      - '@lancedb/lancedb'
-      - '@opentelemetry/api'
-      - '@swc/core'
-      - '@types/node'
-      - '@types/ws'
-      - better-sqlite3
-      - csstype
-      - jiti
-      - less
-      - lightningcss
-      - proper-lockfile
-      - sass
-      - sass-embedded
-      - simple-git
-      - sqlite-vec
-      - stylus
-      - sugarss
-      - supports-color
-      - terser
-      - vitest
-      - yaml
 
   tiny-async-pool@1.3.0:
     dependencies:
@@ -10355,11 +10468,14 @@ snapshots:
 
   y18n@5.0.8: {}
 
-  yallist@3.1.1: {}
+  yallist@3.1.1:
+    optional: true
 
   yallist@4.0.0: {}
 
   yallist@5.0.0: {}
+
+  yaml@2.9.0: {}
 
   yaml@2.9.1: {}
 

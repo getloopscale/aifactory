@@ -1,6 +1,6 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
-import { uploadsInBatch, type IsolatedSandbox, type SandboxFile } from '../factory/sandbox'
+import { type IsolatedSandbox, type SandboxFile } from '../factory/sandbox'
 
 import { SANDBOX_KNOWLEDGE_DIR, sliceIndex } from './format'
 import type { KnowledgeSource } from './source'
@@ -119,13 +119,12 @@ export class KnowledgeFeed {
   }
 
   /**
-   * In one batch where the sandbox can: a file at a time cost about half a second each on E2B, eight minutes
-   * for a project of nearly a thousand files, before every run's first agent.
+   * In one call, which a provider may send as one batch: a file at a time cost about half a second each on E2B,
+   * eight minutes for a project of nearly a thousand files, before every run's first agent. A backend with no
+   * batch of its own writes them one by one, in order.
    */
   private async upload(files: SandboxFile[]) {
-    const backend = this.backend
-    if (uploadsInBatch(backend)) return backend.uploadFiles(files)
-    for (const file of files) await backend.uploadFile(file.path, file.content)
+    await this.backend.uploadFiles(files)
   }
 
   private async must(command: string) {

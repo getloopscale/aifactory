@@ -19,7 +19,7 @@ type Agent = {
 let agent: Agent
 let used: { path: string; options: unknown }[]
 
-vi.mock('theokit/client', () => ({
+vi.mock('@getloopscale/loopzero/client', () => ({
   useAgent: (path: string, options: unknown) => {
     used.push({ path, options })
     return agent
@@ -50,7 +50,7 @@ describe('the assistant under a text box', () => {
   it('talks to the assistant that reads nothing, and sends the CSRF header the server wants', () => {
     mount()
     expect(used[0].path).toBe('/api/agents/assist')
-    expect(used[0].options).toEqual({ headers: { 'x-theo-action': '1' } })
+    expect(used[0].options).toEqual({ headers: { 'x-loopzero-action': '1' } })
   })
 
   it('talks to the setup assistant for a repository setup', () => {

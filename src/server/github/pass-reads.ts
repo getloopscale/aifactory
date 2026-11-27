@@ -1,7 +1,7 @@
 import type { GithubApi } from './pulls'
 
 /**
- * The reads of one cron pass that many tasks share, each asked of GitHub once (paulohenriquevn/aifactory#232).
+ * The reads of one cron pass that many tasks share, each asked of GitHub once (getloopscale/aifactory#232).
  * Fifteen tasks waiting on one integration branch read its head, its checks and its required checks fifteen
  * times a pass without it, every two minutes.
  */

@@ -1,4 +1,4 @@
-import type { UIMessage } from 'theokit/client'
+import type { UIMessage } from '@getloopscale/loopzero/client'
 
 import { en, type Copy } from './copy/en'
 

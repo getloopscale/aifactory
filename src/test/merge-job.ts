@@ -7,7 +7,7 @@ import type { RunResult, RunTaskDeps } from '../server/factory/run-types'
 /** The merge-task jobs still queued for a task, with the commit each one merges. */
 export async function queuedMerges(taskId: number): Promise<string[]> {
   const rows = await getPool().query<{ sha: string }>(
-    `select input->>'sha' as sha from theokit_jobs
+    `select input->>'sha' as sha from loopzero_jobs
       where name = 'merge-task' and (input->>'taskId')::int = $1 order by created_at`,
     [taskId],
   )
@@ -27,7 +27,7 @@ export async function thenMerge(
   if (ran.status !== 'merging') return ran
   expect(await queuedMerges(taskId)).toEqual([ran.sha])
   await getPool().query(
-    `delete from theokit_jobs where name = 'merge-task' and (input->>'taskId')::int = $1`,
+    `delete from loopzero_jobs where name = 'merge-task' and (input->>'taskId')::int = $1`,
     [taskId],
   )
   return mergeTask(deps, taskId, ran.sha)

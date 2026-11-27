@@ -20,7 +20,7 @@ import {
 /**
  * What the `prioritise` playbook reads, and nothing else: the failures of the last hours and, only for a
  * repository where one test failed on several tasks, its queued `run-task` jobs and their issues. It decides
- * nothing (`queue-order.ts` does). The queue is TheoKit's `theokit_jobs`; it offers no way to reorder it
+ * nothing (`queue-order.ts` does). The queue is LoopZero's `loopzero_jobs`; it offers no way to reorder it
  * (https://github.com/usetheokit/theokit/issues/2117).
  */
 
@@ -33,7 +33,7 @@ export type QueueFactsDeps = {
 async function queuedTasks(deps: QueueFactsDeps, repository: string): Promise<QueuedTask[]> {
   const rows = await deps.db.execute<{ id: number; job_id: string; issue_number: number }>(
     sql`select t.id, j.id as job_id, t.issue_number
-        from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
+        from loopzero_jobs j join task t on t.id = (j.input->>'taskId')::int
         where j.name = 'run-task' and j.failed_at is null
           and (j.locked_until is null or j.locked_until < now()) and t.stage = 'intake' and t.repository = ${repository}
         order by j.available_at, t.id`,

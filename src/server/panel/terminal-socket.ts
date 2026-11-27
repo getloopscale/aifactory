@@ -16,7 +16,7 @@ import {
 
 import { ownerFromNodeRequest } from './session'
 
-/** The socket as the handler needs it: the `ws` object TheoKit hands over, reduced to what is used. */
+/** The socket as the handler needs it: the `ws` object LoopZero hands over, reduced to what is used. */
 export type Socket = { send(data: string): void; close(code?: number, reason?: string): void }
 
 /** What the browser sends. The first message is `open`; the rest need an open terminal. */

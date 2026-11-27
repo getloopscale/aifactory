@@ -1,4 +1,4 @@
-import { evaluateRoutePolicy, type RoutePolicy } from 'theokit/server/define'
+import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/server/define'
 import { describe, expect, it } from 'vitest'
 
 import { GET } from '../routes/panel/metrics'

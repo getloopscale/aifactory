@@ -1,7 +1,11 @@
 import { and, count, desc, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { PostgresJobBackend, createOutbox, createQueueClient } from 'theokit/server/jobs'
-import { getStorageManager } from 'theokit/server/storage'
+import {
+  PostgresJobBackend,
+  createOutbox,
+  createQueueClient,
+} from '@getloopscale/loopzero/server/jobs'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { createPool, getDb, getPool, readDatabaseUrl } from '../db'
@@ -21,7 +25,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table stage_event, task, ingress, external_review, theokit_jobs, repository restart identity cascade',
+    'truncate table stage_event, task, ingress, external_review, loopzero_jobs, repository restart identity cascade',
   )
   await getPool().query("insert into repository (full_name, enabled) values ('paulo/app', true)")
 })
@@ -40,7 +44,7 @@ const delivery = (id: string, payload: unknown = labeled(), event = 'issues'): D
 })
 
 const jobs = async () =>
-  (await getPool().query<{ name: string; input: unknown }>('select name, input from theokit_jobs'))
+  (await getPool().query<{ name: string; input: unknown }>('select name, input from loopzero_jobs'))
     .rows
 
 describe('a delivery and its job', () => {
@@ -184,7 +188,7 @@ describe('an issue that no longer asks for the work', () => {
 
   it('deletes the merge-task job of approved work waiting in merge', async () => {
     const id = await taskIn('merge')
-    await getPool().query(`delete from theokit_jobs`)
+    await getPool().query(`delete from loopzero_jobs`)
     await queue.enqueue('merge-task', { taskId: id, sha: 'abc1234' })
 
     await recordAndQueue(delivery('close', closed()), queue)
@@ -195,7 +199,7 @@ describe('an issue that no longer asks for the work', () => {
 
   it('deletes the resume-task job of a waiting task whose answer was taken', async () => {
     const id = await taskIn('waiting')
-    await getPool().query(`delete from theokit_jobs`)
+    await getPool().query(`delete from loopzero_jobs`)
     await queue.enqueue('resume-task', { taskId: id, questionId: 1 })
 
     await recordAndQueue(delivery('close', closed()), queue)
@@ -206,7 +210,7 @@ describe('an issue that no longer asks for the work', () => {
 
   it('cancels a task whose run a worker holds, and leaves the held job alone', async () => {
     const id = await taskIn('build')
-    await getPool().query(`update theokit_jobs set locked_until = now() + interval '2 minutes'`)
+    await getPool().query(`update loopzero_jobs set locked_until = now() + interval '2 minutes'`)
 
     await recordAndQueue(delivery('close', closed()), queue)
 
@@ -217,7 +221,7 @@ describe('an issue that no longer asks for the work', () => {
   it('leaves alone a job whose lease ran out, since its run may still be going on', async () => {
     const id = await taskIn('build')
     await getPool().query(
-      `update theokit_jobs set locked_until = now() - interval '1 minute', attempts = 1`,
+      `update loopzero_jobs set locked_until = now() - interval '1 minute', attempts = 1`,
     )
 
     await recordAndQueue(delivery('close', closed()), queue)
@@ -290,13 +294,13 @@ describe('an issue that no longer asks for the work', () => {
 
   it('starts a failed task over when the factory label is added again, even with its failed job on file', async () => {
     const id = await taskIn('failed')
-    await getPool().query(`update theokit_jobs set failed_at = now(), attempts = 1`)
+    await getPool().query(`update loopzero_jobs set failed_at = now(), attempts = 1`)
 
     const result = await recordAndQueue(delivery('relabel', changed('labeled')), queue)
 
     expect(result).toEqual({ status: 'task_restarted', taskId: id })
     expect(await stageOf(id)).toBe('intake')
-    const pending = await getPool().query('select input from theokit_jobs where failed_at is null')
+    const pending = await getPool().query('select input from loopzero_jobs where failed_at is null')
     expect(pending.rows).toEqual([{ input: { taskId: id } }])
   })
 

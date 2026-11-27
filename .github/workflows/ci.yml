@@ -44,7 +44,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
       # typecheck, eslint and the route/agent scan in one command
-      - run: pnpm exec theokit check
+      - run: pnpm exec loopzero check
       - run: pnpm test
       - run: pnpm test:integration
       - run: pnpm build

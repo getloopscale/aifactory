@@ -20,7 +20,7 @@ const CHANGESET_FILE = /^\.changeset\/[^/]+\.md$/
  * The changesets that wait to ship: the `.changeset/*.md` files, the README aside, that a comparison of the
  * pre-release branch with the release branch lists as added since their merge base. Being on the branch is
  * not enough: a release whose Version Packages pull request consumed changesets deletes them on the release
- * branch only, and with no back-merge the pre-release branch keeps them (theokit-plugins after #250). Being
+ * branch only, and with no back-merge the pre-release branch keeps them (loopzero-plugins after #250). Being
  * added is not enough either: `changesetsWaiting` in `changed-packages.ts` reads each one and leaves out
  * those that name no package, and adds those still on the release branch, which a failed publication left.
  */
@@ -38,7 +38,7 @@ export const isChangesetFile = (path: string) =>
  * The packages a changeset names: one for each `name: bump` line of its front matter, the name quoted or
  * not. A changeset that names none (`changeset add --empty`, or a front matter written empty by hand)
  * releases nothing. One that reached a release branch made the release workflow take its version branch,
- * version no package and refuse to publish (usetheokit/theokit on 2026-11-13, twelve of them for a private
+ * version no package and refuse to publish (getloopscale/loopzero on 2026-11-13, twelve of them for a private
  * app), so such a file never counts as a changeset that waits, nor as a file a check asked for.
  */
 export function changesetPackages(text: string): string[] {
@@ -82,7 +82,7 @@ const escape = (text: string) => text.replace(/[.+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Whether a package name is in the `ignore` list of `.changeset/config.json`. A star stands for any part
- * of a name that has no slash, so `@theokit/example-*` holds the scope's examples and nothing else.
+ * of a name that has no slash, so `@getloopscale/loopzero-example-*` holds the scope's examples and nothing else.
  */
 export function isIgnored(name: string, ignore: string[]): boolean {
   return ignore.some((pattern) =>
@@ -129,7 +129,7 @@ export function versionedTag(
 /**
  * How long a publication waits, after its Version Packages pull request merged, for a release of every
  * package that merge versioned. The release workflow creates the releases one package at a time, so reading
- * them while it runs finds only some (theokit-gateways, publication 12). Past this, the publication goes on
+ * them while it runs finds only some (loopzero-gateways, publication 12). Past this, the publication goes on
  * with the releases that exist and names the ones that do not, so it never waits forever.
  */
 export const VERSION_RELEASES_WAIT_MS = 30 * 60_000
@@ -264,7 +264,7 @@ export const versionBranchFor = (releaseBranch: string) => `changeset-release/${
 /**
  * Whether the version branch holds versions for this publication: ahead of the release branch and built on the
  * promoted commit (`holdsPromoted`: the branch contains it). A release workflow that may not open pull requests
- * (usetheokit/theokit) pushes it and stops there. One that does not contain the promoted commit belongs to an
+ * (getloopscale/loopzero) pushes it and stops there. One that does not contain the promoted commit belongs to an
  * earlier release. The time the factory recorded the publication says nothing: it can be hours after the push.
  */
 export const versionBranchWaits = (branch: BranchAhead | undefined, holdsPromoted: boolean) =>
@@ -285,7 +285,7 @@ export function versionPullRequestFrom(releaseBranch: string, promotedSha: strin
  * The back-merge a repository's own workflow opens after a release: from the release branch into the
  * integration branch, in the repository itself. Until it lands, the integration branch holds the versions
  * before the release, and a check that compares them with what was published fails on every pull request
- * into it (theokit on 2026-11-11, #37). It is the one pull request into the integration branch the factory
+ * into it (loopzero on 2026-11-11, #37). It is the one pull request into the integration branch the factory
  * merges that is not its own, so anything else, a fork's branch of the same name included, is never it.
  */
 export function pickBackMerge(
@@ -315,10 +315,10 @@ export const CHANGESET_CHECK_PATH = '/tmp/factory-changeset-check.mjs'
  * The checks with the factory's changeset check added when the repository uses changesets. The work starts
  * from the integration branch, so that is what it is compared with. A published package changed with no
  * changeset naming it makes the check exit 1, and the agent is sent back to add one: without it, work
- * reached the release branch and nothing was published (theokit-ui's i18n layer on 2026-11-11). A change to
+ * reached the release branch and nothing was published (loopzero-ui's i18n layer on 2026-11-11). A change to
  * a private or an ignored package passes with no changeset, and an added changeset that names no package
  * fails. `changeset status` could say neither: it counts private packages and takes an empty changeset as
- * an answer (paulohenriquevn/aifactory#67).
+ * an answer (getloopscale/aifactory#67).
  */
 export function withChangesetCheck(
   checks: CheckSpec[],

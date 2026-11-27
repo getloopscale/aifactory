@@ -1,6 +1,6 @@
 {
-  "commit": "14cab5c788510ae73e6f61fdadaa27b902c3acd3",
-  "ranAt": "2026-11-24T06:24:16.465Z",
+  "commit": "0c1e8c8af120fb9a4b213e9acf4cdf50d268d3fa",
+  "ranAt": "2026-11-26T16:51:30.288Z",
   "setup": {
     "paulohenriquevn/aifactory-playground builder": "claude-code",
     "paulohenriquevn/aifactory-playground builderModel": "default",
@@ -157,25 +157,56 @@
       "id": "usetheokit/theokit-plugins#235",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.8240597,
-      "durationMs": 613697,
-      "attempts": 1,
-      "reviewRounds": 1,
+      "costUsd": 2.3469085,
+      "costByRole": {
+        "builder": 1.7219515000000003,
+        "reviewer": 0.22561609999999999,
+        "security": 0.20281909999999997,
+        "lens": 0.1965218
+      },
+      "durationMs": 1280840,
+      "attempts": 2,
+      "reviewRounds": 2,
       "reachedVerdict": true,
       "reviews": [
         {
-          "verdict": "approve",
-          "summary": "`createWakeWordDetector` is an on-device detector that matches enrolled \"theo\" clips against the microphone stream. The headless-Chromium end-to-end test with real speech WAVs passes. A held-out \"theo\" fires the wake event and starts recording. The no-wake sentence fires nothing and sends no STT request. I ran both wake-word test files and all 9 tests passed.",
+          "verdict": "changes",
+          "summary": "The detector works end to end: the browser test fires on the 'theo' fixture, stays silent on the negatives, and the 34 tests in the three touched files pass. But A4 is not shown by any test. No test opens the microphone and audio graph and then checks that `stop()` or `release()` actually frees them.",
           "findings": [
             {
-              "severity": "minor",
-              "file": "packages/plugin-voice/src/wake-word.ts",
-              "issue": "After a wake, `state()` stays `triggered` even if the app calls `stop()`, and a later `start()` is allowed from that state. This is a small lifecycle ambiguity. The README should say that `start()` re-arms the detector, or `stop()` should reset the state to `idle`."
+              "severity": "major",
+              "file": "packages/plugin-voice/tests/wake-word.test.ts",
+              "issue": "A4 says stopping or releasing frees the microphone and audio-processing resources, and the plan names wake-word.test.ts lifecycle cases as the evidence. The only lifecycle tests (lines 146-158) cover idempotence when nothing is open, plus start() failures. No test opens a graph with a stubbed getUserMedia, AudioContext and AudioWorkletNode and then asserts the following after release(): every track is stopped; ctx.close() is called; URL.revokeObjectURL is called; the node, source and gain are disconnected; and an active recording is ended. The browser test checks only that state() returns 'idl",
+              "class": "untested-resource-lifecycle"
             },
             {
               "severity": "minor",
-              "file": "packages/plugin-voice/tests/wake-word.e2e.test.ts",
-              "issue": "The negative case always waits a fixed 14 seconds, which makes the test slow. It also pulls `@sparticuz/chromium` and `puppeteer-core` into the normal test run. The Chromium unpack works only because of the `AWS_EXECUTION_ENV` workaround. This is acceptable, but it could be flaky in other environments."
+              "file": "packages/plugin-voice/src/wake-word.ts",
+              "issue": "In fire(), release() or stop() during `await recorder.start()` is not re-checked afterwards. onWake can then fire on a detector that is already idle or released. Check the epoch or state after the await and skip onWake if the detector was stopped.",
+              "class": "lifecycle-race"
+            },
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/tests/wake-word.browser.test.ts",
+              "issue": "The sentence fixture (no-wake.wav) is rejected by the 1.8 s length gate, so it never reaches DTW matching. Only no-wake-short.wav tests the distance match, and the second short-word fixture is not used in the browser test. The README documents that 'theo, turn on the light' in one breath will not fire, which is a real limit on the feature. Consider running no-wake-short-2.wav in the browser test as well.",
+              "class": "weak-negative-test"
+            },
+            {
+              "severity": "major",
+              "class": "acceptance",
+              "issue": "acceptance A4 not met, or not answered by the review: Stopping or releasing the detector releases microphone and audio-processing resources and surfaces errors."
+            }
+          ]
+        },
+        {
+          "verdict": "approve",
+          "summary": "The A4 lifecycle finding from cc41ddc is fixed. A new stubbed-audio-graph block in wake-word.test.ts covers release, stop, resource cleanup, and the races. The wake-word.test.ts and recorder.test.ts suites pass (40 tests). I did not re-run the browser test or read the full diff.",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "packages/plugin-voice/package.json",
+              "issue": "The builder added playwright-core and @sparticuz/chromium as devDependencies. The plan lists package.json and the lockfile for browser-test dependencies, so this is in scope. The owner should check that the Chromium bundle suits CI.",
+              "class": "scope"
             }
           ]
         }
@@ -213,22 +244,22 @@
       "id": "paulohenriquevn/aifactory-playground#61",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.0887114,
-      "durationMs": 41962,
+      "costUsd": 0.13915519999999998,
+      "costByRole": {
+        "builder": 0.05582249999999998,
+        "reviewer": 0.0477678,
+        "security": 0,
+        "lens": 0.035564899999999997
+      },
+      "durationMs": 70586,
       "attempts": 1,
       "reviewRounds": 1,
       "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "`truncate` meets every point in the issue. It lives in `src/truncate.js` with a named export, and the diff touches only the two planned files. The full `npm test` run passes with 11 tests, and the README has no helper list to update.",
-          "findings": [
-            {
-              "severity": "minor",
-              "file": "src/truncate.js",
-              "issue": "`truncate` doesn't validate that `text` is a string. A non-string such as `null` throws a `TypeError` from `Array.from`, and a number or array gives odd results. The issue doesn't require validation, so this is optional."
-            }
-          ]
+          "summary": "truncate(text, max) matches the issue and the plan, and the tests check each criterion. npm test passes (11/11), only the two planned files changed, and nothing under .github/ was touched.",
+          "findings": []
         }
       ]
     },
@@ -387,30 +418,27 @@
       "id": "usetheokit/theokit-gateways#348",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.3550948,
-      "durationMs": 834825,
-      "attempts": 1,
+      "costUsd": 1.2621228,
+      "costByRole": {
+        "builder": 0.907862,
+        "reviewer": 0.1314428,
+        "security": 0.10718470000000001,
+        "lens": 0.1156333
+      },
+      "durationMs": 1824686,
+      "attempts": 2,
       "reviewRounds": 1,
       "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "A first connect now takes UIDNEXT-1 as the baseline and dispatches only newer mail. `connect()` resolves before any dispatch, the fetch is UID-restricted, and the cursor resets when UIDVALIDITY changes. There is a restart/persistence test and a store seam. I read the diff and did not run the tests. The remaining gaps are minor.",
+          "summary": "First connect now takes a UIDVALIDITY/UIDNEXT baseline, start resolves before any dispatch, and a serialized UID-ordered drain with a persisted cursor, UIDVALIDITY reset and an opt-in capped backlog is in place; tests and lint pass. One minor edge: a failed second fetch loses the one-time opt-in backlog.",
           "findings": [
             {
               "severity": "minor",
               "file": "packages/gateway-email/src/adapter.ts",
-              "issue": "`seenUids` and `pendingSeen` are not cleared when the cursor resets for a UIDVALIDITY change. They are only cleared in `disconnect()`. If the reset happens on a reconnect without a disconnect, reused UIDs would be skipped as already seen, and stale pending `\\Seen` flags could land on new mail. Clear both sets in `_establishCursor` when the baseline is reset."
-            },
-            {
-              "severity": "minor",
-              "file": "packages/gateway-email/tests/adapter.test.ts",
-              "issue": "No test covers overlapping drains, which the plan listed. The builder said so. Add one for the IDLE event plus the initial drain running together, checking the cursor stays monotonic and nothing is dispatched twice."
-            },
-            {
-              "severity": "minor",
-              "file": "packages/gateway-email/src/imap-client.ts",
-              "issue": "`mailboxState()` and the UID-range fetch against real imapflow are untested. The `uidValidity` cast to `Number` could lose precision on a bigint above 2^53. UIDVALIDITY is a 32-bit value, so this is unlikely to matter."
+              "issue": "In _drainUnseen, backlogPending is cleared after the backlog fetch succeeds. If the following fetchUnseen(cursor+1) throws, the function returns and the fetched backlog is never dispatched. Clear backlogPending only after the backlog is dispatched, or hold the fetched backlog until it is.",
+              "class": "lost one-shot state on partial failure"
             }
           ]
         }
@@ -419,10 +447,16 @@
     {
       "id": "usetheokit/theokit-sdk#975",
       "passed": false,
-      "reason": "no time left for another agent pass: 38 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
-      "costUsd": 0.4554885000000001,
-      "durationMs": 2296588,
-      "attempts": 3,
+      "reason": "no time left for another agent pass: 32 of the sandbox's 60 minutes are gone, and the checks and the review need the rest",
+      "costUsd": 0.4344262,
+      "costByRole": {
+        "builder": 0.4344262,
+        "reviewer": 0,
+        "security": 0,
+        "lens": 0
+      },
+      "durationMs": 1970287,
+      "attempts": 2,
       "reviewRounds": 0,
       "reachedVerdict": false,
       "reviews": []
@@ -679,16 +713,29 @@
       "id": "usetheokit/theokit#1685",
       "passed": true,
       "reason": "approved",
-      "costUsd": 0.1275064,
-      "durationMs": 328594,
+      "costUsd": 0.2293831,
+      "costByRole": {
+        "builder": 0.06476490000000003,
+        "reviewer": 0.0571736,
+        "security": 0.05595359999999999,
+        "lens": 0.051490999999999995
+      },
+      "durationMs": 582442,
       "attempts": 1,
       "reviewRounds": 1,
       "reachedVerdict": true,
       "reviews": [
         {
           "verdict": "approve",
-          "summary": "Both dependencies are pinned exactly in the manifest and the lockfile specifiers match. The focused test passes, and there are no unrelated changes or exception-list entries.",
-          "findings": []
+          "summary": "mammoth and unpdf are pinned to 1.13.0 and 2.1.0 in the manifest and the lockfile importer, with no exception added. The exact-versions test file passes (29 tests).",
+          "findings": [
+            {
+              "severity": "minor",
+              "file": "apps/theoclaw/tools/check-exact-versions.test.mjs",
+              "issue": "The new test hard-codes the two versions, so it fails on every deliberate upgrade. The existing 'no range' test already covers the requirement. The builder also never ran it against the old ranges, so it was never seen failing.",
+              "class": "test-coverage"
+            }
+          ]
         }
       ]
     },
@@ -985,12 +1032,12 @@
       ]
     }
   ],
-  "spentUsd": 23.289743007999995,
+  "spentUsd": 25.850878007999995,
   "summary": {
     "cases": 30,
     "passed": 28,
     "passRate": 0.9333333333333333,
-    "meanCostUsd": 0.68641363,
-    "meanDurationMs": 977294.9666666667
+    "meanCostUsd": 0.7717847966666667,
+    "meanDurationMs": 1031067.4666666667
   }
 }

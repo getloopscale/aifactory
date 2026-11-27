@@ -1,4 +1,4 @@
-import { Badge, Button } from '@usetheo/ui'
+import { Badge, Button } from '@getloopscale/ui'
 import { Repeat } from 'lucide-react'
 import { useEffect, useState } from 'react'
 

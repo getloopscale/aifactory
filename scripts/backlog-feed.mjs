@@ -2,7 +2,7 @@
 // Feeds the backlog of the squad that preceded the factory to the factory, one issue per open item, and
 // records what became of each. It can be stopped and started again: the state file says where it was.
 //
-//   node scripts/backlog-feed.mjs --backlog ~/theokit/BACKLOG.md [--concurrency 1] [--limit 10]
+//   node scripts/backlog-feed.mjs --backlog ~/loopzero/BACKLOG.md [--concurrency 1] [--limit 10]
 //        [--only B-1,B-2] [--dry-run] [--state .backlog-feed/state.json]
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -56,7 +56,7 @@ let cookie
 async function login() {
   const r = await fetch(`${BASE}/api/panel/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-theo-action': '1' },
+    headers: { 'content-type': 'application/json', 'x-loopzero-action': '1' },
     body: JSON.stringify({ token: panelToken() }),
   })
   if (!r.ok) throw new Error(`the panel refused the login (${r.status})`)
@@ -68,7 +68,7 @@ async function attempt(method, path, body) {
     if (!cookie) await login()
     const r = await fetch(`${BASE}${path}`, {
       method,
-      headers: { 'content-type': 'application/json', 'x-theo-action': '1', cookie },
+      headers: { 'content-type': 'application/json', 'x-loopzero-action': '1', cookie },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     if (r.status === 401 || r.status === 403) {
@@ -258,7 +258,7 @@ function onDevelop(item) {
 }
 
 function fetchClones() {
-  for (const repo of ['theokit', 'theokit-gateways', 'theokit-sdk']) {
+  for (const repo of ['loopzero', 'loopzero-gateways', 'loopzero-sdk']) {
     const clone = resolve(CLONES, repo)
     if (!existsSync(clone)) continue
     try {

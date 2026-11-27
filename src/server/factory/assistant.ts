@@ -4,8 +4,8 @@ import {
   compileAgentDefinition,
   Provider,
   type ContextualTool,
-} from '@theokit/agents'
-import { resolveProvider } from 'theokit/server/agent'
+} from '@getloopscale/loopzero-agents'
+import { resolveProvider } from '@getloopscale/loopzero/server/agent'
 import { z } from 'zod'
 
 import { onlyTools } from '../agents/hooks/only-tools'
@@ -65,7 +65,7 @@ export type OneShot = (message: string) => Promise<{ response: string; cost: num
 /**
  * An assistant that answers one message with nobody watching, as the coordinator's drafter and the
  * scheduler's readiness judge do: built by `buildAssistant` and run once per call, within `budgetUsd`. The key
- * comes from the model's provider, as TheoKit resolves it for the panel's assistants.
+ * comes from the model's provider, as LoopZero resolves it for the panel's assistants.
  */
 export function oneShotAssistant(
   name: string,

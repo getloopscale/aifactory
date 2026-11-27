@@ -1,7 +1,7 @@
 import { Hand } from 'lucide-react'
 import { useState } from 'react'
 
-import { Button, Textarea } from '@usetheo/ui'
+import { Button, Textarea } from '@getloopscale/ui'
 
 import type { TaskDetail } from '../../shared/panel'
 import { post } from '../lib/api'
@@ -10,6 +10,7 @@ import type { Copy } from '../lib/copy/en'
 
 import { Assist } from './Assist'
 import { READABLE, Surface } from './ui/Surface'
+import { enterSends } from '../lib/enter-sends'
 
 /** What the panel says once a release was asked for: made, or waiting for the release branch's checks. */
 function released(t: Copy, answer: unknown): string {
@@ -241,6 +242,10 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
               autoFocus
               value={note}
               onChange={(e) => setNote(e.target.value)}
+              onKeyDown={enterSends(() => {
+                if (!busy && note.trim() !== '')
+                  void run('changes', { note }, t.taskActions.sentBack)
+              })}
               rows={3}
               placeholder={t.taskActions.changesPlaceholder}
               className="mt-1 w-full"
@@ -271,6 +276,10 @@ export function TaskActions({ detail, onDone }: { detail: TaskDetail; onDone: ()
               autoFocus
               value={resolution}
               onChange={(e) => setResolution(e.target.value)}
+              onKeyDown={enterSends(() => {
+                if (!busy && resolution.trim() !== '')
+                  void run('resolve', { note: resolution }, t.taskActions.resolvedMessage)
+              })}
               rows={2}
               placeholder={t.taskActions.resolvePlaceholder}
               className="mt-1 w-full"

@@ -1,4 +1,4 @@
-import { Badge, Progress } from '@usetheo/ui'
+import { Badge, Progress } from '@getloopscale/ui'
 import { Bot, Coins, FolderGit2 } from 'lucide-react'
 import { useMemo } from 'react'
 

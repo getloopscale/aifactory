@@ -1,102 +1,72 @@
 # aifactory
 
-Software factory que transforma issues do GitHub em pull requests verificadas, com agentes de
-programação em sandboxes na nuvem. É uma ferramenta pessoal, open source e single-tenant, com
-suporte a vários projetos.
+A software factory that turns GitHub issues into verified pull requests, with coding agents in cloud sandboxes. It is a personal tool, open source and single-tenant, with support for several projects.
 
-Feita com [TheoKit](https://theokit.dev). O [plano](docs/PLAN.md) traz os marcos M0 a M7, e
-[como a fábrica funciona](docs/como-funciona.md) descreve o fluxo, o isolamento, a evidência e o
-uso do Claude Code e do Codex. Os marcos M0 a M7 estão concluídos: uma issue com a label `factory`
-chega a um pull request, aberto só com os checks verdes no commit enviado e a aprovação de um
-revisor independente, com até três tentativas de retrabalho na mesma sessão do agente. O Claude Code
-funciona por chave de API ou por assinatura. O Codex também completa uma issue, como construtor e como
-revisor. Quando o agente precisa
-de uma decisão, ele pergunta na issue e a task espera a resposta de quem tem acesso de escrita.
-O painel local (quadro, caixa de entrada, detalhe, aprovar, pedir mudanças e tentar de novo) mostra
-tudo ao vivo. Todo repositório tem três branches: `workspace` integra (a fábrica mergeia o próprio PR ali,
-sem governança, quando os checks passam e o review aprova), `develop` é a pré-release (avança a cada
-integração, com uma tag de pré-release) e `main` é a release, uma promoção de `develop` feita por um
-humano pelo painel ou por um agente, conforme `FACTORY_RELEASE_MODE`. Depois de um release, um vigia olha os checks do merge na `main` e, se ficarem
-vermelhos, abre um PR de revert que a fábrica nunca mergeia. A página Health do painel mostra o custo
-por execução e o que o supervisor achou de errado (`stalled`, `orphaned`), e o CI cobra CRAP, duplicação
-e mutação.
+Built with [LoopZero](https://loopzero.dev). The [plan](docs/PLAN.md) lists milestones M0 to M7, and [how the factory works](docs/como-funciona.md) describes the flow, the isolation, the evidence and the use of Claude Code and Codex. Both documents are in Portuguese.
 
-## Primeiros passos, pelo painel
+Milestones M0 to M7 are done:
 
-Com o servidor no ar (`scripts/install-services.sh`, ou `pnpm dev`), abra `http://localhost:3000` e entre
-com o token de `FACTORY_PANEL_TOKEN`.
+- An issue with the `factory` label reaches a pull request. The pull request opens only with green checks on the pushed commit and the approval of an independent reviewer, with up to three rework attempts in the same agent session.
+- Claude Code works with an API key or with a subscription. Codex also completes an issue, as builder and as reviewer.
+- When the agent needs a decision, it asks on the issue, and the task waits for an answer from someone with write access.
+- The local panel (board, inbox, detail, approve, request changes and retry) shows everything live.
+- Every repository has three branches. `workspace` integrates: the factory merges its own pull request there, without governance, when the checks pass and the review approves. `develop` is the pre-release: it advances on every integration, with a pre-release tag. `main` is the release, a promotion of `develop` made by a human from the panel or by an agent, according to `FACTORY_RELEASE_MODE`.
+- After a release, a watcher looks at the checks of the merge on `main` and, if they turn red, opens a revert pull request that the factory never merges.
+- The panel's Health page shows the cost per run and what the supervisor found wrong (`stalled`, `orphaned`), and CI enforces CRAP, duplication and mutation.
 
-1. A página Setup mostra o que falta e leva à página que conserta.
-2. Em Repositories, o botão "Install on GitHub" abre o GitHub, onde você escolhe a conta ou a
-   organização e o que a App alcança, e o painel percebe quando a instalação termina. Habilite os repositórios em que a fábrica pode trabalhar e ajuste os checks, os
-   domínios e os agentes de cada um. Ao habilitar, o doctor examina o repositório e diz o que bloqueia
-   (Issues desligadas, CI mudo, um check exigido sem par na fábrica), com o reparo e o link.
-3. Em Plans, escreva o objetivo, revise as issues que o agente propõe e crie-as (já iniciadas ou não).
-4. O botão New job no quadro abre uma issue avulsa.
-5. Acompanhe no quadro, aprove, peça mudanças e faça o release.
+## First steps, from the panel
 
-Em toda caixa de texto há um botão "Help me say it" (ou "Set this up for me", nos checks de um
-repositório): diga o que quer com as suas palavras e o assistente escreve o que a fábrica precisa. Nada muda
-até você apertar "Use this". Precisa de `ANTHROPIC_API_KEY` no servidor.
+With the server running (`scripts/install-services.sh`, or `pnpm dev`), open `http://localhost:3000` and sign in with the token from `FACTORY_PANEL_TOKEN`.
 
-Detalhes em [como a fábrica funciona](docs/como-funciona.md#do-zero-ao-primeiro-pr-pelo-painel).
+1. The Setup page shows what is missing and takes you to the page that fixes it.
+2. In Repositories, the "Install on GitHub" button opens GitHub, where you choose the account or the organization and what the App can reach, and the panel notices when the installation finishes. Enable the repositories the factory may work on and adjust the checks, the domains and the agents of each one. When you enable a repository, the doctor examines it and says what blocks it (Issues turned off, silent CI, a required check with no counterpart in the factory), with the repair and the link.
+3. In Plans, write the goal, review the issues the agent proposes and create them, started or not.
+4. The New job button on the board opens a single issue.
+5. Follow the work on the board, approve, request changes and release.
 
-## Rodando localmente
+Every text box has a "Help me say it" button (or "Set this up for me", on a repository's checks): say what you want in your own words and the assistant writes what the factory needs. Nothing changes until you press "Use this". It needs `ANTHROPIC_API_KEY` on the server.
+
+Details in [how the factory works](docs/como-funciona.md#do-zero-ao-primeiro-pr-pelo-painel).
+
+## Running locally
 
 ```bash
 pnpm install
-docker compose up -d                 # Postgres 17 na porta 54329 (só em 127.0.0.1)
-cp .env.example .env                 # DATABASE_URL já aponta para o Compose
-pnpm db:migrate                      # cria as tabelas ingress e task
+docker compose up -d                 # Postgres 17 on port 54329 (127.0.0.1 only)
+cp .env.example .env                 # DATABASE_URL already points at Compose
+pnpm db:migrate                      # creates the ingress and task tables
 pnpm dev
 ```
 
-| Rota              | Resposta                                                             |
-| ----------------- | -------------------------------------------------------------------- |
-| `GET /api/health` | 200 sempre que o processo está de pé                                 |
-| `GET /api/ready`  | 200 com o Postgres respondendo, 503 com o motivo quando não responde |
+| Route             | Response                                                        |
+| ----------------- | --------------------------------------------------------------- |
+| `GET /api/health` | 200 whenever the process is up                                  |
+| `GET /api/ready`  | 200 when Postgres answers, 503 with the reason when it does not |
 
-### Webhook do GitHub
+### GitHub webhook
 
-`POST /api/webhooks/github` recebe as entregas. A GitHub App entrega os eventos `Issues` de todos os
-repositórios em que está instalada, com o secret de `GITHUB_WEBHOOK_SECRET`; sem a App, configure no
-repositório um webhook de eventos `Issues`, com conteúdo `application/json` e o mesmo secret.
+`POST /api/webhooks/github` receives the deliveries. The GitHub App delivers the `Issues` events of every repository it is installed on, with the secret from `GITHUB_WEBHOOK_SECRET`. Without the App, configure on the repository a webhook for `Issues` events, with content type `application/json` and the same secret.
 
-- Uma issue que recebe a label `factory`, ou que é aberta com ela, vira uma task em `intake`.
-- Um comentário (`issue_comment`, `pull_request_review_comment`), um review enviado
-  (`pull_request_review`), um check concluído (`check_suite`, `check_run`) e uma issue fechada,
-  reaberta ou que perde a label `factory` são reconhecidos e gravados com o resultado `routed` e
-  um código próprio. Por enquanto nada age sobre eles: não criam task nem job. A App precisa
-  assinar esses eventos para recebê-los, e a página Setup diz quais faltam.
-- Cada entrega fica em `ingress`, com o resultado, um código e o motivo. Uma entrega repetida
-  (mesmo `X-GitHub-Delivery`) não muda nada. Uma issue tem no máximo uma task, mesmo que a label
-  seja removida e posta de novo.
-- Quando a entrega cria uma task, o job `run-task` entra na fila na mesma transação (job do
-  TheoKit, em Postgres). O worker do `theokit start` o executa: sandbox isolado, agente e push de
-  `factory/<n>`.
-- A assinatura `X-Hub-Signature-256` é verificada sobre o corpo bruto antes de qualquer escrita.
-  Assinatura inválida ou ausente responde 401. Sem `GITHUB_WEBHOOK_SECRET` a rota responde 503.
+- An issue that receives the `factory` label, or is opened with it, becomes a task in `intake`.
+- A comment (`issue_comment`, `pull_request_review_comment`), a submitted review (`pull_request_review`), a completed check (`check_suite`, `check_run`) and an issue that is closed, reopened or loses the `factory` label are recognized and stored with the result `routed` and a code of their own. For now nothing acts on them: they create neither task nor job. The App has to subscribe to these events to receive them, and the Setup page says which ones are missing.
+- Every delivery is stored in `ingress`, with the result, a code and the reason. A repeated delivery (same `X-GitHub-Delivery`) changes nothing. An issue has at most one task, even if the label is removed and added again.
+- When the delivery creates a task, the `run-task` job enters the queue in the same transaction (a LoopZero job, in Postgres). The `loopzero start` worker runs it: isolated sandbox, agent and push of `factory/<n>`.
+- The `X-Hub-Signature-256` signature is verified over the raw body before any write. An invalid or missing signature answers 401. Without `GITHUB_WEBHOOK_SECRET` the route answers 503.
 
-### Painel
+### Panel
 
-`http://localhost:3000`, com o token de `FACTORY_PANEL_TOKEN`. A tela inicial é um chat com o assistente
-da fábrica (OpenRouter com `OPENROUTER_API_KEY`, ou a sua assinatura do ChatGPT, conectada no próprio
-chat); o quadro e as outras páginas ficam na aba Work. Para ver uma mudança de interface sem tocar nos
-serviços, `FACTORY_JOBS=off FACTORY_WORKER_ONLY=1 PORT=3010 pnpm dev` sobe uma prévia que não pega jobs.
-O servidor deve escutar só nesta
-máquina (`HOST=127.0.0.1 pnpm start`): o painel não passa pelo túnel, que só deixa o webhook e o health
-check saírem. Veja [como a fábrica funciona](docs/como-funciona.md#o-painel).
+`http://localhost:3000`, with the token from `FACTORY_PANEL_TOKEN`. The home screen is a chat with the factory's assistant (OpenRouter with `OPENROUTER_API_KEY`, or your ChatGPT subscription, connected in the chat itself); the board and the other pages are in the Work tab. To see an interface change without touching the services, `FACTORY_JOBS=off FACTORY_WORKER_ONLY=1 PORT=3010 pnpm dev` starts a preview that takes no jobs.
 
-### Exposição pública
+The server should listen only on this machine (`HOST=127.0.0.1 pnpm start`): the panel does not go through the tunnel, which lets only the webhook and the health check out. See [how the factory works](docs/como-funciona.md#o-painel).
 
-O webhook precisa de uma URL pública. A fábrica usa um Cloudflare Tunnel para `factory.aquim.ai`,
-criado a partir desta máquina, que expõe **só** o webhook e o health check; qualquer outro caminho
-responde 404 na borda da Cloudflare.
+### Public exposure
+
+The webhook needs a public URL. The factory uses a Cloudflare Tunnel to `factory.aquim.ai`, created from this machine, that exposes **only** the webhook and the health check; any other path answers 404 at the Cloudflare edge.
 
 ```yaml
-# ~/.cloudflared/aifactory.yml (fora do repositório; a credencial do túnel fica em ~/.cloudflared/)
-tunnel: <id do túnel>
-credentials-file: /home/<usuário>/.cloudflared/<id do túnel>.json
+# ~/.cloudflared/aifactory.yml (outside the repository; the tunnel credential is in ~/.cloudflared/)
+tunnel: <tunnel id>
+credentials-file: /home/<user>/.cloudflared/<tunnel id>.json
 ingress:
   - hostname: factory.aquim.ai
     path: ^/api/(webhooks/github|health)$
@@ -108,100 +78,78 @@ ingress:
 cloudflared tunnel --config ~/.cloudflared/aifactory.yml run aifactory
 ```
 
-O webhook do GitHub App aponta para essa URL (`node --env-file=.env.local
-scripts/github-app-webhook.mjs https://factory.aquim.ai/api/webhooks/github` grava a URL, o tipo de
-conteúdo e o secret). A API do GitHub não liga o webhook do App: a caixa "Active" fica na página de
-configurações do App, e o GitHub pede a confirmação de acesso (sudo) para abri-la. No repositório de
-teste há também um webhook próprio do repositório, com a mesma URL e o mesmo secret.
+The GitHub App webhook points at that URL (`node --env-file=.env.local scripts/github-app-webhook.mjs https://factory.aquim.ai/api/webhooks/github` writes the URL, the content type and the secret). The GitHub API does not turn the App webhook on: the "Active" box is on the App's settings page, and GitHub asks for access confirmation (sudo) to open it. The test repository also has a webhook of its own, with the same URL and the same secret.
 
-### Notificações no celular (Web Push)
+### Notifications on the phone (Web Push)
 
-Com o painel fechado, uma tarefa que espera uma resposta não avisa ninguém. Com as chaves abaixo, o
-cron `push-attention` manda um Web Push, a cada minuto, para os aparelhos em que o dono ligou as
-notificações (Configuração, "Notificações neste dispositivo"). Sem as três variáveis o push fica
-desligado: as rotas dizem que não está configurado e nada é enviado.
+With the panel closed, a task waiting for an answer notifies nobody. With the keys below, the `push-attention` cron sends a Web Push, every minute, to the devices on which the owner turned notifications on (Configuration, "Notifications on this device"). Without the three variables push stays off: the routes say it is not configured and nothing is sent.
 
 ```bash
-pnpm push:keys   # imprime FACTORY_PUSH_PUBLIC_KEY, FACTORY_PUSH_PRIVATE_KEY e FACTORY_PANEL_ORIGIN
+pnpm push:keys   # prints FACTORY_PUSH_PUBLIC_KEY, FACTORY_PUSH_PRIVATE_KEY and FACTORY_PANEL_ORIGIN
 ```
 
-Ponha as três linhas no ambiente do servidor. `FACTORY_PANEL_ORIGIN` é a origem HTTPS em que o dono
-abre o painel; o navegador só aceita push em HTTPS. Nos aparelhos do próprio dono, o `tailscale serve`
-dá esse HTTPS sem expor nada à internet:
+Put the three lines in the server's environment. `FACTORY_PANEL_ORIGIN` is the HTTPS origin on which the owner opens the panel; the browser only accepts push over HTTPS. On the owner's own devices, `tailscale serve` gives that HTTPS without exposing anything to the internet:
 
 ```bash
 tailscale serve --bg --https=443 http://127.0.0.1:3000
-# o painel abre em https://<máquina>.<tailnet>.ts.net, e essa é a FACTORY_PANEL_ORIGIN
+# the panel opens at https://<machine>.<tailnet>.ts.net, and that is the FACTORY_PANEL_ORIGIN
 ```
 
-A chave privada só o servidor lê; ela não vai para log nem para resposta. O Cloudflare Tunnel não muda:
-continua deixando passar só o webhook e o health check, e o painel nunca passa por ele.
+Only the server reads the private key; it goes to no log and no response. The Cloudflare Tunnel does not change: it still lets only the webhook and the health check through, and the panel never goes through it.
 
 ### Readiness
 
-Sem `DATABASE_URL` o servidor sobe e `/api/ready` responde 503 com "Database "main" not
-configured". Com `DATABASE_URL` que não é uma URL `postgres://`, o `theokit` recusa iniciar e
-mostra o erro de configuração.
+Without `DATABASE_URL` the server starts and `/api/ready` answers 503 with "Database "main" not configured". With a `DATABASE_URL` that is not a `postgres://` URL, `@getloopscale/loopzero` refuses to start and shows the configuration error.
 
-## Comandos
+## Commands
 
 ```bash
-pnpm dev                # servidor de desenvolvimento
+pnpm dev                # development server
 pnpm build && pnpm start
 pnpm typecheck
 pnpm lint
 pnpm format:check
-pnpm test               # unidade
-pnpm test:integration   # exige Postgres e DATABASE_URL exportada
-pnpm test:e2e           # GitHub, Vercel Sandbox e Postgres reais; exige o .env.local
-pnpm quality            # cobertura, CRAP, duplicação e mutação (os gates dos jobs `quality` e `mutation` do CI)
-FACTORY_LIVE=1 pnpm test:e2e -t "real agent"   # com o Claude Code de verdade; custa centavos
-pnpm db:generate        # drizzle-kit: gera migrations a partir do schema
+pnpm test               # unit
+pnpm test:integration   # needs Postgres and DATABASE_URL exported
+pnpm test:e2e           # real GitHub, Vercel Sandbox and Postgres; needs .env.local
+pnpm quality            # coverage, CRAP, duplication and mutation (the gates of the CI jobs `quality` and `mutation`)
+FACTORY_LIVE=1 pnpm test:e2e -t "real agent"   # with the real Claude Code; costs cents
+pnpm db:generate        # drizzle-kit: generates migrations from the schema
 pnpm db:migrate
 ```
 
-Os testes de integração falham quando `DATABASE_URL` não está definida. Uma suíte pulada em
-silêncio passaria por verde. Eles nunca rodam no banco da fábrica: um arquivo de setup aponta as
-suítes para `<nome>_test` no mesmo servidor, que é criado sozinho, porque elas truncam as tabelas e
-o banco real guarda as tasks.
+The integration tests fail when `DATABASE_URL` is not set. A suite skipped in silence would pass for green. They never run on the factory's database: a setup file points the suites at `<name>_test` on the same server, which is created automatically, because they truncate the tables and the real database holds the tasks.
 
-## Estrutura
+## Structure
 
 ```
-src/app/              frontend (React, roteamento por arquivos)
+src/app/              frontend (React, file routing)
 src/server/
-  db/                 Postgres: config, pool, schema Drizzle e sonda de saúde
-  ingest/             decisão sobre cada entrega do GitHub e persistência de ingress e task
-  factory/            execução de uma task: sandbox isolado, agente, push de factory/<n>, estágios
-  github/             autenticação do GitHub App e leitura de issues
-  panel/              consultas, ações, sessão e eventos do painel
-  crons/              poll-answers (respostas), watch-main (vigia da main) e supervise (saúde)
-src/shared/           contratos que o servidor e a interface leem
-src/app/              a interface do painel (React)
-  routes/             rotas HTTP (health, ready, webhooks/github)
-drizzle/              migrations geradas pelo drizzle-kit
-scripts/               registro e verificação do GitHub App (ADR 0004)
-spikes/vercel-sandbox/ scripts que verificam o Vercel Sandbox (ADR 0003); rodam com `.env.local`
-.theokit/             contexto de agente (THEO.md, rules, personalities), versionado
-docs/PLAN.md          plano, marcos e ponto de retomada
-docs/como-funciona.md  o fluxo da fábrica, o isolamento e os agentes
-docs/adr/             decisões de arquitetura
-theo.config.ts        configuração do TheoKit, inclusive o bloco `storage`
+  db/                 Postgres: config, pool, Drizzle schema and health probe
+  ingest/             decision on each GitHub delivery and persistence of ingress and task
+  factory/            running a task: isolated sandbox, agent, push of factory/<n>, stages
+  github/             GitHub App authentication and issue reading
+  panel/              queries, actions, session and events of the panel
+  crons/              poll-answers (answers), watch-main (watcher of main) and supervise (health)
+src/shared/           contracts that the server and the interface read
+src/app/              the panel interface (React)
+  routes/             HTTP routes (health, ready, webhooks/github)
+drizzle/              migrations generated by drizzle-kit
+scripts/               registration and verification of the GitHub App (ADR 0004)
+spikes/vercel-sandbox/ scripts that verify Vercel Sandbox (ADR 0003); they run with `.env.local`
+.loopzero/             agent context (LOOPZERO.md, rules, personalities), versioned
+docs/PLAN.md          plan, milestones and resume point
+docs/como-funciona.md  the factory's flow, the isolation and the agents
+docs/adr/             architecture decisions
+loopzero.config.ts        LoopZero configuration, including the `storage` block
 ```
 
-### Banco de dados
+### Database
 
-O pool do Postgres pertence ao `StorageManager` do TheoKit: `getPool()` chama
-`getStorageManager().usePostgres('main', ...)`. O manager encerra o pool no desligamento e registra
-um aviso, sem derrubar o processo, quando o Postgres derruba uma conexão ociosa
-([usetheokit/theokit#1019](https://github.com/usetheokit/theokit/issues/1019)).
+The Postgres pool belongs to LoopZero's `StorageManager`: `getPool()` calls `getStorageManager().usePostgres('main', ...)`. The manager closes the pool on shutdown and logs a warning, without bringing the process down, when Postgres drops an idle connection ([usetheokit/theokit#1019](https://github.com/usetheokit/theokit/issues/1019)).
 
-O TheoKit lê credenciais como campos e não lê `DATABASE_URL`. Por isso `theo.config.ts` separa a
-URL em servidor e banco (`src/server/db/config.ts`) e o `drizzle-kit` continua usando a mesma
-variável.
+LoopZero reads credentials as fields and does not read `DATABASE_URL`. That is why `loopzero.config.ts` splits the URL into server and database (`src/server/db/config.ts`) and `drizzle-kit` keeps using the same variable.
 
-## Contexto para agentes
+## Context for agents
 
-`AGENTS.md` descreve o código para quem o escreve. `.theokit/THEO.md` descreve o produto para o
-agente que conversa com os usuários. O segundo ainda é o texto do scaffold, porque a fábrica não
-tem agente.
+`AGENTS.md` describes the code for whoever writes it. `.loopzero/LOOPZERO.md` describes the product for the agent that talks to users. The second one is still the scaffold text, because the factory has no agent.

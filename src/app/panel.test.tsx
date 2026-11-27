@@ -131,7 +131,7 @@ function serve(routes: Record<string, unknown | (() => Response)>) {
         url,
         method,
         body: init.body ? JSON.parse(String(init.body)) : undefined,
-        csrf: (init.headers as Record<string, string> | undefined)?.['x-theo-action'],
+        csrf: (init.headers as Record<string, string> | undefined)?.['x-loopzero-action'],
       })
       const answer = routes[`${method} ${url}`]
       if (answer === undefined)
@@ -889,7 +889,7 @@ const metricsReport: MetricsReport = {
       value: 5,
       mean: 1,
       sd: 0.1,
-      issueUrl: 'https://github.com/paulohenriquevn/aifactory/issues/40',
+      issueUrl: 'https://github.com/getloopscale/aifactory/issues/40',
       error: null,
     },
   ],
@@ -911,7 +911,7 @@ describe('health metrics', () => {
     expect(screen.getByText('75%')).toBeDefined()
     expect(screen.getByText('no baseline yet')).toBeDefined()
     expect(screen.getByRole('link', { name: 'issue' }).getAttribute('href')).toBe(
-      'https://github.com/paulohenriquevn/aifactory/issues/40',
+      'https://github.com/getloopscale/aifactory/issues/40',
     )
   })
 

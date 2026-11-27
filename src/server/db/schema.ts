@@ -15,6 +15,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core'
 
+import { CODE_EVENT_KINDS, CODE_MODES, CODE_STATES } from '../../shared/code'
 import type { DoctorReport, ProvenCheck, ProviderProofs, StoredProof } from '../../shared/panel'
 
 /** Raw bytes: a file a check wrote. */
@@ -629,6 +630,40 @@ export const agentEvent = pgTable(
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique('agent_event_task_seq').on(t.taskId, t.seq)],
+)
+
+/** A code session: a conversation with an agent on one repository, in a work branch (`server/code/store.ts`). */
+export const codeSession = pgTable('code_session', {
+  id: text('id').primaryKey(),
+  title: text('title').notNull(),
+  repository: text('repository').notNull(),
+  baseBranch: text('base_branch').notNull(),
+  workBranch: text('work_branch').notNull(),
+  harness: text('harness').notNull(),
+  model: text('model'),
+  mode: text('mode', { enum: CODE_MODES }).notNull(),
+  state: text('state', { enum: CODE_STATES }).notNull(),
+  sandboxId: text('sandbox_id'),
+  snapshotId: text('snapshot_id'),
+  agentSessionId: text('agent_session_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/** What happened in a code session, numbered from 1 within it. The content is redacted and cut like a transcript's. */
+export const codeEvent = pgTable(
+  'code_event',
+  {
+    sessionId: text('session_id')
+      .notNull()
+      .references(() => codeSession.id),
+    seq: integer('seq').notNull(),
+    kind: text('kind', { enum: CODE_EVENT_KINDS }).notNull(),
+    tool: text('tool'),
+    content: text('content').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.sessionId, t.seq] })],
 )
 
 /**

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 type Agent = {
@@ -17,7 +17,7 @@ type Agent = {
 let agent: Agent
 let paths: string[]
 
-vi.mock('theokit/client', () => ({
+vi.mock('@getloopscale/loopzero/client', () => ({
   Metadata: () => null,
   useAgent: (path: string) => {
     paths.push(path)
@@ -203,6 +203,44 @@ describe('a new conversation', () => {
 
     await waitFor(() => expect(screen.getByLabelText('where').textContent).toBe(`/chat/${id}`))
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ model: 'openrouter' })
+  })
+})
+
+describe('the page a new conversation is taken to', () => {
+  const Kept = () => {
+    const { chatId } = useParams()
+    return <ChatView key={chatId} chatId={chatId} />
+  }
+  const pages = () => (
+    <MemoryRouter initialEntries={['/']}>
+      <ChatsProvider enabled={false}>
+        <Routes>
+          <Route path="/" element={<ChatView />} />
+          <Route path="/chat/:chatId" element={<Kept />} />
+        </Routes>
+        <Where />
+      </ChatsProvider>
+    </MemoryRouter>
+  )
+
+  it('shows the answer at once, without loading what was just kept', async () => {
+    const id = '33333333-3333-4333-8333-333333333333'
+    routes['POST /api/panel/chats'] = json({ id, title: '', pinned: false, model: 'openrouter' })
+    routes[`PUT /api/panel/chats/${id}/messages`] = json({ id })
+    agent.thread = [text('u', 'user', 'oi')]
+    agent.status = 'streaming'
+    const view = render(pages())
+    agent.status = 'done'
+    agent.thread = [text('u', 'user', 'oi'), text('r', 'assistant', 'Olá!')]
+    view.rerender(pages())
+    await waitFor(() => expect(screen.getByLabelText('where').textContent).toBe(`/chat/${id}`))
+
+    // The page at the new address has a live conversation of its own, which is empty.
+    agent = fresh()
+    view.rerender(pages())
+    expect(screen.queryByText(ptBR.chat.loading)).toBeNull()
+    expect(screen.getByText('Olá!')).toBeDefined()
+    expect(calls.some((c) => c.method === 'GET' && c.url === `/api/panel/chats/${id}`)).toBe(false)
   })
 })
 

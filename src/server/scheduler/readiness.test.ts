@@ -67,10 +67,10 @@ describe('a blocked verdict', () => {
 
   it('names an unpublished package', () => {
     const read = parseReadiness(
-      '{"verdict":"blocked","missing":"@theokit/sdk 9.9.9 is not published","question":""}',
+      '{"verdict":"blocked","missing":"@getloopscale/loopzero-sdk 9.9.9 is not published","question":""}',
     )
     expect(read.verdict).toBe('blocked')
-    expect(read.missing).toContain('@theokit/sdk')
+    expect(read.missing).toContain('@getloopscale/loopzero-sdk')
   })
 
   it('takes a blocked verdict that names nothing as ready, with the error recorded', () => {

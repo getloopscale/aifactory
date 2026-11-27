@@ -2,15 +2,15 @@ import type {
   ToolInvocationState,
   UIMessage as RenderableMessage,
   UIMessagePart as RenderablePart,
-} from '@theokit/ui'
-import type { UIMessage } from 'theokit/client'
+} from '@getloopscale/loopzero-ui'
+import type { UIMessage } from '@getloopscale/loopzero/client'
 
 /**
  * The seam between what the framework STREAMS and what the component library RENDERS.
  *
- * `useAgent().thread` hands you `UIMessage` from `theokit/client` — the wire shape, whose parts are
+ * `useAgent().thread` hands you `UIMessage` from `@getloopscale/loopzero/client` — the wire shape, whose parts are
  * deliberately open (`{ type: string; [key: string]: unknown }`) so a `data-*` part or a part kind
- * invented after your app was written still arrives intact. `<ChatMessage>` wants `@theokit/ui`'s
+ * invented after your app was written still arrives intact. `<ChatMessage>` wants `@getloopscale/loopzero-ui`'s
  * `UIMessage`, whose parts are a closed discriminated union.
  *
  * Both are right, and neither can be made assignable to the other without one of them giving up
@@ -24,7 +24,7 @@ import type { UIMessage } from 'theokit/client'
  * is the honest outcome for a part this version of the library has no renderer for.
  */
 
-/** The tool states `@theokit/ui` knows how to render. Anything else is not renderable here. */
+/** The tool states `@getloopscale/loopzero-ui` knows how to render. Anything else is not renderable here. */
 const TOOL_STATES = [
   'input-streaming',
   'input-available',
@@ -62,7 +62,7 @@ function toRenderablePart(part: UIMessage['parts'][number]): RenderablePart | nu
     return { ...part, type: `data-${type.slice('data-'.length)}`, data: part.data }
   }
 
-  // A kind this version of `@theokit/ui` has no renderer for. Dropping it keeps the rest of the
+  // A kind this version of `@getloopscale/loopzero-ui` has no renderer for. Dropping it keeps the rest of the
   // message readable; forcing it through would render nothing and hide the reason.
   return null
 }

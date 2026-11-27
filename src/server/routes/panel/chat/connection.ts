@@ -1,4 +1,4 @@
-import { route } from 'theokit/server/define'
+import { route } from '@getloopscale/loopzero/server/define'
 
 import { chatgptConnection, startChatgptLogin } from '../../../factory/chatgpt-login'
 import { ownerOnly } from '../../../panel/policy'

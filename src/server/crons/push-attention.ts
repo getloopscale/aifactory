@@ -1,4 +1,4 @@
-import { defineCron } from 'theokit/server/cron'
+import { defineCron } from '@getloopscale/loopzero/server/cron'
 
 import { getDb, getPool } from '../db'
 import { mainProcessOnly } from '../factory/worker-only'

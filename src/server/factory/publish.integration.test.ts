@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -332,15 +332,22 @@ describe('publishing a changesets release', () => {
     const notIntegrated = await seedTask('done', null)
     repo().unreachable.add('later1')
     const [first] = await getDb().select().from(task).where(eq(task.id, released))
-    mergeChanges(first.mergedSha!, 'packages/ui', '@theokit/ui')
-    mergeChanges('shipped1', 'packages/ui', '@theokit/ui')
+    mergeChanges(first.mergedSha!, 'packages/ui', '@getloopscale/loopzero-ui')
+    mergeChanges('shipped1', 'packages/ui', '@getloopscale/loopzero-ui')
     versionPr()
-    releasesAre(published('@theokit/ui@1.13.0'), published('pre/7-abc'), published('v9.9.9'))
+    releasesAre(
+      published('@getloopscale/loopzero-ui@1.13.0'),
+      published('pre/7-abc'),
+      published('v9.9.9'),
+    )
 
     const result = await pollPublications(deps())
 
     expect(result.published).toHaveLength(1)
-    expect(await row()).toMatchObject({ status: 'published', tags: ['@theokit/ui@1.13.0'] })
+    expect(await row()).toMatchObject({
+      status: 'published',
+      tags: ['@getloopscale/loopzero-ui@1.13.0'],
+    })
     const stageOf = async (id: number) =>
       (await getDb().select().from(task).where(eq(task.id, id)))[0].stage
     expect(await stageOf(released)).toBe('released')
@@ -350,8 +357,8 @@ describe('publishing a changesets release', () => {
     const releases = await getDb().select().from(delivery).where(eq(delivery.kind, 'release'))
     expect(releases.map((d) => [d.taskId, d.tag, d.actor]).sort()).toEqual(
       [
-        [released, '@theokit/ui@1.13.0', 'human'],
-        [alsoShipped, '@theokit/ui@1.13.0', 'human'],
+        [released, '@getloopscale/loopzero-ui@1.13.0', 'human'],
+        [alsoShipped, '@getloopscale/loopzero-ui@1.13.0', 'human'],
       ].sort(),
     )
     const issueOf = async (id: number) =>
@@ -363,9 +370,12 @@ describe('publishing a changesets release', () => {
         .map((c) => c.issue)
         .sort(),
     ).toEqual(shippedIssues)
-    expect(comments()[0].body).toContain('Available in `@theokit/ui@1.13.0`')
+    expect(comments()[0].body).toContain('Available in `@getloopscale/loopzero-ui@1.13.0`')
     const events = await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, alsoShipped))
-    expect(events.at(-1)?.detail).toMatchObject({ tag: '@theokit/ui@1.13.0', actor: 'human' })
+    expect(events.at(-1)?.detail).toMatchObject({
+      tag: '@getloopscale/loopzero-ui@1.13.0',
+      actor: 'human',
+    })
   })
 
   it('releases the task of a publication its promotion superseded, and not one that failed for itself whose package this release does not publish', async () => {
@@ -394,16 +404,16 @@ describe('publishing a changesets release', () => {
       'old2',
       'the release workflow opened no Version Packages pull request',
     )
-    mergeChanges('old2', 'packages/core', '@theokit/core')
+    mergeChanges('old2', 'packages/core', '@getloopscale/loopzero-core')
     await waitingPublication()
     versionPr()
-    releasesAre(published('@theokit/ui@1.13.0'))
+    releasesAre(published('@getloopscale/loopzero-ui@1.13.0'))
 
     await pollPublications(deps())
 
     const releases = await getDb().select().from(delivery).where(eq(delivery.kind, 'release'))
     expect(releases.filter((d) => d.taskId === superseded)).toMatchObject([
-      { tag: '@theokit/ui@1.13.0', sha: 'promoted1' },
+      { tag: '@getloopscale/loopzero-ui@1.13.0', sha: 'promoted1' },
     ])
     expect(releases.filter((d) => d.taskId === failed)).toEqual([])
     const issueOf = async (id: number) =>
@@ -419,12 +429,12 @@ describe('publishing a changesets release', () => {
       releaseBranch: 'main',
       askedTaskId: failed,
       actor: 'human',
-      tags: [published('@theokit/ui@1.14.0')],
+      tags: [published('@getloopscale/loopzero-ui@1.14.0')],
     })
     const later = await getDb()
       .select()
       .from(delivery)
-      .where(eq(delivery.tag, '@theokit/ui@1.14.0'))
+      .where(eq(delivery.tag, '@getloopscale/loopzero-ui@1.14.0'))
     expect(later.map((d) => d.taskId)).toEqual([failed])
   })
 
@@ -465,25 +475,25 @@ describe('publishing a changesets release', () => {
       )
 
     it('is released by the next release that publishes its package, and its open issue closed with the version', async () => {
-      const failed = await failedFor('old3', '@theokit/ui')
+      const failed = await failedFor('old3', '@getloopscale/loopzero-ui')
       await waitingPublication()
       versionPr()
-      releasesAre(published('@theokit/ui@1.13.0'))
+      releasesAre(published('@getloopscale/loopzero-ui@1.13.0'))
 
       await pollPublications(issueState('open'))
 
-      expect(await releasesOf(failed)).toMatchObject([{ tag: '@theokit/ui@1.13.0' }])
+      expect(await releasesOf(failed)).toMatchObject([{ tag: '@getloopscale/loopzero-ui@1.13.0' }])
       const issue = await issueOf(failed)
       expect(closed()).toContain(issue)
       const told = comments().find((c) => c.issue === issue)
-      expect(told?.body).toContain('Available in `@theokit/ui@1.13.0`')
+      expect(told?.body).toContain('Available in `@getloopscale/loopzero-ui@1.13.0`')
     })
 
     it('is released without a comment when a person already closed its issue', async () => {
-      const failed = await failedFor('old4', '@theokit/ui')
+      const failed = await failedFor('old4', '@getloopscale/loopzero-ui')
       await waitingPublication()
       versionPr()
-      releasesAre(published('@theokit/ui@1.13.0'))
+      releasesAre(published('@getloopscale/loopzero-ui@1.13.0'))
 
       await pollPublications(issueState('closed'))
 
@@ -502,7 +512,7 @@ describe('publishing a changesets release', () => {
     await getDb().update(task).set({ resolvedSha: 'later2' }).where(eq(task.id, notYet))
     repo().unreachable.add('later2')
     versionPr()
-    releasesAre(published('@theokit/ui@1.13.0'))
+    releasesAre(published('@getloopscale/loopzero-ui@1.13.0'))
 
     const withIssues = {
       ...deps(),
@@ -526,8 +536,8 @@ describe('publishing a changesets release', () => {
       releaseBranch: 'main',
       resolvedSha: 'resolved1',
       mergeSha: 'promoted1',
-      tag: '@theokit/ui@1.13.0',
-      url: 'https://github.com/usetheokit/ui/releases/tag/%40theokit%2Fui%401.13.0',
+      tag: '@getloopscale/loopzero-ui@1.13.0',
+      url: 'https://github.com/usetheokit/ui/releases/tag/%40getloopscale%2Floopzero-ui%401.13.0',
     })
     expect(await getDb().select().from(delivery).where(eq(delivery.taskId, carried))).toEqual([])
   })
@@ -536,7 +546,10 @@ describe('publishing a changesets release', () => {
     await waitingPublication()
     const other = await seedTask('done', 'shipped1')
     versionPr()
-    releasesAre({ ...published('@theokit/ui@1.12.2'), publishedAt: new Date('2026-09-25') })
+    releasesAre({
+      ...published('@getloopscale/loopzero-ui@1.12.2'),
+      publishedAt: new Date('2026-09-25'),
+    })
 
     expect((await pollPublications(deps())).waiting).toBe(1)
     expect((await row()).status).toBe('waiting')
@@ -615,9 +628,9 @@ describe('publishing a changesets release', () => {
       after: `{"name":"${name}","version":"${to}"}`,
     })
     const ALL = [
-      '@theokit/gateway-yuanbao@0.1.1',
-      '@theokit/gateway-slack@0.5.1',
-      '@theokit/gateway@0.16.1',
+      '@getloopscale/loopzero-gateway-yuanbao@0.1.1',
+      '@getloopscale/loopzero-gateway-slack@0.5.1',
+      '@getloopscale/loopzero-gateway@0.16.1',
     ]
     beforeEach(() => {
       versionPr({
@@ -626,10 +639,18 @@ describe('publishing a changesets release', () => {
         mergedAt: new Date('2026-11-11T12:10:00Z'),
       })
       versionFiles({
-        'packages/gateway/package.json': bump('@theokit/gateway', '0.16.0', '0.16.1'),
+        'packages/gateway/package.json': bump('@getloopscale/loopzero-gateway', '0.16.0', '0.16.1'),
         'packages/gateway/CHANGELOG.md': { before: '', after: '## 0.16.1' },
-        'packages/slack/package.json': bump('@theokit/gateway-slack', '0.5.0', '0.5.1'),
-        'packages/yuanbao/package.json': bump('@theokit/gateway-yuanbao', '0.1.0', '0.1.1'),
+        'packages/slack/package.json': bump(
+          '@getloopscale/loopzero-gateway-slack',
+          '0.5.0',
+          '0.5.1',
+        ),
+        'packages/yuanbao/package.json': bump(
+          '@getloopscale/loopzero-gateway-yuanbao',
+          '0.1.0',
+          '0.1.1',
+        ),
         'examples/demo/package.json': {
           before: '{"name":"demo","version":"0.1.0","private":true}',
           after: '{"name":"demo","version":"0.1.1","private":true}',
@@ -651,7 +672,7 @@ describe('publishing a changesets release', () => {
       expect(result).toMatchObject({ published: [], waiting: 1 })
       expect(await row()).toMatchObject({ status: 'waiting', tags: null })
       expect((await row()).detail).toMatch(
-        /waiting for the release workflow to publish @theokit\/gateway@0\.16\.1$/,
+        /waiting for the release workflow to publish @getloopscale\/loopzero-gateway@0\.16\.1$/,
       )
       expect((await getDb().select().from(task).where(eq(task.id, other)))[0].stage).toBe('done')
       expect(closed()).toEqual([])
@@ -663,9 +684,9 @@ describe('publishing a changesets release', () => {
       const [t] = await getDb().select().from(task).where(eq(task.id, waiting))
       const sha = t.mergedSha!
       const dirs = {
-        'packages/gateway': '@theokit/gateway',
-        'packages/slack': '@theokit/gateway-slack',
-        'packages/yuanbao': '@theokit/gateway-yuanbao',
+        'packages/gateway': '@getloopscale/loopzero-gateway',
+        'packages/slack': '@getloopscale/loopzero-gateway-slack',
+        'packages/yuanbao': '@getloopscale/loopzero-gateway-yuanbao',
       }
       repo()
         .compare(
@@ -705,7 +726,7 @@ describe('publishing a changesets release', () => {
       expect(result.published).toHaveLength(1)
       expect([...((await row()).tags ?? [])].sort()).toEqual(ALL.slice(0, 2).sort())
       expect((await row()).detail).toMatch(
-        /no release for @theokit\/gateway@0\.16\.1 30 minutes after the Version Packages merge/,
+        /no release for @getloopscale\/loopzero-gateway@0\.16\.1 30 minutes after the Version Packages merge/,
       )
       expect(closed()).toHaveLength(1)
     })
@@ -731,7 +752,7 @@ describe('publishing a changesets release', () => {
     await waitingPublication()
     await seedTask('done', 'shipped1')
     versionPr()
-    releasesAre(published('@theokit/ui@1.13.0'))
+    releasesAre(published('@getloopscale/loopzero-ui@1.13.0'))
     await pollPublications(deps())
     await getDb().update(publication).set({ status: 'waiting' })
 
@@ -749,7 +770,7 @@ describe('publishing a changesets release', () => {
     const refusedIssue = (await getDb().select().from(task).where(eq(task.id, refusing)))[0]
       .issueNumber
     versionPr()
-    releasesAre(published('@theokit/ui@1.13.0'))
+    releasesAre(published('@getloopscale/loopzero-ui@1.13.0'))
     api.fail('closeIssue', new Error(`GitHub answered 403 closing #${refusedIssue}`), {
       when: (issue) => issue === refusedIssue,
     })
@@ -920,16 +941,16 @@ describe('a publication whose release run finished without a Version Packages pu
   /** An hour after the promotion: the release run on the promoted commit has long finished. */
   const LATER = new Date(STARTED.getTime() + 60 * 60_000)
   const modified = (path: string): ChangedFile => ({ path, status: 'modified' })
-  /** theokit-plugins after #269: the promotion changed CI and the changelog, no package. */
+  /** loopzero-plugins after #269: the promotion changed CI and the changelog, no package. */
   function promotionOutsidePackages() {
     repo().compare('promoted1^', 'promoted1', [
       modified('.github/workflows/ci.yml'),
       modified('CHANGELOG.md'),
     ])
     repo().files('promoted1', {
-      'package.json': '{"name":"theokit-plugins","private":true}',
+      'package.json': '{"name":"loopzero-plugins","private":true}',
       '.changeset/config.json': '{"ignore":[]}',
-      'packages/voice/package.json': '{"name":"@theokit/plugin-voice"}',
+      'packages/voice/package.json': '{"name":"@getloopscale/loopzero-plugin-voice"}',
     })
     for (const tag of ['v0.2.0', 'v0.3.0']) repo().tags.add(tag)
   }
@@ -1074,10 +1095,10 @@ describe('a publication whose release run finished without a Version Packages pu
 
     expect(result.failed).toHaveLength(1)
     expect(await row()).toMatchObject({ status: 'failed' })
-    expect((await row()).detail).toMatch(/changes @theokit\/plugin-voice/)
+    expect((await row()).detail).toMatch(/changes @getloopscale\/loopzero-plugin-voice/)
     expect(created()).toEqual([])
     expect((await lastEvent(askedFor))?.detail).toMatchObject({
-      releaseError: expect.stringMatching(/@theokit\/plugin-voice/),
+      releaseError: expect.stringMatching(/@getloopscale\/loopzero-plugin-voice/),
     })
     expect((await pollPublications(deps(LATER))).failed).toEqual([])
   })
@@ -1093,7 +1114,7 @@ describe('a version branch the release workflow pushed without a pull request', 
     repo().files('promoted1', {
       'package.json': '{"name":"ui-repo","private":true}',
       '.changeset/config.json': '{"ignore":[]}',
-      'packages/ui/package.json': '{"name":"@theokit/ui"}',
+      'packages/ui/package.json': '{"name":"@getloopscale/loopzero-ui"}',
     })
   }
   const pushed = (committedAt: Date, aheadBy = 1) => {
@@ -1155,7 +1176,7 @@ describe('a version branch the release workflow pushed without a pull request', 
     expect(result.failed).toHaveLength(1)
     expect(opened()).toEqual([])
     expect(await row()).toMatchObject({ status: 'failed' })
-    expect((await row()).detail).toMatch(/changes @theokit\/ui/)
+    expect((await row()).detail).toMatch(/changes @getloopscale\/loopzero-ui/)
   })
 
   it('opens it for a branch committed before the publication was recorded, since it holds the promoted commit', async () => {

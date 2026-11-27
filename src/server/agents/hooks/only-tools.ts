@@ -1,4 +1,4 @@
-import type { HookHandlers } from '@theokit/agents'
+import type { HookHandlers } from '@getloopscale/loopzero-agents'
 
 /**
  * The only tools an agent may call. The SDK gives every agent its own built-in tools (a shell, file

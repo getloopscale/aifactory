@@ -10,14 +10,14 @@ export const EMPTY_QUEUE: QueueView = { position: null, reasons: null, readiness
 
 /**
  * The place of each queued run in the order the worker serves them: due, held by nobody, of a task in
- * `intake`, by `available_at` as TheoKit's `dequeue` reads it.
+ * `intake`, by `available_at` as LoopZero's `dequeue` reads it.
  */
 async function positions(db: Database, taskIds: number[]): Promise<Map<number, number>> {
   const rows = await db.execute<{ task_id: number; position: number }>(
     sql`select task_id, position from (
           select t.id as task_id,
             row_number() over (order by j.available_at, j.id)::int as position
-          from theokit_jobs j join task t on t.id = (j.input->>'taskId')::int
+          from loopzero_jobs j join task t on t.id = (j.input->>'taskId')::int
           where j.name = 'run-task' and j.failed_at is null and t.stage = 'intake'
             and (j.locked_until is null or j.locked_until < now()) and j.available_at <> 'infinity'
         ) line

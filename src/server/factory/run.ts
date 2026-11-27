@@ -1,7 +1,7 @@
 import { itemRef } from './item-ref'
 import { randomUUID } from 'node:crypto'
 
-import { type SandboxBackend } from '@theokit/agents/sandbox'
+import { type SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { and, asc, desc, eq, inArray, notLike } from 'drizzle-orm'
 
 import {
@@ -202,10 +202,10 @@ type Timeouts = NonNullable<RunTaskDeps['timeouts']>
  * The sandbox stops a run after `sandboxMs`. A run is a builder (up to `agentMs`, cut by `agentTimeLeft` so the
  * checks and a review still fit), the checks, a review, and
  * at times a rework and the checks again. In a repository whose checks take twenty minutes on a busy machine
- * that is more than 50 minutes, and 8 runs were cut at 50 on 2026-11-11 (paulohenriquevn/aifactory#4). The
+ * that is more than 50 minutes, and 8 runs were cut at 50 on 2026-11-11 (getloopscale/aifactory#4). The
  * GitHub token is renewed while the run works (`renewGithubCredential`), so the limit is set by what a run
  * needs, not by the hour a token lasts. A first build that adds a package needs more than 25 minutes, and four
- * were cut at 25 on 2026-11-11 (paulohenriquevn/aifactory#23), so a pass may take 45.
+ * were cut at 25 on 2026-11-11 (getloopscale/aifactory#23), so a pass may take 45.
  */
 
 /** Why approved work is handed to a person instead of integrated, said on the issue and the task. */
@@ -449,7 +449,7 @@ export class Run {
 
   /**
    * The sandbox with its credentials renewed while the run works, and a GitHub token minted now: the wait for the
-   * sandbox has no limit, so the token it was created with may be about to end (paulohenriquevn/aifactory#424).
+   * sandbox has no limit, so the token it was created with may be about to end (getloopscale/aifactory#424).
    */
   private static async withFreshCredentials(
     c: RunContext,
@@ -653,7 +653,7 @@ export class Run {
   /**
    * A run sent back continues on the task's branch only while GitHub has it. A task resolved with no change
    * never pushed one, and a retry deletes it: fetching it would fail the task before any agent read the note
-   * (paulohenriquevn/aifactory#54). Such a run starts over instead, and keeps what was asked for its prompt.
+   * (getloopscale/aifactory#54). Such a run starts over instead, and keeps what was asked for its prompt.
    */
   private static async withoutLostBranch(c: RunContext): Promise<RunContext> {
     if (!c.continuation) return c
@@ -706,7 +706,7 @@ export class Run {
   /**
    * The commit on GitHub's `branch`, or empty when the branch does not exist. A run started again after its
    * process died finds the dead run's commits there; it replaces them, as a Retry does, but keeps the pull
-   * request open (paulohenriquevn/aifactory#2).
+   * request open (getloopscale/aifactory#2).
    */
   private static async remoteHeadOf(backend: SandboxBackend, repoDir: string, branch: string) {
     const listed = await must(backend, `git -C ${repoDir} ls-remote origin refs/heads/${branch}`)

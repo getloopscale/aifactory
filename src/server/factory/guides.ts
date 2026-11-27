@@ -128,7 +128,7 @@ export const guideModel = (env: NodeJS.ProcessEnv = process.env) =>
 
 /** The same guides on the owner's ChatGPT subscription. */
 export const guideCodexModel = (env: NodeJS.ProcessEnv = process.env) =>
-  env.FACTORY_CHAT_CODEX_MODEL ?? 'openai-chatgpt/gpt-5.4'
+  env.FACTORY_CHAT_CODEX_MODEL ?? 'openai-chatgpt/gpt-6.2-sol'
 
 /** The guide of one page, as an agent. */
 export const guideAgent = (id: GuideId, model: 'openrouter' | 'codex' = 'openrouter') =>

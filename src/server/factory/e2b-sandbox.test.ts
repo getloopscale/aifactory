@@ -8,7 +8,7 @@ import {
   SandboxUnreachableError,
   TimeoutError,
 } from 'e2b'
-import { shellEscapePosix } from '@theokit/agents/sandbox'
+import { shellEscapePosix } from '@getloopscale/loopzero-agents/sandbox'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
@@ -506,7 +506,7 @@ describe('an E2B terminal', () => {
     expect(f.sent[0]).toBe(`exec sh -c ${shellEscapePosix("claude --resume 'a b'")}\n`)
 
     const seen: string[] = []
-    term.onData((d) => seen.push(d))
+    term.onData((d) => seen.push(Buffer.from(d).toString()))
     f.print('hi')
     expect(seen).toEqual(['hi'])
     term.write('ls\n')

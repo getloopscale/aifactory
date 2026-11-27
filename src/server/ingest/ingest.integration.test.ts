@@ -2,8 +2,12 @@ import { createHmac } from 'node:crypto'
 
 import { count, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { PostgresJobBackend, createOutbox, createQueueClient } from 'theokit/server/jobs'
-import { getStorageManager } from 'theokit/server/storage'
+import {
+  PostgresJobBackend,
+  createOutbox,
+  createQueueClient,
+} from '@getloopscale/loopzero/server/jobs'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { storageFromUrl } from '../db/config'
@@ -28,7 +32,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await getPool().query(
-    'truncate table stage_event, task, ingress, repository, theokit_jobs, failure_signature restart identity cascade',
+    'truncate table stage_event, task, ingress, repository, loopzero_jobs, failure_signature restart identity cascade',
   )
   await getPool().query("insert into repository (full_name, enabled) values ('paulo/app', true)")
 })
@@ -308,7 +312,7 @@ describe('what is written on the factory pull request', () => {
   const jobs = async () =>
     (
       await getPool().query<{ name: string; input: Record<string, unknown> }>(
-        'select name, input from theokit_jobs',
+        'select name, input from loopzero_jobs',
       )
     ).rows
 
@@ -320,7 +324,7 @@ describe('what is written on the factory pull request', () => {
       'update task set stage = $1, merged_sha = $2, head_sha = $3, pull_request_url = $4 where id = $5',
       [stage, mergedSha, 'abc', 'https://github.com/paulo/app/pull/12', id],
     )
-    await getPool().query('delete from theokit_jobs')
+    await getPool().query('delete from loopzero_jobs')
     followUps.length = 0
     return id
   }

@@ -183,15 +183,12 @@ const ALREADY_INTEGRATED = refuse(
 )
 /**
  * The run continues on the task's branch only while GitHub has it. Without it the run would fail on the
- * fetch before any agent read the note (paulohenriquevn/aifactory#54).
+ * fetch before any agent read the note (getloopscale/aifactory#54).
  */
 const onBranch = (task: Facts) =>
   act(task.branchGone ? 'start_from_integration_branch' : 'continue_on_branch')
 const sendBack: Rule = (task) => (task.mergedSha ? ALREADY_INTEGRATED : onBranch(task))
 
-const NOT_CONVERSABLE = refuse(
-  'the owner can write only to the agent of a task that waits for an answer, was handed over, is done or failed',
-)
 const AGENT_RUNNING = refuse(
   'the agent of this task is working: wait until it stops, then write to it',
 )
@@ -199,6 +196,9 @@ const AGENT_RUNNING = refuse(
 const LIVE_STAGES = ['build', 'review'] as const
 const NOT_GUIDABLE = refuse(
   'a message can guide the agent only of a task that is done or was handed over: ask instead, or answer its question',
+)
+const GUIDE_ENDED = refuse(
+  'this task has ended, so there is no work of it left to guide: ask about it, or open a new job',
 )
 const GUIDE_MERGED = refuse(
   'this work is already integrated, so guiding the agent would change work that was delivered: ask instead, or open a new job',
@@ -208,10 +208,10 @@ const GUIDE_NO_BRANCH = refuse(
 )
 /** A question changes nothing, so it is allowed wherever the agent has stopped; guiding sends the work back. */
 const converse =
-  (guidable: boolean): Rule =>
+  (guidable: boolean, notGuidable = NOT_GUIDABLE): Rule =>
   (task) => {
     if (task.conversation !== 'guide') return act('ask_agent')
-    if (!guidable) return NOT_GUIDABLE
+    if (!guidable) return notGuidable
     if (task.mergedSha || task.resolvedSha) return GUIDE_MERGED
     return task.branchGone ? GUIDE_NO_BRANCH : act('guide_agent')
   }
@@ -296,9 +296,9 @@ const NOBODY_WORKING = ignore(
 )
 const NOT_AT_ITS_PULL_REQUEST = ignore('only a run that reached its pull request integrates it')
 /**
- * GitHub merges no draft, so the draft a handoff left is marked ready first (paulohenriquevn/aifactory#56).
+ * GitHub merges no draft, so the draft a handoff left is marked ready first (getloopscale/aifactory#56).
  * Required checks that already passed leave nothing for auto-merge to wait for, and GitHub refuses it: the
- * pull request is merged at once, like one with no required checks (paulohenriquevn/aifactory#51).
+ * pull request is merged at once, like one with no required checks (getloopscale/aifactory#51).
  */
 const integrate: Rule = (task) => {
   if (task.draft) return act('mark_ready_for_review')
@@ -372,7 +372,10 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     ),
     ...each([...LIVE_STAGES], act('message_running_agent')),
     merge: MERGING,
-    ...each(['released', 'cancelled'], NOT_CONVERSABLE),
+    // A task that ended still has what its agent did to be asked about. Nothing there can be guided: the work
+    // is released, or was withdrawn.
+    released: converse(false, GUIDE_ENDED),
+    cancelled: converse(false, GUIDE_ENDED),
     waiting: converse(false),
     failed: converse(false),
     done: converse(true),

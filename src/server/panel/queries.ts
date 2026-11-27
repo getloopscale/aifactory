@@ -40,6 +40,7 @@ import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
 import { pendingSendBack } from '../factory/send-back'
 import { cardAgent, STEP_STAGES, type ReportedModels, type StepEvent } from './card-agent'
+import { headChecks, issueFactsOf } from './card-issue'
 import { EMPTY_QUEUE, queueViews } from './queue-view'
 import { returnedOf } from './returned'
 import {
@@ -204,6 +205,8 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   const changes = await changeSizes(db, ids)
   const risks = await latestRisks(db, ids)
   const limits = await leadTimeLimits(db, rows)
+  const issues = await issueFactsOf(db, rows)
+  const checks = await headChecks(db, ids)
   const now = new Date()
   return rows.map((r) => {
     const seen = byTask.get(r.id)
@@ -244,6 +247,9 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       mainRed: watched.some((w) => w.taskId === r.id && w.status === 'red' && !w.acknowledgedAt),
       releaseWait: lastReleaseWait(releases, r),
       ...cardAgent(r.stage as Stage, steps.get(r.id) ?? [], models.get(r.id)),
+      labels: issues.get(r.id)?.labels ?? [],
+      origin: issues.get(r.id)?.origin ?? 'person',
+      checks: checks.get(r.id) ?? null,
     }
   })
 }
@@ -523,6 +529,12 @@ export async function listTasks(db: Database): Promise<TaskCard[]> {
     .from(task)
     .where(ne(task.stage, 'cancelled'))
     .orderBy(desc(task.id))
+  return (await cards(db, rows)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+}
+
+/** The cancelled tasks, newest activity first, for the board's last lane: `listTasks` leaves them off. */
+export async function listCancelled(db: Database): Promise<TaskCard[]> {
+  const rows = await db.select().from(task).where(eq(task.stage, 'cancelled'))
   return (await cards(db, rows)).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 

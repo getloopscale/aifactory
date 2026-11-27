@@ -1,4 +1,4 @@
-import { Button } from '@usetheo/ui'
+import { Button } from '@getloopscale/ui'
 import { SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 import { Link } from 'react-router'

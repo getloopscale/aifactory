@@ -232,11 +232,11 @@ describe('the catalog of agents', () => {
 
   it('adds the context of the factory and of the knowledge base to every panel agent, and to no agent that builds', () => {
     const view = catalog()
-    expect(view.shared.map((p) => p.id)).toEqual(['theo', 'knowledge'])
-    expect(view.shared[0]).toMatchObject({ id: 'theo', text: 'CONTEXT OF THE FACTORY' })
+    expect(view.shared.map((p) => p.id)).toEqual(['loopzero', 'knowledge'])
+    expect(view.shared[0]).toMatchObject({ id: 'loopzero', text: 'CONTEXT OF THE FACTORY' })
     expect(view.shared[1].text).toBe(ASSISTANT_KNOWLEDGE_NOTE)
     for (const a of view.agents) {
-      expect(a.shared, a.id).toEqual(a.group === 'panel' ? ['theo', 'knowledge'] : [])
+      expect(a.shared, a.id).toEqual(a.group === 'panel' ? ['loopzero', 'knowledge'] : [])
     }
   })
 

@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, readDatabaseUrl } from '../db'
@@ -279,9 +279,9 @@ describe.runIf(mode === 'check' || mode === 'judge')('the readiness judge', () =
     },
     {
       name: 'an unpublished package version',
-      title: 'Use the new gateway API from @theokit/sdk 99.0.0',
-      body: 'Upgrade `@theokit/sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@theokit/sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
-      mentions: /@theokit\/sdk/i,
+      title: 'Use the new gateway API from @getloopscale/loopzero-sdk 99.0.0',
+      body: 'Upgrade `@getloopscale/loopzero-sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@getloopscale/loopzero-sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
+      mentions: /@getloopscale\/loopzero-sdk/i,
     },
   ]
   it.each(blockedIssues)(

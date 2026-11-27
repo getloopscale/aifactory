@@ -1,4 +1,4 @@
-import { Button } from '@usetheo/ui'
+import { Button } from '@getloopscale/ui'
 import { useState } from 'react'
 
 import { post } from '../lib/api'

@@ -94,7 +94,7 @@ const run = await api(`/repos/${repo}/check-runs`, {
 step(run.status === 201, 'creates a check run on main (a token or OAuth app cannot)')
 
 // Public repositories are readable by anyone, so the boundary is tested with a write.
-const outside = await api('/repos/paulohenriquevn/aifactory/git/refs', {
+const outside = await api('/repos/getloopscale/aifactory/git/refs', {
   token,
   method: 'POST',
   body: { ref: 'refs/heads/factory/should-not-exist', sha },

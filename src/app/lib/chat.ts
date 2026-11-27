@@ -89,6 +89,21 @@ export const chatApi = {
   remove: (id: string) => del<{ removed: boolean }>(`/api/panel/chats/${id}`),
 }
 
+/**
+ * The conversation the page just kept, for the page that opens at its address. A new conversation gets its
+ * address once its first answer is finished, and the page there is another one: without this it would start by
+ * loading, and the answer the owner was reading would vanish and come back.
+ */
+let handed: { id: string; messages: ChatMessageView[]; model: ChatModel } | undefined
+
+export const handOver = (id: string, messages: ChatMessageView[], model: ChatModel) => {
+  handed = { id, messages, model }
+}
+
+/** What was handed over for this conversation, if it is the one just kept. */
+export const handedOver = (id: string | undefined) =>
+  handed && handed.id === id ? handed : undefined
+
 export type Connection = {
   connected: boolean
   login:

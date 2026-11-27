@@ -28,7 +28,7 @@ const isWithdrawal = (intent: RoutedIntent): intent is Withdrawal => intent.kind
  */
 const deleteQueuedJobs = (tx: Database, taskId: number) =>
   tx.execute(
-    sql`delete from theokit_jobs
+    sql`delete from loopzero_jobs
         where name in ('run-task', 'merge-task', 'resume-task') and input->>'taskId' = ${String(taskId)}
           and failed_at is null and locked_until is null and attempts = 0`,
   )
@@ -37,7 +37,7 @@ const deleteQueuedJobs = (tx: Database, taskId: number) =>
  * Cancels the task of an issue that was closed or lost the factory label, when `transitions.ts` says so: the
  * `cancelled` stage event with why, the stage, and the task's queued jobs, all in the caller's transaction.
  * Any other outcome changes nothing and is only logged. A run that is going on is not stopped here: it stops
- * at its next stage, which it may no longer record (`enterRunStage`, paulohenriquevn/aifactory#237).
+ * at its next stage, which it may no longer record (`enterRunStage`, getloopscale/aifactory#237).
  */
 export async function withdrawTask(tx: Database, intent: RoutedIntent): Promise<void> {
   if (!isWithdrawal(intent)) return

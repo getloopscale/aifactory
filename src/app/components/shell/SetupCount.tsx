@@ -13,11 +13,13 @@ export function setupAttention(report: SetupReport | undefined): SetupAttention 
   }
 }
 
-// Each pair is read at 4.5 or better in both themes (palette.test.ts): warning text on the warning fill is not,
-// so a warning is the text on a muted pill with a warning ring.
+/** The shape every count in the menu has, so two entries with a number never look like two kinds of thing. */
+export const COUNT = 'rounded px-1.5 font-mono text-[11px] font-medium tabular-nums'
+
+// The number is the foreground on a tint of the tone: warning text on the warning fill is not read at 4.5.
 export const TONE: Record<SetupAttention['tone'], string> = {
-  destructive: 'bg-destructive text-destructive-foreground',
-  warning: 'bg-muted text-foreground ring-2 ring-inset ring-warning',
+  destructive: 'bg-destructive/25 text-foreground',
+  warning: 'bg-warning/25 text-foreground',
 }
 
 /** The number on the Setup entry of the menu. */
@@ -32,7 +34,7 @@ export function SetupCount({
     <span
       aria-hidden
       data-tone={attention.tone}
-      className={`rounded-full px-2 text-xs ${TONE[attention.tone]} ${className}`}
+      className={`${className} ${COUNT} ${TONE[attention.tone]}`}
     >
       {attention.count}
     </span>

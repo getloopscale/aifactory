@@ -1,4 +1,4 @@
-import { Button, Input } from '@usetheo/ui'
+import { Button, Input } from '@getloopscale/ui'
 import { useEffect, useState } from 'react'
 
 import type { ClaudeLoginState } from '../../shared/panel'

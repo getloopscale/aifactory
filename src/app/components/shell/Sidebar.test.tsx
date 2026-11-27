@@ -95,6 +95,29 @@ describe('the setup entry of the menu', () => {
   })
 })
 
+describe('the counts of the menu', () => {
+  it('have one shape, whichever entry they are on', () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <CopyProvider>
+          <Sidebar
+            onToggle={vi.fn()}
+            waiting={31}
+            wrong={0}
+            name="paulo"
+            plan="owner"
+            onSignOut={vi.fn()}
+            setup={{ count: 1, tone: 'warning' }}
+          />
+        </CopyProvider>
+      </MemoryRouter>,
+    )
+    const inbox = screen.getByText('31')
+    const setup = screen.getByText('1')
+    expect(setup.className.split(/\s+/).sort()).toEqual(inbox.className.split(/\s+/).sort())
+  })
+})
+
 describe('the history entry of the menu', () => {
   it('is in the menu and marks the page it leads to', () => {
     render(

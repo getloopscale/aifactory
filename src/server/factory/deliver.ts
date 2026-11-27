@@ -559,7 +559,7 @@ async function refuseKnownConflict(
 /**
  * Refuses a release while a changesets publication of the repository waits. Changesets publishes only from a
  * release branch with no changeset left on it, so a promotion that lands before the Version Packages merge brings
- * new changesets and the workflow versions again instead of publishing: theokit-sdk went from 5.23.0 to 5.25.0
+ * new changesets and the workflow versions again instead of publishing: loopzero-sdk went from 5.23.0 to 5.25.0
  * on `main` on 2026-11-18 with neither version published (#319).
  *
  * A publication whose Version Packages pull request failed a check on its head is let through: its fix reaches

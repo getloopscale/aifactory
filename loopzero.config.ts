@@ -1,4 +1,4 @@
-import { config } from 'theokit'
+import { config } from '@getloopscale/loopzero'
 
 import { storageFromEnv } from './src/server/db/config'
 import { JOB_SHUTDOWN_WAIT_MS } from './src/server/factory/drain'
@@ -23,13 +23,13 @@ export default config()
   .appDir('src/app')
   .serverDir('src/server')
   .agentsDir('src/server/agents')
-  // The panel has a theme of its own (`src/app/theme.ts`). TheoKit's automatic provider knows only the
+  // The panel has a theme of its own (`src/app/theme.ts`). LoopZero's automatic provider knows only the
   // built-in themes and writes them over any other, so the layout mounts the provider and the styles itself.
   .set({ storage: storageFromEnv(), jobs: jobsFromEnv(), cron: cronFromEnv(), ui: false })
   .build()
 
 /**
- * Persistent jobs on the same Postgres pool. `theokit start` creates the table, leases jobs and
+ * Persistent jobs on the same Postgres pool. `loopzero start` creates the table, leases jobs and
  * runs them in this process. The worker runs the leases of a tick one after another, so one job per
  * tick. The lock is short (two minutes) and the `run-task` job extends it while a run is alive
  * (`ctx.extendLease`), so a worker that crashes frees its job in minutes, not after the longest
@@ -37,7 +37,7 @@ export default config()
  *
  * Without `DATABASE_URL` there is no backend, and the server still starts and reports not ready.
  */
-function jobsFromEnv(): TheoConfigJobs | undefined {
+function jobsFromEnv(): LoopZeroConfigJobs | undefined {
   if (!storageFromEnv()) return undefined
   // A preview of the panel must not take jobs from the queue the factory is working through.
   if (process.env.FACTORY_JOBS === 'off') return undefined
@@ -64,4 +64,4 @@ function cronFromEnv() {
   return { lock: mainProcessCronLock(jobBackend().cronLock()) }
 }
 
-type TheoConfigJobs = NonNullable<Parameters<ReturnType<typeof config>['set']>[0]['jobs']>
+type LoopZeroConfigJobs = NonNullable<Parameters<ReturnType<typeof config>['set']>[0]['jobs']>

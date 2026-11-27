@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
-import { SandboxBackend, shellEscapePosix } from '@theokit/agents/sandbox'
+import { SandboxBackend, shellEscapePosix } from '@getloopscale/loopzero-agents/sandbox'
 
 import type {
   ExecuteResult,
@@ -17,9 +17,9 @@ import type {
   TerminalOptions,
 } from './sandbox'
 import { MAX_RUN_MS } from './run-limit'
-import { assertIsolated } from './sandbox'
+import { assertIsolated, terminalOutput } from './sandbox'
 
-/** The exit code the TheoKit backends report for a command that hit its timeout. */
+/** The exit code the LoopZero backends report for a command that hit its timeout. */
 const TIMED_OUT = 124
 const MAX_OUTPUT = 20 * 1024 * 1024
 
@@ -165,12 +165,12 @@ class DockerBackend extends SandboxBackend {
   }
 
   /**
-   * `command` under a pseudo-terminal (usetheokit/theokit-sdk#1614). `docker exec -t` needs a terminal on the
+   * `command` under a pseudo-terminal. `docker exec -t` needs a terminal on the
    * host, so the container's own `script` makes one: it runs the command on a pty and relays the bytes through
    * the pipes of an ordinary `docker exec -i`. The command's pid is written to a file, which is how a resize
    * reaches that pty (`stty` on its input, then SIGWINCH).
    */
-  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+  openTerminal = async (command: string, opts: TerminalOptions): Promise<Terminal> => {
     const cols = dimension(opts.cols)
     const rows = dimension(opts.rows)
     const inner = `echo $$ > ${TERMINAL_PID}; stty cols ${cols} rows ${rows}; exec sh -c ${shellEscapePosix(command)}`
@@ -189,14 +189,9 @@ class DockerBackend extends SandboxBackend {
       inner,
       '/dev/null',
     ])
-    const listeners: ((data: string) => void)[] = []
-    const decoder = new StringDecoder('utf8')
-    const emit = (chunk: Buffer) => {
-      const text = decoder.write(chunk)
-      if (text) for (const listener of listeners) listener(text)
-    }
-    child.stdout.on('data', emit)
-    child.stderr.on('data', emit)
+    const output = terminalOutput()
+    child.stdout.on('data', output.emit)
+    child.stderr.on('data', output.emit)
     let ended = false
     const finished = new Promise<{ exitCode: number }>((done) => {
       child.on('error', () => {
@@ -209,7 +204,7 @@ class DockerBackend extends SandboxBackend {
       })
     })
     return {
-      write: (data) => {
+      write: async (data) => {
         if (!ended) child.stdin.write(data)
       },
       resize: async (c, r) => {
@@ -226,9 +221,7 @@ class DockerBackend extends SandboxBackend {
           `pid=$(cat ${TERMINAL_PID}) && stty cols ${width} rows ${height} < /proc/$pid/fd/0 && kill -WINCH $pid`,
         ])
       },
-      onData: (listener) => {
-        listeners.push(listener)
-      },
+      onData: output.onData,
       wait: () => finished,
       kill: async () => {
         if (ended) return
