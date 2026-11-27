@@ -1468,6 +1468,87 @@ describe('actions', () => {
       expect((await failureOf(id))?.detail).toMatchObject({ blockedBy: ['paulo/app#5'] })
     })
 
+    describe('after a blocker of its repository was integrated', () => {
+      const checked = new Date(Date.now() - 60_000)
+      const recently = (issueNumber: number, blockedBy: string[]) =>
+        seed('failed', { issueNumber }, [
+          {
+            stage: 'failed',
+            detail: {
+              error: `blocked by ${blockedBy.join(', ')}`,
+              blockedBy,
+              blockedCheckedAt: checked.toISOString(),
+            },
+          },
+        ])
+      const countingReads = (open: number[]) => {
+        const reads: number[] = []
+        return {
+          reads,
+          deps: {
+            ...deps(),
+            fetchIssue: async (_repo: string, number: number) => {
+              reads.push(number)
+              return {
+                number,
+                title: 't',
+                body: '',
+                labels: [],
+                state: open.includes(number) ? ('open' as const) : ('closed' as const),
+              }
+            },
+          },
+        }
+      }
+
+      it('starts a recently checked task at once', async () => {
+        await seed('done', { issueNumber: 5, mergedSha: 'm5' })
+        const id = await recently(91, ['paulo/app#5'])
+        const { deps: reads } = countingReads([])
+        expect(await runDueRetries(reads, { limit: 3 })).toMatchObject({ started: 1 })
+        expect(queued.map((q) => q.input)).toEqual([{ taskId: id }])
+      })
+
+      it('counts a blocker found resolved too', async () => {
+        await seed('done', { issueNumber: 5, resolvedSha: 'r5' })
+        await recently(92, ['paulo/app#5'])
+        const { deps: reads } = countingReads([])
+        expect(await runDueRetries(reads, { limit: 3 })).toMatchObject({ started: 1 })
+      })
+
+      it('keeps only the open blocker, and reads nothing on the next pass', async () => {
+        await seed('done', { issueNumber: 5, mergedSha: 'm5' })
+        const id = await recently(93, ['paulo/app#5', 'paulo/app#6'])
+        const { deps: reads, reads: read } = countingReads([6])
+        expect(await runDueRetries(reads, { limit: 3 })).toMatchObject({ started: 0, waiting: 1 })
+        expect(queued).toEqual([])
+        expect((await failureOf(id))?.detail).toMatchObject({ blockedBy: ['paulo/app#6'] })
+        read.length = 0
+        const next = new Date(Date.now() + 60_000)
+        expect(await runDueRetries(reads, { limit: 3, now: next })).toMatchObject({ waiting: 0 })
+        expect(read).toEqual([])
+      })
+
+      it('reads nothing for a recently checked task whose blockers are all open', async () => {
+        await recently(94, ['paulo/app#6'])
+        const { deps: reads, reads: read } = countingReads([6])
+        expect(await runDueRetries(reads, { limit: 3 })).toEqual({
+          started: 0,
+          skipped: 0,
+          waiting: 0,
+        })
+        expect(read).toEqual([])
+      })
+
+      it('ignores an integrated task of another repository', async () => {
+        await seed('done', { issueNumber: 5, mergedSha: 'm5', repository: 'paulo/other' })
+        await recently(95, ['paulo/other#5'])
+        const { deps: reads, reads: read } = countingReads([])
+        expect(await runDueRetries(reads, { limit: 3 })).toMatchObject({ started: 0 })
+        expect(read).toEqual([])
+      })
+    })
+
     it('runs again once its blocker is closed', async () => {
       const id = await blocked(82)
       expect(await runDueRetries(issues('closed'), { limit: 3, now: later() })).toEqual({
