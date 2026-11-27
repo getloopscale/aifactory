@@ -387,7 +387,10 @@ function ordered(id: Lane, tasks: TaskCard[]): TaskCard[] {
 
 const MERGE_STATES: MergeState[] = ['merging', 'opening_pr', 'waiting_for_checks', 'awaiting_merge']
 
-/** What the Merge column's cards wait for, counted, in one line under its title; the states with none are left out. */
+/**
+ * What the cards on their way to the integration branch wait for, counted, beside the lane's title and cut to fit,
+ * so every lane's heading is the same height; the states with none are left out.
+ */
 function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
   const { t } = useCopy()
   const counts = mergeBreakdown(tasks)
@@ -396,7 +399,10 @@ function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
     .join(' · ')
   if (line === '') return null
   return (
-    <span className="mt-0.5 block text-[11px] font-normal leading-snug text-muted-foreground">
+    <span
+      title={line}
+      className="ml-auto min-w-0 shrink truncate text-[11px] font-normal text-muted-foreground"
+    >
       {line}
     </span>
   )
@@ -444,14 +450,14 @@ function Column({
               aria-hidden
               className={`size-2.5 shrink-0 rounded-full ${TONE_DOT[LANE_TONE[id]]}`}
             />
-            <span className="min-w-0 truncate">
+            <span className="shrink-0">
               {title}{' '}
               <span className="font-mono text-xs font-normal tabular-nums text-muted-foreground">
                 {tasks.length}
               </span>
             </span>
+            {id === 'running' ? <MergeCounts tasks={tasks} /> : null}
           </span>
-          {id === 'running' ? <MergeCounts tasks={tasks} /> : null}
         </span>
       </h2>
       {tasks.length === 0 ? (
