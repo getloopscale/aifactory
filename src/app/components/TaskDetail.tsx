@@ -39,7 +39,8 @@ import {
   Surface,
   TABLE,
 } from './ui/Surface'
-import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
+import { ItemId } from './ui/ItemId'
+import { ago, describeEvent, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
@@ -217,9 +218,8 @@ function TaskTabs({
 function TaskPlace({ task }: { task: TaskDetail['task'] }) {
   return (
     <>
-      <span className="font-mono text-xs">
-        {task.repository} {itemName(task)}
-      </span>
+      <ItemId item={task} size="large" link />
+      <span className="min-w-0 truncate font-mono text-xs">{task.repository}</span>
       <StageBadge
         stage={task.stage}
         integrated={task.integrated}

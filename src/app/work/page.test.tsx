@@ -263,8 +263,14 @@ describe('board', () => {
     for (const c of cards) expect(c.querySelector('[class*="min-h-[124px]"]')).not.toBeNull()
     for (const c of cards) expect(c.querySelector('[class*=" h-["]')).toBeNull()
     expect(screen.getByText(/A very long title/).className).toContain('line-clamp-3')
-    expect(screen.queryAllByText('paulo/app #7').length).toBe(0)
-    expect(screen.getAllByText('app #7').length).toBe(2)
+    // The number leads each card in a label that never shrinks; the repository after it is what gets cut.
+    for (const c of cards) {
+      const id = c.querySelector('[data-item-id]') as HTMLElement
+      expect(id.textContent).toBe('#7')
+      expect(id.className).toContain('shrink-0')
+      expect(id.nextElementSibling?.textContent).toBe('app')
+      expect(id.nextElementSibling?.className).toContain('truncate')
+    }
     expect(screen.getByText(/A very long title/).getAttribute('title')).toContain(
       'A very long title',
     )
