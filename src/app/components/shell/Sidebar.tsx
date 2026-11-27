@@ -1,6 +1,7 @@
 import { Avatar, DropdownMenu, ScrollArea } from '@getloopscale/ui'
 import {
   Bot,
+  Code,
   Download,
   ChevronsUpDown,
   FolderGit2,
@@ -56,7 +57,7 @@ function Place({
   attention,
   tone = 'waiting',
 }: {
-  id: GuideId | 'onboarding' | 'history'
+  id: GuideId | 'onboarding' | 'history' | 'code'
   to: string
   icon: Icon
   label: string
@@ -67,7 +68,7 @@ function Place({
   const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
-  const active = id === 'onboarding' || id === 'history' ? pathname.startsWith(to) : place === id
+  const active = id === 'onboarding' || id === 'history' || id === 'code' ? pathname.startsWith(to) : place === id
   return (
     <Link
       to={to}
@@ -274,6 +275,7 @@ export function Sidebar({
             </Link>
             <Place id="board" to="/work" icon={LayoutDashboard} label={t.places.board} />
             <Place id="plans" to="/plans" icon={ListChecks} label={t.places.plans} />
+            <Place id="code" to="/code" icon={Code} label={t.places.code} />
           </Section>
           <Section title={t.menu.groups.factory}>
             <Place

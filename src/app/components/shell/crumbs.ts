@@ -22,6 +22,7 @@ export function crumbs(pathname: string, t: Copy): string[] {
     const view = FLOOR_VIEWS.find((name) => pathname.startsWith(`/floor/${name}`))
     return [t.menu.groups.operation, t.floor.name, t.floor.views[view ?? 'line']]
   }
+  if (pathname.startsWith('/code')) return [t.menu.groups.operation, t.places.code]
   if (pathname.startsWith('/onboarding')) return [t.onboarding.title]
   const place = guideIdFor(pathname)
   if (!place) return []
