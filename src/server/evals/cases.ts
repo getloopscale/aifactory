@@ -158,6 +158,7 @@ export const QUALITY_GATES = [
   'src/server/factory/test-weakening.ts',
   'src/server/evals/cases.ts',
   'src/server/evals/run-case.ts',
+  'src/server/evals/check-receipt.ts',
   'src/server/evals/suite.ts',
   'src/server/evals/compare.ts',
   'src/server/evals/suite.evals.test.ts',

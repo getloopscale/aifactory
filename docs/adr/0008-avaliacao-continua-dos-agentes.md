@@ -65,6 +65,14 @@ issue, o commit de que partiu, as checagens que a aceitaram, o custo e a duraç�
     média: o custo do construtor em um só caso varia mais de 2x de uma rodada para outra e decidia sozinho.
     Exige ao menos 3 casos que chegaram a um veredito nas duas rodadas; com menos, a rodada é recusada. Limite:
     a mediana não vê um aumento concentrado em menos da metade dos casos, e 3 a 5 casos não dão confiança estatística.
+- **Uma passagem registrada não roda de novo.** Quando a checagem mede o conjunto rápido inteiro e o juiz de
+  prontidão, e tudo passa, ela grava um registro em `<diretório comum do git>/aifactory-evals/passes/`, fora de
+  qualquer árvore de trabalho: worktrees e o checkout principal leem o mesmo, e o sandbox de uma tarefa tem o
+  clone dele e não o escreve. A chave é um resumo do conteúdo (não do commit) dos arquivos da configuração dos
+  agentes, da própria checagem, da baseline, dos casos e do setup efetivo dos agentes, então um commit de merge
+  que não muda nada disso continua batendo. Um deploy com a chave de um registro roda zero casos e diz qual
+  registro aceitou. Falha, caso deixado, falha de ambiente, entrada que mudou durante a rodada ou registro
+  malformado nunca é aceito, e a checagem roda como antes. A mudança nesses arquivos é do dono (`QUALITY_GATES`).
 - **Não roda no CI do GitHub.** Lá não estão o banco, as credenciais dos agentes nem a chave do E2B, e
   levá-las para um runner do GitHub é exatamente o que a fábrica evita. A máquina do deploy já tem tudo.
 - **Teto de gasto.** Antes de começar cada caso, o runner soma o que os casos terminados custaram. Ao
