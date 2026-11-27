@@ -1,17 +1,16 @@
-import { FlaskConical as FlaskIcon, ListTodo } from 'lucide-react'
+import { Bot, FlaskConical as FlaskIcon, ListTodo, User } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
 import {
-  COLUMNS,
   mergeBreakdown,
   type MergeState,
-  type Column as ColumnId,
   type LeadTime,
   type LeadTimeStatus,
   type QueueView,
   type TaskCard,
 } from '../../shared/panel'
+import { laneOf, LANES, type Lane, type Need } from '../lib/board-lanes'
 import { useCopy } from '../lib/copy'
 import { useWidth } from '../lib/media'
 import type { Copy } from '../lib/copy/en'
@@ -211,7 +210,66 @@ function LeadTimeLine({ lead }: { lead: LeadTime }) {
  * A card grows with what it has to say, from a floor that keeps the columns even, so nothing on it is cut. The title
  * takes up to three lines, the agent its own panel, and the stage closes the card.
  */
-export function Card({ task }: { task: TaskCard }) {
+/** Why the task waits for the owner, in the words of the inbox, under a dot of the colour of its kind. */
+const NEED_DOT: Record<Need['kind'], string> = {
+  question: 'bg-warning',
+  review: 'bg-primary',
+  handoff: 'bg-warning',
+  failed: 'bg-destructive',
+  main_red: 'bg-destructive',
+}
+
+function NeedLine({ need }: { need: Need }) {
+  return (
+    <div data-need={need.kind} className="flex items-baseline gap-1.5 text-xs text-foreground">
+      <span aria-hidden className={`size-2 shrink-0 rounded-full ${NEED_DOT[need.kind]}`} />
+      <span className="line-clamp-2 min-w-0 font-medium" title={need.summary}>
+        {need.summary}
+      </span>
+    </div>
+  )
+}
+
+/** The labels a card has room for; the rest are in the title of the last. */
+const LABELS_SHOWN = 3
+
+function Labels({ labels }: { labels: string[] }) {
+  if (labels.length === 0) return null
+  const rest = labels.slice(LABELS_SHOWN)
+  return (
+    <div className="flex flex-wrap gap-1">
+      {labels.slice(0, LABELS_SHOWN).map((label) => (
+        <span
+          key={label}
+          className="max-w-full truncate rounded border border-border px-1 font-mono text-[10px] leading-4 text-muted-foreground"
+        >
+          {label}
+        </span>
+      ))}
+      {rest.length > 0 ? (
+        <span
+          className="font-mono text-[10px] leading-4 text-muted-foreground"
+          title={rest.join(', ')}
+        >
+          +{rest.length}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
+/** Who opened the item, as an icon by its number: a person, or the factory itself. */
+function Origin({ origin }: { origin: NonNullable<TaskCard['origin']> }) {
+  const { t } = useCopy()
+  const Icon = origin === 'factory' ? Bot : User
+  return (
+    <span role="img" aria-label={t.board.origin[origin]} title={t.board.origin[origin]}>
+      <Icon aria-hidden className="size-3 shrink-0 translate-y-0.5" />
+    </span>
+  )
+}
+
+export function Card({ task, need }: { task: TaskCard; need?: Need }) {
   const { t } = useCopy()
   // The card whose task is open beside the board.
   const current = useSearchParams()[0].get('task') === String(task.id)
@@ -227,6 +285,7 @@ export function Card({ task }: { task: TaskCard }) {
       >
         <div className="flex items-baseline gap-2 font-mono text-[11px] text-muted-foreground">
           <Rank queue={task.queue} />
+          {task.origin ? <Origin origin={task.origin} /> : null}
           <span className="min-w-0 flex-1 truncate" title={`${task.repository} ${itemName(task)}`}>
             {task.repository.split('/').pop()} {itemName(task)}
           </span>
@@ -241,6 +300,8 @@ export function Card({ task }: { task: TaskCard }) {
         >
           {task.title}
         </div>
+        {need ? <NeedLine need={need} /> : null}
+        <Labels labels={task.labels ?? []} />
         {task.leadTime ? <LeadTimeLine lead={task.leadTime} /> : null}
         {task.returned ? (
           <div className="">
@@ -269,6 +330,15 @@ export function Card({ task }: { task: TaskCard }) {
               title={t.board.riskReasons(task.risk.reasons)}
             >
               {t.board.risk[task.risk.level]}
+            </span>
+          ) : null}
+          {task.checks ? (
+            <span data-checks={task.checks.passed === task.checks.total ? 'passed' : 'failed'}>
+              <span
+                aria-hidden
+                className={`mr-1 inline-block size-1.5 rounded-full align-middle ${task.checks.passed === task.checks.total ? 'bg-success' : 'bg-destructive'}`}
+              />
+              {t.board.checksPassed(task.checks.passed, task.checks.total)}
             </span>
           ) : null}
           {task.attempts > 1 ? <span>{t.board.attempt(task.attempts)}</span> : null}
@@ -305,14 +375,14 @@ export function Card({ task }: { task: TaskCard }) {
  * Every column is the same width, full or empty, and they share the room equally, so the board looks the
  * same however many tasks there are. None goes below this: under it the board scrolls instead.
  */
-const COLUMN = 'minmax(152px, 1fr)'
+const COLUMN = 'minmax(208px, 1fr)'
 
 /**
  * The queued column in the order the worker serves it, with a line under the first ten so the head of the
  * queue reads at a glance. Every other column keeps the order it was given.
  */
-function ordered(id: ColumnId, tasks: TaskCard[]): TaskCard[] {
-  return id === 'queued' ? inQueueOrder(tasks) : tasks
+function ordered(id: Lane, tasks: TaskCard[]): TaskCard[] {
+  return id === 'todo' ? inQueueOrder(tasks) : tasks
 }
 
 const MERGE_STATES: MergeState[] = ['merging', 'opening_pr', 'waiting_for_checks', 'awaiting_merge']
@@ -332,17 +402,14 @@ function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
   )
 }
 
-/** The colour of each column's dot: who has the task now, and whether it ended well. */
-const COLUMN_TONE: Record<ColumnId, Tone> = {
-  queued: 'neutral',
-  working: 'primary',
-  waiting: 'warning',
-  retrying: 'info',
-  merge: 'info',
-  review: 'success',
-  released: 'success',
-  resolved: 'success',
-  attention: 'destructive',
+/** The colour of each lane's dot: who has the task now, and whether it ended well. */
+const LANE_TONE: Record<Lane, Tone> = {
+  todo: 'neutral',
+  needs_you: 'warning',
+  running: 'primary',
+  ready: 'info',
+  done: 'success',
+  cancelled: 'neutral',
 }
 
 /**
@@ -353,11 +420,13 @@ function Column({
   id,
   title,
   tasks,
+  needs,
   fill = false,
 }: {
-  id: ColumnId
+  id: Lane
   title: string
   tasks: TaskCard[]
+  needs: Map<number, Need>
   /** The column keeps the height of the board and its cards scroll under its title. */
   fill?: boolean
 }) {
@@ -373,7 +442,7 @@ function Column({
           <span className="flex items-center gap-2">
             <span
               aria-hidden
-              className={`size-2.5 shrink-0 rounded-full ${TONE_DOT[COLUMN_TONE[id]]}`}
+              className={`size-2.5 shrink-0 rounded-full ${TONE_DOT[LANE_TONE[id]]}`}
             />
             <span className="min-w-0 truncate">
               {title}{' '}
@@ -382,7 +451,7 @@ function Column({
               </span>
             </span>
           </span>
-          {id === 'merge' ? <MergeCounts tasks={tasks} /> : null}
+          {id === 'running' ? <MergeCounts tasks={tasks} /> : null}
         </span>
       </h2>
       {tasks.length === 0 ? (
@@ -398,7 +467,7 @@ function Column({
                   <span className="h-px flex-1 bg-border" />
                 </div>
               ) : null}
-              <Card task={task} />
+              <Card task={task} need={needs.get(task.id)} />
             </li>
           ))}
         </ul>
@@ -412,22 +481,27 @@ function Column({
  * frame when the screen is narrower than the columns need, so the sideways scrollbar stays at the bottom
  * of the screen where it can be found, and the column titles stay at the top.
  */
+const NO_NEEDS = new Map<number, Need>()
+
 export function Board({
   tasks,
+  needs = NO_NEEDS,
   fill = false,
 }: {
   tasks: TaskCard[]
+  /** Why each task that waits for the owner does, by task. */
+  needs?: Map<number, Need>
   /** The board takes the height its page leaves: each column scrolls by itself, and the page does not. */
   fill?: boolean
 }) {
   const { t } = useCopy()
   const compact = useWidth() === 'compact'
-  const [picked, pick] = useState<ColumnId>('waiting')
+  const [picked, pick] = useState<Lane>('needs_you')
   if (compact) {
-    const inColumn = (id: ColumnId) =>
+    const inColumn = (id: Lane) =>
       ordered(
         id,
-        tasks.filter((task) => task.column === id),
+        tasks.filter((task) => laneOf(task) === id),
       )
     return (
       <div>
@@ -436,23 +510,23 @@ export function Board({
           aria-label={t.board.stages}
           className="-mx-4 mb-3 flex gap-1 overflow-x-auto px-4"
         >
-          {COLUMNS.map((column) => (
+          {LANES.map((lane) => (
             <button
-              key={column.id}
+              key={lane}
               type="button"
               role="tab"
-              aria-selected={column.id === picked}
-              onClick={() => pick(column.id)}
-              className={`shrink-0 rounded-full px-3 text-sm ${column.id === picked ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
+              aria-selected={lane === picked}
+              onClick={() => pick(lane)}
+              className={`shrink-0 rounded-full px-3 text-sm ${lane === picked ? 'bg-muted font-medium text-foreground' : 'text-muted-foreground'}`}
             >
-              {t.columns[column.id]}{' '}
+              {t.lanes[lane]}{' '}
               <span className="tabular-nums">
-                {tasks.filter((task) => task.column === column.id).length}
+                {tasks.filter((task) => laneOf(task) === lane).length}
               </span>
             </button>
           ))}
         </div>
-        <Column id={picked} title={t.columns[picked]} tasks={inColumn(picked)} />
+        <Column id={picked} title={t.lanes[picked]} tasks={inColumn(picked)} needs={needs} />
       </div>
     )
   }
@@ -467,17 +541,18 @@ export function Board({
       {/* The columns are as tall as the tallest: a title sticks only inside its own column, so a short one would let it go. */}
       <div
         className={`grid gap-2.5 ${fill ? 'h-full grid-rows-[minmax(0,1fr)]' : ''}`}
-        style={{ gridTemplateColumns: `repeat(${COLUMNS.length}, ${COLUMN})` }}
+        style={{ gridTemplateColumns: `repeat(${LANES.length}, ${COLUMN})` }}
       >
-        {COLUMNS.map((column) => (
+        {LANES.map((lane) => (
           <Column
-            key={column.id}
-            id={column.id}
-            title={t.columns[column.id]}
+            key={lane}
+            id={lane}
+            title={t.lanes[lane]}
             fill={fill}
+            needs={needs}
             tasks={ordered(
-              column.id,
-              tasks.filter((t) => t.column === column.id),
+              lane,
+              tasks.filter((task) => laneOf(task) === lane),
             )}
           />
         ))}

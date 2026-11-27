@@ -459,7 +459,17 @@ export type TaskCard = {
   working: AgentStep | null
   /** The agent that planned, built or reviewed the task last; null before any did. */
   lastAgent: AgentSeen | null
+  /** The labels the item had when it reached the factory, without the one that asks for the work; absent on a card built without them. */
+  labels?: string[]
+  /** Who opened the item: a person, the factory itself (a plan, a follow-up, a proposal) or Linear. */
+  origin?: CardOrigin
+  /** How many checks passed on the commit the task is at; null when none ran there. */
+  checks?: CardChecks | null
 }
+
+export type CardOrigin = 'person' | 'factory' | 'linear'
+
+export type CardChecks = { passed: number; total: number }
 
 /** An agent by the name the factory knows it by (`claude-code`, `codex`, ...), and the model it ran with. */
 export type AgentSeen = {

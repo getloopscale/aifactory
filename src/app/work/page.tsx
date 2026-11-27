@@ -1,17 +1,26 @@
 import { Button, EmptyState, Sheet } from '@getloopscale/ui'
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 
-import type { StoppedLine, TaskCard } from '../../shared/panel'
+import type { InboxItem, StoppedLine, TaskCard } from '../../shared/panel'
 
 import { BaseAlerts } from '../components/BaseAlerts'
 import { LineAlerts } from '../components/LineAlerts'
 import { Board, TaskList } from '../components/Board'
+import { BoardBar } from '../components/BoardBar'
 import { NewJob, type CreatedJob } from '../components/NewJob'
 import { Pulse } from '../components/Pulse'
 import { TaskDetailView } from '../components/TaskDetail'
 import { TaskDock } from '../components/TaskDock'
 import { PageHeader, Quiet, Surface } from '../components/ui/Surface'
+import {
+  boardSummary,
+  filterTasks,
+  needsByTask,
+  NO_FILTER,
+  repositoriesOf,
+  type BoardFilter,
+} from '../lib/board-lanes'
 import { useCopy } from '../lib/copy'
 import { useEscape } from '../lib/keys'
 import { useResource } from '../lib/live'
@@ -24,7 +33,25 @@ import { useView } from '../lib/view'
  */
 export default function Page() {
   const { t } = useCopy()
-  const tasks = useResource<{ tasks: TaskCard[]; stoppedLines?: StoppedLine[] }>('/api/panel/tasks')
+  const tasks = useResource<{
+    tasks: TaskCard[]
+    cancelled?: TaskCard[]
+    stoppedLines?: StoppedLine[]
+  }>('/api/panel/tasks')
+  // Why each task that waits for the owner does: the inbox already says it in one line.
+  const inbox = useResource<{ items?: InboxItem[] }>('/api/panel/inbox')
+  const needs = useMemo(() => needsByTask(inbox.data?.items ?? []), [inbox.data])
+  const [filter, setFilter] = useState<BoardFilter>(NO_FILTER)
+  const every = useMemo(
+    () => [...(tasks.data?.tasks ?? []), ...(tasks.data?.cancelled ?? [])],
+    [tasks.data],
+  )
+  const shown = useMemo(() => filterTasks(every, filter, Date.now()), [every, filter])
+  // The inbox counts what waits for the owner, a red main after a release too, so the line agrees with it.
+  const summary = {
+    ...boardSummary(every),
+    ...(inbox.data?.items ? { needYou: inbox.data.items.length } : {}),
+  }
   const [view, setView] = useView()
   // On a phone the board is one column under tabs, and the page scrolls as any list does.
   const width = useWidth()
@@ -58,6 +85,7 @@ export default function Page() {
       <div className={fill ? 'flex min-h-0 min-w-0 flex-1 flex-col' : undefined}>
         <PageHeader
           title={t.work.board}
+          lede={tasks.data ? t.board.summary(summary.active, summary.needYou) : undefined}
           actions={
             <>
               <NewJob onCreated={setOpened} />
@@ -96,7 +124,7 @@ export default function Page() {
         ) : null}
         {tasks.error ? <p className="mb-3 text-sm text-destructive">{tasks.error}</p> : null}
         {tasks.data ? (
-          tasks.data.tasks.length === 0 ? (
+          every.length === 0 ? (
             <Surface>
               <EmptyState
                 title={t.work.emptyTitle}
@@ -111,12 +139,21 @@ export default function Page() {
                 }
               />
             </Surface>
-          ) : view === 'board' ? (
-            <Board tasks={tasks.data.tasks} fill={fill} />
           ) : (
-            <div className={fill ? 'min-h-0 flex-1 overflow-y-auto' : undefined}>
-              <TaskList tasks={tasks.data.tasks} />
-            </div>
+            <>
+              <BoardBar filter={filter} repositories={repositoriesOf(every)} onChange={setFilter} />
+              {shown.length === 0 ? (
+                <Surface>
+                  <Quiet>{t.board.noMatch}</Quiet>
+                </Surface>
+              ) : view === 'board' ? (
+                <Board tasks={shown} needs={needs} fill={fill} />
+              ) : (
+                <div className={fill ? 'min-h-0 flex-1 overflow-y-auto' : undefined}>
+                  <TaskList tasks={shown} />
+                </div>
+              )}
+            </>
           )
         ) : (
           <Surface>
