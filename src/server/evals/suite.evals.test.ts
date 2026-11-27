@@ -42,6 +42,7 @@ import {
   checkConcurrency,
   checkFromTestStart,
   fromTestStart,
+  parseConcurrency,
   parseMarginMinutes,
   runSuiteFromTestStart,
   spentOn,
@@ -139,7 +140,7 @@ async function runCases(cases: EvalCase[], testStartedAt: number) {
           cases: cases.length,
           freeSlots: await freeSandboxSlots(cases),
         })
-      : Number(env.EVALS_CONCURRENCY ?? 2)
+      : parseConcurrency(env.EVALS_CONCURRENCY ?? '2')
   // A bad value fails the run at once; only the read of the repositories' limits can be cut short.
   const margin =
     env.EVALS_START_MARGIN_MIN !== undefined

@@ -138,6 +138,14 @@ export function baselineResultsFor(path: string): CaseResult[] {
   return (JSON.parse(readFileSync(path, 'utf8')) as Baseline).results
 }
 
+/** `EVALS_CONCURRENCY` as a whole number of at least 1; anything else fails the run at once, never as NaN. */
+export function parseConcurrency(value: string): number {
+  const given = Number(value)
+  if (value.trim() === '' || !Number.isInteger(given) || given < 1)
+    throw new Error(`EVALS_CONCURRENCY must be a whole number of at least 1, got "${value}"`)
+  return given
+}
+
 /**
  * How many cases the check runs at once (#684): `EVALS_CONCURRENCY` when set, else the size of the quick set, no
  * more than the sandbox slots free now. When the provider cannot say how many are free, or none is, one: that case
@@ -148,12 +156,7 @@ export function checkConcurrency(input: {
   cases: number
   freeSlots?: number
 }): number {
-  if (input.override !== undefined && input.override !== '') {
-    const given = Number(input.override)
-    if (!Number.isInteger(given) || given < 1)
-      throw new Error(`EVALS_CONCURRENCY must be a whole number of at least 1, got "${input.override}"`)
-    return given
-  }
+  if (input.override !== undefined && input.override !== '') return parseConcurrency(input.override)
   const free = input.freeSlots
   if (free === undefined || !Number.isFinite(free) || free < 1) return 1
   return Math.max(1, Math.min(input.cases, Math.floor(free)))

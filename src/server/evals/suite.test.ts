@@ -12,6 +12,7 @@ import {
   checkBeforeDeploy,
   baselineResultsFor,
   checkConcurrency,
+  parseConcurrency,
   checkFromTestStart,
   fromTestStart,
   runSuite,
@@ -587,5 +588,12 @@ describe('baselineResultsFor', () => {
     expect(baselineResultsFor(join(dir, 'baseline.json'))).toEqual([])
     writeFileSync(join(dir, 'baseline.json'), JSON.stringify(baseline))
     expect(baselineResultsFor(join(dir, 'baseline.json')).map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
+  })
+})
+
+describe('parseConcurrency', () => {
+  it('reads a whole number and refuses anything else, for the run and baseline modes too', () => {
+    expect(parseConcurrency('3')).toBe(3)
+    for (const bad of ['abc', '0', '-2', '2.5', ' ']) expect(() => parseConcurrency(bad)).toThrow('EVALS_CONCURRENCY')
   })
 })
