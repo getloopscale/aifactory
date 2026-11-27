@@ -299,7 +299,8 @@ describe('the side panel of an open session', () => {
     show('en', '/code/new')
     await screen.findByRole('tab', { name: en.code.editor.diffTab('f0.ts') })
     expect(screen.getByRole('separator', { name: en.code.editor.resizeSide })).toBeDefined()
-    expect(screen.getByRole('separator', { name: en.code.editor.resizeEditor })).toBeDefined()
+    const handle = screen.getByRole('separator', { name: en.code.editor.resizeEditor })
+    expect(handle.querySelector('[data-grip] svg')).not.toBeNull()
     fireEvent.click(
       screen.getByRole('button', { name: en.code.editor.close(en.code.editor.diffTab('f0.ts')) }),
     )

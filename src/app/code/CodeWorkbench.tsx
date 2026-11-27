@@ -7,6 +7,7 @@ import {
   FileText,
   FolderGit2,
   GitCompareArrows,
+  GripVertical,
   MessagesSquare,
   X,
   GitBranch,
@@ -684,15 +685,24 @@ function ActivityBar({
 
 /**
  * The line between two panes: drag it, or focus it and use the arrows, to give one pane the width of the other.
- * A double click puts the pane back at the width it starts with. The line is one pixel; its handle is wider.
+ * A double click puts the pane back at the width it starts with. The line is one pixel, its handle is wider, and
+ * a grip in the middle of it says it can be dragged.
  */
 function Divider({ label }: { label: string }) {
   return (
     <Separator
       aria-label={label}
       title={label}
-      className="relative w-px shrink-0 bg-border outline-none after:absolute after:inset-y-0 after:-left-1 after:w-2 after:content-[''] focus-visible:bg-ring data-[separator=active]:bg-primary data-[separator=hover]:bg-primary"
-    />
+      className="group/divider relative z-10 w-px shrink-0 bg-border outline-none after:absolute after:inset-y-0 after:-left-1.5 after:w-3 after:content-[''] focus-visible:bg-ring data-[separator=active]:bg-primary data-[separator=hover]:bg-primary"
+    >
+      <span
+        aria-hidden
+        data-grip=""
+        className="pointer-events-none absolute left-1/2 top-1/2 z-10 flex h-8 w-3.5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm border border-border bg-card text-muted-foreground group-hover/divider:border-primary group-hover/divider:text-foreground group-focus-visible/divider:border-ring group-data-[separator=active]/divider:border-primary group-data-[separator=active]/divider:text-foreground"
+      >
+        <GripVertical className="size-3" />
+      </span>
+    </Separator>
   )
 }
 
