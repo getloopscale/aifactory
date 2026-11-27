@@ -29,17 +29,16 @@ export const DATABASE_NAME = 'main'
  * LoopZero's `storage` block takes credentials as fields and reads no connection string, so the
  * URL the rest of the tooling shares (`drizzle-kit`, `.env`) is split here, once.
  */
-export function storageFromUrl(url: string): StorageConfig {
+export function storageFromUrl(url: string, leaseUrl?: string): StorageConfig {
   const parsed = new URL(url)
-  return {
-    servers: {
-      primary: {
-        host: parsed.hostname,
-        port: parsed.port ? Number(parsed.port) : 5432,
-        user: decodeURIComponent(parsed.username),
-        password: decodeURIComponent(parsed.password),
-      },
-    },
+  const server = (u: URL) => ({
+    host: u.hostname,
+    port: u.port ? Number(u.port) : 5432,
+    user: decodeURIComponent(u.username),
+    password: decodeURIComponent(u.password),
+  })
+  const config: StorageConfig = {
+    servers: { primary: server(parsed) },
     databases: {
       [DATABASE_NAME]: {
         server: 'primary',
@@ -47,6 +46,29 @@ export function storageFromUrl(url: string): StorageConfig {
       },
     },
   }
+  if (!leaseUrl) return config
+  const lease = new URL(leaseUrl)
+  return {
+    servers: { ...config.servers, lease: server(lease) },
+    databases: {
+      ...config.databases,
+      [LEASE_DATABASE_NAME]: {
+        server: 'lease',
+        database: decodeURIComponent(lease.pathname.slice(1)),
+      },
+    },
+  }
+}
+
+/**
+ * The database a deploy's evaluation records its sandbox lease in (`FACTORY_LEASE_DATABASE_URL`): the one the
+ * supervisor of the running service reads, while the cases read a copy. Unset, leases go where everything goes.
+ */
+export const LEASE_DATABASE_NAME = 'lease'
+
+/** The URL of the lease database, or undefined when leases stay in the main one. */
+export function readLeaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.FACTORY_LEASE_DATABASE_URL || undefined
 }
 
 /**
