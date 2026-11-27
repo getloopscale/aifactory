@@ -3,6 +3,7 @@ import { z } from 'zod'
 
 import { runTurn, type TurnDeps } from '../code/turn'
 import { appendEvent, claimTurn, moveSession, touchSession, saveAgentSession } from '../code/store'
+import { codeMaxSandboxes } from '../code/slots'
 import { workspaceStore } from '../code/workspace'
 import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
@@ -51,6 +52,8 @@ export default defineJob('code-turn', {
       },
       record: (values) => recordPass(getDb(), values),
       onRefusal: (error) => pauseOnRefusal(getDb(), error),
+      codeCap: codeMaxSandboxes(env),
+      keepWorkspace: true,
       signal,
     }
     const result = await withLeaseHeartbeat(
@@ -60,12 +63,12 @@ export default defineJob('code-turn', {
       },
       () => runTurn(deps, input.sessionId),
     )
-    if (result.status === 'busy') {
-      // Another turn of the session writes; this one queues itself again behind it.
+    if (result.status === 'busy' || result.status === 'capped') {
+      // Another turn of the session writes, or the code workspaces are all up: this one queues itself again.
       await jobBackend().enqueue({
         name: 'code-turn',
         input,
-        idempotencyKey: `code-turn-${input.sessionId}-busy-${Math.floor(Date.now() / (BUSY_WAIT_SECONDS * 1000))}`,
+        idempotencyKey: `code-turn-${input.sessionId}-${result.status}-${Math.floor(Date.now() / (BUSY_WAIT_SECONDS * 1000))}`,
         delaySeconds: BUSY_WAIT_SECONDS,
       })
     } else if (result.status === 'deferred') {

@@ -1683,7 +1683,8 @@ export const en = {
         starting: 'Starting the agent…',
         running: 'The agent is working…',
         waiting_input: 'Waiting for you.',
-        stopped: 'Stopped. A message starts it again.',
+        stopped:
+          'Stopped to free its workspace. The next message restores it and starts the agent again.',
         ended: 'The session has ended.',
         failed: 'The last turn failed. A message tries again.',
       },

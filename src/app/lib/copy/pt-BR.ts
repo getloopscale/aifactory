@@ -1989,7 +1989,8 @@ export const ptBR: Copy = {
         starting: 'Iniciando o agente…',
         running: 'O agente está trabalhando…',
         waiting_input: 'Esperando por você.',
-        stopped: 'Parada. Uma mensagem a inicia de novo.',
+        stopped:
+          'Parada para liberar o espaço de trabalho. A próxima mensagem o restaura e inicia o agente de novo.',
         ended: 'A sessão terminou.',
         failed: 'O último turno falhou. Uma mensagem tenta de novo.',
       },

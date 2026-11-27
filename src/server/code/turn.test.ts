@@ -231,4 +231,36 @@ describe('runTurn', () => {
       ['error', 'acme/a'],
     ])
   })
+
+  it('restores a stopped session from its snapshot, with no clone', async () => {
+    const t = setup('code', undefined, { snapshotId: 'snap-9' })
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.sandbox.restored).toEqual(['snap-9'])
+    expect(t.sandbox.backend.commands.some((c) => c.includes('clone'))).toBe(false)
+  })
+
+  it('queues the turn again at the code cap, without an error event', async () => {
+    const t = setup()
+    await t.sandbox.create({
+      owner: { owner: 'code', sessionId: 'other' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    t.deps.codeCap = 1
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'capped' })
+    expect(t.session.state).toBe('queued')
+    expect(t.events.map((e) => e.kind)).toEqual(['user_message'])
+    expect(t.sandbox.specs).toHaveLength(1)
+  })
+
+  it('leaves the sandbox up when asked to, for the idle cron to close', async () => {
+    const t = setup()
+    t.deps.keepWorkspace = true
+    const saved: (string | null)[] = []
+    t.deps.workspace.store.saveSandbox = async (_id, sandboxId) => void saved.push(sandboxId)
+    await runTurn(t.deps, 's1')
+    expect(t.sandbox.snapshots).toEqual([])
+    expect([...t.sandbox.up.keys()]).toEqual(['sbx-1'])
+    expect(saved).toEqual(['sbx-1', 'sbx-1'])
+  })
 })

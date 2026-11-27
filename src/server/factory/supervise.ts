@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm'
 
 import type { Database } from '../db'
-import { finding, lineIncident, question, stageEvent, task, watch } from '../db/schema'
+import { codeSession, finding, lineIncident, question, stageEvent, task, watch } from '../db/schema'
 
 import { raiseFinding, type Found } from './findings'
 import { readPause } from './provider-pause-store'
@@ -332,7 +332,12 @@ export async function detect(deps: SuperviseDeps): Promise<Detected> {
       .select({ snapshotId: question.snapshotId })
       .from(question)
       .where(isNull(question.resumedAt))
-    const keep = new Set(needed.map((n) => n.snapshotId))
+    // A code session keeps the snapshot of its stopped workspace until the session ends.
+    const retained = await db
+      .select({ snapshotId: codeSession.snapshotId })
+      .from(codeSession)
+      .where(and(isNotNull(codeSession.snapshotId), ne(codeSession.state, 'ended')))
+    const keep = new Set([...needed, ...retained].map((n) => n.snapshotId))
     for (const snap of await deps.listSnapshots()) {
       if (keep.has(snap.id) || now.getTime() - snap.createdAt.getTime() <= limits.snapshotGraceMs)
         continue

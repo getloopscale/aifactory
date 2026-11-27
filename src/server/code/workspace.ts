@@ -15,12 +15,13 @@ import {
   restoreIsolatedSandbox,
   type IsolatedSandbox,
   type IsolatedSandboxProvider,
+  type SandboxSpec,
 } from '../factory/sandbox'
 import { KnowledgeFeed } from '../knowledge/feed'
 import type { KnowledgeSource } from '../knowledge/source'
 import { loadKnowledgeConfig } from '../knowledge/store'
 
-import { saveWorkspaceSnapshot } from './store'
+import { saveSandboxId, saveWorkspaceSnapshot } from './store'
 
 /** How long the sandbox of a code session may live. Idle timeouts and limits are not this module's. */
 export const WORKSPACE_TIMEOUT_MS = 2 * 60 * 60_000
@@ -44,6 +45,8 @@ export type WorkspaceStore = {
   knowledgeRepository(): Promise<string | undefined>
   /** Keeps the snapshot on the session and clears its sandbox id. */
   saveSnapshot(sessionId: string, snapshotId: string): Promise<unknown>
+  /** Keeps the id of the sandbox that is up for the session, or clears it. */
+  saveSandbox?(sessionId: string, sandboxId: string | null): Promise<unknown>
 }
 
 export type WorkspaceDeps = {
@@ -76,10 +79,12 @@ export function workspaceStore(db: Database): WorkspaceStore {
       return (await loadKnowledgeConfig(db))?.repository
     },
     saveSnapshot: saveWorkspaceSnapshot,
+    saveSandbox: saveSandboxId,
   }
 }
 
-type Opening = Pick<CodeSession, 'id' | 'repository' | 'baseBranch' | 'workBranch' | 'snapshotId'>
+type Opening = Pick<CodeSession, 'id' | 'repository' | 'baseBranch' | 'workBranch' | 'snapshotId'> &
+  Partial<Pick<CodeSession, 'sandboxId'>>
 
 async function refuseUnlessAllowed(deps: WorkspaceDeps, session: Opening): Promise<void> {
   const name = session.repository
@@ -106,6 +111,7 @@ export async function openWorkspace(deps: WorkspaceDeps, session: Opening): Prom
   await refuseUnlessAllowed(deps, session)
   const { token } = await deps.github.installationToken(session.repository)
   const spec = {
+    owner: { owner: 'code', sessionId: session.id } as const,
     timeoutMs: deps.timeoutMs ?? WORKSPACE_TIMEOUT_MS,
     cacheKey: session.repository,
     egress: [
@@ -114,20 +120,38 @@ export async function openWorkspace(deps: WorkspaceDeps, session: Opening): Prom
       { domain: 'registry.npmjs.org' },
     ],
   }
-  const created = session.snapshotId
-    ? await restoreIsolatedSandbox(deps.sandbox, session.snapshotId, spec)
-    : await createIsolatedSandbox(deps.sandbox, spec)
+  const reconnected = await reconnect(deps, session, spec)
+  const created =
+    reconnected ??
+    (session.snapshotId
+      ? await restoreIsolatedSandbox(deps.sandbox, session.snapshotId, spec)
+      : await createIsolatedSandbox(deps.sandbox, spec))
+  const existing = reconnected !== undefined || session.snapshotId
   try {
     const { backend } = created
-    const repoDir = session.snapshotId
-      ? await existingCheckout(backend)
-      : await checkout(backend, session)
+    const repoDir = existing ? await existingCheckout(backend) : await checkout(backend, session)
     await deps.harness.prepare?.(backend)
     const feed = await KnowledgeFeed.open(deps.knowledge, backend, session.repository, {})
+    if (created.id) await deps.store.saveSandbox?.(session.id, created.id)
     return { sandbox: feed.attachTo(created), backend, repoDir, feed }
   } catch (error) {
     await created.stop().catch(() => undefined)
     throw error
+  }
+}
+
+/** The sandbox a message left up, when the provider can connect to it; one that is gone is not an error. */
+async function reconnect(
+  deps: WorkspaceDeps,
+  session: Opening,
+  spec: SandboxSpec,
+): Promise<IsolatedSandbox | undefined> {
+  if (!session.sandboxId || !deps.sandbox.reconnect) return undefined
+  try {
+    return await deps.sandbox.reconnect(session.sandboxId, spec)
+  } catch {
+    await deps.store.saveSandbox?.(session.id, null)
+    return undefined
   }
 }
 
@@ -186,4 +210,18 @@ export async function closeWorkspace(
     await sandbox.stop().catch(() => undefined)
   }
   return snapshotId
+}
+
+/**
+ * Leaves the sandbox up for the next message and says so on the session; the idle cron closes it later. The feed
+ * stops, since the next turn opens its own.
+ */
+export async function retainWorkspace(
+  deps: Pick<WorkspaceDeps, 'store'>,
+  session: Pick<CodeSession, 'id'>,
+  workspace: Workspace,
+): Promise<void> {
+  workspace.feed.stop()
+  if (!workspace.sandbox.id) throw new Error('the sandbox has no id to reconnect to')
+  await deps.store.saveSandbox?.(session.id, workspace.sandbox.id)
 }

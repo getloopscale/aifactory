@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, gt, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 
 import type { CodeEvent, CodeEventKind, CodeMode, CodeSession, CodeState } from '../../shared/code'
@@ -75,6 +75,11 @@ export async function saveWorkspaceSnapshot(
     .where(eq(codeSession.id, id))
     .returning()
   return row
+}
+
+/** Says which sandbox is up for the session, or that none is. */
+export async function saveSandboxId(id: string, sandboxId: string | null): Promise<void> {
+  await getDb().update(codeSession).set({ sandboxId }).where(eq(codeSession.id, id))
 }
 
 /**
@@ -240,4 +245,61 @@ export async function saveAgentSession(
     .update(codeSession)
     .set({ agentSessionId, agentSessionHarness: harness, updatedAt: sql`now()` })
     .where(eq(codeSession.id, sessionId))
+}
+
+/** Sessions that are `idle` and had no event since `cutoff`: the ones whose workspace may be closed. */
+export function idleSessions(cutoff: Date): Promise<CodeSession[]> {
+  return getDb()
+    .select()
+    .from(codeSession)
+    .where(and(eq(codeSession.state, 'idle'), lt(codeSession.updatedAt, cutoff)))
+}
+
+/**
+ * Closes an idle session's workspace under the row's lock, so a message waits for it instead of racing it. The
+ * state and the last event are read again; `close` returns the snapshot to keep (the session's own when it made
+ * none), and the session ends `stopped` through `transitions.ts` with no sandbox id.
+ */
+export async function closeIdleSession(
+  sessionId: string,
+  cutoff: Date,
+  close: (session: CodeSession) => Promise<string | null>,
+): Promise<boolean> {
+  return getDb().transaction(async (tx) => {
+    const [session] = await tx
+      .select()
+      .from(codeSession)
+      .where(eq(codeSession.id, sessionId))
+      .for('update')
+    if (!session || session.updatedAt.getTime() >= cutoff.getTime()) return false
+    const outcome = transition(session.state, 'idle_timeout')
+    if (outcome.action !== 'move') return false
+    const snapshotId = await close(session)
+    await tx
+      .update(codeSession)
+      .set({ state: outcome.state, snapshotId, sandboxId: null, updatedAt: sql`now()` })
+      .where(eq(codeSession.id, sessionId))
+    return true
+  })
+}
+
+/** Ended sessions that still hold a snapshot or a sandbox. */
+export function endedWithWorkspace(): Promise<CodeSession[]> {
+  return getDb()
+    .select()
+    .from(codeSession)
+    .where(
+      and(
+        eq(codeSession.state, 'ended'),
+        or(isNotNull(codeSession.snapshotId), isNotNull(codeSession.sandboxId)),
+      ),
+    )
+}
+
+/** Forgets what an ended session held, once it was freed. */
+export async function clearWorkspace(sessionId: string): Promise<void> {
+  await getDb()
+    .update(codeSession)
+    .set({ snapshotId: null, sandboxId: null })
+    .where(and(eq(codeSession.id, sessionId), eq(codeSession.state, 'ended')))
 }

@@ -7,7 +7,8 @@ import { untilSlotFree } from '../factory/sandbox-slot'
 import type { agentRun } from '../db/schema'
 
 import { turnMarker, type Claim, type NewCodeEvent } from './store'
-import { closeWorkspace, openWorkspace, type WorkspaceDeps } from './workspace'
+import { codeCapReached } from './slots'
+import { closeWorkspace, openWorkspace, retainWorkspace, type WorkspaceDeps } from './workspace'
 
 /** What a turn reads and writes in the database, so a test can stand in for it. */
 export type TurnStore = {
@@ -27,6 +28,10 @@ export type TurnDeps = {
   /** Remembers a refusal of the sandbox provider for credit or spending, so no run starts a sandbox for a while. */
   onRefusal(error: string): Promise<void>
   agentTimeoutMs?: number
+  /** How many code workspaces may be up; a turn that would start one over it waits in the queue. Absent is no cap. */
+  codeCap?: number
+  /** Leaves the sandbox up after a turn that worked, for the idle cron to close. */
+  keepWorkspace?: boolean
   slotWait?: Parameters<typeof untilSlotFree>[1]
   signal?: AbortSignal
 }
@@ -35,6 +40,8 @@ export type TurnResult =
   | { status: 'nothing' }
   /** Another turn of the session runs: the job queues itself again. */
   | { status: 'busy' }
+  /** The code workspaces up fill the cap: the job queues itself again, and the session waits `queued`. */
+  | { status: 'capped' }
   /** The provider refused a sandbox for credit or spending: the job queues itself again after the pause. */
   | { status: 'deferred' }
   | { status: 'idle' | 'failed'; sessionId: string }
@@ -95,6 +102,15 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let workspace: Awaited<ReturnType<typeof openWorkspace>>
   try {
     harness = deps.harnessFor(session)
+    // A session whose sandbox is still up needs no new slot.
+    if (
+      !session.sandboxId &&
+      deps.codeCap !== undefined &&
+      (await codeCapReached(deps.workspace.sandbox, deps.codeCap))
+    ) {
+      await store.move(sessionId, 'turn_released')
+      return { status: 'capped' }
+    }
     await untilSlotFree(deps.workspace.sandbox, { ...deps.slotWait, signal: deps.signal })
     workspace = await openWorkspace({ ...deps.workspace, harness }, session)
   } catch (error) {
@@ -140,7 +156,14 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   }
 
   try {
-    await closeWorkspace(deps.workspace, session, workspace)
+    const keep =
+      deps.keepWorkspace &&
+      failure === undefined &&
+      result?.ok &&
+      workspace.sandbox.id &&
+      deps.workspace.sandbox.reconnect
+    if (keep) await retainWorkspace(deps.workspace, session, workspace)
+    else await closeWorkspace(deps.workspace, session, workspace)
   } catch (error) {
     console.warn(`code_workspace_not_saved session=${sessionId}: ${errorMessage(error)}`)
   }
