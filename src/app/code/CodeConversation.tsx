@@ -1,6 +1,14 @@
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
-import { Button, Textarea } from '@getloopscale/ui'
-import { ChevronRight } from 'lucide-react'
+import { Button } from '@getloopscale/ui'
+import {
+  ArrowUp,
+  Bot,
+  ChevronRight,
+  FileText,
+  Pencil,
+  SlidersHorizontal,
+  Terminal,
+} from 'lucide-react'
 import {
   useEffect,
   useLayoutEffect,
@@ -20,6 +28,7 @@ import {
 } from '../../shared/code'
 import { Assist } from '../components/Assist'
 import { FollowScroll } from '../components/chat/FollowScroll'
+import { tallest, TOOL } from '../components/chat/MessageBox'
 import { TONE_DOT } from '../components/ui/Surface'
 import { patch, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
@@ -30,6 +39,9 @@ const REFUSING = ['queued', 'starting', 'running', 'waiting_input', 'ended'] as 
 type Refusing = (typeof REFUSING)[number]
 const refuses = (state: CodeState): state is Refusing =>
   (REFUSING as readonly string[]).includes(state)
+
+/** The width a conversation is read at, and its box with it. */
+export const COLUMN = 'w-full max-w-3xl'
 
 /** A tool call as one card: what it was asked, and what came back, when something did. */
 export type ToolCard = {
@@ -80,13 +92,13 @@ export function cardsOf(events: CodeEventWire[]): Array<Row> {
   return fold(rows)
 }
 
-/** Two or more tool cards in a row become one line. */
+/** Two or more commands in a row become one line. An edit stays a line of its own: it is what changed. */
 function fold(rows: Row[]): Row[] {
   const out: Row[] = []
   for (const row of rows) {
     const last = out[out.length - 1]
-    if (row.type !== 'tool') out.push(row)
-    else if (last?.type === 'tool')
+    if (row.type !== 'tool' || describe(row).edit) out.push(row)
+    else if (last?.type === 'tool' && !describe(last).edit)
       out[out.length - 1] = { type: 'tools', seq: last.seq, cards: [last, row] }
     else if (last?.type === 'tools') last.cards.push(row)
     else out.push(row)
@@ -127,40 +139,55 @@ export function describe(card: ToolCard): {
   return { edit: false, label: str(data?.command) ?? str(data?.cmd) ?? path ?? card.input }
 }
 
+const TOOL_ICON = (card: ToolCard, edit: boolean) =>
+  edit ? Pencil : /read|view|cat|glob|grep|search|list/i.test(card.tool ?? '') ? FileText : Terminal
+
+/** One step of the agent on one line: what it ran or edited, opening on what came back. */
 function Card({ card }: { card: ToolCard }) {
   const { t } = useCopy()
   const c = t.code.conversation
   const [open, setOpen] = useState(false)
   const d = describe(card)
+  const Icon = TOOL_ICON(card, d.edit)
   const counts = d.added !== undefined && d.removed !== undefined ? c.lines(d.added, d.removed) : ''
   return (
-    <div className="rounded-lg border border-border bg-card text-[13px]">
+    <div className="text-[13px]">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left"
+        className="group flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
       >
-        <ChevronRight aria-hidden className={`size-3 shrink-0 ${open ? 'rotate-90' : ''}`} />
+        <Icon aria-hidden className="size-3.5 shrink-0 stroke-muted-foreground" />
         {card.failed ? (
           <span
             role="img"
             aria-label={c.failed}
-            className={`size-2.5 shrink-0 rounded-full ${TONE_DOT.destructive}`}
+            className={`size-2 shrink-0 rounded-full ${TONE_DOT.destructive}`}
           />
         ) : null}
-        <span className="shrink-0 font-semibold">
-          {card.tool ?? (card.failed ? c.error : c.tool)}
-        </span>
-        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">
+        {d.edit ? null : (
+          <span className="shrink-0 font-medium">
+            {card.tool ?? (card.failed ? c.error : c.tool)}
+          </span>
+        )}
+        <span
+          className={`min-w-0 truncate font-mono text-xs ${d.edit ? '' : 'text-muted-foreground'}`}
+        >
           {d.edit ? `${c.edited} ${d.label}` : d.label}
         </span>
         {counts ? (
-          <span className="ml-auto shrink-0 font-mono text-xs text-muted-foreground">{counts}</span>
+          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground">
+            {counts}
+          </span>
         ) : null}
+        <ChevronRight
+          aria-hidden
+          className={`ml-auto size-3 shrink-0 stroke-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 ${open ? 'rotate-90 opacity-100' : ''}`}
+        />
       </button>
       {open ? (
-        <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-2 font-mono text-xs">
+        <pre className="mt-1 ml-5 max-h-72 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-background px-3 py-2 font-mono text-xs [scrollbar-width:thin]">
           {card.output === undefined ? c.running : card.output || c.noOutput}
         </pre>
       ) : null}
@@ -168,24 +195,31 @@ function Card({ card }: { card: ToolCard }) {
   )
 }
 
+/** A run of steps folded into one line, so the conversation reads as what was said. */
 function Group({ cards }: { cards: ToolCard[] }) {
   const { t } = useCopy()
   const [open, setOpen] = useState(false)
   return (
-    <div className="space-y-2 text-[13px]">
+    <div className="text-[13px]">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-muted-foreground"
+        className="flex items-center gap-2 rounded-md px-1.5 py-1 text-muted-foreground hover:bg-muted/60 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
       >
         <ChevronRight aria-hidden className={`size-3 ${open ? 'rotate-90' : ''}`} />
         {cards.some((c) => c.failed) ? (
-          <span aria-hidden className={`size-2.5 rounded-full ${TONE_DOT.destructive}`} />
+          <span aria-hidden className={`size-2 rounded-full ${TONE_DOT.destructive}`} />
         ) : null}
         {t.code.conversation.ranCommands(cards.length)}
       </button>
-      {open ? cards.map((c) => <Card key={c.seq} card={c} />) : null}
+      {open ? (
+        <div className="ml-3 mt-0.5 space-y-0.5 border-l border-border pl-2">
+          {cards.map((c) => (
+            <Card key={c.seq} card={c} />
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -283,20 +317,26 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
   })
 
   return (
-    <div className="space-y-1 text-xs">
+    <div className="relative text-xs">
       <button
         type="button"
         aria-expanded={open}
         aria-label={c.modeLabel}
         disabled={saving}
         onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-muted-foreground"
+        className={`${TOOL} px-2`}
       >
-        <ChevronRight aria-hidden className={`size-3 ${open ? 'rotate-90' : ''}`} />
-        {c.modeLabel}: {t.code.modes[mode]}
+        <SlidersHorizontal aria-hidden className="size-3.5" />
+        <span>
+          {c.modeLabel}: {t.code.modes[mode]}
+        </span>
       </button>
       {open ? (
-        <div role="radiogroup" aria-label={c.modeLabel} className="space-y-1">
+        <div
+          role="radiogroup"
+          aria-label={c.modeLabel}
+          className="absolute bottom-full left-0 z-20 mb-2 w-80 max-w-[80vw] rounded-lg border border-border bg-card p-1 shadow-lg"
+        >
           {CODE_MODES.map((m, i) => (
             <button
               key={m}
@@ -304,17 +344,26 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
               role="radio"
               aria-checked={m === mode}
               onClick={() => void pick(m)}
-              className="flex w-full items-baseline gap-2 rounded-md border border-border px-2 py-1 text-left"
+              className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted ${m === mode ? 'bg-muted' : ''}`}
             >
-              <span className="font-mono text-muted-foreground">{i + 1}</span>
-              <span className="font-semibold">{t.code.modes[m]}</span>
-              <span className="text-muted-foreground">{c.modeAbout[m]}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-medium text-foreground">
+                  {t.code.modes[m]}
+                </span>
+                <span className="block text-muted-foreground">{c.modeAbout[m]}</span>
+              </span>
+              <kbd className="mt-0.5 rounded border border-border px-1 font-mono text-[10px] text-muted-foreground">
+                {i + 1}
+              </kbd>
             </button>
           ))}
         </div>
       ) : null}
       {problem ? (
-        <p role="alert" className="text-destructive">
+        <p
+          role="alert"
+          className="absolute left-0 top-full mt-1 whitespace-nowrap text-destructive"
+        >
           {problem}
         </p>
       ) : null}
@@ -367,6 +416,13 @@ export function CodeConversation({
       place.current = undefined
     }
   })
+  // The box is two lines until the text needs more, and scrolls past the tallest it may be.
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, tallest(window.innerHeight))}px`
+  }, [text])
   const menuKeys = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
     if (options.length === 0 || event.nativeEvent.isComposing) return false
     const at = Math.min(active, options.length - 1)
@@ -405,21 +461,27 @@ export function CodeConversation({
     }
   }
 
+  const working = session.state === 'running' || session.state === 'starting'
+  const by = [session.harness, session.model].filter(Boolean).join(' · ')
+
   return (
-    <div className="flex h-full min-h-0 flex-col gap-3">
-      <FollowScroll count={0} watch={events} className="min-h-0 flex-1 pr-1">
-        <div role="log" aria-label={c.label} className="space-y-3 py-1">
+    <div className="flex h-full min-h-0 flex-col">
+      <FollowScroll count={0} watch={events} className="min-h-0 flex-1 [scrollbar-width:thin]">
+        <div role="log" aria-label={c.label} className={`mx-auto space-y-3 px-4 py-5 ${COLUMN}`}>
           {rows.length === 0 ? <p className="text-sm text-muted-foreground">{c.empty}</p> : null}
           {rows.map((row) =>
             row.type === 'user' ? (
-              <div key={row.seq} className="flex justify-end">
-                <p className="max-w-[80%] whitespace-pre-wrap rounded-2xl bg-primary/10 px-3 py-2 text-sm">
+              <div key={row.seq} className="flex justify-end pt-2">
+                <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-muted px-3.5 py-2 text-sm leading-6">
                   {row.text}
                 </p>
               </div>
             ) : row.type === 'agent' ? (
-              <div key={row.seq} className="max-w-[90%]" onClick={openLink}>
-                <ChatMessageResponse text={linkPaths(row.text, files)} className="text-sm" />
+              <div key={row.seq} onClick={openLink}>
+                <ChatMessageResponse
+                  text={linkPaths(row.text, files)}
+                  className="text-sm leading-6"
+                />
               </div>
             ) : row.type === 'tools' ? (
               <Group key={row.seq} cards={row.cards} />
@@ -429,13 +491,20 @@ export function CodeConversation({
           )}
         </div>
       </FollowScroll>
-      <div className="space-y-2">
-        <div className="relative flex items-end gap-2">
+      <div className={`mx-auto w-full shrink-0 px-4 pb-3 ${COLUMN}`}>
+        <p className="flex items-center gap-2 px-1 pb-1.5 text-xs text-muted-foreground">
+          <span
+            aria-hidden
+            className={`size-1.5 shrink-0 rounded-full ${working ? `animate-pulse ${TONE_DOT.primary}` : TONE_DOT.neutral}`}
+          />
+          <span role="status">{c.stateLine[session.state]}</span>
+        </p>
+        <div className="relative rounded-xl border border-border bg-card focus-within:border-foreground/40">
           {options.length > 0 ? (
             <ul
               role="listbox"
               aria-label={c.mentions}
-              className="absolute bottom-full left-0 z-10 mb-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 text-xs shadow-md"
+              className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 text-xs shadow-lg"
             >
               {options.map((path, i) => (
                 <li
@@ -455,8 +524,9 @@ export function CodeConversation({
               ))}
             </ul>
           ) : null}
-          <Textarea
+          <textarea
             ref={box}
+            rows={1}
             aria-label={c.message}
             value={text}
             disabled={refusal !== undefined}
@@ -470,30 +540,44 @@ export function CodeConversation({
             onKeyDown={(e) => {
               if (!menuKeys(e)) sendOnEnter(e)
             }}
-            rows={3}
-            placeholder={c.placeholder}
-            className="w-full"
+            placeholder={refusal ?? c.placeholder}
+            className="block min-h-12 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground disabled:cursor-not-allowed"
           />
-          <Button size="sm" disabled={blocked || text.trim() === ''} onClick={() => void send()}>
-            {busy ? c.sending : c.send}
-          </Button>
+          <div className="flex items-center gap-1 px-2 pb-2">
+            <ModeSelector session={session} />
+            <span
+              title={c.by}
+              aria-label={`${c.by}: ${by}`}
+              className="flex h-7 min-w-0 items-center gap-1 px-2 text-xs text-muted-foreground"
+            >
+              <Bot aria-hidden className="size-3.5 shrink-0" />
+              <span className="truncate">{by}</span>
+            </span>
+            <Button
+              size="sm"
+              aria-label={busy ? c.sending : c.send}
+              title={c.send}
+              disabled={blocked || text.trim() === ''}
+              onClick={() => void send()}
+              className="ml-auto size-8 shrink-0 rounded-full p-0"
+            >
+              <ArrowUp aria-hidden className="size-4" />
+            </Button>
+          </div>
         </div>
-        <ModeSelector session={session} />
-        <Assist
-          kind="changes"
-          text={text}
-          repository={session.repository}
-          onUse={(p) => setText(p.text)}
-        />
-        {refusal ? <p className="text-xs text-muted-foreground">{refusal}</p> : null}
-        {problem ? (
-          <p role="alert" className="text-sm text-destructive">
-            {problem}
-          </p>
-        ) : null}
-        <p role="status" className="text-xs text-muted-foreground">
-          {c.stateLine[session.state]}
-        </p>
+        <div className="px-1 pt-1.5">
+          <Assist
+            kind="changes"
+            text={text}
+            repository={session.repository}
+            onUse={(p) => setText(p.text)}
+          />
+          {problem ? (
+            <p role="alert" className="pt-1 text-sm text-destructive">
+              {problem}
+            </p>
+          ) : null}
+        </div>
       </div>
     </div>
   )

@@ -1645,7 +1645,12 @@ export const en = {
     mode: 'Mode',
     modes: { ask: 'Ask', plan: 'Plan', code: 'Code' },
     message: 'First message',
-    messagePlaceholder: 'What should the agent do?',
+    messagePlaceholder: 'Describe a change, ask about the code, or paste an error',
+    hero: 'What should the agent do?',
+    heroAbout:
+      'A session is a branch of its own in a sandbox. You talk, the agent works there, and you read every change beside the conversation.',
+    filter: 'Filter sessions',
+    noMatch: 'No session matches.',
     start: 'Start',
     retry: 'Send the message again',
     states: {
@@ -1710,7 +1715,8 @@ export const en = {
       send: 'Send',
       sending: 'Sending…',
       message: 'Message to the agent',
-      placeholder: 'Write to the agent',
+      placeholder: 'Reply, ask for a change, or type @ to name a file',
+      by: 'Agent of this session',
       stateLine: {
         idle: 'Ready for your next message.',
         queued: 'Queued: the agent starts soon.',

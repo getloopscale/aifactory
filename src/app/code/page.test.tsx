@@ -23,6 +23,9 @@ const session = (id: string, title: string, updatedAt: string, state = 'running'
   updatedAt,
 })
 
+/** More sessions for the tests of the filter, which shows only over a handful. */
+const many = vi.hoisted(() => ({ list: [] as unknown[] }))
+
 vi.mock('../lib/live', () => ({
   useResource: (path: string) => ({
     data: path.includes('repositories')
@@ -41,6 +44,7 @@ vi.mock('../lib/live', () => ({
           sessions: [
             session('old', 'Older one', '2026-11-27T08:00:00Z', 'stopped'),
             session('new', 'Newer one', '2026-11-27T09:00:00Z'),
+            ...many.list,
           ],
           harnesses: ['claude-code', 'codex'],
         },
@@ -100,6 +104,7 @@ beforeEach(() => {
     return { diff: { files: [] }, live: true, capturedAt: null }
   })
   feed.reset()
+  many.list = []
 })
 afterEach(cleanup)
 
@@ -175,6 +180,30 @@ describe.each([
     expect(post).toHaveBeenNthCalledWith(2, '/api/panel/code/sessions/abc/messages', {
       text: 'fix it\n',
     })
+  })
+})
+
+describe('the list of sessions', () => {
+  it('has no filter for a handful, and narrows a longer list by title', () => {
+    show('en')
+    expect(screen.queryByLabelText(en.code.filter)).toBeNull()
+    cleanup()
+    many.list = ['a', 'b', 'c', 'd'].map((id) =>
+      session(id, `Extra ${id}`, '2026-11-27T07:00:00Z', 'ended'),
+    )
+    show('en')
+    fireEvent.change(screen.getByLabelText(en.code.filter), { target: { value: 'newer' } })
+    expect(screen.getByText('Newer one')).toBeDefined()
+    expect(screen.queryByText('Older one')).toBeNull()
+    fireEvent.change(screen.getByLabelText(en.code.filter), { target: { value: 'zzz' } })
+    expect(screen.getByText(en.code.noMatch)).toBeDefined()
+  })
+
+  it('marks the open session as the current one', () => {
+    show('en', '/code/new')
+    expect(screen.getByRole('link', { name: /Newer one/ }).getAttribute('aria-current')).toBe(
+      'page',
+    )
   })
 })
 

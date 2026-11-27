@@ -1,6 +1,16 @@
-import { Alert, Button, Textarea } from '@getloopscale/ui'
-import { ArrowLeft, Plus } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { Alert, Button } from '@getloopscale/ui'
+import {
+  ArrowLeft,
+  ArrowUp,
+  Bot,
+  FolderGit2,
+  GitBranch,
+  PanelRight,
+  Plus,
+  Search,
+  SlidersHorizontal,
+} from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 
 import type {
@@ -13,22 +23,14 @@ import type {
 import { CODE_MODES } from '../../shared/code'
 import type { RepositoriesView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
-import {
-  PageHeader,
-  Quiet,
-  READABLE,
-  Row,
-  Rows,
-  Surface,
-  TONE_DOT,
-  type Tone,
-} from '../components/ui/Surface'
+import { tallest } from '../components/chat/MessageBox'
+import { PageHeader, Quiet, TONE_DOT, type Tone } from '../components/ui/Surface'
 import { get, post } from '../lib/api'
+import { useCodeSession } from '../lib/code-session'
 import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
 import { ago } from '../lib/format'
 import { useResource } from '../lib/live'
-import { useCodeSession } from '../lib/code-session'
 import { useWidth } from '../lib/media'
 
 import { CodeChanges } from './CodeChanges'
@@ -54,9 +56,24 @@ const STATE_TONE: Record<SessionView['state'], Tone> = {
   failed: 'destructive',
 }
 
-const FIELD = 'mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground'
+/** A block of the workbench: one card that fills its column and scrolls inside. */
+const BLOCK =
+  'flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-card'
 
-/** The form that starts a session: where, with whom, and the first message. */
+/** A choice under the first message: an icon and a small control, in one pill. */
+function Chip({ icon: Icon, children }: { icon: typeof Bot; children: ReactNode }) {
+  return (
+    <label className="flex h-7 min-w-0 items-center gap-1 rounded-md border border-border pl-2 text-xs text-muted-foreground focus-within:border-foreground/40">
+      <Icon aria-hidden className="size-3.5 shrink-0" />
+      {children}
+    </label>
+  )
+}
+
+const CONTROL =
+  'h-full min-w-0 cursor-pointer rounded-md bg-transparent pr-1.5 text-xs text-foreground outline-none'
+
+/** Where a session starts: the first message, and under it where the agent works, which one, and how. */
 function StartForm({ harnesses }: { harnesses: string[] }) {
   const { t } = useCopy()
   const navigate = useNavigate()
@@ -74,12 +91,20 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
   const [busy, setBusy] = useState(false)
   // A session made whose first message failed is kept, so trying again never makes a second one.
   const [created, setCreated] = useState<string>()
+  const box = useRef<HTMLTextAreaElement>(null)
 
   const chosen = repository || enabled[0]?.fullName || ''
   const repo = enabled.find((r) => r.fullName === chosen)
   const base = branch ?? repo?.baseBranch ?? repo?.defaultBranch ?? ''
   const harness = agent || harnesses[0] || ''
   const ready = chosen !== '' && base.trim() !== '' && harness !== '' && message.trim() !== ''
+
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, tallest(window.innerHeight))}px`
+  }, [message])
 
   async function submit() {
     if (busy || !ready) return
@@ -119,136 +144,189 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
     )
   }
   return (
-    <Surface title={t.code.newSession} label={t.code.newSession} padded>
-      <div className={`space-y-3 ${READABLE}`}>
-        <label className="block text-sm">
-          <span>{t.code.repository}</span>
-          <select
-            aria-label={t.code.repository}
-            value={chosen}
-            disabled={created !== undefined}
-            onChange={(e) => {
-              setRepository(e.target.value)
-              setBranch(undefined)
-            }}
-            className={FIELD}
-          >
-            {enabled.map((r) => (
-              <option key={r.fullName}>{r.fullName}</option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span>{t.code.baseBranch}</span>
-          <input
-            aria-label={t.code.baseBranch}
-            value={base}
-            disabled={created !== undefined}
-            onChange={(e) => setBranch(e.target.value)}
-            className={FIELD}
-          />
-        </label>
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block text-sm">
-            <span>{t.code.agent}</span>
-            <select
-              aria-label={t.code.agent}
-              value={harness}
-              disabled={created !== undefined}
-              onChange={(e) => setAgent(e.target.value)}
-              className={FIELD}
-            >
-              {harnesses.map((name) => (
-                <option key={name}>{name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="block text-sm">
-            <span>{t.code.mode}</span>
-            <select
-              aria-label={t.code.mode}
-              value={mode}
-              disabled={created !== undefined}
-              onChange={(e) => setMode(e.target.value as CodeMode)}
-              className={FIELD}
-            >
-              {CODE_MODES.map((name) => (
-                <option key={name} value={name}>
-                  {t.code.modes[name]}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        {harnesses.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t.code.noAgent}</p>
-        ) : null}
-        <label className="block text-sm">
-          <span>{t.code.message}</span>
-          <Textarea
+    <section
+      aria-label={t.code.newSession}
+      className="flex h-full min-h-0 flex-col items-center justify-center overflow-y-auto px-4 py-8"
+    >
+      <div className="w-full max-w-2xl">
+        <h2 className="text-center text-2xl font-semibold tracking-tight">{t.code.hero}</h2>
+        <p className="mx-auto mt-2 max-w-xl text-center text-sm text-muted-foreground">
+          {t.code.heroAbout}
+        </p>
+        <div className="mt-6 rounded-xl border border-border bg-card focus-within:border-foreground/40">
+          <textarea
+            ref={box}
+            rows={3}
+            autoFocus
+            aria-label={t.code.message}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={enterSends(() => void submit())}
-            rows={5}
             placeholder={t.code.messagePlaceholder}
-            className="mt-1 w-full"
+            className="block min-h-20 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground"
           />
-        </label>
-        <Assist kind="job" text={message} repository={chosen} onUse={(p) => setMessage(p.text)} />
-        <div className="flex items-center gap-3">
-          <Button size="sm" disabled={busy || !ready} onClick={() => void submit()}>
-            {created ? t.code.retry : t.code.start}
-          </Button>
-          {problem ? (
-            <span role="alert" className="text-sm text-destructive">
-              {problem}
-            </span>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-1.5 px-2 pb-2">
+            <Chip icon={FolderGit2}>
+              <select
+                aria-label={t.code.repository}
+                title={t.code.repository}
+                value={chosen}
+                disabled={created !== undefined}
+                onChange={(e) => {
+                  setRepository(e.target.value)
+                  setBranch(undefined)
+                }}
+                className={`${CONTROL} max-w-52`}
+              >
+                {enabled.map((r) => (
+                  <option key={r.fullName}>{r.fullName}</option>
+                ))}
+              </select>
+            </Chip>
+            <Chip icon={GitBranch}>
+              <input
+                aria-label={t.code.baseBranch}
+                title={t.code.baseBranch}
+                value={base}
+                disabled={created !== undefined}
+                onChange={(e) => setBranch(e.target.value)}
+                size={Math.max(6, base.length)}
+                className={`${CONTROL} cursor-text font-mono`}
+              />
+            </Chip>
+            <Chip icon={Bot}>
+              <select
+                aria-label={t.code.agent}
+                title={t.code.agent}
+                value={harness}
+                disabled={created !== undefined}
+                onChange={(e) => setAgent(e.target.value)}
+                className={CONTROL}
+              >
+                {harnesses.map((name) => (
+                  <option key={name}>{name}</option>
+                ))}
+              </select>
+            </Chip>
+            <Chip icon={SlidersHorizontal}>
+              <select
+                aria-label={t.code.mode}
+                title={t.code.mode}
+                value={mode}
+                disabled={created !== undefined}
+                onChange={(e) => setMode(e.target.value as CodeMode)}
+                className={CONTROL}
+              >
+                {CODE_MODES.map((name) => (
+                  <option key={name} value={name}>
+                    {t.code.modes[name]}
+                  </option>
+                ))}
+              </select>
+            </Chip>
+            <Button
+              size="sm"
+              aria-label={created ? t.code.retry : t.code.start}
+              title={created ? t.code.retry : t.code.start}
+              disabled={busy || !ready}
+              onClick={() => void submit()}
+              className="ml-auto size-8 shrink-0 rounded-full p-0"
+            >
+              <ArrowUp aria-hidden className="size-4" />
+            </Button>
+          </div>
+        </div>
+        <p className="mt-2 px-1 text-xs text-muted-foreground">
+          {t.code.conversation.modeAbout[mode]}
+        </p>
+        {harnesses.length === 0 ? (
+          <p className="mt-1 px-1 text-sm text-muted-foreground">{t.code.noAgent}</p>
+        ) : null}
+        {problem ? (
+          <p role="alert" className="mt-1 px-1 text-sm text-destructive">
+            {problem}
+          </p>
+        ) : null}
+        <div className="mt-2 px-1">
+          <Assist kind="job" text={message} repository={chosen} onUse={(p) => setMessage(p.text)} />
         </div>
       </div>
-    </Surface>
+    </section>
   )
 }
 
-/** The column of sessions, newest activity first. */
+/** The sessions, newest activity first, each with where it is, and a box that narrows them. */
 function SessionList({ sessions, openId }: { sessions: SessionView[]; openId?: string }) {
   const { t } = useCopy()
-  const sorted = [...sessions].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const [filter, setFilter] = useState('')
+  const words = filter.toLowerCase().split(/\s+/).filter(Boolean)
+  const sorted = [...sessions]
+    .filter((s) => {
+      const text = `${s.title} ${s.repository}`.toLowerCase()
+      return words.every((w) => text.includes(w))
+    })
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   return (
-    <Surface
-      title={t.code.sessions}
-      count={sessions.length}
-      action={
-        <Link to="/code" className="inline-flex items-center gap-1 underline underline-offset-2">
-          <Plus aria-hidden className="size-3" />
+    <nav aria-label={t.code.sessions} className={`${BLOCK} h-full`}>
+      <div className="flex items-center gap-2 px-3 pt-3">
+        <h2 className="text-sm font-semibold">{t.code.sessions}</h2>
+        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          {sessions.length}
+        </span>
+        <Link
+          to="/code"
+          className="ml-auto inline-flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"
+        >
+          <Plus aria-hidden className="size-3.5" />
           {t.code.newSession}
         </Link>
-      }
-    >
+      </div>
+      {sessions.length > 5 ? (
+        <label className="mx-3 mt-2 flex h-8 items-center gap-1.5 rounded-md border border-border px-2 text-muted-foreground focus-within:border-foreground/40">
+          <Search aria-hidden className="size-3.5 shrink-0" />
+          <input
+            type="search"
+            aria-label={t.code.filter}
+            placeholder={t.code.filter}
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </label>
+      ) : null}
       {sorted.length === 0 ? (
-        <Quiet>{t.code.none}</Quiet>
+        <Quiet>{sessions.length === 0 ? t.code.none : t.code.noMatch}</Quiet>
       ) : (
-        <Rows label={t.code.sessions}>
+        <ul className="mt-2 min-h-0 flex-1 space-y-0.5 overflow-y-auto px-1.5 pb-2 [scrollbar-width:thin]">
           {sorted.map((s) => (
-            <Row
-              key={s.id}
-              to={`/code/${s.id}`}
-              current={s.id === openId}
-              lead={
+            <li key={s.id}>
+              <Link
+                to={`/code/${s.id}`}
+                aria-current={s.id === openId ? 'page' : undefined}
+                className={`flex items-start gap-2 rounded-lg px-2 py-2 hover:bg-muted/70 focus-visible:outline-2 focus-visible:outline-ring ${s.id === openId ? 'bg-muted' : ''}`}
+              >
                 <span
                   role="img"
                   aria-label={t.code.states[s.state]}
-                  className={`size-2.5 shrink-0 rounded-full ${TONE_DOT[STATE_TONE[s.state]]}`}
+                  title={t.code.states[s.state]}
+                  className={`mt-1.5 size-2 shrink-0 rounded-full ${s.state === 'running' ? 'animate-pulse' : ''} ${TONE_DOT[STATE_TONE[s.state]]}`}
                 />
-              }
-              title={s.title}
-              meta={s.repository}
-              trail={<span>{ago(s.updatedAt, Date.now(), t.time)}</span>}
-            />
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-2 text-[13px] font-medium leading-5">{s.title}</span>
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className="min-w-0 truncate font-mono">
+                      {s.repository.slice(s.repository.indexOf('/') + 1)}
+                    </span>
+                    <span aria-hidden>·</span>
+                    <span className="shrink-0">{ago(s.updatedAt, Date.now(), t.time)}</span>
+                  </span>
+                </span>
+              </Link>
+            </li>
           ))}
-        </Rows>
+        </ul>
       )}
-    </Surface>
+    </nav>
   )
 }
 
@@ -306,9 +384,10 @@ function useCodeFiles(id: string, turn: number) {
 
 type Tab = 'changes' | 'files'
 
-const TAB = 'flex h-9 items-center border-b-2 px-2.5 text-[13px] font-medium text-foreground'
+const TAB =
+  'flex h-10 items-center border-b-2 px-2.5 text-[13px] font-medium focus-visible:outline-2 focus-visible:outline-ring'
 
-/** The panel beside the conversation: Changes and Files. */
+/** The panel beside the conversation: Changes and Files, each scrolling inside it. */
 function SidePanel({
   id,
   turn,
@@ -334,35 +413,40 @@ function SidePanel({
     ['changes', t.code.changes.title],
     ['files', t.code.files.tab],
   ]
+  const added = data?.diff.files.reduce((n, f) => n + f.added, 0) ?? 0
+  const removed = data?.diff.files.reduce((n, f) => n + f.removed, 0) ?? 0
   return (
-    <Surface title={t.code.changes.panel} label={t.code.changes.panel}>
-      <div
-        role="tablist"
-        aria-label={t.code.changes.tabs}
-        className="flex gap-1 border-b border-border px-2"
-      >
-        {tabs.map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => onTab(key)}
-            className={`-mb-px ${TAB} ${tab === key ? 'border-primary' : 'border-transparent text-muted-foreground'}`}
-          >
-            {label}
-            {key === 'changes' && data && data.diff.files.length > 0 ? (
-              <span className="ml-1.5 font-mono text-[11px] tabular-nums text-muted-foreground">
-                {data.diff.files.length}
-              </span>
-            ) : null}
-          </button>
-        ))}
+    <aside aria-label={t.code.changes.panel} className={`${BLOCK} h-full`}>
+      <div className="flex items-center border-b border-border px-2">
+        <div role="tablist" aria-label={t.code.changes.tabs} className="flex gap-1">
+          {tabs.map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => onTab(key)}
+              className={`-mb-px ${TAB} ${tab === key ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+            >
+              {label}
+              {key === 'changes' && data && data.diff.files.length > 0 ? (
+                <span className="ml-1.5 rounded bg-muted px-1 font-mono text-[11px] tabular-nums text-muted-foreground">
+                  {data.diff.files.length}
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+        {tab === 'changes' && data && data.diff.files.length > 0 ? (
+          <span className="ml-auto pr-2 font-mono text-[11px] tabular-nums text-muted-foreground">
+            {t.code.changes.lines(added, removed)}
+          </span>
+        ) : null}
       </div>
       <div
         role="tabpanel"
         aria-label={tab === 'files' ? t.code.files.tab : t.code.changes.title}
-        className="max-h-[calc(100vh-18rem)] overflow-y-auto"
+        className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]"
       >
         {tab === 'files' ? (
           <CodeFiles
@@ -392,11 +476,11 @@ function SidePanel({
           </>
         )}
       </div>
-    </Surface>
+    </aside>
   )
 }
 
-/** The session that is open, with its conversation read from the hook and the side panel beside it. */
+/** The session that is open: its conversation, and the side panel beside it. */
 function OpenSession({ id }: { id: string }) {
   const { t } = useCopy()
   const compact = useWidth() === 'compact'
@@ -434,64 +518,86 @@ function OpenSession({ id }: { id: string }) {
     return () => window.removeEventListener('keydown', listener)
   }, [toggle, showFiles])
   if (!session) return <Quiet>{error ?? t.code.conversation.loading}</Quiet>
+  const side = panel ? (
+    <SidePanel
+      id={id}
+      turn={turn}
+      tab={tab}
+      onTab={setTab}
+      files={files}
+      filesError={filesError}
+      selected={selected}
+      onSelect={setSelected}
+    />
+  ) : null
   return (
-    <div className={panel && !compact ? 'grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4' : ''}>
-      <Surface
-        title={session.title}
-        label={session.title}
-        padded
-        action={
+    <div
+      className={
+        compact
+          ? 'space-y-4'
+          : `grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-4 ${panel ? 'grid-cols-[minmax(0,1fr)_minmax(340px,42%)]' : 'grid-cols-1'}`
+      }
+    >
+      <section
+        aria-label={session.title}
+        className={`${BLOCK} ${compact ? 'h-[calc(100vh-13rem)] min-h-96' : 'h-full'}`}
+      >
+        <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border px-4 py-2">
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold">{session.title}</h2>
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span
+                  aria-hidden
+                  className={`size-1.5 rounded-full ${TONE_DOT[STATE_TONE[session.state]]}`}
+                />
+                {t.code.states[session.state]}
+              </span>
+              <span className="flex min-w-0 items-center gap-1 font-mono">
+                <FolderGit2 aria-hidden className="size-3 shrink-0" />
+                <span className="truncate">{session.repository}</span>
+              </span>
+              <span className="flex min-w-0 items-center gap-1 font-mono">
+                <GitBranch aria-hidden className="size-3 shrink-0" />
+                <span className="truncate">{session.workBranch}</span>
+              </span>
+            </p>
+          </div>
           <button
             type="button"
             onClick={toggle}
             aria-pressed={panel}
-            className="underline underline-offset-2"
+            aria-label={panel ? t.code.changes.hide : t.code.changes.show}
+            title={panel ? t.code.changes.hide : t.code.changes.show}
+            className={`flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring ${panel ? 'bg-muted text-foreground' : ''}`}
           >
-            {panel ? t.code.changes.hide : t.code.changes.show}
+            <PanelRight aria-hidden className="size-4" />
           </button>
-        }
-      >
-        <div className="flex h-[calc(100vh-15rem)] min-h-80 flex-col gap-2">
-          <p className="font-mono text-xs text-muted-foreground">
-            {session.repository} · {session.workBranch} · {t.code.states[session.state]}
+        </header>
+        {error ? (
+          <p role="alert" className="px-4 pt-2 text-sm text-destructive">
+            {error}
           </p>
-          {error ? (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <div className="min-h-0 flex-1">
-            <CodeConversation
-              key={session.id}
-              session={session}
-              events={events}
-              files={files}
-              onOpenFile={openFile}
-            />
-          </div>
-        </div>
-      </Surface>
-      {panel ? (
-        <div className={compact ? 'mt-4' : ''}>
-          <SidePanel
-            id={id}
-            turn={turn}
-            tab={tab}
-            onTab={setTab}
+        ) : null}
+        <div className="min-h-0 flex-1">
+          <CodeConversation
+            key={session.id}
+            session={session}
+            events={events}
             files={files}
-            filesError={filesError}
-            selected={selected}
-            onSelect={setSelected}
+            onOpenFile={openFile}
           />
         </div>
-      ) : null}
+      </section>
+      {side ? compact ? <div className="h-[70vh]">{side}</div> : side : null}
     </div>
   )
 }
 
 /**
- * Code Mode: the sessions in a column on the left and the open one, or the form that starts one, taking the rest.
- * On a compact width they are one column at a time, with a way back to the list.
+ * Code Mode: the sessions in a narrow column, and the open one, or the box that starts one, taking the rest. The
+ * page never scrolls: each block scrolls inside itself. On a compact width they are one column at a time, with a
+ * way back to the list.
  */
 export function CodeWorkbench({ openId }: { openId?: string }) {
   const { t } = useCopy()
@@ -536,14 +642,13 @@ export function CodeWorkbench({ openId }: { openId?: string }) {
     )
   }
   return (
-    <div data-layout="workbench" className="flex h-[calc(100vh-8.75rem)] flex-col">
-      <PageHeader title={t.code.heading} />
-      <div className="grid min-h-0 flex-1 grid-cols-[minmax(260px,1fr)_minmax(0,2fr)] grid-rows-[minmax(0,1fr)] gap-4">
-        <div className="min-h-0 min-w-0 overflow-y-auto pr-1">
-          <SessionList sessions={sessions} openId={openId} />
-        </div>
-        <div className="min-h-0 min-w-0 overflow-y-auto pr-1">{right}</div>
-      </div>
+    <div
+      data-layout="workbench"
+      className="grid h-[calc(100vh-8.75rem)] grid-cols-[272px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4"
+    >
+      <h1 className="sr-only">{t.code.heading}</h1>
+      <SessionList sessions={sessions} openId={openId} />
+      <div className="min-h-0 min-w-0">{right}</div>
     </div>
   )
 }
