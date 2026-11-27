@@ -103,6 +103,40 @@ export async function saveWorkspaceSnapshot(
   return row
 }
 
+const pullRequestKey = (id: string) => `code-pull-request:${id}`
+
+/** Takes, for the rest of the transaction, the lock a pull request holds; false while one holds it. */
+async function pullRequestUnlocked(tx: Tx, sessionId: string): Promise<boolean> {
+  const result = await tx.execute(
+    sql`select pg_try_advisory_xact_lock(hashtext(${pullRequestKey(sessionId)})) as ok`,
+  )
+  return (result.rows[0] as { ok: boolean }).ok === true
+}
+
+/**
+ * Runs `work` holding the session's pull request lock, which is on a connection of its own, so a crash frees it.
+ * `claimTurn` finds the session busy meanwhile. Not held: another pull request is being opened for it.
+ */
+export async function withPullRequestLock<T>(
+  sessionId: string,
+  work: () => Promise<T>,
+): Promise<{ held: true; value: T } | { held: false }> {
+  const client = await getPool().connect()
+  try {
+    const { rows } = await client.query('select pg_try_advisory_lock(hashtext($1)) as ok', [
+      pullRequestKey(sessionId),
+    ])
+    if (!rows[0]?.ok) return { held: false }
+    try {
+      return { held: true, value: await work() }
+    } finally {
+      await client.query('select pg_advisory_unlock(hashtext($1))', [pullRequestKey(sessionId)])
+    }
+  } finally {
+    client.release()
+  }
+}
+
 /** Keeps the pull request opened from the session's work branch. */
 export async function savePullRequest(id: string, number: number, url: string): Promise<void> {
   await getDb()
@@ -143,7 +177,7 @@ export async function appendEvent(sessionId: string, event: NewCodeEvent): Promi
   return getDb().transaction((tx) => insertEvent(tx, sessionId, event))
 }
 
-type Tx = Pick<Database, 'select' | 'insert' | 'update'>
+type Tx = Pick<Database, 'select' | 'insert' | 'update' | 'execute'>
 
 /** The body of `appendEvent`, in the caller's transaction. */
 async function insertEvent(tx: Tx, sessionId: string, event: NewCodeEvent): Promise<CodeEvent> {
@@ -473,6 +507,8 @@ export async function claimTurn(sessionId: string, now = new Date()): Promise<Cl
       .where(eq(codeSession.id, sessionId))
       .for('update')
     if (!session) return { kind: 'nothing' }
+    // While a pull request is being opened from the workspace, no turn writes to it: the job queues itself again.
+    if (!(await pullRequestUnlocked(tx, sessionId))) return { kind: 'busy' }
     let state = session.state
     if (state === 'starting' || state === 'running') {
       if (now.getTime() - session.updatedAt.getTime() < CLAIM_STALE_MS) return { kind: 'busy' }

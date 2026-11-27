@@ -44,8 +44,8 @@ export type CodeSession = {
   /** The harness that produced `agentSessionId`. */
   agentSessionHarness: string | null
   /** The draft pull request opened from the work branch, once there is one. */
-  pullRequestUrl: string | null
-  pullRequestNumber: number | null
+  pullRequestUrl?: string | null
+  pullRequestNumber?: number | null
   createdAt: Date
   updatedAt: Date
 }

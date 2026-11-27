@@ -22,22 +22,23 @@ export class PullRequestRefused extends Error {
 }
 
 export type PullRequestDeps = {
-  github: Pick<GithubApi, 'openPullRequest'>
+  github: Pick<GithubApi, 'openPullRequest' | 'openPullRequestsBetween'>
   /** A token for the repository, used only for the call to GitHub: the sandbox's firewall holds its own. */
   installationToken(repository: string): Promise<{ token: string }>
   /** The branch the pull request goes into: the repository's integration branch. */
   integrationBranchOf(repository: string): Promise<string>
   /** The workspace of the session: the live one, or one restored for the call. `release` puts it away. */
   workspace(session: CodeSession): Promise<{ workspace: Workspace; release(): Promise<void> }>
+  /** The session as it is now, read while the lock is held. */
+  session(id: string): Promise<CodeSession | undefined>
+  /** Runs `work` while no turn of the session is claimed and no other pull request is opened for it. */
+  lock<T>(id: string, work: () => Promise<T>): Promise<{ held: true; value: T } | { held: false }>
   savePullRequest(id: string, number: number, url: string): Promise<unknown>
   author: { name: string; email: string }
   pushRetryDelayMs?: number
 }
 
 export type PullRequestInput = { title: string; body: string }
-
-/** The sessions that are opening a pull request in this process: a second call at the same time is refused. */
-const opening = new Set<string>()
 
 const TRAILER = /^co-authored-by:.*$/gim
 
@@ -90,17 +91,18 @@ export async function openSessionPullRequest(
   session: CodeSession,
   input: PullRequestInput,
 ): Promise<CodePullRequestResponse> {
-  const outcome = transition(session.state, 'pull_request')
-  if (outcome.action !== 'move') throw new PullRequestRefused(409, outcome.reason)
-  if (opening.has(session.id)) {
+  const locked = await deps.lock(session.id, async () => {
+    // The state is read again under the lock: a turn that claimed the session since the caller read it is seen here.
+    const current = await deps.session(session.id)
+    if (!current) throw new PullRequestRefused(409, 'The session is gone.')
+    const outcome = transition(current.state, 'pull_request')
+    if (outcome.action !== 'move') throw new PullRequestRefused(409, outcome.reason)
+    return open(deps, current, input)
+  })
+  if (!locked.held) {
     throw new PullRequestRefused(409, 'A pull request is already being opened for this session.')
   }
-  opening.add(session.id)
-  try {
-    return await open(deps, session, input)
-  } finally {
-    opening.delete(session.id)
-  }
+  return locked.value
 }
 
 async function open(
@@ -142,6 +144,19 @@ async function open(
       body: input.body,
       draft: true,
     })
+    // An open pull request from this branch into another one is not the one this call is for.
+    const into = await deps.github.openPullRequestsBetween(
+      session.repository,
+      token,
+      session.workBranch,
+      base,
+    )
+    if (!into.some((p) => p.number === pull.number)) {
+      throw new PullRequestRefused(
+        409,
+        `The branch ${session.workBranch} already has an open pull request #${pull.number} that does not go into ${base}.`,
+      )
+    }
     await deps.savePullRequest(session.id, pull.number, pull.url)
     return { number: pull.number, url: pull.url, draft: pull.draft ?? true }
   } finally {

@@ -43,10 +43,29 @@ function setup(changed: string[], dirty = true) {
       return { ...known, draft: true }
     },
   )
+  const between = vi.fn(async (_repo: string, _token: string, head: string, _base: string) =>
+    pulls.has(head) ? [{ number: pulls.get(head)!.number }] : [],
+  )
+  const held = new Set<string>()
+  const current = { state: undefined as CodeState | undefined }
   const release = vi.fn(async () => undefined)
   const savePullRequest = vi.fn(async () => undefined)
   const deps: PullRequestDeps = {
-    github: { openPullRequest },
+    github: {
+      openPullRequest,
+      openPullRequestsBetween:
+        between as unknown as PullRequestDeps['github']['openPullRequestsBetween'],
+    },
+    session: async (id) => (current.state ? { ...session(current.state), id } : session()),
+    lock: async (id, work) => {
+      if (held.has(id)) return { held: false }
+      held.add(id)
+      try {
+        return { held: true, value: await work() }
+      } finally {
+        held.delete(id)
+      }
+    },
     installationToken: async () => ({ token: TOKEN }),
     integrationBranchOf: async () => 'workspace',
     workspace: async () => ({
@@ -57,7 +76,7 @@ function setup(changed: string[], dirty = true) {
     author: { name: 'bot', email: 'bot@example.com' },
     pushRetryDelayMs: 0,
   }
-  return { backend, deps, openPullRequest, release, savePullRequest }
+  return { backend, deps, openPullRequest, release, savePullRequest, between, current }
 }
 
 const pushes = (backend: FakeBackend) => backend.commands.filter((c) => / push /.test(c))
@@ -109,14 +128,35 @@ describe('openSessionPullRequest', () => {
   })
 
   it('refuses a session that is working or waiting, before opening a workspace', async () => {
-    const { deps } = setup(['a.txt'])
+    const { deps, current } = setup(['a.txt'])
     const workspace = vi.spyOn(deps, 'workspace')
     for (const state of ['queued', 'starting', 'running', 'waiting_input', 'ended'] as const) {
+      current.state = state
       await expect(
-        openSessionPullRequest(deps, session(state), { title: 't', body: '' }),
+        openSessionPullRequest(deps, session(), { title: 't', body: '' }),
       ).rejects.toMatchObject({ status: 409 })
     }
     expect(workspace).not.toHaveBeenCalled()
+  })
+
+  it('reads the state again under the lock: a turn that claimed the session meanwhile refuses it', async () => {
+    const { deps, current, backend } = setup(['a.txt'])
+    current.state = 'starting'
+    const workspace = vi.spyOn(deps, 'workspace')
+    await expect(
+      openSessionPullRequest(deps, session('idle'), { title: 't', body: '' }),
+    ).rejects.toMatchObject({ status: 409 })
+    expect(workspace).not.toHaveBeenCalled()
+    expect(pushes(backend)).toEqual([])
+  })
+
+  it('refuses a pull request from the branch that goes into another branch, and saves nothing', async () => {
+    const { deps, between, savePullRequest } = setup(['a.txt'])
+    between.mockResolvedValue([])
+    await expect(
+      openSessionPullRequest(deps, session(), { title: 't', body: '' }),
+    ).rejects.toMatchObject({ status: 409 })
+    expect(savePullRequest).not.toHaveBeenCalled()
   })
 
   it('returns the same pull request on a second call, which pushes again', async () => {

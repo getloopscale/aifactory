@@ -8,7 +8,7 @@ import { effectiveEnv } from '../factory/settings'
 import { createGithubApi } from '../github/pulls'
 
 import type { PullRequestDeps } from './pull-request'
-import { savePullRequest } from './store'
+import { getSession, savePullRequest, withPullRequestLock } from './store'
 import { closeWorkspace, liveWorkspace, openWorkspace, workspaceStore } from './workspace'
 
 /**
@@ -47,6 +47,8 @@ export async function pullRequestDeps(): Promise<PullRequestDeps> {
         release: async () => void (await closeWorkspace(deps, session, workspace)),
       }
     },
+    session: getSession,
+    lock: withPullRequestLock,
     savePullRequest,
     author: run.author,
   }
