@@ -48,6 +48,13 @@ vi.mock('../lib/live', () => ({
   }),
 }))
 vi.mock('../lib/api', () => ({ post: vi.fn() }))
+vi.mock('../lib/code-session', () => ({
+  useCodeSession: (id: string) => ({
+    session: { ...session(id, 'Open one', '2026-11-27T09:00:00Z'), repository: 'acme/shop' },
+    events: [{ sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' }],
+    error: undefined,
+  }),
+}))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 
 import { post } from '../lib/api'
@@ -137,6 +144,7 @@ describe('the code page on a compact width', () => {
     show('en', '/code/new', 'compact')
     expect(screen.queryByText('Older one')).toBeNull()
     expect(screen.getByRole('link', { name: en.code.back }).getAttribute('href')).toBe('/code')
+    expect(screen.getByText('hello')).toBeDefined()
   })
 
   it('retries only the message when it failed after the session was made', async () => {

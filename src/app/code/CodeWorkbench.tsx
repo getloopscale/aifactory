@@ -22,7 +22,10 @@ import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
 import { ago } from '../lib/format'
 import { useResource } from '../lib/live'
+import { useCodeSession } from '../lib/code-session'
 import { useWidth } from '../lib/media'
+
+import { CodeConversation } from './CodeConversation'
 
 /** A session as the API sends it: the dates are text. */
 type SessionView = Omit<CodeSession, 'createdAt' | 'updatedAt'> & {
@@ -241,16 +244,26 @@ function SessionList({ sessions, openId }: { sessions: SessionView[]; openId?: s
   )
 }
 
-/** The session that is open. Its conversation is not drawn yet. */
-function OpenSession({ session }: { session?: SessionView }) {
+/** The session that is open, with its conversation read from the hook. */
+function OpenSession({ id }: { id: string }) {
   const { t } = useCopy()
-  if (!session) return <Quiet>{t.code.missing}</Quiet>
+  const { session, events, error } = useCodeSession(id)
+  if (!session) return <Quiet>{error ?? t.code.conversation.loading}</Quiet>
   return (
     <Surface title={session.title} label={session.title} padded>
-      <p className="font-mono text-xs text-muted-foreground">
-        {session.repository} · {session.workBranch} · {t.code.states[session.state]}
-      </p>
-      <p className="text-sm text-muted-foreground">{t.code.conversationLater}</p>
+      <div className="flex h-[calc(100vh-15rem)] min-h-80 flex-col gap-2">
+        <p className="font-mono text-xs text-muted-foreground">
+          {session.repository} · {session.workBranch} · {t.code.states[session.state]}
+        </p>
+        {error ? (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        ) : null}
+        <div className="min-h-0 flex-1">
+          <CodeConversation key={session.id} session={session} events={events} />
+        </div>
+      </div>
     </Surface>
   )
 }
@@ -266,7 +279,7 @@ export function CodeWorkbench({ openId }: { openId?: string }) {
   const listing = useResource<Listing>('/api/panel/code/sessions', { everyMs: 5_000 })
   const sessions = listing.data?.sessions ?? []
   const right = openId ? (
-    <OpenSession session={sessions.find((s) => s.id === openId)} />
+    <OpenSession id={openId} />
   ) : (
     <StartForm harnesses={listing.data?.harnesses ?? []} />
   )
