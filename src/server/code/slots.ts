@@ -1,3 +1,6 @@
+import { sql } from 'drizzle-orm'
+
+import type { Database } from '../db'
 import { FACTORY_APP } from '../factory/sandbox-reaper'
 import type { ListedSandbox } from '../factory/sandbox'
 
@@ -29,4 +32,15 @@ export async function codeCapReached(
   } catch {
     return false
   }
+}
+
+/** Namespaces the advisory lock that serialises the start of code workspaces. */
+const CAP_LOCK = 569
+
+/** Runs `work` holding the cap's lock, transaction-scoped so it always ends: one start at a time, on any process. */
+export async function underCapLock<T>(db: Database, work: () => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${CAP_LOCK}, 0)`)
+    return work()
+  })
 }

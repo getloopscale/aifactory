@@ -253,6 +253,26 @@ describe('runTurn', () => {
     expect(t.sandbox.specs).toHaveLength(1)
   })
 
+  it('counts and claims the cap in one step, so two sessions starting together start one workspace', async () => {
+    const a = setup()
+    const b = setup()
+    b.deps.workspace.sandbox = a.deps.workspace.sandbox
+    let tail: Promise<unknown> = Promise.resolve()
+    const lock: NonNullable<TurnDeps['underCapLock']> = (work) => {
+      const run = tail.then(work)
+      tail = run.catch(() => undefined)
+      return run
+    }
+    for (const t of [a, b]) {
+      t.deps.codeCap = 1
+      t.deps.keepWorkspace = true
+      t.deps.underCapLock = lock
+    }
+    const results = await Promise.all([runTurn(a.deps, 's1'), runTurn(b.deps, 's1')])
+    expect(results.map((r) => r.status).sort()).toEqual(['capped', 'idle'])
+    expect(a.sandbox.specs).toHaveLength(1)
+  })
+
   it('leaves the sandbox up when asked to, for the idle cron to close', async () => {
     const t = setup()
     t.deps.keepWorkspace = true

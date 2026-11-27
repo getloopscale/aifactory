@@ -3,7 +3,7 @@ import { z } from 'zod'
 
 import { runTurn, type TurnDeps } from '../code/turn'
 import { appendEvent, claimTurn, moveSession, touchSession, saveAgentSession } from '../code/store'
-import { codeMaxSandboxes } from '../code/slots'
+import { codeMaxSandboxes, underCapLock } from '../code/slots'
 import { workspaceStore } from '../code/workspace'
 import { getDb } from '../db'
 import { factoryDeps } from '../factory/deps'
@@ -53,6 +53,7 @@ export default defineJob('code-turn', {
       record: (values) => recordPass(getDb(), values),
       onRefusal: (error) => pauseOnRefusal(getDb(), error),
       codeCap: codeMaxSandboxes(env),
+      underCapLock: (work) => underCapLock(getDb(), work),
       keepWorkspace: true,
       signal,
     }

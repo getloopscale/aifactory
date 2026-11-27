@@ -66,6 +66,19 @@ describe('closeIdleWorkspaces', () => {
     expect(sandbox.up.has(a)).toBe(false)
   })
 
+  it('deletes the snapshot a new one replaces', async () => {
+    const sandbox = new FakeSandbox()
+    const a = await withSandbox(sandbox)
+    const deleted: string[] = []
+    sandbox.deleteSnapshot = async (id: string) => void deleted.push(id)
+    const w = world([
+      { id: 'again', sandboxId: a, snapshotId: 'old-snap', updatedAt: minutesAgo(16) },
+    ])
+    await closeIdleWorkspaces({ store: w.store, sandbox, now: () => NOW })
+    expect(w.rows[0]!.snapshotId).toBe('snap-1')
+    expect(deleted).toEqual(['old-snap'])
+  })
+
   it('keeps the session as it is when the snapshot fails', async () => {
     const sandbox = new FakeSandbox()
     const a = await withSandbox(sandbox)

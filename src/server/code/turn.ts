@@ -30,6 +30,8 @@ export type TurnDeps = {
   agentTimeoutMs?: number
   /** How many code workspaces may be up; a turn that would start one over it waits in the queue. Absent is no cap. */
   codeCap?: number
+  /** Runs `work` alone among the turns of every process, so the cap is counted and claimed in one step. */
+  underCapLock?<T>(work: () => Promise<T>): Promise<T>
   /** Leaves the sandbox up after a turn that worked, for the idle cron to close. */
   keepWorkspace?: boolean
   slotWait?: Parameters<typeof untilSlotFree>[1]
@@ -102,17 +104,24 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let workspace: Awaited<ReturnType<typeof openWorkspace>>
   try {
     harness = deps.harnessFor(session)
-    // A session whose sandbox is still up needs no new slot.
-    if (
-      !session.sandboxId &&
-      deps.codeCap !== undefined &&
-      (await codeCapReached(deps.workspace.sandbox, deps.codeCap))
-    ) {
+    await untilSlotFree(deps.workspace.sandbox, { ...deps.slotWait, signal: deps.signal })
+    // The count and the sandbox it counts are one step: the lock is held until the workspace is up.
+    const lock = deps.underCapLock ?? ((work) => work())
+    const opened = await lock(async () => {
+      // A session whose sandbox is still up needs no new slot.
+      if (
+        !session.sandboxId &&
+        deps.codeCap !== undefined &&
+        (await codeCapReached(deps.workspace.sandbox, deps.codeCap))
+      )
+        return undefined
+      return openWorkspace({ ...deps.workspace, harness }, session)
+    })
+    if (!opened) {
       await store.move(sessionId, 'turn_released')
       return { status: 'capped' }
     }
-    await untilSlotFree(deps.workspace.sandbox, { ...deps.slotWait, signal: deps.signal })
-    workspace = await openWorkspace({ ...deps.workspace, harness }, session)
+    workspace = opened
   } catch (error) {
     const reason = errorMessage(error)
     if (SANDBOX_PROVIDER_BLOCKED.test(reason)) {

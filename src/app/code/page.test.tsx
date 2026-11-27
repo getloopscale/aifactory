@@ -8,7 +8,7 @@ import { en } from '../lib/copy/en'
 import { ptBR } from '../lib/copy/pt-BR'
 import { WidthContext, type WidthClass } from '../lib/media'
 
-const session = (id: string, title: string, updatedAt: string) => ({
+const session = (id: string, title: string, updatedAt: string, state = 'running') => ({
   id,
   title,
   repository: 'acme/shop',
@@ -17,7 +17,7 @@ const session = (id: string, title: string, updatedAt: string) => ({
   harness: 'codex',
   model: null,
   mode: 'code',
-  state: 'running',
+  state,
   createdAt: updatedAt,
   updatedAt,
 })
@@ -38,7 +38,7 @@ vi.mock('../lib/live', () => ({
         }
       : {
           sessions: [
-            session('old', 'Older one', '2026-11-27T08:00:00Z'),
+            session('old', 'Older one', '2026-11-27T08:00:00Z', 'stopped'),
             session('new', 'Newer one', '2026-11-27T09:00:00Z'),
           ],
           harnesses: ['claude-code', 'codex'],
@@ -50,7 +50,10 @@ vi.mock('../lib/live', () => ({
 vi.mock('../lib/api', () => ({ post: vi.fn() }))
 vi.mock('../lib/code-session', () => ({
   useCodeSession: (id: string) => ({
-    session: { ...session(id, 'Open one', '2026-11-27T09:00:00Z'), repository: 'acme/shop' },
+    session: {
+      ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
+      repository: 'acme/shop',
+    },
     events: [{ sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' }],
     error: undefined,
   }),
@@ -104,11 +107,17 @@ describe.each([
     expect(screen.getByLabelText(t.code.agent)).toBeDefined()
     expect(screen.getByLabelText(t.code.mode)).toBeDefined()
     const dots = screen.getAllByRole('img', { name: t.code.states.running })
-    expect(dots).toHaveLength(2)
+    expect(dots).toHaveLength(1)
     expect(dots[0]!.className).toContain('bg-primary')
     expect(dots[0]!.textContent).toBe('')
+    expect(screen.getAllByRole('img', { name: t.code.states.stopped })).toHaveLength(1)
     const repos = screen.getByLabelText(t.code.repository) as HTMLSelectElement
     expect([...repos.options].map((o) => o.value)).toEqual(['acme/shop'])
+  })
+
+  it('says on a stopped session that the next message restores it', () => {
+    show(language, '/code/asleep')
+    expect(screen.getByRole('status').textContent).toBe(t.code.conversation.stateLine.stopped)
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {

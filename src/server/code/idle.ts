@@ -74,8 +74,23 @@ export async function closeIdleWorkspaces(deps: IdleDeps): Promise<IdleResult> {
   )
   for (const session of await deps.store.idleSessions(cutoff)) {
     try {
-      if (await deps.store.closeIdle(session.id, cutoff, (s) => closeSandbox(deps, s))) {
+      let kept: string | null = null
+      let previous: string | null = null
+      const closed = await deps.store.closeIdle(session.id, cutoff, async (s) => {
+        previous = s.snapshotId
+        kept = await closeSandbox(deps, s)
+        return kept
+      })
+      if (closed) {
         result.stopped.push(session.id)
+        // The new snapshot is recorded: the one it replaces is no longer anyone's.
+        if (previous && previous !== kept) {
+          await deps.sandbox.deleteSnapshot?.(previous).catch((error: unknown) => {
+            console.warn(
+              `code_old_snapshot_not_deleted session=${session.id}: ${errorMessage(error)}`,
+            )
+          })
+        }
       }
     } catch (error) {
       result.failed.push(session.id)
