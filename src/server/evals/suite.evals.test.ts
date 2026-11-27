@@ -31,13 +31,10 @@ import { parseReadiness, readinessMessage } from '../scheduler/readiness'
 import type { KnowledgeSource } from '../knowledge/source'
 
 import {
-  completePass,
   findPass,
   fingerprint,
   receiptsFolder,
   recordPass,
-  RECEIPT_VERSION,
-  type Pass,
 } from './check-receipt'
 import { markQuick, selectCandidates, type EvalCase } from './cases'
 import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } from './compare'
@@ -47,7 +44,7 @@ import {
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
-  checkFromTestStart,
+  checkWithRecord,
   fromTestStart,
   parseMarginMinutes,
   runSuiteFromTestStart,
@@ -252,57 +249,48 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
   }, SUITE_TIMEOUT_MS)
 })
 
-// A pass the check recorded for this very agent configuration, and what the check measured, for the record
-// written once the readiness judge passed too.
-let reused: Pass | undefined
-let measured: { fingerprint: () => string; start: string; quick: number; skipped: number; ok: boolean } | undefined
-let judgePassed = 0
-
 const receipts = () =>
   receiptsFolder(process.cwd(), resolve(process.cwd(), git('rev-parse', '--git-common-dir')))
 
 describe.runIf(mode === 'check')('the agent configuration', () => {
   it('is no worse than the baseline when it changed since then', async () => {
-    const checked = await fromTestStart(async (testStartedAt) => {
+    // The decisions (reuse, the judge, what is recorded) are in `checkWithRecord`, which suite.test.ts proves.
+    const checked = await fromTestStart((testStartedAt) => {
       const baseline = readJson<Baseline>(BASELINE)
       const changedPaths = [
         ...git('diff', '--name-only', baseline.commit, 'HEAD').split('\n'),
         ...git('diff', '--name-only', 'HEAD').split('\n'),
       ].filter(Boolean)
       const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
-      const setup = await currentSetup(quick)
-      const print = () =>
-        fingerprint({
-          root: process.cwd(),
-          setup,
-          baseline: readFileSync(BASELINE, 'utf8'),
-          cases: readFileSync(CASES, 'utf8'),
-        })
-      const start = print()
-      reused = findPass(receipts(), start)
-      if (reused) {
-        console.log(JSON.stringify({ event: 'eval_check_reused', ...reused }))
-        return { ran: false, ok: true, reasons: [], changed: [] }
-      }
-      let skippedCases = 0
-      const result = await checkFromTestStart(testStartedAt, {
+      return checkWithRecord(testStartedAt, {
         baseline,
         changedPaths,
-        readSetup: async () => setup,
+        quickCases: quick.length,
+        judgeCases: blockedIssues.length,
+        readSetup: () => currentSetup(quick),
         runQuick: async (startedAt) => {
           const { results, skipped } = await runCases(quick, startedAt)
-          skippedCases = skipped.length
           return { results, skipped }
         },
+        runJudge: async () => {
+          const failures: string[] = []
+          for (const issue of blockedIssues)
+            await answersBlocked(issue).catch((e: Error) =>
+              failures.push(`${issue.name}: ${e.message}`),
+            )
+          return failures
+        },
+        fingerprint: (setup) =>
+          fingerprint({
+            root: process.cwd(),
+            setup,
+            baseline: readFileSync(BASELINE, 'utf8'),
+            cases: readFileSync(CASES, 'utf8'),
+          }),
+        find: (print) => findPass(receipts(), print),
+        record: (pass) => recordPass(receipts(), pass),
+        commit: () => git('rev-parse', 'HEAD'),
       })
-      measured = {
-        fingerprint: print,
-        start,
-        quick: quick.length,
-        skipped: skippedCases,
-        ok: result.ran && result.ok,
-      }
-      return result
     })
     console.log(JSON.stringify({ event: 'eval_check', ...checked }))
     expect(checked.reasons).toEqual([])
@@ -324,52 +312,22 @@ const blockedIssues = [
     mentions: /@getloopscale\/loopzero-sdk/i,
   },
 ]
+async function answersBlocked({
+  title,
+  body,
+  mentions,
+}: (typeof blockedIssues)[number]): Promise<void> {
+  const answer = await modelReadinessJudge()(
+    readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
+  )
+  const read = parseReadiness(answer.response)
+  expect(read.verdict).toBe('blocked')
+  expect(read.missing).toMatch(mentions)
+}
+
 // The readiness judge on issues that cannot be done where they run (#238). The judge is a model, so only a live
 // answer shows that its prompt gets them: a fix under `.github/`, and a package version that is not published.
-describe.runIf(mode === 'check' || mode === 'judge')('the readiness judge', () => {
-  it.each(blockedIssues)(
-    'answers blocked for $name',
-    async ({ title, body, mentions }) => {
-      if (mode === 'check' && reused) return
-      const judge = modelReadinessJudge()
-      const answer = await judge(
-        readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
-      )
-      const read = parseReadiness(answer.response)
-      expect(read.verdict).toBe('blocked')
-      expect(read.missing).toMatch(mentions)
-      judgePassed++
-    },
-    300_000,
-  )
-})
-
-// Last in the file, so it runs only after the quick cases and the judge: a pass is recorded when every one passed
-// and the inputs are the ones the check started with.
-describe.runIf(mode === 'check')('the record of a pass', () => {
-  it('is written only for a check that measured everything and passed', () => {
-    if (reused || !measured) return
-    const { start, fingerprint: print, quick, skipped, ok } = measured
-    const done = completePass({
-      ran: ok,
-      ok,
-      reasons: [],
-      quickCases: quick,
-      skipped,
-      judgeCases: blockedIssues.length,
-      judgePassed,
-    })
-    if (!done || print() !== start) {
-      console.log(JSON.stringify({ event: 'eval_pass_not_recorded', complete: done }))
-      return
-    }
-    recordPass(receipts(), {
-      version: RECEIPT_VERSION,
-      fingerprint: start,
-      commit: git('rev-parse', 'HEAD'),
-      completedAt: new Date().toISOString(),
-      quickCases: quick,
-      judgeCases: blockedIssues.length,
-    })
-  })
+// In `check` mode the judge runs inside the check above, so that a pass is recorded only when it passed too.
+describe.runIf(mode === 'judge')('the readiness judge', () => {
+  it.each(blockedIssues)('answers blocked for $name', (issue) => answersBlocked(issue), 300_000)
 })
