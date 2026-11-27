@@ -1,7 +1,7 @@
 import { ENDED_LANES, laneOf } from '../../shared/lanes'
 import type { InboxItem, TaskCard } from '../../shared/panel'
 
-export { laneOf, LANES, type Lane } from '../../shared/lanes'
+export { FLOW_LANES, laneOf, LANES, type Lane } from '../../shared/lanes'
 
 /** Only the ended lanes are cut by the time filter, so nothing still open is hidden by it. */
 const ENDED = ENDED_LANES
