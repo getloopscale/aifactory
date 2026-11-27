@@ -39,6 +39,7 @@ suite, so a formatting slip fails the build rather than surfacing in review.
 src/app/            frontend — the only half that reaches a browser
 src/server/         backend — never leaves the machine
   agents/           the agent, its tools, prompts, skills and hooks (empty until M2)
+  code/             Code Mode: a session's workspace, its event log and its turns (ADR 0014; planned)
   panel/            what the panel shows and does: queries, actions, owner session, event stream
   crons/            defineCron files (`poll-answers`, `watch-main`, `watch-promotions`, `publish-changesets`, `integrate-after-ci`, `supervise`, `measure`,
                     `catch-up`, `retry-due`, `knowledge-sync`, `knowledge-curator`, `prune-transcripts`, `coordinate`, `schedule`, `improve`, `conversation-recover`, `push-attention`)
