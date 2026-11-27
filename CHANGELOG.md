@@ -98,6 +98,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The box of a task's conversation is one box again. Its text field had a fill and corners of its own inside the bordered box, so it read as two fields. A long message there grows to two fifths of the window, as in the chat
 - The chat and the guides answer again on the ChatGPT subscription. Their model there was `gpt-5.4`, which a ChatGPT account no longer serves, so every answer ended in "An error occurred"; it is `gpt-6.2-sol` now, and `FACTORY_CHAT_CODEX_MODEL` still chooses another
 - The first answer of a new conversation stays on the page when the conversation gets its address. The page there started by loading what had just been kept, so the answer vanished and came back
 - The chat and the guide of a page stay at the end of the conversation while an answer arrives, and go there when a message is sent. Scrolling up to read stops that until the reader is back at the end. The page used to stay where it was, so a long answer was written out of sight

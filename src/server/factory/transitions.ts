@@ -197,6 +197,9 @@ const LIVE_STAGES = ['build', 'review'] as const
 const NOT_GUIDABLE = refuse(
   'a message can guide the agent only of a task that is done or was handed over: ask instead, or answer its question',
 )
+const GUIDE_ENDED = refuse(
+  'this task has ended, so there is no work of it left to guide: ask about it, or open a new job',
+)
 const GUIDE_MERGED = refuse(
   'this work is already integrated, so guiding the agent would change work that was delivered: ask instead, or open a new job',
 )
@@ -205,10 +208,10 @@ const GUIDE_NO_BRANCH = refuse(
 )
 /** A question changes nothing, so it is allowed wherever the agent has stopped; guiding sends the work back. */
 const converse =
-  (guidable: boolean): Rule =>
+  (guidable: boolean, notGuidable = NOT_GUIDABLE): Rule =>
   (task) => {
     if (task.conversation !== 'guide') return act('ask_agent')
-    if (!guidable) return NOT_GUIDABLE
+    if (!guidable) return notGuidable
     if (task.mergedSha || task.resolvedSha) return GUIDE_MERGED
     return task.branchGone ? GUIDE_NO_BRANCH : act('guide_agent')
   }
@@ -371,8 +374,8 @@ const TRANSITIONS: Record<TransitionEvent, Record<TaskStage, Rule>> = {
     merge: MERGING,
     // A task that ended still has what its agent did to be asked about. Nothing there can be guided: the work
     // is released, or was withdrawn.
-    released: converse(false),
-    cancelled: converse(false),
+    released: converse(false, GUIDE_ENDED),
+    cancelled: converse(false, GUIDE_ENDED),
     waiting: converse(false),
     failed: converse(false),
     done: converse(true),

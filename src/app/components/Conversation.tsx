@@ -389,7 +389,8 @@ function Composer({
       <div className="rounded-xl border border-border bg-background focus-within:border-foreground/40">
         <label className="block">
           <span className="sr-only">{t.conversation.label}</span>
-          <Textarea
+          {/* A plain textarea: the library's has a fill and corners of its own, which drew a box inside this one. */}
+          <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
@@ -398,7 +399,7 @@ function Composer({
             }}
             rows={1}
             placeholder={t.conversation.placeholder}
-            className="field-sizing-content max-h-40 min-h-9 w-full resize-none border-0 bg-transparent shadow-none focus-visible:ring-0"
+            className="field-sizing-content block max-h-[40vh] min-h-6 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground"
           />
         </label>
         <div className="flex items-center gap-2 px-2 pb-2">

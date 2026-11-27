@@ -706,7 +706,14 @@ describe('the owner writing to a task agent', () => {
       )
     }
     expect(outcome({ stage: 'merge', ...ask }, 'conversation').kind).toBe('refused')
-    for (const stage of ['waiting', 'failed', 'released', 'cancelled'] as const) {
+    for (const stage of ['released', 'cancelled'] as const) {
+      expect(outcome({ stage, ...guide }, 'conversation')).toEqual(
+        refused(
+          'this task has ended, so there is no work of it left to guide: ask about it, or open a new job',
+        ),
+      )
+    }
+    for (const stage of ['waiting', 'failed'] as const) {
       expect(outcome({ stage, ...guide }, 'conversation')).toEqual(
         refused(
           'a message can guide the agent only of a task that is done or was handed over: ask instead, or answer its question',
