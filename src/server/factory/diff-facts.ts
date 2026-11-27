@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { unplannedFiles, type ChangePlan } from './change-plan'
 import { MAX_PATHS, parseNumstat, type ChangeSize } from './change-size'

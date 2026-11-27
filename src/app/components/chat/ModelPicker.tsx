@@ -1,4 +1,4 @@
-import { DropdownMenu } from '@usetheo/ui'
+import { DropdownMenu } from '@getloopscale/ui'
 import { Check, ChevronDown } from 'lucide-react'
 
 import type { ChatModel } from '../../../shared/panel'

@@ -6,7 +6,7 @@ Status: aceita (2026-10-30)
 
 A aifactory transforma issues do GitHub em pull requests verificadas. Quem escreve o código é um
 agente de programação, e um agente que certifica o próprio trabalho não serve como evidência.
-O projeto também é dogfooding do TheoKit, framework do mesmo autor.
+O projeto também é dogfooding do LoopZero, framework do mesmo autor.
 
 ## Decisão
 
@@ -22,16 +22,16 @@ O projeto também é dogfooding do TheoKit, framework do mesmo autor.
   revert se a `main` quebrar.
 - Princípios: o agente não certifica o próprio trabalho, a fábrica executa os checks.
   Evidência, review e merge se referem ao SHA correspondente. Toda decisão vai para o audit log.
-- TheoKit: a dependência vem do npm publicado, sem link para um checkout local. Antes de
+- LoopZero: a dependência vem do npm publicado, sem link para um checkout local. Antes de
   adicionar uma biblioteca ou um mecanismo próprio, verifica-se o que o framework já oferece. Uma
-  lacuna vira issue no repositório do TheoKit antes de qualquer contorno, e o contorno cita a
+  lacuna vira issue no repositório do LoopZero antes de qualquer contorno, e o contorno cita a
   issue.
 - Commits: nunca incluem coautoria.
 
 ## Consequências
 
 - O estado de cada execução mora no PostgreSQL, e o painel lê dele.
-- A conexão com o banco usa o `StorageManager` do TheoKit, e as filas usam o backend de jobs do
+- A conexão com o banco usa o `StorageManager` do LoopZero, e as filas usam o backend de jobs do
   framework.
 - A interação entre `.approval(...)` nas ferramentas com efeito externo e o modo de merge `auto`
   precisa ser definida antes do M6.

@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 /**
  * Puts the package manager a repository declares (`packageManager` in package.json) in the user's own corepack

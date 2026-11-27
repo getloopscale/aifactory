@@ -1,8 +1,8 @@
-import { Alert, Input } from '@usetheo/ui'
+import { Alert, Input } from '@getloopscale/ui'
 import { Search } from 'lucide-react'
 import { useState } from 'react'
 import { useSearchParams } from 'react-router'
-import { Metadata } from 'theokit/client'
+import { Metadata } from '@getloopscale/loopzero/client'
 
 import type { AgentsView } from '../../shared/panel'
 import { AgentDetail } from '../components/agents/AgentDetail'

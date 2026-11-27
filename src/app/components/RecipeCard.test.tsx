@@ -30,7 +30,7 @@ function serve(answers: { get: RecipeView[]; post?: Response }) {
       if (init.method === 'POST') {
         posted.push({
           body: JSON.parse(String(init.body)),
-          csrf: (init.headers as Record<string, string>)['x-theo-action'],
+          csrf: (init.headers as Record<string, string>)['x-loopzero-action'],
         })
         return answers.post ?? new Response('{}', { status: 200 })
       }

@@ -1,7 +1,7 @@
 import { itemRef } from './item-ref'
 import { randomUUID } from 'node:crypto'
 
-import { type SandboxBackend } from '@theokit/agents/sandbox'
+import { type SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { and, asc, desc, eq, inArray, notLike } from 'drizzle-orm'
 
 import {

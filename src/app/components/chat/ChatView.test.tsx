@@ -17,7 +17,7 @@ type Agent = {
 let agent: Agent
 let paths: string[]
 
-vi.mock('theokit/client', () => ({
+vi.mock('@getloopscale/loopzero/client', () => ({
   Metadata: () => null,
   useAgent: (path: string) => {
     paths.push(path)

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button } from '@usetheo/ui'
+import { Button } from '@getloopscale/ui'
 import { CircleDollarSign, Stethoscope, TriangleAlert } from 'lucide-react'
 import { Link } from 'react-router'
 

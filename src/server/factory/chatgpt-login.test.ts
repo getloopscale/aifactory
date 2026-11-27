@@ -16,9 +16,9 @@ const none: LoginDeps = { read: (() => undefined) as never }
 describe('the ChatGPT connection', () => {
   it('writes where the framework reads the ChatGPT credential, and nowhere else', () => {
     expect(CHATGPT_STORE).toMatchObject({
-      dirName: '.theokit',
+      dirName: '.loopzero',
       fileName: 'auth.json',
-      homeEnvVar: 'THEOKIT_AUTH_HOME',
+      homeEnvVar: 'LOOPZERO_AUTH_HOME',
     })
   })
 

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, getPool } from '../db'
@@ -61,7 +61,7 @@ describe.skipIf(!live)('a task that waits for an answer, with the real agent', (
   beforeAll(async () => {
     getStorageManager().configure(storageFromEnv()!)
     await migrate(getDb(), { migrationsFolder: 'drizzle' })
-    // The run queues its merge-task job in TheoKit's table, which its own migration creates.
+    // The run queues its merge-task job in LoopZero's table, which its own migration creates.
     await jobBackend().migrate()
     await getPool().query(
       'truncate table question, review, evidence, stage_event, task, ingress restart identity cascade',

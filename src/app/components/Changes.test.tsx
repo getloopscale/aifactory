@@ -6,7 +6,7 @@ import type { TaskCard, TaskDiff } from '../../shared/panel'
 
 import { Changes } from './Changes'
 
-vi.mock('theokit/client', () => ({
+vi.mock('@getloopscale/loopzero/client', () => ({
   useAgent: () => ({ thread: [], status: 'idle', error: undefined, send: vi.fn(), reset: vi.fn() }),
 }))
 

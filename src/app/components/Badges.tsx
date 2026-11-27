@@ -1,4 +1,4 @@
-import { Badge } from '@usetheo/ui'
+import { Badge } from '@getloopscale/ui'
 import type React from 'react'
 
 import { mergeState, type Retryable, type Returned, type Stage } from '../../shared/panel'

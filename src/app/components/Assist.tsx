@@ -1,5 +1,5 @@
-import { Button, Input } from '@usetheo/ui'
-import { useAgent } from 'theokit/client'
+import { Button, Input } from '@getloopscale/ui'
+import { useAgent } from '@getloopscale/loopzero/client'
 import { useState } from 'react'
 
 import {
@@ -44,7 +44,7 @@ export function Assist({
 }) {
   const { t } = useCopy()
   const agent = useAgent<{ message: string }>(agentFor(kind), {
-    headers: { 'x-theo-action': '1' },
+    headers: { 'x-loopzero-action': '1' },
   })
   const [instruction, setInstruction] = useState('')
   const proposal = proposalOf(agent.thread)

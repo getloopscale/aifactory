@@ -11,7 +11,7 @@ import { NewJob } from './NewJob'
 
 const api = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
 vi.mock('../lib/api', () => api)
-vi.mock('theokit/client', () => ({
+vi.mock('@getloopscale/loopzero/client', () => ({
   useAgent: () => ({ thread: [], status: 'idle', error: undefined, send: vi.fn(), reset: vi.fn() }),
 }))
 

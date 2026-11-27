@@ -7,7 +7,7 @@
 //     --config spikes/e2b/vitest.config.ts
 import { writeFileSync } from 'node:fs'
 
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { beforeAll, it } from 'vitest'
 
 import { storageFromUrl } from '../../src/server/db/config'

@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -96,6 +96,8 @@ const runQueued = async () => {
       attempt: 1,
       signal: new AbortController().signal,
       extendLease: async () => {},
+      // The handler queues nothing.
+      queue: undefined as never,
     })
   }
 }

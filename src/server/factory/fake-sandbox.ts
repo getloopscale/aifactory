@@ -1,4 +1,4 @@
-import { SandboxBackend } from '@theokit/agents/sandbox'
+import { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import type {
   IsolatedSandbox,
@@ -9,6 +9,7 @@ import type {
   Terminal,
   TerminalOptions,
 } from './sandbox'
+import { terminalOutput } from './sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
 import { metadataFor } from './sandbox-reaper'
 
@@ -59,7 +60,7 @@ export class FakeTerminal implements Terminal {
   written: string[] = []
   sizes: { cols: number; rows: number }[]
   killed = false
-  private listeners: ((data: string) => void)[] = []
+  private readonly output = terminalOutput()
   private end!: (result: { exitCode: number }) => void
   private readonly finished = new Promise<{ exitCode: number }>((done) => {
     this.end = done
@@ -72,15 +73,16 @@ export class FakeTerminal implements Terminal {
     this.sizes = [{ cols: options.cols, rows: options.rows }]
   }
 
-  write(data: string) {
-    this.written.push(data)
-    this.print(data)
-    if (data.trim() === 'exit') this.end({ exitCode: 0 })
+  async write(data: Uint8Array | string) {
+    const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
+    this.written.push(text)
+    this.print(text)
+    if (text.trim() === 'exit') this.end({ exitCode: 0 })
   }
 
   /** What the command prints, as the test scripts it. */
   print(data: string) {
-    for (const listener of this.listeners) listener(data)
+    this.output.emit(new TextEncoder().encode(data))
   }
 
   /** The command ends by itself. */
@@ -92,8 +94,8 @@ export class FakeTerminal implements Terminal {
     this.sizes.push({ cols, rows })
   }
 
-  onData(listener: (data: string) => void) {
-    this.listeners.push(listener)
+  onData(listener: (data: Uint8Array) => void) {
+    return this.output.onData(listener)
   }
 
   wait() {
@@ -110,7 +112,7 @@ export class FakeTerminal implements Terminal {
 export class TerminalFakeBackend extends FakeBackend {
   terminals: FakeTerminal[] = []
 
-  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+  openTerminal = async (command: string, opts: TerminalOptions): Promise<Terminal> => {
     const terminal = new FakeTerminal(command, opts)
     this.terminals.push(terminal)
     return terminal

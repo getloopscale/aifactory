@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 
-import { Button, Input } from '@usetheo/ui'
+import { Button, Input } from '@getloopscale/ui'
 
 import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'

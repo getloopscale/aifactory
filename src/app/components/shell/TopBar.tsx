@@ -1,4 +1,4 @@
-import { useTheme } from '@theokit/ui'
+import { useTheme } from '@getloopscale/loopzero-ui'
 import { ChevronRight, Languages, Menu, Moon, Search, Sparkles, Sun } from 'lucide-react'
 import { Link, NavLink, useLocation } from 'react-router'
 

@@ -1,4 +1,4 @@
-import { defineJob } from 'theokit/server/jobs'
+import { defineJob } from '@getloopscale/loopzero/server/jobs'
 import { z } from 'zod'
 
 import { getDb } from '../db'

@@ -1,5 +1,5 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { holdOthers } from '../coordinator/queue-apply'
@@ -16,14 +16,14 @@ beforeAll(async () => {
   await jobBackend().migrate()
 })
 beforeEach(async () => {
-  await getPool().query('truncate table theokit_jobs, task, ingress restart identity cascade')
+  await getPool().query('truncate table loopzero_jobs, task, ingress restart identity cascade')
 })
 afterAll(() => getStorageManager().dispose())
 
 const keys = async () =>
   (
     await getPool().query<{ key: string }>(
-      "select idempotency_key as key from theokit_jobs where name = 'run-task' order by key",
+      "select idempotency_key as key from loopzero_jobs where name = 'run-task' order by key",
     )
   ).rows.map((row) => row.key)
 
@@ -90,7 +90,7 @@ describe('taking back a queued run, as withdrawing a send-back does', () => {
     await getDb().transaction((tx) => holdOthers(tx, fix))
     const [job] = (
       await getPool().query<{ held: string | null; infinite: boolean }>(
-        "select input->>'heldFrom' as held, available_at = 'infinity' as infinite from theokit_jobs where idempotency_key = $1",
+        "select input->>'heldFrom' as held, available_at = 'infinity' as infinite from loopzero_jobs where idempotency_key = $1",
         [`task-${held}-d7`],
       )
     ).rows

@@ -1,5 +1,5 @@
-import { useTheme } from '@theokit/ui'
-import { CommandPalette } from '@usetheo/ui'
+import { useTheme } from '@getloopscale/loopzero-ui'
+import { CommandPalette } from '@getloopscale/ui'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 

@@ -1,6 +1,6 @@
 import { asc, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -20,7 +20,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table theokit_jobs, scheduler_decision, question, stage_event, task, ingress restart identity cascade',
+    'truncate table loopzero_jobs, scheduler_decision, question, stage_event, task, ingress restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -112,7 +112,7 @@ async function enqueue(
   over: { input?: object; lockedFor?: number; available?: string } = {},
 ) {
   await getPool().query(
-    `insert into theokit_jobs (id, name, input, available_at, created_at, locked_until)
+    `insert into loopzero_jobs (id, name, input, available_at, created_at, locked_until)
      values ($1, 'run-task', $2, coalesce($4::timestamptz, now() - ($3 || ' minutes')::interval),
        now() - ($3 || ' minutes')::interval,
        case when $5::int is null then null else now() + ($5 || ' minutes')::interval end)`,
@@ -129,7 +129,7 @@ async function enqueue(
 const jobs = async () =>
   (
     await getPool().query<{ id: string; available_at: string; input: object }>(
-      'select id, available_at::text, input from theokit_jobs order by id',
+      'select id, available_at::text, input from loopzero_jobs order by id',
     )
   ).rows
 const dequeue = async () => (await jobBackend().dequeue({ batchSize: 1 })).map((l) => l.jobId)

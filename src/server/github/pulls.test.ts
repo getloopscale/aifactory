@@ -456,14 +456,14 @@ describe('what changed between two branches, and the files of a branch', () => {
   it('lists every file the head changed since the base, page by page, with its status and the old name of a rename', async () => {
     const { fetch, urls } = comparePages([
       [
-        { filename: 'apps/theoclaw/a.ts', status: 'modified' },
+        { filename: 'apps/loopbot/a.ts', status: 'modified' },
         { filename: 'b.md', status: 'renamed', previous_filename: 'old/b.md' },
       ],
       [{ filename: '.changeset/brave-fox.md', status: 'added' }],
     ])
 
     expect(await createGithubApi(fetch).changedFiles('o/r', 't', 'main', 'develop')).toEqual([
-      { path: 'apps/theoclaw/a.ts', status: 'modified' },
+      { path: 'apps/loopbot/a.ts', status: 'modified' },
       { path: 'b.md', status: 'renamed', previousPath: 'old/b.md' },
       { path: '.changeset/brave-fox.md', status: 'added' },
     ])
@@ -567,14 +567,14 @@ describe('what changed between two branches, and the files of a branch', () => {
           tree: [
             { path: 'package.json', type: 'blob' },
             { path: 'apps', type: 'tree' },
-            { path: 'apps/theoclaw/package.json', type: 'blob' },
+            { path: 'apps/loopbot/package.json', type: 'blob' },
           ],
         },
       },
     })
     expect(await createGithubApi(fetch).filePaths('o/r', 't', 'develop')).toEqual([
       'package.json',
-      'apps/theoclaw/package.json',
+      'apps/loopbot/package.json',
     ])
     expect(calls[0].url).toBe('/git/trees/develop?recursive=1')
   })
@@ -596,12 +596,12 @@ describe('what changed between two branches, and the files of a branch', () => {
       accepts.push((init.headers as Record<string, string>).accept)
       return url.includes('missing')
         ? new Response('{}', { status: 404 })
-        : new Response('{"name":"theoclaw"}', { status: 200 })
+        : new Response('{"name":"loopbot"}', { status: 200 })
     }
     const api = createGithubApi(fetch)
 
     expect(await api.readFile('o/r', 't', 'apps/the claw/package.json', 'develop')).toBe(
-      '{"name":"theoclaw"}',
+      '{"name":"loopbot"}',
     )
     expect(await api.readFile('o/r', 't', 'missing.json', 'develop')).toBeUndefined()
     expect(urls[0]).toBe('/contents/apps/the%20claw/package.json?ref=develop')
@@ -1127,7 +1127,7 @@ describe('what a release with changesets needs to read', () => {
         status: 200,
         body: [
           {
-            tag_name: '@theokit/ui@1.13.0',
+            tag_name: '@getloopscale/loopzero-ui@1.13.0',
             html_url: 'https://github.com/o/r/releases/tag/u',
             prerelease: false,
             draft: false,
@@ -1142,7 +1142,7 @@ describe('what a release with changesets needs to read', () => {
           },
           { tag_name: 'draft', html_url: 'd', prerelease: false, draft: true, published_at: null },
           {
-            tag_name: '@theokit/ui@1.12.2',
+            tag_name: '@getloopscale/loopzero-ui@1.12.2',
             html_url: 'old',
             prerelease: false,
             draft: false,
@@ -1155,7 +1155,7 @@ describe('what a release with changesets needs to read', () => {
       await createGithubApi(fetch).releasesSince('o/r', 't', new Date('2026-11-11T11:00:00Z')),
     ).toEqual([
       {
-        tag: '@theokit/ui@1.13.0',
+        tag: '@getloopscale/loopzero-ui@1.13.0',
         url: 'https://github.com/o/r/releases/tag/u',
         publishedAt: new Date('2026-11-11T12:00:00Z'),
       },

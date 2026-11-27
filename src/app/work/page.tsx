@@ -1,4 +1,4 @@
-import { Button, EmptyState, Sheet } from '@usetheo/ui'
+import { Button, EmptyState, Sheet } from '@getloopscale/ui'
 import { useCallback, useState } from 'react'
 import { Link, useSearchParams } from 'react-router'
 

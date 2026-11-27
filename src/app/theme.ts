@@ -1,4 +1,4 @@
-import { defineTheme } from '@theokit/ui'
+import { defineTheme } from '@getloopscale/loopzero-ui'
 
 /**
  * The LoopScale brand as the panel's theme: ink and paper in place of pure black and white, one brand colour

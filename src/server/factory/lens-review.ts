@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { modeFromEnv, type CoordinatorMode } from '../coordinator/mode'
 import { knowledgeRules } from '../knowledge/prompt'

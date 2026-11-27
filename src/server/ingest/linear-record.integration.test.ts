@@ -1,6 +1,6 @@
 import { count, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { storageFromUrl } from '../db/config'
@@ -17,7 +17,7 @@ beforeAll(async () => {
 
 beforeEach(async () => {
   await getPool().query(
-    'truncate table stage_event, task, ingress, repository, theokit_jobs restart identity cascade',
+    'truncate table stage_event, task, ingress, repository, loopzero_jobs restart identity cascade',
   )
   await getPool().query(
     "insert into repository (full_name, enabled, linear_team_id) values ('paulo/app', true, 'team-1'), ('paulo/off', false, 'team-2')",

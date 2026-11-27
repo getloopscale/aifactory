@@ -16,23 +16,23 @@ const SLOW = 60_000
 
 type Files = Record<string, string>
 
-/** A repository like theokit: a private root, a published package, a private app and an ignored one. */
+/** A repository like loopzero: a private root, a published package, a private app and an ignored one. */
 const MONOREPO: Files = {
-  'package.json': '{"name":"theokit-monorepo","private":true}',
-  '.changeset/config.json': '{"ignore":["@theokit/example-*"]}',
+  'package.json': '{"name":"loopzero-monorepo","private":true}',
+  '.changeset/config.json': '{"ignore":["@getloopscale/loopzero-example-*"]}',
   '.changeset/README.md': 'How changesets work.\n',
-  'packages/ui/package.json': '{"name":"@theokit/ui","version":"1.13.0"}',
+  'packages/ui/package.json': '{"name":"@getloopscale/loopzero-ui","version":"1.13.0"}',
   'packages/ui/src/index.ts': 'export {}\n',
-  'packages/sdk/package.json': '{"name":"@theokit/sdk","version":"5.0.0"}',
+  'packages/sdk/package.json': '{"name":"@getloopscale/loopzero-sdk","version":"5.0.0"}',
   'packages/sdk/src/index.ts': 'export {}\n',
-  'apps/theocode/package.json': '{"name":"theocode","private":true}',
-  'apps/theocode/src/main.ts': 'export {}\n',
-  'examples/chat/package.json': '{"name":"@theokit/example-chat"}',
+  'apps/loopcode/package.json': '{"name":"loopcode","private":true}',
+  'apps/loopcode/src/main.ts': 'export {}\n',
+  'examples/chat/package.json': '{"name":"@getloopscale/loopzero-example-chat"}',
   'examples/chat/main.ts': 'export {}\n',
   'docs/guide.md': '# Guide\n',
 }
 
-const NAMES_UI = '---\n"@theokit/ui": patch\n---\n\nFixes the button.\n'
+const NAMES_UI = '---\n"@getloopscale/loopzero-ui": patch\n---\n\nFixes the button.\n'
 const EMPTY = '---\n---\n\nA private app changed.\n'
 
 function git(dir: string, ...args: string[]) {
@@ -65,7 +65,7 @@ describe('the changeset check', () => {
   it(
     'passes a change under a private package with no changeset',
     () => {
-      const run = check({ 'apps/theocode/src/main.ts': 'export const a = 1\n' })
+      const run = check({ 'apps/loopcode/src/main.ts': 'export const a = 1\n' })
 
       expect(run).toMatchObject({ exitCode: 0 })
       expect(run.output).toContain('no published package changed')
@@ -92,15 +92,15 @@ describe('the changeset check', () => {
     () => {
       const run = check({
         'packages/ui/src/index.ts': 'export const a = 1\n',
-        'apps/theocode/src/main.ts': 'export const a = 1\n',
+        'apps/loopcode/src/main.ts': 'export const a = 1\n',
       })
 
       expect(run.exitCode).toBe(1)
       expect(run.output).toContain(
-        'error No changeset added since origin/workspace names @theokit/ui, which is published and changed (packages/ui/src/index.ts).',
+        'error No changeset added since origin/workspace names @getloopscale/loopzero-ui, which is published and changed (packages/ui/src/index.ts).',
       )
-      expect(run.output).toContain('"@theokit/ui": patch')
-      expect(run.output).not.toContain('theocode')
+      expect(run.output).toContain('"@getloopscale/loopzero-ui": patch')
+      expect(run.output).not.toContain('loopcode')
     },
     SLOW,
   )
@@ -114,7 +114,7 @@ describe('the changeset check', () => {
       })
 
       expect(run).toMatchObject({ exitCode: 0 })
-      expect(run.output).toContain('@theokit/ui')
+      expect(run.output).toContain('@getloopscale/loopzero-ui')
     },
     SLOW,
   )
@@ -133,9 +133,9 @@ describe('the changeset check', () => {
 
       expect(run.exitCode).toBe(1)
       expect(run.output).toContain(
-        'names @theokit/sdk, which is published and changed (packages/sdk/src/index.ts, packages/sdk/src/more.ts, packages/sdk/src/other.ts and 1 more).',
+        'names @getloopscale/loopzero-sdk, which is published and changed (packages/sdk/src/index.ts, packages/sdk/src/more.ts, packages/sdk/src/other.ts and 1 more).',
       )
-      expect(run.output).not.toContain('names @theokit/ui')
+      expect(run.output).not.toContain('names @getloopscale/loopzero-ui')
     },
     SLOW,
   )
@@ -144,13 +144,13 @@ describe('the changeset check', () => {
     'fails a diff that adds an empty changeset, names the file and says to delete it',
     () => {
       const run = check({
-        'apps/theocode/src/main.ts': 'export const a = 1\n',
-        '.changeset/theocode-fix.md': EMPTY,
+        'apps/loopcode/src/main.ts': 'export const a = 1\n',
+        '.changeset/loopcode-fix.md': EMPTY,
       })
 
       expect(run.exitCode).toBe(1)
       expect(run.output).toContain(
-        "error .changeset/theocode-fix.md names no package, so it releases nothing and the release workflow fails on it. Delete it: a change to a private or ignored package needs no changeset, and is recorded in that package's CHANGELOG.md.",
+        "error .changeset/loopcode-fix.md names no package, so it releases nothing and the release workflow fails on it. Delete it: a change to a private or ignored package needs no changeset, and is recorded in that package's CHANGELOG.md.",
       )
     },
     SLOW,
@@ -182,7 +182,9 @@ describe('the changeset check', () => {
 
       expect(run.exitCode).toBe(1)
       expect(run.output).toContain('error .changeset/empty-one.md names no package')
-      expect(run.output).toContain('names @theokit/ui, which is published and changed')
+      expect(run.output).toContain(
+        'names @getloopscale/loopzero-ui, which is published and changed',
+      )
     },
     SLOW,
   )
@@ -191,7 +193,7 @@ describe('the changeset check', () => {
     'judges only what the work added: an empty changeset and a README the integration branch already had pass',
     () => {
       const run = check(
-        { 'apps/theocode/src/main.ts': 'export const a = 1\n', '.changeset/README.md': 'New.\n' },
+        { 'apps/loopcode/src/main.ts': 'export const a = 1\n', '.changeset/README.md': 'New.\n' },
         { start: { ...MONOREPO, '.changeset/old-empty.md': EMPTY } },
       )
 
@@ -209,7 +211,7 @@ describe('the changeset check', () => {
       )
 
       expect(run.exitCode).toBe(1)
-      expect(run.output).toContain('names @theokit/ui')
+      expect(run.output).toContain('names @getloopscale/loopzero-ui')
     },
     SLOW,
   )
@@ -233,7 +235,7 @@ describe('the changeset check', () => {
     'counts every file for a repository that is one published package',
     () => {
       const start = {
-        'package.json': '{"name":"@theokit/gateways","version":"1.0.0"}',
+        'package.json': '{"name":"@getloopscale/loopzero-gateways","version":"1.0.0"}',
         '.changeset/config.json': '{}',
         'src/index.ts': 'export {}\n',
       }
@@ -242,13 +244,13 @@ describe('the changeset check', () => {
       const named = check(
         {
           'README.md': '# Gateways\n',
-          '.changeset/a.md': "---\n'@theokit/gateways': minor\n---\n",
+          '.changeset/a.md': "---\n'@getloopscale/loopzero-gateways': minor\n---\n",
         },
         { start },
       )
 
       expect(without.exitCode).toBe(1)
-      expect(without.output).toContain('names @theokit/gateways')
+      expect(without.output).toContain('names @getloopscale/loopzero-gateways')
       expect(named).toMatchObject({ exitCode: 0 })
     },
     SLOW,
@@ -274,10 +276,10 @@ describe('the changeset check', () => {
 
       expect(without.exitCode).toBe(1)
       expect(without.output).toContain(
-        'names @theokit/ui or fixture-app, which is published and changed (packages/ui/fixtures/app/main.ts).',
+        'names @getloopscale/loopzero-ui or fixture-app, which is published and changed (packages/ui/fixtures/app/main.ts).',
       )
       expect(without.output).toContain(
-        'names @theokit/ui, which is published and changed (packages/ui/fixtures/broken/main.ts).',
+        'names @getloopscale/loopzero-ui, which is published and changed (packages/ui/fixtures/broken/main.ts).',
       )
       expect(named).toMatchObject({ exitCode: 0 })
     },
@@ -300,7 +302,7 @@ describe('the changeset check', () => {
       rmSync(dir, { recursive: true, force: true })
 
       expect(run.status).toBe(1)
-      expect(run.stderr).toContain('names @theokit/sdk')
+      expect(run.stderr).toContain('names @getloopscale/loopzero-sdk')
     },
     SLOW,
   )
@@ -308,7 +310,7 @@ describe('the changeset check', () => {
   it(
     'does not pass when it cannot read the range or the config: nothing was verified',
     () => {
-      const change = { 'apps/theocode/src/main.ts': 'export const a = 1\n' }
+      const change = { 'apps/loopcode/src/main.ts': 'export const a = 1\n' }
 
       const noBranch = check(change, { since: 'origin/missing' })
       const noConfig = check(change, {

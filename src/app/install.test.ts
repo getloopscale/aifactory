@@ -34,7 +34,7 @@ describe('the installable panel', () => {
     expect(html).toContain('name="theme-color"')
     expect(html).toContain('rel="apple-touch-icon"')
     expect(html).toContain('name="apple-mobile-web-app-capable"')
-    expect(read('public/index.html')).not.toContain('TheoKit App')
+    expect(read('public/index.html')).not.toContain('LoopZero App')
   })
 
   it('has a worker that handles install and activate and registers no fetch handler', () => {

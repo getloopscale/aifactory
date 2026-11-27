@@ -181,7 +181,12 @@ export async function openTerminalSession(
   }
 
   const live = terminal
-  live.onData((data) => input.send(data))
+  // A character may arrive split between two chunks, so the decoder keeps what is incomplete.
+  const decoder = new TextDecoder()
+  live.onData((data) => {
+    const text = decoder.decode(data, { stream: true })
+    if (text) input.send(text)
+  })
   void live.wait().then(
     () => end('exited'),
     (error: unknown) => end('failed', errorMessage(error)),
@@ -199,7 +204,7 @@ export async function openTerminalSession(
     write: (data) => {
       if (ending) return
       resetIdle()
-      live.write(data)
+      void live.write(data)
     },
     resize: async (cols, rows) => {
       if (!ending) await live.resize(cols, rows)

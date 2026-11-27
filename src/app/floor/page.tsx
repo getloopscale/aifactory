@@ -1,4 +1,4 @@
-import { Sheet } from '@usetheo/ui'
+import { Sheet } from '@getloopscale/ui'
 import { ListOrdered, type LucideIcon, PackageCheck, Timer, Zap } from 'lucide-react'
 import { useCallback, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router'

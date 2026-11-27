@@ -1,4 +1,4 @@
-import { DropdownMenu } from '@usetheo/ui'
+import { DropdownMenu } from '@getloopscale/ui'
 import { ArrowUp, ListChecks, Plus, Square, TriangleAlert, FilePlus2 } from 'lucide-react'
 import { useEffect, useRef, type ReactNode } from 'react'
 

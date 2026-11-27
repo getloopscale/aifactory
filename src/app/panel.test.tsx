@@ -131,7 +131,7 @@ function serve(routes: Record<string, unknown | (() => Response)>) {
         url,
         method,
         body: init.body ? JSON.parse(String(init.body)) : undefined,
-        csrf: (init.headers as Record<string, string> | undefined)?.['x-theo-action'],
+        csrf: (init.headers as Record<string, string> | undefined)?.['x-loopzero-action'],
       })
       const answer = routes[`${method} ${url}`]
       if (answer === undefined)

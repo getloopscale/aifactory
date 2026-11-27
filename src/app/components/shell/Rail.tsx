@@ -1,4 +1,4 @@
-import { Avatar, DropdownMenu, Tooltip } from '@usetheo/ui'
+import { Avatar, DropdownMenu, Tooltip } from '@getloopscale/ui'
 import {
   Bot,
   Factory,

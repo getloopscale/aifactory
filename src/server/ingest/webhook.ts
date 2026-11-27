@@ -1,4 +1,4 @@
-import { defineWebhook, dispatchWebhook, github } from 'theokit/server/webhook'
+import { defineWebhook, dispatchWebhook, github } from '@getloopscale/loopzero/server/webhook'
 
 import type { Delivery, RecordResult } from './record'
 

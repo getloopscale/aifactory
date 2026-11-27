@@ -1,5 +1,5 @@
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -15,14 +15,14 @@ beforeAll(async () => {
   await jobBackend().migrate()
 })
 beforeEach(async () => {
-  await getPool().query('truncate table plan_item, plan, theokit_jobs restart identity cascade')
+  await getPool().query('truncate table plan_item, plan, loopzero_jobs restart identity cascade')
 })
 afterAll(() => getStorageManager().dispose())
 
 const jobs = async () =>
   (
     await getPool().query<{ name: string; input: { planId: number } }>(
-      "select name, input from theokit_jobs where name = 'plan-run'",
+      "select name, input from loopzero_jobs where name = 'plan-run'",
     )
   ).rows
 

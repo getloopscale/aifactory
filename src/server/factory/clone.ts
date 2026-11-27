@@ -4,7 +4,7 @@ import {
   shellEscapePosix,
   type ProvisionRepoOptions,
   type SandboxBackend,
-} from '@theokit/agents/sandbox'
+} from '@getloopscale/loopzero-agents/sandbox'
 
 /** A clone of these repositories takes seconds; one that takes minutes has stalled. */
 export const CLONE_TIMEOUT_MS = 3 * 60_000

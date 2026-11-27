@@ -11,8 +11,8 @@ export const SANDBOX_TOOLCHAIN = {
 }
 
 /**
- * The word lists theokit's `theocode` english-only check (apps/theocode/tools/english-only-detectors.mjs) reads: its
- * verdict depends on which of these paths the image holds. The image installs the same two packages as theokit's CI
+ * The word lists loopzero's `loopcode` english-only check (apps/loopcode/tools/english-only-detectors.mjs) reads: its
+ * verdict depends on which of these paths the image holds. The image installs the same two packages as loopzero's CI
  * runner (`wamerican wbrazilian`), which provide the paths in SANDBOX_DICTIONARY_PROVIDES; the rest must be absent.
  */
 export const CHECKER_DICTIONARY_PATHS = [

@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -35,7 +35,7 @@ beforeAll(async () => {
 })
 beforeEach(async () => {
   await getPool().query(
-    'truncate table theokit_jobs, coordinator_action, failure_signature, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
+    'truncate table loopzero_jobs, coordinator_action, failure_signature, finding, decision, review, change_plan, stage_event, task, ingress, repository restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -805,7 +805,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
 
   const enqueue = (id: number, minutes: number) =>
     getPool().query(
-      `insert into theokit_jobs (id, name, input, available_at)
+      `insert into loopzero_jobs (id, name, input, available_at)
        values ($1, 'run-task', $2, now() - ($3 || ' minutes')::interval)`,
       [`job-${id}`, JSON.stringify({ taskId: id }), String(minutes)],
     )
@@ -871,7 +871,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   it('holds the others when the fix is already first, and keeps a job queued later held', async () => {
     const { fix, other } = await incident()
     await getPool().query(
-      "update theokit_jobs set available_at = now() - interval '2 hours' where id = $1",
+      "update loopzero_jobs set available_at = now() - interval '2 hours' where id = $1",
       [`job-${fix}`],
     )
 
@@ -890,7 +890,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
 
   it('gives the held jobs their availability back once the fix is no longer on its way', async () => {
     const { fix, other } = await incident()
-    const before = await getPool().query('select available_at from theokit_jobs where id = $1', [
+    const before = await getPool().query('select available_at from loopzero_jobs where id = $1', [
       `job-${other}`,
     ])
 
@@ -900,7 +900,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     await coordinate(deps(), 'auto')
 
     const after = await getPool().query(
-      "select available_at, input->>'heldFrom' as held from theokit_jobs where id = $1",
+      "select available_at, input->>'heldFrom' as held from loopzero_jobs where id = $1",
       [`job-${other}`],
     )
     expect(after.rows[0].available_at).toEqual(before.rows[0].available_at)
@@ -947,7 +947,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     const late = await seed('intake')
     await enqueue(late, 5)
     const state = () =>
-      getPool().query('select id, available_at, input from theokit_jobs order by id')
+      getPool().query('select id, available_at, input from loopzero_jobs order by id')
 
     const before = await state()
     await coordinate(deps(), 'trial')
@@ -1008,7 +1008,7 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   const heldJobs = async () =>
     (
       await getPool().query(
-        "select count(*)::int as n from theokit_jobs where input ? 'heldFrom' or available_at = 'infinity'",
+        "select count(*)::int as n from loopzero_jobs where input ? 'heldFrom' or available_at = 'infinity'",
       )
     ).rows[0].n as number
 
@@ -1071,10 +1071,10 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
     await getDb().update(task).set({ stage: 'failed' }).where(eq(task.id, fix))
     await coordinate(deps(), 'auto')
     // The fix is retried: a new run-task job, queued behind the others again.
-    await getPool().query('delete from theokit_jobs where id = $1', [`job-${fix}`])
+    await getPool().query('delete from loopzero_jobs where id = $1', [`job-${fix}`])
     await getDb().update(task).set({ stage: 'intake' }).where(eq(task.id, fix))
     await getPool().query(
-      `insert into theokit_jobs (id, name, input, available_at) values ('retry-${fix}', 'run-task', $1, now())`,
+      `insert into loopzero_jobs (id, name, input, available_at) values ('retry-${fix}', 'run-task', $1, now())`,
       [JSON.stringify({ taskId: fix })],
     )
 
@@ -1108,16 +1108,16 @@ describe('the coordinator on a test that fails the tasks of a repository', () =>
   it('does not bring a fix scheduled for later ahead of its time', async () => {
     const { fix } = await incident()
     await getPool().query(
-      "update theokit_jobs set available_at = now() + interval '30 minutes' where id = $1",
+      "update loopzero_jobs set available_at = now() + interval '30 minutes' where id = $1",
       [`job-${fix}`],
     )
-    const before = await getPool().query('select available_at from theokit_jobs where id = $1', [
+    const before = await getPool().query('select available_at from loopzero_jobs where id = $1', [
       `job-${fix}`,
     ])
 
     await coordinate(deps(), 'auto')
 
-    const after = await getPool().query('select available_at from theokit_jobs where id = $1', [
+    const after = await getPool().query('select available_at from loopzero_jobs where id = $1', [
       `job-${fix}`,
     ])
     expect(after.rows[0].available_at).toEqual(before.rows[0].available_at)

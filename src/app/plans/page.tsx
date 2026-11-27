@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Textarea } from '@usetheo/ui'
+import { Alert, Badge, Button, Textarea } from '@getloopscale/ui'
 import { ListTree, Target } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'

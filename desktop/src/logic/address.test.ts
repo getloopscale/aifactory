@@ -33,7 +33,7 @@ describe('checkAddress', () => {
   it('accepts the factory shape', async () => {
     const r = await checkAddress(
       'localhost:3000',
-      answer({ status: 'ok', framework: 'TheoKit', timestamp: 1 }),
+      answer({ status: 'ok', framework: 'LoopZero', timestamp: 1 }),
     )
     expect(r).toEqual({ ok: true, origin: 'https://localhost:3000' })
   })

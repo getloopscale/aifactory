@@ -70,6 +70,6 @@ mecanismo e não foi considerado.
 - O spike não bloqueia mais o M2.
 - O token do sandbox é um token OIDC de 12 horas do projeto Vercel, obtido com `vercel env pull`.
   Fora da Vercel, a fábrica usa o ID do time, o ID do projeto e um token de acesso.
-- O `LocalSandbox` do TheoKit roda comandos no host, sem isolamento
+- O `LocalSandbox` do LoopZero roda comandos no host, sem isolamento
   ([usetheokit/theokit#1070](https://github.com/usetheokit/theokit/issues/1070)), então não serve
   como `SandboxProvider`.

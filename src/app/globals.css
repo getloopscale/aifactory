@@ -1,5 +1,5 @@
 @import 'tailwindcss';
-@import '@theokit/ui/preset.css';
+@import '@getloopscale/loopzero-ui/preset.css';
 
 /* The brand's two typefaces (SIL Open Font License), served by the panel so no page asks another host. */
 @font-face {

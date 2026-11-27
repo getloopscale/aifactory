@@ -1,4 +1,4 @@
-import { websocket } from 'theokit/server/define'
+import { websocket } from '@getloopscale/loopzero/server/define'
 
 import { terminalSocket } from '../../panel/terminal-socket'
 

@@ -25,7 +25,7 @@ function serve(routes: Record<string, Reply>) {
         url,
         method,
         body: init.body ? JSON.parse(String(init.body)) : undefined,
-        csrf: (init.headers as Record<string, string> | undefined)?.['x-theo-action'],
+        csrf: (init.headers as Record<string, string> | undefined)?.['x-loopzero-action'],
       }
       calls.push(call)
       const reply = routes[`${method} ${url}`]

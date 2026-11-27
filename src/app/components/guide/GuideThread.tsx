@@ -1,6 +1,6 @@
-import { ScrollArea } from '@usetheo/ui'
+import { ScrollArea } from '@getloopscale/ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useAgent } from 'theokit/client'
+import { useAgent } from '@getloopscale/loopzero/client'
 
 import { guidePath } from '../../../shared/guides'
 import type { ChatMessageView, ChatModel } from '../../../shared/panel'
@@ -74,7 +74,7 @@ export function GuideThread({
   const [model, setModel] = useState<ChatModel>(preferred)
   const [restored, setRestored] = useState<ChatMessageView[]>([])
   const agent = useAgent<{ message: string }>(guidePath(guide.id, model), {
-    headers: { 'x-theo-action': '1' },
+    headers: { 'x-loopzero-action': '1' },
   })
   const { needsConnection, recheck } = useChatgptConnection(model)
   const [value, setValue] = useState('')

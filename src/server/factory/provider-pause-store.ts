@@ -135,7 +135,7 @@ export async function deferWhilePaused(
   return true
 }
 
-/** `deferWhilePaused` for a job handler: the factory's database and TheoKit's queue. */
+/** `deferWhilePaused` for a job handler: the factory's database and LoopZero's queue. */
 export function deferJobWhilePaused(job: DeferredJob): Promise<boolean> {
   return deferWhilePaused(getDb(), job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }
@@ -171,7 +171,7 @@ export async function deferAfterRefusal(
   )
 }
 
-/** `deferAfterRefusal` for a job handler: the factory's database and TheoKit's queue. */
+/** `deferAfterRefusal` for a job handler: the factory's database and LoopZero's queue. */
 export function deferJobAfterRefusal(job: DeferredJob): Promise<void> {
   return deferAfterRefusal(getDb(), job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }

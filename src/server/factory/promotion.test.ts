@@ -76,13 +76,13 @@ describe('logEvidence', () => {
 
   it('keeps an eslint error with the file it is in', () => {
     const log = [
-      stamp('/home/runner/work/theokit/theokit/apps/theoclaw/tests/http-api.test.ts'),
+      stamp('/home/runner/work/loopzero/loopzero/apps/loopbot/tests/http-api.test.ts'),
       stamp('##[error]  259:114  error  Unexpected any  @typescript-eslint/no-explicit-any'),
-      stamp('/home/runner/work/theokit/theokit/apps/theoclaw/tests/clean.test.ts'),
+      stamp('/home/runner/work/loopzero/loopzero/apps/loopbot/tests/clean.test.ts'),
       stamp('✖ 1 problem (1 error, 0 warnings)'),
     ].join('\n')
     expect(logEvidence(log)).toEqual([
-      'apps/theoclaw/tests/http-api.test.ts',
+      'apps/loopbot/tests/http-api.test.ts',
       '259:114  error  Unexpected any  @typescript-eslint/no-explicit-any',
       '✖ 1 problem (1 error, 0 warnings)',
     ])
@@ -93,7 +93,7 @@ describe('logEvidence', () => {
       stamp('Unused devDependencies (1)'),
       stamp('onnxruntime-node  packages/sdk/package.json:455:6'),
       stamp(''),
-      stamp('> theokit-sdk-monorepo@ quality:public-surface'),
+      stamp('> loopzero-sdk-monorepo@ quality:public-surface'),
     ].join('\n')
     expect(logEvidence(log)).toEqual([
       'Unused devDependencies (1)',
@@ -126,7 +126,7 @@ describe('logEvidence', () => {
     const log = [
       ...noise,
       stamp(
-        ' FAIL   @theokit/agents  tests/unit/capability-map-is-current.test.ts > has NOT drifted',
+        ' FAIL   @getloopscale/loopzero-agents  tests/unit/capability-map-is-current.test.ts > has NOT drifted',
       ),
       stamp('##[error]AssertionError: docs/capability-map.md has drifted from the package'),
       stamp('##[error]Process completed with exit code 1.'),
@@ -136,7 +136,7 @@ describe('logEvidence', () => {
 
     expect(evidence).toHaveLength(40)
     expect(evidence.slice(-2)).toEqual([
-      'FAIL   @theokit/agents  tests/unit/capability-map-is-current.test.ts > has NOT drifted',
+      'FAIL   @getloopscale/loopzero-agents  tests/unit/capability-map-is-current.test.ts > has NOT drifted',
       'AssertionError: docs/capability-map.md has drifted from the package',
     ])
   })
@@ -171,7 +171,7 @@ describe('logEvidence', () => {
   it('drops the warnings a package manager prints while installing', () => {
     const log = [
       stamp(
-        ' WARN  Failed to create bin at /home/runner/work/theokit/theokit/apps/theoclaw/node_modules/.bin/theokit. ENOENT: no such file or directory',
+        ' WARN  Failed to create bin at /home/runner/work/loopzero/loopzero/apps/loopbot/node_modules/.bin/loopzero. ENOENT: no such file or directory',
       ),
       stamp('error TS2322: Type string is not assignable to type number.'),
     ].join('\n')
@@ -205,13 +205,13 @@ describe('logEvidence', () => {
   it('keeps a line a script starts with a ballot cross, as a changelog check prints its failure', () => {
     const log = [
       stamp(
-        '✗ [changelog] @theokit/agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
+        '✗ [changelog] @getloopscale/loopzero-agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
       ),
       stamp('##[error]Process completed with exit code 1.'),
     ].join('\n')
 
     expect(logEvidence(log)).toEqual([
-      '✗ [changelog] @theokit/agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
+      '✗ [changelog] @getloopscale/loopzero-agents@16.11.0 shipped on 2026-11-19 and no dated section names it.',
     ])
   })
 

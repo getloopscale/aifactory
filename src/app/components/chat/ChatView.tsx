@@ -1,8 +1,8 @@
-import { ScrollArea } from '@usetheo/ui'
+import { ScrollArea } from '@getloopscale/ui'
 import { MessageSquare } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useAgent } from 'theokit/client'
+import { useAgent } from '@getloopscale/loopzero/client'
 
 import type { ChatMessageView, ChatModel } from '../../../shared/panel'
 import { AGENT_PATH, chatApi, displayed, promptWith } from '../../lib/chat'
@@ -33,7 +33,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
   const { needsConnection, recheck: checkConnection } = useChatgptConnection(model)
 
   const agent = useAgent<{ message: string }>(AGENT_PATH[model], {
-    headers: { 'x-theo-action': '1' },
+    headers: { 'x-loopzero-action': '1' },
   })
 
   const messages = useMemo<ChatMessageView[]>(

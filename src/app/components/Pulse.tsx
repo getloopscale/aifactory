@@ -1,4 +1,4 @@
-import { Button } from '@usetheo/ui'
+import { Button } from '@getloopscale/ui'
 import { Activity, Gauge, ShieldCheck, Timer } from 'lucide-react'
 import { useState } from 'react'
 
