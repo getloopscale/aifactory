@@ -356,6 +356,7 @@ describe('checkBeforeDeploy', () => {
   it('runs nothing when no file of the agent configuration changed and the setup is the same', async () => {
     let ran = false
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/app/page.tsx'],
       setup: { builder: 'claude-code', model: 'opus' },
@@ -371,6 +372,7 @@ describe('checkBeforeDeploy', () => {
 
   it('runs the quick set when a prompt changed, and passes a run as good as the baseline', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
@@ -386,6 +388,7 @@ describe('checkBeforeDeploy', () => {
 
   it('counts a different model as a change, though no file changed', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: [],
       setup: { builder: 'claude-code', model: 'sonnet' },
@@ -397,6 +400,7 @@ describe('checkBeforeDeploy', () => {
 
   it('names every setting that changed, in the order of their names', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline: { ...baseline, setup: { reviewer: 'codex', builder: 'claude-code' } },
       changedPaths: [],
       setup: { reviewer: 'claude-code', builder: 'codex' },
@@ -411,6 +415,7 @@ describe('checkBeforeDeploy', () => {
 
   it('refuses a partial quick run, naming the cases left, though the ones that ran are as good', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
@@ -429,6 +434,7 @@ describe('checkBeforeDeploy', () => {
         '[unavailable] the connection to sandbox x ended before the stream completed: The sandbox was killed or reached its end of life while the request was in flight.',
     }
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/review.ts'],
       setup: baseline.setup,
@@ -442,6 +448,7 @@ describe('checkBeforeDeploy', () => {
 
   it('refuses a run worse than the baseline, with the reason', async () => {
     const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       setup: baseline.setup,
@@ -452,6 +459,7 @@ describe('checkBeforeDeploy', () => {
       ran: true,
       ok: false,
       reasons: [
+        '4 quick case(s) passed in the baseline and failed now: a, b, c, d',
         'the pass rate fell from 100% to 0%',
         'no case ran to a verdict in both runs, so the cost could not be compared',
       ],
@@ -466,6 +474,7 @@ describe('checkFromTestStart', () => {
     let ran = false
 
     const checking = checkFromTestStart(testStartedAt, {
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       readSetup: () => new Promise<never>(() => {}),
@@ -484,6 +493,7 @@ describe('checkFromTestStart', () => {
     const given: number[] = []
 
     const checked = await checkFromTestStart(testStartedAt, {
+      quickIds: ['a', 'b', 'c', 'd'],
       baseline,
       changedPaths: ['src/server/factory/harness.ts'],
       readSetup: async () => baseline.setup,

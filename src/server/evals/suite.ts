@@ -311,7 +311,7 @@ export async function checkBeforeDeploy(input: {
   setup: AgentSetup
   runQuick: () => Promise<CaseResult[] | { results: CaseResult[]; skipped: string[] }>
   /** The quick set's ids. Given, each must have passed in the baseline, and one that fails now fails the gate. */
-  quickIds?: string[]
+  quickIds: string[]
 }): Promise<DeployCheck> {
   const changed = [
     ...agentConfigurationChanged(input.changedPaths),
@@ -329,7 +329,7 @@ export async function checkBeforeDeploy(input: {
   const failed = `the environment failed ${environment.length} quick case(s), which are not measured: ${environment.join(', ')}`
   const earlier = new Map(input.baseline.results.map((r) => [r.id, r]))
   // A quick case that failed or is missing in the baseline cannot tell a regression from it (#684).
-  const unproven = (input.quickIds ?? []).filter((id) => !earlier.get(id)?.passed)
+  const unproven = input.quickIds.filter((id) => !earlier.get(id)?.passed)
   // The set is small and each case stands for a repository: one that passed in the baseline and fails now is a
   // regression, whatever the rate says. An environment failure is not one.
   const broken = results
@@ -339,7 +339,7 @@ export async function checkBeforeDeploy(input: {
     ...(unproven.length > 0
       ? [`${unproven.length} quick case(s) did not pass in the baseline: ${unproven.join(', ')}`]
       : []),
-    ...(input.quickIds && broken.length > 0
+    ...(broken.length > 0
       ? [`${broken.length} quick case(s) passed in the baseline and failed now: ${broken.join(', ')}`]
       : []),
     ...(skipped.length > 0 ? [unmeasured] : []),
