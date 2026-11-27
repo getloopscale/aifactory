@@ -1,35 +1,10 @@
+import { ENDED_LANES, laneOf } from '../../shared/lanes'
 import type { InboxItem, TaskCard } from '../../shared/panel'
 
-/**
- * The six lanes the board shows. The server still tells nine columns apart (`Column`), which the assistants and
- * the floor read; a lane groups them by who has the task now, and the card says the rest.
- */
-export type Lane = 'todo' | 'needs_you' | 'running' | 'ready' | 'done' | 'cancelled'
+export { laneOf, LANES, type Lane } from '../../shared/lanes'
 
-export const LANES: Lane[] = ['todo', 'needs_you', 'running', 'ready', 'done', 'cancelled']
-
-/** The lanes whose tasks ended: only these are cut by the time filter, so nothing still open is hidden by it. */
-const ENDED: readonly Lane[] = ['done', 'cancelled']
-
-export function laneOf(task: Pick<TaskCard, 'stage' | 'column'>): Lane {
-  if (task.stage === 'cancelled') return 'cancelled'
-  switch (task.column) {
-    case 'queued':
-      return 'todo'
-    case 'waiting':
-    case 'attention':
-      return 'needs_you'
-    case 'working':
-    case 'retrying':
-    case 'merge':
-      return 'running'
-    case 'review':
-      return 'ready'
-    case 'released':
-    case 'resolved':
-      return 'done'
-  }
-}
+/** Only the ended lanes are cut by the time filter, so nothing still open is hidden by it. */
+const ENDED = ENDED_LANES
 
 /** How far back the ended tasks go, in days; `null` is all of them. */
 export type Window = 1 | 3 | 7 | 30 | null

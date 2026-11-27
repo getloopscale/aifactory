@@ -116,7 +116,7 @@ describe('the guides', () => {
   })
 
   it('names, in each manual, the words the screen uses', () => {
-    expect(GUIDE_INSTRUCTIONS('board')).toContain('"Will retry itself"')
+    expect(GUIDE_INSTRUCTIONS('board')).toContain('"Needs you"')
     expect(GUIDE_INSTRUCTIONS('inbox')).toContain('"Approve this commit"')
     expect(GUIDE_INSTRUCTIONS('repositories')).toContain('"Branch a release lands on"')
     expect(GUIDE_INSTRUCTIONS('setup')).toContain('"Check again"')
