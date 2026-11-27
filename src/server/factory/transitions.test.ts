@@ -669,6 +669,8 @@ describe('the owner writing to a task agent', () => {
       done: 'ask_agent',
       handoff: 'ask_agent',
       failed: 'ask_agent',
+      released: 'ask_agent',
+      cancelled: 'ask_agent',
     })
     expect(acting('conversation', {})).toEqual(acting('conversation', ask))
     expect(acting('conversation', { ...ask, mergedSha: 'm', branchGone: true })).toEqual(
@@ -705,9 +707,9 @@ describe('the owner writing to a task agent', () => {
     }
     expect(outcome({ stage: 'merge', ...ask }, 'conversation').kind).toBe('refused')
     for (const stage of ['released', 'cancelled'] as const) {
-      expect(outcome({ stage, ...ask }, 'conversation')).toEqual(
+      expect(outcome({ stage, ...guide }, 'conversation')).toEqual(
         refused(
-          'the owner can write only to the agent of a task that waits for an answer, was handed over, is done or failed',
+          'this task has ended, so there is no work of it left to guide: ask about it, or open a new job',
         ),
       )
     }

@@ -1,6 +1,20 @@
 @import 'tailwindcss';
 @import '@getloopscale/loopzero-ui/preset.css';
 
+/*
+ * A border with no colour of its own is the theme's border. Tailwind's preflight makes it the colour of the text,
+ * which draws a menu or a popover with a bright outline in the dark theme.
+ */
+@layer base {
+  *,
+  ::before,
+  ::after,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border);
+  }
+}
+
 /* The brand's two typefaces (SIL Open Font License), served by the panel so no page asks another host. */
 @font-face {
   font-family: 'Hanken Grotesk';

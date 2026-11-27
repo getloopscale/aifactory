@@ -1,20 +1,20 @@
-import { ScrollArea } from '@getloopscale/ui'
 import { MessageSquare } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useAgent } from '@getloopscale/loopzero/client'
 
 import type { ChatMessageView, ChatModel } from '../../../shared/panel'
-import { AGENT_PATH, chatApi, displayed, promptWith } from '../../lib/chat'
+import { AGENT_PATH, chatApi, displayed, handedOver, handOver, promptWith } from '../../lib/chat'
 import { useChatgptConnection } from '../../lib/chatgpt-connection'
 import { useChats } from '../../lib/chats'
 import { useCopy } from '../../lib/copy'
 
 import { ChatgptConnect } from './ChatgptConnect'
+import { FollowScroll } from './FollowScroll'
 import { ModelPicker } from './ModelPicker'
 import { Messages } from './Messages'
 import { Pending } from './Pending'
-import { PillComposer } from './PillComposer'
+import { MessageBox } from './MessageBox'
 
 /**
  * A conversation with the factory's assistant, or the empty one that starts a new. What was said before
@@ -25,9 +25,11 @@ export function ChatView({ chatId }: { chatId?: string }) {
   const navigate = useNavigate()
   const { t } = useCopy()
   const { reload } = useChats()
-  const [model, setModel] = useState<ChatModel>('openrouter')
-  const [restored, setRestored] = useState<ChatMessageView[]>([])
-  const [loading, setLoading] = useState(chatId !== undefined)
+  // The conversation this page continues, when the page before it kept it a moment ago: nothing to load.
+  const [handed] = useState(() => handedOver(chatId))
+  const [model, setModel] = useState<ChatModel>(handed?.model ?? 'openrouter')
+  const [restored, setRestored] = useState<ChatMessageView[]>(handed?.messages ?? [])
+  const [loading, setLoading] = useState(chatId !== undefined && !handed)
   const [loadError, setLoadError] = useState(false)
   const [value, setValue] = useState('')
   const { needsConnection, recheck: checkConnection } = useChatgptConnection(model)
@@ -52,7 +54,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
   latest.current = messages
 
   useEffect(() => {
-    if (!chatId) return
+    if (!chatId || handed) return
     let alive = true
     chatApi
       .load(chatId)
@@ -66,13 +68,14 @@ export function ChatView({ chatId }: { chatId?: string }) {
     return () => {
       alive = false
     }
-  }, [chatId])
+  }, [chatId, handed])
 
   /** Keeps the conversation: creates it the first time, and sends the owner to its address. */
   const keep = useCallback(async () => {
     let target = chatId
     if (!target) target = (await chatApi.create(model)).id
     await chatApi.save(target, latest.current)
+    handOver(target, latest.current, model)
     reload()
     if (!chatId) void navigate(`/chat/${target}`, { replace: true })
   }, [chatId, model, navigate, reload])
@@ -112,7 +115,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
     <div className="w-full">
       <Pending conversation={agent} />
       {needsConnection ? <ChatgptConnect onConnected={checkConnection} /> : null}
-      <PillComposer
+      <MessageBox
         value={value}
         onValueChange={setValue}
         onSubmit={send}
@@ -158,7 +161,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScrollArea className="min-h-0 flex-1">
+      <FollowScroll count={messages.length} watch={messages} className="min-h-0 flex-1">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 sm:px-6 py-6">
           <Messages
             messages={messages}
@@ -166,7 +169,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
             model={model === 'codex' ? 'ChatGPT' : 'OpenRouter'}
           />
         </div>
-      </ScrollArea>
+      </FollowScroll>
       <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pb-5">{composer}</div>
     </div>
   )

@@ -6,6 +6,7 @@ import { get, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 
 import { Assist } from './Assist'
+import { enterSends } from '../lib/enter-sends'
 
 /** One issue, written here, opened on GitHub, and started if asked. The task comes back through the webhook. */
 export type CreatedJob = { number: number; url: string; started: boolean }
@@ -114,6 +115,9 @@ export function NewJob({
                 <Textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
+                  onKeyDown={enterSends(() => {
+                    if (!busy && chosen !== '' && title.trim() !== '') void submit()
+                  })}
                   rows={6}
                   className="mt-1 w-full"
                 />
