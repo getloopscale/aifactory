@@ -10,7 +10,7 @@
 //   EVALS_START_MARGIN_MIN  no case starts when less than this is left of the 4 hour test time (default: the longest sandbox limit + 10)
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 
 import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -212,7 +212,10 @@ describe.runIf(mode === 'cases')('the cases', () => {
         }),
       )
     }
-    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5)))
+    const passing = existsSync(BASELINE)
+      ? new Set(readJson<Baseline>(BASELINE).results.filter((r) => r.passed).map((r) => r.id))
+      : undefined
+    writeJson(CASES, markQuick(cases, Number(env.EVALS_QUICK ?? 5), passing))
     expect(cases.length).toBeGreaterThan(0)
   })
 })

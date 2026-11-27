@@ -90,10 +90,19 @@ export function selectCandidates(
 
 /**
  * Marks `count` cases as the quick set run before a deploy: the shortest of each repository in turn, so the
- * set is cheap and still reaches every repository it can.
+ * set is cheap and still reaches every repository it can. With `passing` (the ids a baseline passed), only
+ * those cases are eligible, so the quick set never holds a case the baseline already fails; when none of the
+ * cases passed, every case stays eligible.
  */
-export function markQuick(cases: EvalCase[], count: number): EvalCase[] {
-  const groups = byRepository(cases)
+export function markQuick(
+  cases: EvalCase[],
+  count: number,
+  passing?: ReadonlySet<string>,
+): EvalCase[] {
+  const eligible = passing && cases.some((c) => passing.has(c.id))
+    ? cases.filter((c) => passing.has(c.id))
+    : cases
+  const groups = byRepository(eligible)
   for (const [key, group] of groups) {
     groups.set(
       key,
