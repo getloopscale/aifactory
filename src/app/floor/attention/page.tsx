@@ -20,7 +20,8 @@ import {
 } from '../../components/ui/Surface'
 import { useCopy } from '../../lib/copy'
 import { laneOf, shortRepository, splitInbox, stateOf } from '../../lib/floor'
-import { ago, itemName, money, runsAgain } from '../../lib/format'
+import { ItemId } from '../../components/ui/ItemId'
+import { ago, money, runsAgain } from '../../lib/format'
 import { useResource } from '../../lib/live'
 
 /** The sentence that explains a block, under its heading: too long for the heading strip. */
@@ -124,7 +125,7 @@ export default function FloorAttentionPage() {
                   }
                   meta={
                     <>
-                      {shortRepository(task.repository)} {itemName(task)} ·{' '}
+                      <ItemId item={task} /> {shortRepository(task.repository)} ·{' '}
                       {ago(at, Date.now(), t.time)}
                     </>
                   }
@@ -219,7 +220,7 @@ export default function FloorAttentionPage() {
                     title={task.title}
                     meta={
                       <>
-                        {shortRepository(task.repository)} {itemName(task)}
+                        <ItemId item={task} /> {shortRepository(task.repository)}
                         {action ? ` · ${action.action}` : ''} ·{' '}
                         {ago(task.updatedAt, Date.now(), t.time)}
                       </>

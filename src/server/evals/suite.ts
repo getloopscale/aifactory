@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { SECURITY_EFFORT_CEILING } from '../../shared/panel'
@@ -137,6 +137,39 @@ export function startMarginFor(sandboxLimitsMs: number[]): number {
   return sandboxLimitsMs.length === 0
     ? DEFAULT_START_MARGIN_MS
     : Math.max(...sandboxLimitsMs) + WRITE_SLACK_MS
+}
+
+/**
+ * The results `markQuick` reads. With no baseline file yet (the first collection of cases) no case is measured,
+ * so none is quick: record the baseline, then collect again.
+ */
+export function baselineResultsFor(path: string): CaseResult[] {
+  if (!existsSync(path)) return []
+  return (JSON.parse(readFileSync(path, 'utf8')) as Baseline).results
+}
+
+/** `EVALS_CONCURRENCY` as a whole number of at least 1; anything else fails the run at once, never as NaN. */
+export function parseConcurrency(value: string): number {
+  const given = Number(value)
+  if (value.trim() === '' || !Number.isInteger(given) || given < 1)
+    throw new Error(`EVALS_CONCURRENCY must be a whole number of at least 1, got "${value}"`)
+  return given
+}
+
+/**
+ * How many cases the check runs at once (#684): `EVALS_CONCURRENCY` when set, else the size of the quick set, no
+ * more than the sandbox slots free now. When the provider cannot say how many are free, or none is, one: that case
+ * waits for its slot instead of the run assuming capacity.
+ */
+export function checkConcurrency(input: {
+  override?: string
+  cases: number
+  freeSlots?: number
+}): number {
+  if (input.override !== undefined && input.override !== '') return parseConcurrency(input.override)
+  const free = input.freeSlots
+  if (free === undefined || !Number.isFinite(free) || free < 1) return 1
+  return Math.max(1, Math.min(input.cases, Math.floor(free)))
 }
 
 /** What the cases cost: what the agents reported plus the time their sandboxes ran. */
@@ -287,6 +320,8 @@ export async function checkBeforeDeploy(input: {
   changedPaths: string[]
   setup: AgentSetup
   runQuick: () => Promise<CaseResult[] | { results: CaseResult[]; skipped: string[] }>
+  /** The quick set's ids. Given, each must have passed in the baseline, and one that fails now fails the gate. */
+  quickIds: string[]
 }): Promise<DeployCheck> {
   const changed = [
     ...agentConfigurationChanged(input.changedPaths),
@@ -302,7 +337,21 @@ export async function checkBeforeDeploy(input: {
   // quick set is incomplete without it: the gate stops and names the environment, not the agents.
   const environment = results.filter(failedForEnvironment).map((r) => r.id)
   const failed = `the environment failed ${environment.length} quick case(s), which are not measured: ${environment.join(', ')}`
+  const earlier = new Map(input.baseline.results.map((r) => [r.id, r]))
+  // A quick case that failed or is missing in the baseline cannot tell a regression from it (#684).
+  const unproven = input.quickIds.filter((id) => !earlier.get(id)?.passed)
+  // The set is small and each case stands for a repository: one that passed in the baseline and fails now is a
+  // regression, whatever the rate says. An environment failure is not one.
+  const broken = results
+    .filter((r) => !r.passed && !failedForEnvironment(r) && earlier.get(r.id)?.passed)
+    .map((r) => r.id)
   const reasons = [
+    ...(unproven.length > 0
+      ? [`${unproven.length} quick case(s) did not pass in the baseline: ${unproven.join(', ')}`]
+      : []),
+    ...(broken.length > 0
+      ? [`${broken.length} quick case(s) passed in the baseline and failed now: ${broken.join(', ')}`]
+      : []),
     ...(skipped.length > 0 ? [unmeasured] : []),
     ...(environment.length > 0 && !compared.reasons.some((r) => r.startsWith('the environment failed'))
       ? [failed]

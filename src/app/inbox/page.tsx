@@ -18,7 +18,8 @@ import {
   type Tone,
 } from '../components/ui/Surface'
 import { useCopy } from '../lib/copy'
-import { ago, itemName, money } from '../lib/format'
+import { ItemId } from '../components/ui/ItemId'
+import { ago, money } from '../lib/format'
 import { shortRepository } from '../lib/floor'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
@@ -134,12 +135,12 @@ export default function InboxPage() {
                             />
                             {t.inbox[kind]}
                           </span>{' '}
-                          · {shortRepository(task.repository)} {itemName(task)} ·{' '}
+                          · <ItemId item={task} /> {shortRepository(task.repository)} ·{' '}
                           {ago(at, Date.now(), t.time)}
                         </>
                       ) : (
                         <>
-                          {task.repository} {itemName(task)} · {ago(at, Date.now(), t.time)}
+                          <ItemId item={task} /> {task.repository} · {ago(at, Date.now(), t.time)}
                         </>
                       )
                     }

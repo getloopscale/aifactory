@@ -88,7 +88,8 @@ describe('the decisions of the floor', () => {
 
     const row = (await screen.findByText('Add truncate')).closest('a')!
     expect(row.getAttribute('href')).toBe('/tasks/11')
-    expect(within(row).getByText('app #7 · send_back · checks_red')).toBeDefined()
+    expect(within(row).getByText('#7')).toBeDefined()
+    expect(within(row).getByText(/app · send_back · checks_red/)).toBeDefined()
     expect(within(row).getByText('The checks failed twice')).toBeDefined()
     expect(within(row).getByText('Escalated')).toBeDefined()
   })

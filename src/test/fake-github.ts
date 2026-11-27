@@ -1019,9 +1019,12 @@ export class FakeGithub implements GithubApi {
         return states.includes('pending') ? ('pending' as const) : ('success' as const)
       }
       return {
-        checkRuns: r
-          .checkRuns(sha)
-          .map(({ name, status, conclusion }) => ({ name, status, conclusion })),
+        checkRuns: r.checkRuns(sha).map(({ name, status, conclusion, url }) => ({
+          name,
+          status,
+          conclusion,
+          ...(url ? { url } : {}),
+        })),
         statuses: combined(),
         statusContexts: r.commitStatuses(sha).map((s) => ({ context: s.context, state: s.state })),
       }

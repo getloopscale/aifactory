@@ -20,7 +20,11 @@ export default defineConfig({
             'src/**/*.e2e.test.ts',
             'src/**/*.evals.test.ts',
           ],
-          setupFiles: ['src/test/quiet-jsdom-css.ts', 'src/test/no-real-docker.ts'],
+          setupFiles: [
+            'src/test/quiet-jsdom-css.ts',
+            'src/test/jsdom-resize-observer.ts',
+            'src/test/no-real-docker.ts',
+          ],
         },
       },
       {
