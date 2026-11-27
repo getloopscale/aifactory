@@ -5,6 +5,7 @@ import type { CodingHarness } from '../factory/harness'
 
 import {
   closeWorkspace,
+  liveWorkspace,
   openWorkspace,
   WorkspaceRefused,
   type WorkspaceDeps,
@@ -22,10 +23,20 @@ const session = {
 
 function setup(store: Partial<WorkspaceStore> = {}) {
   const sandbox = new FakeSandbox((command) =>
-    command.includes('rev-parse') ? { stdout: '/home/work\n' } : undefined,
+    command.includes('@@numstat@@')
+      ? {
+          stdout:
+            '@@numstat@@\0' +
+            '1\t0\ta.txt\0' +
+            '\0\0@@patch@@\0diff --git a/a.txt b/a.txt\n@@ -0,0 +1 @@\n+x\n',
+        }
+      : command.includes('rev-parse')
+        ? { stdout: '/home/work\n' }
+        : undefined,
   )
   const installationToken = vi.fn(async (_repo: string) => ({ token: TOKEN }))
   const saveSnapshot = vi.fn(async () => undefined)
+  const saveDiff = vi.fn(async (_id: string, _diff: unknown) => undefined)
   const deps: WorkspaceDeps = {
     sandbox,
     harness: { name: 'fake', egress: async () => [{ domain: 'api.example.com' }] } as CodingHarness,
@@ -34,10 +45,11 @@ function setup(store: Partial<WorkspaceStore> = {}) {
       enabled: async () => true,
       knowledgeRepository: async () => 'acme/knowledge',
       saveSnapshot,
+      saveDiff,
       ...store,
     },
   }
-  return { sandbox, deps, installationToken, saveSnapshot }
+  return { sandbox, deps, installationToken, saveSnapshot, saveDiff }
 }
 
 describe('openWorkspace', () => {
@@ -107,6 +119,34 @@ describe('closeWorkspace', () => {
     expect(id).toBe('snap-1')
     expect(saveSnapshot).toHaveBeenCalledWith('s1', 'snap-1')
     expect(sandbox.stopped).toBe(1)
+  })
+
+  it('keeps the diff before the snapshot, and the open workspace is read until then', async () => {
+    const { deps, saveDiff, saveSnapshot } = setup()
+    const workspace = await openWorkspace(deps, session)
+    expect(liveWorkspace('s1')?.workspace).toBe(workspace)
+    await closeWorkspace(deps, session, workspace)
+    expect(saveDiff).toHaveBeenCalledWith('s1', {
+      files: [expect.objectContaining({ path: 'a.txt', added: 1, removed: 0 })],
+    })
+    expect(saveDiff.mock.invocationCallOrder[0]!).toBeLessThan(
+      saveSnapshot.mock.invocationCallOrder[0]!,
+    )
+    expect(liveWorkspace('s1')).toBeUndefined()
+  })
+
+  it('still saves the workspace when the diff cannot be read or kept', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { deps, saveSnapshot } = setup({
+      saveDiff: async () => {
+        throw new Error('db down')
+      },
+    })
+    const workspace = await openWorkspace(deps, session)
+    await expect(closeWorkspace(deps, session, workspace)).resolves.toBe('snap-1')
+    expect(saveSnapshot).toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the diff was not kept'))
+    warn.mockRestore()
   })
 
   it('stops the sandbox and throws when the snapshot cannot be kept', async () => {
