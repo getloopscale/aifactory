@@ -108,9 +108,10 @@ describe("a session's turn", () => {
     expect((await getSession(s.id))?.state).toBe('starting')
   })
 
-  it('treats a message after the last cost or error as unanswered', async () => {
+  it('treats a message after the one a turn took as unanswered', async () => {
     const s = await aSession()
     await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
     await appendEvent(s.id, { kind: 'error', content: 'failed' })
     await appendEvent(s.id, { kind: 'user_message', content: 'two' })
     await moveSession(s.id, 'message')
