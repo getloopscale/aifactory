@@ -8,6 +8,10 @@ import { EVENT_MAX_BYTES } from '../factory/transcript'
 
 import {
   appendEvent,
+  claimTurn,
+  moveSession,
+  turnMarker,
+  CLAIM_STALE_MS,
   createSession,
   eventsAfter,
   getSession,
@@ -88,5 +92,52 @@ describe('code events', () => {
       await appendEvent(s.id, { kind: 'agent_message', content: `m${i}` })
     expect((await eventsAfter(s.id, 5, 10)).map((e) => e.seq)).toEqual([6, 7, 8, 9, 10, 11, 12])
     expect((await eventsAfter(s.id, 5, 3)).map((e) => e.seq)).toEqual([6, 7, 8])
+  })
+})
+
+describe("a session's turn", () => {
+  it('is claimed by one worker, for the oldest message no turn answered', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'first' })
+    await moveSession(s.id, 'message')
+    const [a, b] = await Promise.all([claimTurn(s.id), claimTurn(s.id)])
+    const kinds = [a.kind, b.kind].sort()
+    expect(kinds).toEqual(['busy', 'claimed'])
+    const claimed = a.kind === 'claimed' ? a : b
+    expect(claimed.kind === 'claimed' && claimed.message.content).toBe('first')
+    expect((await getSession(s.id))?.state).toBe('starting')
+  })
+
+  it('treats a message after the one a turn took as unanswered', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
+    await appendEvent(s.id, { kind: 'error', content: 'failed' })
+    await appendEvent(s.id, { kind: 'user_message', content: 'two' })
+    await moveSession(s.id, 'message')
+    const claim = await claimTurn(s.id)
+    expect(claim.kind === 'claimed' && claim.message.content).toBe('two')
+  })
+
+  it('keeps a message that arrived during a turn unanswered when the turn ends', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
+    await appendEvent(s.id, { kind: 'user_message', content: 'late' })
+    await appendEvent(s.id, { kind: 'error', content: 'streamed by the harness' })
+    await appendEvent(s.id, { kind: 'cost', content: '{}' })
+    await moveSession(s.id, 'message')
+    const claim = await claimTurn(s.id)
+    expect(claim.kind === 'claimed' && claim.message.content).toBe('late')
+  })
+
+  it('takes a claim nothing touched for the stale time, and not before', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await moveSession(s.id, 'message')
+    await claimTurn(s.id)
+    expect((await claimTurn(s.id)).kind).toBe('busy')
+    const later = new Date(Date.now() + CLAIM_STALE_MS + 1000)
+    expect((await claimTurn(s.id, later)).kind).toBe('claimed')
   })
 })
