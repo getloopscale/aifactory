@@ -39,6 +39,9 @@ function deploy({
   installedCloudflared = false,
   buildFails = false,
   installedTunnel,
+  applied = '300',
+  copyFails = false,
+  slowEval = false,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'deploy-test-'))
   homes.push(root)
@@ -49,6 +52,18 @@ function deploy({
     join(root, 'scripts', 'write-units.sh'),
   )
   chmodSync(join(root, 'scripts', 'write-units.sh'), 0o755)
+  copyFileSync(new URL('./deploy-db.mjs', import.meta.url), join(root, 'scripts', 'deploy-db.mjs'))
+  mkdirSync(join(root, 'drizzle', 'meta'), { recursive: true })
+  writeFileSync(
+    join(root, 'drizzle', 'meta', '_journal.json'),
+    JSON.stringify({
+      entries: [
+        { tag: '0001_a', when: 100 },
+        { tag: '0002_renamed_tables', when: 200 },
+        { tag: '0003_c', when: 400 },
+      ],
+    }),
+  )
   mkdirSync(join(root, 'ops', 'systemd'), { recursive: true })
   writeFileSync(join(root, 'ops', 'systemd', 'aifactory.service'), 'ExecStart=@ROOT@/run\n')
   writeFileSync(
@@ -78,11 +93,20 @@ function deploy({
     writeFileSync(join(bin, name), `#!/bin/sh\necho "${name} $*" >> ${calls}\n${body}\n`)
     chmodSync(join(bin, name), 0o755)
   }
-  fake('docker', `echo ${busy}`)
+  fake(
+    'docker',
+    `case "$*" in
+*"max(created_at)"*) echo ${applied} ;;
+*pg_dump*) ${copyFails ? 'exit 1' : 'echo dump'} ;;
+*pg_restore*) cat >/dev/null ;;
+*"create database"*|*"drop database"*) ;;
+*) echo ${busy} ;;
+esac`,
+  )
   // `pnpm evals:check` is the agent-configuration gate; the deploy must stop when it fails.
   fake(
     'pnpm',
-    `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}\n${buildFails ? 'case "$*" in build*) exit 1 ;; esac' : ''}\n${migrateFails ? 'case "$*" in db:migrate*) exit 1 ;; esac' : ''}`,
+    `echo "pnpm sees DATABASE_URL=$DATABASE_URL" >> ${calls}\n${slowEval ? `case "$*" in evals:check*) sleep 1; echo "evaluation finished" >> ${calls} ;; esac` : ''}\n${checkFails ? 'case "$*" in evals:check*) exit 1 ;; esac' : ''}\n${buildFails ? 'case "$*" in build*) exit 1 ;; esac' : ''}\n${migrateFails ? 'case "$*$DATABASE_URL" in db:migrate*_eval_*) ;; db:migrate*) exit 1 ;; esac' : ''}`,
   )
   // The fake systemctl keeps state: a unit is enabled when a file of its name is in `enabled`. `list-dependencies`
   // answers with those, `enable` and `disable` add and remove them, and `daemon-reload` and the first `restart`
@@ -185,14 +209,77 @@ describe('the deploy script', () => {
     ])
   })
 
-  it('checks the agent configuration against the baseline before it builds', () => {
+  it('checks the agent configuration on a migrated copy, builds, then migrates production', () => {
     const { code, pnpm } = deploy()
 
     expect(code).toBe(0)
-    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build'])
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build', 'pnpm db:migrate'])
   })
 
-  it('builds and restarts nothing when the agents do worse than the baseline', () => {
+  it('has nothing that waits on an agent between the production migration and the restart', () => {
+    const { code, log } = deploy({ slowEval: true })
+
+    expect(code).toBe(0)
+    const finished = log.indexOf('evaluation finished')
+    const migrations = log.flatMap((l, i) => (l === 'pnpm db:migrate' ? [i] : []))
+    const restart = log.findIndex((l) => l.includes(' restart '))
+    expect(finished).toBeGreaterThan(-1)
+    expect(finished).toBeLessThan(migrations[1])
+    expect(log.slice(migrations[1], restart).filter((l) => l.includes('evals:check'))).toEqual([])
+    expect(migrations[1]).toBeLessThan(restart)
+    expect(log.indexOf('pnpm build')).toBeLessThan(migrations[1])
+  })
+
+  it('names the pending migrations before it applies them', () => {
+    const { code, output } = deploy({ applied: '200' })
+
+    expect(code).toBe(0)
+    expect(output).toMatch(/applying the pending migrations:\n {2}0003_c\n/)
+  })
+
+  it('names every migration the journal holds beyond the history, by time and not by number', () => {
+    const { output } = deploy({ applied: '100' })
+
+    expect(output).toMatch(/0002_renamed_tables\n {2}0003_c/)
+  })
+
+  it('says when no migration is pending', () => {
+    const { code, output } = deploy({ applied: '400' })
+
+    expect(code).toBe(0)
+    expect(output).toMatch(/no migrations are pending/)
+  })
+
+  it('stops before it changes anything when the applied migrations cannot be read', () => {
+    const { code, pnpm, systemctl, output } = deploy({ applied: 'x' })
+
+    expect(code).not.toBe(0)
+    expect(pnpm).toEqual([])
+    expect(systemctl).toEqual([])
+    expect(output).toMatch(/could not tell which migrations are pending/)
+  })
+
+  it('stops before it changes production when the copy cannot be made', () => {
+    const { code, pnpm, systemctl, output, log } = deploy({ copyFails: true })
+
+    expect(code).not.toBe(0)
+    expect(pnpm).toEqual([])
+    expect(systemctl).toEqual([])
+    expect(output).toMatch(/could not copy the database for the evaluation/)
+    expect(log.some((l) => l.includes('drop database'))).toBe(true)
+  })
+
+  it('removes the evaluation database whether the evaluation passes or fails', () => {
+    for (const checkFails of [false, true]) {
+      const { log } = deploy({ checkFails })
+      const create = log.findIndex((l) => l.includes('create database'))
+      const drop = log.findIndex((l) => l.includes('drop database'))
+      expect(create).toBeGreaterThan(-1)
+      expect(drop).toBeGreaterThan(create)
+    }
+  })
+
+  it('builds and restarts nothing, and leaves production unmigrated, when the agents do worse than the baseline', () => {
     const { code, pnpm, systemctl, output } = deploy({ checkFails: true })
 
     expect(code).not.toBe(0)
@@ -201,30 +288,41 @@ describe('the deploy script', () => {
     expect(output).toMatch(/the agents did worse than the baseline/)
   })
 
-  it('gives the check the database the service uses, which .env.local does not name', () => {
+  it('migrates and restarts nothing when the build fails', () => {
+    const { code, pnpm, systemctl } = deploy({ buildFails: true })
+
+    expect(code).not.toBe(0)
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build'])
+    expect(systemctl).toEqual([])
+  })
+
+  it('gives the evaluation a database of its own and production the one the service uses', () => {
     const { code, pnpmEnv } = deploy()
 
     expect(code).toBe(0)
-    const url = 'pnpm sees DATABASE_URL=postgres://factory:factory@localhost:54329/factory'
-    expect(pnpmEnv).toEqual([url, url, url])
+    const prod = 'pnpm sees DATABASE_URL=postgres://factory:factory@localhost:54329/factory'
+    expect(pnpmEnv[0]).toMatch(
+      /^pnpm sees DATABASE_URL=postgres:\/\/factory:factory@localhost:54329\/factory_eval_[0-9a-f]{8}$/,
+    )
+    expect(pnpmEnv[1]).toBe(pnpmEnv[0])
+    expect(pnpmEnv[2]).toBe(prod)
+    expect(pnpmEnv[3]).toBe(prod)
   })
 
-  it('gives the migration and the check the database .env.local names', () => {
+  it('migrates production in the database .env.local names, after the evaluation', () => {
     const { code, pnpmEnv } = deploy({ envFile: 'DATABASE_URL=postgres://other/db\n' })
 
     expect(code).toBe(0)
-    expect(pnpmEnv.slice(0, 2)).toEqual([
-      'pnpm sees DATABASE_URL=postgres://other/db',
-      'pnpm sees DATABASE_URL=postgres://other/db',
-    ])
+    expect(pnpmEnv[0]).toMatch(/^pnpm sees DATABASE_URL=postgres:\/\/other\/db_eval_/)
+    expect(pnpmEnv[3]).toBe('pnpm sees DATABASE_URL=postgres://other/db')
   })
 
-  it('ends before the build when the migrations fail', () => {
+  it('ends before the restart when the production migration fails', () => {
     const { code, pnpm, systemctl, output } = deploy({ migrateFails: true })
 
     expect(code).not.toBe(0)
-    expect(pnpm).toEqual(['pnpm db:migrate'])
-    expect(systemctl).toEqual([])
+    expect(pnpm).toEqual(['pnpm db:migrate', 'pnpm evals:check', 'pnpm build', 'pnpm db:migrate'])
+    expect(systemctl.filter((l) => l.includes('restart'))).toEqual([])
     expect(output).toMatch(/the migrations failed/)
   })
 
