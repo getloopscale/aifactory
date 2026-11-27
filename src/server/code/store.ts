@@ -64,6 +64,16 @@ export async function renameSession(id: string, title: string): Promise<CodeSess
   return row
 }
 
+/** Saves the permission mode of a session; a turn already claimed keeps the mode it took, the next one uses this. */
+export async function setMode(id: string, mode: CodeMode): Promise<CodeSession | undefined> {
+  const [row] = await getDb()
+    .update(codeSession)
+    .set({ mode, updatedAt: sql`now()` })
+    .where(eq(codeSession.id, id))
+    .returning()
+  return row
+}
+
 /** Keeps the snapshot of a closed workspace and clears the sandbox id: no sandbox is up for the session any more. */
 export async function saveWorkspaceSnapshot(
   id: string,

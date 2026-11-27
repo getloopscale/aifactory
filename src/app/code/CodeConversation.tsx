@@ -1,13 +1,19 @@
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
 import { Button, Textarea } from '@getloopscale/ui'
 import { ChevronRight } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
-import type { CodeEventWire, CodeSessionWire, CodeState } from '../../shared/code'
+import {
+  CODE_MODES,
+  type CodeEventWire,
+  type CodeMode,
+  type CodeSessionWire,
+  type CodeState,
+} from '../../shared/code'
 import { Assist } from '../components/Assist'
 import { FollowScroll } from '../components/chat/FollowScroll'
 import { TONE_DOT } from '../components/ui/Surface'
-import { post } from '../lib/api'
+import { patch, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
 
@@ -176,6 +182,85 @@ function Group({ cards }: { cards: ToolCard[] }) {
   )
 }
 
+/** Ask, Plan and Code, one line each; keys 1, 2 and 3 pick one while the list is open. */
+function ModeSelector({ session }: { session: CodeSessionWire }) {
+  const { t } = useCopy()
+  const c = t.code.conversation
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<CodeMode>(session.mode)
+  const [saving, setSaving] = useState(false)
+  const [problem, setProblem] = useState<string>()
+  useEffect(() => setMode(session.mode), [session.mode])
+
+  async function pick(next: CodeMode) {
+    setOpen(false)
+    if (saving || next === mode) return
+    setSaving(true)
+    setProblem(undefined)
+    try {
+      const saved = await patch<{ mode: CodeMode }>(`/api/panel/code/sessions/${session.id}`, {
+        mode: next,
+      })
+      setMode(saved.mode)
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
+      const picked = CODE_MODES[Number(e.key) - 1]
+      if (picked) void pick(picked)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
+  return (
+    <div className="space-y-1 text-xs">
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label={c.modeLabel}
+        disabled={saving}
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-muted-foreground"
+      >
+        <ChevronRight aria-hidden className={`size-3 ${open ? 'rotate-90' : ''}`} />
+        {c.modeLabel}: {t.code.modes[mode]}
+      </button>
+      {open ? (
+        <div role="radiogroup" aria-label={c.modeLabel} className="space-y-1">
+          {CODE_MODES.map((m, i) => (
+            <button
+              key={m}
+              type="button"
+              role="radio"
+              aria-checked={m === mode}
+              onClick={() => void pick(m)}
+              className="flex w-full items-baseline gap-2 rounded-md border border-border px-2 py-1 text-left"
+            >
+              <span className="font-mono text-muted-foreground">{i + 1}</span>
+              <span className="font-semibold">{t.code.modes[m]}</span>
+              <span className="text-muted-foreground">{c.modeAbout[m]}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {problem ? (
+        <p role="alert" className="text-destructive">
+          {problem}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
 /** The conversation of a session and the box that writes to it. */
 export function CodeConversation({
   session,
@@ -248,6 +333,7 @@ export function CodeConversation({
             {busy ? c.sending : c.send}
           </Button>
         </div>
+        <ModeSelector session={session} />
         <Assist
           kind="changes"
           text={text}

@@ -67,8 +67,10 @@ function setup(
   extra: Partial<CodeSession> = {},
 ) {
   const world = memory(mode, extra)
+  const scripted: { fn?: (command: string) => { stdout?: string; exitCode?: number } | undefined } =
+    {}
   const sandbox = new FakeSandbox((c) =>
-    c.includes('rev-parse') ? { stdout: '/home/work\n' } : undefined,
+    c.includes('rev-parse') ? { stdout: '/home/work\n' } : scripted.fn?.(c),
   )
   const run = vi.fn(async (_b: unknown, input: HarnessInput) => {
     input.onEvent?.({ kind: 'tool_use', tool: 'shell', content: 'ls' })
@@ -97,7 +99,7 @@ function setup(
     record,
     onRefusal,
   }
-  return { ...world, deps, run, resume, record, onRefusal, sandbox }
+  return { ...world, deps, run, resume, record, onRefusal, sandbox, scripted }
 }
 
 describe('runTurn', () => {
@@ -163,6 +165,49 @@ describe('runTurn', () => {
       await runTurn(t.deps, 's1')
       expect(t.run.mock.calls[0]![1].ask).toBe(ask)
     }
+  })
+
+  it('reverts what an ask turn left changed and names it in an error event', async () => {
+    const t = setup('ask')
+    let dirty = true
+    t.scripted.fn = (c) => {
+      if (c.includes('status --porcelain')) {
+        const out = dirty ? { stdout: ' M src/a.ts\0' } : { stdout: '' }
+        return out
+      }
+      if (c.includes('restore')) dirty = false
+      return undefined
+    }
+    await runTurn(t.deps, 's1')
+    expect(t.sandbox.backend.commands.some((c) => c.includes('restore'))).toBe(true)
+    const error = t.events.find((e) => e.kind === 'error')
+    expect(error?.content).toContain('src/a.ts')
+    expect(t.session.state).toBe('idle')
+  })
+
+  it('leaves the changes of a code turn and writes no such event', async () => {
+    const t = setup('code')
+    t.scripted.fn = (c) =>
+      c.includes('status --porcelain') ? { stdout: ' M src/a.ts\0' } : undefined
+    await runTurn(t.deps, 's1')
+    expect(t.sandbox.backend.commands.some((c) => c.includes('restore'))).toBe(false)
+    expect(t.events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
+  it('records the mode the turn ran in on its state event', async () => {
+    const t = setup('plan')
+    await runTurn(t.deps, 's1')
+    expect(t.events.find((e) => e.kind === 'state')).toMatchObject({
+      content: 'turn:1',
+      tool: 'plan',
+    })
+  })
+
+  it('fails the turn without saving the workspace when the revert fails', async () => {
+    const t = setup('ask')
+    t.scripted.fn = (c) => (c.includes('status --porcelain') ? { exitCode: 128 } : undefined)
+    expect((await runTurn(t.deps, 's1')).status).toBe('failed')
+    expect(t.events.at(-1)?.content).toContain('not saved')
   })
 
   it('fails the session with the error of a harness that throws', async () => {
