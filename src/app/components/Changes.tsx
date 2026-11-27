@@ -17,6 +17,7 @@ import {
 
 import { Assist } from './Assist'
 import { Quiet, Surface } from './ui/Surface'
+import { enterSends } from '../lib/enter-sends'
 
 /** A file opens by itself while the change is small enough to read at once. */
 const OPEN_FILES = 20
@@ -504,13 +505,7 @@ function Patch({
                   rows={2}
                   placeholder={t.changes.notePlaceholder}
                   onChange={(e) => onDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Enter keeps the note; Shift+Enter breaks the line; a composing keyboard is left alone.
-                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                      e.preventDefault()
-                      onSave()
-                    }
-                  }}
+                  onKeyDown={enterSends(onSave)}
                   className="w-full text-sm"
                 />
                 <Assist

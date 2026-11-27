@@ -3,6 +3,7 @@ import { ArrowUp, ListChecks, Plus, Square, TriangleAlert, FilePlus2 } from 'luc
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 
 import { useCopy } from '../../lib/copy'
+import { enterSends } from '../../lib/enter-sends'
 
 type Start = { icon: typeof FilePlus2; label: string; text: string }
 
@@ -74,12 +75,9 @@ export function MessageBox({
         aria-label={t.composer.message}
         placeholder={placeholder ?? t.composer.placeholder}
         onChange={(e) => onValueChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-            e.preventDefault()
-            if (canSend) onSubmit(value)
-          }
-        }}
+        onKeyDown={enterSends(() => {
+          if (canSend) onSubmit(value)
+        })}
         className="block min-h-6 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground"
       />
       <div className="flex items-center gap-1 px-2 pb-2">

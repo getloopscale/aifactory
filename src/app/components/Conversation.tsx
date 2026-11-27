@@ -25,6 +25,7 @@ import { Terminal } from './Terminal'
 import { StepRow } from './Transcript'
 import { AgentIcon } from './floor/AgentIcon'
 import { Surface } from './ui/Surface'
+import { enterSends } from '../lib/enter-sends'
 
 /** The stages where the agent has stopped and the owner may write to it. The server decides again. */
 export const CONVERSABLE = ['waiting', 'handoff', 'done', 'failed', 'released', 'cancelled']
@@ -394,10 +395,9 @@ function Composer({
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !busy && text.trim() !== '')
-                void send()
-            }}
+            onKeyDown={enterSends(() => {
+              if (!busy && text.trim() !== '') void send()
+            })}
             rows={1}
             placeholder={t.conversation.placeholder}
             className="field-sizing-content block max-h-[40vh] min-h-6 w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground"
