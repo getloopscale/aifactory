@@ -1,6 +1,7 @@
 import { Avatar, DropdownMenu, Tooltip } from '@getloopscale/ui'
 import {
   Bot,
+  Code,
   Factory,
   FolderGit2,
   HeartPulse,
@@ -62,7 +63,7 @@ function Place({
   count,
   attention,
 }: {
-  id: GuideId | 'history' | 'floor'
+  id: GuideId | 'history' | 'floor' | 'code'
   to: string
   icon: Icon
   label: string
@@ -75,7 +76,8 @@ function Place({
   const { t } = useCopy()
   const place = usePlace()
   const { pathname } = useLocation()
-  const active = id === 'history' || id === 'floor' ? pathname.startsWith(to) : place === id
+  const active =
+    id === 'history' || id === 'floor' || id === 'code' ? pathname.startsWith(to) : place === id
   const tone = attention?.tone ?? (count ? mark : undefined)
   const said = attention ? attention.count : count
   return (
@@ -165,6 +167,7 @@ export function Rail({
         <Place id="floor" to="/floor" icon={Factory} label={t.floor.name} />
         <Place id="board" to="/work" icon={LayoutDashboard} label={t.places.board} />
         <Place id="plans" to="/plans" icon={ListChecks} label={t.places.plans} />
+        <Place id="code" to="/code" icon={Code} label={t.places.code} />
         <Rule />
         <Place
           id="repositories"

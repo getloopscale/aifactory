@@ -88,6 +88,7 @@ describe('the layout', () => {
     expect(screen.getByRole('link', { name: t.places.board }).getAttribute('href')).toBe('/work')
     for (const [name, href] of [
       [t.places.plans, '/plans'],
+      [t.places.code, '/code'],
       [t.places.repositories, '/repositories'],
       [t.places.agents, '/agents'],
       [t.places.setup, '/setup'],
