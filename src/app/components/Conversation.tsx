@@ -1,5 +1,6 @@
 import { ArrowUp, ChevronRight, MessagesSquare, SquareTerminal } from 'lucide-react'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { atEnd } from './chat/FollowScroll'
 
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
 import { Button, Textarea } from '@getloopscale/ui'
@@ -299,7 +300,7 @@ function Thread({
       ref={scroller}
       onScroll={(e) => {
         const box = e.currentTarget
-        stuck.current = box.scrollHeight - box.scrollTop - box.clientHeight < 24
+        stuck.current = atEnd(box)
       }}
       className={`overflow-y-auto pr-2 ${tall ? 'min-h-0 flex-1' : 'max-h-[32rem]'}`}
     >
@@ -544,10 +545,30 @@ export function Conversation({
     return () => clearInterval(timer)
   }, [liveRole])
 
-  useEffect(() => {
+  // What the owner just sent, and the thread of another agent, are read from the end, wherever the box was.
+  const sent = messages.length
+  const lastSent = useRef(sent)
+  const lastRole = useRef(role)
+  useLayoutEffect(() => {
+    if (sent > lastSent.current || role !== lastRole.current) stuck.current = true
+    lastSent.current = sent
+    lastRole.current = role
     const box = scroller.current
     if (box && stuck.current) box.scrollTop = box.scrollHeight
-  }, [shown.length, activity])
+  }, [shown.length, activity, sent, role])
+
+  // A row can grow with no new row: an answer that renders, a folded pass that opens, the box under it resizing.
+  useLayoutEffect(() => {
+    const box = scroller.current
+    const inner = box?.firstElementChild
+    if (!box || !inner || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (stuck.current) box.scrollTop = box.scrollHeight
+    })
+    observer.observe(inner)
+    observer.observe(box)
+    return () => observer.disconnect()
+  }, [role, shown.length === 0])
 
   useEffect(() => {
     if (!target) return
