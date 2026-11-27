@@ -10,7 +10,7 @@ import {
   type QueueView,
   type TaskCard,
 } from '../../shared/panel'
-import { laneOf, LANES, type Lane, type Need } from '../lib/board-lanes'
+import { FLOW_LANES, laneOf, LANES, type Lane, type Need } from '../lib/board-lanes'
 import { useCopy } from '../lib/copy'
 import { useWidth } from '../lib/media'
 import type { Copy } from '../lib/copy/en'
@@ -410,11 +410,12 @@ function MergeCounts({ tasks }: { tasks: TaskCard[] }) {
 
 /** The colour of each lane's dot: who has the task now, and whether it ended well. */
 const LANE_TONE: Record<Lane, Tone> = {
-  todo: 'neutral',
   needs_you: 'warning',
-  running: 'primary',
-  ready: 'info',
-  done: 'success',
+  todo: 'neutral',
+  building: 'primary',
+  integrating: 'primary',
+  awaiting_release: 'info',
+  released: 'success',
   cancelled: 'neutral',
 }
 
@@ -438,9 +439,12 @@ function Column({
 }) {
   const { t } = useCopy()
   const head = tasks.filter((task) => topRank(task.queue) !== null).length
+  // Where the lane is in the flow, from 1; a lane beside the flow has no number.
+  const step = FLOW_LANES.indexOf(id) + 1
   return (
     <section
       aria-label={title}
+      aria-description={t.laneAbout[id]}
       className={`min-w-0 rounded-xl border border-border bg-card ${fill ? 'flex min-h-0 flex-col overflow-hidden' : ''}`}
     >
       <h2 className="sticky top-0 z-10 rounded-t-xl border-b border-border bg-card text-sm font-semibold text-foreground">
@@ -456,7 +460,11 @@ function Column({
                 {tasks.length}
               </span>
             </span>
-            {id === 'running' ? <MergeCounts tasks={tasks} /> : null}
+            {id === 'integrating' ? <MergeCounts tasks={tasks} /> : null}
+          </span>
+          <span className="mt-0.5 block truncate pl-[18px] text-[11px] font-normal text-muted-foreground">
+            {step > 0 ? <span className="mr-1 font-mono tabular-nums">{step}</span> : null}
+            {t.laneAbout[id]}
           </span>
         </span>
       </h2>
