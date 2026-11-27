@@ -11,6 +11,7 @@
 //   EVALS_BASELINE=1    write the run as evals/baseline.json
 import { execFileSync } from 'node:child_process'
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -29,6 +30,12 @@ import { modelReadinessJudge } from '../scheduler/judge'
 import { parseReadiness, readinessMessage } from '../scheduler/readiness'
 import type { KnowledgeSource } from '../knowledge/source'
 
+import {
+  findPass,
+  fingerprint,
+  receiptsFolder,
+  recordPass,
+} from './check-receipt'
 import { markQuick, selectCandidates, type EvalCase } from './cases'
 import { compareWithBaseline, failedForEnvironment, summarize, type Baseline } from './compare'
 import { deliveredCandidates, toCase } from './extract'
@@ -37,7 +44,7 @@ import {
   E2B_USD_PER_MS,
   SUITE_TIMEOUT_MS,
   agentSetup,
-  checkFromTestStart,
+  checkWithRecord,
   fromTestStart,
   parseMarginMinutes,
   runSuiteFromTestStart,
@@ -242,8 +249,12 @@ describe.runIf(mode === 'run')('a run of the suite', () => {
   }, SUITE_TIMEOUT_MS)
 })
 
+const receipts = () =>
+  receiptsFolder(process.cwd(), resolve(process.cwd(), git('rev-parse', '--git-common-dir')))
+
 describe.runIf(mode === 'check')('the agent configuration', () => {
   it('is no worse than the baseline when it changed since then', async () => {
+    // The decisions (reuse, the judge, what is recorded) are in `checkWithRecord`, which suite.test.ts proves.
     const checked = await fromTestStart((testStartedAt) => {
       const baseline = readJson<Baseline>(BASELINE)
       const changedPaths = [
@@ -251,14 +262,34 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
         ...git('diff', '--name-only', 'HEAD').split('\n'),
       ].filter(Boolean)
       const quick = readJson<EvalCase[]>(CASES).filter((c) => c.quick)
-      return checkFromTestStart(testStartedAt, {
+      return checkWithRecord(testStartedAt, {
         baseline,
         changedPaths,
+        quickCases: quick.length,
+        judgeCases: blockedIssues.length,
         readSetup: () => currentSetup(quick),
         runQuick: async (startedAt) => {
           const { results, skipped } = await runCases(quick, startedAt)
           return { results, skipped }
         },
+        runJudge: async () => {
+          const failures: string[] = []
+          for (const issue of blockedIssues)
+            await answersBlocked(issue).catch((e: Error) =>
+              failures.push(`${issue.name}: ${e.message}`),
+            )
+          return failures
+        },
+        fingerprint: (setup) =>
+          fingerprint({
+            root: process.cwd(),
+            setup,
+            baseline: readFileSync(BASELINE, 'utf8'),
+            cases: readFileSync(CASES, 'utf8'),
+          }),
+        find: (print) => findPass(receipts(), print),
+        record: (pass) => recordPass(receipts(), pass),
+        commit: () => git('rev-parse', 'HEAD'),
       })
     })
     console.log(JSON.stringify({ event: 'eval_check', ...checked }))
@@ -267,34 +298,36 @@ describe.runIf(mode === 'check')('the agent configuration', () => {
   })
 })
 
+const blockedIssues = [
+  {
+    name: 'a fix under .github/',
+    title: 'The release workflow publishes with the wrong token',
+    body: 'The job `publish` in `.github/workflows/release.yml` reads `NPM_TOKEN` from the wrong secret.\nChange it to `NPM_PUBLISH_TOKEN` and the release workflow publishes again.\nDone when the next release run passes.',
+    mentions: /\.github|workflow/i,
+  },
+  {
+    name: 'an unpublished package version',
+    title: 'Use the new gateway API from @getloopscale/loopzero-sdk 99.0.0',
+    body: 'Upgrade `@getloopscale/loopzero-sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@getloopscale/loopzero-sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
+    mentions: /@getloopscale\/loopzero-sdk/i,
+  },
+]
+async function answersBlocked({
+  title,
+  body,
+  mentions,
+}: (typeof blockedIssues)[number]): Promise<void> {
+  const answer = await modelReadinessJudge()(
+    readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
+  )
+  const read = parseReadiness(answer.response)
+  expect(read.verdict).toBe('blocked')
+  expect(read.missing).toMatch(mentions)
+}
+
 // The readiness judge on issues that cannot be done where they run (#238). The judge is a model, so only a live
 // answer shows that its prompt gets them: a fix under `.github/`, and a package version that is not published.
-describe.runIf(mode === 'check' || mode === 'judge')('the readiness judge', () => {
-  const blockedIssues = [
-    {
-      name: 'a fix under .github/',
-      title: 'The release workflow publishes with the wrong token',
-      body: 'The job `publish` in `.github/workflows/release.yml` reads `NPM_TOKEN` from the wrong secret.\nChange it to `NPM_PUBLISH_TOKEN` and the release workflow publishes again.\nDone when the next release run passes.',
-      mentions: /\.github|workflow/i,
-    },
-    {
-      name: 'an unpublished package version',
-      title: 'Use the new gateway API from @getloopscale/loopzero-sdk 99.0.0',
-      body: 'Upgrade `@getloopscale/loopzero-sdk` to 99.0.0 and call `gateway.route()` from `src/server/routes/hook.ts`.\n@getloopscale/loopzero-sdk 99.0.0 is not published yet: it is waiting for its release.\nDone when `npm test` passes with the new call.',
-      mentions: /@getloopscale\/loopzero-sdk/i,
-    },
-  ]
-  it.each(blockedIssues)(
-    'answers blocked for $name',
-    async ({ title, body, mentions }) => {
-      const judge = modelReadinessJudge()
-      const answer = await judge(
-        readinessMessage({ repository: 'o/app', issueNumber: 1, title, body }),
-      )
-      const read = parseReadiness(answer.response)
-      expect(read.verdict).toBe('blocked')
-      expect(read.missing).toMatch(mentions)
-    },
-    300_000,
-  )
+// In `check` mode the judge runs inside the check above, so that a pass is recorded only when it passed too.
+describe.runIf(mode === 'judge')('the readiness judge', () => {
+  it.each(blockedIssues)('answers blocked for $name', (issue) => answersBlocked(issue), 300_000)
 })
