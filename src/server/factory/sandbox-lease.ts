@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 
-import { getDb } from '../db'
+import { getLeaseDb } from '../db'
 import type { Database } from '../db'
 import { sandboxLease } from '../db/schema'
 
@@ -62,7 +62,7 @@ let beating: ReturnType<typeof setInterval> | undefined
  * Says this process is alive, now and every half minute while it runs. Awaited before a sandbox is created, so
  * the supervisor never sees a sandbox whose lease it cannot find.
  */
-export async function holdLease(db: Database = getDb()): Promise<void> {
+export async function holdLease(db: Database = getLeaseDb()): Promise<void> {
   await beat(db, THIS_PROCESS)
   beating ??= setInterval(() => {
     beat(db, THIS_PROCESS).catch((error) =>

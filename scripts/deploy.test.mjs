@@ -288,6 +288,13 @@ describe('the deploy script', () => {
     expect(output).toMatch(/the agents did worse than the baseline/)
   })
 
+  it('records the evaluation lease where the running service reads it, and the cases in the copy', () => {
+    const script = readFileSync(new URL('./deploy.sh', import.meta.url), 'utf8')
+    expect(script).toMatch(
+      /FACTORY_LEASE_DATABASE_URL="\$DATABASE_URL" DATABASE_URL="\$eval_url" pnpm evals:check/,
+    )
+  })
+
   it('migrates and restarts nothing when the build fails', () => {
     const { code, pnpm, systemctl } = deploy({ buildFails: true })
 
