@@ -57,6 +57,7 @@ describe('the folded menu', () => {
       [t.floor.name, '/floor'],
       [t.places.board, '/work'],
       [t.places.plans, '/plans'],
+      [t.places.code, '/code'],
       [t.places.repositories, '/repositories'],
       [t.places.agents, '/agents'],
       [t.places.health, '/health'],
