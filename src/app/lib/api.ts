@@ -15,7 +15,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     credentials: 'same-origin',
     headers: {
       ...(init.body ? { 'content-type': 'application/json' } : {}),
-      ...(init.method && init.method !== 'GET' ? { 'x-theo-action': '1' } : {}),
+      ...(init.method && init.method !== 'GET' ? { 'x-loopzero-action': '1' } : {}),
       ...init.headers,
     },
   })

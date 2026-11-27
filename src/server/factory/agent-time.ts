@@ -2,8 +2,8 @@
 export const MIN_AGENT_MS = 5 * 60_000
 
 /**
- * How long one check may take when the deps do not say. theokit-sdk's tests take 8 to 10 minutes on a busy
- * machine and were cut at 10 three times on 2026-11-11 (paulohenriquevn/aifactory#24).
+ * How long one check may take when the deps do not say. loopzero-sdk's tests take 8 to 10 minutes on a busy
+ * machine and were cut at 10 three times on 2026-11-11 (getloopscale/aifactory#24).
  */
 export const DEFAULT_CHECK_MS = 15 * 60_000
 /** How long a review may take when the deps do not say. */
@@ -58,7 +58,7 @@ export type SessionCap = { maxSessionMs: number; renewable: boolean }
  * How long the next agent pass may take, on two clocks: the run's own limits since it started, and the
  * provider's session cap since the current sandbox started. When the session has no room left but a new one
  * would, and the provider can save the disk, the plan is to renew: E2B's free hour stopped tasks that still
- * had most of their budget after one review asked for changes (paulohenriquevn/aifactory#29). The run's
+ * had most of their budget after one review asked for changes (getloopscale/aifactory#29). The run's
  * budget is never extended by a renewal.
  */
 export function planAgentPass(

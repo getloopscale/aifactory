@@ -1,4 +1,4 @@
-import { Avatar, DropdownMenu, ScrollArea } from '@usetheo/ui'
+import { Avatar, DropdownMenu, ScrollArea } from '@getloopscale/ui'
 import {
   Bot,
   Download,
@@ -33,7 +33,7 @@ import { useChats } from '../../lib/chats'
 
 import { BrandMark } from './BrandMark'
 import { ACTIVE, useOnNewChat, usePlace } from './active'
-import { SetupCount, type SetupAttention } from './SetupCount'
+import { COUNT, SetupCount, TONE as SETUP_TONE, type SetupAttention } from './SetupCount'
 
 type Icon = ComponentType<{ className?: string }>
 
@@ -42,8 +42,8 @@ const row =
 /** The mark of the item the owner is in: the lighter row of `ACTIVE`, and a bar in the accent on its left. */
 const HERE = `${ACTIVE} before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-[3px] before:rounded-full before:bg-primary`
 const TONE = {
-  waiting: 'bg-warning/25 text-foreground',
-  wrong: 'bg-destructive/25 text-foreground',
+  waiting: SETUP_TONE.warning,
+  wrong: SETUP_TONE.destructive,
 } as const
 
 /** One place in the factory, in the menu: an icon, a name, and a count when something is waiting. */
@@ -79,13 +79,7 @@ function Place({
     >
       <Icon className={`size-4 shrink-0 ${active ? '' : 'opacity-80'}`} />
       <span className="truncate">{label}</span>
-      {count ? (
-        <span
-          className={`ml-auto rounded px-1.5 font-mono text-[11px] font-medium tabular-nums ${TONE[tone]}`}
-        >
-          {count}
-        </span>
-      ) : null}
+      {count ? <span className={`ml-auto ${COUNT} ${TONE[tone]}`}>{count}</span> : null}
       {attention ? <SetupCount attention={attention} className="ml-auto" /> : null}
     </Link>
   )

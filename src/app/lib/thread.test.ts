@@ -45,6 +45,31 @@ const message = (id: number, s: number, over: Partial<MessageView> = {}): Messag
 })
 
 describe('threadRows', () => {
+  it('puts what the owner wrote after the last pass ended in the conversation of the builder', () => {
+    const events = [
+      ev(0, 'message', 'built'),
+      ev(20, 'message', 'reviewed', { role: 'reviewer' }),
+      ev(25, 'message', 'approved', { role: 'reviewer' }),
+    ]
+    const asked = message(1, 60, { answer: 'Here is what I did.', answeredAt: at(70) })
+
+    const rows = threadRows(events, [asked], T0 + 100_000)
+
+    const owner = rows.find((r) => r.type === 'owner')
+    const answer = rows.find((r) => r.type === 'said')
+    expect(owner?.role).toBe('builder')
+    expect(answer?.role).toBe('builder')
+    expect(rows.indexOf(owner!)).toBeGreaterThan(rows.map((r) => r.role).lastIndexOf('reviewer'))
+  })
+
+  it("keeps a message written while the reviewer works in the reviewer's pass", () => {
+    const events = [ev(0, 'message', 'built'), ev(20, 'message', 'reviewing', { role: 'reviewer' })]
+
+    const rows = threadRows(events, [message(1, 60)], T0 + 100_000, { running: 'reviewer' })
+
+    expect(rows.find((r) => r.type === 'owner')?.role).toBe('reviewer')
+  })
+
   it('puts an owner message between two steps of a running pass', () => {
     const events = [...call(0, 'Read'), ...call(20, 'Read')]
     const rows = threadRows(events, [message(1, 10)], T0 + 30_000, { running: 'builder' })

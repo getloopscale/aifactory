@@ -1,4 +1,4 @@
-import { defineCron } from 'theokit/server/cron'
+import { defineCron } from '@getloopscale/loopzero/server/cron'
 
 import { modeFromEnv } from '../coordinator/mode'
 import { getDb, getPool } from '../db'

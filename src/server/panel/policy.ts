@@ -1,4 +1,4 @@
-import type { RoutePolicyInput } from 'theokit/server/define'
+import type { RoutePolicyInput } from '@getloopscale/loopzero/server/define'
 
 /** Only the signed-in owner. Everything under /api/panel uses it except the login itself. */
 export const ownerOnly = ({ subject }: RoutePolicyInput) =>

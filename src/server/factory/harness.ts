@@ -1,7 +1,7 @@
 import { issueRef } from './item-ref'
 import { personaPreamble, type PersonaRole } from '../agents/prompts/personas'
 import { knowledgeRules, LEARNED_RULE } from '../knowledge/prompt'
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { streams, type EgressRule, type ExecuteResult } from './sandbox'
 import type { CodingRole } from './agent-plugin'

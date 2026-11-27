@@ -11,6 +11,8 @@ import {
   type Candidate,
   type EvalCase,
   FACTORY_REPOSITORY,
+  FORMER_FACTORY_REPOSITORIES,
+  isFactoryRepository,
   heldForEvaluation,
   heldForReview,
 } from './cases'
@@ -237,5 +239,30 @@ describe('the security cases of the suite', () => {
     ]) {
       expect(AGENT_CONFIGURATION).toContain(file)
     }
+  })
+})
+
+describe('the factory after its repository moved', () => {
+  const agent = 'src/server/agents/prompts/builder.ts'
+  const gate = 'scripts/crap.mjs'
+
+  it('still holds a change to its agents and its gates on a task recorded under a former name', () => {
+    for (const former of FORMER_FACTORY_REPOSITORIES) {
+      expect(heldForEvaluation(former, [agent])).toEqual([agent])
+      expect(heldForReview(former, [gate])).toEqual([gate])
+    }
+  })
+
+  it('knows its own name whatever the case, as GitHub does', () => {
+    expect(isFactoryRepository(FACTORY_REPOSITORY.toUpperCase())).toBe(true)
+    expect(isFactoryRepository('GetLoopScale/AIFactory')).toBe(true)
+    expect(isFactoryRepository('getloopscale/aifactory-playground')).toBe(false)
+  })
+
+  it('counts only the name a fork gives, not the factory names', () => {
+    expect(isFactoryRepository('paulo/app', 'paulo/app')).toBe(true)
+    expect(isFactoryRepository(FACTORY_REPOSITORY, 'paulo/app')).toBe(false)
+    expect(heldForEvaluation(FACTORY_REPOSITORY, [agent], 'paulo/app')).toEqual([])
+    expect(heldForReview(FORMER_FACTORY_REPOSITORIES[0], [gate], 'paulo/app')).toEqual([])
   })
 })

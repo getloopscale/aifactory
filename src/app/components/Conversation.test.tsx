@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render as rtlRender, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -105,5 +105,65 @@ describe('the mode the box offers', () => {
     render(<Conversation detail={refused} onDone={() => {}} />)
     expect(modes()).toEqual(['ask'])
     expect(screen.getByText('not here')).toBeTruthy()
+  })
+})
+
+describe('the scroll of the conversation', () => {
+  const sized = (box: HTMLElement, scrollHeight: number) => {
+    Object.defineProperty(box, 'scrollHeight', { configurable: true, value: scrollHeight })
+    Object.defineProperty(box, 'clientHeight', { configurable: true, value: 300 })
+  }
+  const asked = {
+    id: 1,
+    author: 'owner',
+    mode: 'ask',
+    text: 'what did you do?',
+    delivery: 'pending',
+    reason: null,
+    answer: null,
+    costUsd: null,
+    at: '2026-11-25T11:00:00Z',
+    answeredAt: null,
+  }
+
+  it('goes to the end for a message the owner sent, even after they scrolled up to read', () => {
+    const view = render(<Conversation detail={detail} events={events} onDone={() => {}} />)
+    const box = view.container.querySelector('.overflow-y-auto') as HTMLElement
+    sized(box, 2000)
+    box.scrollTop = 1700
+    fireEvent.scroll(box)
+    box.scrollTop = 100
+    fireEvent.scroll(box)
+
+    const sent = { ...detail, messages: [asked] } as unknown as TaskDetail
+    view.rerender(
+      <MemoryRouter>
+        <Conversation detail={sent} events={events} onDone={() => {}} />
+      </MemoryRouter>,
+    )
+
+    expect(box.scrollTop).toBe(2000)
+  })
+
+  it('stays where the owner reads when an agent adds a row and they sent nothing', () => {
+    const view = render(<Conversation detail={detail} events={events} onDone={() => {}} />)
+    const box = view.container.querySelector('.overflow-y-auto') as HTMLElement
+    sized(box, 2000)
+    box.scrollTop = 1700
+    fireEvent.scroll(box)
+    box.scrollTop = 100
+    fireEvent.scroll(box)
+
+    view.rerender(
+      <MemoryRouter>
+        <Conversation
+          detail={detail}
+          events={[...events.slice(0, 2), step(5, 'builder', 'one more')]}
+          onDone={() => {}}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(box.scrollTop).toBe(100)
   })
 })

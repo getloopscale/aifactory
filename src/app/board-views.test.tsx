@@ -140,7 +140,7 @@ describe('board and list', () => {
     await waitFor(() => expect(screen.getByRole('table', { name: en.board.tasks })).toBeDefined())
     fireEvent.click(screen.getByRole('button', { name: en.work.board }))
     expect(screen.queryByRole('table')).toBeNull()
-    expect(screen.getByRole('region', { name: en.columns.review })).toBeDefined()
+    expect(screen.getByRole('region', { name: en.lanes.ready })).toBeDefined()
   })
 
   it('still switches when the browser refuses to store the choice', async () => {
@@ -212,7 +212,7 @@ describe('a task beside the board', () => {
     await waitFor(() => expect(screen.getByText('Detail of 2')).toBeDefined())
     expect(where()).toBe('/work?task=2&full=1')
     expect(screen.queryByRole('dialog')).toBeNull()
-    expect(screen.queryByRole('region', { name: en.columns.working })).toBeNull()
+    expect(screen.queryByRole('region', { name: en.lanes.running })).toBeNull()
   })
 })
 
@@ -301,15 +301,15 @@ describe('the board on a phone', () => {
     window.localStorage.setItem('aifactory.language', 'en')
     compact()
     const tabs = screen.getAllByRole('tab')
-    expect(tabs).toHaveLength(9)
-    expect(screen.getByRole('tab', { name: `${en.columns.waiting} 2` })).toBeDefined()
-    expect(screen.getByRole('tab', { name: `${en.columns.working} 1` })).toBeDefined()
+    expect(tabs).toHaveLength(6)
+    expect(screen.getByRole('tab', { name: `${en.lanes.needs_you} 2` })).toBeDefined()
+    expect(screen.getByRole('tab', { name: `${en.lanes.running} 1` })).toBeDefined()
     expect(
-      screen.getByRole('tab', { name: `${en.columns.waiting} 2` }).getAttribute('aria-selected'),
+      screen.getByRole('tab', { name: `${en.lanes.needs_you} 2` }).getAttribute('aria-selected'),
     ).toBe('true')
     expect(screen.getByText('Task 2')).toBeDefined()
     expect(screen.queryByText('Task 1')).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: `${en.columns.working} 1` }))
+    fireEvent.click(screen.getByRole('tab', { name: `${en.lanes.running} 1` }))
     expect(screen.getByText('Task 1')).toBeDefined()
     expect(screen.queryByText('Task 2')).toBeNull()
   })

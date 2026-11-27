@@ -1,4 +1,4 @@
-import { Alert, Badge, Button } from '@usetheo/ui'
+import { Alert, Badge, Button } from '@getloopscale/ui'
 import { FileCog } from 'lucide-react'
 import { useState } from 'react'
 

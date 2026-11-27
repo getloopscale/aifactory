@@ -164,7 +164,7 @@ export function holdJobForTerminal(job: HeldJob): Promise<void> {
   return holdJob(job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }
 
-/** `deferWhileTerminal` for a job handler: the factory's database and TheoKit's queue. */
+/** `deferWhileTerminal` for a job handler: the factory's database and LoopZero's queue. */
 export async function deferJobWhileTerminal(db: Database, job: HeldJob): Promise<boolean> {
   return deferWhileTerminal(db, job, { enqueue: (queued) => jobBackend().enqueue(queued) })
 }

@@ -1,4 +1,4 @@
-import { route } from 'theokit/server/define'
+import { route } from '@getloopscale/loopzero/server/define'
 
 import { recordLinearAndQueue } from '../../ingest/linear-record'
 import { handleLinearDelivery } from '../../linear/ingress'

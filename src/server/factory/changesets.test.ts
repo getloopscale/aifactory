@@ -98,24 +98,24 @@ describe('versionedTag', () => {
   it('is the release changesets makes for a published package whose version the merge moved', () => {
     expect(
       versionedTag(
-        '{"name":"@theokit/gateway","version":"0.16.0"}',
-        '{"name":"@theokit/gateway","version":"0.16.1"}',
+        '{"name":"@getloopscale/loopzero-gateway","version":"0.16.0"}',
+        '{"name":"@getloopscale/loopzero-gateway","version":"0.16.1"}',
         path,
       ),
-    ).toBe('@theokit/gateway@0.16.1')
+    ).toBe('@getloopscale/loopzero-gateway@0.16.1')
   })
 
   it('is the first release of a package the merge added', () => {
-    expect(versionedTag(undefined, '{"name":"@theokit/new","version":"0.1.0"}', path)).toBe(
-      '@theokit/new@0.1.0',
-    )
+    expect(
+      versionedTag(undefined, '{"name":"@getloopscale/loopzero-new","version":"0.1.0"}', path),
+    ).toBe('@getloopscale/loopzero-new@0.1.0')
   })
 
   it('is nothing when the merge changed the manifest but kept its version', () => {
     expect(
       versionedTag(
-        '{"name":"@theokit/gateway","version":"0.16.1","dependencies":{"a":"1"}}',
-        '{"name":"@theokit/gateway","version":"0.16.1","dependencies":{"a":"2"}}',
+        '{"name":"@getloopscale/loopzero-gateway","version":"0.16.1","dependencies":{"a":"1"}}',
+        '{"name":"@getloopscale/loopzero-gateway","version":"0.16.1","dependencies":{"a":"2"}}',
         path,
       ),
     ).toBeUndefined()
@@ -135,8 +135,8 @@ describe('versionedTag', () => {
     expect(versionedTag(undefined, '{"version":"1.0.0"}', path)).toBeUndefined()
     expect(
       versionedTag(
-        '{"name":"@theokit/gateway","version":"0.16.0"}',
-        '{"name":"@theokit/gateway"}',
+        '{"name":"@getloopscale/loopzero-gateway","version":"0.16.0"}',
+        '{"name":"@getloopscale/loopzero-gateway"}',
         path,
       ),
     ).toBeUndefined()
@@ -154,9 +154,9 @@ describe('releasesRead', () => {
   const merged = new Date('2026-11-12T13:00:00Z')
   const after = (ms: number) => new Date(merged.getTime() + ms)
   const expected = [
-    '@theokit/gateway-yuanbao@0.1.1',
-    '@theokit/gateway-slack@0.5.1',
-    '@theokit/gateway@0.16.1',
+    '@getloopscale/loopzero-gateway-yuanbao@0.1.1',
+    '@getloopscale/loopzero-gateway-slack@0.5.1',
+    '@getloopscale/loopzero-gateway@0.16.1',
   ]
 
   it('is complete, with nothing to add, once every versioned package has its release', () => {
@@ -166,19 +166,23 @@ describe('releasesRead', () => {
   })
 
   it('is complete when the merge versioned no package it can name', () => {
-    expect(releasesRead([], ['@theokit/ui@1.13.0'], merged, after(0))).toEqual({ complete: '' })
+    expect(releasesRead([], ['@getloopscale/loopzero-ui@1.13.0'], merged, after(0))).toEqual({
+      complete: '',
+    })
   })
 
   it('waits, naming the package, while one release is missing and the bounded wait lasts', () => {
     expect(VERSION_RELEASES_WAIT_MS).toBe(30 * 60_000)
     expect(
       releasesRead(expected, expected.slice(0, 2), merged, after(VERSION_RELEASES_WAIT_MS - 1)),
-    ).toEqual({ wait: 'waiting for the release workflow to publish @theokit/gateway@0.16.1' })
+    ).toEqual({
+      wait: 'waiting for the release workflow to publish @getloopscale/loopzero-gateway@0.16.1',
+    })
   })
 
   it('names every missing release', () => {
     expect(releasesRead(expected, expected.slice(0, 1), merged, after(0))).toEqual({
-      wait: 'waiting for the release workflow to publish @theokit/gateway-slack@0.5.1, @theokit/gateway@0.16.1',
+      wait: 'waiting for the release workflow to publish @getloopscale/loopzero-gateway-slack@0.5.1, @getloopscale/loopzero-gateway@0.16.1',
     })
   })
 
@@ -187,7 +191,7 @@ describe('releasesRead', () => {
       releasesRead(expected, expected.slice(0, 2), merged, after(VERSION_RELEASES_WAIT_MS)),
     ).toEqual({
       complete:
-        '; no release for @theokit/gateway@0.16.1 30 minutes after the Version Packages merge',
+        '; no release for @getloopscale/loopzero-gateway@0.16.1 30 minutes after the Version Packages merge',
     })
   })
 })
@@ -266,9 +270,9 @@ describe('versionPullRequestFrom', () => {
 
 describe('isPackageTag', () => {
   it('recognises the tags changesets publishes, scoped or not', () => {
-    expect(isPackageTag('@theokit/ui@1.13.0')).toBe(true)
+    expect(isPackageTag('@getloopscale/loopzero-ui@1.13.0')).toBe(true)
     expect(isPackageTag('theokit@3.0.19')).toBe(true)
-    expect(isPackageTag('@theokit/sdk@5.14.0-next.1')).toBe(true)
+    expect(isPackageTag('@getloopscale/loopzero-sdk@5.14.0-next.1')).toBe(true)
   })
 
   it('leaves out a version tag of its own and the factory pre-releases', () => {
@@ -277,18 +281,18 @@ describe('isPackageTag', () => {
   })
 
   it('takes only a whole tag of that shape, with versions of more than one digit', () => {
-    expect(isPackageTag('@theokit/gateway-slack@10.2.3')).toBe(true)
-    expect(isPackageTag('release notes for @theokit/ui@1.13.0')).toBe(false)
-    expect(isPackageTag('@theokit/ui@1.13.0 (draft)')).toBe(false)
+    expect(isPackageTag('@getloopscale/loopzero-gateway-slack@10.2.3')).toBe(true)
+    expect(isPackageTag('release notes for @getloopscale/loopzero-ui@1.13.0')).toBe(false)
+    expect(isPackageTag('@getloopscale/loopzero-ui@1.13.0 (draft)')).toBe(false)
   })
 })
 
 describe('changesetPackages', () => {
   it('is the packages the front matter names, quoted either way or bare', () => {
     const text =
-      '---\n"@theokit/ui": minor\n\'theokit\': patch\n  create-app : major\n---\n\nSays why.\n'
+      '---\n"@getloopscale/loopzero-ui": minor\n\'loopzero\': patch\n  create-app : major\n---\n\nSays why.\n'
 
-    expect(changesetPackages(text)).toEqual(['@theokit/ui', 'theokit', 'create-app'])
+    expect(changesetPackages(text)).toEqual(['@getloopscale/loopzero-ui', 'loopzero', 'create-app'])
   })
 
   it('is nothing for an empty changeset, the one `changeset add --empty` writes', () => {
@@ -297,24 +301,30 @@ describe('changesetPackages', () => {
   })
 
   it('reads only the front matter: a line of the summary names nothing', () => {
-    expect(changesetPackages('---\n---\n\nfix: the parser\n"@theokit/ui": minor\n')).toEqual([])
-    expect(changesetPackages('"@theokit/ui": minor\n')).toEqual([])
-    expect(changesetPackages('---\n"@theokit/ui": minor\n')).toEqual([])
+    expect(
+      changesetPackages('---\n---\n\nfix: the parser\n"@getloopscale/loopzero-ui": minor\n'),
+    ).toEqual([])
+    expect(changesetPackages('"@getloopscale/loopzero-ui": minor\n')).toEqual([])
+    expect(changesetPackages('---\n"@getloopscale/loopzero-ui": minor\n')).toEqual([])
   })
 
   it('takes a line only when it has a name and a bump', () => {
     expect(
-      changesetPackages('---\n"@theokit/ui":\n: patch\n"": patch\nno bump here\n---\n'),
+      changesetPackages(
+        '---\n"@getloopscale/loopzero-ui":\n: patch\n"": patch\nno bump here\n---\n',
+      ),
     ).toEqual([])
   })
 
   it('takes the fences with spaces around them, and no bump made only of spaces', () => {
-    expect(changesetPackages('---  \n"@theokit/ui": minor\n ---  \n')).toEqual(['@theokit/ui'])
-    expect(changesetPackages('---\n"@theokit/ui":   \n---\n')).toEqual([])
+    expect(changesetPackages('---  \n"@getloopscale/loopzero-ui": minor\n ---  \n')).toEqual([
+      '@getloopscale/loopzero-ui',
+    ])
+    expect(changesetPackages('---\n"@getloopscale/loopzero-ui":   \n---\n')).toEqual([])
   })
 
   it('names nothing when the file does not open with a fence, though one closes later', () => {
-    expect(changesetPackages('Notes\n"@theokit/ui": minor\n---\n')).toEqual([])
+    expect(changesetPackages('Notes\n"@getloopscale/loopzero-ui": minor\n---\n')).toEqual([])
   })
 
   it('strips only the quotes around a name', () => {
@@ -323,7 +333,9 @@ describe('changesetPackages', () => {
   })
 
   it('reads a file with Windows line ends, or with blank lines before the front matter', () => {
-    expect(changesetPackages('\n\n---\r\n"@theokit/ui": minor\r\n---\r\n')).toEqual(['@theokit/ui'])
+    expect(changesetPackages('\n\n---\r\n"@getloopscale/loopzero-ui": minor\r\n---\r\n')).toEqual([
+      '@getloopscale/loopzero-ui',
+    ])
   })
 })
 
@@ -379,7 +391,9 @@ describe('pickBackMerge', () => {
   })
 
   it('never takes a release branch of the same name pushed to a fork', () => {
-    expect(pickBackMerge([{ ...backMerge, headRepo: 'someone/theokit' }], branches)).toBeUndefined()
+    expect(
+      pickBackMerge([{ ...backMerge, headRepo: 'someone/loopzero' }], branches),
+    ).toBeUndefined()
   })
 
   it('is nothing when no pull request is open', () => {
@@ -395,9 +409,9 @@ describe('packageDirs', () => {
         'README.md',
         'packages/ui/package.json',
         'packages/ui/src/index.ts',
-        'apps/theoclaw/package.json',
+        'apps/loopbot/package.json',
       ]),
-    ).toEqual(['', 'packages/ui', 'apps/theoclaw'])
+    ).toEqual(['', 'packages/ui', 'apps/loopbot'])
   })
 
   it('leaves out a vendored node_modules and a file merely ending in package.json', () => {
@@ -408,7 +422,7 @@ describe('packageDirs', () => {
 })
 
 describe('enclosingPackages', () => {
-  const dirs = ['', 'packages/ui', 'packages/ui/fixtures/app', 'apps/theoclaw']
+  const dirs = ['', 'packages/ui', 'packages/ui/fixtures/app', 'apps/loopbot']
 
   it('is every package directory a file is under, the root included', () => {
     expect(enclosingPackages('packages/ui/fixtures/app/a.ts', dirs)).toEqual([
@@ -421,9 +435,7 @@ describe('enclosingPackages', () => {
 
   it('does not take a directory that only shares a prefix with the file', () => {
     expect(enclosingPackages('packages/ui-kit/a.ts', ['packages/ui'])).toEqual([])
-    expect(enclosingPackages('apps/theoclaw/src/a.ts', ['apps/theoclaw'])).toEqual([
-      'apps/theoclaw',
-    ])
+    expect(enclosingPackages('apps/loopbot/src/a.ts', ['apps/loopbot'])).toEqual(['apps/loopbot'])
   })
 
   it('is nothing for a file outside every package', () => {
@@ -433,16 +445,18 @@ describe('enclosingPackages', () => {
 
 describe('isIgnored', () => {
   it('matches a name in the ignore list, exactly', () => {
-    expect(isIgnored('theoclaw', ['theoclaw'])).toBe(true)
-    expect(isIgnored('theoclaw-cli', ['theoclaw'])).toBe(false)
-    expect(isIgnored('theoclaw', [])).toBe(false)
+    expect(isIgnored('loopbot', ['loopbot'])).toBe(true)
+    expect(isIgnored('loopbot-cli', ['loopbot'])).toBe(false)
+    expect(isIgnored('loopbot', [])).toBe(false)
   })
 
   it('takes a star as any part of a name without a slash, as in a scope', () => {
-    expect(isIgnored('@theokit/example-chat', ['@theokit/example-*'])).toBe(true)
-    expect(isIgnored('@theokit/ui', ['@theokit/example-*'])).toBe(false)
-    expect(isIgnored('@other/example-chat', ['@theokit/example-*'])).toBe(false)
-    expect(isIgnored('@theokit/a/b', ['@theokit/*'])).toBe(false)
+    expect(
+      isIgnored('@getloopscale/loopzero-example-chat', ['@getloopscale/loopzero-example-*']),
+    ).toBe(true)
+    expect(isIgnored('@getloopscale/loopzero-ui', ['@getloopscale/loopzero-example-*'])).toBe(false)
+    expect(isIgnored('@other/example-chat', ['@getloopscale/loopzero-example-*'])).toBe(false)
+    expect(isIgnored('@getloopscale/loopzero-a/b', ['@getloopscale/loopzero-*'])).toBe(false)
   })
 
   it('reads the other characters of a pattern literally', () => {
@@ -453,12 +467,12 @@ describe('isIgnored', () => {
 
 describe('parseManifest', () => {
   it('reads the name and whether the package is private', () => {
-    expect(parseManifest('{"name":"theoclaw","private":true}', 'apps/theoclaw')).toEqual({
-      name: 'theoclaw',
+    expect(parseManifest('{"name":"loopbot","private":true}', 'apps/loopbot')).toEqual({
+      name: 'loopbot',
       private: true,
     })
-    expect(parseManifest('{"name":"@theokit/ui"}', 'packages/ui')).toEqual({
-      name: '@theokit/ui',
+    expect(parseManifest('{"name":"@getloopscale/loopzero-ui"}', 'packages/ui')).toEqual({
+      name: '@getloopscale/loopzero-ui',
       private: false,
     })
   })
@@ -478,7 +492,7 @@ describe('parseManifest', () => {
 
 describe('changesetIgnore', () => {
   it('reads the ignore list of .changeset/config.json, empty when there is none', () => {
-    expect(changesetIgnore('{"ignore":["theoclaw"]}')).toEqual(['theoclaw'])
+    expect(changesetIgnore('{"ignore":["loopbot"]}')).toEqual(['loopbot'])
     expect(changesetIgnore('{"access":"public"}')).toEqual([])
   })
 
@@ -489,10 +503,10 @@ describe('changesetIgnore', () => {
 
 describe('publishedTouched', () => {
   const manifests = new Map([
-    ['', { name: 'theokit-monorepo', private: true }],
-    ['packages/ui', { name: '@theokit/ui', private: false }],
-    ['packages/sdk', { name: '@theokit/sdk', private: false }],
-    ['apps/theoclaw', { name: 'theoclaw', private: false }],
+    ['', { name: 'loopzero-monorepo', private: true }],
+    ['packages/ui', { name: '@getloopscale/loopzero-ui', private: false }],
+    ['packages/sdk', { name: '@getloopscale/loopzero-sdk', private: false }],
+    ['apps/loopbot', { name: 'loopbot', private: false }],
     ['apps/site', { name: 'site', private: true }],
     ['apps/unnamed', { name: undefined, private: false }],
   ])
@@ -500,9 +514,9 @@ describe('publishedTouched', () => {
   it('is nothing when every change is in an ignored or private package, or at the private root', () => {
     expect(
       publishedTouched(
-        ['apps/theoclaw/src/a.ts', 'apps/site/page.tsx', 'pnpm-lock.yaml', 'apps/unnamed/x.ts'],
+        ['apps/loopbot/src/a.ts', 'apps/site/page.tsx', 'pnpm-lock.yaml', 'apps/unnamed/x.ts'],
         manifests,
-        ['theoclaw'],
+        ['loopbot'],
       ),
     ).toEqual([])
   })
@@ -510,11 +524,11 @@ describe('publishedTouched', () => {
   it('names each published package a change touches, once and in order', () => {
     expect(
       publishedTouched(
-        ['packages/ui/b.ts', 'apps/theoclaw/a.ts', 'packages/sdk/x.ts', 'packages/ui/a.ts'],
+        ['packages/ui/b.ts', 'apps/loopbot/a.ts', 'packages/sdk/x.ts', 'packages/ui/a.ts'],
         manifests,
-        ['theoclaw'],
+        ['loopbot'],
       ),
-    ).toEqual(['@theokit/sdk', '@theokit/ui'])
+    ).toEqual(['@getloopscale/loopzero-sdk', '@getloopscale/loopzero-ui'])
   })
 
   it('counts a file of a package nested in a published one as a change to the published one', () => {
@@ -522,7 +536,9 @@ describe('publishedTouched', () => {
       ...manifests,
       ['packages/ui/fixtures/app', { name: 'fixture', private: true }],
     ])
-    expect(publishedTouched(['packages/ui/fixtures/app/a.ts'], nested, [])).toEqual(['@theokit/ui'])
+    expect(publishedTouched(['packages/ui/fixtures/app/a.ts'], nested, [])).toEqual([
+      '@getloopscale/loopzero-ui',
+    ])
   })
 
   it('takes a published root package, as in a repository that is one package', () => {

@@ -23,7 +23,7 @@ export const mainProcessOnly =
   async (): Promise<T | undefined> =>
     isWorkerOnly(env) ? undefined : handler()
 
-/** The lock `theokit start` asks before each cron tick (`cron.lock` in `theo.config.ts`). */
+/** The lock `loopzero start` asks before each cron tick (`cron.lock` in `loopzero.config.ts`). */
 export type CronLock = { acquire(name: string, scheduledAt: Date): Promise<boolean> }
 
 /**

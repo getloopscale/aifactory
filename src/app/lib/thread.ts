@@ -282,7 +282,7 @@ function single(step: TranscriptRow, role: ThreadRole, atOf: Map<number, number>
  * The rows of the conversation with an agent: what the owner wrote and what the agent said and did, in the
  * order it happened. Tool steps fold into one row, and a finished pass into `worked`; a failed step, a message
  * of the owner, the pass that runs and the last text of each pass never fold. A message belongs to the pass
- * it was written during, since it names no agent.
+ * it was written during, since it names no agent, and to the builder when it was written after the last one ended.
  */
 export function threadRows(
   events: TranscriptEvent[],
@@ -294,10 +294,17 @@ export function threadRows(
   const starts = passes.map((p) => Date.parse(p.events[0]?.at ?? ''))
   const owned: MessageView[][] = passes.map(() => [])
   const loose: MessageView[] = []
+  // What the owner wrote once the last pass had ended went to a stopped agent, and that is always the builder
+  // (`conversation.ts`), whoever worked last: it is the builder's conversation, after everything else.
+  const last = passes.at(-1)
+  const lastEnded =
+    last && options.running !== last.role ? Date.parse(last.events.at(-1)?.at ?? '') : Infinity
+  const afterwards: MessageView[] = []
   for (const m of messages) {
     const at = Date.parse(m.at)
     const index = starts.reduce((found, s, i) => (s <= at ? i : found), -1)
     if (index === -1) loose.push(m)
+    else if (at > lastEnded) afterwards.push(m)
     else owned[index]?.push(m)
   }
   const first = passes[0]?.role ?? options.running ?? 'builder'
@@ -310,6 +317,11 @@ export function threadRows(
       ...passRows(pass, owned[i] ?? [], running, now, options.engineOf?.(pass.role) ?? null),
     )
   })
+  rows.push(
+    ...afterwards
+      .sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+      .flatMap((m) => ownerRows(m, 'builder')),
+  )
   return rows
 }
 

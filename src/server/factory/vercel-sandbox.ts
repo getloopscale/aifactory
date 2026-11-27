@@ -1,10 +1,10 @@
-import { SandboxBackend } from '@theokit/agents/sandbox'
+import { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { Sandbox, Snapshot, type NetworkPolicy } from '@vercel/sandbox'
 
 import type { IsolatedSandbox, IsolatedSandboxProvider, SandboxSpec } from './sandbox'
 import { assertIsolated, ImageRefused } from './sandbox'
 
-/** The exit code the TheoKit backends report for a command that hit its timeout. */
+/** The exit code the LoopZero backends report for a command that hit its timeout. */
 const TIMED_OUT = 124
 
 /**

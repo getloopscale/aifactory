@@ -1,4 +1,4 @@
-import { tool } from 'theokit/server/define'
+import { tool } from '@getloopscale/loopzero/server/define'
 import { z } from 'zod'
 
 /**

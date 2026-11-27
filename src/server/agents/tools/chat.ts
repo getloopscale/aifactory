@@ -1,4 +1,4 @@
-import { tool } from 'theokit/server/define'
+import { tool } from '@getloopscale/loopzero/server/define'
 import { z } from 'zod'
 
 import { getDb } from '../../db'
@@ -20,7 +20,7 @@ export const factoryStatusTool = tool('factory_status')
 
 export const listTasksTool = tool('list_tasks')
   .describe(
-    'List tasks, the most recently active first. Filter by stage (failed, done, build, waiting, handoff, released...), by the board column as the screen writes it (Queued, Working, Waiting for you, Will retry itself, Merge, Delivered, Released, Already resolved, Needs a person), or by part of the repository name.',
+    'List tasks, the most recently active first. Filter by stage (failed, done, build, waiting, handoff, released...), by the lane of the board as the screen writes it (To do, Needs you, Running, Ready, Done) or by the finer state inside a lane (Queued, Working, Waiting for you, Will retry itself, Merge, Delivered, Released, Already resolved, Needs a person), both in `column`, or by part of the repository name. Each task comes with its `lane` and its finer `column`.',
   )
   .input(
     z.object({

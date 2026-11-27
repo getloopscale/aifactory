@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { CHANGESET_CHECK_PATH } from './changesets'
 import type { CheckSpec } from './evidence'

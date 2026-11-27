@@ -5,7 +5,7 @@ import {
   loginWithDevice,
   readStoredOAuth,
   type CredentialStoreConfig,
-} from '@theokit/agents/auth'
+} from '@getloopscale/loopzero-agents/auth'
 
 /**
  * The owner's ChatGPT subscription as the assistant's model. The framework's `openai-chatgpt` provider
@@ -16,9 +16,9 @@ import {
  */
 export const CHATGPT_STORE: CredentialStoreConfig = {
   home: homedir(),
-  dirName: '.theokit',
+  dirName: '.loopzero',
   fileName: 'auth.json',
-  homeEnvVar: 'THEOKIT_AUTH_HOME',
+  homeEnvVar: 'LOOPZERO_AUTH_HOME',
 }
 
 export type LoginState =

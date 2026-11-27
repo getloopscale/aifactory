@@ -20,7 +20,7 @@ describe('the sandbox toolchain', () => {
     expect(SANDBOX_TOOLCHAIN.nodeHeaders).toBe(SANDBOX_TOOLCHAIN.node)
   })
 
-  // A repository check that reads /usr/share/dict (theokit's TheoCode english-only lint) fails closed without them,
+  // A repository check that reads /usr/share/dict (loopzero's LoopCode english-only lint) fails closed without them,
   // and reads a different lexicon when the image adds a list: the packages are exactly the CI runner's pair.
   it('installs only the word-list packages named in SANDBOX_DICTIONARY_PACKAGES', () => {
     const installed = /apt-get install -y --no-install-recommends ([^\\\n]+)/

@@ -1,7 +1,7 @@
 // The `run-task` and `resume-task` jobs queue themselves again, with the input they were given, when the run
 // they started was refused a sandbox for credit.
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'

@@ -25,7 +25,7 @@ function envFile(path) {
 async function main() {
   const env = { ...envFile(resolve(process.cwd(), '.env.local')), ...process.env }
   const base = env.FACTORY_URL ?? 'http://localhost:3000'
-  const headers = { 'content-type': 'application/json', 'x-theo-action': '1' }
+  const headers = { 'content-type': 'application/json', 'x-loopzero-action': '1' }
   const login = await fetch(`${base}/api/panel/login`, {
     method: 'POST',
     headers,

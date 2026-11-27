@@ -44,7 +44,7 @@ O Knowledge Catalog do Google lê OKF, e a especificação traz um visualizador 
 - **A fatia de cada run também é um bundle.** O `index.md` na raiz de `/tmp/knowledge` lista as regras e as
   notas, com os commits e o peso de cada parte nos títulos. Ele substitui o `GUIDE.md`.
 - **O front matter é lido e escrito com a biblioteca `yaml`** (2.9.1, ISC). O OKF usa mapas e listas, e o
-  `frontmatterValue` do TheoKit lê só valores simples, de propósito. Texto vindo de um agente só chega
+  `frontmatterValue` do LoopZero lê só valores simples, de propósito. Texto vindo de um agente só chega
   ao front matter pela biblioteca, que o escapa.
 
 ## Alternativas consideradas
@@ -60,5 +60,5 @@ O Knowledge Catalog do Google lê OKF, e a especificação traz um visualizador 
 - A especificação é nova, e a 0.2 já quebrou dois campos da 0.1 (`timestamp` e `# Citations`). Como a
   fábrica não recusa o que não entende e grava `okf_version`, uma versão nova da especificação muda o
   que ela escreve, não o que ela consegue ler. Uma 0.3 pede rever esta ADR.
-- A migração do único repositório em uso (`usetheokit/knowledge`) foi um PR no repositório e a reescrita
+- A migração do único repositório em uso (`getloopscale/knowledge`) foi um PR no repositório e a reescrita
   da `factory-memory`, que só tinha duas notas.

@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import type { OAuthTokens } from '@theokit/agents/auth'
+import type { OAuthTokens } from '@getloopscale/loopzero-agents/auth'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {

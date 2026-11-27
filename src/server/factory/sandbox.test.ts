@@ -128,7 +128,7 @@ describe('terminals', () => {
     if (!terminals(backend)) throw new Error('no terminal')
     const term = await backend.openTerminal('echo', { cols: 80, rows: 24 })
     const seen: string[] = []
-    term.onData((d) => seen.push(d))
+    term.onData((d) => seen.push(Buffer.from(d).toString()))
     term.write('echo hi\n')
     expect(seen).toEqual(['echo hi\n'])
     await term.resize(100, 30)

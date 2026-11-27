@@ -1,4 +1,4 @@
-import { defineCron } from 'theokit/server/cron'
+import { defineCron } from '@getloopscale/loopzero/server/cron'
 
 import { getDb } from '../db'
 import { pruneRetained, TRANSCRIPT_RETENTION_DAYS } from '../factory/transcript-store'

@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { CODEX_PROVIDER, type OAuthTokens } from '@theokit/agents/auth'
+import { CODEX_PROVIDER, type OAuthTokens } from '@getloopscale/loopzero-agents/auth'
 
 import type { CodexLoginState } from '../../shared/panel'
 
@@ -11,7 +11,7 @@ import { saveCodexLogin } from './codex-auth'
 import { parseCodexResult } from './harness-codex'
 
 /**
- * Changing the factory's Codex account from the panel. It is TheoKit's OpenAI device login: the owner opens
+ * Changing the factory's Codex account from the panel. It is LoopZero's OpenAI device login: the owner opens
  * an address signed in to the account they want and types a short code, and the framework polls until they
  * approve. Before the login is kept, Codex is asked one small question with it, so an account that is out
  * of quota is refused at the door instead of failing the next run.
@@ -43,7 +43,7 @@ function realAuthorize(hooks: {
 }): Promise<OAuthTokens> {
   const method = CODEX_PROVIDER.methods.find((m) => m.type === 'oauth')
   if (!method || method.type !== 'oauth') {
-    return Promise.reject(new Error('TheoKit has no ChatGPT device login method'))
+    return Promise.reject(new Error('LoopZero has no ChatGPT device login method'))
   }
   return method.authorize(
     { fetch, sleep: (ms) => new Promise((done) => setTimeout(done, ms)), now: Date.now },

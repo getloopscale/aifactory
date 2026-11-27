@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -773,13 +773,13 @@ describe('pollAwaitingIntegrations', () => {
 })
 
 describe('a held integration of the factory repository', () => {
-  const OWN = 'paulohenriquevn/aifactory'
+  const OWN = 'getloopscale/aifactory'
 
   it('is not merged when the CI check stopped being required during the hold', async () => {
     api.repo(OWN).prepare()
     api.repo(OWN).pullRequest({
       number: 12,
-      url: 'https://github.com/paulohenriquevn/aifactory/pull/12',
+      url: 'https://github.com/getloopscale/aifactory/pull/12',
       headRef: 'factory/7',
       baseRef: 'workspace',
       headSha: VERIFIED,
@@ -788,7 +788,7 @@ describe('a held integration of the factory repository', () => {
     const id = await waitingTask({ repository: OWN, held: true })
     await getDb()
       .update(task)
-      .set({ pullRequestUrl: 'https://github.com/paulohenriquevn/aifactory/pull/12' })
+      .set({ pullRequestUrl: 'https://github.com/getloopscale/aifactory/pull/12' })
       .where(eq(task.id, id))
 
     const result = await pollAwaitingIntegrations(deps())

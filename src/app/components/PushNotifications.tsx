@@ -1,4 +1,4 @@
-import { Badge, Button } from '@usetheo/ui'
+import { Badge, Button } from '@getloopscale/ui'
 import { useCallback, useEffect, useState } from 'react'
 
 import type { PushDevices, PushKey } from '../../shared/push'

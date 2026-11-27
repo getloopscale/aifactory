@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { SandboxBackend, shellEscapePosix } from '@theokit/agents/sandbox'
+import { SandboxBackend, shellEscapePosix } from '@getloopscale/loopzero-agents/sandbox'
 import {
   ALL_TRAFFIC,
   CommandExitError,
@@ -35,11 +35,11 @@ import type {
   Terminal,
   TerminalOptions,
 } from './sandbox'
-import { assertIsolated } from './sandbox'
+import { assertIsolated, terminalOutput } from './sandbox'
 import { THIS_PROCESS } from './sandbox-lease'
 import { E2B_SANDBOX_LIMIT, metadataFor } from './sandbox-reaper'
 
-/** The exit code the TheoKit backends report for a command that hit its timeout. */
+/** The exit code the LoopZero backends report for a command that hit its timeout. */
 const TIMED_OUT = 124
 /** The user and directory the image is built for (ops/sandbox/Dockerfile). */
 const USER = 'node'
@@ -167,14 +167,13 @@ export class E2BBackend extends SandboxBackend {
   }
 
   /**
-   * `command` under a pseudo-terminal of E2B's `pty` (usetheokit/theokit-sdk#1614). The terminal is a shell that
+   * `command` under a pseudo-terminal of E2B's `pty`. The terminal is a shell that
    * `exec`s the command, so the session ends with it. The command is a string the factory built, quoted here.
    */
-  async openTerminal(command: string, opts: TerminalOptions): Promise<Terminal> {
+  openTerminal = async (command: string, opts: TerminalOptions): Promise<Terminal> => {
     const pty = this.sandbox.pty
     if (!pty) throw new Error('this E2B sandbox has no pseudo-terminal')
-    const listeners: ((data: string) => void)[] = []
-    const decoder = new TextDecoder()
+    const output = terminalOutput()
     const handle = await pty.create({
       cols: opts.cols,
       rows: opts.rows,
@@ -182,10 +181,7 @@ export class E2BBackend extends SandboxBackend {
       cwd: opts.cwd ?? WORKDIR,
       envs: { ...this.env, TERM: 'xterm-256color' },
       timeoutMs: 0,
-      onData: (bytes) => {
-        const text = decoder.decode(bytes, { stream: true })
-        for (const listener of listeners) listener(text)
-      },
+      onData: output.emit,
     })
     const encoder = new TextEncoder()
     let ended = false
@@ -201,15 +197,14 @@ export class E2BBackend extends SandboxBackend {
       })
     await pty.sendInput(handle.pid, encoder.encode(`exec sh -c ${shellEscapePosix(command)}\n`))
     return {
-      write: (data) => {
-        if (!ended) void pty.sendInput(handle.pid, encoder.encode(data)).catch(() => {})
+      write: async (data) => {
+        const bytes = typeof data === 'string' ? encoder.encode(data) : data
+        if (!ended) void pty.sendInput(handle.pid, bytes).catch(() => {})
       },
       resize: async (cols, rows) => {
         if (!ended) await pty.resize(handle.pid, { cols, rows })
       },
-      onData: (listener) => {
-        listeners.push(listener)
-      },
+      onData: output.onData,
       wait: () => finished,
       kill: async () => {
         if (!ended) await pty.kill(handle.pid).catch(() => false)

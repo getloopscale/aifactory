@@ -1,4 +1,4 @@
-import { route } from 'theokit/server/define'
+import { route } from '@getloopscale/loopzero/server/define'
 
 import { getDb } from '../../../db'
 import { ownerOnly } from '../../../panel/policy'

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -75,11 +75,11 @@ describe('board', () => {
 
     await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
     const inColumn = (name: string) => within(screen.getByRole('region', { name }))
-    expect(inColumn(en.columns.working).getByText('Building one')).toBeDefined()
-    expect(inColumn(en.columns.waiting).getByText('Asking one')).toBeDefined()
-    expect(inColumn(en.columns.review).getByText('Done one')).toBeDefined()
-    expect(inColumn(en.columns.attention).getByText('Broken one')).toBeDefined()
-    expect(inColumn(en.columns.queued).getByText(en.board.nothingHere)).toBeDefined()
+    expect(inColumn(en.lanes.running).getByText('Building one')).toBeDefined()
+    expect(inColumn(en.lanes.needs_you).getByText('Asking one')).toBeDefined()
+    expect(inColumn(en.lanes.ready).getByText('Done one')).toBeDefined()
+    expect(inColumn(en.lanes.needs_you).getByText('Broken one')).toBeDefined()
+    expect(inColumn(en.lanes.todo).getByText(en.board.nothingHere)).toBeDefined()
     expect(screen.getByText(/\$0\.31/)).toBeDefined()
   })
 
@@ -112,16 +112,16 @@ describe('board', () => {
     )
     await waitFor(() => expect(screen.getByText('Out of quota')).toBeDefined())
     const inColumn = (name: string) => within(screen.getByRole('region', { name }))
-    expect(inColumn(en.columns.retrying).getByText('Out of quota')).toBeDefined()
-    expect(inColumn(en.columns.retrying).getByText(en.stages.waitingForLimit)).toBeDefined()
-    expect(inColumn(en.columns.retrying).getByText(en.time.runsInHours(2))).toBeDefined()
-    expect(inColumn(en.columns.retrying).getByText(en.stages.willRetry)).toBeDefined()
-    expect(inColumn(en.columns.review).getByText(en.stages.integrated)).toBeDefined()
-    expect(inColumn(en.columns.attention).getByText('Real failure')).toBeDefined()
-    expect(inColumn(en.columns.attention).queryByText('Out of quota')).toBeNull()
+    expect(inColumn(en.lanes.running).getByText('Out of quota')).toBeDefined()
+    expect(inColumn(en.lanes.running).getByText(en.stages.waitingForLimit)).toBeDefined()
+    expect(inColumn(en.lanes.running).getByText(en.time.runsInHours(2))).toBeDefined()
+    expect(inColumn(en.lanes.running).getByText(en.stages.willRetry)).toBeDefined()
+    expect(inColumn(en.lanes.ready).getByText(en.stages.integrated)).toBeDefined()
+    expect(inColumn(en.lanes.needs_you).getByText('Real failure')).toBeDefined()
+    expect(inColumn(en.lanes.needs_you).queryByText('Out of quota')).toBeNull()
   })
 
-  it('always draws all eight columns, in the same order and the same width, with cards in them or not', async () => {
+  it('always draws the six lanes, in the same order and the same width, with cards in them or not', async () => {
     serve({
       tasks: [
         card({ id: 1, title: 'Building one' }),
@@ -136,37 +136,78 @@ describe('board', () => {
     await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
     const regions = screen.getAllByRole('region')
     expect(regions.map((r) => r.getAttribute('aria-label'))).toEqual([
-      en.columns.queued,
-      en.columns.working,
-      en.columns.waiting,
-      en.columns.retrying,
-      en.columns.merge,
-      en.columns.review,
-      en.columns.released,
-      en.columns.resolved,
-      en.columns.attention,
+      en.lanes.todo,
+      en.lanes.needs_you,
+      en.lanes.running,
+      en.lanes.ready,
+      en.lanes.done,
+      en.lanes.cancelled,
     ])
     const grid = regions[0].parentElement as HTMLElement
-    expect(grid.style.gridTemplateColumns).toBe('repeat(9, minmax(152px, 1fr))')
-    for (const name of [
-      en.columns.queued,
-      en.columns.waiting,
-      en.columns.retrying,
-      en.columns.merge,
-      en.columns.review,
-      en.columns.released,
-    ]) {
+    expect(grid.style.gridTemplateColumns).toBe('repeat(6, minmax(208px, 1fr))')
+    for (const name of [en.lanes.todo, en.lanes.ready, en.lanes.done, en.lanes.cancelled]) {
       expect(
         within(screen.getByRole('region', { name })).getByText(en.board.nothingHere),
         name,
       ).toBeDefined()
     }
     expect(
-      within(screen.getByRole('region', { name: en.columns.attention })).queryByText(
+      within(screen.getByRole('region', { name: en.lanes.needs_you })).queryByText(
         en.board.nothingHere,
       ),
     ).toBeNull()
     expect(screen.queryByLabelText('Empty columns')).toBeNull()
+  })
+
+  it('puts a cancelled task in its own lane, and a task that waits for the owner under why it waits', async () => {
+    const handed = card({ id: 2, title: 'Handed one', stage: 'handoff', column: 'attention' })
+    serve({
+      tasks: [handed],
+      cancelled: [card({ id: 3, title: 'Dropped one', stage: 'cancelled', column: 'attention' })],
+      items: [
+        {
+          task: handed,
+          kind: 'handoff',
+          summary: 'The checks failed three times',
+          at: handed.updatedAt,
+        },
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Dropped one')).toBeDefined())
+    const inLane = (name: string) => within(screen.getByRole('region', { name }))
+    expect(inLane(en.lanes.cancelled).getByText('Dropped one')).toBeDefined()
+    expect(inLane(en.lanes.needs_you).queryByText('Dropped one')).toBeNull()
+    expect(inLane(en.lanes.needs_you).getByText('The checks failed three times')).toBeDefined()
+  })
+
+  it('narrows the board to the tasks the search matches, and says so when none does', async () => {
+    serve({
+      tasks: [
+        card({ id: 1, title: 'Building one', labels: ['bug'] }),
+        card({ id: 2, title: 'Asking one', stage: 'waiting', column: 'waiting' }),
+      ],
+    })
+    render(
+      <MemoryRouter>
+        <Page />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
+    expect(screen.getByText('bug')).toBeDefined()
+    fireEvent.change(screen.getByRole('searchbox', { name: en.board.search }), {
+      target: { value: 'asking' },
+    })
+    expect(screen.queryByText('Building one')).toBeNull()
+    expect(screen.getByText('Asking one')).toBeDefined()
+    fireEvent.change(screen.getByRole('searchbox', { name: en.board.search }), {
+      target: { value: 'nothing like it' },
+    })
+    expect(screen.getByText(en.board.noMatch)).toBeDefined()
   })
 
   it('keeps every column title in view while its cards scroll under it, empty columns too', async () => {
@@ -177,7 +218,7 @@ describe('board', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
-    const column = screen.getByRole('region', { name: en.columns.working })
+    const column = screen.getByRole('region', { name: en.lanes.running })
     // The cards scroll inside their column, so the title above them never leaves.
     expect(column.className).toContain('flex-col')
     expect((column.querySelector('ul') as HTMLElement).className).toContain('overflow-y-auto')
@@ -262,7 +303,7 @@ describe('board', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Queued 1')).toBeDefined())
-    const column = within(screen.getByRole('region', { name: en.columns.queued }))
+    const column = within(screen.getByRole('region', { name: en.lanes.todo }))
     const titles = column.getAllByText(/^Queued \d+$/).map((element) => element.textContent)
     expect(titles).toEqual([
       ...Array.from({ length: 11 }, (_, i) => `Queued ${i + 1}`),
@@ -333,7 +374,7 @@ describe('board', () => {
     expect(screen.queryByText(en.board.restOfQueue)).toBeNull()
   })
 
-  it('writes the nine column titles in Portuguese, in the same order', async () => {
+  it('writes the six lane titles in Portuguese, in the same order', async () => {
     window.localStorage.setItem('aifactory.language', 'pt-BR')
     serve({ tasks: [card({ id: 1, title: 'Building one' })] })
     render(
@@ -344,21 +385,14 @@ describe('board', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Building one')).toBeDefined())
-    const order = [
-      'queued',
-      'working',
-      'waiting',
-      'retrying',
-      'merge',
-      'review',
-      'released',
-      'resolved',
-      'attention',
-    ] as const
-    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(
-      order.map((id) => ptBR.columns[id]),
-    )
-    expect(ptBR.columns.merge).toBe('Merge')
+    expect(screen.getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual([
+      ptBR.lanes.todo,
+      ptBR.lanes.needs_you,
+      ptBR.lanes.running,
+      ptBR.lanes.ready,
+      ptBR.lanes.done,
+      ptBR.lanes.cancelled,
+    ])
     expect(screen.getByText(ptBR.stages.build)).toBeDefined()
   })
 
@@ -370,7 +404,7 @@ describe('board', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Merging one')).toBeDefined())
-    const column = within(screen.getByRole('region', { name: en.columns.merge }))
+    const column = within(screen.getByRole('region', { name: en.lanes.running }))
     expect(column.getByText('Merging one')).toBeDefined()
     expect(column.getByText(en.stages.merge)).toBeDefined()
   })

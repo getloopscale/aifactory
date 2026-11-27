@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-librar
 import type { ReactElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { PillComposer } from './PillComposer'
+import { MessageBox, tallest } from './MessageBox'
 import { CopyProvider, LANGUAGE_KEY } from '../../lib/copy'
 import { ptBR } from '../../lib/copy/pt-BR'
 // The owner's language is Portuguese here; the dictionary keys say what is on the screen.
@@ -12,7 +12,7 @@ const render = (ui: ReactElement) => rtlRender(ui, { wrapper: CopyProvider })
 
 afterEach(cleanup)
 
-const mount = (over: Partial<Parameters<typeof PillComposer>[0]> = {}) => {
+const mount = (over: Partial<Parameters<typeof MessageBox>[0]> = {}) => {
   const props = {
     value: '',
     onValueChange: vi.fn(),
@@ -21,7 +21,7 @@ const mount = (over: Partial<Parameters<typeof PillComposer>[0]> = {}) => {
     onStop: vi.fn(),
     ...over,
   }
-  render(<PillComposer {...props} />)
+  render(<MessageBox {...props} />)
   return props
 }
 
@@ -83,5 +83,37 @@ describe('the message box', () => {
   it('shows what it is given at the right', () => {
     mount({ trailing: <span>modelo</span> })
     expect(screen.getByText('modelo')).toBeDefined()
+  })
+
+  it('keeps the text over the row of its controls, so they never take its width', () => {
+    mount({ trailing: <span>modelo</span> })
+    const box = screen.getByLabelText(ptBR.composer.message)
+    const row = screen
+      .getByRole('button', { name: ptBR.composer.send })
+      .closest('div')!.parentElement!
+    expect(box.parentElement).toBe(row.parentElement)
+    expect(box.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(row.contains(screen.getByText('modelo'))).toBe(true)
+    expect(row.contains(screen.getByRole('button', { name: ptBR.composer.moreActions }))).toBe(true)
+  })
+
+  it('grows to the height of the text and stops at the tallest it may be', () => {
+    const scrollHeight = vi.spyOn(HTMLTextAreaElement.prototype, 'scrollHeight', 'get')
+    scrollHeight.mockReturnValue(120)
+    mount({ value: 'texto' })
+    const box = screen.getByLabelText(ptBR.composer.message)
+    expect(box.style.height).toBe('120px')
+    cleanup()
+    scrollHeight.mockReturnValue(1800)
+    mount({ value: 'texto longo' })
+    expect(screen.getByLabelText(ptBR.composer.message).style.height).toBe(
+      `${tallest(window.innerHeight)}px`,
+    )
+    scrollHeight.mockRestore()
+  })
+
+  it('lets the text have eight lines in a short window and two fifths of a tall one', () => {
+    expect(tallest(400)).toBe(192)
+    expect(tallest(1000)).toBe(400)
   })
 })

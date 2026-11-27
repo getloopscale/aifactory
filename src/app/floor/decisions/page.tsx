@@ -1,4 +1,4 @@
-import { Badge } from '@usetheo/ui'
+import { Badge } from '@getloopscale/ui'
 import { Zap } from 'lucide-react'
 import { Fragment, useEffect, useState } from 'react'
 import { Link } from 'react-router'

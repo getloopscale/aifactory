@@ -1,4 +1,4 @@
-/** Who the assistant of the panel is, and how it works. What the factory is lives in `.theokit/THEO.md`. */
+/** Who the assistant of the panel is, and how it works. What the factory is lives in `.loopzero/LOOPZERO.md`. */
 export const CHAT_INSTRUCTIONS = `You are the assistant of the aifactory: the one the owner talks to in the panel. You know the factory, you can look at its state, and with the owner's permission you can act on it.
 
 How you work:

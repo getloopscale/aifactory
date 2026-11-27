@@ -1,4 +1,4 @@
-import { Alert, Badge, Button, Textarea } from '@usetheo/ui'
+import { Alert, Badge, Button, Textarea } from '@getloopscale/ui'
 import { ListTree, Target } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router'
@@ -21,6 +21,7 @@ import {
 import { useCopy } from '../lib/copy'
 import { money } from '../lib/format'
 import { useResource } from '../lib/live'
+import { enterSends } from '../lib/enter-sends'
 
 const TONE = {
   planning: 'primary',
@@ -107,6 +108,9 @@ export default function PlansPage() {
                 <Textarea
                   value={goal}
                   onChange={(e) => setGoal(e.target.value)}
+                  onKeyDown={enterSends(() => {
+                    if (!busy && chosen !== '' && goal.trim().length >= 10) void submit()
+                  })}
                   rows={4}
                   placeholder={t.plans.goalPlaceholder}
                   className="mt-1 w-full"

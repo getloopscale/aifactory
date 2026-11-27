@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@theokit/agents/sandbox'
+import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { whenSlotFree } from './sandbox-slot'
 
@@ -55,51 +55,51 @@ export type StreamingBackend = SandboxBackend & {
 export const streams = (backend: SandboxBackend): backend is StreamingBackend =>
   typeof (backend as Partial<StreamingBackend>).executeStreaming === 'function'
 
-/** A terminal open in a sandbox: a command under a pseudo-terminal, its bytes both ways. */
-export type Terminal = {
-  /** Sends keystrokes (or pasted text) to the command. */
-  write(data: string): void
-  resize(cols: number, rows: number): Promise<void>
-  /** Called with each piece of what the command prints. */
-  onData(listener: (data: string) => void): void
-  /** Settles with the command's exit code when it ends, however it ended. */
-  wait(): Promise<{ exitCode: number }>
-  /** Ends the command. Safe to call when it already ended. */
-  kill(): Promise<void>
-}
-
-export type TerminalOptions = { cols: number; rows: number; cwd?: string }
+type OpenTerminal = NonNullable<SandboxBackend['openTerminal']>
 
 /**
- * A backend that can run a command under a pseudo-terminal. `SandboxBackend` has none
- * (usetheokit/theokit-sdk#1614), so a provider that can adds this, and a caller asks `terminals` before using it.
+ * A terminal open in a sandbox: a command under a pseudo-terminal, its bytes both ways. The contract is the
+ * SDK's (`SandboxBackend.openTerminal`), which a provider of the factory implements.
  */
-export type TerminalBackend = SandboxBackend & {
-  openTerminal(command: string, opts: TerminalOptions): Promise<Terminal>
-}
+export type Terminal = Awaited<ReturnType<OpenTerminal>>
+
+export type TerminalOptions = Parameters<OpenTerminal>[1]
+
+/** A backend that can run a command under a pseudo-terminal; a caller asks `terminals` before using it. */
+export type TerminalBackend = SandboxBackend & { openTerminal: OpenTerminal }
 
 export const terminals = (backend: SandboxBackend): backend is TerminalBackend =>
-  typeof (backend as Partial<TerminalBackend>).openTerminal === 'function'
+  typeof backend.openTerminal === 'function'
+
+/**
+ * What a terminal prints, handed to whoever listens. What arrives before the first listener is kept for it,
+ * as the contract asks, and a listener that left is not called again.
+ */
+export function terminalOutput() {
+  const listeners = new Set<(data: Uint8Array) => void>()
+  let held: Uint8Array[] | undefined = []
+  return {
+    emit(data: Uint8Array) {
+      if (held) held.push(data)
+      else for (const listener of listeners) listener(data)
+    },
+    onData(listener: (data: Uint8Array) => void) {
+      listeners.add(listener)
+      const waiting = held ?? []
+      held = undefined
+      for (const data of waiting) listener(data)
+      return () => {
+        listeners.delete(listener)
+      }
+    },
+  }
+}
 
 /** A file to write into a sandbox: its absolute path there and what it holds. */
 export type SandboxFile = { path: string; content: string | Buffer }
 
 /**
- * A backend that can write many files at once. `SandboxBackend` writes one file per call
- * (usetheokit/theokit-sdk#1279), and on E2B each call costs about half a second, so the knowledge base of a
- * large project (nearly a thousand files) took most of a run's preparation. A provider that can adds this, and
- * a caller asks `uploadsInBatch` before using it. It is for paths that do not exist yet: unlike `uploadFile`,
- * it removes nothing first.
- */
-export type BatchUploadBackend = SandboxBackend & {
-  uploadFiles(files: readonly SandboxFile[]): Promise<void>
-}
-
-export const uploadsInBatch = (backend: SandboxBackend): backend is BatchUploadBackend =>
-  typeof (backend as Partial<BatchUploadBackend>).uploadFiles === 'function'
-
-/**
- * A running sandbox: the TheoKit `SandboxBackend` the agent tools and the factory talk to, plus the
+ * A running sandbox: the LoopZero `SandboxBackend` the agent tools and the factory talk to, plus the
  * way to stop it. `SandboxBackend` has no lifecycle and no network policy, so both live here.
  */
 export type IsolatedSandbox = {

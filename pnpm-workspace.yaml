@@ -9,14 +9,14 @@
 # Each entry is a decision, not boilerplate: an install script runs arbitrary code
 # on your machine. These are the ones this scaffold needs.
 allowBuilds:
-  # The bundler behind `theokit dev` and `theokit build`; ships a platform binary.
+  # The bundler behind `loopzero dev` and `loopzero build`; ships a platform binary.
   esbuild: true
   # A native terminal. Compiles or downloads a prebuild on install, so it is the one
   # entry here that costs real time — and a scaffolded app does NOT install it.
   # Measured 2026-09-20 on a scaffold generated from this template: 0 occurrences in
   # the generated pnpm-lock.yaml, out of 453 resolved packages, and pnpm raised no
   # ERR_PNPM_IGNORED_BUILDS. It arrives only if you add a package that depends on it.
-  # An earlier version of this comment said it was "reached through @theokit/agents";
+  # An earlier version of this comment said it was "reached through @getloopscale/loopzero-agents";
   # that package declares no pty dependency, so the line is corrected rather than
   # deleted — a wrong reason for a right entry is what sent the last reader looking
   # in the wrong place (usetheokit/theokit#25).
@@ -29,11 +29,14 @@ allowBuilds:
   electron: false
   electron-winstaller: false
 minimumReleaseAgeExclude:
-  - '@theokit/http@2.3.1'
-  - theokit@0.77.4 || 0.78.0 || 0.79.0
-  - '@theokit/sdk@5.14.0'
-  - '@theokit/agents@16.3.0'
-  - '@usetheo/ui@0.36.0'
+  - '@getloopscale/loopzero-agents@0.1.0'
+  - '@getloopscale/loopzero-http@0.1.0'
+  - '@getloopscale/loopzero-presenter@0.1.0'
+  - '@getloopscale/loopzero-sdk-tools@0.1.0'
+  - '@getloopscale/loopzero-sdk@0.1.0'
+  - '@getloopscale/loopzero-ui@0.1.0'
+  - '@getloopscale/loopzero@0.1.0'
+  - '@getloopscale/ui@0.38.0'
 
 packages:
   - desktop

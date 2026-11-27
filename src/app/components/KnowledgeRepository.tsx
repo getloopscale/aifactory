@@ -1,4 +1,4 @@
-import { Button, Input } from '@usetheo/ui'
+import { Button, Input } from '@getloopscale/ui'
 import { CircleHelp, Lightbulb } from 'lucide-react'
 import { useEffect, useState } from 'react'
 

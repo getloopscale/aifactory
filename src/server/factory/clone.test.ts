@@ -1,4 +1,4 @@
-import { SandboxBackend } from '@theokit/agents/sandbox'
+import { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { describe, expect, it } from 'vitest'
 
 import { CLONE_ATTEMPTS, CLONE_TIMEOUT_MS, cloneRepository, withTimeout } from './clone'

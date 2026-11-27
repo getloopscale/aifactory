@@ -140,7 +140,7 @@ describe('approved work on its way to the integration branch', () => {
       />,
     )
 
-    const merge = within(screen.getByRole('region', { name: ptBR.columns.merge }))
+    const merge = within(screen.getByRole('region', { name: ptBR.lanes.running }))
     expect(
       merge.getByText(
         [
@@ -150,7 +150,7 @@ describe('approved work on its way to the integration branch', () => {
         ].join(' · '),
       ),
     ).toBeTruthy()
-    const delivered = screen.getByRole('region', { name: ptBR.columns.review })
+    const delivered = screen.getByRole('region', { name: ptBR.lanes.ready })
     expect(delivered.textContent).not.toContain(ptBR.board.merge.awaiting_merge(1))
     expect(within(delivered).getByText('Approved 1')).toBeTruthy()
   })

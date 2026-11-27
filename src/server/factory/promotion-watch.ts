@@ -207,7 +207,7 @@ async function stopsLine(pass: Pass, seen: Seen[], pull: PromotionPull, promotio
 
 /**
  * A line stopped by a promotion that GitHub merged green between two passes. No promotion is open, so nothing
- * above reads its checks; the incident would stay open until the next promotion (paulohenriquevn/aifactory#394).
+ * above reads its checks; the incident would stay open until the next promotion (getloopscale/aifactory#394).
  * The promotion merged after the incident opened with no failed check is read as that head, so the line decides
  * over it as over an open one; one that merged red, or before the incident, changes nothing.
  */

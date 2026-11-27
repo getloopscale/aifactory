@@ -53,7 +53,7 @@ const DRAFT_BUDGET_USD = 1
 
 /**
  * The drafter on a model, built by `buildAssistant` and run once per call. The key comes from the model's
- * provider, as TheoKit resolves it for the panel's assistants. `FACTORY_COORDINATOR_MODEL` changes the model.
+ * provider, as LoopZero resolves it for the panel's assistants. `FACTORY_COORDINATOR_MODEL` changes the model.
  */
 export function modelScopeDrafter(model: string = coordinatorModel()): ScopeDrafter {
   return oneShotAssistant('scope-drafter', model, SCOPE_DRAFTER_SPEC, DRAFT_BUDGET_USD)

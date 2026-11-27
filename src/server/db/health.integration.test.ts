@@ -1,5 +1,5 @@
 import pg from 'pg'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { storageFromUrl } from './config'

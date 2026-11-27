@@ -197,7 +197,7 @@ describe('a failure that passes by itself', () => {
     expect(retryableFailure({ error: 'the API could not be reached by the test' })).toBeNull()
   })
 
-  // Ten theokit tasks sat in failed on this message, never retried, after e2b dropped their streams (2026-11-19).
+  // Ten loopzero tasks sat in failed on this message, never retried, after e2b dropped their streams (2026-11-19).
   it('reads a sandbox whose stream dropped with its state unknown as the environment', () => {
     expect(
       retryableFailure({

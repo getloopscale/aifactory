@@ -105,9 +105,9 @@ describe('what a builder says it waits for', () => {
   })
 
   it('finds the sentence that says a release or a branch does not exist', () => {
-    expect(unavailableNamed('Checked. @theokit/sdk 2.0.0 is not published yet. Stopping.')).toBe(
-      '@theokit/sdk 2.0.0 is not published yet.',
-    )
+    expect(
+      unavailableNamed('Checked. @getloopscale/loopzero-sdk 2.0.0 is not published yet. Stopping.'),
+    ).toBe('@getloopscale/loopzero-sdk 2.0.0 is not published yet.')
     expect(unavailableNamed('The branch factory/1963 is not merged.')).toBeDefined()
     expect(unavailableNamed('The code already does this.')).toBeUndefined()
   })

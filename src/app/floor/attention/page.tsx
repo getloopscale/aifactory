@@ -1,4 +1,4 @@
-import { Badge } from '@usetheo/ui'
+import { Badge } from '@getloopscale/ui'
 import { Hourglass, Siren, UserRound, Wrench } from 'lucide-react'
 import { useMemo } from 'react'
 import { Link } from 'react-router'

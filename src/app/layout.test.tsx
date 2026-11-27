@@ -24,7 +24,7 @@ function serve(routes: Record<string, unknown>) {
       calls.push({
         url,
         method,
-        csrf: (init.headers as Record<string, string> | undefined)?.['x-theo-action'],
+        csrf: (init.headers as Record<string, string> | undefined)?.['x-loopzero-action'],
       })
       const body = routes[`${method} ${url}`]
       return new Response(JSON.stringify(body ?? {}), { status: body === undefined ? 404 : 200 })
@@ -323,6 +323,8 @@ describe('the language of the panel', () => {
     const calls = serve({
       ...signedIn,
       'GET /api/panel/me': { owner: true, name: 'paulo', language: 'en' },
+      // The board reads why each task waits from the inbox, so its items are whole here.
+      'GET /api/panel/inbox': { items: [] },
       'GET /api/panel/tasks': {
         tasks: [
           {
@@ -342,19 +344,15 @@ describe('the language of the panel', () => {
       'PUT /api/panel/language': { language: 'pt-BR' },
     })
     renderAt('/work', <WorkPage />)
-    await waitFor(() =>
-      expect(screen.getByRole('region', { name: en.columns.queued })).toBeDefined(),
-    )
+    await waitFor(() => expect(screen.getByRole('region', { name: en.lanes.todo })).toBeDefined())
     const before = board(calls)
     expect(before).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: en.topBar.switchLanguage }))
 
-    await waitFor(() =>
-      expect(screen.getByRole('region', { name: ptBR.columns.queued })).toBeDefined(),
-    )
+    await waitFor(() => expect(screen.getByRole('region', { name: ptBR.lanes.todo })).toBeDefined())
     expect(screen.getByRole('link', { name: ptBR.places.plans })).toBeDefined()
-    expect(screen.queryByRole('region', { name: en.columns.queued })).toBeNull()
+    expect(screen.queryByRole('region', { name: en.lanes.todo })).toBeNull()
     await waitFor(() =>
       expect(calls).toContainEqual(
         expect.objectContaining({ url: '/api/panel/language', method: 'PUT' }),

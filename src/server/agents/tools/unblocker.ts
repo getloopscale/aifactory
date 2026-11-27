@@ -1,5 +1,5 @@
 import { and, asc, eq } from 'drizzle-orm'
-import { tool } from 'theokit/server/define'
+import { tool } from '@getloopscale/loopzero/server/define'
 import { z } from 'zod'
 
 import { getDb } from '../../db'

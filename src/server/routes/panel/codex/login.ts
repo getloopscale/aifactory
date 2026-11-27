@@ -1,4 +1,4 @@
-import { route } from 'theokit/server/define'
+import { route } from '@getloopscale/loopzero/server/define'
 
 import type { CodexConnection } from '../../../../shared/panel'
 import { codexAccount } from '../../../factory/codex-auth'

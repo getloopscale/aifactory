@@ -17,7 +17,7 @@ issue com a label "factory"
         v  webhook assinado (X-Hub-Signature-256)
    ingress + task + job run-task          (uma transação, Postgres)
         |
-        v  worker do TheoKit
+        v  worker do LoopZero
    sandbox isolado ----- clone, branch factory/<n>
         |
         v
@@ -533,27 +533,27 @@ O mesmo cron `integrate-after-ci` olha esses releases a cada dois minutos:
 - Checks ainda rodando: espera.
 
 **A branch de release.** É a branch padrão do repositório, a não ser que o dono nomeie outra em "Branch a
-release lands on". Um repositório cuja branch padrão é `develop` (os gateways do theokit) precisa nomear a
+release lands on". Um repositório cuja branch padrão é `develop` (os gateways do loopzero) precisa nomear a
 sua (`main`), porque `develop` é onde vai a pré-release e a fábrica se recusa a tratar a mesma branch como
 pré-release e como release. As branches que faltam são criadas a partir da branch de release, e a promoção
 abre o PR `develop → <branch de release>`.
 
 **Repositório que publica com changesets.** Quando `develop` tem `.changeset/config.json` (os quatro
-repositórios do theokit), a versão não é da fábrica: vem dos arquivos `.changeset/*.md`, e quem publica no
+repositórios do loopzero), a versão não é da fábrica: vem dos arquivos `.changeset/*.md`, e quem publica no
 npm e cria as tags (`@theokit/ui@1.13.0`) é o workflow de release do próprio repositório, ao mergear o PR
 "Version Packages" que ele abre a partir de `changeset-release/main`. Nesse caso o `release()`:
 
 - um changeset só conta como esperando quando a API de comparação entre a branch de release e `develop` o
   lista como adicionado desde a base comum das duas (`.changeset/*.md`, menos o README) e ele nomeia pelo
   menos um pacote no front matter. Um changeset que um release anterior consumiu na branch de release, e que
-  `develop` ainda guarda porque ninguém fez o back-merge, não conta (o theokit-plugins depois do Version
+  `develop` ainda guarda porque ninguém fez o back-merge, não conta (o loopzero-plugins depois do Version
   Packages #250). Um changeset vazio também não conta: ele não versiona nada, e o workflow de release falha
-  com "this release would publish nothing" (o theokit em 2026-11-13, com doze deles);
+  com "this release would publish nothing" (o loopzero em 2026-11-13, com doze deles);
 - quando nenhum changeset está esperando, lê na mesma comparação os arquivos que
   `develop` muda desde a branch de release e liga cada um aos pacotes em que está (todo `package.json` de
   `develop` acima dele, a raiz incluída). Se algum desses pacotes é publicado pelo changesets (tem nome, não
   é `private` e não está no `ignore` do `.changeset/config.json`), recusa e diz o nome do pacote, porque ele
-  não seria publicado. Se nenhum é (o `theoclaw`, ignorado no theokit, ou arquivos fora de pacote), o
+  não seria publicado. Se nenhum é (o `loopbot`, ignorado no loopzero, ou arquivos fora de pacote), o
   release é o da própria fábrica: tag, release, tasks liberadas e issues fechadas, como num repositório
   sem changesets, porque nenhum changeset pode existir para esses pacotes;
 - com um changeset esperando, promove `develop` para a branch de release como sempre, mas não cria tag nem
@@ -575,7 +575,7 @@ ganha o comentário "Available in <tags>" na issue e tem a issue fechada. Uma is
 registrada na task e no `detail` da `publication`, e a publicação segue.
 
 Há workflows de release que fazem o versionamento, empurram `changeset-release/<release>` e param, porque a
-organização não deixa o Actions abrir pull request (o `release.yml` do usetheokit/theokit). Quando não há PR
+organização não deixa o Actions abrir pull request (o `release.yml` do getloopscale/loopzero). Quando não há PR
 "Version Packages" aberto ou mergeado depois da promoção e essa branch existe, está à frente da branch de release
 e tem o commit da ponta mais novo que a promoção, a fábrica abre ela mesma o PR "Version Packages" a partir dela
 (título "Version Packages", corpo citando o commit promovido), e a `publication` continua esperando; na passada
@@ -601,7 +601,7 @@ a permissão Actions):
 
 Depois do release, o workflow do repositório abre o back-merge: o PR da branch de release para a branch de
 integração (`main → workspace`). Enquanto ele não entra, `workspace` fica com as versões de antes do release,
-e um check que compara as duas coisas (o `check-changelog-current` do theokit) reprova todo PR da fábrica, que
+e um check que compara as duas coisas (o `check-changelog-current` do loopzero) reprova todo PR da fábrica, que
 então devolve trabalho já aprovado ao agente. Por isso o mesmo cron, a cada passada, procura em cada
 repositório habilitado que já teve uma `publication` um PR aberto cuja head é a branch de release do próprio
 repositório (nunca a de um fork) e cuja base é a branch de integração. Com os checks verdes, ele mergeia com
@@ -753,7 +753,7 @@ zero, a série fica "no baseline yet". A detecção é só aritmética, sem mode
 | `beyond_3_sigma`              | O último ponto além de 3σ          | Registra, mostra e abre issue |
 
 As faixas e os níveis ficam em `src/server/metrics/config.ts`, versionados. Cada regra quebrada num dia vira
-uma linha em `metric_signal`, uma vez só. A issue vai para `paulohenriquevn/aifactory`, com a tabela dos
+uma linha em `metric_signal`, uma vez só. A issue vai para `getloopscale/aifactory`, com a tabela dos
 pontos, e só uma por indicador e repositório a cada 30 dias. Quando o mesmo dia já abriu issue num
 repositório, a série da fábrica inteira não abre outra. Se o GitHub recusa, o erro fica na linha e a passada
 seguinte tenta de novo. A página Health mostra o último dia de cada indicador, a base e o estado da faixa, e
@@ -825,11 +825,11 @@ Dois agentes respondem, e o seletor no campo de mensagem escolhe entre eles:
 | Modelo     | Agente                 | Credencial                                                                                               |
 | ---------- | ---------------------- | -------------------------------------------------------------------------------------------------------- |
 | OpenRouter | `agents/chat.ts`       | `OPENROUTER_API_KEY`; o modelo vem de `FACTORY_CHAT_MODEL` (padrão `openrouter/google/gemini-2.5-flash`) |
-| ChatGPT    | `agents/chat-codex.ts` | a assinatura do ChatGPT, pelo login de dispositivo do TheoKit; modelo em `FACTORY_CHAT_CODEX_MODEL`      |
+| ChatGPT    | `agents/chat-codex.ts` | a assinatura do ChatGPT, pelo login de dispositivo do LoopZero; modelo em `FACTORY_CHAT_CODEX_MODEL`     |
 
 O login do ChatGPT é feito no próprio chat: ao escolher o modelo sem estar conectado, aparece um cartão
 com o endereço e o código, e a página percebe sozinha quando você termina. A credencial fica em
-`~/.theokit/auth.json` e é renovada pelo TheoKit. Ela é separada do login do Codex que a fábrica usa para
+`~/.loopzero/auth.json` e é renovada pelo LoopZero. Ela é separada do login do Codex que a fábrica usa para
 construir (`~/.codex-factory-N`), porque um refresh token rotaciona e dois usuários do mesmo login se
 invalidariam. A cota da assinatura, porém, é a mesma.
 
@@ -910,7 +910,7 @@ no Claude Code, `-m` e `-c model_reasoning_effort` no Codex, inclusive ao retoma
 Agentes faz a mesma troca, com o seu OK.
 
 **O modelo dos agentes do painel não se troca pela tela.** O chat, os guias e os dois assistentes de texto
-têm o modelo fixado quando o servidor sobe: o TheoKit exige que um arquivo de `agents/` entregue o agente
+têm o modelo fixado quando o servidor sobe: o LoopZero exige que um arquivo de `agents/` entregue o agente
 pronto, não uma função que o monte a cada pedido (testado: devolve erro 500). Por isso o modelo deles segue
 nas variáveis `FACTORY_CHAT_MODEL`, `FACTORY_CHAT_CODEX_MODEL`, `FACTORY_GUIDE_MODEL` e
 `FACTORY_ASSIST_MODEL`, e só vale depois de reiniciar o painel. A página diz isso em cada um. A conta do Claude Code (assinatura ou chave de API) continua sendo definida no
@@ -945,7 +945,7 @@ para um passo (`factory/transcript.ts`) e grava na tabela `agent_event`, em orde
 rodadas da task. O resultado da execução continua saindo da última linha, então custo e estágio não mudam.
 Antes de gravar, cada passo passa por um filtro que troca os formatos de token conhecidos (`ghs_`, `ghp_`,
 `github_pat_`, `sk-ant-`, `sk-proj-`, `vcp_`) por `[redacted]` e é cortado em 8 KB. Os passos ficam 30
-dias; o cron `prune-transcripts` apaga os mais velhos, uma vez por dia. O `SandboxBackend` do TheoKit só
+dias; o cron `prune-transcripts` apaga os mais velhos, uma vez por dia. O `SandboxBackend` do LoopZero só
 devolve a saída no fim (usetheokit/theokit-sdk#883), por isso a leitura em fluxo é do provedor Docker; num
 provedor sem ela, a execução roda como antes e a task fica sem passos.
 
@@ -975,7 +975,7 @@ Aprovar não faz merge. Quem mergeia é o Release.
 cookie criptografado com `FACTORY_PANEL_SECRET` (os dois com pelo menos 32 caracteres, por exemplo
 `openssl rand -base64 36`). Cinco tokens errados do mesmo cliente bloqueiam esse cliente por uma hora.
 Sem token e segredo configurados, o painel recusa todo mundo. As rotas `/api/panel/*` só respondem ao
-dono, e as que mudam algo exigem o cabeçalho `X-Theo-Action: 1` (a proteção contra CSRF do TheoKit).
+dono, e as que mudam algo exigem o cabeçalho `X-LoopZero-Action: 1` (a proteção contra CSRF do LoopZero).
 
 **Onde ele aparece.** Só nesta máquina. O servidor escuta em `127.0.0.1` (`HOST=127.0.0.1`), e o
 Cloudflare Tunnel só deixa passar `/api/webhooks/github` e `/api/health`, então o painel não é
@@ -1136,11 +1136,11 @@ O assistente responde na língua em que o dono escreveu, nunca faz pergunta (esc
 nas notas o que supôs), e **nada muda até o dono apertar "Use this"**. Dá para pedir outra versão em
 palavras ("mais curto", "sem a parte do e-mail") ou dispensar.
 
-**Como é feito.** São dois agentes do TheoKit, um arquivo cada: `assist` (escreve, não lê nada) e
+**Como é feito.** São dois agentes do LoopZero, um arquivo cada: `assist` (escreve, não lê nada) e
 `assist-setup` (o único que lê um repositório, e só os arquivos que dizem como ele é construído e
 testado: `package.json`, `pyproject.toml`, `requirements*.txt`, `Makefile`, o README, os workflows do CI;
 código-fonte e segredos são recusados, porque o que ele lê vai para o provedor do modelo). O que a fábrica
-é (o fluxo, o que faz um bom pedido, o que o sandbox tem) está em `.theokit/THEO.md`, que o framework
+é (o fluxo, o que faz um bom pedido, o que o sandbox tem) está em `.loopzero/LOOPZERO.md`, que o framework
 junta a toda conversa. A resposta volta pela ferramenta `propose`, e a página lê os argumentos dela.
 
 **Limites de segurança.** Só o dono conversa com o assistente (a política de cada agente é a mesma das
@@ -1277,10 +1277,10 @@ O Codex não informa custo em dólar, então `costUsd` fica vazio.
 
 Com as duas, vale a chave; `FACTORY_CODEX_AUTH=api-key|subscription` escolhe. O login da assinatura
 fica em `~/.codex-factory-1` por padrão (`FACTORY_CODEX_HOME` muda a pasta), no arquivo
-`factory-auth.json`, que é o store de credenciais do TheoKit.
+`factory-auth.json`, que é o store de credenciais do LoopZero.
 
 O login é feito pelo painel. Na página Setup, abaixo da linha do Codex, "Conectar o Codex" (ou "Entrar
-com outra conta", quando já há uma) inicia o login por dispositivo do TheoKit: o painel mostra um
+com outra conta", quando já há uma) inicia o login por dispositivo do LoopZero: o painel mostra um
 endereço da OpenAI e um código curto, o dono abre o endereço na conta do ChatGPT que quer usar e digita
 o código, e a página percebe sozinha quando ele terminar. Antes de guardar o login, o servidor faz uma
 pergunta pequena ao `codex exec` com ele, numa pasta temporária e sem o token de renovação; uma conta no
@@ -1292,8 +1292,8 @@ fábrica copia esse `auth.json` para o store e deixa o original como está.
 O token de renovação rotaciona. Se o Codex do uso diário e a fábrica compartilharem o mesmo login, o
 primeiro que renovar invalida o outro, por isso a fábrica tem um login só dela. O access token dura 10
 dias. A fábrica o renova no host quando faltam menos de 2 dias, para que ele não vença no meio de uma
-execução. A renovação é a do `AuthProvider` do TheoKit, com `refreshBeforeMs` de 2 dias. Ela e a troca de conta
-pelo painel passam pelo mesmo lock entre processos (o do TheoKit, com `proper-lockfile`) e releem o
+execução. A renovação é a do `AuthProvider` do LoopZero, com `refreshBeforeMs` de 2 dias. Ela e a troca de conta
+pelo painel passam pelo mesmo lock entre processos (o do LoopZero, com `proper-lockfile`) e releem o
 arquivo dentro dele, então o servidor e o worker nunca gastam o mesmo token de renovação duas vezes, e
 uma renovação nunca grava a conta antiga por cima da nova. Se a renovação for recusada, a task diz
 para conectar o Codex de novo pela página Setup. Cada execução simultânea do Codex por assinatura
@@ -1307,7 +1307,7 @@ Quando o provedor recusa o token com um 401 (mesmo com `exp` distante), a fábri
 `scripts/backlog-feed.mjs` lê o `BACKLOG.md` do squad que veio antes da fábrica e transforma cada item
 aberto (`approved`, `planned`, `triaged`, `raw`) numa issue que se sustenta sozinha: o que fazer, por que
 agora, onde, as condições de "pronto" com as emendas e o que o sandbox não consegue provar. O item vai para
-o repositório certo (`theokit`, `theokit-sdk` ou `theokit-gateways`), respeitando `blocked_by`: um item só
+o repositório certo (`loopzero`, `loopzero-sdk` ou `loopzero-gateways`), respeitando `blocked_by`: um item só
 começa quando o que o bloqueia foi integrado, e se o bloqueio falhou o item não começa e o relatório diz
 atrás de quem ele ficou. Itens que mudam um workflow do GitHub são pulados, porque a App não tem essa
 permissão.
@@ -1436,7 +1436,7 @@ responde `/api/health` mesmo sem as credenciais.
 2. O túnel do Cloudflare expõe só o webhook e o health check (README, "Exposição pública").
 3. Para publicar uma mudança, `scripts/deploy.sh`: compila e reinicia o servidor, os workers e o
    alimentador que estiverem rodando, sem tocar no túnel e sem ligar um alimentador parado.
-   Reiniciar não interrompe as execuções em andamento: o systemd sinaliza só o processo do TheoKit
+   Reiniciar não interrompe as execuções em andamento: o systemd sinaliza só o processo do LoopZero
    (`KillMode=mixed`), que para de pegar jobs, espera a execução em que está (até 52 minutos,
    `src/server/factory/drain.ts`, via `jobs.worker.shutdownTimeoutMs`) e sai. Os comandos do agente
    continuam rodando enquanto isso. Por isso um deploy com tarefas trabalhando demora o tempo da mais
@@ -1483,7 +1483,7 @@ Cada execução é um sandbox com limite de memória (`FACTORY_SANDBOX_MEMORY`, 
 simultâneas é o número de processos que tiram jobs da fila: o servidor e cada `aifactory-worker@N`
 ligado. A conta tem de fechar com a RAM da máquina: **execuções × limite + o que a máquina já usa**. Com
 3 execuções de 4g numa máquina de 15 GB que já usava uns 3 GB, dois sandboxes foram mortos pelo kernel
-(`OOMKilled`) construindo o theokit (dois `tsup` de 2,2 GB cada) e a máquina chegou a 8,5 GB de swap.
+(`OOMKilled`) construindo o loopzero (dois `tsup` de 2,2 GB cada) e a máquina chegou a 8,5 GB de swap.
 Por isso o padrão são 2 execuções de 5g. Uma execução morta por memória aparece como
 `codex failed: killed (most likely out of memory), exit 137` ou `out of memory: the sandbox hit its
 memory limit`, e é tratada como falha do ambiente (a fábrica repete sozinha), não do trabalho.

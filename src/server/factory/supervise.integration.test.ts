@@ -3,7 +3,7 @@ import { once } from 'node:events'
 
 import { eq } from 'drizzle-orm'
 import { migrate } from 'drizzle-orm/node-postgres/migrator'
-import { getStorageManager } from 'theokit/server/storage'
+import { getStorageManager } from '@getloopscale/loopzero/server/storage'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
@@ -28,8 +28,8 @@ const NOW = new Date('2026-11-04T12:00:00Z')
 const minutesAgo = (m: number) => new Date(NOW.getTime() - m * 60_000)
 const now = () => NOW
 
-// The queue table the TheoKit worker creates on its first start.
-const JOBS = `create table if not exists theokit_jobs (
+// The queue table the LoopZero worker creates on its first start.
+const JOBS = `create table if not exists loopzero_jobs (
   id text primary key, name text not null, input jsonb not null, attempts integer not null default 0,
   max_attempts integer not null default 1, available_at timestamptz not null default now(),
   locked_until timestamptz, traceparent text, idempotency_key text, created_at timestamptz not null default now(),
@@ -43,7 +43,7 @@ beforeAll(async () => {
 beforeEach(async () => {
   await getPool().query(JOBS)
   await getPool().query(
-    'truncate table setting, line_incident, sandbox_lease, finding, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, theokit_jobs restart identity cascade',
+    'truncate table setting, line_incident, sandbox_lease, finding, agent_run, watch, delivery, decision, question, review, evidence, stage_event, task, ingress, loopzero_jobs restart identity cascade',
   )
 })
 afterAll(() => getStorageManager().dispose())
@@ -80,7 +80,7 @@ async function seed(stage: string, lastEventMinutesAgo: number): Promise<number>
 
 const job = (name: string, input: object, failed = false) =>
   getPool().query(
-    'insert into theokit_jobs (id, name, input, failed_at, last_error) values ($1, $2, $3, $4, $5)',
+    'insert into loopzero_jobs (id, name, input, failed_at, last_error) values ($1, $2, $3, $4, $5)',
     [
       `j-${Math.random()}`,
       name,
@@ -107,7 +107,7 @@ describe('stalled work', () => {
     const waiting = await seed('sandbox', 75)
     const held = (taskId: number, minutesAhead: number) =>
       getPool().query(
-        'insert into theokit_jobs (id, name, input, locked_until) values ($1, $2, $3, $4)',
+        'insert into loopzero_jobs (id, name, input, locked_until) values ($1, $2, $3, $4)',
         [
           `j-${Math.random()}`,
           'run-task',
@@ -124,7 +124,7 @@ describe('stalled work', () => {
   it('flags a held run once it is silent past the longest a run may take', async () => {
     const forever = await seed('build', MAX_RUN_MINUTES + 5)
     await getPool().query(
-      'insert into theokit_jobs (id, name, input, locked_until) values ($1, $2, $3, $4)',
+      'insert into loopzero_jobs (id, name, input, locked_until) values ($1, $2, $3, $4)',
       [
         'j-forever',
         'run-task',
@@ -174,7 +174,7 @@ describe('a task queued with no job to run it', () => {
 
   it('does not call a task orphaned when there is no queue table to check', async () => {
     await seed('intake', 15)
-    await getPool().query('drop table theokit_jobs')
+    await getPool().query('drop table loopzero_jobs')
     const { found, checked } = await detect({ db: getDb(), now })
     expect(found).toEqual([])
     expect(checked.has('queued_run')).toBe(false)
@@ -184,7 +184,7 @@ describe('a task queued with no job to run it', () => {
 /** A queued run-task job of a task, created and due at the given times; `held` puts it at 'infinity'. */
 const queuedRun = (taskId: number, queuedMinutesAgo: number, held = false) =>
   getPool().query(
-    `insert into theokit_jobs (id, name, input, created_at, available_at)
+    `insert into loopzero_jobs (id, name, input, created_at, available_at)
      values ($1, 'run-task', $2, $3, $4)`,
     [
       `j-${Math.random()}`,
@@ -258,7 +258,7 @@ describe('a repository whose queued runs nobody starts', () => {
   it('leaves alone runs queued for later, as a retry or a paused provider queues them', async () => {
     const waiting = await seed('intake', 90)
     await getPool().query(
-      `insert into theokit_jobs (id, name, input, created_at, available_at) values ('later', 'run-task', $1, $2, $3)`,
+      `insert into loopzero_jobs (id, name, input, created_at, available_at) values ('later', 'run-task', $1, $2, $3)`,
       [JSON.stringify({ taskId: waiting }), minutesAgo(90), minutesAgo(-30)],
     )
 
