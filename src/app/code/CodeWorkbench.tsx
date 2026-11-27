@@ -401,6 +401,21 @@ function useCodeFiles(id: string, turn: number) {
   return state.id === id ? state : { id }
 }
 
+/** Ctrl+Shift+D shows or hides the changes and Ctrl+Shift+F shows the files, from a text box too. */
+function usePanelKeys(onChanges: () => void, onFiles: () => void) {
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || !event.shiftKey || event.altKey) return
+      const run = { d: onChanges, f: onFiles }[event.key.toLowerCase()]
+      if (!run) return
+      event.preventDefault()
+      run()
+    }
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [onChanges, onFiles])
+}
+
 type Tab = 'changes' | 'files'
 
 /** The pull request a session already opened, as the form that opens one wants it. */
@@ -554,21 +569,7 @@ function OpenSession({ id }: { id: string }) {
     },
     [showFiles],
   )
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || !event.shiftKey || event.altKey) return
-      const key = event.key.toLowerCase()
-      if (key === 'd') {
-        event.preventDefault()
-        toggle()
-      } else if (key === 'f') {
-        event.preventDefault()
-        showFiles()
-      }
-    }
-    window.addEventListener('keydown', listener)
-    return () => window.removeEventListener('keydown', listener)
-  }, [toggle, showFiles])
+  usePanelKeys(toggle, showFiles)
   if (!session) return <Quiet>{error ?? t.code.conversation.loading}</Quiet>
   const side = panel ? (
     <SidePanel
@@ -1005,21 +1006,9 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
     setActive(tabKey({ kind: 'diff', path: first }))
   }, [first])
   const pick = useCallback((next: View) => setView((now) => (now === next ? undefined : next)), [])
-  useEffect(() => {
-    const listener = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || !event.shiftKey || event.altKey) return
-      const key = event.key.toLowerCase()
-      if (key === 'd') {
-        event.preventDefault()
-        pick('changes')
-      } else if (key === 'f') {
-        event.preventDefault()
-        setView('files')
-      }
-    }
-    window.addEventListener('keydown', listener)
-    return () => window.removeEventListener('keydown', listener)
-  }, [pick])
+  const showFiles = useCallback(() => setView('files'), [])
+  const toggleChanges = useCallback(() => pick('changes'), [pick])
+  usePanelKeys(toggleChanges, showFiles)
 
   const changed = diff?.diff.files ?? []
   const shown = tabs.find((x) => tabKey(x) === active)
