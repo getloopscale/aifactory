@@ -198,9 +198,12 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
     setSaving(true)
     setProblem(undefined)
     try {
-      const saved = await patch<{ mode: CodeMode }>(`/api/panel/code/sessions/${session.id}`, {
-        mode: next,
-      })
+      const saved = await patch<{ mode: CodeMode }>(
+        `/api/panel/code/${encodeURIComponent(session.id)}`,
+        {
+          mode: next,
+        },
+      )
       setMode(saved.mode)
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))

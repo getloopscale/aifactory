@@ -176,7 +176,7 @@ describe('following the end', () => {
       expect(screen.getByText(c.modeAbout[m])).toBeDefined()
     fireEvent.click(screen.getByRole('radio', { name: new RegExp(en.code.modes.plan) }))
     await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { mode: 'plan' }),
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'plan' }),
     )
     await screen.findByText(`${c.modeLabel}: ${en.code.modes.plan}`)
   })
@@ -189,7 +189,7 @@ describe('following the end', () => {
     fireEvent.click(screen.getByRole('button', { name: c.modeLabel }))
     fireEvent.keyDown(window, { key: '3' })
     await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { mode: 'code' }),
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'code' }),
     )
   })
 
