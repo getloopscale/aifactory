@@ -8,6 +8,7 @@ import type { agentRun } from '../db/schema'
 
 import { turnMarker, type Claim, type NewCodeEvent } from './store'
 import { codeCapReached } from './slots'
+import { revertChanges } from './readonly-workspace'
 import {
   closeWorkspace,
   openWorkspace,
@@ -147,7 +148,11 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let marked = false
   try {
     await store.move(sessionId, 'turn_started')
-    await store.append(sessionId, { kind: 'state', content: turnMarker(message.seq) })
+    await store.append(sessionId, {
+      kind: 'state',
+      content: turnMarker(message.seq),
+      tool: session.mode,
+    })
     marked = true
     const writer = serialWriter(store, sessionId)
     const input: HarnessInput = {
@@ -171,6 +176,29 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
     if (!result.ok) failure = failureText(result)
   } catch (error) {
     failure = errorMessage(error)
+  }
+
+  // Ask and Plan may not change the checkout: whatever the agent left is put back before the workspace is saved.
+  if (session.mode !== 'code') {
+    try {
+      const reverted = await revertChanges(workspace.backend, workspace.repoDir)
+      if (reverted.length > 0) {
+        await store.append(sessionId, {
+          kind: 'error',
+          content: `The agent tried to change the checkout in ${session.mode} mode. Reverted: ${reverted.join(', ')}`,
+        })
+      }
+    } catch (error) {
+      workspace.feed.stop()
+      await workspace.sandbox.stop().catch(() => undefined)
+      return fail(
+        deps,
+        sessionId,
+        message,
+        `The checkout could not be reverted in ${session.mode} mode, so the workspace was not saved: ${errorMessage(error)}`,
+        marked,
+      )
+    }
   }
 
   try {

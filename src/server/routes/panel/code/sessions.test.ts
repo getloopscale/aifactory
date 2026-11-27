@@ -1,7 +1,14 @@
 import { evaluateRoutePolicy, type RoutePolicy } from '@getloopscale/loopzero/server/define'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createSession, listSessions, recordMessage } from '../../../code/store'
+import {
+  appendEvent,
+  createSession,
+  getSession,
+  listSessions,
+  recordMessage,
+  setMode,
+} from '../../../code/store'
 import { getDb } from '../../../db'
 import { canStart, harnessRegistry } from '../../../factory/harness-registry'
 
@@ -16,6 +23,7 @@ let enabledRepository = true
 
 import { POST as message } from './sessions/[id]/messages'
 import { GET, POST } from './sessions'
+import { PATCH } from './[id]'
 
 const input = (subject: { id: string } | null) => ({
   subject,
@@ -28,6 +36,7 @@ describe.each([
   ['GET /api/panel/code/sessions', GET],
   ['POST /api/panel/code/sessions', POST],
   ['POST /api/panel/code/sessions/:id/messages', message],
+  ['PATCH /api/panel/code/:id', PATCH],
 ])('%s', (_name, handler) => {
   const policy = handler.policy as RoutePolicy<unknown, unknown, unknown>
 
@@ -137,5 +146,27 @@ describe('the handlers', () => {
       event: { seq: 1 },
     })
     expect(recordMessage).toHaveBeenCalledWith('s', 'hi')
+  })
+
+  it('validates the mode of a PATCH and answers 404 for an unknown session', async () => {
+    expect(schema(PATCH).safeParse({ mode: 'plan' }).success).toBe(true)
+    expect(schema(PATCH).safeParse({ mode: 'root' }).success).toBe(false)
+    vi.mocked(setMode).mockResolvedValueOnce(undefined)
+    const response = (await run(PATCH, { params: { id: 'x' }, body: { mode: 'ask' } })) as Response
+    expect(response.status).toBe(404)
+  })
+
+  it('saves the mode and answers the session', async () => {
+    vi.mocked(setMode).mockResolvedValueOnce({
+      id: 's',
+      mode: 'plan',
+      createdAt: new Date(0),
+      updatedAt: new Date(0),
+    } as never)
+    expect(await run(PATCH, { params: { id: 's' }, body: { mode: 'plan' } })).toMatchObject({
+      id: 's',
+      mode: 'plan',
+    })
+    expect(setMode).toHaveBeenCalledWith('s', 'plan')
   })
 })

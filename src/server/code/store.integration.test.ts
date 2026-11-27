@@ -19,6 +19,7 @@ import {
   getSession,
   listSessions,
   renameSession,
+  setMode,
 } from './store'
 
 beforeAll(async () => {
@@ -48,6 +49,16 @@ describe('code sessions', () => {
     expect((await getSession(created.id))?.title).toBe('Fix it')
     expect((await renameSession(created.id, 'New'))?.title).toBe('New')
     expect(await getSession('missing')).toBeUndefined()
+  })
+
+  it('saves the mode, and a marker that carries it still answers its message', async () => {
+    const s = await aSession()
+    expect((await setMode(s.id, 'plan'))?.mode).toBe('plan')
+    expect(await setMode('00000000-0000-0000-0000-000000000000', 'ask')).toBeUndefined()
+    await appendEvent(s.id, { kind: 'user_message', content: 'one' })
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1), tool: 'plan' })
+    await moveSession(s.id, 'message')
+    expect((await claimTurn(s.id)).kind).toBe('nothing')
   })
 
   it('lists the newest activity first', async () => {
