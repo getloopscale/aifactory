@@ -4,12 +4,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
+import { jobBackend } from '../factory/job-backend'
 import { EVENT_MAX_BYTES } from '../factory/transcript'
 
 import {
   appendEvent,
   claimTurn,
   moveSession,
+  recordMessage,
   turnMarker,
   CLAIM_STALE_MS,
   createSession,
@@ -22,9 +24,10 @@ import {
 beforeAll(async () => {
   getStorageManager().configure(storageFromUrl(readDatabaseUrl()))
   await migrate(getDb(), { migrationsFolder: 'drizzle' })
+  await jobBackend().migrate()
 })
 beforeEach(async () => {
-  await getPool().query('truncate table code_event, code_session')
+  await getPool().query('truncate table code_event, code_session, loopzero_jobs')
 })
 afterAll(() => getStorageManager().dispose())
 
@@ -139,5 +142,32 @@ describe("a session's turn", () => {
     expect((await claimTurn(s.id)).kind).toBe('busy')
     const later = new Date(Date.now() + CLAIM_STALE_MS + 1000)
     expect((await claimTurn(s.id, later)).kind).toBe('claimed')
+  })
+})
+
+describe('recordMessage', () => {
+  it('writes the event, the move and one job together, once per message', async () => {
+    const { id } = await aSession()
+    const result = await recordMessage(id, 'hi')
+    expect(result.kind).toBe('queued')
+    expect((await getSession(id))?.state).toBe('queued')
+    const jobs = await getPool().query('select 1 from loopzero_jobs where idempotency_key = $1', [
+      `code-message-${id}-1`,
+    ])
+    expect(jobs.rowCount).toBe(1)
+  })
+
+  it('refuses a running session and writes nothing', async () => {
+    const { id } = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [id])
+    expect((await recordMessage(id, 'hi')).kind).toBe('refused')
+    expect(await eventsAfter(id, 0, 10)).toEqual([])
+    expect((await recordMessage('missing', 'hi')).kind).toBe('not_found')
+  })
+
+  it('takes a message for a stopped session', async () => {
+    const { id } = await aSession()
+    await getPool().query(`update code_session set state = 'stopped' where id = $1`, [id])
+    expect((await recordMessage(id, 'hi')).kind).toBe('queued')
   })
 })

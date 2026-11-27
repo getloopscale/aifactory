@@ -38,6 +38,14 @@ export class WorkspaceRefused extends Error {
   }
 }
 
+/** A workspace that would start a new sandbox past the cap of code workspaces: the turn waits in the queue. */
+export class WorkspaceCapped extends Error {
+  constructor() {
+    super('the code workspaces up fill the cap')
+    this.name = 'WorkspaceCapped'
+  }
+}
+
 /** What a workspace reads and writes outside the sandbox, so a test can stand in for each. */
 export type WorkspaceStore = {
   /** Whether the owner enabled the repository. */
@@ -59,6 +67,11 @@ export type WorkspaceDeps = {
   knowledge?: KnowledgeSource
   store: WorkspaceStore
   timeoutMs?: number
+  /**
+   * Asked just before a new sandbox is started (not for one the session reconnects to): false throws
+   * `WorkspaceCapped`, so a sandbox that died while retained is under the cap like any new one.
+   */
+  mayStart?(): Promise<boolean>
 }
 
 export type Workspace = {
@@ -132,6 +145,7 @@ export async function openWorkspace(deps: WorkspaceDeps, session: Opening): Prom
     ],
   }
   const reconnected = await reconnect(deps, session, spec)
+  if (!reconnected && deps.mayStart && !(await deps.mayStart())) throw new WorkspaceCapped()
   const created =
     reconnected ??
     (session.snapshotId
@@ -253,9 +267,17 @@ export async function retainWorkspace(
   session: Pick<CodeSession, 'id' | 'baseBranch'>,
   workspace: Workspace,
 ): Promise<void> {
+  // A sandbox nobody recorded is found by neither the idle cron nor the reaper: when its id cannot be kept the
+  // workspace is closed, which snapshots it.
+  try {
+    if (!workspace.sandbox.id) throw new Error('the sandbox has no id to reconnect to')
+    await deps.store.saveSandbox?.(session.id, workspace.sandbox.id)
+  } catch (error) {
+    console.warn(`code session ${session.id}: the sandbox was not kept up: ${errorMessage(error)}`)
+    await closeWorkspace(deps, session, workspace)
+    return
+  }
   await captureDiff(deps, session, workspace)
   open.delete(session.id)
   workspace.feed.stop()
-  if (!workspace.sandbox.id) throw new Error('the sandbox has no id to reconnect to')
-  await deps.store.saveSandbox?.(session.id, workspace.sandbox.id)
 }

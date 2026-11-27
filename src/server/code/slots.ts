@@ -19,7 +19,8 @@ export const isCodeWorkspace = (s: ListedSandbox): boolean =>
 /**
  * Whether the code workspaces up already fill the cap. The cap counts inside the account's own limit, so it is never
  * above `maxSandboxes`. A provider that cannot list, or a listing that fails, does not hold a turn back: the account's
- * own wait (`untilSlotFree`) still does.
+ * own wait (`untilSlotFree`) still does. The Vercel provider can neither list nor reconnect, so there the cap is not
+ * enforced and a turn closes its workspace (snapshot, stop) instead of leaving it up.
  */
 export async function codeCapReached(
   provider: { maxSandboxes?: number; listSandboxes?(): Promise<ListedSandbox[]> },

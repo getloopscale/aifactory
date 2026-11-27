@@ -272,6 +272,32 @@ describe('runTurn', () => {
     expect(t.sandbox.specs).toHaveLength(1)
   })
 
+  it('applies the cap when the retained sandbox of the session is gone', async () => {
+    const t = setup('code', undefined, { sandboxId: 'sbx-dead' })
+    await t.sandbox.create({
+      owner: { owner: 'code', sessionId: 'other' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    t.deps.codeCap = 1
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'capped' })
+    expect(t.session.state).toBe('queued')
+    expect(t.events.map((e) => e.kind)).toEqual(['user_message'])
+    expect(t.sandbox.specs).toHaveLength(1)
+  })
+
+  it('reconnects to a retained sandbox at the cap, since it takes no new slot', async () => {
+    const t = setup('code', undefined, { sandboxId: 'sbx-1' })
+    await t.sandbox.create({
+      owner: { owner: 'code', sessionId: 's1' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    t.deps.codeCap = 1
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.sandbox.reconnected).toEqual(['sbx-1'])
+  })
+
   it('counts and claims the cap in one step, so two sessions starting together start one workspace', async () => {
     const a = setup()
     const b = setup()

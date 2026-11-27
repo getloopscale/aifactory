@@ -8,7 +8,13 @@ import type { agentRun } from '../db/schema'
 
 import { turnMarker, type Claim, type NewCodeEvent } from './store'
 import { codeCapReached } from './slots'
-import { closeWorkspace, openWorkspace, retainWorkspace, type WorkspaceDeps } from './workspace'
+import {
+  closeWorkspace,
+  openWorkspace,
+  retainWorkspace,
+  WorkspaceCapped,
+  type WorkspaceDeps,
+} from './workspace'
 
 /** What a turn reads and writes in the database, so a test can stand in for it. */
 export type TurnStore = {
@@ -108,14 +114,17 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
     // The count and the sandbox it counts are one step: the lock is held until the workspace is up.
     const lock = deps.underCapLock ?? ((work) => work())
     const opened = await lock(async () => {
-      // A session whose sandbox is still up needs no new slot.
-      if (
-        !session.sandboxId &&
-        deps.codeCap !== undefined &&
-        (await codeCapReached(deps.workspace.sandbox, deps.codeCap))
-      )
-        return undefined
-      return openWorkspace({ ...deps.workspace, harness }, session)
+      // The cap is asked only when a new sandbox is needed: a session whose retained sandbox is still up needs none.
+      const mayStart =
+        deps.codeCap === undefined
+          ? undefined
+          : async () => !(await codeCapReached(deps.workspace.sandbox, deps.codeCap!))
+      try {
+        return await openWorkspace({ ...deps.workspace, harness, mayStart }, session)
+      } catch (error) {
+        if (error instanceof WorkspaceCapped) return undefined
+        throw error
+      }
     })
     if (!opened) {
       await store.move(sessionId, 'turn_released')

@@ -173,4 +173,18 @@ describe('retainWorkspace', () => {
     })
     expect(liveWorkspace('s1')).toBeUndefined()
   })
+
+  it('closes the workspace with a snapshot when its id cannot be kept', async () => {
+    // The first save is the open's own; the one of the retention fails.
+    const saveSandbox = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('db down'))
+    const { sandbox, deps, saveSnapshot } = setup({ saveSandbox })
+    const workspace = await openWorkspace(deps, session)
+    await retainWorkspace(deps, session, workspace)
+    expect(saveSnapshot).toHaveBeenCalledWith('s1', 'snap-1')
+    expect(sandbox.stopped).toBe(1)
+    expect(liveWorkspace('s1')).toBeUndefined()
+  })
 })
