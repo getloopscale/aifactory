@@ -68,8 +68,18 @@ function setup(
 ) {
   const world = memory(mode, extra)
   const sandbox = new FakeSandbox((c) =>
-    c.includes('rev-parse') ? { stdout: '/home/work\n' } : undefined,
+    c.includes('@@numstat@@')
+      ? {
+          stdout:
+            '@@numstat@@\0' +
+            '1\t0\ta.txt\0' +
+            '\0\0@@patch@@\0diff --git a/a.txt b/a.txt\n@@ -0,0 +1 @@\n+x\n',
+        }
+      : c.includes('rev-parse')
+        ? { stdout: '/home/work\n' }
+        : undefined,
   )
+  const saveDiff = vi.fn(async (_id: string, _diff: unknown) => undefined)
   const run = vi.fn(async (_b: unknown, input: HarnessInput) => {
     input.onEvent?.({ kind: 'tool_use', tool: 'shell', content: 'ls' })
     input.onEvent?.({ kind: 'tool_result', content: 'a' })
@@ -91,14 +101,14 @@ function setup(
         enabled: async () => true,
         knowledgeRepository: async () => undefined,
         saveSnapshot: async () => undefined,
-        saveDiff: async () => undefined,
+        saveDiff,
       },
     },
     harnessFor: () => harness,
     record,
     onRefusal,
   }
-  return { ...world, deps, run, resume, record, onRefusal, sandbox }
+  return { ...world, deps, run, resume, record, onRefusal, sandbox, saveDiff }
 }
 
 describe('runTurn', () => {
@@ -122,6 +132,14 @@ describe('runTurn', () => {
       expect.objectContaining({ role: 'code', codeSessionId: 's1', codeMessageSeq: 1, ok: true }),
     )
     expect(t.sandbox.stopped).toBe(1)
+  })
+
+  it('stores the diff of the workspace when the turn ends', async () => {
+    const { deps, saveDiff } = setup()
+    await runTurn(deps, 's1')
+    expect(saveDiff).toHaveBeenCalledWith('s1', {
+      files: [expect.objectContaining({ path: 'a.txt', added: 1, removed: 0 })],
+    })
   })
 
   it('resumes the session the first turn saved, and starts fresh for another harness', async () => {
