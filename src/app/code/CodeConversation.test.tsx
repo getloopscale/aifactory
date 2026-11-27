@@ -13,7 +13,7 @@ vi.mock('@getloopscale/loopzero-ui', () => ({
 
 import { post } from '../lib/api'
 
-import { CodeConversation } from './CodeConversation'
+import { CodeConversation, linkPaths, mentionAt } from './CodeConversation'
 
 const c = en.code.conversation
 
@@ -163,5 +163,72 @@ describe('following the end', () => {
       />,
     )
     expect(box.scrollTop).toBe(100)
+  })
+})
+
+describe('mentioning a file', () => {
+  const files = ['README.md', 'src/readme-helper.ts', 'src/app.ts']
+
+  it('lists matching files after @ and leaves the path in the box on Enter, sending nothing', () => {
+    render(<CodeConversation session={session('idle')} events={[]} files={files} />)
+    const box = screen.getByLabelText(c.message) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: '@rea', selectionStart: 4 } })
+    const options = screen.getAllByRole('option').map((o) => o.textContent)
+    expect(options).toEqual(['README.md', 'src/readme-helper.ts'])
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(box.value).toBe('@README.md')
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('moves with the arrows, closes on Escape and takes a click', () => {
+    render(<CodeConversation session={session('idle')} events={[]} files={files} />)
+    const box = screen.getByLabelText(c.message) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'see @rea', selectionStart: 8 } })
+    fireEvent.keyDown(box, { key: 'ArrowDown' })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(box.value).toBe('see @src/readme-helper.ts')
+    fireEvent.change(box, { target: { value: 'see @rea', selectionStart: 8 } })
+    fireEvent.keyDown(box, { key: 'Escape' })
+    expect(screen.queryByRole('listbox')).toBeNull()
+    fireEvent.change(box, { target: { value: 'see @app', selectionStart: 8 } })
+    fireEvent.mouseDown(screen.getByRole('option', { name: 'src/app.ts' }))
+    expect(box.value).toBe('see @src/app.ts')
+  })
+
+  it('sends the path in the text', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    render(<CodeConversation session={session('idle')} events={[]} files={files} />)
+    const box = screen.getByLabelText(c.message)
+    fireEvent.change(box, { target: { value: 'read @rea', selectionStart: 9 } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/messages', {
+        content: 'read @README.md',
+      }),
+    )
+  })
+
+  it('finds the mention that ends at the caret', () => {
+    expect(mentionAt('a @b', 4)).toEqual({ query: 'b', start: 2 })
+    expect(mentionAt('mail a@b', 8)).toBeUndefined()
+    expect(mentionAt('@b c', 4)).toBeUndefined()
+  })
+})
+
+describe('linkPaths', () => {
+  const files = ['README.md', 'src/app.ts', 'Makefile']
+  it('links known paths, bare or in code, and nothing else', () => {
+    const out = linkPaths('Edit src/app.ts, `README.md`. See other/app.ts and Makefile.', files)
+    expect(out).toContain('[src/app.ts](#workspace-file/src%2Fapp.ts),')
+    expect(out).toContain('[`README.md`](#workspace-file/README.md).')
+    expect(out).toContain('other/app.ts')
+    expect(out).not.toContain('](#workspace-file/other')
+    expect(out).not.toContain('Makefile](')
+  })
+  it('leaves code fences alone', () => {
+    const text = '```\nsrc/app.ts\n```'
+    expect(linkPaths(text, files)).toBe(text)
   })
 })

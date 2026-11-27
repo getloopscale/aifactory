@@ -1,7 +1,14 @@
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
 import { Button, Textarea } from '@getloopscale/ui'
 import { ChevronRight } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from 'react'
 
 import type { CodeEventWire, CodeSessionWire, CodeState } from '../../shared/code'
 import { Assist } from '../components/Assist'
@@ -176,20 +183,117 @@ function Group({ cards }: { cards: ToolCard[] }) {
   )
 }
 
+const MENTION = /(?:^|\s)@([^\s@]*)$/
+const MENTIONS_SHOWN = 8
+const FILE_HREF = '#workspace-file/'
+
+/** The `@query` that ends at the caret, with where it starts, or nothing. */
+export function mentionAt(
+  text: string,
+  caret: number,
+): { query: string; start: number } | undefined {
+  const found = MENTION.exec(text.slice(0, caret))
+  return found ? { query: found[1]!, start: caret - found[1]!.length - 1 } : undefined
+}
+
+/** The files that match what was typed after `@`: a name that starts with it first, then any path holding it. */
+export function mentionMatches(files: string[], query: string): string[] {
+  const q = query.toLowerCase()
+  const name = (f: string) => f.slice(f.lastIndexOf('/') + 1).toLowerCase()
+  const hits = files.filter((f) => f.toLowerCase().includes(q))
+  const rank = (f: string) => (name(f).startsWith(q) ? 0 : 1)
+  return hits.sort((a, b) => rank(a) - rank(b) || a.length - b.length).slice(0, MENTIONS_SHOWN)
+}
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+/**
+ * Makes each path of the workspace that an agent's text names a link the viewer opens. Only a path from the
+ * listing counts, one with a `/` or an extension, and never inside a code fence.
+ */
+export function linkPaths(text: string, files: string[]): string {
+  const known = files
+    .filter((f) => /^[\w.\-/@+]+$/.test(f) && /[./]/.test(f))
+    .sort((a, b) => b.length - a.length)
+  if (known.length === 0) return text
+  const re = new RegExp(
+    `(\`?)(?<![\\w./@\\-\\[(])(${known.map(escapeRe).join('|')})(?![\\w/\\-]|\\.\\w)\\1`,
+    'g',
+  )
+  return text
+    .split(/(```[\s\S]*?(?:```|$))/)
+    .map((part, i) =>
+      i % 2 === 1
+        ? part
+        : part.replace(re, (_all, tick: string, path: string) => {
+            const label = tick ? `\`${path}\`` : path
+            return `[${label}](${FILE_HREF}${encodeURIComponent(path)})`
+          }),
+    )
+    .join('')
+}
+
 /** The conversation of a session and the box that writes to it. */
 export function CodeConversation({
   session,
   events,
+  files = [],
+  onOpenFile,
 }: {
   session: CodeSessionWire
   events: CodeEventWire[]
+  /** The files of the workspace, for `@` and for the paths an agent names. */
+  files?: string[]
+  onOpenFile?: (path: string) => void
 }) {
   const { t } = useCopy()
-  const c = t.code.conversation
+  const c = { ...t.code.conversation, mentions: t.code.files.mentions }
   const rows = useMemo(() => cardsOf(events), [events])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string>()
+  const [caret, setCaret] = useState(0)
+  const [active, setActive] = useState(0)
+  const [menuOff, setMenuOff] = useState(false)
+  const box = useRef<HTMLTextAreaElement>(null)
+  const place = useRef<number | undefined>(undefined)
+  const mention = menuOff ? undefined : mentionAt(text, caret)
+  const options = useMemo(() => (mention ? mentionMatches(files, mention.query) : []))
+  const choose = (path: string) => {
+    if (!mention) return
+    const end = mention.start + 1 + mention.query.length
+    const next = `${text.slice(0, mention.start)}@${path}${text.slice(end)}`
+    place.current = mention.start + 1 + path.length
+    setText(next)
+    setCaret(place.current)
+    setMenuOff(true)
+  }
+  useLayoutEffect(() => {
+    if (place.current !== undefined && box.current) {
+      box.current.setSelectionRange(place.current, place.current)
+      place.current = undefined
+    }
+  })
+  const menuKeys = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (options.length === 0 || event.nativeEvent.isComposing) return false
+    const at = Math.min(active, options.length - 1)
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      const step = event.key === 'ArrowDown' ? 1 : options.length - 1
+      setActive((at + step) % options.length)
+    } else if (event.key === 'Enter' || event.key === 'Tab') choose(options[at]!)
+    else if (event.key === 'Escape') setMenuOff(true)
+    else return false
+    event.preventDefault()
+    return true
+  }
+  const sendOnEnter = enterSends(() => void send())
+  const openLink = (event: MouseEvent) => {
+    const link = (event.target as HTMLElement).closest('a')
+    const href = link?.getAttribute('href')
+    if (!href?.startsWith(FILE_HREF) || !onOpenFile) return
+    event.preventDefault()
+    onOpenFile(decodeURIComponent(href.slice(FILE_HREF.length)))
+  }
   const refusal = refuses(session.state) ? c.refused[session.state] : undefined
   const blocked = busy || refusal !== undefined
 
@@ -221,8 +325,8 @@ export function CodeConversation({
                 </p>
               </div>
             ) : row.type === 'agent' ? (
-              <div key={row.seq} className="max-w-[90%]">
-                <ChatMessageResponse text={row.text} className="text-sm" />
+              <div key={row.seq} className="max-w-[90%]" onClick={openLink}>
+                <ChatMessageResponse text={linkPaths(row.text, files)} className="text-sm" />
               </div>
             ) : row.type === 'tools' ? (
               <Group key={row.seq} cards={row.cards} />
@@ -233,13 +337,46 @@ export function CodeConversation({
         </div>
       </FollowScroll>
       <div className="space-y-2">
-        <div className="flex items-end gap-2">
+        <div className="relative flex items-end gap-2">
+          {options.length > 0 ? (
+            <ul
+              role="listbox"
+              aria-label={c.mentions}
+              className="absolute bottom-full left-0 z-10 mb-1 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 text-xs shadow-md"
+            >
+              {options.map((path, i) => (
+                <li
+                  key={path}
+                  role="option"
+                  aria-selected={i === Math.min(active, options.length - 1)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    choose(path)
+                  }}
+                  className={`cursor-pointer break-all px-3 py-1 font-mono ${
+                    i === Math.min(active, options.length - 1) ? 'bg-muted' : ''
+                  }`}
+                >
+                  {path}
+                </li>
+              ))}
+            </ul>
+          ) : null}
           <Textarea
+            ref={box}
             aria-label={c.message}
             value={text}
             disabled={refusal !== undefined}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={enterSends(() => void send())}
+            onChange={(e) => {
+              setText(e.target.value)
+              setCaret(e.target.selectionStart)
+              setActive(0)
+              setMenuOff(false)
+            }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+            onKeyDown={(e) => {
+              if (!menuKeys(e)) sendOnEnter(e)
+            }}
             rows={3}
             placeholder={c.placeholder}
             className="w-full"
