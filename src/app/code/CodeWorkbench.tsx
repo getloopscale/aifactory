@@ -3,7 +3,13 @@ import {
   ArrowLeft,
   ArrowUp,
   Bot,
+  Code2,
+  Files,
+  FileText,
   FolderGit2,
+  GitCompareArrows,
+  MessagesSquare,
+  X,
   GitBranch,
   PanelRight,
   Plus,
@@ -33,9 +39,9 @@ import { ago } from '../lib/format'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
-import { CodeChanges } from './CodeChanges'
+import { CodeChanges, Hunks } from './CodeChanges'
 import { CodeConversation } from './CodeConversation'
-import { CodeFiles } from './CodeFiles'
+import { CodeFiles, FileViewer } from './CodeFiles'
 
 /** A session as the API sends it: the dates are text. */
 type SessionView = Omit<CodeSession, 'createdAt' | 'updatedAt'> & {
@@ -256,7 +262,16 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
 }
 
 /** The sessions, newest activity first, each with where it is, and a box that narrows them. */
-function SessionList({ sessions, openId }: { sessions: SessionView[]; openId?: string }) {
+function SessionList({
+  sessions,
+  openId,
+  flat = false,
+}: {
+  sessions: SessionView[]
+  openId?: string
+  /** Inside the side bar of the IDE: no card around it. */
+  flat?: boolean
+}) {
   const { t } = useCopy()
   const [filter, setFilter] = useState('')
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean)
@@ -267,9 +282,12 @@ function SessionList({ sessions, openId }: { sessions: SessionView[]; openId?: s
     })
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
   return (
-    <nav aria-label={t.code.sessions} className={`${BLOCK} h-full`}>
+    <nav
+      aria-label={t.code.sessions}
+      className={flat ? 'flex h-full min-h-0 flex-col' : `${BLOCK} h-full`}
+    >
       <div className="flex items-center gap-2 px-3 pt-3">
-        <h2 className="text-sm font-semibold">{t.code.sessions}</h2>
+        <h2 className={flat ? SIDE_TITLE : 'text-sm font-semibold'}>{t.code.sessions}</h2>
         <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
           {sessions.length}
         </span>
@@ -594,6 +612,440 @@ function OpenSession({ id }: { id: string }) {
   )
 }
 
+/** The heading of a view of the side bar, as an IDE writes it. */
+const SIDE_TITLE = 'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+
+type View = 'sessions' | 'files' | 'changes'
+type EditorTab = { kind: 'file' | 'diff'; path: string }
+const tabKey = (tab: EditorTab) => `${tab.kind}:${tab.path}`
+const baseName = (path: string) => path.slice(path.lastIndexOf('/') + 1)
+
+/** The strip of icons at the far left: each shows a view of the side bar, and the one showing hides it. */
+function ActivityBar({
+  view,
+  onView,
+  changed,
+  session,
+}: {
+  view: View | undefined
+  onView: (view: View) => void
+  changed: number
+  /** Without an open session only the sessions can show. */
+  session: boolean
+}) {
+  const { t } = useCopy()
+  const views: Array<[View, string, typeof Bot]> = [
+    ['sessions', t.code.sessions, MessagesSquare],
+    ['files', t.code.files.tab, Files],
+    ['changes', t.code.changes.title, GitCompareArrows],
+  ]
+  return (
+    <div className="flex w-12 shrink-0 flex-col items-center border-r border-border bg-card py-1.5">
+      <div
+        role="tablist"
+        aria-orientation="vertical"
+        aria-label={t.code.changes.tabs}
+        className="flex flex-col items-center gap-1"
+      >
+        {views.map(([key, label, Icon]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={view === key}
+            aria-label={label}
+            title={label}
+            disabled={!session && key !== 'sessions'}
+            onClick={() => onView(key)}
+            className={`relative flex size-9 items-center justify-center rounded-md hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-40 ${
+              view === key ? 'bg-muted text-foreground' : 'text-muted-foreground'
+            }`}
+          >
+            <Icon aria-hidden className="size-[18px]" />
+            {key === 'changes' && changed > 0 ? (
+              <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-primary px-1 text-center font-mono text-[10px] leading-4 text-primary-foreground">
+                {changed}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+      <Link
+        to="/code"
+        aria-label={t.code.newSession}
+        title={t.code.newSession}
+        className="mt-auto flex size-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+      >
+        <Plus aria-hidden className="size-[18px]" />
+      </Link>
+    </div>
+  )
+}
+
+/** The frame of the IDE: icons, side bar, the editor, the agent, and a line of status under them. */
+function Frame({
+  activity,
+  side,
+  editor,
+  agent,
+  status,
+}: {
+  activity: ReactNode
+  side?: ReactNode
+  editor: ReactNode
+  agent?: ReactNode
+  status: ReactNode
+}) {
+  const { t } = useCopy()
+  return (
+    <div data-layout="ide" className="flex h-full min-h-0 flex-col bg-background">
+      <h1 className="sr-only">{t.code.heading}</h1>
+      <div className="flex min-h-0 flex-1">
+        {activity}
+        {side ? (
+          <aside
+            aria-label={t.code.editor.side}
+            className="flex w-64 shrink-0 flex-col border-r border-border bg-card"
+          >
+            {side}
+          </aside>
+        ) : null}
+        <div className="flex min-w-0 flex-1 flex-col">{editor}</div>
+        {agent ? (
+          <section
+            aria-label={t.code.conversation.agent}
+            className="flex w-[min(460px,38%)] shrink-0 flex-col border-l border-border bg-card"
+          >
+            {agent}
+          </section>
+        ) : null}
+      </div>
+      <footer
+        aria-label={t.code.editor.status}
+        className="flex h-6 shrink-0 items-center gap-4 border-t border-border bg-card pl-3 pr-20 font-mono text-[11px] text-muted-foreground"
+      >
+        {status}
+      </footer>
+    </div>
+  )
+}
+
+/** The changed files as a list: a click opens the diff of one in the editor. */
+function ChangeList({
+  data,
+  error,
+  active,
+  onOpen,
+}: {
+  data: CodeDiffResponse | undefined
+  error: string | undefined
+  active: string | undefined
+  onOpen: (path: string) => void
+}) {
+  const { t } = useCopy()
+  if (error && !data)
+    return (
+      <p role="alert" className="px-3 py-2 text-sm text-destructive">
+        {error}
+      </p>
+    )
+  if (!data) return <Quiet role="status">{t.code.changes.loading}</Quiet>
+  if (data.diff.files.length === 0) return <Quiet>{t.code.changes.empty}</Quiet>
+  return (
+    <>
+      <ul aria-label={t.code.changes.files}>
+        {data.diff.files.map((file) => (
+          <li key={file.path}>
+            <button
+              type="button"
+              aria-label={t.code.changes.open(file.path)}
+              aria-current={file.path === active ? 'true' : undefined}
+              title={file.path}
+              onClick={() => onOpen(file.path)}
+              className={`flex w-full items-center gap-2 px-3 py-1 text-left text-xs hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring ${file.path === active ? 'bg-muted' : ''}`}
+            >
+              <span className="shrink-0 font-mono">{baseName(file.path)}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+                {file.path.slice(0, Math.max(0, file.path.lastIndexOf('/')))}
+              </span>
+              <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground">
+                {t.code.changes.lines(file.added, file.removed)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      {!data.live && data.capturedAt ? <Quiet>{t.code.changes.stored}</Quiet> : null}
+    </>
+  )
+}
+
+/** The editor: a strip of tabs, the path of the one showing, and its file or its diff. */
+function Editor({
+  id,
+  tabs,
+  active,
+  diff,
+  onActive,
+  onClose,
+}: {
+  id: string
+  tabs: EditorTab[]
+  active: string | undefined
+  diff: CodeDiffResponse | undefined
+  onActive: (key: string) => void
+  onClose: (key: string) => void
+}) {
+  const { t } = useCopy()
+  const e = t.code.editor
+  const shown = tabs.find((tab) => tabKey(tab) === active)
+  if (!shown) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+        <Code2 aria-hidden className="size-10 stroke-muted-foreground/40" />
+        <p className="max-w-xs text-sm text-muted-foreground">{e.empty}</p>
+      </div>
+    )
+  }
+  const file = shown.kind === 'diff' ? diff?.diff.files.find((f) => f.path === shown.path) : null
+  return (
+    <>
+      <div
+        role="tablist"
+        aria-label={e.tabs}
+        className="flex h-9 shrink-0 items-stretch overflow-x-auto border-b border-border bg-card [scrollbar-width:none]"
+      >
+        {tabs.map((tab) => {
+          const key = tabKey(tab)
+          const name = baseName(tab.path)
+          const label = tab.kind === 'diff' ? e.diffTab(name) : name
+          const Icon = tab.kind === 'diff' ? GitCompareArrows : FileText
+          return (
+            <div
+              key={key}
+              className={`group flex shrink-0 items-center border-r border-border pr-1 ${
+                key === active
+                  ? 'bg-background text-foreground shadow-[inset_0_2px_0_0_var(--color-primary)]'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={key === active}
+                aria-label={label}
+                title={tab.path}
+                onClick={() => onActive(key)}
+                className="flex h-full items-center gap-1.5 pl-3 pr-1 font-mono text-xs focus-visible:outline-2 focus-visible:outline-ring"
+              >
+                <Icon aria-hidden className="size-3.5 shrink-0" />
+                {name}
+              </button>
+              <button
+                type="button"
+                aria-label={e.close(label)}
+                title={e.close(label)}
+                onClick={() => onClose(key)}
+                className={`flex size-5 items-center justify-center rounded hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring ${key === active ? '' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'}`}
+              >
+                <X aria-hidden className="size-3" />
+              </button>
+            </div>
+          )
+        })}
+      </div>
+      <p className="flex h-6 shrink-0 items-center gap-1 truncate border-b border-border px-3 font-mono text-[11px] text-muted-foreground">
+        {shown.path.split('/').join(' › ')}
+      </p>
+      <div role="tabpanel" className="min-h-0 flex-1 overflow-auto [scrollbar-width:thin]">
+        {shown.kind === 'file' ? (
+          <FileViewer sessionId={id} path={shown.path} fill />
+        ) : file ? (
+          <Hunks file={file} />
+        ) : (
+          <Quiet>{t.code.changes.empty}</Quiet>
+        )}
+      </div>
+    </>
+  )
+}
+
+/** An open session as an IDE: what it changed and its files at the left, the editor, and the agent at the right. */
+function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
+  const { t } = useCopy()
+  const { session, events, error } = useCodeSession(id)
+  const turn = lastStateSeq(events)
+  const { files, error: filesError } = useCodeFiles(id, turn)
+  const { data: diff, error: diffError } = useCodeDiff(id, turn)
+  const [view, setView] = useState<View | undefined>('changes')
+  const [tabs, setTabs] = useState<EditorTab[]>([])
+  const [active, setActive] = useState<string>()
+  const opened = useRef(false)
+
+  const open = useCallback((tab: EditorTab) => {
+    opened.current = true
+    setTabs((all) => (all.some((x) => tabKey(x) === tabKey(tab)) ? all : [...all, tab]))
+    setActive(tabKey(tab))
+  }, [])
+  const openFile = useCallback(
+    (path: string) => {
+      open({ kind: 'file', path })
+      setView('files')
+    },
+    [open],
+  )
+  const close = (key: string) => {
+    const at = tabs.findIndex((x) => tabKey(x) === key)
+    const rest = tabs.filter((x) => tabKey(x) !== key)
+    setTabs(rest)
+    if (key === active) {
+      const next = rest[Math.min(at, rest.length - 1)]
+      setActive(next ? tabKey(next) : undefined)
+    }
+  }
+  // The first change opens by itself, so the editor is never empty when there is something to read.
+  const first = diff?.diff.files[0]?.path
+  useEffect(() => {
+    if (first === undefined || opened.current) return
+    opened.current = true
+    setTabs([{ kind: 'diff', path: first }])
+    setActive(tabKey({ kind: 'diff', path: first }))
+  }, [first])
+  const pick = useCallback((next: View) => setView((now) => (now === next ? undefined : next)), [])
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || !event.shiftKey || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'd') {
+        event.preventDefault()
+        pick('changes')
+      } else if (key === 'f') {
+        event.preventDefault()
+        setView('files')
+      }
+    }
+    window.addEventListener('keydown', listener)
+    return () => window.removeEventListener('keydown', listener)
+  }, [pick])
+
+  const changed = diff?.diff.files ?? []
+  const shown = tabs.find((x) => tabKey(x) === active)
+  const side =
+    view === 'sessions' ? (
+      <SessionList sessions={sessions} openId={id} flat />
+    ) : view === 'files' ? (
+      <>
+        <h2 className={`px-3 pb-1 pt-3 ${SIDE_TITLE}`}>{t.code.files.tab}</h2>
+        <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
+          <CodeFiles
+            sessionId={id}
+            files={files}
+            error={filesError}
+            selected={shown?.kind === 'file' ? shown.path : undefined}
+            onSelect={(path) => open({ kind: 'file', path })}
+            bare
+          />
+        </div>
+      </>
+    ) : view === 'changes' ? (
+      <>
+        <h2 className={`flex items-center gap-2 px-3 pb-2 pt-3 ${SIDE_TITLE}`}>
+          {t.code.changes.title}
+          {changed.length > 0 ? (
+            <span className="font-mono tabular-nums">{changed.length}</span>
+          ) : null}
+        </h2>
+        <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
+          <ChangeList
+            data={diff}
+            error={diffError}
+            active={shown?.kind === 'diff' ? shown.path : undefined}
+            onOpen={(path) => open({ kind: 'diff', path })}
+          />
+        </div>
+      </>
+    ) : undefined
+
+  return (
+    <Frame
+      activity={<ActivityBar view={view} onView={pick} changed={changed.length} session />}
+      side={side}
+      editor={
+        <Editor
+          id={id}
+          tabs={tabs}
+          active={active}
+          diff={diff}
+          onActive={setActive}
+          onClose={close}
+        />
+      }
+      agent={
+        session ? (
+          <>
+            <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-3">
+              <span className={SIDE_TITLE}>{t.code.conversation.agent}</span>
+              <span className="min-w-0 truncate text-xs font-medium" title={session.title}>
+                {session.title}
+              </span>
+            </header>
+            {error ? (
+              <p role="alert" className="px-3 pt-2 text-sm text-destructive">
+                {error}
+              </p>
+            ) : null}
+            <div className="min-h-0 flex-1">
+              <CodeConversation
+                key={session.id}
+                session={session}
+                events={events}
+                files={files}
+                onOpenFile={openFile}
+              />
+            </div>
+          </>
+        ) : (
+          <Quiet>{error ?? t.code.conversation.loading}</Quiet>
+        )
+      }
+      status={
+        session ? (
+          <>
+            <span className="flex items-center gap-1.5 font-sans">
+              <span
+                aria-hidden
+                className={`size-1.5 rounded-full ${TONE_DOT[STATE_TONE[session.state]]}`}
+              />
+              {t.code.states[session.state]}
+            </span>
+            <span className="flex min-w-0 items-center gap-1">
+              <GitBranch aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">{session.workBranch}</span>
+            </span>
+            <span className="flex min-w-0 items-center gap-1">
+              <FolderGit2 aria-hidden className="size-3 shrink-0" />
+              <span className="truncate">{session.repository}</span>
+            </span>
+            <span className="ml-auto tabular-nums">
+              {changed.length > 0
+                ? t.code.changes.lines(
+                    changed.reduce((n, f) => n + f.added, 0),
+                    changed.reduce((n, f) => n + f.removed, 0),
+                  )
+                : null}
+            </span>
+            <span className="font-sans">{t.code.modes[session.mode]}</span>
+            <span className="flex items-center gap-1">
+              <Bot aria-hidden className="size-3 shrink-0" />
+              {[session.harness, session.model].filter(Boolean).join(' · ')}
+            </span>
+          </>
+        ) : null
+      }
+    />
+  )
+}
+
 /**
  * Code Mode: the sessions in a narrow column, and the open one, or the box that starts one, taking the rest. The
  * page never scrolls: each block scrolls inside itself. On a compact width they are one column at a time, with a
@@ -605,13 +1057,12 @@ export function CodeWorkbench({ openId }: { openId?: string }) {
   const [composing, setComposing] = useState(false)
   const listing = useResource<Listing>('/api/panel/code/sessions', { everyMs: 5_000 })
   const sessions = listing.data?.sessions ?? []
-  const right = openId ? (
-    <OpenSession id={openId} />
-  ) : (
-    <StartForm harnesses={listing.data?.harnesses ?? []} />
-  )
-
   if (compact) {
+    const right = openId ? (
+      <OpenSession id={openId} />
+    ) : (
+      <StartForm harnesses={listing.data?.harnesses ?? []} />
+    )
     const detail = openId !== undefined || composing
     return (
       <div data-layout="stack" className="space-y-4">
@@ -641,14 +1092,13 @@ export function CodeWorkbench({ openId }: { openId?: string }) {
       </div>
     )
   }
+  if (openId) return <IdeSession key={openId} id={openId} sessions={sessions} />
   return (
-    <div
-      data-layout="workbench"
-      className="grid h-[calc(100vh-8.75rem)] grid-cols-[272px_minmax(0,1fr)] grid-rows-[minmax(0,1fr)] gap-4"
-    >
-      <h1 className="sr-only">{t.code.heading}</h1>
-      <SessionList sessions={sessions} openId={openId} />
-      <div className="min-h-0 min-w-0">{right}</div>
-    </div>
+    <Frame
+      activity={<ActivityBar view="sessions" onView={() => {}} changed={0} session={false} />}
+      side={<SessionList sessions={sessions} flat />}
+      editor={<StartForm harnesses={listing.data?.harnesses ?? []} />}
+      status={<span className="font-sans">{t.code.heading}</span>}
+    />
   )
 }

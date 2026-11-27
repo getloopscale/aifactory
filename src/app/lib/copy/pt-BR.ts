@@ -1955,6 +1955,14 @@ export const ptBR: Copy = {
     hero: 'O que o agente deve fazer?',
     heroAbout:
       'Uma sessão é uma branch própria em um sandbox. Você conversa, o agente trabalha lá e você lê cada mudança ao lado da conversa.',
+    editor: {
+      tabs: 'Editores abertos',
+      close: (name: string) => `Fechar ${name}`,
+      empty: 'Abra uma mudança ou um arquivo na barra lateral para ler aqui.',
+      diffTab: (name: string) => `${name} (mudanças)`,
+      side: 'Barra lateral',
+      status: 'Estado da sessão',
+    },
     filter: 'Filtrar sessões',
     noMatch: 'Nenhuma sessão corresponde.',
     start: 'Iniciar',

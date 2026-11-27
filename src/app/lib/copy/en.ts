@@ -1649,6 +1649,14 @@ export const en = {
     hero: 'What should the agent do?',
     heroAbout:
       'A session is a branch of its own in a sandbox. You talk, the agent works there, and you read every change beside the conversation.',
+    editor: {
+      tabs: 'Open editors',
+      close: (name: string) => `Close ${name}`,
+      empty: 'Open a change or a file from the side bar to read it here.',
+      diffTab: (name: string) => `${name} (changes)`,
+      side: 'Side bar',
+      status: 'Session status',
+    },
     filter: 'Filter sessions',
     noMatch: 'No session matches.',
     start: 'Start',

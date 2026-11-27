@@ -199,8 +199,10 @@ describe('the list of sessions', () => {
     expect(screen.getByText(en.code.noMatch)).toBeDefined()
   })
 
-  it('marks the open session as the current one', () => {
+  it('shows the sessions of an open one behind their icon, with the open one marked', () => {
     show('en', '/code/new')
+    expect(screen.queryByRole('link', { name: /Newer one/ })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: en.code.sessions }))
     expect(screen.getByRole('link', { name: /Newer one/ }).getAttribute('aria-current')).toBe(
       'page',
     )
@@ -257,16 +259,37 @@ describe('the side panel of an open session', () => {
     expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/new/diff')
   })
 
-  it('shows and hides the panel on Ctrl+Shift+D, from a text box too', async () => {
+  it('shows and hides the changes on Ctrl+Shift+D, from a text box too', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     const box = screen.getByLabelText(en.code.conversation.message)
     fireEvent.keyDown(box, { key: 'D', ctrlKey: true, shiftKey: true })
-    expect(screen.queryByRole('tablist', { name: en.code.changes.tabs })).toBeNull()
+    expect(screen.queryByText(en.code.changes.empty)).toBeNull()
+    expect(screen.queryByRole('complementary', { name: en.code.editor.side })).toBeNull()
     fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
-    expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
+    expect(screen.getByText(en.code.changes.empty)).toBeDefined()
     fireEvent.keyDown(window, { key: 'd', ctrlKey: true })
-    expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
+    expect(screen.getByText(en.code.changes.empty)).toBeDefined()
+  })
+
+  it('opens the first change by itself, and a tab closes back to an empty editor', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diff(2),
+    )
+    show('en', '/code/new')
+    const tab = await screen.findByRole('tab', { name: en.code.editor.diffTab('f0.ts') })
+    expect(tab.getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: en.code.changes.open('f1.ts') }))
+    expect(
+      screen
+        .getByRole('tab', { name: en.code.editor.diffTab('f1.ts') })
+        .getAttribute('aria-selected'),
+    ).toBe('true')
+    for (const name of ['f0.ts', 'f1.ts'])
+      fireEvent.click(
+        screen.getByRole('button', { name: en.code.editor.close(en.code.editor.diffTab(name)) }),
+      )
+    expect(screen.getByText(en.code.editor.empty)).toBeDefined()
   })
 
   it('reads the diff again when a turn ends', async () => {
