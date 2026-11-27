@@ -804,6 +804,13 @@ de verdade (ADR 0008).
 A baseline de 2026-11-11 passou cinco de cinco casos, com custo médio de US$ 0,35 por caso nos agentes, e
 levou 32 minutos. Somando o sandbox, a rodada custou US$ 1,98.
 
+**Pendente (#688).** A meta é que a checagem rápida termine em menos de 20 minutos, num host ocioso. Isso
+ainda não foi medido: a baseline não foi regravada com o conjunto rápido novo (a seleção a partir dos casos
+que passaram e a concorrência são do #684) e nenhum tempo de `pnpm evals:check` foi registrado. Falta, numa
+máquina com Postgres, credenciais e sandbox: `EVALS_BASELINE=1 pnpm evals`, conferir que todo caso rápido
+de `evals/cases.json` está em `evals/baseline.json`, e cronometrar `pnpm evals:check` com `eval_check`
+`ran=true`, anotando aqui o host, a carga e o tempo. Até lá, o número de 32 minutos acima é o único medido.
+
 ## O painel
 
 Uma interface local para ver e conduzir a fábrica. Abre em `http://localhost:3000`.
