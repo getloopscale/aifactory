@@ -317,6 +317,12 @@ export const en = {
       linear: 'from Linear',
     },
     checksPassed: (passed: number, total: number) => `checks ${passed}/${total}`,
+    ci: {
+      running: (done: number, total: number) => `CI ${done}/${total}`,
+      passed: 'CI passed',
+      failed: (first: string, more: number) =>
+        more > 0 ? `CI failed: ${first} and ${more} more` : `CI failed: ${first}`,
+    },
     restOfQueue: 'rest of the queue',
     priority: (n: number) => `priority ${n}`,
     priorityBadge: (n: number) => `P${n}`,
@@ -454,6 +460,8 @@ export const en = {
     questions: 'Questions',
     replyHint: 'Reply in a comment on the issue, as someone with write access.',
     answered: (by: string, answer: string) => `${by} answered: ${answer}`,
+    ciChecks: 'GitHub checks',
+    ciState: { running: 'running', passed: 'passed', failed: 'failed' },
     deliveries: 'Deliveries',
     deliveryRelease: 'Release',
     deliveryPreRelease: 'Pre-release',

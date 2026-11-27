@@ -305,7 +305,7 @@ describe('the state the fake GitHub holds', () => {
 
     expect(await github.commitChecks(REPO, 't', 'abc')).toEqual({
       checkRuns: [
-        { name: 'CI', status: 'completed', conclusion: 'failure' },
+        { name: 'CI', status: 'completed', conclusion: 'failure', url: 'u1' },
         { name: 'docs', status: 'completed', conclusion: 'skipped' },
         { name: 'e2e', status: 'in_progress', conclusion: null },
         { name: 'factory', status: 'completed', conclusion: 'success' },
