@@ -96,6 +96,10 @@ describe.each([
     expect(screen.getByLabelText(t.code.baseBranch)).toBeDefined()
     expect(screen.getByLabelText(t.code.agent)).toBeDefined()
     expect(screen.getByLabelText(t.code.mode)).toBeDefined()
+    const dots = screen.getAllByRole('img', { name: t.code.states.running })
+    expect(dots).toHaveLength(2)
+    expect(dots[0]!.className).toContain('bg-primary')
+    expect(dots[0]!.textContent).toBe('')
     const repos = screen.getByLabelText(t.code.repository) as HTMLSelectElement
     expect([...repos.options].map((o) => o.value)).toEqual(['acme/shop'])
   })
