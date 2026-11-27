@@ -59,12 +59,12 @@ issue, o commit de que partiu, as checagens que a aceitaram, o custo e a duraç�
   build e sem restart, quando:
   - a taxa de aprovação cai mais de 20 pontos percentuais. Com 5 casos, um caso vale 20 pontos, então
     um caso que deixa de passar (um modelo erra por acaso) não bloqueia, e dois bloqueiam;
-  - o custo passa do dobro da baseline na mediana dos casos. Até 2026-11-19 o limite era 25%; o dono decidiu que
-    uma fábrica mais cara é melhor que uma mais lenta, e o limite ficou só para pegar um custo descontrolado.
-    Desde 2026-11-24 (#465) o veredito é a mediana, caso a caso, de `custo - 2 x custo da baseline`, e não a
-    média: o custo do construtor em um só caso varia mais de 2x de uma rodada para outra e decidia sozinho.
-    Exige ao menos 3 casos que chegaram a um veredito nas duas rodadas; com menos, a rodada é recusada. Limite:
-    a mediana não vê um aumento concentrado em menos da metade dos casos, e 3 a 5 casos não dão confiança estatística.
+    O custo não está nessa lista desde 2026-11-27. Naquele dia um deploy que passou cinco casos de cinco foi
+    recusado porque o dono tinha posto o construtor num modelo mais caro, e a rodada foi comparada com uma baseline
+    gravada em outro modelo. A decisão do dono: trabalho que passa está pronto, custe o que custar, e cada modelo
+    tem o seu preço. A comparação continua sendo feita (a mediana, caso a caso, de `custo - 2 x custo da baseline`,
+    sobre ao menos 3 casos que chegaram a um veredito nas duas rodadas, #465) e o resultado sai como nota em
+    `costNotes`, que `ok` não lê. O histórico: o limite era 25% até 2026-11-19 e o dobro até 2026-11-27.
 - **Uma passagem registrada não roda de novo.** Quando a checagem mede o conjunto rápido inteiro e o juiz de
   prontidão, e tudo passa, ela grava um registro em `<diretório comum do git>/aifactory-evals/passes/`, fora de
   qualquer árvore de trabalho: worktrees e o checkout principal leem o mesmo, e o sandbox de uma tarefa tem o

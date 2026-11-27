@@ -368,7 +368,7 @@ describe('checkBeforeDeploy', () => {
       },
     })
 
-    expect(checked).toEqual({ ran: false, ok: true, reasons: [], changed: [] })
+    expect(checked).toEqual({ ran: false, ok: true, reasons: [], changed: [], costNotes: [] })
     expect(ran).toBe(false)
   })
 
@@ -463,9 +463,23 @@ describe('checkBeforeDeploy', () => {
       reasons: [
         '4 quick case(s) passed in the baseline and failed now: a, b, c, d',
         'the pass rate fell from 100% to 0%',
-        'no case ran to a verdict in both runs, so the cost could not be compared',
       ],
+      costNotes: ['no case ran to a verdict in both runs, so the cost was not compared'],
     })
+  })
+
+  it('passes a run that costs three times the baseline and passes the same cases, and says what the cost did', async () => {
+    const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
+      baseline,
+      changedPaths: ['src/server/factory/harness.ts'],
+      setup: baseline.setup,
+      runQuick: async () => baseline.results.map((r) => ({ ...r, costUsd: r.costUsd * 3 })),
+    })
+
+    expect(checked).toMatchObject({ ran: true, ok: true, reasons: [] })
+    expect(checked.costNotes).toHaveLength(1)
+    expect(checked.costNotes[0]).toMatch(/^the median case cost rose past 2x its baseline/)
   })
 })
 

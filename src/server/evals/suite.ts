@@ -308,7 +308,14 @@ export function agentSetup(
   }
 }
 
-export type DeployCheck = { ran: boolean; ok: boolean; reasons: string[]; changed: string[] }
+export type DeployCheck = {
+  ran: boolean
+  ok: boolean
+  reasons: string[]
+  changed: string[]
+  /** What the cost did against the baseline (`Comparison.costNotes`). It is printed and never decides `ok`. */
+  costNotes: string[]
+}
 
 /**
  * The gate before a deploy: when a file that steers the agents changed since the baseline's commit, or the
@@ -327,7 +334,7 @@ export async function checkBeforeDeploy(input: {
     ...agentConfigurationChanged(input.changedPaths),
     ...setupChanges(input.baseline.setup, input.setup),
   ]
-  if (changed.length === 0) return { ran: false, ok: true, reasons: [], changed }
+  if (changed.length === 0) return { ran: false, ok: true, reasons: [], changed, costNotes: [] }
   const ran = await input.runQuick()
   const { results, skipped } = Array.isArray(ran) ? { results: ran, skipped: [] } : ran
   const compared = compareWithBaseline(results, input.baseline)
@@ -358,7 +365,7 @@ export async function checkBeforeDeploy(input: {
       : []),
     ...compared.reasons,
   ]
-  return { ran: true, ok: reasons.length === 0, reasons, changed }
+  return { ran: true, ok: reasons.length === 0, reasons, changed, costNotes: compared.costNotes }
 }
 
 export type RunOutcome = {
@@ -428,7 +435,8 @@ export async function checkWithRecord(
   const setup = await readSetupInTime(testStartedAt, input.readSetup, now)
   const start = input.fingerprint(setup)
   const found = input.find(start)
-  if (found) return { ran: false, ok: true, reasons: [], changed: [], accepted: found.fingerprint }
+  if (found)
+    return { ran: false, ok: true, reasons: [], changed: [], costNotes: [], accepted: found.fingerprint }
   let skipped = 0
   const checked = await checkFromTestStart(testStartedAt, {
     ...input,
