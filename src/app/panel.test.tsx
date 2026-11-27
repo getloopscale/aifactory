@@ -769,6 +769,78 @@ describe('the default branch after a release', () => {
     expect(screen.getByText('no verdict: the checks never reported')).toBeDefined()
   })
 
+  describe('the GitHub checks of the pull request', () => {
+    const check = (
+      name: string,
+      state: 'running' | 'passed' | 'failed',
+      url: string | null = null,
+    ) => ({
+      name,
+      state,
+      url,
+    })
+    const cardWith = (ci: TaskCard['ci']) =>
+      render(
+        <MemoryRouter>
+          <Card task={{ ...base, ci }} />
+        </MemoryRouter>,
+      )
+
+    it('says how many checks finished while one runs', () => {
+      cardWith({
+        state: 'running',
+        done: 2,
+        total: 3,
+        failed: [],
+        checks: [
+          check('check', 'passed'),
+          check('quality', 'passed'),
+          check('mutation', 'running'),
+        ],
+      })
+      expect(screen.getByText('CI 2/3')).toBeDefined()
+    })
+
+    it('names the failed check, or the first one and how many more', () => {
+      cardWith({ state: 'failed', done: 1, total: 1, failed: ['quality'], checks: [] })
+      expect(screen.getByText('CI failed: quality')).toBeDefined()
+      cleanup()
+      cardWith({ state: 'failed', done: 2, total: 2, failed: ['check', 'quality'], checks: [] })
+      expect(screen.getByText('CI failed: check and 1 more')).toBeDefined()
+    })
+
+    it('says nothing without a state', () => {
+      cardWith(null)
+      expect(screen.queryByText(/^CI/)).toBeNull()
+    })
+
+    it('lists each check in the detail with a link to its run', async () => {
+      serve({
+        'GET /api/panel/tasks/5': detail({
+          task: {
+            ...base,
+            ci: {
+              state: 'running',
+              done: 1,
+              total: 2,
+              failed: [],
+              checks: [
+                check('check', 'passed', 'https://github.com/paulo/app/runs/1'),
+                check('mutation', 'running'),
+              ],
+            },
+          },
+        }),
+      })
+      renderTask()
+      await waitFor(() => expect(screen.getByText('GitHub checks')).toBeDefined())
+      expect(screen.getByText('mutation')).toBeDefined()
+      expect(screen.getByText('check').closest('a')?.getAttribute('href')).toBe(
+        'https://github.com/paulo/app/runs/1',
+      )
+    })
+  })
+
   it('marks the card of a task whose release broke the default branch', () => {
     render(
       <MemoryRouter>

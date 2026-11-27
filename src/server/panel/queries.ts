@@ -38,6 +38,7 @@ import { guideAvailability } from './guide-availability'
 import { openTerminalOf } from '../factory/terminal-lock'
 import { integrationBranch } from '../factory/branches'
 import { baseHoldOf } from '../factory/await-ci'
+import { ciOf, readPullRequestCi } from '../factory/pull-request-ci'
 import { pendingSendBack } from '../factory/send-back'
 import { cardAgent, STEP_STAGES, type ReportedModels, type StepEvent } from './card-agent'
 import { headChecks, issueFactsOf } from './card-issue'
@@ -207,6 +208,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
   const limits = await leadTimeLimits(db, rows)
   const issues = await issueFactsOf(db, rows)
   const checks = await headChecks(db, ids)
+  const ci = await readPullRequestCi(db, ids)
   const now = new Date()
   return rows.map((r) => {
     const seen = byTask.get(r.id)
@@ -234,6 +236,7 @@ async function cards(db: Database, rows: TaskRow[]): Promise<TaskCard[]> {
       approved: r.headSha !== null && kinds.some((k) => k.sha === r.headSha),
       integrated: r.mergedSha !== null,
       waitingForChecks: r.awaitingCiSha !== null,
+      ci: ciOf(ci.get(r.id), r),
       waitingOnBase: holds.get(r.id) ?? null,
       change: changes.get(r.id) ?? null,
       risk: risks.get(r.id) ?? null,

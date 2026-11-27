@@ -388,6 +388,12 @@ export const ptBR: Copy = {
       linear: 'do Linear',
     },
     checksPassed: (passed: number, total: number) => `checks ${passed}/${total}`,
+    ci: {
+      running: (done: number, total: number) => `CI ${done}/${total}`,
+      passed: 'CI passou',
+      failed: (first: string, more: number) =>
+        more > 0 ? `CI falhou: ${first} e mais ${more}` : `CI falhou: ${first}`,
+    },
     restOfQueue: 'resto da fila',
     priority: (n: number) => `prioridade ${n}`,
     priorityBadge: (n: number) => `P${n}`,
@@ -525,6 +531,8 @@ export const ptBR: Copy = {
     questions: 'Perguntas',
     replyHint: 'Responda em um comentário na issue, como alguém com permissão de escrita.',
     answered: (by: string, answer: string) => `${by} respondeu: ${answer}`,
+    ciChecks: 'Checks do GitHub',
+    ciState: { running: 'em andamento', passed: 'passou', failed: 'falhou' },
     deliveries: 'Entregas',
     deliveryRelease: 'Lançamento',
     deliveryPreRelease: 'Pré-lançamento',
