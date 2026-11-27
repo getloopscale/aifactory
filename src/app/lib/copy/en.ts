@@ -1701,6 +1701,12 @@ export const en = {
       failed: 'Failed',
       noOutput: 'No output.',
       running: 'No result yet.',
+      modeLabel: 'Mode',
+      modeAbout: {
+        ask: 'Answers questions about the code. It changes nothing.',
+        plan: 'Reads the code and writes a plan. It changes nothing.',
+        code: 'Reads, edits files and runs commands in the checkout.',
+      },
       send: 'Send',
       sending: 'Sending…',
       message: 'Message to the agent',

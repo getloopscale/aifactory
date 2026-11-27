@@ -5,13 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CodeEventWire, CodeSessionWire, CodeState } from '../../shared/code'
 import { en } from '../lib/copy/en'
 
-vi.mock('../lib/api', () => ({ post: vi.fn() }))
+vi.mock('../lib/api', () => ({ post: vi.fn(), patch: vi.fn() }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 vi.mock('@getloopscale/loopzero-ui', () => ({
   ChatMessageResponse: ({ text }: { text: string }) => <div data-testid="md">{text}</div>,
 }))
 
-import { post } from '../lib/api'
+import { patch, post } from '../lib/api'
 
 import { CodeConversation, linkPaths, mentionAt } from './CodeConversation'
 
@@ -41,7 +41,10 @@ const ev = (
   tool: string | null = null,
 ): CodeEventWire => ({ sessionId: 's1', seq, kind, tool, content, at: '' })
 
-beforeEach(() => vi.mocked(post).mockReset())
+beforeEach(() => {
+  vi.mocked(post).mockReset()
+  vi.mocked(patch).mockReset()
+})
 afterEach(cleanup)
 
 describe('the conversation', () => {
@@ -163,6 +166,36 @@ describe('following the end', () => {
       />,
     )
     expect(box.scrollTop).toBe(100)
+  })
+
+  it('shows the three modes with a line each, and picking Plan saves it', async () => {
+    vi.mocked(patch).mockResolvedValueOnce({ mode: 'plan' })
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.click(screen.getByRole('button', { name: c.modeLabel }))
+    for (const m of ['ask', 'plan', 'code'] as const)
+      expect(screen.getByText(c.modeAbout[m])).toBeDefined()
+    fireEvent.click(screen.getByRole('radio', { name: new RegExp(en.code.modes.plan) }))
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'plan' }))
+    await screen.findByText(`${c.modeLabel}: ${en.code.modes.plan}`)
+  })
+
+  it('picks Code with the key 3 while the selector is open, and ignores it closed', async () => {
+    vi.mocked(patch).mockResolvedValueOnce({ mode: 'code' })
+    render(<CodeConversation session={{ ...session('idle'), mode: 'ask' }} events={[]} />)
+    fireEvent.keyDown(window, { key: '3' })
+    expect(patch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: c.modeLabel }))
+    fireEvent.keyDown(window, { key: '3' })
+    await waitFor(() => expect(patch).toHaveBeenCalledWith('/api/panel/code/s1', { mode: 'code' }))
+  })
+
+  it('says so when the mode cannot be saved and keeps the old one', async () => {
+    vi.mocked(patch).mockRejectedValueOnce(new Error('down'))
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.click(screen.getByRole('button', { name: c.modeLabel }))
+    fireEvent.keyDown(window, { key: '1' })
+    await screen.findByRole('alert')
+    expect(screen.getByText(`${c.modeLabel}: ${en.code.modes.code}`)).toBeDefined()
   })
 })
 
