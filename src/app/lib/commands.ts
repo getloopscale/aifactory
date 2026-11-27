@@ -11,6 +11,7 @@ export const GO_KEYS: Record<string, string> = {
   r: '/repositories',
   a: '/agents',
   h: '/health',
+  c: '/code',
   y: '/history',
   s: '/setup',
 }
@@ -75,6 +76,7 @@ export function commands(a: {
     place('/floor', t.floor.name),
     place('/work', t.places.board),
     place('/plans', t.places.plans),
+    place('/code', t.places.code),
     place('/repositories', t.places.repositories),
     place('/agents', t.places.agents),
     place('/health', t.places.health),
