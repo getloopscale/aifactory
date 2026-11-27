@@ -257,7 +257,7 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
     setProblem(undefined)
     try {
       const saved = await patch<{ mode: CodeMode }>(
-        `/api/panel/code/${encodeURIComponent(session.id)}`,
+        `/api/panel/code/sessions/${encodeURIComponent(session.id)}`,
         {
           mode: next,
         },
@@ -396,7 +396,7 @@ export function CodeConversation({
     setBusy(true)
     setProblem(undefined)
     try {
-      await post(`/api/panel/code/sessions/${session.id}/messages`, { content })
+      await post(`/api/panel/code/sessions/${session.id}/messages`, { text: content })
       setText('')
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))

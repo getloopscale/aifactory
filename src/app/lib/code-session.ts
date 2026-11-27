@@ -57,7 +57,9 @@ export function useCodeSession(id: string): CodeSessionView {
 
     const readSession = async () => {
       try {
-        const session = await get<CodeSessionWire>(`/api/panel/code/${encodeURIComponent(id)}`)
+        const session = await get<CodeSessionWire>(
+          `/api/panel/code/sessions/${encodeURIComponent(id)}`,
+        )
         if (alive) setView((v) => ({ ...v, session, error: undefined }))
       } catch (e) {
         if (alive) setView((v) => ({ ...v, error: e instanceof Error ? e.message : String(e) }))
@@ -78,7 +80,7 @@ export function useCodeSession(id: string): CodeSessionView {
           while (more && alive) {
             const after = lastContiguous([...bySeq.values()].sort((a, b) => a.seq - b.seq))
             const page = await get<CodeEventPage>(
-              `/api/panel/code/${encodeURIComponent(id)}/events?after=${after}`,
+              `/api/panel/code/sessions/${encodeURIComponent(id)}/events?after=${after}`,
             )
             if (!alive) return
             add(page.events)
