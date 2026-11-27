@@ -406,11 +406,24 @@ function OpenSession({ id }: { id: string }) {
   const [selected, setSelected] = useState<string>()
   const turn = lastStateSeq(events)
   const { files, error: filesError } = useCodeFiles(id, turn)
+  const [title, setTitle] = useState<string>()
+  useEffect(() => setTitle(undefined), [id])
   const toggle = useCallback(() => setPanel((p) => !p), [])
   const showFiles = useCallback(() => {
     setPanel(true)
     setTab('files')
   }, [])
+  /** `/diff` and `/files`: hide the tab when it is the one showing, show it otherwise. */
+  const togglePanel = useCallback(
+    (next: Tab) => {
+      if (panel && tab === next) setPanel(false)
+      else {
+        setPanel(true)
+        setTab(next)
+      }
+    },
+    [panel, tab],
+  )
   const openFile = useCallback(
     (path: string) => {
       setSelected(path)
@@ -437,8 +450,8 @@ function OpenSession({ id }: { id: string }) {
   return (
     <div className={panel && !compact ? 'grid grid-cols-[minmax(0,3fr)_minmax(0,2fr)] gap-4' : ''}>
       <Surface
-        title={session.title}
-        label={session.title}
+        title={title ?? session.title}
+        label={title ?? session.title}
         padded
         action={
           <button
@@ -467,6 +480,8 @@ function OpenSession({ id }: { id: string }) {
               events={events}
               files={files}
               onOpenFile={openFile}
+              onPanel={togglePanel}
+              onRenamed={setTitle}
             />
           </div>
         </div>
