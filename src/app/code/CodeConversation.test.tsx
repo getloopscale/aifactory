@@ -1,0 +1,166 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { CodeEventWire, CodeSessionWire, CodeState } from '../../shared/code'
+import { en } from '../lib/copy/en'
+
+vi.mock('../lib/api', () => ({ post: vi.fn() }))
+vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
+vi.mock('@getloopscale/loopzero-ui', () => ({
+  ChatMessageResponse: ({ text }: { text: string }) => <div data-testid="md">{text}</div>,
+}))
+
+import { post } from '../lib/api'
+
+import { CodeConversation } from './CodeConversation'
+
+const c = en.code.conversation
+
+const session = (state: CodeState): CodeSessionWire => ({
+  id: 's1',
+  title: 'T',
+  repository: 'acme/shop',
+  baseBranch: 'workspace',
+  workBranch: 'code/s1',
+  harness: 'codex',
+  model: null,
+  mode: 'code',
+  state,
+  sandboxId: null,
+  snapshotId: null,
+  agentSessionId: null,
+  createdAt: '',
+  updatedAt: '',
+})
+const ev = (
+  seq: number,
+  kind: CodeEventWire['kind'],
+  content: string,
+  tool: string | null = null,
+): CodeEventWire => ({ sessionId: 's1', seq, kind, tool, content, at: '' })
+
+beforeEach(() => vi.mocked(post).mockReset())
+afterEach(cleanup)
+
+describe('the conversation', () => {
+  it('folds two tool pairs into one line that opens on both commands', () => {
+    render(
+      <CodeConversation
+        session={session('idle')}
+        events={[
+          ev(1, 'user_message', 'run the tests'),
+          ev(2, 'tool_use', 'ls -la', 'bash'),
+          ev(3, 'tool_result', 'file-a', 'bash'),
+          ev(4, 'tool_use', 'pnpm test', 'bash'),
+          ev(5, 'tool_result', 'all green', 'bash'),
+          ev(6, 'agent_message', 'Done **now**'),
+        ]}
+      />,
+    )
+    expect(screen.getByText('run the tests')).toBeDefined()
+    expect(screen.getByTestId('md').textContent).toBe('Done **now**')
+    expect(screen.queryByText('ls -la')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: c.ranCommands(2) }))
+    expect(screen.getByText('ls -la')).toBeDefined()
+    expect(screen.getByText('pnpm test')).toBeDefined()
+    fireEvent.click(screen.getAllByRole('button', { name: /bash/ })[1]!)
+    expect(screen.getByText('all green')).toBeDefined()
+  })
+
+  it('marks a failed result with a dot and shows its output', () => {
+    render(
+      <CodeConversation
+        session={session('idle')}
+        events={[ev(1, 'tool_use', 'make', 'bash'), ev(2, 'error', 'boom')]}
+      />,
+    )
+    const card = screen.getByRole('button', { name: /bash/ })
+    const dot = screen.getByRole('img', { name: c.failed })
+    expect(dot.className).toContain('bg-destructive')
+    expect(dot.textContent).toBe('')
+    fireEvent.click(card)
+    const out = screen.getByText('boom')
+    expect(out.className).not.toContain('destructive')
+  })
+
+  it('reads an edit with and without line counts', () => {
+    render(
+      <CodeConversation
+        session={session('idle')}
+        events={[
+          ev(1, 'tool_use', JSON.stringify({ file_path: 'a.ts', added: 3, removed: 1 }), 'edit'),
+          ev(2, 'tool_result', 'ok'),
+          ev(3, 'agent_message', 'between'),
+          ev(4, 'tool_use', JSON.stringify({ file_path: 'b.ts' }), 'edit'),
+          ev(5, 'tool_result', 'ok'),
+        ]}
+      />,
+    )
+    expect(screen.getByText(`${c.edited} a.ts`)).toBeDefined()
+    expect(screen.getByText(c.lines(3, 1))).toBeDefined()
+    expect(screen.getByText(`${c.edited} b.ts`)).toBeDefined()
+    expect(screen.queryByText(c.lines(0, 0))).toBeNull()
+  })
+
+  it('shows the working line and a disabled send while running', () => {
+    render(<CodeConversation session={session('running')} events={[]} />)
+    expect(screen.getByRole('status').textContent).toBe(c.stateLine.running)
+    expect(screen.getByText(c.refused.running)).toBeDefined()
+    expect((screen.getByRole('button', { name: c.send }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText(c.message) as HTMLTextAreaElement).disabled).toBe(true)
+  })
+
+  it('sends on Enter and keeps the draft when the request fails', async () => {
+    vi.mocked(post).mockRejectedValueOnce(new Error('down')).mockResolvedValueOnce({})
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    const box = screen.getByLabelText(c.message) as HTMLTextAreaElement
+    fireEvent.change(box, { target: { value: 'go' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await screen.findByRole('alert')
+    expect(box.value).toBe('go')
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(box.value).toBe(''))
+    expect(post).toHaveBeenLastCalledWith('/api/panel/code/sessions/s1/messages', {
+      content: 'go',
+    })
+  })
+})
+
+describe('following the end', () => {
+  it('keeps the end in view, and stops after a scroll up', () => {
+    const geometry = { scrollHeight: 1000, clientHeight: 200 }
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
+      configurable: true,
+      get: () => geometry.scrollHeight,
+    })
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get: () => geometry.clientHeight,
+    })
+    const first = [ev(1, 'user_message', 'one')]
+    const { rerender, container } = render(
+      <CodeConversation session={session('idle')} events={first} />,
+    )
+    const box = container.querySelector('.\\[overflow-anchor\\:none\\]') as HTMLElement
+    expect(box.scrollTop).toBe(1000)
+    geometry.scrollHeight = 1200
+    rerender(
+      <CodeConversation
+        session={session('idle')}
+        events={[...first, ev(2, 'agent_message', 'two')]}
+      />,
+    )
+    expect(box.scrollTop).toBe(1200)
+    box.scrollTop = 100
+    fireEvent.scroll(box)
+    geometry.scrollHeight = 1400
+    rerender(
+      <CodeConversation
+        session={session('idle')}
+        events={[...first, ev(2, 'agent_message', 'two'), ev(3, 'agent_message', 'three')]}
+      />,
+    )
+    expect(box.scrollTop).toBe(100)
+  })
+})
