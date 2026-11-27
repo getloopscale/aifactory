@@ -14,6 +14,8 @@ import {
   agentsTool,
   updateAgentSettingsTool,
   approveTool,
+  codeSessionTool,
+  codeSessionsTool,
   createPlanIssuesTool,
   createPlanTool,
   healthTool,
@@ -60,6 +62,8 @@ const ALL: Tools = {
   list_plans: plansTool,
   plan_detail: planTool,
   list_repositories: repositoriesTool,
+  list_code_sessions: codeSessionsTool,
+  code_session_events: codeSessionTool,
   list_agents: agentsTool,
   agent_prompt: agentPromptTool,
   update_agent_settings: updateAgentSettingsTool,
@@ -92,6 +96,7 @@ const TOOLS_OF: Record<GuideId, string[]> = {
   health: ['health_report', 'task_detail', 'resolve_finding', 'acknowledge_watch'],
   agents: ['list_agents', 'agent_prompt', 'update_agent_settings'],
   setup: ['setup_report'],
+  code: ['list_code_sessions', 'code_session_events'],
 }
 
 const TOOLS = Object.fromEntries(

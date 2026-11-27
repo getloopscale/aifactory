@@ -19,6 +19,7 @@ describe('the guides', () => {
       'health',
       'agents',
       'setup',
+      'code',
     ])
     expect(Object.keys(GUIDE_SPECS)).toEqual([...GUIDE_IDS])
     expect(guidePath('board')).toBe('/api/agents/guide-board')
@@ -78,6 +79,19 @@ describe('the guides', () => {
       'history_search',
       'history_read',
     ])
+  })
+
+  it('gives the Code Mode guide two read tools and nothing that writes', () => {
+    expect(Object.keys(GUIDE_SPECS.code.tools)).toEqual([
+      'list_code_sessions',
+      'code_session_events',
+      'history_search',
+      'history_read',
+    ])
+    expect(GUIDE_SPECS.code.asks).toEqual({})
+    expect(guidePath('code')).toBe('/api/agents/guide-code')
+    expect(guidePath('code', 'codex')).toBe('/api/agents/guide-code-codex')
+    expect(GUIDE_INSTRUCTIONS('code')).toContain('Code Mode never merges')
   })
 
   it('lets the agents guide read the catalog and, with approval, choose which coding agent does each role', () => {
