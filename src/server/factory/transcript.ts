@@ -133,7 +133,7 @@ const SECRET = new RegExp(
 export const redactSecrets = (value: string): string => value.replace(SECRET, '[redacted]')
 
 /** Cuts text to `max` bytes of UTF-8 without splitting a character, marking the cut. */
-function cutToBytes(value: string, max: number): string {
+export function cutToBytes(value: string, max: number): string {
   if (Buffer.byteLength(value) <= max) return value
   const room = max - Buffer.byteLength(CUT)
   let end = Math.min(value.length, room)
