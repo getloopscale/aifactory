@@ -148,7 +148,7 @@ export function GuideThread({
           running={running}
           onStop={() => agent.abort()}
           placeholder={t.guide.placeholder}
-          trailing={<ModelPicker model={model} onChange={changeModel} />}
+          trailing={<ModelPicker model={model} onChange={changeModel} use="guide" />}
         />
         {guide.note ? <p className="mt-2 px-3 text-xs text-foreground/50">{guide.note}</p> : null}
       </div>

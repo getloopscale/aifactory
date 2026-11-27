@@ -968,6 +968,9 @@ export type ChatSummary = {
 /** Which agent answers: the OpenRouter one, or the one that uses the owner's ChatGPT (Codex) subscription. */
 export type ChatModel = 'openrouter' | 'codex'
 
+/** The model behind each choice of the picker, for the chat and for the guides of the pages, as the owner reads it. */
+export type ChatModels = Record<'chat' | 'guide', Record<ChatModel, string>>
+
 /** A message as the page renders it: an id, a role, and parts (text, tool calls, ...). */
 export type ChatMessageView = {
   id: string

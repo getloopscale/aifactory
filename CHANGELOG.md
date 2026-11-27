@@ -59,6 +59,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The model picker of the message box names the model behind each choice, in its menu and on its button, as the server is configured: the chat's in the chat, the guides' in a guide. It named only the provider, so the model had to be looked up in the environment file
 - The message box of the chat and of the guide gives a message of more than one line the whole width, with the "+", the model and the send button in a row under it, and lets it grow to two fifths of the window before it scrolls. A long message used to stay squeezed between the buttons, eight lines tall
 - The count on the Setup entry of the menu has the shape of the one on Inbox and Health: the same corners, size and monospaced digits, on a tint of its tone. It was a round pill with a ring
 - The factory runs on LoopZero, the framework TheoKit became: `@getloopscale/loopzero` in place of `theokit`, `@getloopscale/loopzero-sdk`, `-agents` and `-ui` in place of `@theokit/sdk`, `@theokit/agents` and `@theokit/ui`, and `@getloopscale/ui` in place of `@usetheo/ui`. The configuration is `loopzero.config.ts`, the agent context and the build are in `.loopzero/` (`LOOPZERO.md` holds the product facts), the command is `loopzero`, and a request that changes something carries `X-LoopZero-Action`. A build of the old framework left in `.theokit/` is no longer read and may be deleted
