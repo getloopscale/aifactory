@@ -91,6 +91,7 @@ function setup(
         enabled: async () => true,
         knowledgeRepository: async () => undefined,
         saveSnapshot: async () => undefined,
+        saveDiff: async () => undefined,
       },
     },
     harnessFor: () => harness,
