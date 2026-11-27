@@ -553,8 +553,11 @@ export const agentRun = pgTable('agent_run', {
   /** The review of a pull request the pass was for, when it was not for a task. */
   externalReviewId: integer('external_review_id'),
   role: text('role', {
-    enum: ['builder', 'planner', 'reviewer', 'merger', 'security', 'lens'],
+    enum: ['builder', 'planner', 'reviewer', 'merger', 'security', 'lens', 'code'],
   }).notNull(),
+  /** The code session a `code` pass ran for, and the `code_event.seq` of the user message it answered. */
+  codeSessionId: text('code_session_id'),
+  codeMessageSeq: integer('code_message_seq'),
   harness: text('harness').notNull(),
   /** The model and effort the pass ran with, `default` when the owner chose none; null for a pass before this was recorded. */
   model: text('model'),
@@ -649,6 +652,8 @@ export const codeSession = pgTable('code_session', {
   /** The last diff read from the workspace when a turn ended, kept for a session whose sandbox is stopped. */
   lastDiff: jsonb('last_diff').$type<CodeDiff>(),
   lastDiffAt: timestamp('last_diff_at', { withTimezone: true }),
+  /** The harness that produced `agentSessionId`: another harness cannot resume it. */
+  agentSessionHarness: text('agent_session_harness'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

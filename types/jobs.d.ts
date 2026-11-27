@@ -26,6 +26,8 @@ declare module '@getloopscale/loopzero/server/jobs' {
     'resume-task': { taskId: number; questionId: number }
     /** Delivers the owner's pending messages to a stopped task's agent, oldest first, one writer per task. */
     conversation: { taskId: number }
+    /** Runs one turn of a code session: its oldest unanswered message, one writer per session. */
+    'code-turn': { sessionId: string }
     /** Sends one finished agent pass to Looptrace over OTLP; queued only when FACTORY_TRACE_ENDPOINT is set. */
     'export-trace': { runId: number }
     /** Has an agent read a repository and split a goal into issues. */

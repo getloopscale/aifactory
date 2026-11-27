@@ -90,7 +90,12 @@ export async function admitSandbox(db: Database, now = new Date()): Promise<Admi
 }
 
 /** A job that starts a sandbox, as the job handler received it. */
-export type DeferredJob = { name: string; input: Record<string, unknown>; taskId: number }
+/** `taskId` is a task's number, or a code session's id. */
+export type DeferredJob = {
+  name: string
+  input: Record<string, unknown>
+  taskId: number | string
+}
 
 export type DeferDeps = {
   enqueue: (job: {

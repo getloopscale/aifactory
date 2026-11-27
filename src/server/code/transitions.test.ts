@@ -34,6 +34,15 @@ describe('code session transitions', () => {
     }
   })
 
+  it('gives a claimed turn back to the queue, and only a claimed one', () => {
+    for (const from of ['starting', 'running'] as const) {
+      expect(transition(from, 'turn_released')).toEqual({ action: 'move', state: 'queued' })
+    }
+    for (const from of ['idle', 'stopped', 'ended', 'failed', 'waiting_input'] as const) {
+      expect(transition(from, 'turn_released').action).not.toBe('move')
+    }
+  })
+
   it('waits for the answer to a plan, then queues the next turn', () => {
     expect(transition('running', 'plan_proposed')).toEqual({
       action: 'move',
