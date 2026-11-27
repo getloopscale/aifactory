@@ -1981,6 +1981,17 @@ export const ptBR: Copy = {
       unchanged: (n: number) =>
         n === 1 ? 'Mostrar 1 linha sem alteração' : `Mostrar ${n} linhas sem alteração`,
       stored: 'Do fim do último turno.',
+      pullRequest: {
+        heading: 'Pull request',
+        title: 'Título',
+        body: 'Descrição',
+        open: 'Abrir pull request',
+        opening: 'Abrindo…',
+        again: 'Enviar as novas alterações',
+        draftNote: 'Abre como rascunho, na branch de integração. Nada a integra a partir daqui.',
+        link: (n: number) => `Pull request #${n}`,
+        failed: (why: string) => `O pull request não foi aberto: ${why}`,
+      },
     },
     files: {
       tab: 'Arquivos',

@@ -102,3 +102,17 @@ describe('code session transitions', () => {
     }
   })
 })
+
+describe('pull_request', () => {
+  it('is allowed where no turn runs or waits, and moves nothing', () => {
+    for (const state of ['idle', 'stopped', 'failed'] as const) {
+      expect(transition(state, 'pull_request'), state).toEqual({ action: 'move', state })
+    }
+  })
+
+  it('is refused while a turn runs, waits to start or waits for a plan answer, and after the end', () => {
+    for (const state of ['queued', 'starting', 'running', 'waiting_input', 'ended'] as const) {
+      expect(transition(state, 'pull_request').action, state).toBe('refused')
+    }
+  })
+})

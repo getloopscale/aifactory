@@ -25,6 +25,7 @@ import {
   sendMessage,
   setMode,
   updateSession,
+  withPullRequestLock,
 } from './store'
 
 beforeAll(async () => {
@@ -125,6 +126,18 @@ describe("a session's turn", () => {
     const claimed = a.kind === 'claimed' ? a : b
     expect(claimed.kind === 'claimed' && claimed.message.content).toBe('first')
     expect((await getSession(s.id))?.state).toBe('starting')
+  })
+
+  it('is not claimed while a pull request is being opened, and is claimed after', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'first' })
+    await moveSession(s.id, 'message')
+    const seen = await withPullRequestLock(s.id, async () => ({
+      claim: (await claimTurn(s.id)).kind,
+      second: await withPullRequestLock(s.id, async () => 'never'),
+    }))
+    expect(seen).toEqual({ held: true, value: { claim: 'busy', second: { held: false } } })
+    expect((await claimTurn(s.id)).kind).toBe('claimed')
   })
 
   it('treats a message after the one a turn took as unanswered', async () => {

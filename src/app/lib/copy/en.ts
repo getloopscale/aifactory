@@ -1674,6 +1674,17 @@ export const en = {
       diffOf: (path: string) => `Changes of ${path}`,
       unchanged: (n: number) => (n === 1 ? 'Show 1 unchanged line' : `Show ${n} unchanged lines`),
       stored: 'From the end of the last turn.',
+      pullRequest: {
+        heading: 'Pull request',
+        title: 'Title',
+        body: 'Description',
+        open: 'Open pull request',
+        opening: 'Opening…',
+        again: 'Send the new changes',
+        draftNote: 'It opens as a draft, into the integration branch. Nothing merges it from here.',
+        link: (n: number) => `Pull request #${n}`,
+        failed: (why: string) => `The pull request was not opened: ${why}`,
+      },
     },
     files: {
       tab: 'Files',

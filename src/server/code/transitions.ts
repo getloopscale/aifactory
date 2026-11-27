@@ -11,6 +11,9 @@ import type { CodeState } from '../../shared/code'
  * turn that ends queues the next one (`endTurn` in `store.ts`). `stop` in `running` names the state the session
  * ends in; it does not move it, since the process that holds the pass ends the turn and `turn_ended` moves it.
  *
+ * `pull_request` opens the session's work as a draft pull request. It moves nothing: it is allowed where no turn
+ * is running or waiting to start (the workspace is not being written) and the session has not ended.
+ *
  * `turn_started` comes twice in a turn: a worker takes a queued turn (`queued` to `starting`, the sandbox
  * comes up), then the agent starts working (`starting` to `running`).
  */
@@ -26,6 +29,7 @@ export const CODE_EVENTS = [
   'end',
   'turn_failed',
   'turn_released',
+  'pull_request',
 ] as const
 export type CodeTransitionEvent = (typeof CODE_EVENTS)[number]
 
@@ -56,6 +60,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: refused(NO_TURN),
     turn_released: refused(NO_TURN),
+    pull_request: to('idle'),
   },
   queued: {
     message: refused(BUSY),
@@ -68,6 +73,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: ignored('The turn is already waiting.'),
+    pull_request: refused(BUSY),
   },
   starting: {
     message: refused(BUSY),
@@ -80,6 +86,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: to('queued'),
+    pull_request: refused(BUSY),
   },
   running: {
     message: to('running'),
@@ -92,6 +99,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: to('queued'),
+    pull_request: refused(BUSY),
   },
   waiting_input: {
     message: refused('The agent waits for an answer to its plan. Answer it first.'),
@@ -104,6 +112,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: refused(NO_TURN),
     turn_released: refused(NO_TURN),
+    pull_request: refused('The agent waits for an answer to its plan. Answer it first.'),
   },
   stopped: {
     message: to('queued'),
@@ -116,6 +125,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: ignored('The session is stopped.'),
     turn_released: ignored('The session is stopped.'),
+    pull_request: to('stopped'),
   },
   ended: {
     message: refused(GONE),
@@ -128,6 +138,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: ignored('The session has already ended.'),
     turn_failed: ignored(GONE),
     turn_released: ignored(GONE),
+    pull_request: refused(GONE),
   },
   failed: {
     message: to('queued'),
@@ -140,6 +151,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: ignored('The last turn already failed.'),
     turn_released: ignored('The last turn failed.'),
+    pull_request: to('failed'),
   },
 }
 
