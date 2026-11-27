@@ -98,3 +98,14 @@ export type CodeDiff = { files: CodeDiffFile[] }
 
 /** The diff route's answer: `live` when it was read from the running workspace, else the last one stored. */
 export type CodeDiffResponse = { diff: CodeDiff; live: boolean; capturedAt: string | null }
+
+/** The files of a workspace: tracked and untracked, without what git excludes by default. */
+export type CodeFilesResponse = { files: string[] }
+
+/** One file's text, cut at `limit` bytes; `truncated` says it was longer. */
+export type CodeFileResponse = {
+  path: string
+  content: string
+  truncated: boolean
+  limit: number
+}

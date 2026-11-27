@@ -1982,6 +1982,18 @@ export const ptBR: Copy = {
         n === 1 ? 'Mostrar 1 linha sem alteração' : `Mostrar ${n} linhas sem alteração`,
       stored: 'Do fim do último turno.',
     },
+    files: {
+      tab: 'Arquivos',
+      filter: 'Filtrar arquivos',
+      tree: 'Arquivos do workspace',
+      loading: 'Lendo os arquivos…',
+      empty: 'Nenhum arquivo no workspace',
+      noMatch: 'Nenhum arquivo corresponde',
+      viewerOf: (path: string) => `Conteúdo de ${path}`,
+      truncated: (n: number) => `Mostrando os primeiros ${n} bytes: o arquivo é maior.`,
+      mentions: 'Arquivos para mencionar',
+      openFile: (path: string) => `Abrir ${path}`,
+    },
     conversation: {
       label: 'Conversa',
       empty: 'Nada foi dito ou feito ainda.',
