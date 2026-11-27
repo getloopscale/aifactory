@@ -48,7 +48,7 @@ export async function openAmong(
  * Whether the integration branch already holds what a task for this issue was for: its work was merged
  * there, or the task found the issue already resolved there (checked and reviewed, with nothing to change).
  */
-async function integrated(db: Database, repository: string, issueNumber: number): Promise<boolean> {
+export async function integrated(db: Database, repository: string, issueNumber: number): Promise<boolean> {
   const [merged] = await db
     .select({ id: task.id })
     .from(task)
