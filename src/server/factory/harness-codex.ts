@@ -187,6 +187,7 @@ export function codexHarness(
     let session = resume
     let waiting: string | undefined
     let over = false
+    let cancelled = false
     live.attach({
       interrupts: true,
       async send(text) {
@@ -198,17 +199,28 @@ export function codexHarness(
         await backend.execute(`pkill -f '[c]odex exec'`)
         return 'delivered'
       },
+      async cancel() {
+        cancelled = true
+        waiting = undefined
+        await backend.execute(`pkill -f '[c]odex exec'`)
+      },
     })
     let prompt = input.prompt
     let total: HarnessResult | undefined
     try {
       for (;;) {
+        // A stop that came before the process ran: there is nothing to end, and nothing is started.
+        if (cancelled) return merged(total, { ok: false, summary: 'Stopped.' }, session)
         const run = await once(backend, input, prompt, session, (line) => {
           const id = threadOf(line)
           if (id) session = id
         })
         const parsed = parseCodexResult(run.exitCode, run.stdout, run.stderr)
         session = parsed.sessionId ?? session
+        if (cancelled) {
+          over = true
+          return merged(total, { ok: false, summary: 'Stopped.' }, session)
+        }
         const message = waiting
         waiting = undefined
         if (message === undefined) {

@@ -40,7 +40,7 @@ import { ago } from '../lib/format'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
-import { CodeChanges, Hunks } from './CodeChanges'
+import { CodeChanges, Hunks, PullRequestForm } from './CodeChanges'
 import { CodeConversation } from './CodeConversation'
 import { CodeFiles, FileViewer } from './CodeFiles'
 
@@ -403,12 +403,23 @@ function useCodeFiles(id: string, turn: number) {
 
 type Tab = 'changes' | 'files'
 
+/** The pull request a session already opened, as the form that opens one wants it. */
+const pullRequestOf = (session: {
+  pullRequestUrl?: string | null
+  pullRequestNumber?: number | null
+}) =>
+  session.pullRequestUrl && session.pullRequestNumber
+    ? { number: session.pullRequestNumber, url: session.pullRequestUrl }
+    : undefined
+
 const TAB =
   'flex h-10 items-center border-b-2 px-2.5 text-[13px] font-medium focus-visible:outline-2 focus-visible:outline-ring'
 
 /** The panel beside the conversation: Changes and Files, each scrolling inside it. */
 function SidePanel({
   id,
+  repository,
+  pullRequest,
   turn,
   tab,
   onTab,
@@ -418,6 +429,8 @@ function SidePanel({
   onSelect,
 }: {
   id: string
+  repository: string
+  pullRequest: { number: number; url: string } | undefined
   turn: number
   tab: Tab
   onTab: (tab: Tab) => void
@@ -485,6 +498,13 @@ function SidePanel({
             {data ? (
               <>
                 <CodeChanges diff={data.diff} />
+                <PullRequestForm
+                  key={id}
+                  sessionId={id}
+                  repository={repository}
+                  existing={pullRequest}
+                  hasChanges={data.diff.files.length > 0}
+                />
                 {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
                   <Quiet>{t.code.changes.stored}</Quiet>
                 ) : null}
@@ -509,11 +529,24 @@ function OpenSession({ id }: { id: string }) {
   const [selected, setSelected] = useState<string>()
   const turn = lastStateSeq(events)
   const { files, error: filesError } = useCodeFiles(id, turn)
+  const [title, setTitle] = useState<string>()
+  useEffect(() => setTitle(undefined), [id])
   const toggle = useCallback(() => setPanel((p) => !p), [])
   const showFiles = useCallback(() => {
     setPanel(true)
     setTab('files')
   }, [])
+  /** `/diff` and `/files`: hide the tab when it is the one showing, show it otherwise. */
+  const togglePanel = useCallback(
+    (next: Tab) => {
+      if (panel && tab === next) setPanel(false)
+      else {
+        setPanel(true)
+        setTab(next)
+      }
+    },
+    [panel, tab],
+  )
   const openFile = useCallback(
     (path: string) => {
       setSelected(path)
@@ -540,6 +573,8 @@ function OpenSession({ id }: { id: string }) {
   const side = panel ? (
     <SidePanel
       id={id}
+      repository={session.repository}
+      pullRequest={pullRequestOf(session)}
       turn={turn}
       tab={tab}
       onTab={setTab}
@@ -558,12 +593,12 @@ function OpenSession({ id }: { id: string }) {
       }
     >
       <section
-        aria-label={session.title}
+        aria-label={title ?? session.title}
         className={`${BLOCK} ${compact ? 'h-[calc(100vh-13rem)] min-h-96' : 'h-full'}`}
       >
         <header className="flex min-h-12 shrink-0 items-center gap-3 border-b border-border px-4 py-2">
           <div className="min-w-0 flex-1">
-            <h2 className="truncate text-sm font-semibold">{session.title}</h2>
+            <h2 className="truncate text-sm font-semibold">{title ?? session.title}</h2>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <span
@@ -605,6 +640,8 @@ function OpenSession({ id }: { id: string }) {
             events={events}
             files={files}
             onOpenFile={openFile}
+            onPanel={togglePanel}
+            onRenamed={setTitle}
           />
         </div>
       </section>
@@ -935,6 +972,8 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   const [tabs, setTabs] = useState<EditorTab[]>([])
   const [active, setActive] = useState<string>()
   const opened = useRef(false)
+  // A `/rename` shows at once, before the list of sessions is read again.
+  const [title, setTitle] = useState<string>()
 
   const open = useCallback((tab: EditorTab) => {
     opened.current = true
@@ -1016,6 +1055,15 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
             active={shown?.kind === 'diff' ? shown.path : undefined}
             onOpen={(path) => open({ kind: 'diff', path })}
           />
+          {session && diff ? (
+            <PullRequestForm
+              key={id}
+              sessionId={id}
+              repository={session.repository}
+              existing={pullRequestOf(session)}
+              hasChanges={changed.length > 0}
+            />
+          ) : null}
         </div>
       </>
     ) : undefined
@@ -1041,8 +1089,8 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
           <>
             <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-card px-3">
               <span className={SIDE_TITLE}>{t.code.conversation.agent}</span>
-              <span className="min-w-0 truncate text-xs font-medium" title={session.title}>
-                {session.title}
+              <span className="min-w-0 truncate text-xs font-medium" title={title ?? session.title}>
+                {title ?? session.title}
               </span>
             </header>
             {error ? (
@@ -1057,6 +1105,8 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
                 events={events}
                 files={files}
                 onOpenFile={openFile}
+                onPanel={pick}
+                onRenamed={setTitle}
               />
             </div>
           </>

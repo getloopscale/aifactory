@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { CODE_STATES } from '../../shared/code'
 
-import { CODE_EVENTS, CODE_TRANSITIONS, transition } from './transitions'
+import { CODE_EVENTS, CODE_TRANSITIONS, planAnswerOutcome, transition } from './transitions'
 
 describe('code session transitions', () => {
   it('has a row for every pair of state and event', () => {
@@ -62,15 +62,57 @@ describe('code session transitions', () => {
     for (const event of CODE_EVENTS) expect(transition('ended', event).action).not.toBe('move')
   })
 
-  it('refuses a message while the agent works and ignores a late event', () => {
-    expect(transition('running', 'message').action).toBe('refused')
+  it('refuses a message while a turn waits to run and ignores a late event', () => {
+    for (const from of ['queued', 'starting'] as const) {
+      expect(transition(from, 'message').action).toBe('refused')
+    }
     expect(transition('stopped', 'turn_ended').action).toBe('ignored')
     expect(transition('stopped', 'stop').action).toBe('ignored')
+  })
+
+  it('takes a message while the turn runs, without moving the session', () => {
+    expect(transition('running', 'message')).toEqual({ action: 'move', state: 'running' })
+  })
+
+  it('takes a stop only from a running turn, which ends idle', () => {
+    expect(transition('running', 'stop')).toEqual({ action: 'move', state: 'idle' })
+    for (const from of CODE_STATES.filter((s) => s !== 'running')) {
+      expect(transition(from, 'stop').action, from).not.toBe('move')
+    }
   })
 
   it('stops an idle session on timeout and fails an active turn', () => {
     expect(transition('idle', 'idle_timeout')).toEqual({ action: 'move', state: 'stopped' })
     expect(transition('running', 'idle_timeout').action).toBe('ignored')
     expect(transition('running', 'turn_failed')).toEqual({ action: 'move', state: 'failed' })
+  })
+
+  it('queues an accepted or revised plan, returns a rejected one to idle, and refuses any other state', () => {
+    expect(planAnswerOutcome('waiting_input', 'accept')).toEqual({
+      action: 'move',
+      state: 'queued',
+    })
+    expect(planAnswerOutcome('waiting_input', 'revise')).toEqual({
+      action: 'move',
+      state: 'queued',
+    })
+    expect(planAnswerOutcome('waiting_input', 'reject')).toEqual({ action: 'move', state: 'idle' })
+    for (const state of CODE_STATES.filter((x) => x !== 'waiting_input')) {
+      expect(planAnswerOutcome(state, 'reject').action).toBe('refused')
+    }
+  })
+})
+
+describe('pull_request', () => {
+  it('is allowed where no turn runs or waits, and moves nothing', () => {
+    for (const state of ['idle', 'stopped', 'failed'] as const) {
+      expect(transition(state, 'pull_request'), state).toEqual({ action: 'move', state })
+    }
+  })
+
+  it('is refused while a turn runs, waits to start or waits for a plan answer, and after the end', () => {
+    for (const state of ['queued', 'starting', 'running', 'waiting_input', 'ended'] as const) {
+      expect(transition(state, 'pull_request').action, state).toBe('refused')
+    }
   })
 })

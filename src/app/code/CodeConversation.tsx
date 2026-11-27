@@ -1,5 +1,5 @@
 import { ChatMessageResponse } from '@getloopscale/loopzero-ui'
-import { Button } from '@getloopscale/ui'
+import { Button, Textarea } from '@getloopscale/ui'
 import {
   ArrowUp,
   Bot,
@@ -8,6 +8,7 @@ import {
   Pencil,
   SlidersHorizontal,
   Terminal,
+  Square,
 } from 'lucide-react'
 import {
   useEffect,
@@ -30,18 +31,28 @@ import { Assist } from '../components/Assist'
 import { FollowScroll } from '../components/chat/FollowScroll'
 import { tallest, TOOL } from '../components/chat/MessageBox'
 import { TONE_DOT } from '../components/ui/Surface'
-import { patch, post } from '../lib/api'
+import { del, patch, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
 
+import {
+  COMMAND_TEXT,
+  commandRefusal,
+  matchCommands,
+  type CodeCommand,
+  type CommandAction,
+} from './code-commands'
+
 /** The states in which the server refuses a message (`transitions.ts`, `message`); the others take one. */
-const REFUSING = ['queued', 'starting', 'running', 'waiting_input', 'ended'] as const
+const REFUSING = ['queued', 'starting', 'waiting_input', 'ended'] as const
 type Refusing = (typeof REFUSING)[number]
 const refuses = (state: CodeState): state is Refusing =>
   (REFUSING as readonly string[]).includes(state)
 
 /** The width a conversation is read at, and its box with it. */
 export const COLUMN = 'w-full max-w-3xl'
+export type PlanAnswer = 'accept' | 'revise' | 'reject'
+const ANSWER = /^plan:(\d+):(accept|revise|reject)$/
 
 /** A tool call as one card: what it was asked, and what came back, when something did. */
 export type ToolCard = {
@@ -55,14 +66,29 @@ export type ToolCard = {
 export type Row =
   | { type: 'user'; seq: number; text: string }
   | { type: 'agent'; seq: number; text: string }
+  | { type: 'plan'; seq: number; text: string; answer: PlanAnswer | undefined; last: boolean }
   | ToolCard
   | { type: 'tools'; seq: number; cards: ToolCard[] }
 
 /** A tool result joins the call right before it; one with no call is a card of its own. */
 export function cardsOf(events: CodeEventWire[]): Array<Row> {
   const rows: Row[] = []
+  const answers = new Map<number, PlanAnswer>()
   for (const e of events) {
-    if (e.kind === 'user_message') rows.push({ type: 'user', seq: e.seq, text: e.content })
+    const m = e.kind === 'state' ? ANSWER.exec(e.content) : null
+    if (m) answers.set(Number(m[1]), m[2] as PlanAnswer)
+  }
+  const lastPlan = events.filter((e) => e.kind === 'plan').pop()?.seq
+  for (const e of events) {
+    if (e.kind === 'plan')
+      rows.push({
+        type: 'plan',
+        seq: e.seq,
+        text: e.content,
+        answer: answers.get(e.seq),
+        last: e.seq === lastPlan,
+      })
+    else if (e.kind === 'user_message') rows.push({ type: 'user', seq: e.seq, text: e.content })
     else if (e.kind === 'agent_message') rows.push({ type: 'agent', seq: e.seq, text: e.content })
     else if (e.kind === 'tool_use')
       rows.push({
@@ -224,6 +250,118 @@ function Group({ cards }: { cards: ToolCard[] }) {
   )
 }
 
+/** A plan the agent proposed; Reject, Revise and Accept are only on the last one, while it waits for an answer. */
+function PlanCard({
+  sessionId,
+  row,
+  files,
+  repository,
+  waiting,
+}: {
+  sessionId: string
+  row: Extract<Row, { type: 'plan' }>
+  files: string[]
+  repository: string
+  waiting: boolean
+}) {
+  const { t } = useCopy()
+  const c = t.code.conversation.plan
+  const [revising, setRevising] = useState(false)
+  const [text, setText] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string>()
+  const open = row.last && row.answer === undefined && waiting
+
+  async function answer(which: PlanAnswer) {
+    if (busy) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await post(`/api/panel/code/sessions/${encodeURIComponent(sessionId)}/plan-answer`, {
+        plan: row.seq,
+        answer: which,
+        ...(which === 'revise' ? { text: text.trim() } : {}),
+      })
+      setRevising(false)
+      setText('')
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section aria-label={c.title} className="space-y-2 rounded-lg border border-border bg-card p-3">
+      <h3 className="text-sm font-semibold">{c.title}</h3>
+      <ChatMessageResponse text={linkPaths(row.text, files)} className="text-sm" />
+      {row.answer ? (
+        <p className="text-xs text-muted-foreground">{c.answered[row.answer]}</p>
+      ) : null}
+      {open ? (
+        <div className="space-y-2">
+          {revising ? (
+            <div className="space-y-2">
+              <Textarea
+                aria-label={c.reviseLabel}
+                value={text}
+                rows={3}
+                onChange={(e) => setText(e.target.value)}
+                className="w-full"
+              />
+              <Assist
+                kind="changes"
+                text={text}
+                repository={repository}
+                onUse={(p) => setText(p.text)}
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={busy || text.trim() === ''}
+                  onClick={() => void answer('revise')}
+                >
+                  {busy ? c.sending : c.sendRevision}
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => setRevising(false)}>
+                  {c.cancel}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => void answer('reject')}
+              >
+                {c.reject}
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy}
+                onClick={() => setRevising(true)}
+              >
+                {c.revise}
+              </Button>
+              <Button size="sm" disabled={busy} onClick={() => void answer('accept')}>
+                {c.accept}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : null}
+      {problem ? (
+        <p role="alert" className="text-sm text-destructive">
+          {problem}
+        </p>
+      ) : null}
+    </section>
+  )
+}
+
 const MENTION = /(?:^|\s)@([^\s@]*)$/
 const MENTIONS_SHOWN = 8
 const FILE_HREF = '#workspace-file/'
@@ -275,33 +413,21 @@ export function linkPaths(text: string, files: string[]): string {
 }
 
 /** Ask, Plan and Code, one line each; keys 1, 2 and 3 pick one while the list is open. */
-function ModeSelector({ session }: { session: CodeSessionWire }) {
+function ModeSelector({
+  mode,
+  saving,
+  onPick,
+}: {
+  mode: CodeMode
+  saving: boolean
+  onPick: (mode: CodeMode) => void
+}) {
   const { t } = useCopy()
   const c = t.code.conversation
   const [open, setOpen] = useState(false)
-  const [mode, setMode] = useState<CodeMode>(session.mode)
-  const [saving, setSaving] = useState(false)
-  const [problem, setProblem] = useState<string>()
-  useEffect(() => setMode(session.mode), [session.mode])
-
-  async function pick(next: CodeMode) {
+  const pick = (next: CodeMode) => {
     setOpen(false)
-    if (saving || next === mode) return
-    setSaving(true)
-    setProblem(undefined)
-    try {
-      const saved = await patch<{ mode: CodeMode }>(
-        `/api/panel/code/sessions/${encodeURIComponent(session.id)}`,
-        {
-          mode: next,
-        },
-      )
-      setMode(saved.mode)
-    } catch (e) {
-      setProblem(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
+    onPick(next)
   }
 
   useEffect(() => {
@@ -310,7 +436,7 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
       const target = e.target as HTMLElement | null
       if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
       const picked = CODE_MODES[Number(e.key) - 1]
-      if (picked) void pick(picked)
+      if (picked) pick(picked)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -343,7 +469,7 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
               type="button"
               role="radio"
               aria-checked={m === mode}
-              onClick={() => void pick(m)}
+              onClick={() => pick(m)}
               className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted ${m === mode ? 'bg-muted' : ''}`}
             >
               <span className="min-w-0 flex-1">
@@ -359,14 +485,6 @@ function ModeSelector({ session }: { session: CodeSessionWire }) {
           ))}
         </div>
       ) : null}
-      {problem ? (
-        <p
-          role="alert"
-          className="absolute left-0 top-full mt-1 whitespace-nowrap text-destructive"
-        >
-          {problem}
-        </p>
-      ) : null}
     </div>
   )
 }
@@ -377,12 +495,18 @@ export function CodeConversation({
   events,
   files = [],
   onOpenFile,
+  onPanel,
+  onRenamed,
 }: {
   session: CodeSessionWire
   events: CodeEventWire[]
   /** The files of the workspace, for `@` and for the paths an agent names. */
   files?: string[]
   onOpenFile?: (path: string) => void
+  /** `/diff` and `/files`: show or hide that tab of the side panel. */
+  onPanel?: (tab: 'changes' | 'files') => void
+  /** The title the session was renamed to. */
+  onRenamed?: (title: string) => void
 }) {
   const { t } = useCopy()
   const c = { ...t.code.conversation, mentions: t.code.files.mentions }
@@ -393,6 +517,11 @@ export function CodeConversation({
   const [caret, setCaret] = useState(0)
   const [active, setActive] = useState(0)
   const [menuOff, setMenuOff] = useState(false)
+  const [mode, setMode] = useState<CodeMode>(session.mode)
+  const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState<'model' | 'rename'>()
+  const [draft, setDraft] = useState('')
+  useEffect(() => setMode(session.mode), [session.mode])
   const box = useRef<HTMLTextAreaElement>(null)
   const place = useRef<number | undefined>(undefined)
   const mention = menuOff ? undefined : mentionAt(text, caret)
@@ -435,6 +564,28 @@ export function CodeConversation({
     event.preventDefault()
     return true
   }
+  const slash = menuOff ? undefined : COMMAND_TEXT.exec(text)
+  const typed = slash?.[1]
+  const commands = useMemo(() => (typed === undefined ? [] : matchCommands(typed)), [typed])
+  const commandAt = Math.min(active, commands.length - 1)
+  const view = { state: session.state, mode }
+  const reasonOf = (command: CodeCommand) => {
+    const reason = commandRefusal(command.action, view)
+    return reason ? c.commands.reasons[reason] : undefined
+  }
+  const slashKeys = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
+    if (commands.length === 0 || event.nativeEvent.isComposing) return false
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      const step = event.key === 'ArrowDown' ? 1 : commands.length - 1
+      setActive((commandAt + step) % commands.length)
+    } else if (event.key === 'Enter') {
+      const picked = commands[commandAt]!
+      if (!reasonOf(picked)) runCommand(picked.action)
+    } else if (event.key === 'Escape') setMenuOff(true)
+    else return false
+    event.preventDefault()
+    return true
+  }
   const sendOnEnter = enterSends(() => void send())
   const openLink = (event: MouseEvent) => {
     const link = (event.target as HTMLElement).closest('a')
@@ -445,6 +596,84 @@ export function CodeConversation({
   }
   const refusal = refuses(session.state) ? c.refused[session.state] : undefined
   const blocked = busy || refusal !== undefined
+  // While a turn runs and nothing is typed, the box offers Stop; a typed message is sent to the running turn.
+  const stopping = session.state === 'running' && text.trim() === ''
+
+  async function saveSession(
+    body: { mode: CodeMode } | { model: string | null } | { title: string },
+  ) {
+    if (saving) return false
+    setSaving(true)
+    setProblem(undefined)
+    try {
+      const saved = await patch<CodeSessionWire>(
+        `/api/panel/code/sessions/${encodeURIComponent(session.id)}`,
+        body,
+      )
+      if ('mode' in body) setMode(saved.mode)
+      if ('title' in body) onRenamed?.(saved.title)
+      return true
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+      return false
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const pickMode = (next: CodeMode) => {
+    if (next !== mode) void saveSession({ mode: next })
+  }
+
+  async function submitEditor() {
+    const value = draft.trim()
+    if (editing === 'rename' && value === '') return
+    const done = await saveSession(
+      editing === 'rename' ? { title: value } : { model: value === '' ? null : value },
+    )
+    if (done) setEditing(undefined)
+  }
+
+  async function endSession() {
+    if (busy) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await del(`/api/panel/code/sessions/${encodeURIComponent(session.id)}`)
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  /** Runs a command through the same handler as the control it shortcuts, and clears the box. */
+  function runCommand(action: CommandAction) {
+    setText('')
+    setMenuOff(false)
+    setActive(0)
+    if (action.kind === 'mode') pickMode(action.mode)
+    else if (action.kind === 'panel') onPanel?.(action.tab)
+    else if (action.kind === 'stop') void stop()
+    else if (action.kind === 'end') void endSession()
+    else {
+      setDraft(action.kind === 'model' ? (session.model ?? '') : session.title)
+      setEditing(action.kind)
+    }
+  }
+
+  async function stop() {
+    if (busy) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      await post(`/api/panel/code/sessions/${encodeURIComponent(session.id)}/stop`, {})
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function send() {
     const content = text.trim()
@@ -483,6 +712,15 @@ export function CodeConversation({
                   className="text-sm leading-6"
                 />
               </div>
+            ) : row.type === 'plan' ? (
+              <PlanCard
+                key={row.seq}
+                sessionId={session.id}
+                row={row}
+                files={files}
+                repository={session.repository}
+                waiting={session.state === 'waiting_input'}
+              />
             ) : row.type === 'tools' ? (
               <Group key={row.seq} cards={row.cards} />
             ) : (
@@ -524,12 +762,43 @@ export function CodeConversation({
               ))}
             </ul>
           ) : null}
+          {commands.length > 0 ? (
+            <ul
+              role="listbox"
+              aria-label={c.commands.list}
+              className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-lg border border-border bg-card py-1 text-xs shadow-lg"
+            >
+              {commands.map((command, i) => {
+                const reason = reasonOf(command)
+                return (
+                  <li
+                    key={command.name}
+                    role="option"
+                    aria-selected={i === commandAt}
+                    aria-disabled={reason !== undefined}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      if (!reason) runCommand(command.action)
+                    }}
+                    className={`px-3 py-1 ${reason ? 'text-muted-foreground' : 'cursor-pointer'} ${
+                      i === commandAt ? 'bg-muted' : ''
+                    }`}
+                  >
+                    <span className="font-mono font-semibold">/{command.name}</span>{' '}
+                    <span className="text-muted-foreground">
+                      {c.commands.about[command.name]}
+                      {reason ? ` (${reason})` : ''}
+                    </span>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : null}
           <textarea
             ref={box}
             rows={1}
             aria-label={c.message}
             value={text}
-            disabled={refusal !== undefined}
             onChange={(e) => {
               setText(e.target.value)
               setCaret(e.target.selectionStart)
@@ -538,13 +807,13 @@ export function CodeConversation({
             }}
             onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={(e) => {
-              if (!menuKeys(e)) sendOnEnter(e)
+              if (!slashKeys(e) && !menuKeys(e)) sendOnEnter(e)
             }}
             placeholder={refusal ?? c.placeholder}
             className="block min-h-12 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground disabled:cursor-not-allowed"
           />
           <div className="flex items-center gap-1 px-2 pb-2">
-            <ModeSelector session={session} />
+            <ModeSelector mode={mode} saving={saving} onPick={pickMode} />
             <span
               title={c.by}
               aria-label={`${c.by}: ${by}`}
@@ -553,19 +822,64 @@ export function CodeConversation({
               <Bot aria-hidden className="size-3.5 shrink-0" />
               <span className="truncate">{by}</span>
             </span>
-            <Button
-              size="sm"
-              aria-label={busy ? c.sending : c.send}
-              title={c.send}
-              disabled={blocked || text.trim() === ''}
-              onClick={() => void send()}
-              className="ml-auto size-8 shrink-0 rounded-full p-0"
-            >
-              <ArrowUp aria-hidden className="size-4" />
-            </Button>
+            {stopping ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                aria-label={c.stop}
+                title={c.stop}
+                disabled={busy}
+                onClick={() => void stop()}
+                className="ml-auto size-8 shrink-0 rounded-full p-0"
+              >
+                <Square aria-hidden className="size-3.5" />
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                aria-label={busy ? c.sending : c.send}
+                title={c.send}
+                disabled={blocked || text.trim() === ''}
+                onClick={() => void send()}
+                className="ml-auto size-8 shrink-0 rounded-full p-0"
+              >
+                <ArrowUp aria-hidden className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
-        <div className="px-1 pt-1.5">
+        <div className="space-y-1.5 px-1 pt-1.5">
+          {editing ? (
+            <form
+              className="flex items-center gap-2 text-xs"
+              onSubmit={(e) => {
+                e.preventDefault()
+                void submitEditor()
+              }}
+            >
+              <label className="flex flex-1 items-center gap-2">
+                {c.commands[editing]}
+                <input
+                  autoFocus
+                  value={draft}
+                  placeholder={editing === 'model' ? c.commands.modelHint : undefined}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
+                />
+              </label>
+              <Button type="submit" size="sm" disabled={saving}>
+                {c.commands.save}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                onClick={() => setEditing(undefined)}
+              >
+                {c.commands.cancel}
+              </Button>
+            </form>
+          ) : null}
           <Assist
             kind="changes"
             text={text}
@@ -573,7 +887,7 @@ export function CodeConversation({
             onUse={(p) => setText(p.text)}
           />
           {problem ? (
-            <p role="alert" className="pt-1 text-sm text-destructive">
+            <p role="alert" className="text-sm text-destructive">
               {problem}
             </p>
           ) : null}

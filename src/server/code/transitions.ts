@@ -7,6 +7,13 @@ import type { CodeState } from '../../shared/code'
  * `turn_released` gives a claimed turn back (the provider refused a sandbox, or the worker holding the claim went
  * quiet): the session is `queued` again and its message is still unanswered.
  *
+ * `message` in `running` keeps the state: the message is stored unanswered, and the pass is handed it live or the
+ * turn that ends queues the next one (`endTurn` in `store.ts`). `stop` in `running` names the state the session
+ * ends in; it does not move it, since the process that holds the pass ends the turn and `turn_ended` moves it.
+ *
+ * `pull_request` opens the session's work as a draft pull request. It moves nothing: it is allowed where no turn
+ * is running or waiting to start (the workspace is not being written) and the session has not ended.
+ *
  * `turn_started` comes twice in a turn: a worker takes a queued turn (`queued` to `starting`, the sandbox
  * comes up), then the agent starts working (`starting` to `running`).
  */
@@ -22,6 +29,7 @@ export const CODE_EVENTS = [
   'end',
   'turn_failed',
   'turn_released',
+  'pull_request',
 ] as const
 export type CodeTransitionEvent = (typeof CODE_EVENTS)[number]
 
@@ -47,11 +55,12 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: ignored(NO_TURN),
     plan_proposed: refused(NO_TURN),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: to('stopped'),
     end: to('ended'),
     turn_failed: refused(NO_TURN),
     turn_released: refused(NO_TURN),
+    pull_request: to('idle'),
   },
   queued: {
     message: refused(BUSY),
@@ -59,11 +68,12 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: refused(NO_TURN),
     plan_proposed: refused(NO_TURN),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('The session has work waiting, so it is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: ignored('The turn is already waiting.'),
+    pull_request: refused(BUSY),
   },
   starting: {
     message: refused(BUSY),
@@ -71,23 +81,25 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: refused(NO_TURN),
     plan_proposed: refused(NO_TURN),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('The session is starting, so it is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: to('queued'),
+    pull_request: refused(BUSY),
   },
   running: {
-    message: refused(BUSY),
+    message: to('running'),
     turn_started: ignored('The turn is already running.'),
     turn_ended: to('idle'),
     plan_proposed: to('waiting_input'),
     plan_answered: refused('No plan is waiting for an answer.'),
-    stop: to('stopped'),
+    stop: to('idle'),
     idle_timeout: ignored('The agent is working, so the session is not idle.'),
     end: to('ended'),
     turn_failed: to('failed'),
     turn_released: to('queued'),
+    pull_request: refused(BUSY),
   },
   waiting_input: {
     message: refused('The agent waits for an answer to its plan. Answer it first.'),
@@ -95,11 +107,12 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: refused(NO_TURN),
     plan_proposed: refused('A plan is already waiting for an answer.'),
     plan_answered: to('queued'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('A plan waits for the owner, so the session stays as it is.'),
     end: to('ended'),
     turn_failed: refused(NO_TURN),
     turn_released: refused(NO_TURN),
+    pull_request: refused('The agent waits for an answer to its plan. Answer it first.'),
   },
   stopped: {
     message: to('queued'),
@@ -112,6 +125,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: to('ended'),
     turn_failed: ignored('The session is stopped.'),
     turn_released: ignored('The session is stopped.'),
+    pull_request: to('stopped'),
   },
   ended: {
     message: refused(GONE),
@@ -124,6 +138,7 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     end: ignored('The session has already ended.'),
     turn_failed: ignored(GONE),
     turn_released: ignored(GONE),
+    pull_request: refused(GONE),
   },
   failed: {
     message: to('queued'),
@@ -131,13 +146,27 @@ export const CODE_TRANSITIONS: Record<CodeState, Record<CodeTransitionEvent, Cod
     turn_ended: ignored('The last turn failed.'),
     plan_proposed: ignored('The last turn failed.'),
     plan_answered: refused('The last turn failed. Send a message to try again.'),
-    stop: to('stopped'),
+    stop: refused(NO_TURN),
     idle_timeout: ignored('The last turn failed, so the session is not idle.'),
     end: to('ended'),
     turn_failed: ignored('The last turn already failed.'),
     turn_released: ignored('The last turn failed.'),
+    pull_request: to('failed'),
   },
 }
 
 export const transition = (state: CodeState, event: CodeTransitionEvent): CodeOutcome =>
   CODE_TRANSITIONS[state][event]
+
+/** The three answers the owner gives to a plan. */
+export const PLAN_ANSWERS = ['accept', 'revise', 'reject'] as const
+export type PlanAnswer = (typeof PLAN_ANSWERS)[number]
+
+/**
+ * `plan_answered` for one answer: accepting or revising queues the next turn, rejecting returns the session to
+ * `idle`. Anything the table does not move stays refused or ignored.
+ */
+export const planAnswerOutcome = (state: CodeState, answer: PlanAnswer): CodeOutcome => {
+  const outcome = transition(state, 'plan_answered')
+  return outcome.action === 'move' && answer === 'reject' ? to('idle') : outcome
+}

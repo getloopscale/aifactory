@@ -8,8 +8,12 @@ import { jobBackend } from '../factory/job-backend'
 import { EVENT_MAX_BYTES } from '../factory/transcript'
 
 import {
+  answerPlan,
   appendEvent,
   claimTurn,
+  endTurn,
+  requestStop,
+  stopRequested,
   moveSession,
   turnMarker,
   CLAIM_STALE_MS,
@@ -21,6 +25,7 @@ import {
   sendMessage,
   setMode,
   updateSession,
+  withPullRequestLock,
 } from './store'
 
 beforeAll(async () => {
@@ -123,6 +128,18 @@ describe("a session's turn", () => {
     expect((await getSession(s.id))?.state).toBe('starting')
   })
 
+  it('is not claimed while a pull request is being opened, and is claimed after', async () => {
+    const s = await aSession()
+    await appendEvent(s.id, { kind: 'user_message', content: 'first' })
+    await moveSession(s.id, 'message')
+    const seen = await withPullRequestLock(s.id, async () => ({
+      claim: (await claimTurn(s.id)).kind,
+      second: await withPullRequestLock(s.id, async () => 'never'),
+    }))
+    expect(seen).toEqual({ held: true, value: { claim: 'busy', second: { held: false } } })
+    expect((await claimTurn(s.id)).kind).toBe('claimed')
+  })
+
   it('treats a message after the one a turn took as unanswered', async () => {
     const s = await aSession()
     await appendEvent(s.id, { kind: 'user_message', content: 'one' })
@@ -188,11 +205,83 @@ describe('sending a message', () => {
     expect((await getSession(s.id))?.state).toBe('queued')
   })
 
-  it('refuses a running session with its state and writes nothing', async () => {
+  it('stores a message for a running turn unanswered, with no job', async () => {
     const s = await aSession()
     await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
-    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'refused', state: 'running' })
-    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+    expect(await sendMessage(s.id, 'hi')).toMatchObject({ kind: 'sent' })
+    expect((await getSession(s.id))?.state).toBe('running')
+    expect(await jobs()).toBe(0)
+  })
+
+  it('queues one turn for a message the pass was not handed, when the turn ends', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    expect((await getSession(s.id))?.state).toBe('queued')
+    expect(await jobs()).toBe(1)
+    expect(await endTurn(s.id)).toBeUndefined()
+    expect(await jobs()).toBe(1)
+  })
+
+  it('ends idle with no job when the message was handed to the pass', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    await appendEvent(s.id, { kind: 'state', content: turnMarker(1) })
+    expect(await endTurn(s.id)).toEqual({ queued: false })
+    expect((await getSession(s.id))?.state).toBe('idle')
+    expect(await jobs()).toBe(0)
+  })
+
+  it('queues exactly one turn when two turns end at once', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    const ended = await Promise.all([endTurn(s.id), endTurn(s.id)])
+    expect(ended.filter((r) => r?.queued)).toHaveLength(1)
+    expect(await jobs()).toBe(1)
+  })
+
+  it('never loses a message sent while the turn ends: it is answered by a queued turn or is the next one', async () => {
+    for (let round = 0; round < 5; round += 1) {
+      const s = await aSession(`race-${round}`)
+      await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+      const [sent] = await Promise.all([sendMessage(s.id, 'hi'), endTurn(s.id)])
+      const after = await getSession(s.id)
+      if (sent.kind === 'sent') {
+        // Either the end saw it (queued, one job) or it came after the end (queued by the message, one job).
+        expect(after?.state).toBe('queued')
+      } else {
+        expect(after?.state).toBe('idle')
+      }
+      const queued = await getPool().query(
+        `select 1 from loopzero_jobs where name = 'code-turn' and input->>'sessionId' = $1`,
+        [s.id],
+      )
+      expect(queued.rowCount).toBe(1)
+    }
+  })
+
+  it('queues one turn for a message sent twice during a turn that ends after them', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await Promise.all([sendMessage(s.id, 'a'), sendMessage(s.id, 'b')])
+    expect(await jobs()).toBe(0)
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    expect(await jobs()).toBe(1)
+  })
+
+  it('marks only a running turn to stop, and clears the mark when the turn ends', async () => {
+    const s = await aSession()
+    expect(await requestStop(s.id)).toMatchObject({ kind: 'refused', state: 'idle' })
+    expect(await requestStop('missing')).toEqual({ kind: 'not_found' })
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    expect(await requestStop(s.id)).toEqual({ kind: 'requested' })
+    expect(await stopRequested(s.id)).toBe(true)
+    await endTurn(s.id)
+    expect(await stopRequested(s.id)).toBe(false)
+    expect((await getSession(s.id))?.state).toBe('idle')
   })
 
   it('stores no event when the job cannot be queued', async () => {
@@ -215,5 +304,55 @@ describe('sending a message', () => {
       mode: 'plan',
       model: 'm',
     })
+  })
+})
+
+describe('answering a plan', () => {
+  async function waitingWithPlan() {
+    const s = await aSession()
+    await updateSession(s.id, { mode: 'plan' })
+    await appendEvent(s.id, { kind: 'user_message', content: 'plan it' })
+    const plan = await appendEvent(s.id, { kind: 'plan', content: '## What exists' })
+    await getPool().query("update code_session set state = 'waiting_input' where id = $1", [s.id])
+    return { id: s.id, seq: plan.seq }
+  }
+  const jobs = async () =>
+    (await getPool().query("select 1 from loopzero_jobs where name = 'code-turn'")).rowCount
+
+  it('accepts: switches to code and queues one turn whose message is the plan', async () => {
+    const { id, seq } = await waitingWithPlan()
+    const result = await answerPlan(id, seq, { answer: 'accept' })
+    expect(result).toMatchObject({ kind: 'answered', queued: true })
+    expect(await getSession(id)).toMatchObject({ mode: 'code', state: 'queued' })
+    const events = await eventsAfter(id, seq, 10)
+    expect(events[0]).toMatchObject({ kind: 'state', content: `plan:${seq}:accept` })
+    expect(events[1]!.content).toContain('## What exists')
+    expect(await jobs()).toBe(1)
+  })
+
+  it('revises: sends the text in plan mode', async () => {
+    const { id, seq } = await waitingWithPlan()
+    await answerPlan(id, seq, { answer: 'revise', text: 'add tests' })
+    expect(await getSession(id)).toMatchObject({ mode: 'plan', state: 'queued' })
+    expect((await eventsAfter(id, seq, 10))[1]).toMatchObject({
+      kind: 'user_message',
+      content: 'add tests',
+    })
+    expect(await jobs()).toBe(1)
+  })
+
+  it('rejects: records it, goes idle in plan mode and queues nothing', async () => {
+    const { id, seq } = await waitingWithPlan()
+    await answerPlan(id, seq, { answer: 'reject' })
+    expect(await getSession(id)).toMatchObject({ mode: 'plan', state: 'idle' })
+    expect(await jobs()).toBe(0)
+  })
+
+  it('refuses a second answer and a stale plan, with no second job', async () => {
+    const { id, seq } = await waitingWithPlan()
+    expect((await answerPlan(id, seq + 5, { answer: 'accept' })).kind).toBe('refused')
+    await answerPlan(id, seq, { answer: 'accept' })
+    expect((await answerPlan(id, seq, { answer: 'accept' })).kind).toBe('refused')
+    expect(await jobs()).toBe(1)
   })
 })

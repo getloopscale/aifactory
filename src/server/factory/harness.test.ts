@@ -9,6 +9,7 @@ import {
   parseClaudeResult,
   resultLine,
 } from './harness-claude'
+import type { ActivePass } from './harness'
 import type { AgentEvent } from './transcript'
 import { FakeSandbox } from './fake-sandbox'
 
@@ -626,5 +627,46 @@ describe('session folders', () => {
     expect(claudeCodeHarness({ kind: 'api-key', secret: 'x' }).sessionFolder).toBe(
       '.claude/projects',
     )
+  })
+})
+
+describe('cancelling a watched Claude pass', () => {
+  const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-1' })
+
+  it('ends the process, keeps the session id it saw and is not ok', async () => {
+    let pass: ActivePass | undefined
+    const sandbox = new FakeSandbox(
+      (command) => {
+        if (!command.includes('stream-json')) return undefined
+        void pass?.cancel?.()
+        return { stdout: init, exitCode: 143 }
+      },
+      { streaming: true },
+    )
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [] })
+    const result = await claudeCodeHarness({ kind: 'api-key', secret: 'k' }).run(backend, {
+      prompt: 'P',
+      cwd: '/work',
+      timeoutMs: 5,
+      onEvent: () => {},
+      live: { attach: (p) => (pass = p) },
+    })
+    expect(result).toEqual({ ok: false, summary: 'Stopped.', sessionId: 'sess-1' })
+    expect(sandbox.backend.commands.some((c) => c.includes("pkill -f '[c]laude -p'"))).toBe(true)
+  })
+
+  it('says a later send found the pass over', async () => {
+    let pass: ActivePass | undefined
+    const sandbox = new FakeSandbox(() => ({ stdout: init }), { streaming: true })
+    const { backend } = await sandbox.create({ timeoutMs: 1, egress: [] })
+    await claudeCodeHarness({ kind: 'api-key', secret: 'k' }).run(backend, {
+      prompt: 'P',
+      cwd: '/work',
+      timeoutMs: 5,
+      onEvent: () => {},
+      live: { attach: (p) => (pass = p) },
+    })
+    await pass!.cancel?.()
+    expect(await pass!.send('late')).toBe('ended')
   })
 })

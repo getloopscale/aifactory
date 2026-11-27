@@ -1,8 +1,11 @@
+import { Button, Textarea } from '@getloopscale/ui'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useMemo, useState } from 'react'
 
 import type { CodeDiff, CodeDiffFile, CodeDiffLine } from '../../shared/code'
+import { Assist } from '../components/Assist'
 import { Quiet } from '../components/ui/Surface'
+import { post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 
 /** A run of unchanged lines longer than this is folded behind a button. */
@@ -125,5 +128,100 @@ export function CodeChanges({ diff }: { diff: CodeDiff }) {
         )
       })}
     </ul>
+  )
+}
+
+/** The pull request a session already opened, as the form shows it. */
+export type OpenedPullRequest = { number: number; url: string }
+
+/** Opens the session's work as a draft pull request, and shows the link once there is one. */
+export function PullRequestForm({
+  sessionId,
+  repository,
+  existing,
+  hasChanges,
+}: {
+  sessionId: string
+  repository: string
+  existing?: OpenedPullRequest | null
+  hasChanges: boolean
+}) {
+  const { t } = useCopy()
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [problem, setProblem] = useState<string>()
+  const [made, setMade] = useState<OpenedPullRequest>()
+  const pull = made ?? existing ?? undefined
+  const ready = !busy && hasChanges && title.trim() !== ''
+
+  async function submit() {
+    if (!ready) return
+    setBusy(true)
+    setProblem(undefined)
+    try {
+      const out = await post<OpenedPullRequest>(
+        `/api/panel/code/sessions/${encodeURIComponent(sessionId)}/pull-request`,
+        { title: title.trim(), body },
+      )
+      setMade({ number: out.number, url: out.url })
+    } catch (e) {
+      setProblem(t.code.changes.pullRequest.failed(e instanceof Error ? e.message : String(e)))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const copy = t.code.changes.pullRequest
+  return (
+    <section aria-label={copy.heading} className="space-y-2 border-t border-border px-4 py-3">
+      {pull ? (
+        <a
+          href={pull.url}
+          target="_blank"
+          rel="noreferrer"
+          className="text-sm underline underline-offset-2"
+        >
+          {copy.link(pull.number)}
+        </a>
+      ) : null}
+      <label className="block text-sm">
+        <span>{copy.title}</span>
+        <input
+          aria-label={copy.title}
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground"
+        />
+      </label>
+      <Assist
+        kind="issue"
+        text={title}
+        repository={repository}
+        onUse={(p) => setTitle(p.title ?? p.text)}
+      />
+      <label className="block text-sm">
+        <span>{copy.body}</span>
+        <Textarea
+          aria-label={copy.body}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={4}
+          className="mt-1 w-full"
+        />
+      </label>
+      <Assist kind="changes" text={body} repository={repository} onUse={(p) => setBody(p.text)} />
+      <p className="text-xs text-muted-foreground">{copy.draftNote}</p>
+      <div className="flex items-center gap-3">
+        <Button size="sm" disabled={!ready} onClick={() => void submit()}>
+          {busy ? copy.opening : pull ? copy.again : copy.open}
+        </Button>
+        {problem ? (
+          <span role="alert" className="text-sm text-destructive">
+            {problem}
+          </span>
+        ) : null}
+      </div>
+    </section>
   )
 }

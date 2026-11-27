@@ -18,7 +18,13 @@ import { codeEvent, codeSession } from '../db/schema'
 import { jobBackend } from '../factory/job-backend'
 import { toStored } from '../factory/transcript'
 
-import { transition, type CodeTransitionEvent } from './transitions'
+import { acceptedPlanMessage } from '../agents/prompts/code-plan'
+import {
+  planAnswerOutcome,
+  transition,
+  type CodeTransitionEvent,
+  type PlanAnswer,
+} from './transitions'
 
 /** Storage of a code session and its numbered events. State changes go through `transitions.ts`, not here. */
 
@@ -97,6 +103,48 @@ export async function saveWorkspaceSnapshot(
   return row
 }
 
+const pullRequestKey = (id: string) => `code-pull-request:${id}`
+
+/** Takes, for the rest of the transaction, the lock a pull request holds; false while one holds it. */
+async function pullRequestUnlocked(tx: Tx, sessionId: string): Promise<boolean> {
+  const result = await tx.execute(
+    sql`select pg_try_advisory_xact_lock(hashtext(${pullRequestKey(sessionId)})) as ok`,
+  )
+  return (result.rows[0] as { ok: boolean }).ok === true
+}
+
+/**
+ * Runs `work` holding the session's pull request lock, which is on a connection of its own, so a crash frees it.
+ * `claimTurn` finds the session busy meanwhile. Not held: another pull request is being opened for it.
+ */
+export async function withPullRequestLock<T>(
+  sessionId: string,
+  work: () => Promise<T>,
+): Promise<{ held: true; value: T } | { held: false }> {
+  const client = await getPool().connect()
+  try {
+    const { rows } = await client.query('select pg_try_advisory_lock(hashtext($1)) as ok', [
+      pullRequestKey(sessionId),
+    ])
+    if (!rows[0]?.ok) return { held: false }
+    try {
+      return { held: true, value: await work() }
+    } finally {
+      await client.query('select pg_advisory_unlock(hashtext($1))', [pullRequestKey(sessionId)])
+    }
+  } finally {
+    client.release()
+  }
+}
+
+/** Keeps the pull request opened from the session's work branch. */
+export async function savePullRequest(id: string, number: number, url: string): Promise<void> {
+  await getDb()
+    .update(codeSession)
+    .set({ pullRequestNumber: number, pullRequestUrl: url, updatedAt: sql`now()` })
+    .where(eq(codeSession.id, id))
+}
+
 /** Says which sandbox is up for the session, or that none is. */
 export async function saveSandboxId(id: string, sandboxId: string | null): Promise<void> {
   await getDb().update(codeSession).set({ sandboxId }).where(eq(codeSession.id, id))
@@ -129,7 +177,7 @@ export async function appendEvent(sessionId: string, event: NewCodeEvent): Promi
   return getDb().transaction((tx) => insertEvent(tx, sessionId, event))
 }
 
-type Tx = Pick<Database, 'select' | 'insert' | 'update'>
+type Tx = Pick<Database, 'select' | 'insert' | 'update' | 'execute'>
 
 /** The body of `appendEvent`, in the caller's transaction. */
 async function insertEvent(tx: Tx, sessionId: string, event: NewCodeEvent): Promise<CodeEvent> {
@@ -199,12 +247,176 @@ export async function sendMessage(sessionId: string, text: string): Promise<Mess
         .set({ state: outcome.state, updatedAt: sql`clock_timestamp()` })
         .where(eq(codeSession.id, sessionId))
         .returning()
-      await jobBackend().enqueueInTransaction(client, {
-        name: 'code-turn',
-        input: { sessionId },
-        idempotencyKey: `code-turn-${sessionId}-${event!.seq}`,
-      })
+      // A message to a running turn stays unanswered: the pass is handed it live, or the turn that ends queues it.
+      if (session.state !== 'running') await enqueueTurn(client, sessionId, event!.seq)
       return { kind: 'sent' as const, event: event!, session: moved! }
+    })
+  } finally {
+    client.release()
+  }
+}
+
+function enqueueTurn(
+  client: Parameters<ReturnType<typeof jobBackend>['enqueueInTransaction']>[0],
+  sessionId: string,
+  seq: number,
+) {
+  return jobBackend().enqueueInTransaction(client, {
+    name: 'code-turn',
+    input: { sessionId },
+    idempotencyKey: `code-turn-${sessionId}-${seq}`,
+  })
+}
+
+export type StopResult =
+  | { kind: 'requested' }
+  | { kind: 'refused'; reason: string; state: CodeState }
+  | { kind: 'not_found' }
+
+/**
+ * Marks the running turn to stop, under the row's lock. Only a running turn takes it (`transitions.ts`, `stop`);
+ * the process that holds the pass reads the mark, ends the pass and moves the session.
+ */
+export async function requestStop(sessionId: string): Promise<StopResult> {
+  return getDb().transaction(async (tx) => {
+    const [session] = await tx
+      .select({ state: codeSession.state })
+      .from(codeSession)
+      .where(eq(codeSession.id, sessionId))
+      .for('update')
+    if (!session) return { kind: 'not_found' as const }
+    const outcome = transition(session.state, 'stop')
+    if (outcome.action !== 'move') {
+      return { kind: 'refused' as const, reason: outcome.reason, state: session.state }
+    }
+    await tx
+      .update(codeSession)
+      .set({ stopRequestedAt: sql`clock_timestamp()` })
+      .where(eq(codeSession.id, sessionId))
+    return { kind: 'requested' as const }
+  })
+}
+
+/** Whether the owner asked the session's running turn to stop. */
+export async function stopRequested(sessionId: string): Promise<boolean> {
+  const [row] = await getDb()
+    .select({ at: codeSession.stopRequestedAt })
+    .from(codeSession)
+    .where(eq(codeSession.id, sessionId))
+  return row?.at != null
+}
+
+/**
+ * Ends the running turn: the session goes `idle` and the stop mark is cleared, under the row's lock. A message
+ * that arrived during the turn and was not handed to the pass is still unanswered: the session is queued for it
+ * and its `code-turn` is queued, in the same transaction, so a message is never left without a turn nor given two.
+ */
+export async function endTurn(sessionId: string): Promise<{ queued: boolean } | undefined> {
+  const client = await getPool().connect()
+  try {
+    return await drizzle(client, { schema }).transaction(async (tx) => {
+      const [session] = await tx
+        .select({ state: codeSession.state })
+        .from(codeSession)
+        .where(eq(codeSession.id, sessionId))
+        .for('update')
+      if (!session) return undefined
+      const ended = transition(session.state, 'turn_ended')
+      if (ended.action !== 'move') return undefined
+      const pending = await unansweredMessage(sessionId, tx)
+      const next = pending ? transition(ended.state, 'message') : undefined
+      const state = next?.action === 'move' ? next.state : ended.state
+      await tx
+        .update(codeSession)
+        .set({ state, stopRequestedAt: null, updatedAt: sql`now()` })
+        .where(eq(codeSession.id, sessionId))
+      if (pending && next?.action === 'move') {
+        await enqueueTurn(client, sessionId, pending.seq)
+        return { queued: true }
+      }
+      return { queued: false }
+    })
+  } finally {
+    client.release()
+  }
+}
+
+/** The `state` event that says a plan was answered, and how. */
+export const planAnswerMarker = (planSeq: number, answer: PlanAnswer) => `plan:${planSeq}:${answer}`
+
+export type PlanAnswerInput =
+  { answer: 'accept' } | { answer: 'revise'; text: string } | { answer: 'reject' }
+
+export type PlanAnswerResult =
+  | { kind: 'answered'; session: CodeSession; queued: boolean }
+  | { kind: 'refused'; reason: string; state: CodeState }
+  | { kind: 'not_found' }
+
+/**
+ * Answers the plan at `planSeq`, under the session's row lock. `transitions.ts` (`plan_answered`) is asked first, and
+ * only the session's last plan may be answered: a second answer finds the session no longer waiting, a stale
+ * `planSeq` finds another plan. The answer is a `state` event; accept (mode `code`, the plan as the message) and
+ * revise (the owner's text, mode unchanged) store the message and queue its `code-turn` in the same transaction,
+ * reject queues nothing and returns the session to `idle`.
+ */
+export async function answerPlan(
+  sessionId: string,
+  planSeq: number,
+  input: PlanAnswerInput,
+): Promise<PlanAnswerResult> {
+  const client = await getPool().connect()
+  try {
+    return await drizzle(client, { schema }).transaction(async (tx) => {
+      const [session] = await tx
+        .select()
+        .from(codeSession)
+        .where(eq(codeSession.id, sessionId))
+        .for('update')
+      if (!session) return { kind: 'not_found' as const }
+      const outcome = planAnswerOutcome(session.state, input.answer)
+      if (outcome.action !== 'move') {
+        return { kind: 'refused' as const, reason: outcome.reason, state: session.state }
+      }
+      const [plan] = await tx
+        .select({ seq: codeEvent.seq, content: codeEvent.content })
+        .from(codeEvent)
+        .where(and(eq(codeEvent.sessionId, sessionId), eq(codeEvent.kind, 'plan')))
+        .orderBy(desc(codeEvent.seq))
+        .limit(1)
+      if (!plan || plan.seq !== planSeq) {
+        return {
+          kind: 'refused' as const,
+          reason: 'That plan is not the one waiting for an answer.',
+          state: session.state,
+        }
+      }
+      await insertEvent(tx, sessionId, {
+        kind: 'state',
+        content: planAnswerMarker(plan.seq, input.answer),
+      })
+      let message: string | undefined
+      if (input.answer === 'accept') message = acceptedPlanMessage(plan.content)
+      if (input.answer === 'revise') message = input.text
+      const event = message
+        ? await insertEvent(tx, sessionId, { kind: 'user_message', content: message })
+        : undefined
+      const [moved] = await tx
+        .update(codeSession)
+        .set({
+          state: outcome.state,
+          ...(input.answer === 'accept' ? { mode: 'code' as const } : {}),
+          updatedAt: sql`clock_timestamp()`,
+        })
+        .where(eq(codeSession.id, sessionId))
+        .returning()
+      if (event) {
+        await jobBackend().enqueueInTransaction(client, {
+          name: 'code-turn',
+          input: { sessionId },
+          idempotencyKey: `code-turn-${sessionId}-${event.seq}`,
+        })
+      }
+      return { kind: 'answered' as const, session: moved!, queued: event !== undefined }
     })
   } finally {
     client.release()
@@ -295,6 +507,8 @@ export async function claimTurn(sessionId: string, now = new Date()): Promise<Cl
       .where(eq(codeSession.id, sessionId))
       .for('update')
     if (!session) return { kind: 'nothing' }
+    // While a pull request is being opened from the workspace, no turn writes to it: the job queues itself again.
+    if (!(await pullRequestUnlocked(tx, sessionId))) return { kind: 'busy' }
     let state = session.state
     if (state === 'starting' || state === 'running') {
       if (now.getTime() - session.updatedAt.getTime() < CLAIM_STALE_MS) return { kind: 'busy' }
@@ -307,7 +521,7 @@ export async function claimTurn(sessionId: string, now = new Date()): Promise<Cl
     if (!message || outcome.action !== 'move') return { kind: 'nothing' }
     const [moved] = await tx
       .update(codeSession)
-      .set({ state: outcome.state, updatedAt: sql`now()` })
+      .set({ state: outcome.state, stopRequestedAt: null, updatedAt: sql`now()` })
       .where(eq(codeSession.id, sessionId))
       .returning()
     return { kind: 'claimed', session: moved!, message }

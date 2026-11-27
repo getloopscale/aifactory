@@ -52,7 +52,7 @@ vi.mock('../lib/live', () => ({
     reload: () => {},
   }),
 }))
-vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn() }))
+vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn(), patch: vi.fn(), del: vi.fn() }))
 const feed = vi.hoisted(() => {
   const listeners = new Set<() => void>()
   let extra: unknown[] = []
@@ -75,6 +75,8 @@ vi.mock('../lib/code-session', () => ({
       session: {
         ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
         repository: 'acme/shop',
+        pullRequestUrl: id === 'asleep' ? 'https://github.com/acme/shop/pull/9' : null,
+        pullRequestNumber: id === 'asleep' ? 9 : null,
       },
       events: [
         { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
@@ -157,6 +159,15 @@ describe.each([
     expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe(
       'status',
     )
+  })
+
+  it('shows the pull request form in the Changes panel, with the link of the one already opened', async () => {
+    show(language, '/code/asleep')
+    const link = await screen.findByRole('link', {
+      name: t.code.changes.pullRequest.link(9),
+    })
+    expect(link.getAttribute('href')).toBe('https://github.com/acme/shop/pull/9')
+    expect(screen.getByLabelText(t.code.changes.pullRequest.title)).toBeDefined()
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
@@ -307,6 +318,46 @@ describe('the side panel of an open session', () => {
     expect(screen.queryByRole('separator', { name: en.code.editor.resizeEditor })).toBeNull()
     fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
     expect(screen.queryByRole('separator', { name: en.code.editor.resizeSide })).toBeNull()
+  })
+
+  it('shows and hides the changes and the files of the side bar from the slash commands', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const box = screen.getByLabelText(en.code.conversation.message)
+    const showing = (name: string) =>
+      screen.getByRole('tab', { name }).getAttribute('aria-selected') === 'true'
+    const run = (name: string) => {
+      fireEvent.change(box, { target: { value: `/${name}` } })
+      fireEvent.keyDown(box, { key: 'Enter' })
+    }
+    expect(showing(en.code.changes.title)).toBe(true)
+    run('diff')
+    expect(showing(en.code.changes.title)).toBe(false)
+    expect((box as HTMLTextAreaElement).value).toBe('')
+    run('diff')
+    expect(showing(en.code.changes.title)).toBe(true)
+    run('files')
+    expect(showing(en.code.files.tab)).toBe(true)
+    run('files')
+    expect(showing(en.code.files.tab)).toBe(false)
+    expect(showing(en.code.changes.title)).toBe(false)
+  })
+
+  it('shows the new title above the conversation as soon as the session is renamed', async () => {
+    const { patch } = await import('../lib/api')
+    vi.mocked(patch).mockResolvedValue({ title: 'A better name', mode: 'code' })
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const box = screen.getByLabelText(en.code.conversation.message)
+    fireEvent.change(box, { target: { value: '/rename' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    // The pull request form has a Title of its own: the one of the rename is the box the command focused.
+    const input = document.activeElement as HTMLInputElement
+    expect(input.closest('label')?.textContent).toContain(en.code.conversation.commands.rename)
+    fireEvent.change(input, { target: { value: 'A better name' } })
+    fireEvent.submit(input.closest('form')!)
+    expect(await screen.findByTitle('A better name')).toBeDefined()
+    expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/new', { title: 'A better name' })
   })
 
   it('reads the diff again when a turn ends', async () => {

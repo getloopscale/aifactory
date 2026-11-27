@@ -27,6 +27,7 @@ function memory(mode: CodeMode = 'code', extra: Partial<CodeSession> = {}) {
     ...extra,
   }
   const events: CodeEvent[] = []
+  const control = { stop: false }
   const add = (kind: CodeEvent['kind'], content: string, tool: string | null = null) => {
     const event = { sessionId: 's1', seq: events.length + 1, kind, tool, content, at: new Date() }
     events.push(event)
@@ -48,12 +49,29 @@ function memory(mode: CodeMode = 'code', extra: Partial<CodeSession> = {}) {
       const out = transition(session.state, event)
       if (out.action === 'move') session.state = out.state
     },
+    async end() {
+      const out = transition(session.state, 'turn_ended')
+      if (out.action !== 'move') return
+      session.state = out.state
+      // Like `endTurn`: a message no pass took is queued for the next turn.
+      const taken = new Set(events.filter((e) => e.kind === 'state').map((e) => e.content))
+      const waiting = events.some((e) => e.kind === 'user_message' && !taken.has(`turn:${e.seq}`))
+      const next = transition(session.state, 'message')
+      if (waiting && next.action === 'move') session.state = next.state
+    },
+    async stopRequested() {
+      return control.stop
+    },
+    async pending() {
+      const taken = new Set(events.filter((e) => e.kind === 'state').map((e) => e.content))
+      return events.find((e) => e.kind === 'user_message' && !taken.has(`turn:${e.seq}`))
+    },
     async saveAgentSession(_id, agentSessionId, harness) {
       session.agentSessionId = agentSessionId
       session.agentSessionHarness = harness
     },
   }
-  return { session, events, store }
+  return { session, events, store, control }
 }
 
 function setup(
@@ -112,6 +130,142 @@ function setup(
   }
   return { ...world, deps, run, resume, record, onRefusal, sandbox, scripted, saveDiff }
 }
+
+describe('runTurn controls', () => {
+  it('ends a pass that waits when the owner stops it, and leaves the session idle', async () => {
+    let release!: (r: HarnessResult) => void
+    const t = setup('code', (input) => {
+      input.live?.attach({
+        interrupts: false,
+        send: async () => 'delivered',
+        cancel: async () => release({ ok: false, summary: 'Stopped.', sessionId: 'agent-9' }),
+      })
+      return new Promise<HarnessResult>((resolve) => {
+        release = resolve
+      })
+    })
+    t.deps.controlPollMs = 5
+    const turn = runTurn(t.deps, 's1')
+    await vi.waitFor(() => expect(t.session.state).toBe('running'))
+    t.control.stop = true
+    expect(await turn).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.session.state).toBe('idle')
+    expect(t.events.map((e) => e.content)).toContain('stopped by the owner')
+    expect(t.session.agentSessionId).toBe('agent-9')
+    expect(t.events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
+  it('stops a pass that cannot be cancelled once the grace runs out', async () => {
+    const t = setup('code', () => new Promise<HarnessResult>(() => undefined))
+    t.deps.controlPollMs = 5
+    t.deps.stopGraceMs = 10
+    const turn = runTurn(t.deps, 's1')
+    await vi.waitFor(() => expect(t.session.state).toBe('running'))
+    t.control.stop = true
+    expect(await turn).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.events.map((e) => e.content)).toContain('stopped by the owner')
+  })
+
+  it('proposes no plan for a plan turn the owner stopped, and leaves the session idle', async () => {
+    let release!: (r: HarnessResult) => void
+    const t = setup('plan', (input) => {
+      input.live?.attach({
+        interrupts: false,
+        send: async () => 'delivered',
+        cancel: async () => release({ ok: true, summary: 'Half a plan.', sessionId: 'agent-9' }),
+      })
+      return new Promise<HarnessResult>((resolve) => {
+        release = resolve
+      })
+    })
+    t.deps.controlPollMs = 5
+    const turn = runTurn(t.deps, 's1')
+    await vi.waitFor(() => expect(t.session.state).toBe('running'))
+    t.control.stop = true
+    expect(await turn).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.session.state).toBe('idle')
+    expect(t.events.some((e) => e.kind === 'plan')).toBe(false)
+    expect(t.events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
+  it('hands a message stored during the turn to a pass that can be written to, once', async () => {
+    const sent: string[] = []
+    let finish!: () => void
+    const t = setup('code', (input) => {
+      input.live?.attach({
+        interrupts: false,
+        send: async (text) => {
+          sent.push(text)
+          return 'delivered'
+        },
+      })
+      return new Promise<HarnessResult>((resolve) => {
+        finish = () => resolve({ ok: true, summary: 'done' })
+      })
+    })
+    t.deps.controlPollMs = 5
+    const turn = runTurn(t.deps, 's1')
+    await vi.waitFor(() => expect(t.session.state).toBe('running'))
+    t.events.push({
+      sessionId: 's1',
+      seq: t.events.length + 1,
+      kind: 'user_message',
+      tool: null,
+      content: 'also this',
+      at: new Date(),
+    })
+    await vi.waitFor(() => expect(sent).toEqual(['also this']))
+    await vi.waitFor(() =>
+      expect(
+        t.events.some((e) => e.kind === 'state' && e.content === `turn:${t.events.length - 1}`),
+      ).toBe(true),
+    )
+    finish()
+    await turn
+    expect(sent).toEqual(['also this'])
+    expect(await t.store.pending('s1')).toBeUndefined()
+  })
+
+  it('leaves a message unanswered when the harness cannot be written to', async () => {
+    const t: ReturnType<typeof setup> = setup('code', async () => {
+      t.events.push({
+        sessionId: 's1',
+        seq: t.events.length + 1,
+        kind: 'user_message',
+        tool: null,
+        content: 'later',
+        at: new Date(),
+      })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      return { ok: true, summary: 'done' }
+    })
+    t.deps.controlPollMs = 5
+    await runTurn(t.deps, 's1')
+    expect((await t.store.pending('s1'))?.content).toBe('later')
+    // The turn that ended leaves the session queued for it, not idle.
+    expect(t.session.state).toBe('queued')
+  })
+
+  it('queues the next turn for a message that arrives as the pass ends', async () => {
+    const t: ReturnType<typeof setup> = setup('code', async () => {
+      // Stored after the last tick could have seen it, before the turn settles.
+      t.events.push({
+        sessionId: 's1',
+        seq: t.events.length + 1,
+        kind: 'user_message',
+        tool: null,
+        content: 'at the end',
+        at: new Date(),
+      })
+      return { ok: true, summary: 'done' }
+    })
+    t.deps.controlPollMs = 60_000
+    await runTurn(t.deps, 's1')
+    expect(t.session.state).toBe('queued')
+    expect(t.events.filter((e) => e.content === 'turn:3')).toHaveLength(0)
+    expect((await t.store.pending('s1'))?.content).toBe('at the end')
+  })
+})
 
 describe('runTurn', () => {
   it('streams a turn in order and leaves the session idle', async () => {
@@ -211,6 +365,27 @@ describe('runTurn', () => {
     await runTurn(t.deps, 's1')
     expect(t.sandbox.backend.commands.some((c) => c.includes('restore'))).toBe(false)
     expect(t.events.some((e) => e.kind === 'error')).toBe(false)
+  })
+
+  it('asks plan mode for a plan and ends with one plan event, waiting for the owner', async () => {
+    const t = setup('plan', (input) => {
+      input.onEvent?.({ kind: 'message', content: 'thinking aloud' })
+      return { ok: true, summary: '## What exists\nx', costUsd: 0.1 }
+    })
+    const result = await runTurn(t.deps, 's1')
+    expect(result.status).toBe('waiting_input')
+    expect(t.run.mock.calls[0]![1].prompt).toContain('## What I will not do')
+    expect(t.run.mock.calls[0]![1].prompt).toContain('do it')
+    expect(t.events.filter((e) => e.kind === 'plan')).toHaveLength(1)
+    expect(t.events.find((e) => e.kind === 'plan')?.content).toBe('## What exists\nx')
+    expect(t.events.some((e) => e.kind === 'agent_message')).toBe(false)
+    expect(t.session.state).toBe('waiting_input')
+  })
+
+  it('fails a plan turn that answers with nothing', async () => {
+    const t = setup('plan', () => ({ ok: true, summary: '  ' }))
+    expect((await runTurn(t.deps, 's1')).status).toBe('failed')
+    expect(t.events.some((e) => e.kind === 'plan')).toBe(false)
   })
 
   it('records the mode the turn ran in on its state event', async () => {
