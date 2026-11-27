@@ -1042,8 +1042,12 @@ export type AgentsView = {
   settings: AgentSettings
 }
 
-/** The agent and the model each role's latest pass reported; a role that never ran has no entry. */
-export type RoleModels = Partial<Record<AgentRole, { agent: string; model: string }>>
+/** The model each agent last reported on a pass of a task, by role and then by agent; none where it never named one. */
+export type RoleModels = Partial<Record<AgentRole, Record<string, string>>>
+
+/** What the catalog writes where no model is chosen, and where the security effort is fixed; the page puts the localized text in their place. */
+export const DEFAULT_MODEL_WORD = 'modelo padrão'
+export const FIXED_EFFORT_WORD = 'esforço fixo'
 
 /** The roles of a coding agent (the security role's effort is pinned at the highest, never chosen) that the owner can give to one agent or another. */
 export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
