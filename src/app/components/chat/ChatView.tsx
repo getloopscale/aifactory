@@ -1,4 +1,3 @@
-import { ScrollArea } from '@getloopscale/ui'
 import { MessageSquare } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -11,6 +10,7 @@ import { useChats } from '../../lib/chats'
 import { useCopy } from '../../lib/copy'
 
 import { ChatgptConnect } from './ChatgptConnect'
+import { FollowScroll } from './FollowScroll'
 import { ModelPicker } from './ModelPicker'
 import { Messages } from './Messages'
 import { Pending } from './Pending'
@@ -158,7 +158,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ScrollArea className="min-h-0 flex-1">
+      <FollowScroll count={messages.length} watch={messages} className="min-h-0 flex-1">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 sm:px-6 py-6">
           <Messages
             messages={messages}
@@ -166,7 +166,7 @@ export function ChatView({ chatId }: { chatId?: string }) {
             model={model === 'codex' ? 'ChatGPT' : 'OpenRouter'}
           />
         </div>
-      </ScrollArea>
+      </FollowScroll>
       <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pb-5">{composer}</div>
     </div>
   )
