@@ -748,12 +748,14 @@ describe('the readiness of a run a worker took before any pass saw it queued (#7
     expect(await readiness()).toHaveLength(1)
   })
 
-  it('orders nothing for a single queued run', async () => {
+  it('orders nothing for a run a worker holds once it is judged', async () => {
     const t = await seed()
-    await enqueue(t.id, 30)
+    const run = await held(t)
 
+    expect(await readinessOfHeldRun(deps(), run, 'auto')).toBe(false)
     await schedule(deps(), AUTO)
 
+    expect(await readiness()).toHaveLength(1)
     expect((await decisions()).filter((d) => d.kind === 'order')).toEqual([])
   })
 })
