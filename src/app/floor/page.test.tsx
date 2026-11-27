@@ -291,7 +291,8 @@ describe('the floor', () => {
 
     const one = (await screen.findByText('send_back · Applied')).closest('a')
     expect(one?.getAttribute('href')).toBe('/floor?task=11')
-    expect(one?.textContent).toContain('app #7 One')
+    expect(one?.querySelector('[data-item-id]')?.textContent).toBe('#7')
+    expect(one?.textContent).toContain('#7 app One')
     expect(screen.getByText('escalate · Escalated')).toBeDefined()
     expect(screen.getByText('scope · Failed')).toBeDefined()
     expect(screen.getByText('wait · Read again later')).toBeDefined()

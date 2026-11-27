@@ -108,6 +108,29 @@ describe('the conversation', () => {
     expect(screen.queryByText(c.lines(0, 0))).toBeNull()
   })
 
+  it('keeps an edit on a line of its own between folded commands', () => {
+    render(
+      <CodeConversation
+        session={session('idle')}
+        events={[
+          ev(1, 'tool_use', 'ls', 'bash'),
+          ev(2, 'tool_result', 'a'),
+          ev(3, 'tool_use', 'cat a', 'bash'),
+          ev(4, 'tool_result', 'b'),
+          ev(5, 'tool_use', JSON.stringify({ file_path: 'a.ts', added: 1, removed: 0 }), 'edit'),
+          ev(6, 'tool_result', 'ok'),
+        ]}
+      />,
+    )
+    expect(screen.getByRole('button', { name: c.ranCommands(2) })).toBeDefined()
+    expect(screen.getByText(`${c.edited} a.ts`)).toBeDefined()
+  })
+
+  it('names the agent and the model of the session under the box', () => {
+    render(<CodeConversation session={{ ...session('idle'), model: 'm-1' }} events={[]} />)
+    expect(screen.getByLabelText(`${c.by}: codex · m-1`)).toBeDefined()
+  })
+
   it('shows Stop in place of Send only while running with an empty box', async () => {
     vi.mocked(post).mockResolvedValue({})
     const { rerender } = render(<CodeConversation session={session('running')} events={[]} />)

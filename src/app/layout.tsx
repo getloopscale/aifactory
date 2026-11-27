@@ -188,6 +188,14 @@ function Page({
   pathname: string
 }) {
   const { t } = useCopy()
+  // Code Mode is an IDE: it takes the whole area, edge to edge, and scrolls inside its own panes.
+  if (signedIn && !compact && /^\/code(\/|$)/.test(pathname)) {
+    return (
+      <div data-bleed="" className="h-full">
+        <Outlet />
+      </div>
+    )
+  }
   if (signedIn && inWork(pathname)) {
     return (
       <div className={`mx-auto max-w-[1800px] pb-10 pt-5 ${compact ? 'px-4' : 'px-6'}`}>

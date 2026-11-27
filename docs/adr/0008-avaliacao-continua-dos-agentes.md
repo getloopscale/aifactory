@@ -109,7 +109,7 @@ repositório, e a suíte inteira ainda não rodou.
 ## Consequências
 
 - Uma mudança de prompt, harness, modelo ou imagem do sandbox passa a ter custo e tempo no deploy: os
-  casos rápidos rodam em paralelo, dois a dois. Uma mudança em qualquer outro arquivo não muda nada.
+  casos rápidos rodam em paralelo (ver a emenda abaixo). Uma mudança em qualquer outro arquivo não muda nada.
 - O resultado de um caso varia entre rodadas, porque os modelos não são determinísticos. Cinco casos
   detectam uma piora grande, não uma de poucos pontos. Para uma decisão fina (trocar de modelo, por
   exemplo), `EVALS_SET=all pnpm evals` roda os 30 casos.
@@ -118,3 +118,15 @@ repositório, e a suíte inteira ainda não rodou.
 - A issue é lida como está hoje. Se alguém a editou depois da entrega, o caso pede outra coisa.
 - Uma melhoria real muda a baseline. Ela é regravada com `EVALS_BASELINE=1 pnpm evals`, num commit que
   diz por quê.
+
+## Emenda (#684): o conjunto rápido vem da baseline
+
+- Um caso só é rápido se passou na baseline. O mais curto de cada repositório entre os que passaram (pela
+  duração medida lá, não pela da entrega) vem primeiro; só depois o segundo de cada um. Um caso que falhou
+  ou que a baseline não tem nunca entra, e a lacuna não é preenchida com um caso não medido (`markQuick`).
+- O `pnpm evals:check` roda tantos casos ao mesmo tempo quanto o conjunto rápido tem, no máximo os slots de
+  sandbox livres na hora; sem essa informação, ou sem slot, roda um. `EVALS_CONCURRENCY` continua mandando.
+- No portão do deploy, um caso rápido que passou na baseline e falha agora reprova a verificação, sem
+  esperar a taxa de piora; um caso rápido que a baseline não passou também a reprova. A comparação geral
+  continua como antes.
+- Mudar o conjunto muda o que o portão mede: a baseline deve ser regravada por uma pessoa com o novo conjunto.

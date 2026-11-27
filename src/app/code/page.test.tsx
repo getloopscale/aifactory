@@ -23,6 +23,9 @@ const session = (id: string, title: string, updatedAt: string, state = 'running'
   updatedAt,
 })
 
+/** More sessions for the tests of the filter, which shows only over a handful. */
+const many = vi.hoisted(() => ({ list: [] as unknown[] }))
+
 vi.mock('../lib/live', () => ({
   useResource: (path: string) => ({
     data: path.includes('repositories')
@@ -41,6 +44,7 @@ vi.mock('../lib/live', () => ({
           sessions: [
             session('old', 'Older one', '2026-11-27T08:00:00Z', 'stopped'),
             session('new', 'Newer one', '2026-11-27T09:00:00Z'),
+            ...many.list,
           ],
           harnesses: ['claude-code', 'codex'],
         },
@@ -48,7 +52,7 @@ vi.mock('../lib/live', () => ({
     reload: () => {},
   }),
 }))
-vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn() }))
+vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn(), patch: vi.fn(), del: vi.fn() }))
 const feed = vi.hoisted(() => {
   const listeners = new Set<() => void>()
   let extra: unknown[] = []
@@ -102,6 +106,7 @@ beforeEach(() => {
     return { diff: { files: [] }, live: true, capturedAt: null }
   })
   feed.reset()
+  many.list = []
 })
 afterEach(cleanup)
 
@@ -189,6 +194,32 @@ describe.each([
   })
 })
 
+describe('the list of sessions', () => {
+  it('has no filter for a handful, and narrows a longer list by title', () => {
+    show('en')
+    expect(screen.queryByLabelText(en.code.filter)).toBeNull()
+    cleanup()
+    many.list = ['a', 'b', 'c', 'd'].map((id) =>
+      session(id, `Extra ${id}`, '2026-11-27T07:00:00Z', 'ended'),
+    )
+    show('en')
+    fireEvent.change(screen.getByLabelText(en.code.filter), { target: { value: 'newer' } })
+    expect(screen.getByText('Newer one')).toBeDefined()
+    expect(screen.queryByText('Older one')).toBeNull()
+    fireEvent.change(screen.getByLabelText(en.code.filter), { target: { value: 'zzz' } })
+    expect(screen.getByText(en.code.noMatch)).toBeDefined()
+  })
+
+  it('shows the sessions of an open one behind their icon, with the open one marked', () => {
+    show('en', '/code/new')
+    expect(screen.queryByRole('link', { name: /Newer one/ })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: en.code.sessions }))
+    expect(screen.getByRole('link', { name: /Newer one/ }).getAttribute('aria-current')).toBe(
+      'page',
+    )
+  })
+})
+
 describe('the code page on a compact width', () => {
   it('shows the list alone, then one session with a way back', () => {
     show('en', '/code', 'compact')
@@ -239,38 +270,94 @@ describe('the side panel of an open session', () => {
     expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/new/diff')
   })
 
-  it('shows and hides the panel on Ctrl+Shift+D, from a text box too', async () => {
+  it('shows and hides the changes on Ctrl+Shift+D, from a text box too', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     const box = screen.getByLabelText(en.code.conversation.message)
     fireEvent.keyDown(box, { key: 'D', ctrlKey: true, shiftKey: true })
-    expect(screen.queryByRole('tablist', { name: en.code.changes.tabs })).toBeNull()
+    expect(screen.queryByText(en.code.changes.empty)).toBeNull()
+    expect(screen.queryByRole('complementary', { name: en.code.editor.side })).toBeNull()
     fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
-    expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
+    expect(screen.getByText(en.code.changes.empty)).toBeDefined()
     fireEvent.keyDown(window, { key: 'd', ctrlKey: true })
-    expect(screen.getByRole('tablist', { name: en.code.changes.tabs })).toBeDefined()
+    expect(screen.getByText(en.code.changes.empty)).toBeDefined()
   })
 
-  it('toggles Changes and Files from the slash commands', async () => {
+  it('opens the first change by itself, and closing the last tab leaves the agent alone', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diff(2),
+    )
+    show('en', '/code/new')
+    const tab = await screen.findByRole('tab', { name: en.code.editor.diffTab('f0.ts') })
+    expect(tab.getAttribute('aria-selected')).toBe('true')
+    fireEvent.click(screen.getByRole('button', { name: en.code.changes.open('f1.ts') }))
+    expect(
+      screen
+        .getByRole('tab', { name: en.code.editor.diffTab('f1.ts') })
+        .getAttribute('aria-selected'),
+    ).toBe('true')
+    for (const name of ['f0.ts', 'f1.ts'])
+      fireEvent.click(
+        screen.getByRole('button', { name: en.code.editor.close(en.code.editor.diffTab(name)) }),
+      )
+    expect(screen.queryByRole('tablist', { name: en.code.editor.tabs })).toBeNull()
+  })
+
+  it('puts a handle between the side bar, the agent and the editor, each only while its pane shows', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diff(1),
+    )
+    show('en', '/code/new')
+    await screen.findByRole('tab', { name: en.code.editor.diffTab('f0.ts') })
+    expect(screen.getByRole('separator', { name: en.code.editor.resizeSide })).toBeDefined()
+    const handle = screen.getByRole('separator', { name: en.code.editor.resizeEditor })
+    expect(handle.querySelector('[data-grip] svg')).not.toBeNull()
+    fireEvent.click(
+      screen.getByRole('button', { name: en.code.editor.close(en.code.editor.diffTab('f0.ts')) }),
+    )
+    expect(screen.queryByRole('separator', { name: en.code.editor.resizeEditor })).toBeNull()
+    fireEvent.keyDown(window, { key: 'd', ctrlKey: true, shiftKey: true })
+    expect(screen.queryByRole('separator', { name: en.code.editor.resizeSide })).toBeNull()
+  })
+
+  it('shows and hides the changes and the files of the side bar from the slash commands', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     const box = screen.getByLabelText(en.code.conversation.message)
-    const tabs = () => screen.queryByRole('tablist', { name: en.code.changes.tabs })
+    const showing = (name: string) =>
+      screen.getByRole('tab', { name }).getAttribute('aria-selected') === 'true'
     const run = (name: string) => {
       fireEvent.change(box, { target: { value: `/${name}` } })
       fireEvent.keyDown(box, { key: 'Enter' })
     }
+    expect(showing(en.code.changes.title)).toBe(true)
     run('diff')
-    expect(tabs()).toBeNull()
+    expect(showing(en.code.changes.title)).toBe(false)
     expect((box as HTMLTextAreaElement).value).toBe('')
     run('diff')
-    expect(tabs()).not.toBeNull()
+    expect(showing(en.code.changes.title)).toBe(true)
     run('files')
-    expect(screen.getByRole('tab', { name: en.code.files.tab }).getAttribute('aria-selected')).toBe(
-      'true',
-    )
+    expect(showing(en.code.files.tab)).toBe(true)
     run('files')
-    expect(tabs()).toBeNull()
+    expect(showing(en.code.files.tab)).toBe(false)
+    expect(showing(en.code.changes.title)).toBe(false)
+  })
+
+  it('shows the new title above the conversation as soon as the session is renamed', async () => {
+    const { patch } = await import('../lib/api')
+    vi.mocked(patch).mockResolvedValue({ title: 'A better name', mode: 'code' })
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const box = screen.getByLabelText(en.code.conversation.message)
+    fireEvent.change(box, { target: { value: '/rename' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    // The pull request form has a Title of its own: the one of the rename is the box the command focused.
+    const input = document.activeElement as HTMLInputElement
+    expect(input.closest('label')?.textContent).toContain(en.code.conversation.commands.rename)
+    fireEvent.change(input, { target: { value: 'A better name' } })
+    fireEvent.submit(input.closest('form')!)
+    expect(await screen.findByTitle('A better name')).toBeDefined()
+    expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/new', { title: 'A better name' })
   })
 
   it('reads the diff again when a turn ends', async () => {

@@ -1417,3 +1417,28 @@ export const pushSent = pgTable(
   },
   (t) => [uniqueIndex('push_sent_item').on(t.identity, t.itemAt, t.subscriptionId)],
 )
+
+/**
+ * The GitHub checks of a task's pull request, as the `integrate-after-ci` cron last read them: one row per task,
+ * replaced by each read. It belongs to the commit it names (`headSha`, the pull request's head on GitHub) and to the
+ * pull request it was read from, so the panel shows it only while both are still the task's. `checkedAt` is when the
+ * read began: a read that began earlier never replaces a later one.
+ */
+export const pullRequestCi = pgTable('pull_request_ci', {
+  taskId: integer('task_id')
+    .primaryKey()
+    .references(() => task.id, { onDelete: 'cascade' }),
+  pullRequestUrl: text('pull_request_url').notNull(),
+  headSha: text('head_sha').notNull(),
+  pullState: text('pull_state', { enum: ['open', 'closed', 'merged'] }).notNull(),
+  checks: jsonb('checks')
+    .$type<
+      {
+        name: string
+        state: 'running' | 'passed' | 'failed'
+        url: string | null
+      }[]
+    >()
+    .notNull(),
+  checkedAt: timestamp('checked_at', { withTimezone: true }).notNull(),
+})

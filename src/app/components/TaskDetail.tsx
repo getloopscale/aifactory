@@ -1,6 +1,9 @@
 import {
   Bot,
+  CircleCheck,
   CircleHelp,
+  CircleX,
+  Clock,
   Eye,
   FlaskConical,
   History,
@@ -39,8 +42,10 @@ import {
   Surface,
   TABLE,
 } from './ui/Surface'
-import { ago, describeEvent, itemName, money, shortSha } from '../lib/format'
+import { ItemId } from './ui/ItemId'
+import { ago, describeEvent, money, shortSha } from '../lib/format'
 import { useCopy } from '../lib/copy'
+import { CI_TONE } from './Ci'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
@@ -217,9 +222,8 @@ function TaskTabs({
 function TaskPlace({ task }: { task: TaskDetail['task'] }) {
   return (
     <>
-      <span className="font-mono text-xs">
-        {task.repository} {itemName(task)}
-      </span>
+      <ItemId item={task} size="large" link />
+      <span className="min-w-0 truncate font-mono text-xs">{task.repository}</span>
       <StageBadge
         stage={task.stage}
         integrated={task.integrated}
@@ -333,6 +337,29 @@ function Questions({ questions }: { questions: TaskDetail['questions'] }) {
               {q.answer ? t.task.answered(q.answeredBy ?? '', q.answer) : t.task.replyHint}
             </span>
           </Row>
+        ))}
+      </Rows>
+    </Surface>
+  )
+}
+
+const CI_ICON = { running: Clock, passed: CircleCheck, failed: CircleX } as const
+
+/** Each GitHub check of the pull request's head with its state and a link to its run. Nothing when none reported. */
+function PullRequestChecks({ ci }: { ci: TaskDetail['task']['ci'] }) {
+  const { t } = useCopy()
+  if (!ci) return null
+  return (
+    <Surface title={t.task.ciChecks} icon={CircleCheck} count={ci.checks.length}>
+      <Rows>
+        {ci.checks.map((c) => (
+          <Row
+            key={c.name}
+            href={c.url ?? undefined}
+            lead={<RowIcon icon={CI_ICON[c.state]} tone={CI_TONE[c.state]} />}
+            title={c.name}
+            trail={t.task.ciState[c.state]}
+          />
         ))}
       </Rows>
     </Surface>
@@ -670,6 +697,8 @@ export function TaskDetailView({
               <CoordinatorActions actions={detail.coordinatorActions} />
             </Surface>
           ) : null}
+
+          <PullRequestChecks ci={detail.task.ci} />
 
           <Deliveries deliveries={detail.deliveries} />
 
