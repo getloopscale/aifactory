@@ -45,6 +45,7 @@ export const en = {
       delivered: 'delivered',
     },
     defaultModel: 'default model',
+    modelUnknown: 'model not known yet',
     now: {
       heading: 'Working now',
       idle: 'No agent is working right now.',
@@ -1209,6 +1210,11 @@ export const en = {
     model: 'Model',
     modelOf: (role: string) => `Model of the ${role}`,
     agentDefault: "Agent's default",
+    agentDefaultToday: (model: string) => `Agent's default (today: ${model})`,
+    agentDefaultUnknown: "Agent's default (model not known yet)",
+    summaryDefault: (model?: string) =>
+      model ? `default model (today: ${model})` : 'default model (not known yet)',
+    summaryEffort: (level?: string) => (level ? `effort ${level} (fixed)` : 'effort not known'),
     effort: 'Effort',
     effortOf: (role: string) => `Effort of the ${role}`,
     default: 'Default',

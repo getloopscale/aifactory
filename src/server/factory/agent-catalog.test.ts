@@ -173,6 +173,14 @@ describe('the catalog of agents', () => {
     expect(agent('merger', { FACTORY_MERGER: 'codex' }).engine.value).toContain('codex')
   })
 
+  it('does not call the security effort the highest of the model, since a ceiling holds it', () => {
+    const value = agent('security').engine.value
+    expect(value).toBe(
+      'claude-code · modelo padrão · esforço fixo (o mesmo agente do construtor, numa sessão nova)',
+    )
+    expect(value).not.toContain('máximo')
+  })
+
   it('reports the model and the coding agent as they are configured now', () => {
     expect(agent('builder').engine.value).toBe('claude-code · modelo padrão')
     expect(agent('builder', { FACTORY_HARNESS: 'codex' }).engine.value).toBe(
