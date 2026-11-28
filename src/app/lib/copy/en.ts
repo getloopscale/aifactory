@@ -1719,6 +1719,7 @@ export const en = {
       side: 'Side bar',
       status: 'Session status',
       cost: (usd: string) => `Cost so far: ${usd}`,
+      costUnreported: 'Cost not reported by this agent',
     },
     filter: 'Filter sessions',
     hideEnded: 'Hide ended sessions',
@@ -1828,6 +1829,8 @@ export const en = {
         reject: 'Reject',
         answered: { accept: 'Accepted', revise: 'Revised', reject: 'Rejected' },
         reviseLabel: 'What should change in the plan?',
+        assistContext: (plan: string, cut: boolean) =>
+          `The owner is revising the plan below, which the coding agent proposed and has not carried out yet: what they write is a change to this plan, not to the files the session already changed. The plan${cut ? ' (cut: only its beginning is shown)' : ''}:\n${plan}\n`,
         sendRevision: 'Send revision',
         cancel: 'Cancel',
         sending: 'Sending…',

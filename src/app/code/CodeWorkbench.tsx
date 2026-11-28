@@ -415,17 +415,20 @@ function costGroup(reading: CostReading, previous: string, fresh: () => string):
 }
 
 /**
- * The cost of the session so far, or null when no event reported one. Each `cost` event holds the running total
+ * The cost of the session so far; `unreported` when cost events came but none carried a value (the Codex CLI
+ * reports none), and null before any cost event. Each `cost` event holds the running total
  * of its agent session (a resumed Claude Code session reports everything since it began), so this adds the last
  * value of each agent session, never every event.
  */
-function sessionCost(events: CodeEventWire[]): number | null {
+function sessionCost(events: CodeEventWire[]): number | 'unreported' | null {
   const last = new Map<string, number>()
   let group = UNNAMED
   let unknown = 0
+  let read = false
   for (const e of events) {
     const reading = e.kind === 'cost' ? readCost(e.content) : null
     if (!reading) continue
+    read = true
     const next = costGroup(reading, group, () => `fresh:${unknown++}`)
     // The first pass to name its session and say it resumed one goes on from the unnamed events before it.
     if (group === UNNAMED && next !== UNNAMED && reading.resumed && reading.usd !== null) {
@@ -434,7 +437,7 @@ function sessionCost(events: CodeEventWire[]): number | null {
     group = next
     if (reading.usd !== null) last.set(group, reading.usd)
   }
-  if (last.size === 0) return null
+  if (last.size === 0) return read ? 'unreported' : null
   return [...last.values()].reduce((sum, usd) => sum + usd, 0)
 }
 
@@ -1253,7 +1256,11 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
                 : null}
             </span>
             {cost === null ? null : (
-              <span className="font-sans tabular-nums">{t.code.editor.cost(money(cost))}</span>
+              <span className="font-sans tabular-nums">
+                {cost === 'unreported'
+                  ? t.code.editor.costUnreported
+                  : t.code.editor.cost(money(cost))}
+              </span>
             )}
             <span className="font-sans">{t.code.modes[session.mode]}</span>
             <span className="flex items-center gap-1">
