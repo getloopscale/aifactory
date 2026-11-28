@@ -2091,6 +2091,19 @@ export const ptBR: Copy = {
     },
     conversation: {
       label: 'Conversa',
+      assistContext: (
+        repository: string,
+        branch: string,
+        changed: string[] | undefined,
+        more: number,
+      ) =>
+        `Uma mensagem do dono para o agente de código de uma sessão em ${repository}, branch de trabalho ${branch}. ${
+          changed === undefined
+            ? 'Não foi possível ler os arquivos que a sessão alterou.'
+            : changed.length === 0
+              ? 'A sessão ainda não alterou nenhum arquivo.'
+              : `Arquivos que a sessão alterou: ${changed.join(', ')}${more > 0 ? ` e mais ${more}` : ''}.`
+        }`,
       empty: 'Nada foi dito ou feito ainda.',
       loading: 'Carregando a sessão…',
       you: 'Você',

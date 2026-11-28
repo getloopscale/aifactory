@@ -14,14 +14,20 @@ import { en } from '../lib/copy/en'
 import { ptBR } from '../lib/copy/pt-BR'
 
 vi.mock('../lib/api', () => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
-vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
+vi.mock('../components/Assist', () => ({
+  Assist: ({ context }: { context?: string }) => (
+    <p data-testid="assist" data-context={context}>
+      assist
+    </p>
+  ),
+}))
 vi.mock('@getloopscale/loopzero-ui', () => ({
   ChatMessageResponse: ({ text }: { text: string }) => <div data-testid="md">{text}</div>,
 }))
 
 import { del, get, patch, post } from '../lib/api'
 
-import { CodeConversation, linkPaths, mentionAt } from './CodeConversation'
+import { CodeConversation, CONTEXT_PATHS, linkPaths, mentionAt } from './CodeConversation'
 
 const c = en.code.conversation
 
@@ -719,5 +725,73 @@ describe('slash commands', () => {
     )
     type('/nope')
     expect(screen.queryByRole('option')).toBeNull()
+  })
+})
+
+describe('the assist of a session', () => {
+  const contexts = () => screen.getAllByTestId('assist').map((a) => a.getAttribute('data-context'))
+
+  it('tells the assist of the message box the repository, the work branch and the changed paths', () => {
+    render(
+      <CodeConversation
+        session={session('idle')}
+        events={[]}
+        files={['README.md', 'src/isEvenOrOdd.js']}
+        changed={['src/isEvenOrOdd.js']}
+      />,
+    )
+    expect(contexts()).toEqual([c.assistContext('acme/shop', 'code/s1', ['src/isEvenOrOdd.js'], 0)])
+    expect(contexts()[0]).toContain('src/isEvenOrOdd.js')
+    expect(contexts()[0]).toContain('code/s1')
+    expect(contexts()[0]).not.toContain('README.md')
+  })
+
+  it('tells the assist of the plan revision box the same session', () => {
+    render(
+      <CodeConversation
+        session={session('waiting_input')}
+        events={[ev(1, 'user_message', 'plan it'), ev(2, 'plan', '## What exists\nold')]}
+        changed={['src/a.ts']}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: c.plan.revise }))
+    const want = c.assistContext('acme/shop', 'code/s1', ['src/a.ts'], 0)
+    expect(contexts()).toEqual([want, want])
+  })
+
+  it('says the changed files could not be read, never listing the workspace in their place', () => {
+    render(
+      <CodeConversation session={session('idle')} events={[]} files={['README.md', 'src/a.ts']} />,
+    )
+    const [context] = contexts()
+    expect(context).toBe(c.assistContext('acme/shop', 'code/s1', undefined, 0))
+    expect(context).toContain('could not be read')
+    expect(context).not.toContain('README.md')
+  })
+
+  it('says the session changed nothing yet, and counts the paths past the limit', () => {
+    const many = Array.from({ length: CONTEXT_PATHS + 2 }, (_, i) => `f${i}.ts`)
+    render(<CodeConversation session={session('idle')} events={[]} changed={many} />)
+    expect(contexts()[0]).toContain(`f${CONTEXT_PATHS - 1}.ts and 2 more`)
+    expect(contexts()[0]).not.toContain(`f${CONTEXT_PATHS}.ts`)
+    cleanup()
+    render(<CodeConversation session={session('idle')} events={[]} changed={[]} />)
+    expect(contexts()[0]).toContain('no file yet')
+  })
+
+  it('says it in Portuguese on a page in Portuguese', () => {
+    window.localStorage.setItem('aifactory.language', 'pt-BR')
+    try {
+      render(
+        <CopyProvider>
+          <CodeConversation session={session('idle')} events={[]} changed={['src/a.ts']} />
+        </CopyProvider>,
+      )
+    } finally {
+      window.localStorage.clear()
+    }
+    expect(contexts()[0]).toBe(
+      ptBR.code.conversation.assistContext('acme/shop', 'code/s1', ['src/a.ts'], 0),
+    )
   })
 })

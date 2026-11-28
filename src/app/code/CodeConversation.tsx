@@ -327,12 +327,15 @@ function PlanCard({
   row,
   files,
   repository,
+  context,
   waiting,
 }: {
   sessionId: string
   row: Extract<Row, { type: 'plan' }>
   files: string[]
   repository: string
+  /** What the assist of the revision box knows of the session. */
+  context: string
   waiting: boolean
 }) {
   const { t } = useCopy()
@@ -385,6 +388,7 @@ function PlanCard({
                 kind="changes"
                 text={text}
                 repository={repository}
+                context={context}
                 onUse={(p) => setText(p.text)}
               />
               <div className="flex gap-2">
@@ -561,11 +565,30 @@ function ModeSelector({
   )
 }
 
+/** The most changed paths the assist is told of; the rest are only counted. */
+export const CONTEXT_PATHS = 40
+
+/**
+ * What the assist of a session's boxes knows of it: its repository, its work branch and the paths its diff
+ * changed. `changed` is undefined while the diff is not read or could not be, which is said as such, never
+ * replaced by the files of the workspace.
+ */
+export function sessionContext(
+  session: Pick<CodeSessionWire, 'repository' | 'workBranch'>,
+  changed: string[] | undefined,
+  say: (repository: string, branch: string, changed: string[] | undefined, more: number) => string,
+): string {
+  const listed = changed?.slice(0, CONTEXT_PATHS)
+  const more = changed ? changed.length - (listed?.length ?? 0) : 0
+  return say(session.repository, session.workBranch, listed, more)
+}
+
 /** The conversation of a session and the box that writes to it. */
 export function CodeConversation({
   session,
   events,
   files = [],
+  changed,
   onOpenFile,
   onPanel,
   onRenamed,
@@ -575,6 +598,8 @@ export function CodeConversation({
   events: CodeEventWire[]
   /** The files of the workspace, for `@` and for the paths an agent names. */
   files?: string[]
+  /** The paths the session's diff changed, undefined while it is not read or could not be. */
+  changed?: string[]
   onOpenFile?: (path: string) => void
   /** `/diff` and `/files`: show or hide that tab of the side panel. */
   onPanel?: (tab: 'changes' | 'files') => void
@@ -589,6 +614,7 @@ export function CodeConversation({
     () => cardsOf(inOwnerWords(events, session.repository, c.missingBranch)),
     [events, session.repository, c.missingBranch],
   )
+  const context = sessionContext(session, changed, c.assistContext)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string>()
@@ -815,6 +841,7 @@ export function CodeConversation({
                 row={row}
                 files={files}
                 repository={session.repository}
+                context={context}
                 waiting={session.state === 'waiting_input'}
               />
             ) : row.type === 'tools' ? (
@@ -1011,6 +1038,7 @@ export function CodeConversation({
             kind="changes"
             text={text}
             repository={session.repository}
+            context={context}
             onUse={(p) => setText(p.text)}
           />
           {problem ? (
