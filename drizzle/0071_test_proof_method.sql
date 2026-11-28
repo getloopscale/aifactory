@@ -1,0 +1,1 @@
+ALTER TABLE "test_proof" ADD COLUMN "method" text;
