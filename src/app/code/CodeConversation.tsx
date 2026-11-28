@@ -335,7 +335,7 @@ function PlanCard({
   row: Extract<Row, { type: 'plan' }>
   files: string[]
   repository: string
-  /** What the assist of the revision box knows of the session. */
+  /** What the assist of the revision box knows of the session; the plan's text goes before it. */
   context: string
   waiting: boolean
 }) {
@@ -389,7 +389,7 @@ function PlanCard({
                 kind="changes"
                 text={text}
                 repository={repository}
-                context={context}
+                context={planContext(row.text, context, c.assistContext)}
                 onUse={(p) => setText(p.text)}
               />
               <div className="flex gap-2">
@@ -582,6 +582,22 @@ export function sessionContext(
   const listed = changed?.slice(0, CONTEXT_PATHS)
   const more = changed ? changed.length - (listed?.length ?? 0) : 0
   return say(session.repository, session.workBranch, listed, more)
+}
+
+/** The longest part of a plan the assist of its revision box is given. */
+export const PLAN_CONTEXT_CHARS = 12000
+
+/**
+ * What the assist of the plan revision box knows: the plan the owner is revising, cut at
+ * `PLAN_CONTEXT_CHARS` and said to be cut, then what it knows of the session.
+ */
+export function planContext(
+  plan: string,
+  session: string,
+  say: (plan: string, cut: boolean) => string,
+): string {
+  const cut = plan.length > PLAN_CONTEXT_CHARS
+  return `${say(cut ? plan.slice(0, PLAN_CONTEXT_CHARS) : plan, cut)}\n${session}`
 }
 
 /** The conversation of a session and the box that writes to it. */
