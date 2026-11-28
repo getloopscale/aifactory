@@ -152,19 +152,26 @@ export function PullRequestForm({
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string>()
   const [made, setMade] = useState<OpenedPullRequest>()
+  const [sent, setSent] = useState<OpenedPullRequest>()
   const pull = made ?? existing ?? undefined
   const ready = !busy && hasChanges && title.trim() !== ''
+  const copy = t.code.changes.pullRequest
+  const titleLabel = pull ? copy.commitTitle : copy.title
+  const why = whyNotReady(copy, { busy, hasChanges, title, pull: Boolean(pull) })
 
   async function submit() {
     if (!ready) return
     setBusy(true)
     setProblem(undefined)
+    setSent(undefined)
+    const update = Boolean(pull)
     try {
       const out = await post<OpenedPullRequest>(
         `/api/panel/code/sessions/${encodeURIComponent(sessionId)}/pull-request`,
         { title: title.trim(), body },
       )
       setMade({ number: out.number, url: out.url })
+      if (update) setSent({ number: out.number, url: out.url })
     } catch (e) {
       setProblem(t.code.changes.pullRequest.failed(e instanceof Error ? e.message : String(e)))
     } finally {
@@ -172,7 +179,6 @@ export function PullRequestForm({
     }
   }
 
-  const copy = t.code.changes.pullRequest
   return (
     <section aria-label={copy.heading} className="space-y-2 border-t border-border px-4 py-3">
       {pull ? (
@@ -186,9 +192,9 @@ export function PullRequestForm({
         </a>
       ) : null}
       <label className="block text-sm">
-        <span>{copy.title}</span>
+        <span>{titleLabel}</span>
         <input
-          aria-label={copy.title}
+          aria-label={titleLabel}
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground"
@@ -214,8 +220,22 @@ export function PullRequestForm({
       <p className="text-xs text-muted-foreground">{copy.draftNote}</p>
       <div className="flex items-center gap-3">
         <Button size="sm" disabled={!ready} onClick={() => void submit()}>
-          {busy ? copy.opening : pull ? copy.again : copy.open}
+          {busy ? (pull ? copy.sending : copy.opening) : pull ? copy.again : copy.open}
         </Button>
+        {why ? <span className="text-xs text-muted-foreground">{why}</span> : null}
+        {sent ? (
+          <span role="status" className="text-sm">
+            {copy.sent(sent.number)}{' '}
+            <a
+              href={sent.url}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-2"
+            >
+              {sent.url}
+            </a>
+          </span>
+        ) : null}
         {problem ? (
           <span role="alert" className="text-sm text-destructive">
             {problem}
@@ -224,4 +244,17 @@ export function PullRequestForm({
       </div>
     </section>
   )
+}
+
+type PullRequestCopy = ReturnType<typeof useCopy>['t']['code']['changes']['pullRequest']
+
+/** Why the send button is off, or nothing while it is on or busy (its label says so). */
+export function whyNotReady(
+  copy: PullRequestCopy,
+  state: { busy: boolean; hasChanges: boolean; title: string; pull: boolean },
+): string | undefined {
+  if (state.busy) return undefined
+  if (!state.hasChanges) return copy.noChanges
+  if (state.title.trim() === '') return state.pull ? copy.noCommitTitle : copy.noTitle
+  return undefined
 }

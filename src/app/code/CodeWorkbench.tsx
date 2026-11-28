@@ -27,6 +27,7 @@ import type {
   CodeMode,
   CodeSession,
 } from '../../shared/code'
+import { integrationBranch } from '../../shared/branches'
 import { CODE_MODES } from '../../shared/code'
 import type { RepositoriesView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
@@ -102,7 +103,8 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
 
   const chosen = repository || enabled[0]?.fullName || ''
   const repo = enabled.find((r) => r.fullName === chosen)
-  const base = branch ?? repo?.baseBranch ?? repo?.defaultBranch ?? ''
+  // The pull request goes to the integration branch, so the work starts from it too (#727).
+  const base = branch ?? (repo ? integrationBranch(repo) : '')
   const harness = agent || harnesses[0] || ''
   const ready = chosen !== '' && base.trim() !== '' && harness !== '' && message.trim() !== ''
 

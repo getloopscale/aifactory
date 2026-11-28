@@ -1,5 +1,7 @@
 import type { GithubApi } from '../github/pulls'
 
+export { INTEGRATION_BRANCH, integrationBranch } from '../../shared/branches'
+
 /**
  * The three branches every repository the factory works in has, and what each one is for:
  *
@@ -9,12 +11,7 @@ import type { GithubApi } from '../github/pulls'
  *   and each of those commits gets a pre-release;
  * - the release branch, which is the repository's default branch (`main`): only a release reaches it.
  */
-export const INTEGRATION_BRANCH = 'workspace'
 export const PRE_RELEASE_BRANCH = 'develop'
-
-/** The branch work starts from and pull requests target: the owner's choice, or `workspace`. */
-export const integrationBranch = (config: { baseBranch?: string | null }): string =>
-  config.baseBranch ?? INTEGRATION_BRANCH
 
 /** The branch a release lands on: the owner's choice, or the repository's default branch. */
 export async function releaseBranchOf(
