@@ -20,6 +20,12 @@ export type Candidate = {
   checks: CheckSpec[]
 }
 
+/**
+ * The weakness a security case plants. The ordinary review's findings are free text, so it is told by its CWE or by
+ * one of `patterns` (case-insensitive regular expressions, narrow enough that an unrelated finding does not match).
+ */
+export type PlantedWeakness = { cwe: string; name: string; patterns: string[] }
+
 /** One case of the suite: a past task, from the commit it started on, with what accepted it. */
 export type EvalCase = {
   /** `owner/repo#issue`. */
@@ -49,6 +55,8 @@ export type EvalCase = {
   }
   /** Written to be blocked by the security review (`block`), or to pass it (the default, `pass`). */
   expectSecurity?: 'block' | 'pass'
+  /** The weakness a case written to be blocked plants, so a block by the ordinary review counts only for it (#714). */
+  weakness?: PlantedWeakness
   /** Part of the small set run before a deploy. */
   quick?: boolean
 }

@@ -37,6 +37,7 @@ import {
   proveTests,
   provedOnce,
   testProofModeFromEnv,
+  type ProofMethod,
   type TestProof,
 } from './test-proof'
 import { ensureBranches, integrationBranch } from './branches'
@@ -2304,6 +2305,7 @@ export class Run {
                   outcome: stored.outcome as TestProof['outcome'],
                   files: stored.files,
                   ...(stored.detail ? { detail: stored.detail } : {}),
+                  ...(stored.method ? { method: stored.method as ProofMethod } : {}),
                 }
               : undefined
           },
@@ -2317,6 +2319,7 @@ export class Run {
                 detail: proof.detail ?? null,
                 files: proof.files,
                 mode,
+                method: proof.method ?? null,
               })
               .onConflictDoNothing()
           },

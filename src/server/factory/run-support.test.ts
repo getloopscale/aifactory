@@ -1,6 +1,7 @@
 import { FACTORY_SIGNATURE } from '../../shared/personas'
 import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { renderChangePlan } from './change-plan'
 
 import {
   checkSummary,
@@ -166,6 +167,34 @@ describe('who the builder is told sent the work back', () => {
 })
 
 describe('pullRequestBody', () => {
+  it('carries an entry only a published commit can show as something to confirm (#718)', () => {
+    const plan = renderChangePlan({
+      acceptance: [
+        { id: 'A1', statement: 'it parses', evidence: 'a test' },
+        { id: 'A2', statement: 'the quality gate passes', evidence: '', where: 'after_publish' },
+      ],
+      files: [],
+      order: [],
+      risks: [],
+      proof: [],
+      outOfScope: [],
+    })
+    const text = pullRequestBody({
+      issueNumber: 1,
+      sha: 'abc1234def',
+      rows: [],
+      agentSummary: 'x',
+      review: {
+        reviewer: 'codex',
+        attempt: 1,
+        outcome: { verdict: 'approve', summary: 'Fine.', findings: [] },
+      },
+      plan,
+    })
+    expect(text).toContain('To confirm after publishing')
+    expect(text).toContain('- [ ] **A2**: the quality gate passes')
+  })
+
   const body = () =>
     pullRequestBody({
       issueNumber: 114,

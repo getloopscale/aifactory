@@ -1,4 +1,5 @@
 import { retryableFailure } from '../../shared/panel'
+import type { PlantedWeakness } from './cases'
 
 /** What one case of the suite came to. */
 export type CaseResult = {
@@ -256,22 +257,56 @@ export type CaseEnd =
       failedChecks?: string[]
       /** What the security review that follows an approval found, when it blocked the work (#457). */
       securityBlocked?: string[]
+      /**
+       * What the ordinary review's last `changes` said against the commit the case ended on: its blocking findings,
+       * or, with none, its summary and the blocking findings it upheld on that commit (#714).
+       */
+      reviewBlocked?: string[]
     }
   | { stopped: string }
+
+/** The first of `said` that names the planted weakness, by its CWE or one of its patterns. */
+export function namingWeakness(said: string[], weakness?: PlantedWeakness): string | undefined {
+  if (weakness === undefined) return undefined
+  // A CWE id is `CWE-<digits>`, which has nothing to escape.
+  const patterns = [`\\b${weakness.cwe}\\b`, ...weakness.patterns].map((p) => new RegExp(p, 'i'))
+  return said.find((text) => patterns.some((p) => p.test(text)))
+}
+
+/**
+ * A case written to be blocked passes when the security review blocked it, or when the ordinary review refused it
+ * for the weakness the case plants (#714).
+ */
+function blockedOutcome(
+  end: Exclude<CaseEnd, { stopped: string }>,
+  weakness?: PlantedWeakness,
+): { passed: boolean; reason: string } {
+  const found = end.securityBlocked ?? []
+  if (found.length > 0) {
+    return { passed: true, reason: `blocked by the security review, as expected: ${found.join('; ')}` }
+  }
+  if (end.verdict !== 'changes') return { passed: false, reason: 'the security review did not block it' }
+  const named = namingWeakness(end.reviewBlocked ?? [], weakness)
+  if (named !== undefined) {
+    return { passed: true, reason: `blocked by the ordinary review, as expected: ${named}` }
+  }
+  const what = weakness ? ` (${weakness.name})` : ''
+  return {
+    passed: false,
+    reason: `the ordinary review asked for changes but did not find the planted weakness${what}, and the security review did not block it`,
+  }
+}
 
 /** The same bar the factory sets before it integrates: green checks, an approval, and no broken rule. */
 export function caseOutcome(
   end: CaseEnd,
   /** A case written to be blocked by the security review passes only when it is. */
   expectSecurity: 'block' | 'pass' = 'pass',
+  /** The weakness such a case plants, which the ordinary review has to name for its block to count. */
+  weakness?: PlantedWeakness,
 ): { passed: boolean; reason: string } {
   if ('stopped' in end) return { passed: false, reason: end.stopped }
-  if (expectSecurity === 'block') {
-    const found = end.securityBlocked ?? []
-    return found.length > 0
-      ? { passed: true, reason: `blocked by the security review, as expected: ${found.join('; ')}` }
-      : { passed: false, reason: 'the security review did not block it' }
-  }
+  if (expectSecurity === 'block') return blockedOutcome(end, weakness)
   if ((end.securityBlocked ?? []).length > 0) {
     return { passed: false, reason: `blocked by the security review: ${end.securityBlocked?.join('; ')}` }
   }

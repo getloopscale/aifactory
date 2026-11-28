@@ -6,7 +6,21 @@ import { jsonObjects } from './review'
  * the tests that prove it, and what it leaves out. It is stored, shown in the pull request and the panel,
  * and given to the reviewer, who measures the diff against it.
  */
-export type Acceptance = { id: string; statement: string; evidence: string }
+export type Acceptance = {
+  id: string
+  statement: string
+  evidence: string
+  /**
+   * Where the entry can be shown: `after_publish` when only a service outside the sandbox can show it once the
+   * work is published (an analysis, a deployment, a release). Absent means the sandbox: the code and a test (#718).
+   */
+  where?: 'after_publish'
+}
+
+/** An entry only a published commit can show: never held in the review, confirmed after publishing. */
+export function afterPublish(entry: Acceptance): boolean {
+  return entry.where === 'after_publish'
+}
 
 export type ChangePlan = {
   /** What the finished work must do, one behaviour each. A plan stored before ADR 0009's 2026-11-25 note has none. */
@@ -31,17 +45,18 @@ Do this in two turns. In this one, read the code and plan; you will be told to i
 - Do not create, edit or delete any file, and do not run anything that writes to the repository. You may read files and run read-only commands.
 - Do not ask a question in this turn. Write what is undecided under "risks", with the option you would take; you may ask in the next turn.
 - Start from the issue: state, one by one, what the finished work does, as "acceptance". Each entry has an id ("A1", "A2", ...), a statement of one behaviour, and the evidence that shows it: a test by name, a check, or a file and symbol. The reviewer holds the work against this list, so it must not be empty.
+- Give each entry "where": "sandbox" when the code and a test in this checkout can show it, or "after_publish" when only a service outside the sandbox can show it once the work is published (a service's analysis such as a quality gate, a deployment, a release). An "after_publish" entry is not held in the review; it is listed in the pull request to confirm after publishing. At least one entry must be "sandbox".
 - Name every file you expect to change, the tests included. A folder ending in "/" or a pattern with "*" may stand for several files.
 
 Finish with one JSON object on its own, and nothing after it:
 
-{"acceptance":[{"id":"A1","statement":"one behaviour the finished work has","evidence":"the test, check, or file and symbol that shows it"}],"files":[{"path":"path/from/the/repository/root","why":"what changes there"}],"order":["first step","..."],"risks":["what could break, or what is undecided"],"proof":["the test or command that shows it works"],"outOfScope":["what the issue might suggest that you will not do"]}
+{"acceptance":[{"id":"A1","statement":"one behaviour the finished work has","evidence":"the test, check, or file and symbol that shows it","where":"sandbox"}],"files":[{"path":"path/from/the/repository/root","why":"what changes there"}],"order":["first step","..."],"risks":["what could break, or what is undecided"],"proof":["the test or command that shows it works"],"outOfScope":["what the issue might suggest that you will not do"]}
 `
 }
 
 /** When the planning turn ended without a plan that could be read. */
 export function planAgainPrompt(): string {
-  return 'Your answer had no plan that could be read. Do not change any file. Answer with the plan only, as one JSON object with "acceptance" (a list that is not empty), "files", "order", "risks", "proof" and "outOfScope", and nothing after it.'
+  return 'Your answer had no plan that could be read. Do not change any file. Answer with the plan only, as one JSON object with "acceptance" (a list with at least one entry whose "where" is "sandbox"), "files", "order", "risks", "proof" and "outOfScope", and nothing after it.'
 }
 
 /**
@@ -96,22 +111,26 @@ function acceptanceOf(value: unknown): Acceptance[] {
   const entries: Acceptance[] = []
   for (const entry of value) {
     if (typeof entry !== 'object' || entry === null) continue
-    const { id, statement, evidence } = entry as Record<string, unknown>
+    const { id, statement, evidence, where } = entry as Record<string, unknown>
     if (typeof id !== 'string' || id.trim() === '') continue
     if (typeof statement !== 'string' || statement.trim() === '') continue
     entries.push({
       id: id.trim().slice(0, 20),
       statement: statement.trim().slice(0, TEXT_MAX),
       evidence: typeof evidence === 'string' ? evidence.trim().slice(0, TEXT_MAX) : '',
+      ...(where === 'after_publish' ? { where } : {}),
     })
   }
   return entries.slice(0, MAX_ACCEPTANCE)
 }
 
-/** A plan from a planning turn: one that lists no acceptance is read as no plan, so the turn is asked again. */
+/**
+ * A plan from a planning turn: one that lists no acceptance the sandbox can show is read as no plan, so the
+ * turn is asked again.
+ */
 export function parseNewChangePlan(text: string): ChangePlan | undefined {
   const plan = parseChangePlan(text)
-  return plan && (plan.acceptance?.length ?? 0) > 0 ? plan : undefined
+  return plan?.acceptance?.some((a) => !afterPublish(a)) ? plan : undefined
 }
 
 /** A path inside the repository: relative, and never climbing out of it. */
@@ -204,11 +223,23 @@ export function renderChangePlan(plan: ChangePlan): string {
     plan.files.length === 0
       ? ['No file: the builder expected the code to already do what the issue asks.']
       : plan.files.map((f) => `- \`${f.path}\`${f.why ? `: ${f.why}` : ''}`)
-  const acceptance = (plan.acceptance ?? []).map(
-    (a) => `- **${a.id}**: ${a.statement}${a.evidence ? ` (evidence: ${a.evidence})` : ''}`,
-  )
+  const entries = plan.acceptance ?? []
+  const acceptance = entries
+    .filter((a) => !afterPublish(a))
+    .map((a) => `- **${a.id}**: ${a.statement}${a.evidence ? ` (evidence: ${a.evidence})` : ''}`)
+  const confirm = entries.filter(afterPublish).map((a) => `- [ ] **${a.id}**: ${a.statement}`)
   return [
     ...(acceptance.length > 0 ? ['**Acceptance**', '', ...acceptance, ''] : []),
+    ...(confirm.length > 0
+      ? [
+          '**To confirm after publishing**',
+          '',
+          'Nothing in the sandbox can show these; check them once the work is published.',
+          '',
+          ...confirm,
+          '',
+        ]
+      : []),
     '**Files**',
     '',
     ...files,
