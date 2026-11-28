@@ -53,7 +53,7 @@ describe('the diff route', () => {
     expect(((await run({ params: { id: 'nope' } })) as Response).status).toBe(404)
   })
 
-  it('lists both files of a running workspace this process never opened', async () => {
+  it('lists both files of a running workspace with their counts', async () => {
     store.getSession.mockResolvedValue(SESSION)
     const sandbox = open(() => ({ stdout: output }))
     const res = (await run({ params: { id: 's' } })) as { diff: CodeDiff; live: boolean }
@@ -69,12 +69,9 @@ describe('the diff route', () => {
     expect(sandbox.stopped).toBe(0)
   })
 
-  it.each([
-    ['a stopped session', { ...SESSION, state: 'stopped', sandboxId: null }, true],
-    ['a session whose sandbox is gone', SESSION, false],
-  ])('answers %s from the stored diff', async (_, session, up) => {
-    store.getSession.mockResolvedValue(session)
-    open(() => ({ stdout: output }), up)
+  it('answers a stopped session from the stored diff', async () => {
+    store.getSession.mockResolvedValue({ ...SESSION, state: 'stopped', sandboxId: null })
+    const sandbox = open(() => ({ stdout: output }))
     const diff = { files: [{ path: 'a', added: 1, removed: 0, binary: false, hunks: [] }] }
     store.loadLastDiff.mockResolvedValue({ diff, at: new Date('2026-11-27T10:00:00Z') })
     expect(await run({ params: { id: 's' } })).toEqual({
@@ -82,6 +79,16 @@ describe('the diff route', () => {
       live: false,
       capturedAt: '2026-11-27T10:00:00.000Z',
     })
+    expect(sandbox.reconnected).toEqual([])
+  })
+
+  it('answers a session whose sandbox is gone from the stored diff', async () => {
+    store.getSession.mockResolvedValue(SESSION)
+    open(() => ({ stdout: output }), false)
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const diff = { files: [{ path: 'a', added: 1, removed: 0, binary: false, hunks: [] }] }
+    store.loadLastDiff.mockResolvedValue({ diff, at: new Date('2026-11-27T10:00:00Z') })
+    expect(await run({ params: { id: 's' } })).toMatchObject({ diff, live: false })
   })
 
   it('answers an empty diff for a session that never stored one', async () => {

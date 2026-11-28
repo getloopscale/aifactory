@@ -61,6 +61,7 @@ describe('readableWorkspace', () => {
   })
 
   it('answers nothing for a provider that cannot reconnect, fails, or reaches no checkout', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     expect(await readableWorkspace(SESSION, async () => ({}))).toBeUndefined()
     expect(
       await readableWorkspace(SESSION, async () => {
@@ -73,5 +74,18 @@ describe('readableWorkspace', () => {
     const empty = up(() => ({ exitCode: 128 }))
     expect(await readableWorkspace(SESSION, async () => empty)).toBeUndefined()
     expect(empty.stopped).toBe(0)
+    const silent = up(() => ({}))
+    expect(await readableWorkspace(SESSION, async () => silent)).toBeUndefined()
+    // A provider with no reconnect is not a failure; the four that failed say why, naming the session.
+    expect(warn).toHaveBeenCalledTimes(4)
+    expect(warn.mock.calls.map(([line]) => String(line))).toEqual([
+      expect.stringMatching(
+        /^code_workspace_unreachable session=s sandbox=sbx-1: .*FACTORY_SANDBOX is wrong/,
+      ),
+      expect.stringMatching(/^code_workspace_unreachable session=s sandbox=sbx-1: .*not running/),
+      expect.stringMatching(/^code_workspace_unreachable session=s sandbox=sbx-1: .*exited 128/),
+      expect.stringMatching(/^code_workspace_unreachable session=s sandbox=sbx-1: .*no checkout/),
+    ])
+    warn.mockRestore()
   })
 })

@@ -48,7 +48,7 @@ describe('the files routes', () => {
     expect(await evaluateRoutePolicy(policy, input({ id: 'owner' }))).toEqual({ allowed: true })
   })
 
-  it('lists the files of a sandbox this process never opened, and leaves it up', async () => {
+  it('lists the files', async () => {
     const sandbox = open(() => ({ stdout: 'b\0a\0' }))
     expect(await call(files, { params: { id: 's' } })).toEqual({ files: ['a', 'b'] })
     expect(sandbox.reconnected).toEqual(['sbx-1'])
@@ -87,6 +87,7 @@ describe('the files routes', () => {
   })
 
   it('answers 409 when the sandbox is gone or holds no checkout yet', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
     open(() => ({})).up.clear()
     expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(409)
     const sandbox = new FakeSandbox(() => ({ exitCode: 128 }))
@@ -95,9 +96,15 @@ describe('the files routes', () => {
     expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(409)
   })
 
-  it('answers 404 and 502 for a missing session and a failed read', async () => {
+  it('answers 404, 409 and 502 for a missing session, a stopped workspace and a failed read', async () => {
     store.getSession.mockResolvedValueOnce(undefined)
     expect(((await call(files, { params: { id: 'x' } })) as Response).status).toBe(404)
+    store.getSession.mockResolvedValueOnce({ ...SESSION, state: 'stopped', sandboxId: null })
+    expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(409)
+    store.getSession.mockResolvedValueOnce({ ...SESSION, state: 'stopped', sandboxId: null })
+    expect(
+      ((await call(file, { params: { id: 's' }, query: { path: 'a' } })) as Response).status,
+    ).toBe(409)
     open(() => ({ exitCode: 1 }))
     expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(502)
     expect(
