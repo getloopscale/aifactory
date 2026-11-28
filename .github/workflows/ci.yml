@@ -90,8 +90,14 @@ jobs:
   # The tests must catch changes to the logic: mutation score of the decision code at 90 or more. Its own job,
   # beside `quality`, because it is the slowest gate and grows with every module added to `stryker.config.json`:
   # inside `quality` it ran after coverage and hit that job's limit on slower runners (#181). It runs only unit
-  # tests (`vitest.stryker.config.ts`), so it needs no database. The limit leaves room over the slowest runs: on
-  # 2026-11-27 they took 24 to 38 minutes, and a limit of 40 cancelled one that would have passed.
+  # tests (`vitest.stryker.config.ts`), so it needs no database.
+  #
+  # A pull request runs incrementally: it starts from the results the integration branch last saved and tests
+  # again only the mutants of the files, and of the tests, that differ. The score is over every mutant, reused or
+  # not, and the line it must reach is the same. A push to the integration or the release branch tests every
+  # mutant again (`--force`) and saves the results, so what a pull request reuses was measured on a branch a pull
+  # request cannot write to (a cache saved on a pull request is only visible to that pull request). The limit
+  # leaves room over a full run: on 2026-11-27 they took 24 to 38 minutes.
   mutation:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -105,4 +111,19 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm mutation
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name == 'pull_request'
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-${{ hashFiles('stryker.config.json', 'pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            stryker-${{ hashFiles('stryker.config.json', 'pnpm-lock.yaml') }}-
+      - if: github.event_name == 'pull_request'
+        run: pnpm mutation --incremental
+      - if: github.event_name != 'pull_request'
+        run: pnpm mutation --incremental --force
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: github.event_name != 'pull_request'
+        with:
+          path: reports/stryker-incremental.json
+          key: stryker-${{ hashFiles('stryker.config.json', 'pnpm-lock.yaml') }}-${{ github.sha }}
