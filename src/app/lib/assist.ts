@@ -3,6 +3,7 @@ import type { UIMessage } from '@getloopscale/loopzero/client'
 import type { AssistProviderRefusal } from '../../shared/panel'
 
 import { en, type Copy } from './copy/en'
+import type { Language } from './copy'
 
 export type AssistKind =
   'goal' | 'job' | 'issue' | 'changes' | 'resolution' | 'pr_title' | 'pr_description' | 'setup'
@@ -20,12 +21,15 @@ export const agentFor = (kind: AssistKind) =>
   kind === 'setup' ? '/api/agents/assist-setup' : '/api/agents/assist'
 
 /**
- * The message the assistant gets: a header that says what the text is for and where, then what the owner
- * wrote. An instruction to change a suggestion rides on the same header, so the assistant stays on the
+ * The message the assistant gets: a header that says what the text is for, the language of the page and where,
+ * then what the owner wrote. The header and the context are English whatever the page's language, so the
+ * language rides along for the assistant to fall back on when the owner's words are too few to tell (#770).
+ * An instruction to change a suggestion rides on the same header, so the assistant stays on the
  * same kind of text.
  */
 export function buildMessage(input: {
   kind: AssistKind
+  language: Language
   repository?: string
   context?: string
   text: string
@@ -33,6 +37,7 @@ export function buildMessage(input: {
 }): string {
   const header = [
     `kind: ${input.kind}`,
+    `language: ${input.language}`,
     ...(input.repository ? [`repository: ${input.repository}`] : []),
     ...(input.context ? [`context: ${input.context}`] : []),
   ].join('\n')
