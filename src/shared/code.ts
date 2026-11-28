@@ -103,7 +103,11 @@ export type CodeDiff = { files: CodeDiffFile[] }
 export type CodeDiffResponse = { diff: CodeDiff; live: boolean; capturedAt: string | null }
 
 /** The files of a workspace: tracked and untracked, without what git excludes by default. */
-export type CodeFilesResponse = { files: string[] }
+/**
+ * The files of a session's checkout. A session with no workspace to read (none yet, stopped, ended, or ended while the
+ * request was on its way) answers `unavailable` with no files, so it is told apart from an empty checkout.
+ */
+export type CodeFilesResponse = { files: string[]; unavailable?: true }
 
 /** One file's text, cut at `limit` bytes; `truncated` says it was longer. */
 export type CodeFileResponse = {

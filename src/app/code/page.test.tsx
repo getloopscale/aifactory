@@ -26,6 +26,8 @@ const session = (id: string, title: string, updatedAt: string, state = 'running'
 /** The state of an open session by its id (running otherwise), and the ids that opened pull request #9. */
 const STATE_OF: Record<string, string> = { asleep: 'stopped', closed: 'ended', gone: 'ended' }
 const PULLED = ['asleep', 'closed']
+/** The open sessions with no sandbox (every other one has `sbx-<id>`). */
+const NO_SANDBOX = new Set<string>()
 
 /** More sessions for the tests of the filter, which shows only over a handful. */
 const many = vi.hoisted(() => ({ list: [] as unknown[] }))
@@ -86,6 +88,7 @@ vi.mock('../lib/code-session', () => ({
     return {
       session: {
         ...session(id, 'Open one', '2026-11-27T09:00:00Z', STATE_OF[id] ?? 'running'),
+        sandboxId: NO_SANDBOX.has(id) ? null : `sbx-${id}`,
         repository: 'acme/shop',
         pullRequestUrl: PULLED.includes(id) ? 'https://github.com/acme/shop/pull/9' : null,
         pullRequestNumber: PULLED.includes(id) ? 9 : null,
@@ -401,6 +404,22 @@ describe.each(['expanded', 'compact'] as const)('an ended session on a %s width'
     } finally {
       delete STATE_OF.ending
     }
+  })
+
+  it('shows the unavailable message, not stale files, when the server answers that the workspace ended', async () => {
+    show('en', '/code/ending', width)
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true, shiftKey: true })
+    expect(await screen.findByRole('button', { name: 'README.md' })).toBeDefined()
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files')
+        ? { files: [], unavailable: true }
+        : { diff: { files: [] }, live: true, capturedAt: null },
+    )
+    act(() =>
+      feed.add({ sessionId: 'ending', seq: 2, kind: 'state', tool: null, content: 'idle', at: '' }),
+    )
+    expect((await screen.findByRole('alert')).textContent).toBe(en.code.files.unavailable)
+    expect(screen.queryByRole('button', { name: 'README.md' })).toBeNull()
   })
 
   it('renders no pull request form when it opened none', async () => {
@@ -820,6 +839,53 @@ describe.each(['expanded', 'compact'] as const)(
         ),
       )
       expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(1)
+    })
+  },
+)
+
+describe.each(['expanded', 'compact'] as const)(
+  'a session with no workspace on a %s width',
+  (width) => {
+    const asked = (id: string) =>
+      vi.mocked(get).mock.calls.filter(([path]) => path === `/api/panel/code/sessions/${id}/files`)
+        .length
+    afterEach(() => {
+      NO_SANDBOX.clear()
+      delete STATE_OF.fresh
+    })
+
+    it.each(['queued', 'starting'])(
+      'asks for no files while %s, and asks once it has a sandbox',
+      async (state) => {
+        STATE_OF.fresh = state
+        NO_SANDBOX.add('fresh')
+        show('en', '/code/fresh', width)
+        await waitFor(() => expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/fresh/diff'))
+        fireEvent.keyDown(window, { key: 'f', ctrlKey: true, shiftKey: true })
+        await act(async () => {})
+        expect(asked('fresh')).toBe(0)
+        STATE_OF.fresh = 'running'
+        NO_SANDBOX.delete('fresh')
+        act(() =>
+          feed.add({
+            sessionId: 'fresh',
+            seq: 2,
+            kind: 'state',
+            tool: null,
+            content: 'running',
+            at: '',
+          }),
+        )
+        expect(await screen.findByRole('button', { name: 'README.md' })).toBeDefined()
+        expect(asked('fresh')).toBe(1)
+      },
+    )
+
+    it('asks for no files of a stopped session', async () => {
+      show('en', '/code/asleep', width)
+      await waitFor(() => expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/asleep/diff'))
+      await act(async () => {})
+      expect(asked('asleep')).toBe(0)
     })
   },
 )
