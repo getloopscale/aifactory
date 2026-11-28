@@ -7,13 +7,38 @@ import { CopyProvider } from '../lib/copy'
 import { en } from '../lib/copy/en'
 
 vi.mock('../lib/api', () => ({ post: vi.fn() }))
+type AssistProps = {
+  kind: string
+  context?: string
+  onUse: (p: { title?: string; text: string; notes: string }) => void
+}
+const assists = vi.hoisted(() => [] as AssistProps[])
 vi.mock('../components/Assist', () => ({
-  Assist: ({ kind }: { kind: string }) => <p>assist {kind}</p>,
+  Assist: (props: AssistProps) => {
+    assists.push(props)
+    return (
+      <p>
+        <span>assist {props.kind}</span>
+        <button
+          type="button"
+          onClick={() =>
+            props.onUse({
+              title: `title from ${props.kind}`,
+              text: `text from ${props.kind}`,
+              notes: '',
+            })
+          }
+        >
+          use {props.kind}
+        </button>
+      </p>
+    )
+  },
 }))
 
 import { post } from '../lib/api'
 
-import { CodeChanges, foldHunk, PullRequestForm } from './CodeChanges'
+import { CodeChanges, foldHunk, PullRequestForm, pullRequestContext } from './CodeChanges'
 
 afterEach(cleanup)
 
@@ -121,6 +146,54 @@ describe('the pull request form', () => {
   it('offers an assistant for the title and for the body', () => {
     form()
     expect(screen.getAllByText(/^assist /)).toHaveLength(2)
+  })
+
+  const session: CodeDiff = {
+    files: [
+      { path: 'src/isEvenOrOdd.js', added: 7, removed: 0, binary: false, hunks: [] },
+      { path: 'src/isEvenOrOdd.test.js', added: 12, removed: 2, binary: false, hunks: [] },
+    ],
+  }
+  const last = (kind: string) => assists.filter((a) => a.kind === kind).at(-1)!
+
+  it('asks for a pull request title and description, with the paths and counts of the diff', () => {
+    form({ diff: session })
+    expect(screen.queryByText('assist issue')).toBeNull()
+    expect(screen.queryByText('assist changes')).toBeNull()
+    const title = last('pr_title').context!
+    const description = last('pr_description').context!
+    expect(title).toContain('title of a pull request')
+    expect(description).toContain('description of a pull request')
+    for (const context of [title, description]) {
+      expect(context).toContain('src/isEvenOrOdd.js (+7 -0)')
+      expect(context).toContain('src/isEvenOrOdd.test.js (+12 -2)')
+    }
+  })
+
+  it('tells the title assistant it writes the commit message once a pull request is open', () => {
+    form({ diff: session, existing: { number: 3, url: 'https://github.com/acme/app/pull/3' } })
+    expect(last('pr_title').context).toContain('commit message of an update to a pull request')
+  })
+
+  it('fills only the title with its proposal, and only the description with its own', () => {
+    form({ diff: session })
+    fireEvent.click(screen.getByRole('button', { name: 'use pr_title' }))
+    expect((screen.getByLabelText(copy.title) as HTMLInputElement).value).toBe(
+      'title from pr_title',
+    )
+    expect((screen.getByLabelText(copy.body) as HTMLTextAreaElement).value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: 'use pr_description' }))
+    expect((screen.getByLabelText(copy.body) as HTMLTextAreaElement).value).toBe(
+      'text from pr_description',
+    )
+    expect((screen.getByLabelText(copy.title) as HTMLInputElement).value).toBe(
+      'title from pr_title',
+    )
+  })
+
+  it('says when no file changed yet', () => {
+    expect(pullRequestContext({ files: [] }, 'description')).toContain('no file changed yet')
+    expect(pullRequestContext(undefined, 'title')).toContain('no file changed yet')
   })
 
   it('sends the title and the body, then shows the link', async () => {

@@ -98,7 +98,13 @@ vi.mock('../lib/code-session', () => ({
     }
   },
 }))
-vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
+vi.mock('../components/Assist', () => ({
+  Assist: ({ kind, context }: { kind: string; context?: string }) => (
+    <p data-assist={kind} data-context={context}>
+      assist
+    </p>
+  ),
+}))
 
 import { ApiError, get, post } from '../lib/api'
 
@@ -645,6 +651,24 @@ describe('the side panel of an open session', () => {
     )
     expect(await screen.findByText('f1.ts')).toBeDefined()
     expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+  })
+
+  it('hands the diff the panel shows to the assistants of the pull request, and its refresh too', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diffs.shift(),
+    )
+    const diffs = [diff(1), diff(2)]
+    show('en', '/code/new')
+    const context = (kind: string) =>
+      document.querySelector(`[data-assist="${kind}"]`)?.getAttribute('data-context') ?? ''
+    await waitFor(() => expect(context('pr_title')).toContain('f0.ts (+1 -0)'))
+    expect(context('pr_description')).toContain('f0.ts (+1 -0)')
+    expect(context('pr_description')).not.toContain('f1.ts')
+    act(() =>
+      feed.add({ sessionId: 'new', seq: 2, kind: 'state', tool: null, content: 'idle', at: '' }),
+    )
+    await waitFor(() => expect(context('pr_description')).toContain('f1.ts (+1 -0)'))
+    expect(context('pr_title')).toContain('f1.ts (+1 -0)')
   })
 
   it('reads the diff again when the end of a finished turn arrives, and lists what it changed', async () => {

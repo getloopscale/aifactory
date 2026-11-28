@@ -729,6 +729,8 @@ export const en = {
       issue: 'Improve this',
       changes: 'Help me say it',
       resolution: 'Help me say it',
+      pr_title: 'Improve this',
+      pr_description: 'Help me say it',
       setup: 'Set this up for me',
     },
     working: 'Working on it…',

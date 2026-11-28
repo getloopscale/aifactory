@@ -134,18 +134,44 @@ export function CodeChanges({ diff }: { diff: CodeDiff }) {
 /** The pull request a session already opened, as the form shows it. */
 export type OpenedPullRequest = { number: number; url: string }
 
+/**
+ * What the assistant of a field of the form is told: the text is for this session's pull request, and the files
+ * its diff changes, with the lines each adds and removes. Only the paths and counts go, never the contents.
+ */
+export function pullRequestContext(
+  diff: CodeDiff | undefined,
+  field: 'title' | 'description',
+  opened = false,
+): string {
+  const what =
+    field === 'title'
+      ? opened
+        ? 'the commit message of an update to a pull request already open, for the changes below'
+        : 'the title of a pull request that holds the changes below'
+      : 'the description of a pull request that holds the changes below'
+  const files = diff?.files ?? []
+  const listed =
+    files.length === 0
+      ? 'no file changed yet'
+      : files.map((f) => `${f.path} (+${f.added} -${f.removed})`).join('; ')
+  return `${what}, already made by the session. Files changed: ${listed}`
+}
+
 /** Opens the session's work as a draft pull request, and shows the link once there is one. */
 export function PullRequestForm({
   sessionId,
   repository,
   existing,
   hasChanges,
+  diff,
   ended = false,
 }: {
   sessionId: string
   repository: string
   existing?: OpenedPullRequest | null
   hasChanges: boolean
+  /** The diff the Changes panel shows, which the assistants of the two fields describe. */
+  diff?: CodeDiff
   /** An ended session opens nothing: only the link of a pull request it opened shows. */
   ended?: boolean
 }) {
@@ -207,9 +233,10 @@ export function PullRequestForm({
             />
           </label>
           <Assist
-            kind="issue"
+            kind="pr_title"
             text={title}
             repository={repository}
+            context={pullRequestContext(diff, 'title', Boolean(pull))}
             onUse={(p) => setTitle(p.title ?? p.text)}
           />
           <label className="block text-sm">
@@ -223,9 +250,10 @@ export function PullRequestForm({
             />
           </label>
           <Assist
-            kind="changes"
+            kind="pr_description"
             text={body}
             repository={repository}
+            context={pullRequestContext(diff, 'description')}
             onUse={(p) => setBody(p.text)}
           />
           <p className="text-xs text-muted-foreground">{copy.draftNote}</p>

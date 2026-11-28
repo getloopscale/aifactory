@@ -45,6 +45,14 @@ describe('buildMessage', () => {
     ).toBe('kind: changes\nrepository: o/r\ncontext: the pull request\n\nThe owner wrote:\nx')
   })
 
+  it('carries the pull request kinds and their context', () => {
+    expect(agentFor('pr_title')).toBe('/api/agents/assist')
+    expect(agentFor('pr_description')).toBe('/api/agents/assist')
+    expect(
+      buildMessage({ kind: 'pr_title', repository: 'o/r', context: 'a.js (+1 -0)', text: 'x' }),
+    ).toBe('kind: pr_title\nrepository: o/r\ncontext: a.js (+1 -0)\n\nThe owner wrote:\nx')
+  })
+
   it('leaves out an empty repository or context, and keeps an empty text', () => {
     expect(buildMessage({ kind: 'setup', repository: '', context: '', text: '' })).toBe(
       'kind: setup\n\nThe owner wrote:\n',

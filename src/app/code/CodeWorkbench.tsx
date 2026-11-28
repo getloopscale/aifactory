@@ -610,6 +610,7 @@ function SidePanel({
                   repository={repository}
                   existing={pullRequest}
                   hasChanges={data.diff.files.length > 0}
+                  diff={data.diff}
                   ended={ended}
                 />
                 {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
@@ -1162,6 +1163,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
               repository={session.repository}
               existing={pullRequestOf(session)}
               hasChanges={changed.length > 0}
+              diff={diff.diff}
               ended={session.state === 'ended'}
             />
           ) : null}

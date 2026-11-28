@@ -1025,6 +1025,8 @@ export const ptBR: Copy = {
       issue: 'Melhorar isto',
       changes: 'Me ajude a dizer',
       resolution: 'Me ajude a dizer',
+      pr_title: 'Melhorar isto',
+      pr_description: 'Me ajude a dizer',
       setup: 'Configure para mim',
     },
     working: 'Trabalhando nisso…',
