@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { CodeDiffResponse } from '../../../../../../shared/code'
 import { readWorkspaceDiff } from '../../../../../code/diff'
 import { loadLastDiff, getSession } from '../../../../../code/store'
-import { liveWorkspace } from '../../../../../code/workspace'
+import { readableWorkspace } from '../../../../../code/workspace-read'
 import { errorMessage } from '../../../../../factory/error-message'
 import { ownerOnly } from '../../../../../panel/policy'
 
@@ -20,11 +20,10 @@ export const GET = route()
     if (!session) {
       return Response.json({ error: 'not_found', message: 'No such session.' }, { status: 404 })
     }
-    const live = liveWorkspace(session.id)
+    const live = await readableWorkspace(session)
     if (live) {
       try {
-        const { workspace, baseBranch } = live
-        const diff = await readWorkspaceDiff(workspace.backend, workspace.repoDir, baseBranch)
+        const diff = await readWorkspaceDiff(live.backend, live.repoDir, live.baseBranch)
         return { diff, live: true, capturedAt: new Date().toISOString() }
       } catch (error) {
         const message = `The diff could not be read: ${errorMessage(error)}`

@@ -2,11 +2,16 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { CopyProvider, LANGUAGE_KEY } from '../lib/copy'
 import { en } from '../lib/copy/en'
+import { ptBR } from '../lib/copy/pt-BR'
 
-vi.mock('../lib/api', () => ({ get: vi.fn() }))
+vi.mock('../lib/api', async (original) => ({
+  ApiError: (await original<typeof import('../lib/api')>()).ApiError,
+  get: vi.fn(),
+}))
 
-import { get } from '../lib/api'
+import { ApiError, get } from '../lib/api'
 
 import { CodeFiles, filterFiles } from './CodeFiles'
 
@@ -87,5 +92,25 @@ describe('the files tab', () => {
       />,
     )
     expect((await screen.findByRole('alert')).textContent).toBe('gone')
+  })
+
+  it('says in the page language that the workspace stopped while a file was open', async () => {
+    vi.mocked(get).mockRejectedValue(
+      new ApiError('The workspace is not running.', 409, 'workspace_unavailable'),
+    )
+    window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
+    render(
+      <CopyProvider>
+        <CodeFiles
+          sessionId="s"
+          files={['a.txt']}
+          error={undefined}
+          selected="a.txt"
+          onSelect={() => {}}
+        />
+      </CopyProvider>,
+    )
+    expect((await screen.findByRole('alert')).textContent).toBe(ptBR.code.files.unavailable)
+    window.localStorage.clear()
   })
 })
