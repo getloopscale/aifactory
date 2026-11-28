@@ -306,6 +306,15 @@ export async function stopRequested(sessionId: string): Promise<boolean> {
   return row?.at != null
 }
 
+/** The transitions that end a turn or the session: each writes a `state` event, so an open page reads it again. */
+const ENDINGS = ['turn_ended', 'turn_failed', 'end'] as const
+type Ending = (typeof ENDINGS)[number]
+const isEnding = (event: CodeTransitionEvent): event is Ending =>
+  (ENDINGS as readonly string[]).includes(event)
+
+/** The `state` event a turn that ended, failed, or a session that ended writes, with the move it commits with. */
+export const endMarker = (event: Ending) => `end:${event}`
+
 /**
  * Ends the running turn: the session goes `idle` and the stop mark is cleared, under the row's lock. A message
  * that arrived during the turn and was not handed to the pass is still unanswered: the session is queued for it
@@ -330,6 +339,7 @@ export async function endTurn(sessionId: string): Promise<{ queued: boolean } | 
         .update(codeSession)
         .set({ state, stopRequestedAt: null, updatedAt: sql`now()` })
         .where(eq(codeSession.id, sessionId))
+      await insertEvent(tx, sessionId, { kind: 'state', content: endMarker('turn_ended') })
       if (pending && next?.action === 'move') {
         await enqueueTurn(client, sessionId, pending.seq)
         return { queued: true }
@@ -528,7 +538,10 @@ export async function claimTurn(sessionId: string, now = new Date()): Promise<Cl
   })
 }
 
-/** Applies an event to the session's state as `transitions.ts` says; anything but a move changes nothing. */
+/**
+ * Applies an event to the session's state as `transitions.ts` says; anything but a move changes nothing. A move that
+ * ends a turn or the session writes its `state` event in the same transaction.
+ */
 export async function moveSession(
   sessionId: string,
   event: CodeTransitionEvent,
@@ -546,6 +559,8 @@ export async function moveSession(
       .update(codeSession)
       .set({ state: outcome.state, updatedAt: sql`now()` })
       .where(eq(codeSession.id, sessionId))
+    if (isEnding(event))
+      await insertEvent(tx, sessionId, { kind: 'state', content: endMarker(event) })
     return outcome.state
   })
 }

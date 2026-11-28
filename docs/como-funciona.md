@@ -802,16 +802,24 @@ de verdade (ADR 0008).
   quando a mediana dos casos passa do dobro da baseline, a checagem escreve uma nota (`costNotes`) e segue. Uma configuração que uma checagem anterior já mediu e aprovou (registro fora do repositório,
   por conteúdo dos arquivos) não roda de novo: o deploy diz qual registro aceitou.
 
-A baseline de 2026-11-11 passou cinco de cinco casos, com custo médio de US$ 0,35 por caso nos agentes, e
-levou 32 minutos. Somando o sandbox, a rodada custou US$ 1,98.
+A baseline atual é de 2026-11-28: os 34 casos, com o construtor em Opus e o revisor e a segurança em Sonnet,
+no commit `25fffe67`. Passaram 29, com custo médio de US$ 1,57 por caso nos agentes; somando o sandbox, a
+rodada custou US$ 57,20. A anterior, de 2026-11-26, com o construtor em Sonnet, passou 28 de 30 a US$ 0,77
+por caso. Nos 30 casos que as duas têm, a de Opus passou 27 e levou em média 23,8 minutos por caso, contra
+28 e 17,2 minutos. Dois dos cinco casos que não passaram são casos de segurança que a revisão comum barrou
+antes da revisão de segurança, o que a regra de então contava como falha (#714).
 
-Com o conjunto rápido do #684 (cinco casos que passaram na baseline, todos ao mesmo tempo), a checagem de
-2026-11-27 passou cinco de cinco em 35 min 46 s, contra 41 a 55 minutos do conjunto anterior. A baseline de
-2026-11-26 já tinha os cinco casos medidos, então não foi regravada. O tempo da checagem é o do caso mais
-longo: quatro casos terminaram em 1, 3, 9 e 17 minutos, e `usetheokit/theokit-sdk#938` levou 35, contra 11
-na baseline. O host não estava ocioso (carga 12, com outra checagem rodando ao mesmo tempo nos últimos sete
-minutos), então a meta de menos de 20 minutos num host ocioso (#688) não foi confirmada nem descartada por
-essa rodada.
+O conjunto rápido sai da baseline (`markQuick`: em cada repositório, o caso mais curto que passou), então
+mudou com ela: `aifactory-playground#63`, `theokit-ui#178`, `theokit#1690`, `theokit-sdk#981` e
+`theokit-plugins#235`, que na baseline levaram 1, 5, 8, 13 e 15 minutos. A checagem com esse conjunto, em
+2026-11-28 às 04:21 UTC com o host em carga 1, passou cinco de cinco em 14 min 48 s, dentro da meta de 20
+minutos (#695). Com o conjunto anterior, que tinha
+`theokit-sdk#938` e `theokit-gateways#354`, a checagem levou 35 min 46 s em 2026-11-27 e 35 a 43 minutos em
+cinco rodadas de 2026-11-28, com o host em carga 1 a 3, acima da meta de 20 minutos (#688, #695). O tempo
+por etapa (#711) mostra de onde vinha: em `theokit-sdk#938`, 8 minutos de checagens, duas vezes, e 14 minutos
+da prova de teste, que roda a suíte do repositório de novo (#721), contra menos de 4 minutos de agentes.
+`theokit-gateways#354` caiu de 35 a 43 minutos para 18,6 quando um critério de aceite que só um commit
+publicado prova deixou de bloquear a revisão (#718).
 
 ## O painel
 
