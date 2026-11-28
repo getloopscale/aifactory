@@ -16,7 +16,15 @@ import {
   Search,
   SlidersHorizontal,
 } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { Group, Panel, Separator, useDefaultLayout } from 'react-resizable-panels'
 import { Link, useNavigate } from 'react-router'
 
@@ -26,6 +34,7 @@ import type {
   CodeFilesResponse,
   CodeMode,
   CodeSession,
+  CodeSessionWire,
 } from '../../shared/code'
 import { integrationBranch } from '../../shared/branches'
 import { CODE_MODES } from '../../shared/code'
@@ -617,11 +626,26 @@ function SidePanel({
   )
 }
 
+/**
+ * A `/model` shows at once: a model change writes no event, so the session is not read again for it. The saved
+ * model belongs to the session it was saved on, and a null one is the agent's default.
+ */
+function useSavedModel(id: string, read: CodeSessionWire | undefined) {
+  const [saved, setSaved] = useState<{ id: string; model: string | null }>()
+  const onModel = useCallback((model: string | null) => setSaved({ id, model }), [id])
+  const session = useMemo(
+    () => (read && saved?.id === read.id ? { ...read, model: saved.model } : read),
+    [read, saved],
+  )
+  return { session, onModel }
+}
+
 /** The session that is open: its conversation, and the side panel beside it. */
 function OpenSession({ id }: { id: string }) {
   const { t } = useCopy()
   const compact = useWidth() === 'compact'
-  const { session, events, error } = useCodeSession(id)
+  const { session: read, events, error } = useCodeSession(id)
+  const { session, onModel } = useSavedModel(id, read)
   const [panel, setPanel] = useState(true)
   const [tab, setTab] = useState<Tab>('changes')
   const [selected, setSelected] = useState<string>()
@@ -727,6 +751,7 @@ function OpenSession({ id }: { id: string }) {
             onOpenFile={openFile}
             onPanel={togglePanel}
             onRenamed={setTitle}
+            onModel={onModel}
           />
         </div>
       </section>
@@ -1049,7 +1074,8 @@ function Editor({
 /** An open session as an IDE: its changes and files at the left, the agent in the middle, the editor at the right. */
 function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   const { t } = useCopy()
-  const { session, events, error } = useCodeSession(id)
+  const { session: read, events, error } = useCodeSession(id)
+  const { session, onModel } = useSavedModel(id, read)
   const turn = lastStateSeq(events)
   const cost = sessionCost(events)
   const { files, error: filesError } = useCodeFiles(id, turn)
@@ -1182,6 +1208,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
                 onOpenFile={openFile}
                 onPanel={pick}
                 onRenamed={setTitle}
+                onModel={onModel}
               />
             </div>
           </>
