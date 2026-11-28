@@ -473,31 +473,76 @@ describe('the side panel of an open session', () => {
     expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/new', { title: 'A better name' })
   })
 
-  const cost = (seq: number, costUsd: number | null) => ({
+  const cost = (
+    seq: number,
+    costUsd: number | null,
+    agentSessionId?: string | null,
+    resumed?: boolean,
+  ) => ({
     sessionId: 'new',
     seq,
     kind: 'cost',
     tool: null,
-    content: JSON.stringify({ costUsd }),
+    content: JSON.stringify(
+      agentSessionId === undefined ? { costUsd } : { costUsd, agentSessionId, resumed },
+    ),
     at: '',
   })
   const status = () => screen.getByLabelText(en.code.editor.status).textContent ?? ''
 
-  it('shows the cost of the session so far in the status bar, summed over its turns', async () => {
+  it('shows the last running total of the agent session, never the sum of its turns', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     expect(status()).not.toContain('Cost so far')
-    act(() => feed.add(cost(2, 0.25)))
-    act(() => feed.add(cost(3, null)))
-    act(() => feed.add(cost(4, 1.1)))
-    expect(status()).toContain(en.code.editor.cost('$1.35'))
+    act(() => feed.add(cost(2, 0.036, 'a1', false)))
+    act(() => feed.add(cost(3, 0.05, 'a1', true)))
+    act(() => feed.add(cost(4, null, 'a1', true)))
+    act(() => feed.add(cost(5, 0.059, 'a1', true)))
+    expect(status()).toContain(en.code.editor.cost('$0.06'))
+    // The sum of the events, which the bar showed before, is $0.145.
+    expect(status()).not.toMatch(/\$0\.1[45]/)
+  })
+
+  it('adds the last value of each agent session when the agent session started over', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() => feed.add(cost(2, 0.1, 'a1', false)))
+    act(() => feed.add(cost(3, 0.2, 'a1', true)))
+    act(() => feed.add(cost(4, 0.5, 'a2', false)))
+    act(() => feed.add(cost(5, 0.75, 'a2', true)))
+    act(() => feed.add(cost(6, 0.05, null, false)))
+    expect(status()).toContain(en.code.editor.cost('$1.00'))
+  })
+
+  it('reads costs written before they named their agent session as one running total', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() => feed.add(cost(2, 0.036)))
+    act(() => feed.add(cost(3, 0.05)))
+    expect(status()).toContain(en.code.editor.cost('$0.05'))
+    // The next pass resumed that agent session: its total already holds the unnamed ones.
+    act(() => feed.add(cost(4, 0.06, 'a1', true)))
+    expect(status()).toContain(en.code.editor.cost('$0.06'))
+    // A new agent session adds to it.
+    act(() => feed.add(cost(5, 0.01, 'a2', false)))
+    expect(status()).toContain(en.code.editor.cost('$0.07'))
+  })
+
+  it('keeps unnamed costs when the next pass started a new agent session', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() => feed.add(cost(2, 0.5)))
+    act(() => feed.add(cost(3, 0.25, 'a1', false)))
+    expect(status()).toContain(en.code.editor.cost('$0.75'))
   })
 
   it('shows no cost when every cost event carries none', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     act(() => feed.add(cost(2, null)))
-    act(() => feed.add({ ...cost(3, null), content: 'not json' }))
+    act(() => feed.add(cost(3, null, 'a1', false)))
+    act(() => feed.add({ ...cost(4, null), content: 'not json' }))
+    act(() => feed.add({ ...cost(5, null), content: '7' }))
     expect(status()).not.toContain('Cost so far')
   })
 

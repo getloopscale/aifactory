@@ -334,6 +334,45 @@ describe('runTurn', () => {
     expect(t.run).toHaveBeenCalledTimes(2)
   })
 
+  it('names the agent session in the cost event, and whether the pass resumed it', async () => {
+    const t = setup()
+    await runTurn(t.deps, 's1')
+    const costs = () => t.events.filter((e) => e.kind === 'cost').map((e) => JSON.parse(e.content))
+    expect(costs()).toEqual([{ costUsd: 0.5, agentSessionId: 'agent-1', resumed: false }])
+    t.events.push({
+      sessionId: 's1',
+      seq: 9,
+      kind: 'user_message',
+      tool: null,
+      content: 'more',
+      at: new Date(),
+    })
+    t.session.state = 'queued'
+    await runTurn(t.deps, 's1')
+    expect(costs()[1]).toEqual({ costUsd: 0.5, agentSessionId: 'agent-1', resumed: true })
+  })
+
+  it('names the resumed agent session when the result names none, and none for a fresh pass', async () => {
+    const t = setup('code', () => ({ ok: true, summary: 'done', costUsd: 0.2 }))
+    await runTurn(t.deps, 's1')
+    const costs = () => t.events.filter((e) => e.kind === 'cost').map((e) => JSON.parse(e.content))
+    expect(costs()).toEqual([{ costUsd: 0.2, agentSessionId: null, resumed: false }])
+
+    t.session.agentSessionId = 'agent-7'
+    t.events.push({
+      sessionId: 's1',
+      seq: 9,
+      kind: 'user_message',
+      tool: null,
+      content: 'more',
+      at: new Date(),
+    })
+    t.session.state = 'queued'
+    await runTurn(t.deps, 's1')
+    expect(t.resume).toHaveBeenCalledWith(expect.anything(), 'agent-7', expect.anything())
+    expect(costs()[1]).toEqual({ costUsd: 0.2, agentSessionId: 'agent-7', resumed: true })
+  })
+
   it('passes ask: true in ask and plan mode and not in code mode', async () => {
     for (const [mode, ask] of [
       ['ask', true],

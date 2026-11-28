@@ -365,25 +365,71 @@ function SessionList({
   )
 }
 
-/** The seq of the last state event: it moves when a turn starts or ends. */
-/** What a `cost` event says the turn cost, or null when it says nothing a number can be read from. */
-function turnCost(content: string): number | null {
+/** What a `cost` event says: the running total of its agent session, and which agent session that was. */
+interface CostReading {
+  usd: number | null
+  /** The agent session that reported it; absent from the events written before it was recorded. */
+  agentSessionId?: string | null
+  resumed?: boolean
+}
+
+/** Reads a `cost` event, or null when its content is not an object. */
+function readCost(content: string): CostReading | null {
   try {
-    const usd = (JSON.parse(content) as { costUsd?: unknown } | null)?.costUsd
-    return typeof usd === 'number' && Number.isFinite(usd) ? usd : null
+    const raw = JSON.parse(content) as {
+      costUsd?: unknown
+      agentSessionId?: unknown
+      resumed?: unknown
+    } | null
+    if (!raw || typeof raw !== 'object') return null
+    const usd = typeof raw.costUsd === 'number' && Number.isFinite(raw.costUsd) ? raw.costUsd : null
+    return {
+      usd,
+      agentSessionId: typeof raw.agentSessionId === 'string' ? raw.agentSessionId : undefined,
+      resumed: typeof raw.resumed === 'boolean' ? raw.resumed : undefined,
+    }
   } catch {
     return null
   }
 }
 
-/** The cost of the session so far: the sum of the turns that reported one, or null when none did. */
-function sessionCost(events: CodeEventWire[]): number | null {
-  return events.reduce<number | null>((sum, e) => {
-    const usd = e.kind === 'cost' ? turnCost(e.content) : null
-    return usd === null ? sum : (sum ?? 0) + usd
-  }, null)
+/** Events written before the cost named its agent session: taken as one agent session, the first one. */
+const UNNAMED = 'unnamed'
+
+/**
+ * The agent session a cost belongs to. An event that names none continues the one before it, unless it says its
+ * pass started afresh (a harness that reported no session), which is a session of its own.
+ */
+function costGroup(reading: CostReading, previous: string, fresh: () => string): string {
+  if (reading.agentSessionId) return reading.agentSessionId
+  return reading.resumed === false ? fresh() : previous
 }
 
+/**
+ * The cost of the session so far, or null when no event reported one. Each `cost` event holds the running total
+ * of its agent session (a resumed Claude Code session reports everything since it began), so this adds the last
+ * value of each agent session, never every event.
+ */
+function sessionCost(events: CodeEventWire[]): number | null {
+  const last = new Map<string, number>()
+  let group = UNNAMED
+  let unknown = 0
+  for (const e of events) {
+    const reading = e.kind === 'cost' ? readCost(e.content) : null
+    if (!reading) continue
+    const next = costGroup(reading, group, () => `fresh:${unknown++}`)
+    // The first pass to name its session and say it resumed one goes on from the unnamed events before it.
+    if (group === UNNAMED && next !== UNNAMED && reading.resumed && reading.usd !== null) {
+      last.delete(UNNAMED)
+    }
+    group = next
+    if (reading.usd !== null) last.set(group, reading.usd)
+  }
+  if (last.size === 0) return null
+  return [...last.values()].reduce((sum, usd) => sum + usd, 0)
+}
+
+/** The seq of the last state event: it moves when a turn starts or ends. */
 const lastStateSeq = (events: CodeEventWire[]) =>
   events.reduce((seq, e) => (e.kind === 'state' ? Math.max(seq, e.seq) : seq), 0)
 
