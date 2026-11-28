@@ -67,7 +67,7 @@ export function Assist({
   context?: string
   onUse: (proposal: Proposal) => void
 }) {
-  const { t } = useCopy()
+  const { t, language } = useCopy()
   const agent = useAgent<{ message: string }>(agentFor(kind), {
     headers: { 'x-loopzero-action': '1' },
   })
@@ -81,7 +81,16 @@ export function Assist({
   const ready = !NEEDS_WORDS[kind] || text.trim().length >= 3
 
   const ask = (change?: string) =>
-    agent.send({ message: buildMessage({ kind, repository, context, text, instruction: change }) })
+    agent.send({
+      message: buildMessage({
+        kind,
+        language,
+        repository,
+        context,
+        text,
+        instruction: change,
+      }),
+    })
 
   return (
     <div className="space-y-2 text-sm">
