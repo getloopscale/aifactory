@@ -1,6 +1,7 @@
 import type { SandboxBackend } from '@getloopscale/loopzero-agents/sandbox'
 
 import { modeFromEnv, type CoordinatorMode } from '../coordinator/mode'
+import { CHANGESET_CHECK_PATH } from './changesets'
 import { runChecks, type CheckResult, type CheckSpec } from './evidence'
 import type { Finding } from './review'
 import { must } from './run-support'
@@ -121,11 +122,67 @@ function readResults(results: CheckResult[], files: string[]): TestProof {
   return { outcome: 'unproven', files }
 }
 
+/** A script of a package manager that formats, lints, typechecks or builds, and so runs no test. */
+const NO_TEST_SCRIPT =
+  /^(?:lint|format|fmt|prettier|typecheck|type-check|types|tsc|build)(?::[\w-]+)?$/
+
+/** A tool that formats, lints or typechecks, and never runs a test. */
+const NO_TEST_TOOL = /^(?:prettier|eslint|tsc|biome|oxlint|markdownlint|stylelint)$/
+
+/**
+ * Whether a check is known to run no test, so failing on the base cannot be the work's tests (#716). Only a single
+ * plain command is read: a script of a package manager named for formatting, linting, typechecking or building, a
+ * formatter, a linter or `tsc`, or the factory's own changeset check. Anything else, a compound command included,
+ * is not known, and is run.
+ */
+export function runsNoTest(check: CheckSpec): boolean {
+  const command = check.command.trim()
+  if (command.startsWith(`node ${CHANGESET_CHECK_PATH} `)) return true
+  if (/[;&|<>`$()\n]/.test(command)) return false
+  const words = command.split(/\s+/)
+  const [first, second, third] = words
+  if (first === 'pnpm' || first === 'npm' || first === 'yarn' || first === 'bun') {
+    if (second === 'exec' || second === 'dlx')
+      return third !== undefined && NO_TEST_TOOL.test(third)
+    const script = second === 'run' ? third : second
+    return script !== undefined && NO_TEST_SCRIPT.test(script)
+  }
+  if (first === 'npx') return second !== undefined && NO_TEST_TOOL.test(second)
+  return first !== undefined && NO_TEST_TOOL.test(first)
+}
+
+/** The checks the proof runs: every one but those known to run no test, in their order. */
+export function proofChecks(checks: CheckSpec[]): CheckSpec[] {
+  return checks.filter((check) => !runsNoTest(check))
+}
+
+/**
+ * Runs the checks on the base one at a time, each retried as `runChecks` does, and stops at the first that failed
+ * for good (#716): `readResults` already calls that `proven`. A check is not taken as failed for good while a later
+ * one has its name, since the last result of a name is the one read.
+ */
+async function runUntilProven(
+  backend: SandboxBackend,
+  checks: CheckSpec[],
+  timeoutMs: number,
+): Promise<CheckResult[]> {
+  const results: CheckResult[] = []
+  for (const [index, check] of checks.entries()) {
+    const ran = await runChecks(backend, PROOF_DIR, [check], timeoutMs)
+    results.push(...ran)
+    const final = ran[ran.length - 1]
+    const again = checks.slice(index + 1).some((later) => later.name === check.name)
+    if (final && !final.passed && !final.timedOut && !again) break
+  }
+  return results
+}
+
 /**
  * Asks whether the tests a head adds depend on the change: it checks out the commit the run started from, copies
  * the head's version of those test files onto it and runs the task's checks there (#550). A check that fails
- * there means the tests cannot pass without the change. A step that cannot run is `not_run`, never `proven`. The
- * checkout is removed whatever happens.
+ * there means the tests cannot pass without the change, and no check runs after it (#716). A check known to run no
+ * test (`runsNoTest`) is not run there. A step that cannot run is `not_run`, never `proven`. The checkout is removed
+ * whatever happens.
  */
 export async function proveTests(backend: SandboxBackend, run: ProofRun): Promise<TestProof> {
   let files: string[] = []
@@ -139,6 +196,10 @@ export async function proveTests(backend: SandboxBackend, run: ProofRun): Promis
     }
   }
   if (files.length === 0) return { outcome: 'no_tests', files }
+  const checks = proofChecks(run.checks)
+  if (!checks.some((check) => check.name !== 'install')) {
+    return { outcome: 'not_run', detail: 'no check of the task runs tests', files }
+  }
   try {
     await must(
       backend,
@@ -149,7 +210,7 @@ export async function proveTests(backend: SandboxBackend, run: ProofRun): Promis
       backend,
       `git -C ${PROOF_DIR} --literal-pathspecs checkout ${run.headSha} --pathspec-from-file=${PROOF_LIST} --pathspec-file-nul`,
     )
-    const results = await runChecks(backend, PROOF_DIR, run.checks, run.timeoutMs)
+    const results = await runUntilProven(backend, checks, run.timeoutMs)
     return readResults(results, files)
   } catch (error) {
     return { outcome: 'not_run', detail: message(error), files }
@@ -160,3 +221,21 @@ export async function proveTests(backend: SandboxBackend, run: ProofRun): Promis
 
 const message = (error: unknown): string =>
   (error instanceof Error ? error.message : String(error)).slice(-500)
+
+/**
+ * Runs `work` while `background` (the proof of a head) runs in its own checkout, so the review does not wait for it
+ * (#716). The caller awaits `background` itself before reading the verdict. When `work` throws, `background` is let
+ * settle first, so its checkout is removed before the run goes on, and its own failure is never left unhandled.
+ */
+export async function alongside<T>(
+  background: Promise<unknown>,
+  work: () => Promise<T>,
+): Promise<T> {
+  background.catch(() => undefined)
+  try {
+    return await work()
+  } catch (error) {
+    await background.catch(() => undefined)
+    throw error
+  }
+}
