@@ -71,6 +71,7 @@ import {
 import { DEFAULT_TIMEOUTS, PLAN_MS } from '../factory/run'
 import {
   addsProofFinding,
+  alongside,
   blockedByProof,
   proveTests,
   provedOnce,
@@ -143,7 +144,8 @@ function ensureLive(signal: AbortSignal | undefined): void {
 /**
  * The steps a case finished, timed one after another from the case's start (#711). A step that throws still took its
  * time and is kept, but an agent pass refused for want of time never started; one still running when the result is
- * read is not kept.
+ * read is not kept. The proof of the tests runs alongside the review (#716), so those two steps overlap and
+ * `unaccountedMs` can be below zero by the overlap.
  */
 export class CaseClock {
   private readonly steps: CaseStep[] = []
@@ -470,7 +472,8 @@ class CaseRun {
 
   /**
    * The review, with the finding `Run.review` adds in `auto` when the tests this commit adds pass on the base
-   * (#550): the verdict cannot be `approve`, and the finding reaches the rework. The step runs once per head.
+   * (#550): the verdict cannot be `approve`, and the finding reaches the rework. The step runs once per head, alongside
+   * the review, so its `test_proof` time overlaps the review's (#716).
    */
   private async reviewedWithProof(
     sha: string,
@@ -478,7 +481,7 @@ class CaseRun {
     required: Parameters<CaseRun['review']>[2],
   ): Promise<ReviewVerdict> {
     const mode = testProofModeFromEnv(process.env)
-    const proof = await provedOnce(
+    const proving = provedOnce(
       { mode, sha, known: this.proofs, store: { load: async () => undefined, save: async () => {} } },
       () =>
         this.clock.time('test_proof', () =>
@@ -491,8 +494,9 @@ class CaseRun {
           }),
         ),
     )
-    const proved = addsProofFinding(mode, proof)
-    const read = await this.review(sha, unplanned, required)
+    // The proof runs in a checkout of its own while the reviewer reads this one, as `Run.review` does (#716).
+    const read = await alongside(proving, () => this.review(sha, unplanned, required))
+    const proved = addsProofFinding(mode, await proving)
     if (proved.length === 0) return read
     return {
       ...read,
