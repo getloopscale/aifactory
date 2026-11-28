@@ -569,6 +569,7 @@ export function CodeConversation({
   onOpenFile,
   onPanel,
   onRenamed,
+  onModel,
 }: {
   session: CodeSessionWire
   events: CodeEventWire[]
@@ -579,6 +580,8 @@ export function CodeConversation({
   onPanel?: (tab: 'changes' | 'files') => void
   /** The title the session was renamed to. */
   onRenamed?: (title: string) => void
+  /** The model the session was saved with, null for the agent's default. */
+  onModel?: (model: string | null) => void
 }) {
   const { t } = useCopy()
   const c = { ...t.code.conversation, mentions: t.code.files.mentions }
@@ -689,6 +692,7 @@ export function CodeConversation({
       )
       if ('mode' in body) setMode(saved.mode)
       if ('title' in body) onRenamed?.(saved.title)
+      if ('model' in body) onModel?.(saved.model)
       return true
     } catch (e) {
       setProblem(e instanceof Error ? e.message : String(e))
