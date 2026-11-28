@@ -37,7 +37,7 @@ import { get, post } from '../lib/api'
 import { useCodeSession } from '../lib/code-session'
 import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
-import { ago } from '../lib/format'
+import { ago, money } from '../lib/format'
 import { useResource } from '../lib/live'
 import { useWidth } from '../lib/media'
 
@@ -127,6 +127,7 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
           baseBranch: base.trim(),
           harness,
           mode,
+          firstMessage: message,
         })
         id = made.session.id
         setCreated(id)
@@ -365,6 +366,24 @@ function SessionList({
 }
 
 /** The seq of the last state event: it moves when a turn starts or ends. */
+/** What a `cost` event says the turn cost, or null when it says nothing a number can be read from. */
+function turnCost(content: string): number | null {
+  try {
+    const usd = (JSON.parse(content) as { costUsd?: unknown } | null)?.costUsd
+    return typeof usd === 'number' && Number.isFinite(usd) ? usd : null
+  } catch {
+    return null
+  }
+}
+
+/** The cost of the session so far: the sum of the turns that reported one, or null when none did. */
+function sessionCost(events: CodeEventWire[]): number | null {
+  return events.reduce<number | null>((sum, e) => {
+    const usd = e.kind === 'cost' ? turnCost(e.content) : null
+    return usd === null ? sum : (sum ?? 0) + usd
+  }, null)
+}
+
 const lastStateSeq = (events: CodeEventWire[]) =>
   events.reduce((seq, e) => (e.kind === 'state' ? Math.max(seq, e.seq) : seq), 0)
 
@@ -986,6 +1005,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   const { t } = useCopy()
   const { session, events, error } = useCodeSession(id)
   const turn = lastStateSeq(events)
+  const cost = sessionCost(events)
   const { files, error: filesError } = useCodeFiles(id, turn)
   const { data: diff, error: diffError } = useCodeDiff(id, turn)
   const [view, setView] = useState<View | undefined>('changes')
@@ -1149,6 +1169,9 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
                   )
                 : null}
             </span>
+            {cost === null ? null : (
+              <span className="font-sans tabular-nums">{t.code.editor.cost(money(cost))}</span>
+            )}
             <span className="font-sans">{t.code.modes[session.mode]}</span>
             <span className="flex items-center gap-1">
               <Bot aria-hidden className="size-3 shrink-0" />

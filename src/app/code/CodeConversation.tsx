@@ -370,6 +370,7 @@ function PlanCard({
           {revising ? (
             <div className="space-y-2">
               <Textarea
+                autoFocus
                 aria-label={c.reviseLabel}
                 value={text}
                 rows={3}
@@ -956,6 +957,7 @@ export function CodeConversation({
                 {editing === 'model' ? (
                   <select
                     autoFocus
+                    aria-label={c.commands.inputLabel.model}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
@@ -970,6 +972,7 @@ export function CodeConversation({
                 ) : (
                   <input
                     autoFocus
+                    aria-label={c.commands.inputLabel.rename}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
