@@ -294,6 +294,43 @@ describe('the handlers', () => {
     expect(updateSession).toHaveBeenCalledWith('s', { mode: 'plan' })
   })
 
+  it('refuses a model the harness does not list and names the accepted ones', async () => {
+    vi.mocked(getSession).mockResolvedValueOnce({ id: 's', harness: 'claude-code' } as never)
+    const response = (await run(PATCH, {
+      params: { id: 's' },
+      body: { model: 'modelo-que-nao-existe' },
+    })) as Response
+    expect(response.status).toBe(400)
+    const answer = (await response.json()) as { message: string; accepted: string[] }
+    expect(answer.accepted).toEqual(['sonnet', 'opus', 'fable'])
+    expect(answer.message).toContain('modelo-que-nao-existe')
+    expect(answer.message).toContain('sonnet, opus, fable')
+    expect(updateSession).not.toHaveBeenCalled()
+  })
+
+  it('refuses any model for a harness that lists none', async () => {
+    vi.mocked(getSession).mockResolvedValueOnce({ id: 's', harness: 'other' } as never)
+    const response = (await run(PATCH, { params: { id: 's' }, body: { model: 'x' } })) as Response
+    expect(response.status).toBe(400)
+    expect(((await response.json()) as { accepted: string[] }).accepted).toEqual([])
+  })
+
+  it('saves a listed model, clears it with null and answers 404 for an unknown session', async () => {
+    vi.mocked(getSession).mockResolvedValueOnce({ id: 's', harness: 'claude-code' } as never)
+    vi.mocked(updateSession).mockResolvedValue(stored)
+    await run(PATCH, { params: { id: 's' }, body: { model: 'opus' } })
+    expect(updateSession).toHaveBeenCalledWith('s', { model: 'opus' })
+    await run(PATCH, { params: { id: 's' }, body: { model: null } })
+    expect(updateSession).toHaveBeenLastCalledWith('s', { model: null })
+    expect(getSession).toHaveBeenCalledTimes(1)
+    vi.mocked(getSession).mockResolvedValueOnce(undefined)
+    const response = (await run(PATCH, {
+      params: { id: 'x' },
+      body: { model: 'opus' },
+    })) as Response
+    expect(response.status).toBe(404)
+  })
+
   it('reads one session and ends one', async () => {
     vi.mocked(getSession).mockResolvedValueOnce(undefined)
     expect(((await run(one, { params: { id: 'x' } })) as Response).status).toBe(404)
