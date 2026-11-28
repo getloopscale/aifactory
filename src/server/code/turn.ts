@@ -208,19 +208,24 @@ async function saveWorkspace(
   }
 }
 
-/** Starts the pass: on the agent's own session when the harness that made it can resume it, afresh otherwise. */
-function startPass(
-  harness: CodingHarness,
-  session: CodeSession,
-  workspace: Workspace,
-  input: HarnessInput,
-): Promise<HarnessResult> {
+/** The agent session a pass resumes: the session's own when the harness that made it can resume it, else none. */
+function resumedSession(harness: CodingHarness, session: CodeSession): string | undefined {
   const resumable =
     session.agentSessionId &&
     harness.resume &&
     (session.agentSessionHarness ?? harness.name) === harness.name
-  const pass = resumable
-    ? harness.resume!(workspace.backend, session.agentSessionId!, input)
+  return resumable ? session.agentSessionId! : undefined
+}
+
+/** Starts the pass: on the agent session it resumes when there is one, afresh otherwise. */
+function startPass(
+  harness: CodingHarness,
+  resumed: string | undefined,
+  workspace: Workspace,
+  input: HarnessInput,
+): Promise<HarnessResult> {
+  const pass = resumed
+    ? harness.resume!(workspace.backend, resumed, input)
     : harness.run(workspace.backend, input)
   // Whichever way the race with a stop ends, a pass that fails later is not an unhandled rejection.
   pass.catch(() => undefined)
@@ -243,6 +248,19 @@ async function untilEndOrStop(
 }
 
 /**
+ * What a `cost` event holds. A harness that resumes its agent session (Claude Code) reports the running total of
+ * that agent session, so the event names it (`agentSessionId`, the resumed one when the result names none) and
+ * says whether the pass resumed it: the page keeps the last value of each agent session instead of adding them.
+ */
+export function costContent(result: HarnessResult, resumed: string | undefined): string {
+  return JSON.stringify({
+    costUsd: result.costUsd ?? null,
+    agentSessionId: result.sessionId ?? resumed ?? null,
+    resumed: resumed !== undefined,
+  })
+}
+
+/**
  * Ends a turn that did not fail: says the owner stopped it when they did, keeps the cost, and either proposes the
  * plan and waits for the owner or leaves the session idle.
  */
@@ -252,15 +270,11 @@ async function endWell(
   result: HarnessResult | undefined,
   stopped: boolean,
   plan: string,
+  resumed: string | undefined,
 ): Promise<TurnResult> {
   const { store } = deps
   if (stopped) await store.append(sessionId, { kind: 'state', content: STOPPED_BY_OWNER })
-  if (result) {
-    await store.append(sessionId, {
-      kind: 'cost',
-      content: JSON.stringify({ costUsd: result.costUsd ?? null }),
-    })
-  }
+  if (result) await store.append(sessionId, { kind: 'cost', content: costContent(result, resumed) })
   if (plan) {
     await store.append(sessionId, { kind: 'plan', content: plan })
     await store.move(sessionId, 'plan_proposed')
@@ -312,6 +326,7 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let marked = false
   let stopped = false
   let plan = ''
+  const resumed = resumedSession(harness, session)
   const control = watchControls(store, sessionId, deps.controlPollMs ?? CONTROL_POLL_MS)
   try {
     await store.move(sessionId, 'turn_started')
@@ -331,7 +346,7 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
       live: control.live,
       ...(session.mode === 'code' ? {} : { ask: true }),
     }
-    const pass = startPass(harness, session, workspace, input)
+    const pass = startPass(harness, resumed, workspace, input)
     try {
       ;({ result, stopped } = await untilEndOrStop(
         pass,
@@ -365,7 +380,7 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
       await recordResult(deps, session, message, harness, result, Date.now() - started)
     }
     if (failure === undefined && (result || stopped)) {
-      return await endWell(deps, sessionId, result, stopped, plan)
+      return await endWell(deps, sessionId, result, stopped, plan, resumed)
     }
   } catch (error) {
     // A step after the pass failed: the session must not stay claimed, or its later turns wait for ever.
