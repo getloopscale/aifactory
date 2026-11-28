@@ -94,9 +94,13 @@ export function cardsOf(events: CodeEventWire[]): Array<Row> {
   const shown = new Set<string>()
   let turn = 0
   const answers = new Map<number, PlanAnswer>()
+  // Accepting a plan writes the instruction for the agent right after its marker: the plan card says it was
+  // accepted, so that message is not shown as the owner's (#751).
+  const instructions = new Set<number>()
   for (const e of events) {
     const m = e.kind === 'state' ? ANSWER.exec(e.content) : null
     if (m) answers.set(Number(m[1]), m[2] as PlanAnswer)
+    if (m?.[2] === 'accept') instructions.add(e.seq + 1)
   }
   const lastPlan = events.filter((e) => e.kind === 'plan').pop()?.seq
   for (const e of events) {
@@ -110,7 +114,7 @@ export function cardsOf(events: CodeEventWire[]): Array<Row> {
       })
     else if (e.kind === 'user_message') {
       turn++
-      rows.push({ type: 'user', seq: e.seq, text: e.content })
+      if (!instructions.has(e.seq)) rows.push({ type: 'user', seq: e.seq, text: e.content })
     } else if (e.kind === 'agent_message') {
       if (!errors.has(`${turn}:${e.content.trim()}`))
         rows.push({ type: 'agent', seq: e.seq, text: e.content })
