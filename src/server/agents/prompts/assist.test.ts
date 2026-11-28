@@ -27,3 +27,13 @@ describe('the language the assistants write in (#770)', () => {
     expect(prompt).not.toContain('use the language of the context')
   })
 })
+
+describe('the request for changes (#775)', () => {
+  it('is a change to a pull request, or to the plan the context says the owner is revising', () => {
+    expect(ASSIST_INSTRUCTIONS).toContain('A request for changes to a pull request')
+    expect(ASSIST_INSTRUCTIONS).toContain('when the context says the owner is revising one')
+    expect(ASSIST_INSTRUCTIONS).toContain(
+      'never to the files the session already changed unless the owner names them',
+    )
+  })
+})

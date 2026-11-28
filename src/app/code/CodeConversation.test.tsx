@@ -27,7 +27,13 @@ vi.mock('@getloopscale/loopzero-ui', () => ({
 
 import { del, get, patch, post } from '../lib/api'
 
-import { CodeConversation, CONTEXT_PATHS, linkPaths, mentionAt } from './CodeConversation'
+import {
+  CodeConversation,
+  CONTEXT_PATHS,
+  linkPaths,
+  mentionAt,
+  PLAN_CONTEXT_CHARS,
+} from './CodeConversation'
 
 const c = en.code.conversation
 
@@ -786,7 +792,65 @@ describe('the assist of a session', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: c.plan.revise }))
     const want = c.assistContext('acme/shop', 'code/s1', ['src/a.ts'], 0)
-    expect(contexts()).toEqual([want, want])
+    const [plan, message] = contexts()
+    expect(message).toBe(want)
+    expect(plan?.endsWith(want)).toBe(true)
+  })
+
+  it('gives the assist of the plan revision box the plan on screen, and says the owner revises it (#775)', () => {
+    const clamp =
+      '## Plan\n- add `src/clamp.js` with clamp(value, min, max)\n- add `src/clamp.test.js`'
+    render(
+      <CodeConversation
+        session={session('waiting_input')}
+        events={[ev(1, 'user_message', 'plan clamp'), ev(2, 'plan', clamp)]}
+        changed={['src/minOf.js', 'src/minOf.test.js', 'docs/min.md', 'NOTES.md']}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: c.plan.revise }))
+    const [plan, message] = contexts()
+    expect(plan).toBe(
+      `${c.plan.assistContext(clamp, false)}\n${c.assistContext('acme/shop', 'code/s1', ['src/minOf.js', 'src/minOf.test.js', 'docs/min.md', 'NOTES.md'], 0)}`,
+    )
+    expect(plan).toContain(clamp)
+    expect(plan).toContain('The owner is revising the plan below')
+    expect(plan).not.toContain('cut:')
+    expect(message).not.toContain('clamp')
+  })
+
+  it('cuts a long plan at the limit and says it was cut', () => {
+    const long = `${'a'.repeat(PLAN_CONTEXT_CHARS)}TAIL`
+    render(
+      <CodeConversation
+        session={session('waiting_input')}
+        events={[ev(1, 'user_message', 'plan it'), ev(2, 'plan', long)]}
+        changed={[]}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: c.plan.revise }))
+    const [plan] = contexts()
+    expect(plan).toContain(c.plan.assistContext('a'.repeat(PLAN_CONTEXT_CHARS), true))
+    expect(plan).toContain('cut: only its beginning is shown')
+    expect(plan).not.toContain('TAIL')
+  })
+
+  it('says the plan revision in Portuguese on a page in Portuguese', () => {
+    window.localStorage.setItem('aifactory.language', 'pt-BR')
+    try {
+      render(
+        <CopyProvider>
+          <CodeConversation
+            session={session('waiting_input')}
+            events={[ev(1, 'user_message', 'planeje'), ev(2, 'plan', 'clamp')]}
+            changed={[]}
+          />
+        </CopyProvider>,
+      )
+      fireEvent.click(screen.getByRole('button', { name: ptBR.code.conversation.plan.revise }))
+    } finally {
+      window.localStorage.clear()
+    }
+    expect(contexts()[0]).toContain(ptBR.code.conversation.plan.assistContext('clamp', false))
   })
 
   it('says the changed files could not be read, never listing the workspace in their place', () => {
