@@ -55,14 +55,18 @@ export function useCodeSession(id: string): CodeSessionView {
       if (changed) publish()
     }
 
+    // Reads can overlap (a message, then the state of its turn): only the last one asked for is shown.
+    let reads = 0
     const readSession = async () => {
+      const mine = ++reads
       try {
         const session = await get<CodeSessionWire>(
           `/api/panel/code/sessions/${encodeURIComponent(id)}`,
         )
-        if (alive) setView((v) => ({ ...v, session, error: undefined }))
+        if (alive && mine === reads) setView((v) => ({ ...v, session, error: undefined }))
       } catch (e) {
-        if (alive) setView((v) => ({ ...v, error: e instanceof Error ? e.message : String(e) }))
+        if (alive && mine === reads)
+          setView((v) => ({ ...v, error: e instanceof Error ? e.message : String(e) }))
       }
     }
 
@@ -101,7 +105,8 @@ export function useCodeSession(id: string): CodeSessionView {
       const next = lastContiguous([...bySeq.values()].sort((a, b) => a.seq - b.seq)) + 1
       add([e])
       if (e.seq > next) void catchUp()
-      if (e.kind === 'state' || e.kind === 'plan') void readSession()
+      // A message sent from another page queues a turn without a `state` event: read what it changed.
+      if (e.kind === 'state' || e.kind === 'plan' || e.kind === 'user_message') void readSession()
     })
     const unopen = onStreamOpen(() => {
       void catchUp()
