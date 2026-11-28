@@ -55,6 +55,72 @@ export class StreamingFakeBackend extends FakeBackend {
   }
 }
 
+/** What a scripted Claude Code does while its pass runs: print lines, wait for what its inbox holds. */
+export type ClaudeScript = (claude: {
+  print(line: string): void
+  /** Resolves once the inbox holds `count` lines, the prompt included. */
+  read(count: number): Promise<void>
+}) => Promise<void>
+
+/**
+ * A streaming backend whose watched Claude pass follows a script and ends only when its input is closed, as
+ * `claude -p --input-format stream-json` does: the factory's `pkill` of the inbox's `tail` ends it.
+ */
+export class ClaudeStreamBackend extends StreamingFakeBackend {
+  inbox: string[] = []
+  private waiting: (() => void)[] = []
+  private closeInput!: () => void
+  private readonly inputClosed = new Promise<void>((done) => {
+    this.closeInput = done
+  })
+
+  constructor(
+    answer: (command: string) => Reply | undefined,
+    private readonly script: ClaudeScript,
+  ) {
+    super(answer)
+  }
+
+  private grew() {
+    for (const wake of this.waiting.splice(0)) wake()
+  }
+
+  async uploadFile(path: string, content: string | Buffer) {
+    await super.uploadFile(path, content)
+    if (/^\/tmp\/factory-inbox-[^.]+\.jsonl$/.test(path)) {
+      this.inbox.push(String(content))
+      this.grew()
+    }
+  }
+
+  async execute(command: string) {
+    const append = /^cat (\S+) >> /.exec(command)
+    if (append) {
+      this.inbox.push(this.files.get(append[1]!) ?? '')
+      this.grew()
+    }
+    if (command.startsWith("pkill -f '^tail")) this.closeInput()
+    return super.execute(command)
+  }
+
+  async executeStreaming(command: string, opts: StreamingOptions) {
+    if (!command.includes('--input-format stream-json'))
+      return super.executeStreaming(command, opts)
+    this.commands.push(command)
+    const printed: string[] = []
+    const print = (line: string) => {
+      printed.push(line)
+      opts.onStdoutLine(line)
+    }
+    const read = async (count: number) => {
+      while (this.inbox.length < count) await new Promise<void>((wake) => this.waiting.push(wake))
+    }
+    await this.script({ print, read })
+    await this.inputClosed
+    return { stdout: printed.join('\n'), stderr: '', exitCode: 0, timedOut: false }
+  }
+}
+
 /** A terminal that echoes what it is sent, remembers its size and ends when it is killed or told `exit`. */
 export class FakeTerminal implements Terminal {
   written: string[] = []
@@ -137,13 +203,19 @@ export class FakeSandbox implements IsolatedSandboxProvider {
 
   constructor(
     answer: (command: string) => Reply | undefined = () => ({}),
-    { streaming = false, terminal = false } = {},
+    {
+      streaming = false,
+      terminal = false,
+      backend,
+    }: { streaming?: boolean; terminal?: boolean; backend?: FakeBackend } = {},
   ) {
-    this.backend = terminal
-      ? new TerminalFakeBackend(answer)
-      : streaming
-        ? new StreamingFakeBackend(answer)
-        : new FakeBackend(answer)
+    this.backend = backend
+      ? backend
+      : terminal
+        ? new TerminalFakeBackend(answer)
+        : streaming
+          ? new StreamingFakeBackend(answer)
+          : new FakeBackend(answer)
   }
 
   async create(spec: SandboxSpec): Promise<IsolatedSandbox> {
