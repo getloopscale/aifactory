@@ -418,6 +418,27 @@ describe('runCase', () => {
       expect(provider.backend.commands.some((c) => c.includes('/tmp/aifactory-proof'))).toBe(true)
     })
 
+    it('runs only the changed test files on the base when the test script is vitest, as the factory does (#721)', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const provider = withTests(sandbox())
+      const execute = provider.backend.execute.bind(provider.backend)
+      const report = { testResults: [{ name: '/tmp/aifactory-proof/src/a.test.ts', status: 'failed', assertionResults: [{ status: 'failed' }] }] }
+      provider.backend.execute = async (command: string) =>
+        command === 'cat /tmp/aifactory-proof/package.json'
+          ? { stdout: JSON.stringify({ scripts: { test: 'vitest run' } }), stderr: '', exitCode: 0, timedOut: false }
+          : command === 'cat /tmp/aifactory-proof-report.json'
+            ? { stdout: JSON.stringify(report), stderr: '', exitCode: 0, timedOut: false }
+            : execute(command)
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+
+      const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(result.passed).toBe(true)
+      expect(provider.backend.commands.some((c) => c.includes('xargs -0 ./node_modules/.bin/vitest run'))).toBe(true)
+      expect(provider.backend.commands).not.toContain('cd /tmp/aifactory-proof && pnpm test')
+    })
+
     it('runs nothing in off', async () => {
       vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'off')
       const provider = withTests(sandbox())

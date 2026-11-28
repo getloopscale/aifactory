@@ -631,7 +631,13 @@ describe('runTask', () => {
       expect(proofEnded(sandbox)).toBe(true)
       const proofs = await getDb().select().from(testProof).where(eq(testProof.taskId, id))
       expect(proofs).toMatchObject([
-        { sha: 'abc123def', outcome: 'unproven', files: ['src/truncate.test.js'], mode: 'trial' },
+        {
+          sha: 'abc123def',
+          outcome: 'unproven',
+          files: ['src/truncate.test.js'],
+          mode: 'trial',
+          method: 'checks',
+        },
       ])
     })
 

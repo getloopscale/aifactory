@@ -186,6 +186,8 @@ export const testProof = pgTable(
     /** The test files copied onto the base. */
     files: jsonb('files').$type<string[]>().notNull().default([]),
     mode: text('mode').notNull(),
+    /** How the proof ran (#721): `named` (only the files, by the repository's runner), `checks`, or null for neither. */
+    method: text('method'),
     at: timestamp('at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex('test_proof_task_sha').on(t.taskId, t.sha)],

@@ -24,12 +24,19 @@ export const testProofModeFromEnv = (env: NodeJS.ProcessEnv): TestProofMode =>
 
 export type ProofOutcome = 'proven' | 'unproven' | 'no_tests' | 'not_run'
 
+/**
+ * How the proof ran on the base (#721): `named`, only the changed test files through the repository's own runner;
+ * `checks`, the task's checks as after #716. A proof that ran neither (no test changed, nothing could start) has none.
+ */
+export type ProofMethod = 'named' | 'checks'
+
 export type TestProof = {
   outcome: ProofOutcome
-  /** The check that failed on the base (`proven`), or why the step could not run (`not_run`). */
+  /** The check or files that failed on the base (`proven`), or why the step could not run (`not_run`). */
   detail?: string
   /** The test files the work added or changed. */
   files: string[]
+  method?: ProofMethod
 }
 
 /** What the step needs: the checkout of the work, the commit it started from and the head. */
@@ -106,7 +113,9 @@ async function cleanUp(backend: SandboxBackend, run: ProofRun): Promise<void> {
     .execute(`git -C ${run.repoDir} worktree remove --force ${PROOF_DIR}`)
     .catch(() => undefined)
   await backend
-    .execute(`rm -rf ${PROOF_DIR} ${PROOF_LIST} && git -C ${run.repoDir} worktree prune`)
+    .execute(
+      `rm -rf ${PROOF_DIR} ${PROOF_LIST} ${PROOF_REPORT} && git -C ${run.repoDir} worktree prune`,
+    )
     .catch(() => undefined)
 }
 
@@ -179,10 +188,11 @@ async function runUntilProven(
 
 /**
  * Asks whether the tests a head adds depend on the change: it checks out the commit the run started from, copies
- * the head's version of those test files onto it and runs the task's checks there (#550). A check that fails
- * there means the tests cannot pass without the change, and no check runs after it (#716). A check known to run no
- * test (`runsNoTest`) is not run there. A step that cannot run is `not_run`, never `proven`. The checkout is removed
- * whatever happens.
+ * the head's version of those test files onto it and runs them there (#550). When the repository's test check starts
+ * a runner the factory knows how to point at files (`namedRunner`), only those files run (#721); otherwise the task's
+ * checks run, and a check that fails there means the tests cannot pass without the change, and no check runs after
+ * it (#716). A check known to run no test (`runsNoTest`) is not run there. A step that cannot run is `not_run`, never
+ * `proven`. The checkout is removed whatever happens.
  */
 export async function proveTests(backend: SandboxBackend, run: ProofRun): Promise<TestProof> {
   let files: string[] = []
@@ -210,13 +220,275 @@ export async function proveTests(backend: SandboxBackend, run: ProofRun): Promis
       backend,
       `git -C ${PROOF_DIR} --literal-pathspecs checkout ${run.headSha} --pathspec-from-file=${PROOF_LIST} --pathspec-file-nul`,
     )
-    const results = await runUntilProven(backend, checks, run.timeoutMs)
-    return readResults(results, files)
+    return await proveOnBase(backend, run, checks, files)
   } catch (error) {
     return { outcome: 'not_run', detail: message(error), files }
   } finally {
     await cleanUp(backend, run)
   }
+}
+
+/** The proof in the checkout of the base: the named files when the runner is known, else the checks. */
+async function proveOnBase(
+  backend: SandboxBackend,
+  run: ProofRun,
+  checks: CheckSpec[],
+  files: string[],
+): Promise<TestProof> {
+  const named = namedRunner(checks, await rootScripts(backend))
+  if (!named) {
+    const results = await runUntilProven(backend, checks, run.timeoutMs)
+    return { ...readResults(results, files), method: 'checks' }
+  }
+  const answer = await runNamed(backend, named, checks, files, run.timeoutMs)
+  return { ...answer, files, method: 'named' }
+}
+
+/** The scripts of the base's root `package.json`; none when it is missing or does not parse. */
+async function rootScripts(backend: SandboxBackend): Promise<Record<string, string>> {
+  const read = await backend.execute(`cat ${PROOF_DIR}/package.json`)
+  if (read.exitCode !== 0) return {}
+  try {
+    const scripts: unknown = (JSON.parse(read.stdout) as { scripts?: unknown }).scripts
+    return scripts && typeof scripts === 'object' ? (scripts as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+/** Where the runner writes its JSON report of the named files. */
+export const PROOF_REPORT = '/tmp/aifactory-proof-report.json'
+
+export type TestRunner = 'vitest' | 'jest'
+
+/** A runner the factory can point at files, with the flags kept from the repository's command. */
+export type NamedRunner = { runner: TestRunner; flags: string[] }
+
+/** Anything a shell would read as more than a plain word. */
+const SHELL_SYNTAX = /[;&|<>`$()\n'"\\*?{}[\]~#!]/
+
+/** Flags kept as they are, each with whether it takes the next word as its value. */
+const KEPT_FLAGS: Record<TestRunner, Record<string, boolean>> = {
+  vitest: {
+    '--project': true,
+    '--config': true,
+    '-c': true,
+    '--root': true,
+    '-r': true,
+    '--dir': true,
+    '--environment': true,
+    '--pool': true,
+    '--mode': true,
+    '--no-file-parallelism': false,
+    '--passWithNoTests': false,
+    '--globals': false,
+    '--silent': false,
+    '--allowOnly': false,
+  },
+  jest: {
+    '--config': true,
+    '-c': true,
+    '--selectProjects': true,
+    '--rootDir': true,
+    '--testEnvironment': true,
+    '--env': true,
+    '--runInBand': false,
+    '-i': false,
+    '--ci': false,
+    '--passWithNoTests': false,
+    '--silent': false,
+    '--detectOpenHandles': false,
+    '--forceExit': false,
+    '--no-cache': false,
+  },
+}
+
+/** Flags that change nothing about which tests pass, and are left out of the named run. */
+const DROPPED_FLAGS = new Set(['--coverage', '--run'])
+
+/**
+ * The flags of a runner's command, split at `=` and read against `KEPT_FLAGS`; undefined for any other word, a
+ * positional filter included, since it would change which files run.
+ */
+export function runnerFlags(runner: TestRunner, args: string[]): string[] | undefined {
+  const words = args.flatMap((arg) => {
+    const at = arg.indexOf('=')
+    return arg.startsWith('-') && at > 0 ? [arg.slice(0, at), arg.slice(at + 1)] : [arg]
+  })
+  const flags: string[] = []
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!
+    if (DROPPED_FLAGS.has(word)) continue
+    const takesValue = KEPT_FLAGS[runner][word]
+    if (takesValue === undefined) return undefined
+    if (!takesValue) {
+      flags.push(word)
+      continue
+    }
+    const value = words[++i]
+    if (value === undefined || value.startsWith('-')) return undefined
+    flags.push(word, value)
+  }
+  return flags
+}
+
+/** The words that start a runner's binary: `npx`, `pnpm exec`, `yarn exec`, `pnpm` or `yarn`, or nothing. */
+function withoutLauncher(words: string[]): string[] {
+  const [first, second] = words
+  if (first === 'npx') return words.slice(1)
+  if ((first === 'pnpm' || first === 'yarn') && second === 'exec') return words.slice(2)
+  if (first === 'pnpm' || first === 'yarn') return words.slice(1)
+  return words
+}
+
+/** A single plain command that starts `vitest` or `jest` itself, read word by word; undefined for anything else. */
+export function runnerOf(command: string): NamedRunner | undefined {
+  const trimmed = command.trim()
+  if (trimmed === '' || SHELL_SYNTAX.test(trimmed)) return undefined
+  const [bin, ...args] = withoutLauncher(trimmed.split(/\s+/))
+  if (bin !== 'vitest' && bin !== 'jest') return undefined
+  const rest = bin === 'vitest' && args[0] === 'run' ? args.slice(1) : args
+  const flags = runnerFlags(bin, rest)
+  return flags ? { runner: bin, flags } : undefined
+}
+
+/** The script a plain `pnpm test`, `npm run test`, `yarn test` or `bun run test` names, with nothing after it. */
+export function scriptOf(command: string): string | undefined {
+  const words = command.trim().split(/\s+/)
+  const [manager, second, third] = words
+  if (manager === 'bun') return second === 'run' && words.length === 3 ? third : undefined
+  if (manager !== 'pnpm' && manager !== 'npm' && manager !== 'yarn') return undefined
+  if (second === 'run') return words.length === 3 ? third : undefined
+  if (words.length !== 2 || second === undefined) return undefined
+  if (manager === 'npm') return second === 'test' || second === 't' ? 'test' : undefined
+  return second
+}
+
+/** The runner a check starts, directly or through a script of the root `package.json`. */
+export function checkRunner(
+  check: CheckSpec,
+  scripts: Record<string, string>,
+): NamedRunner | undefined {
+  const direct = runnerOf(check.command)
+  if (direct) return direct
+  const script = scriptOf(check.command)
+  const body = script === undefined ? undefined : scripts[script]
+  return typeof body === 'string' ? runnerOf(body) : undefined
+}
+
+/**
+ * How the changed test files can be run alone (#721): when exactly one of the checks but the install starts a
+ * runner the factory knows (`checkRunner`), that runner with its flags. None when no check does, or more than one
+ * does, so the proof runs the checks and nothing is called `proven` or `unproven` on a guess.
+ */
+export function namedRunner(
+  checks: CheckSpec[],
+  scripts: Record<string, string>,
+): NamedRunner | undefined {
+  const found = checks
+    .filter((check) => check.name !== 'install')
+    .map((check) => checkRunner(check, scripts))
+    .filter((runner) => runner !== undefined)
+  return found.length === 1 ? found[0] : undefined
+}
+
+/**
+ * The command that runs the named files in the checkout of the base: the repository's binary, its flags and a JSON
+ * report, with the files handed over by `xargs` from the NUL-separated list, so no path reaches a shell.
+ */
+export function namedCommand(named: NamedRunner): string {
+  const tail =
+    named.runner === 'vitest'
+      ? ['run', ...named.flags, '--reporter=json', `--outputFile=${PROOF_REPORT}`]
+      : [...named.flags, '--ci', '--json', `--outputFile=${PROOF_REPORT}`, '--runTestsByPath']
+  return `rm -f ${PROOF_REPORT} && xargs -0 ./node_modules/.bin/${named.runner} ${tail.join(' ')} < ${PROOF_LIST}`
+}
+
+/** Installs on the base, runs the named files and reads their report. Anything that does not start is `not_run`. */
+async function runNamed(
+  backend: SandboxBackend,
+  named: NamedRunner,
+  checks: CheckSpec[],
+  files: string[],
+  timeoutMs: number,
+): Promise<Pick<TestProof, 'outcome' | 'detail'>> {
+  const installs = checks.filter((check) => check.name === 'install')
+  const installed = await runChecks(backend, PROOF_DIR, installs, timeoutMs)
+  const install = installed[installed.length - 1]
+  if (install && !install.passed) {
+    return {
+      outcome: 'not_run',
+      detail: `install failed on the base: ${install.output.slice(-300)}`,
+    }
+  }
+  const command = namedCommand(named)
+  const ran = lastOf(await runChecks(backend, PROOF_DIR, [{ name: 'named', command }], timeoutMs))
+  if (ran.timedOut) return { outcome: 'not_run', detail: `${command}: cut at its limit` }
+  const report = await backend.execute(`cat ${PROOF_REPORT}`)
+  const read = report.exitCode === 0 ? readReport(report.stdout, files) : undefined
+  return (
+    read ?? {
+      outcome: 'not_run',
+      detail: `${command}: no report of the tests (exit ${ran.exitCode}): ${ran.output.slice(-300)}`,
+    }
+  )
+}
+
+/** The last of the results `runChecks` gives for one check, the one that is read. */
+const lastOf = (results: CheckResult[]): CheckResult => results[results.length - 1]!
+
+type ReportedFile = { name?: unknown; status?: unknown; assertionResults?: unknown }
+
+/** The results of the report that are of `file` in the checkout of the base. */
+function resultsFor(reported: ReportedFile[], file: string): ReportedFile[] {
+  return reported.filter(
+    (r) =>
+      typeof r.name === 'string' && (r.name === file || r.name.endsWith(`${PROOF_DIR}/${file}`)),
+  )
+}
+
+/** The statuses of the tests of a file's results. */
+function statuses(results: ReportedFile[]): string[] {
+  return results.flatMap((r) =>
+    Array.isArray(r.assertionResults)
+      ? r.assertionResults.map((a: { status?: unknown }) => String(a?.status))
+      : [],
+  )
+}
+
+/**
+ * What the JSON report of `vitest` or `jest` (the same shape) says about the named files: one that failed on the base
+ * is `proven`; one that did not run, or ran no test, is `not_run`; every one passing is `unproven`. Undefined for a
+ * report that does not parse.
+ */
+export function readReport(
+  text: string,
+  files: string[],
+): Pick<TestProof, 'outcome' | 'detail'> | undefined {
+  let reported: ReportedFile[]
+  try {
+    const parsed = JSON.parse(text) as { testResults?: unknown }
+    if (!Array.isArray(parsed?.testResults)) return undefined
+    reported = parsed.testResults as ReportedFile[]
+  } catch {
+    return undefined
+  }
+  const each = files.map((file) => ({ file, results: resultsFor(reported, file) }))
+  const failed = each.filter(
+    ({ results }) =>
+      results.some((r) => r.status === 'failed') || statuses(results).includes('failed'),
+  )
+  if (failed.length > 0) {
+    return {
+      outcome: 'proven',
+      detail: `${failed.map((f) => f.file).join(', ')} failed on the base`,
+    }
+  }
+  const idle = each.filter(({ results }) => !statuses(results).includes('passed'))
+  if (idle.length > 0) {
+    return { outcome: 'not_run', detail: `no test ran in ${idle.map((f) => f.file).join(', ')}` }
+  }
+  return { outcome: 'unproven' }
 }
 
 const message = (error: unknown): string =>
