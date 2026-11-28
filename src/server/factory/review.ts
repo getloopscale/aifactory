@@ -5,7 +5,7 @@ import type { RiskAssessment } from '../../shared/panel'
 import type { CheckSpec } from './evidence'
 import { checksRule, forbiddenPathsRule, FORBIDDEN_PATHS, isForbiddenPath } from './harness'
 import type { RequiredByCheck } from './required-files'
-import type { Acceptance } from './change-plan'
+import { afterPublish, type Acceptance } from './change-plan'
 
 export type Severity = 'blocker' | 'major' | 'minor'
 
@@ -126,7 +126,7 @@ ${
 }${input.earlier ? earlierSection(input.earlier, input.baseSha) : ''}
 Finish with one JSON object on its own, and nothing after it:
 
-{"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","class":"a short name for the kind of defect, or omit","issue":"what is wrong and what to do"}]${input.plan !== undefined && (input.acceptance ?? []).length > 0 ? ',"acceptance":[{"id":"A1","met":true,"where":"the test or file and symbol that shows it, or what is missing"}]' : ''}}
+{"verdict":"approve"|"changes","summary":"one or two sentences","findings":[{"severity":"blocker"|"major"|"minor","file":"path or omit","class":"a short name for the kind of defect, or omit","issue":"what is wrong and what to do"}]${input.plan !== undefined && (input.acceptance ?? []).some((a) => !afterPublish(a)) ? ',"acceptance":[{"id":"A1","met":true,"where":"the test or file and symbol that shows it, or what is missing"}]' : ''}}
 
 Use "changes" when there is any blocker or major finding. Use "approve" only when you would merge it as it is; minor findings may stay in an approval.
 `
@@ -286,16 +286,32 @@ ${saidSection(builderSummary)}`
 }
 
 function acceptanceSection(acceptance: Acceptance[]): string {
-  if (acceptance.length === 0) return ''
-  const listed = acceptance
+  const held = acceptance.filter((a) => !afterPublish(a))
+  const later = acceptance.filter(afterPublish)
+  const listed = held
     .map((a) => `- ${a.id}: ${a.statement}${a.evidence ? ` (evidence: ${a.evidence})` : ''}`)
     .join('\n')
-  return `
+  const heldText =
+    held.length === 0
+      ? ''
+      : `
 The plan states what the finished work must do. Hold the work against this list and no other; do not add a requirement of your own to it:
 
 ${listed}
 
 Answer for every id: "met" is true only when the code and a test show it, and "where" names what shows it or what is missing. An id you leave out counts as not met.
+`
+  return `${heldText}${later.length === 0 ? '' : afterPublishSection(later)}`
+}
+
+/** The entries only a published commit can show: the reviewer neither answers for them nor blocks on them. */
+function afterPublishSection(later: Acceptance[]): string {
+  return `
+Only a service outside the sandbox can show these, once the work is published, so they go to the pull request to confirm after publishing:
+
+${later.map((a) => `- ${a.id}: ${a.statement}`).join('\n')}
+
+Do not answer for these ids, and do not write a finding that one of them is unverified or cannot be shown here. A defect in the code that would make one fail is still a finding.
 `
 }
 
@@ -315,17 +331,19 @@ export function acceptanceFinding(entry: Acceptance): Finding {
 /**
  * Holds a review to the plan's acceptance list: an id the answer marks as not met, or leaves out, is a major
  * finding that names it, and an approval becomes `changes`. An id counts as met only when no entry for it says
- * otherwise. A review with no verdict, or a plan with no acceptance, is returned as it is.
+ * otherwise. An entry only a published commit can show is never held (#718). A review with no verdict, or a plan
+ * with no acceptance the sandbox can show, is returned as it is.
  */
 export function withAcceptance(
   read: ReviewVerdict,
   acceptance: Acceptance[] | undefined,
   text: string,
 ): ReviewVerdict {
-  if (!acceptance || acceptance.length === 0) return read
+  const held = (acceptance ?? []).filter((a) => !afterPublish(a))
+  if (held.length === 0) return read
   if (read.verdict === 'invalid' && read.findings.length === 0) return read
   const answers = answeredAcceptance(text)
-  const unmet = acceptance.filter((a) => {
+  const unmet = held.filter((a) => {
     const given = answers.filter((x) => x.id === a.id)
     return given.length === 0 || given.some((x) => x.met !== true)
   })

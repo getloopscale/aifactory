@@ -822,6 +822,7 @@ class CaseRun {
         checksPassed: true,
         verdict: read.verdict,
         blockingGuards: blocking.map((g) => g.issue),
+        ...blockedBy(read),
       }
       reviewed = { sha, end: handedOver }
       if (
@@ -844,7 +845,10 @@ class CaseRun {
           sha = await this.applyFixes(await this.commit())
           continue
         }
-        return judged.verdict === 'invalid' ? handedOver : { ...handedOver, verdict: judged.verdict }
+        // The judgement is on the same commit, so the findings it upholds still stand against it.
+        return judged.verdict === 'invalid'
+          ? handedOver
+          : { ...handedOver, verdict: judged.verdict, ...blockedBy(judged, findings) }
       }
       sha = await this.applyFixes(await this.commit())
     }
@@ -861,7 +865,7 @@ class CaseRun {
   result(end: CaseEnd): CaseResult {
     return {
       id: this.c.id,
-      ...caseOutcome(this.withFloor(end), this.c.expectSecurity),
+      ...caseOutcome(this.withFloor(end), this.c.expectSecurity, this.c.weakness),
       costUsd: this.cost,
       costByRole: {
         builder: Math.max(0, this.cost - this.reviewerCost - this.securityCost - this.lensCost),
@@ -876,6 +880,21 @@ class CaseRun {
       reviews: this.reviews,
     }
   }
+}
+
+const blockingText = (findings: Finding[]) =>
+  findings
+    .filter((f) => f.severity !== 'minor')
+    .map((f) => (f.class ? `${f.class}: ${f.issue}` : f.issue))
+
+/**
+ * What a review that asks for changes says against its commit, for `caseOutcome` to look for the planted weakness
+ * in (#714): its blocking findings or, when it has none, its summary and the blocking findings it upholds there.
+ */
+export function blockedBy(read: ReviewVerdict, upheld: Finding[] = []): { reviewBlocked?: string[] } {
+  if (read.verdict !== 'changes') return {}
+  const own = blockingText(read.findings)
+  return { reviewBlocked: own.length > 0 ? own : [read.summary, ...blockingText(upheld)] }
 }
 
 const names = (checks: CheckResult[]) => [...new Set(checks.map((c) => c.name))]
