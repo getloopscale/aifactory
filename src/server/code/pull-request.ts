@@ -27,8 +27,10 @@ export type PullRequestDeps = {
   installationToken(repository: string): Promise<{ token: string }>
   /** The branch the pull request goes into: the repository's integration branch. */
   integrationBranchOf(repository: string): Promise<string>
-  /** The workspace of the session: the live one, or one restored for the call. `release` puts it away. */
-  workspace(session: CodeSession): Promise<{ workspace: Workspace; release(): Promise<void> }>
+  /** The checkout of the session: the running one, or one restored for the call. `release` puts it away. */
+  workspace(
+    session: CodeSession,
+  ): Promise<{ workspace: Pick<Workspace, 'backend' | 'repoDir'>; release(): Promise<void> }>
   /** The session as it is now, read while the lock is held. */
   session(id: string): Promise<CodeSession | undefined>
   /** Runs `work` while no turn of the session is claimed and no other pull request is opened for it. */
