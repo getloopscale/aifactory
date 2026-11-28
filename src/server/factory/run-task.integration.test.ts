@@ -8310,6 +8310,29 @@ describe('the docs lens over approved work', () => {
     expect(rows.map((r) => r.verdict)).toEqual(['changes', 'changes'])
   })
 
+  it('runs on the lens agent the owner chose, and records its agent and model (#701)', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'trial')
+    const id = await seedTask()
+    const reviewer = reviewerSaying(verdictJson('approve'))
+    const lens = { ...reviewerSaying(MAJOR), name: 'fake-lens', model: 'lens-model' }
+    const result = await runOnly(
+      deps(withDocuments(), {
+        reviewer,
+        lens: (name) => (name === reviewer.name ? lens : undefined),
+      }),
+      id,
+    )
+    expect(result).toMatchObject({ status: 'merging' })
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(lens.prompts).toHaveLength(1)
+    const rows = await lensRows(id)
+    expect(rows.map((r) => r.reviewer)).toEqual(['lens:docs (fake-lens)'])
+    const runs = await getDb().select().from(agentRun).where(eq(agentRun.taskId, id))
+    expect(runs.filter((r) => r.role === 'lens')).toMatchObject([
+      { harness: 'fake-lens', model: 'lens-model' },
+    ])
+  })
+
   it('records an answer that does not parse and goes on to merge', async () => {
     vi.stubEnv('FACTORY_LENS_MODE', 'auto')
     const id = await seedTask()

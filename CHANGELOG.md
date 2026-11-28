@@ -108,6 +108,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A deploy and the check of an agent change are no longer refused for what the cases cost. Five cases of five passed and the deploy stopped because the builder ran on a dearer model than the one the baseline was recorded with. The cost against the baseline is now a note the check prints (`costNotes`), and only the pass rate, the regressions and the cases the environment failed refuse a run
 - A conversation opens at its end after a refresh, in the chat, the guide and a task. While the page loaded, the box grew and was moved to the end in steps, and a scroll event of one of those steps was read as the owner scrolling away, so the conversation sometimes stayed in the middle. Only the owner moving up stops it from following now.
 - The conversation of a task stays at its end: it opens there, goes there when the owner sends a message or picks another agent's tab, and follows an answer that grows. It followed only a new row, so a sent message could land out of sight. Scrolling up to read still stops it.
 - What the owner asks a stopped agent shows in the builder's tab, where the answer comes from. After a review it showed under the reviewer, so the box of the builder's tab seemed to send nothing.

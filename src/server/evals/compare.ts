@@ -59,8 +59,9 @@ export type Summary = {
 /**
  * How much worse a run may be than the baseline before it is refused (ADR 0008). A pass rate may fall by
  * one case in five, since a model answers differently from one run to the next; two cases in five is a
- * change. The mean cost may double: the owner prefers a factory that costs more to one that is slower, so only
- * a cost out of control refuses a run.
+ * change. Cost never refuses a run: work that passes is ready whatever it cost, and each model has a price of
+ * its own, so a run on another model than the baseline's costs another amount by the owner's choice. A cost
+ * past `costRise` times the baseline's is a note on the comparison (`costNotes`), for a person to read.
  *
  * Two more rules, for a suite large enough to tell a change from chance. Cases that got worse are weighed
  * against cases that got better, and a run is refused when that many regressions would come by chance less
@@ -73,7 +74,7 @@ export const THRESHOLDS = { passRateDrop: 0.2, costRise: 1, unmeasured: 0.2, pVa
 const mean = (values: number[]) =>
   values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length
 
-/** The fewest cases that ran to a verdict in both runs that the cost gate will judge. */
+/** The fewest cases that ran to a verdict in both runs for the cost to be compared at all. */
 export const MIN_COST_CASES = 3
 
 const median = (values: number[]) => {
@@ -96,6 +97,8 @@ export function summarize(results: CaseResult[]): Summary {
 export type Comparison = {
   ok: boolean
   reasons: string[]
+  /** What the cost did against the baseline. It informs and never refuses: `ok` does not read it. */
+  costNotes: string[]
   /** Cases that passed in the baseline and failed now. */
   regressions: string[]
   /** Cases that failed in the baseline and pass now. */
@@ -144,6 +147,31 @@ export function regressionPValue(regressions: number, improvements: number): num
   return tail / 2 ** n
 }
 
+/** What to tell a person about the cost of the cases that ran to a verdict in both runs. */
+function costNotes(
+  costed: CaseResult[],
+  earlier: Map<string, CaseResult>,
+  measured: number,
+  means: { now: Summary; before: Summary },
+  costRise: number,
+): string[] {
+  if (measured === 0) return []
+  if (costed.length === 0) return ['no case ran to a verdict in both runs, so the cost was not compared']
+  if (costed.length < MIN_COST_CASES) {
+    return [
+      `only ${costed.length} cases ran to a verdict in both runs, and the cost is compared over ${MIN_COST_CASES} or more`,
+    ]
+  }
+  const priced = costed.filter((r) => earlier.get(r.id)!.costUsd > 0)
+  if (priced.length === 0) return []
+  // The median of the paired excess over the line: one case's variance cannot carry it (#465).
+  const excess = median(priced.map((r) => r.costUsd - earlier.get(r.id)!.costUsd * (1 + costRise)))
+  if (excess <= EPSILON) return []
+  return [
+    `the median case cost rose past ${1 + costRise}x its baseline (mean per case from ${usd(means.before.meanCostUsd)} to ${usd(means.now.meanCostUsd)}, ${priced.length} cases that ran to a verdict in both runs)`,
+  ]
+}
+
 /** Compares the cases a run shares with the baseline; cases only one of them has are left out. */
 export function compareWithBaseline(
   run: CaseResult[],
@@ -167,7 +195,7 @@ export function compareWithBaseline(
   before.meanCostUsd = mean(costed.map((r) => earlier.get(r.id)!.costUsd))
   const counts = { regressions, improvements, unmeasured, pValue, now, before }
   if (shared.length === 0) {
-    return { ok: false, reasons: ['no case of this run is in the baseline'], ...counts }
+    return { ok: false, reasons: ['no case of this run is in the baseline'], costNotes: [], ...counts }
   }
   const reasons: string[] = []
   if (unmeasured.length / shared.length > thresholds.unmeasured + EPSILON) {
@@ -183,25 +211,12 @@ export function compareWithBaseline(
   if (before.passRate - now.passRate > thresholds.passRateDrop + EPSILON) {
     reasons.push(`the pass rate fell from ${percent(before.passRate)} to ${percent(now.passRate)}`)
   }
-  const priced = costed.filter((r) => earlier.get(r.id)!.costUsd > 0)
-  if (costed.length === 0 && measured.length > 0) {
-    reasons.push('no case ran to a verdict in both runs, so the cost could not be compared')
-  } else if (costed.length < MIN_COST_CASES && measured.length > 0) {
-    reasons.push(
-      `only ${costed.length} cases ran to a verdict in both runs, and the cost gate needs ${MIN_COST_CASES}`,
-    )
-  } else if (priced.length > 0) {
-    // The median of the paired excess over the line: one case's variance cannot carry it (#465).
-    const excess = median(
-      priced.map((r) => r.costUsd - earlier.get(r.id)!.costUsd * (1 + thresholds.costRise)),
-    )
-    if (excess > EPSILON) {
-      reasons.push(
-        `the median case cost rose past ${1 + thresholds.costRise}x its baseline (mean per case from ${usd(before.meanCostUsd)} to ${usd(now.meanCostUsd)}, ${priced.length} cases that ran to a verdict in both runs)`,
-      )
-    }
+  return {
+    ok: reasons.length === 0,
+    reasons,
+    costNotes: costNotes(costed, earlier, measured.length, { now, before }, thresholds.costRise),
+    ...counts,
   }
-  return { ok: reasons.length === 0, reasons, ...counts }
 }
 
 /** What a case's last attempt came to, or what stopped it before there was one. */

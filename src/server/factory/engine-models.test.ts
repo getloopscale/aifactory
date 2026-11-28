@@ -7,8 +7,10 @@ import {
   securityEffort,
   assertSafeName,
   codexModels,
+  EFFORT_ENV,
   engineModels,
   isSafeName,
+  MODEL_ENV,
   optionsFor,
   tagged,
   untag,
@@ -173,6 +175,35 @@ describe('what a role tells the agent it ends up running', () => {
     expect(
       optionsFor({ ...own, FACTORY_MODEL_PLANNER: 'claude-code:opus' }, 'planner', 'claude-code'),
     ).toEqual({ model: 'opus' })
+  })
+
+  it("makes the lens use the reviewer's model and effort, then the builder's, until given its own (#701)", () => {
+    const builder = {
+      FACTORY_MODEL_BUILDER: 'codex:gpt-6.1-sol',
+      FACTORY_EFFORT_BUILDER: 'codex:high',
+    }
+    expect(optionsFor(builder, 'lens', 'codex')).toEqual({ model: 'gpt-6.1-sol', effort: 'high' })
+    const reviewer = {
+      ...builder,
+      FACTORY_MODEL_REVIEWER: 'codex:gpt-6-luna',
+      FACTORY_EFFORT_REVIEWER: 'codex:low',
+    }
+    expect(optionsFor(reviewer, 'lens', 'codex')).toEqual({ model: 'gpt-6-luna', effort: 'low' })
+    const own = { ...reviewer, FACTORY_MODEL_LENS: 'codex:gpt-6.1-terra' }
+    expect(optionsFor(own, 'lens', 'codex')).toEqual({ model: 'gpt-6.1-terra', effort: 'low' })
+    expect(
+      optionsFor(
+        {
+          ...own,
+          FACTORY_MODEL_LENS: 'claude-code:sonnet',
+          FACTORY_EFFORT_LENS: 'claude-code:medium',
+        },
+        'lens',
+        'claude-code',
+      ),
+    ).toEqual({ model: 'sonnet', effort: 'medium' })
+    expect(MODEL_ENV.lens).toBe('FACTORY_MODEL_LENS')
+    expect(EFFORT_ENV.lens).toBe('FACTORY_EFFORT_LENS')
   })
 
   it('never hands on a name that is not a plain one', () => {

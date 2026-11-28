@@ -90,7 +90,7 @@ function engineValue(env: NodeJS.ProcessEnv, role: AgentRole, engine: string): s
 /** The agents that build, review and plan. They run in a sandbox the factory makes for each run. */
 function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
   const builder = env.FACTORY_HARNESS || DEFAULT_HARNESS
-  const planner = effectiveOf(env).planner
+  const { planner, lens: lensAgent } = effectiveOf(env)
   const choose =
     'Aqui mesmo, na página Agentes, vale para as próximas execuções sem reiniciar. A configuração de um repositório ou a label harness:<nome> numa issue mudam para uma só.'
   // The prompts as an agent gets them once a knowledge base is set; without one the part about it is left out.
@@ -179,26 +179,13 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
         KNOWLEDGE_TOOL,
       ],
       shared: [],
-      source: ['src/server/factory/review.ts', 'src/server/factory/lens-review.ts'],
+      source: ['src/server/factory/review.ts'],
       prompts: [
         template(
           'review',
           'Instruções da revisão',
           'Toda vez que o revisor entra, com o diff entre o commit base e o commit do construtor.',
           reviewPrompt({ ...issue, baseSha: '‹commit base›' }),
-        ),
-        ...LENSES.map((lens) =>
-          template(
-            `lens-${lens.name}`,
-            `Instruções da lente ${lens.name}`,
-            'Depois da aprovação, numa sessão nova e só de leitura, com o diff e os caminhos dos documentos.',
-            lens.prompt({
-              ...issue,
-              baseSha: '‹commit base›',
-              diff: '‹diff›',
-              documents: ['‹documentos›'],
-            }),
-          ),
         ),
       ],
     },
@@ -264,6 +251,44 @@ function factoryAgents(env: NodeJS.ProcessEnv): AgentEntry[] {
           'Instruções da revisão de segurança',
           'Toda vez que a revisão de segurança entra, com o diff entre o commit base e o commit aprovado.',
           securityPrompt({ ...issue, baseSha: '‹commit base›' }),
+        ),
+      ],
+    },
+    {
+      id: 'lens',
+      group: 'factory',
+      name: 'Lente',
+      role: 'Depois da aprovação e da revisão de segurança, lê a mudança por um ângulo só (hoje, os documentos: uma frase que a mudança torna falsa, ou algo novo que o índice de um documento deveria listar). Não edita nada.',
+      runsIn: 'sandbox',
+      engine: {
+        value: `${engineValue(env, 'lens', lensAgent)}${env.FACTORY_LENS ? '' : ' (o mesmo agente do revisor, numa sessão nova)'}`,
+        change:
+          'Aqui mesmo, na página Agentes, ou FACTORY_LENS, FACTORY_MODEL_LENS e FACTORY_EFFORT_LENS. Sem escolha, usa o agente, o modelo e o esforço do revisor.',
+      },
+      when: 'Depois de cada aprovação e da revisão de segurança, antes do merge, quando o repositório tem documentos. Em FACTORY_LENS_MODE=auto um achado que bloqueia volta ao construtor uma vez; o resto vai para o corpo do pull request.',
+      tools: [
+        {
+          ...SANDBOX_TOOL,
+          description:
+            'Pode ler o código e os documentos. O prompt proíbe editar; o que ela escrever é descartado.',
+        },
+        KNOWLEDGE_TOOL,
+      ],
+      shared: [],
+      source: ['src/server/factory/lens-review.ts'],
+      prompts: [
+        ...LENSES.map((lens) =>
+          template(
+            `lens-${lens.name}`,
+            `Instruções da lente ${lens.name}`,
+            'Depois da aprovação, numa sessão nova e só de leitura, com o diff e os caminhos dos documentos.',
+            lens.prompt({
+              ...issue,
+              baseSha: '‹commit base›',
+              diff: '‹diff›',
+              documents: ['‹documentos›'],
+            }),
+          ),
         ),
       ],
     },

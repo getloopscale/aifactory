@@ -36,6 +36,7 @@ const ROLES = [
   'reviewer',
   'merger',
   'security',
+  'lens',
 ] as const satisfies readonly AgentRole[]
 const roleOf = (id: string): AgentRole | undefined => ROLES.find((r) => r === id)
 

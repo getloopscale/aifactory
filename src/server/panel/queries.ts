@@ -414,7 +414,7 @@ export async function roleModels(db: Database): Promise<RoleModels> {
     .from(agentRun)
     .where(and(NAMED_MODEL, isNotNull(agentRun.taskId)))
     .orderBy(agentRun.role, agentRun.harness, desc(agentRun.at), desc(agentRun.id))
-  // A pass may have a role the owner chooses no agent for (a review lens): it has no row on the crew.
+  // A pass may have a role the owner chooses no agent for (a code session): it has no row on the crew.
   const models: Partial<Record<string, Record<string, string>>> = {}
   for (const row of latest)
     if (row.model !== null) (models[row.role] ??= {})[row.harness] = row.model
