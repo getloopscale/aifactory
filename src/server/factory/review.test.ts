@@ -985,4 +985,61 @@ describe('acceptance in the review', () => {
     const text = '{"verdict":"approve","summary":"s","findings":[]}'
     expect(withAcceptance(parseVerdict(text), undefined, text).verdict).toBe('approve')
   })
+  describe('an entry only a published commit can show (#718)', () => {
+    const later = {
+      id: 'A3',
+      statement: 'the quality gate no longer fails',
+      evidence: 'SonarCloud',
+      where: 'after_publish' as const,
+    }
+    const mixed = [...acceptance, later]
+
+    it('tells the reviewer not to answer or block on it', () => {
+      const prompt = reviewPrompt({ ...base, plan: '**Files**', acceptance: mixed })
+      expect(prompt).toContain('- A3: the quality gate no longer fails')
+      expect(prompt).toContain('Do not answer for these ids')
+      expect(prompt).not.toContain('- A3: the quality gate no longer fails (evidence')
+      expect(prompt).toContain('"acceptance":[')
+    })
+
+    it('asks no acceptance answer when every entry is for after publishing', () => {
+      const prompt = reviewPrompt({ ...base, plan: '**Files**', acceptance: [later] })
+      expect(prompt).toContain('Do not answer for these ids')
+      expect(prompt).not.toContain('"acceptance":[')
+      expect(prompt).not.toContain('An id you leave out counts as not met')
+    })
+
+    it('never blocks an approval, left out, unmet or met', () => {
+      for (const entries of [
+        [
+          { id: 'A1', met: true },
+          { id: 'A2', met: true },
+        ],
+        [
+          { id: 'A1', met: true },
+          { id: 'A2', met: true },
+          { id: 'A3', met: false },
+        ],
+        [
+          { id: 'A1', met: true },
+          { id: 'A2', met: true },
+          { id: 'A3', met: true },
+        ],
+      ]) {
+        const text = answer(entries)
+        const read = withAcceptance(parseVerdict(text), mixed, text)
+        expect(read.verdict).toBe('approve')
+        expect(read.findings).toEqual([])
+      }
+      const text = answer([])
+      expect(withAcceptance(parseVerdict(text), [later], text).verdict).toBe('approve')
+    })
+
+    it('still holds the sandbox entries beside it', () => {
+      const text = answer([{ id: 'A1', met: true }])
+      const read = withAcceptance(parseVerdict(text), mixed, text)
+      expect(read.verdict).toBe('changes')
+      expect(read.findings.map((f) => f.issue)).toEqual([expect.stringContaining('A2')])
+    })
+  })
 })

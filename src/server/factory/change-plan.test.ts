@@ -307,3 +307,51 @@ describe('acceptance', () => {
     expect(renderChangePlan({ ...plan, acceptance: undefined })).not.toContain('Acceptance')
   })
 })
+
+describe('acceptance only a published commit can show (#718)', () => {
+  const later = {
+    id: 'A2',
+    statement: 'the quality gate no longer fails',
+    evidence: 'SonarCloud',
+    where: 'after_publish' as const,
+  }
+
+  it('reads "after_publish" and treats any other or missing value as the sandbox', () => {
+    const read = parseChangePlan(
+      JSON.stringify({
+        files: [],
+        acceptance: [
+          { id: 'A1', statement: 's', evidence: 'e', where: 'sandbox' },
+          { id: 'A2', statement: 's', evidence: 'e', where: 'after_publish' },
+          { id: 'A3', statement: 's', evidence: 'e', where: 'later' },
+          { id: 'A4', statement: 's', evidence: 'e' },
+        ],
+      }),
+    )
+    expect(read?.acceptance?.map((a) => a.where)).toEqual([
+      undefined,
+      'after_publish',
+      undefined,
+      undefined,
+    ])
+  })
+
+  it('is no plan for a new planning turn when no entry is for the sandbox', () => {
+    expect(parseNewChangePlan(JSON.stringify({ ...plan, acceptance: [later] }))).toBeUndefined()
+    const mixed = { ...plan, acceptance: [...plan.acceptance!, later] }
+    expect(parseNewChangePlan(JSON.stringify(mixed))).toEqual(mixed)
+  })
+
+  it('is asked of the planner', () => {
+    expect(changePlanPrompt({} as never)).toContain('"after_publish"')
+    expect(planAgainPrompt()).toContain('"sandbox"')
+  })
+
+  it('is rendered as something to confirm after publishing, not as acceptance', () => {
+    const text = renderChangePlan({ ...plan, acceptance: [...plan.acceptance!, later] })
+    expect(text).toContain('**To confirm after publishing**')
+    expect(text).toContain('- [ ] **A2**: the quality gate no longer fails')
+    expect(text).not.toContain('**A2**: the quality gate no longer fails (evidence')
+    expect(renderChangePlan(plan)).not.toContain('after publishing')
+  })
+})
