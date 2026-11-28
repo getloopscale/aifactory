@@ -1011,6 +1011,11 @@ export const en = {
       back_merge: 'A back-merge conflicts and nothing will merge it',
     },
     openOnGithub: 'Open it on GitHub',
+    assistProvider: {
+      title: "The assistants' model provider is refusing calls",
+      detail: (provider: string) =>
+        `${provider} refuses the panel's assistants because the account behind its key has no credit left. Add credit to that account, or set FACTORY_ASSIST_MODEL to another provider.`,
+    },
     actions: {
       run: {
         label: 'Start again',
@@ -1532,6 +1537,8 @@ export const en = {
   assistProblems: {
     signIn: 'Sign in to the panel again, then retry.',
     noCredit: 'The assistant has no model credit: set ANTHROPIC_API_KEY on the server (see Setup).',
+    creditRefused: (provider: string) =>
+      `The assistant's model provider (${provider}) refused the call: the account behind its key has no credit left. Add credit to that account, or set FACTORY_ASSIST_MODEL to another provider.`,
     couldNot: (message: string) => `The assistant could not answer: ${message}`,
   },
   agentGroups: {
@@ -1807,6 +1814,10 @@ export const en = {
         cancel: 'Cancel',
         sending: 'Sending…',
       },
+      waitingWorkspace:
+        'Waiting for a workspace: every one is in use. Ending another session, or leaving one idle until its workspace closes, frees one.',
+      missingBranch: (branch: string, repository: string) =>
+        `The branch ${branch} does not exist in ${repository}. Start a session on a branch the repository has.`,
       stateLine: {
         idle: 'Ready for your next message.',
         queued: 'Queued: the agent starts soon.',
