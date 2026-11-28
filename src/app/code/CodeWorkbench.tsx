@@ -471,11 +471,21 @@ function useCodeDiff(id: string, turn: number) {
   return state.id === id ? state : { id }
 }
 
-/** The files of a session's workspace, read again when a turn ends and when the id changes. */
-function useCodeFiles(id: string, turn: number): { files?: string[]; error?: string } {
+/**
+ * The files of a session's workspace, read again when a turn ends and when the id changes. They are read only once
+ * the session's state is known and while it is not `ended`: an ended session has no workspace, and its route
+ * answers 409.
+ */
+function useCodeFiles(
+  id: string,
+  turn: number,
+  sessionState: SessionView['state'] | undefined,
+): { files?: string[]; error?: string } {
   const { t } = useCopy()
   const [state, setState] = useState<{ id: string; files?: string[]; error?: unknown }>({ id })
+  const readable = sessionState !== undefined && sessionState !== 'ended'
   useEffect(() => {
+    if (!readable) return
     let alive = true
     get<CodeFilesResponse>(`/api/panel/code/sessions/${encodeURIComponent(id)}/files`).then(
       (data) => alive && setState({ id, files: data.files }),
@@ -485,8 +495,8 @@ function useCodeFiles(id: string, turn: number): { files?: string[]; error?: str
     return () => {
       alive = false
     }
-  }, [id, turn])
-  if (state.id !== id) return {}
+  }, [id, turn, readable])
+  if (!readable || state.id !== id) return {}
   return {
     files: state.files,
     error: state.error === undefined ? undefined : readError(state.error, t),
@@ -591,7 +601,9 @@ function SidePanel({
         aria-label={tab === 'files' ? t.code.files.tab : t.code.changes.title}
         className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]"
       >
-        {tab === 'files' ? (
+        {tab === 'files' && ended ? (
+          <Quiet>{t.code.files.ended}</Quiet>
+        ) : tab === 'files' ? (
           <CodeFiles
             sessionId={id}
             files={files}
@@ -656,7 +668,7 @@ function OpenSession({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>('changes')
   const [selected, setSelected] = useState<string>()
   const turn = lastStateSeq(events)
-  const { files, error: filesError } = useCodeFiles(id, turn)
+  const { files, error: filesError } = useCodeFiles(id, turn, read?.state)
   const { data: diff, error: diffError } = useCodeDiff(id, turn)
   const changed = useMemo(() => diff?.diff.files.map((f) => f.path), [diff])
   const [title, setTitle] = useState<string>()
@@ -1088,7 +1100,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   const { session, onModel } = useSavedModel(id, read)
   const turn = lastStateSeq(events)
   const cost = sessionCost(events)
-  const { files, error: filesError } = useCodeFiles(id, turn)
+  const { files, error: filesError } = useCodeFiles(id, turn, read?.state)
   const { data: diff, error: diffError } = useCodeDiff(id, turn)
   const [view, setView] = useState<View | undefined>('changes')
   const [tabs, setTabs] = useState<EditorTab[]>([])
@@ -1141,14 +1153,18 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
       <>
         <h2 className={`px-3 pb-1 pt-3 ${SIDE_TITLE}`}>{t.code.files.tab}</h2>
         <div className="min-h-0 flex-1 overflow-y-auto [scrollbar-width:thin]">
-          <CodeFiles
-            sessionId={id}
-            files={files}
-            error={filesError}
-            selected={shown?.kind === 'file' ? shown.path : undefined}
-            onSelect={(path) => open({ kind: 'file', path })}
-            bare
-          />
+          {session?.state === 'ended' ? (
+            <Quiet>{t.code.files.ended}</Quiet>
+          ) : (
+            <CodeFiles
+              sessionId={id}
+              files={files}
+              error={filesError}
+              selected={shown?.kind === 'file' ? shown.path : undefined}
+              onSelect={(path) => open({ kind: 'file', path })}
+              bare
+            />
+          )}
         </div>
       </>
     ) : view === 'changes' ? (
