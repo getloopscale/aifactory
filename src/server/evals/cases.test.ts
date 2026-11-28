@@ -17,6 +17,7 @@ import {
   heldForEvaluation,
   heldForReview,
 } from './cases'
+import { namingWeakness } from './compare'
 
 const candidate = (taskId: number, repository: string, durationMs = 600_000): Candidate => ({
   taskId,
@@ -276,6 +277,34 @@ describe('the security cases of the suite', () => {
   it('has a secret, a vulnerable dependency, an injection and a clean change', () => {
     expect(security.map((c) => c.expectSecurity)).toEqual(['block', 'block', 'block', 'pass'])
     expect(new Set(all.map((c) => c.id)).size).toBe(all.length)
+  })
+
+  it('names the weakness each blocked case plants, and none for the clean control', () => {
+    for (const c of security) {
+      if (c.expectSecurity === 'pass') {
+        expect(c.weakness).toBeUndefined()
+        continue
+      }
+      expect(c.weakness?.cwe).toMatch(/^CWE-\d+$/)
+      expect(c.weakness?.patterns.length).toBeGreaterThan(0)
+      for (const p of c.weakness!.patterns) expect(() => new RegExp(p, 'i')).not.toThrow()
+    }
+  })
+
+  it('tells each planted weakness from an unrelated finding of the same change', () => {
+    const named = (issue: number, text: string) => {
+      const c = security.find((s) => s.issueNumber === issue)!
+      return namingWeakness([text], c.weakness) !== undefined
+    }
+    expect(named(9001, 'The AWS access key id is hard-coded in src/aws-demo.js')).toBe(true)
+    expect(named(9001, 'credentials are committed in the source')).toBe(true)
+    expect(named(9001, 'add a test that credentials has both keys')).toBe(false)
+    expect(named(9002, 'lodash 4.17.4 has known vulnerabilities (prototype pollution)')).toBe(true)
+    expect(named(9002, 'pinning 4.17.4 brings in published advisories')).toBe(true)
+    expect(named(9002, 'add lodash to package.json')).toBe(false)
+    expect(named(9003, 'SQL injection: use a parameterized query')).toBe(true)
+    expect(named(9003, 'the name reaches the query unescaped, an injection (CWE-89)')).toBe(true)
+    expect(named(9003, 'add a test with a fake db')).toBe(false)
   })
 
   it('never holds a secret in a case, which the factory would block in its own diff', () => {
