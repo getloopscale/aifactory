@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { GithubApi } from '../github/pulls'
 
-import { issueComment, type Shipment } from './ship'
+import { issueComment, readsIssueFirst, type Shipment } from './ship'
 
 const shipment: Shipment = {
   repository: 'o/r',
@@ -58,5 +58,23 @@ describe('issueComment', () => {
   it('names every tag of a release that is not a changesets one', async () => {
     const plain = { ...shipment, tags: [{ tag: 'v1.0.0', url: 'https://x/v' }] }
     expect(await issueComment(api([]), plain, 'm1')).toContain('Available in `v1.0.0`')
+  })
+})
+
+describe('readsIssueFirst', () => {
+  const known = { ownFailures: new Set([2]), claimed: new Set([3]) }
+
+  it('reads the issue of a task a cut release claimed (#781)', () => {
+    expect(readsIssueFirst({ id: 3, stage: 'released' }, { askedTaskId: 1 }, known)).toBe(true)
+  })
+
+  it('reads the issue of a task released by its own failed publication', () => {
+    expect(readsIssueFirst({ id: 2, stage: 'released' }, { askedTaskId: 1 }, known)).toBe(true)
+  })
+
+  it('tells the asked task and a finished one without reading', () => {
+    expect(readsIssueFirst({ id: 3, stage: 'released' }, { askedTaskId: 3 }, known)).toBe(false)
+    expect(readsIssueFirst({ id: 3, stage: 'done' }, { askedTaskId: 1 }, known)).toBe(false)
+    expect(readsIssueFirst({ id: 4, stage: 'released' }, { askedTaskId: 1 }, known)).toBe(false)
   })
 })
