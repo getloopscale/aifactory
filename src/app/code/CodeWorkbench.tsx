@@ -42,7 +42,7 @@ import { useWidth } from '../lib/media'
 
 import { CodeChanges, Hunks, PullRequestForm } from './CodeChanges'
 import { CodeConversation } from './CodeConversation'
-import { CodeFiles, FileViewer } from './CodeFiles'
+import { CodeFiles, FileViewer, readError } from './CodeFiles'
 
 /** A session as the API sends it: the dates are text. */
 type SessionView = Omit<CodeSession, 'createdAt' | 'updatedAt'> & {
@@ -380,25 +380,25 @@ function useCodeDiff(id: string, turn: number) {
 }
 
 /** The files of a session's workspace, read again when a turn ends and when the id changes. */
-function useCodeFiles(id: string, turn: number) {
-  const [state, setState] = useState<{ id: string; files?: string[]; error?: string }>({ id })
+function useCodeFiles(id: string, turn: number): { files?: string[]; error?: string } {
+  const { t } = useCopy()
+  const [state, setState] = useState<{ id: string; files?: string[]; error?: unknown }>({ id })
   useEffect(() => {
     let alive = true
     get<CodeFilesResponse>(`/api/panel/code/sessions/${encodeURIComponent(id)}/files`).then(
       (data) => alive && setState({ id, files: data.files }),
-      (e: unknown) =>
-        alive &&
-        setState((v) => ({
-          id,
-          files: v.id === id ? v.files : undefined,
-          error: e instanceof Error ? e.message : String(e),
-        })),
+      (error: unknown) =>
+        alive && setState((v) => ({ id, files: v.id === id ? v.files : undefined, error })),
     )
     return () => {
       alive = false
     }
   }, [id, turn])
-  return state.id === id ? state : { id }
+  if (state.id !== id) return {}
+  return {
+    files: state.files,
+    error: state.error === undefined ? undefined : readError(state.error, t),
+  }
 }
 
 /** Ctrl+Shift+D shows or hides the changes and Ctrl+Shift+F shows the files, from a text box too. */

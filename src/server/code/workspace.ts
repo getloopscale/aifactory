@@ -195,7 +195,8 @@ async function checkout(backend: SandboxBackend, session: Opening): Promise<stri
   return repoDir
 }
 
-async function existingCheckout(backend: SandboxBackend): Promise<string> {
+/** The top of the checkout a sandbox already holds, read with git; it writes nothing. */
+export async function existingCheckout(backend: SandboxBackend): Promise<string> {
   const out = await run(backend, `git -C ${shellEscapePosix(INSTANCE)} rev-parse --show-toplevel`)
   return out.trim()
 }

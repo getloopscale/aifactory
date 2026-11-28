@@ -2071,6 +2071,8 @@ export const ptBR: Copy = {
       truncated: (n: number) => `Mostrando os primeiros ${n} bytes: o arquivo é maior.`,
       mentions: 'Arquivos para mencionar',
       openFile: (path: string) => `Abrir ${path}`,
+      unavailable:
+        'O workspace não está rodando, então os arquivos dele não podem ser lidos agora.',
     },
     conversation: {
       label: 'Conversa',

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { CodeFileResponse } from '../../../../../../shared/code'
 import { BadPath, NoSuchFile, readWorkspaceFile, validatePath } from '../../../../../code/files'
 import { getSession } from '../../../../../code/store'
-import { liveWorkspace } from '../../../../../code/workspace'
+import { readableWorkspace } from '../../../../../code/workspace-read'
 import { errorMessage } from '../../../../../factory/error-message'
 import { ownerOnly } from '../../../../../panel/policy'
 
@@ -24,14 +24,13 @@ export const GET = route()
     }
     const session = await getSession(params.id)
     if (!session) return refuse('not_found', 'No such session.', 404)
-    const live = liveWorkspace(session.id)
+    const live = await readableWorkspace(session)
     if (!live) {
       const message = 'The workspace is not running, so its files cannot be read now.'
       return refuse('workspace_unavailable', message, 409)
     }
     try {
-      const { workspace } = live
-      return await readWorkspaceFile(workspace.backend, workspace.repoDir, query.path)
+      return await readWorkspaceFile(live.backend, live.repoDir, query.path)
     } catch (error) {
       if (error instanceof BadPath) return refuse('bad_path', error.message, 400)
       if (error instanceof NoSuchFile) return refuse('not_found', error.message, 404)
