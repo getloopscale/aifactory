@@ -629,6 +629,8 @@ describe('baselineResultsFor', () => {
     expect(baselineResultsFor(join(dir, 'baseline.json'))).toEqual([])
     writeFileSync(join(dir, 'baseline.json'), JSON.stringify(baseline))
     expect(baselineResultsFor(join(dir, 'baseline.json')).map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
+    // Recorded before a result kept its timing (#711): it still loads, without one.
+    expect(baselineResultsFor(join(dir, 'baseline.json')).every((r) => r.timing === undefined)).toBe(true)
   })
 })
 

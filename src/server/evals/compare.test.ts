@@ -62,6 +62,17 @@ describe('compareWithBaseline', () => {
     result('e', false),
   ])
 
+  it('reads no timing: a run whose steps differ from a baseline that has none gets the same verdict (#711)', () => {
+    const timed = (r: CaseResult): CaseResult => ({
+      ...r,
+      timing: { steps: [{ step: 'checks', ms: r.durationMs * 3 }], unaccountedMs: 7 },
+    })
+    const run = [...before.results.slice(0, 2), result('c', false), ...before.results.slice(3)]
+
+    expect(compareWithBaseline(run.map(timed), before)).toEqual(compareWithBaseline(run, before))
+    expect(compareWithBaseline(before.results.map(timed), before).ok).toBe(true)
+  })
+
   it('accepts a run that passes the same cases at the same cost', () => {
     const run = before.results.map((r) => ({ ...r }))
 
