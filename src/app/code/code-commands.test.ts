@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { en } from '../lib/copy/en'
 import { ptBR } from '../lib/copy/pt-BR'
 
-import { CODE_COMMANDS, commandRefusal, matchCommands } from './code-commands'
+import { CODE_COMMANDS, commandRefusal, commandWithArguments, matchCommands } from './code-commands'
 
 describe('CODE_COMMANDS', () => {
   it.each([
@@ -16,6 +16,16 @@ describe('CODE_COMMANDS', () => {
 
   it('has unique names', () => {
     expect(new Set(CODE_COMMANDS.map((c) => c.name)).size).toBe(CODE_COMMANDS.length)
+  })
+
+  it('names a command followed by arguments, and nothing else', () => {
+    expect(commandWithArguments('/rename Rodada 8')?.name).toBe('rename')
+    expect(commandWithArguments('  /MODEL\tsonnet ')?.name).toBe('model')
+    expect(commandWithArguments('/rename')).toBeUndefined()
+    expect(commandWithArguments('/rename   ')).toBeUndefined()
+    expect(commandWithArguments('/renamed title')).toBeUndefined()
+    expect(commandWithArguments('/tmp/file is missing')).toBeUndefined()
+    expect(commandWithArguments('rename it')).toBeUndefined()
   })
 
   it('filters by prefix', () => {

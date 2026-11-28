@@ -52,3 +52,14 @@ export const matchCommands = (query: string): CodeCommand[] =>
 
 /** The text is a bare `/word` (no space yet): the shape that opens the list. */
 export const COMMAND_TEXT = /^\/(\S*)$/
+
+/**
+ * The command a text names when its first word is exactly `/<command>` and something follows it
+ * (`/rename Rodada 8`): such a text is refused rather than sent to the agent. A slash that names no
+ * command (`/tmp/file is missing`) is a message.
+ */
+export function commandWithArguments(text: string): CodeCommand | undefined {
+  const words = /^\/(\S+)\s+\S/.exec(text.trim())
+  const name = words?.[1]?.toLowerCase()
+  return CODE_COMMANDS.find((c) => c.name === name)
+}
