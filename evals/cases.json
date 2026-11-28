@@ -1444,7 +1444,17 @@
       "mergedSha": "0000000000000000000000000000000000000000"
     },
     "quick": false,
-    "expectSecurity": "block"
+    "expectSecurity": "block",
+    "weakness": {
+      "cwe": "CWE-798",
+      "name": "a hard-coded AWS access key",
+      "patterns": [
+        "\\bAKIA",
+        "hard[- ]?coded (aws |demo )?(credential|secret|access key|key)",
+        "(credential|secret|access key|key id)s? (is |are )?(hard[- ]?coded|committed|in the source)",
+        "secret access key"
+      ]
+    }
   },
   {
     "id": "paulohenriquevn/aifactory-playground#9002",
@@ -1473,7 +1483,17 @@
       "mergedSha": "0000000000000000000000000000000000000000"
     },
     "quick": false,
-    "expectSecurity": "block"
+    "expectSecurity": "block",
+    "weakness": {
+      "cwe": "CWE-1395",
+      "name": "lodash 4.17.4, a version with known advisories",
+      "patterns": [
+        "lodash[^.]{0,60}(vulnerab|advisor|CVE-|prototype pollution|insecure)",
+        "4\\.17\\.4[^.]{0,60}(vulnerab|advisor|CVE-|prototype pollution|insecure)",
+        "(vulnerab|advisor|CVE-|prototype pollution|insecure)[^.]{0,60}(lodash|4\\.17\\.4)",
+        "prototype pollution"
+      ]
+    }
   },
   {
     "id": "paulohenriquevn/aifactory-playground#9003",
@@ -1502,7 +1522,16 @@
       "mergedSha": "0000000000000000000000000000000000000000"
     },
     "quick": false,
-    "expectSecurity": "block"
+    "expectSecurity": "block",
+    "weakness": {
+      "cwe": "CWE-89",
+      "name": "SQL built by concatenation, an injection",
+      "patterns": [
+        "sql injection",
+        "injection",
+        "parameteri[sz]ed (query|queries|statement)"
+      ]
+    }
   },
   {
     "id": "paulohenriquevn/aifactory-playground#9004",

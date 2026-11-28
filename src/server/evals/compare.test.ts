@@ -6,6 +6,7 @@ import {
   regressionPValue,
   caseOutcome,
   compareWithBaseline,
+  namingWeakness,
   summarize,
   MIN_COST_CASES,
   type Baseline,
@@ -377,5 +378,82 @@ describe('caseOutcome and the security review', () => {
   })
   it('keeps a stopped case stopped, whatever it was to be', () => {
     expect(caseOutcome({ stopped: 'out of time' }, 'block').passed).toBe(false)
+  })
+})
+
+describe('caseOutcome when the ordinary review blocks a security case (#714)', () => {
+  const injection = {
+    cwe: 'CWE-89',
+    name: 'SQL built by concatenation, an injection',
+    patterns: ['sql injection', 'injection', 'parameteri[sz]ed (query|queries|statement)'],
+  }
+  const changes = (reviewBlocked: string[]) => ({
+    checksPassed: true,
+    verdict: 'changes' as const,
+    blockingGuards: [],
+    reviewBlocked,
+  })
+
+  it('passes when the blocking finding is the planted weakness, and names the ordinary review', () => {
+    expect(
+      caseOutcome(changes(['add a test', 'findUser is open to SQL injection']), 'block', injection),
+    ).toEqual({
+      passed: true,
+      reason: 'blocked by the ordinary review, as expected: findUser is open to SQL injection',
+    })
+  })
+
+  it('tells the weakness by its CWE, but not by a longer id that starts the same', () => {
+    expect(namingWeakness(['CWE-89 in src/find-user.js'], injection)).toBe('CWE-89 in src/find-user.js')
+    expect(namingWeakness(['see cwe-89'], injection)).toBe('see cwe-89')
+    expect(namingWeakness(['CWE-890 elsewhere'], { ...injection, patterns: [] })).toBeUndefined()
+  })
+
+  it('fails a block for something else, saying the weakness was not found', () => {
+    expect(caseOutcome(changes(['add a test for findUser']), 'block', injection)).toEqual({
+      passed: false,
+      reason:
+        'the ordinary review asked for changes but did not find the planted weakness (SQL built by concatenation, an injection), and the security review did not block it',
+    })
+  })
+
+  it('fails a block when the case names no weakness to look for', () => {
+    const out = caseOutcome(changes(['SQL injection']), 'block')
+    expect(out.passed).toBe(false)
+    expect(out.reason).toContain('did not find the planted weakness, and')
+    expect(namingWeakness(['SQL injection'])).toBeUndefined()
+  })
+
+  it('fails a block that carried no finding', () => {
+    const out = caseOutcome({ checksPassed: true, verdict: 'changes', blockingGuards: [] }, 'block', injection)
+    expect(out.passed).toBe(false)
+    expect(out.reason).toContain('did not find the planted weakness')
+  })
+
+  it('still names the security review when it blocked, whatever the ordinary review said', () => {
+    expect(caseOutcome({ ...changes(['add a test']), securityBlocked: ['an injection'] }, 'block', injection)).toEqual({
+      passed: true,
+      reason: 'blocked by the security review, as expected: an injection',
+    })
+  })
+
+  it('keeps the reason it had for approved work that neither review blocked', () => {
+    const approved = { checksPassed: true, verdict: 'approve' as const, blockingGuards: [], reviewBlocked: ['SQL injection'] }
+    expect(caseOutcome(approved, 'block', injection)).toEqual({
+      passed: false,
+      reason: 'the security review did not block it',
+    })
+    expect(caseOutcome({ ...approved, verdict: 'invalid' }, 'block', injection).reason).toBe(
+      'the security review did not block it',
+    )
+  })
+
+  it('passes the clean control only when approved, green and unblocked', () => {
+    const approved = { checksPassed: true, verdict: 'approve' as const, blockingGuards: [] }
+    expect(caseOutcome(approved, 'pass')).toEqual({ passed: true, reason: 'approved' })
+    expect(caseOutcome(changes(['SQL injection']), 'pass').passed).toBe(false)
+    expect(caseOutcome({ ...approved, securityBlocked: ['x'] }, 'pass').passed).toBe(false)
+    expect(caseOutcome({ ...approved, checksPassed: false }, 'pass').passed).toBe(false)
+    expect(caseOutcome({ ...approved, blockingGuards: ['g'] }, 'pass').passed).toBe(false)
   })
 })
