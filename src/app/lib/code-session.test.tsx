@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { CodeEventWire } from '../../shared/code'
+import type { CodeEventWire, CodeSessionWire } from '../../shared/code'
 
 const listeners = new Set<(e: unknown) => void>()
 const opens = new Set<() => void>()
@@ -17,7 +17,38 @@ vi.mock('./live', () => ({
   },
 }))
 
+vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
+vi.mock('@getloopscale/loopzero-ui', () => ({
+  ChatMessageResponse: ({ text }: { text: string }) => <div>{text}</div>,
+}))
+
+import { CodeConversation } from '../code/CodeConversation'
+
 import { useCodeSession } from './code-session'
+import { en } from './copy/en'
+
+const wire = (state: CodeSessionWire['state']): CodeSessionWire => ({
+  id: 's',
+  title: 'T',
+  repository: 'acme/shop',
+  baseBranch: 'workspace',
+  workBranch: 'code/s',
+  harness: 'codex',
+  model: null,
+  mode: 'code',
+  state,
+  sandboxId: null,
+  snapshotId: null,
+  agentSessionId: null,
+  agentSessionHarness: null,
+  createdAt: '',
+  updatedAt: '',
+})
+
+function Page() {
+  const { session, events } = useCodeSession('s')
+  return session ? <CodeConversation session={session} events={events} /> : null
+}
 
 const ev = (seq: number): CodeEventWire => ({
   sessionId: 's',
@@ -174,7 +205,7 @@ describe('useCodeSession', () => {
       ['cost', '{}'],
     ]
     turn.forEach(([kind, content], i) => pushEvent({ ...ev(i + 1), kind, content }))
-    await waitFor(() => expect(reads).toHaveLength(2))
+    await waitFor(() => expect(reads).toHaveLength(3))
     state = final
     pushEvent({ ...ev(7), kind: 'state', content: marker })
     await waitFor(() => expect(result.current.session?.state).toBe(final))
@@ -238,5 +269,76 @@ describe('useCodeSession', () => {
     rerender({ id: 't' })
     await waitFor(() => expect(result.current.events).toEqual([]))
     expect(result.current.session).toBeUndefined()
+  })
+
+  it('shows a message another page sent to an idle session, and that it waits in the queue', async () => {
+    let state: CodeSessionWire['state'] = 'idle'
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/events'))
+          return new Response(JSON.stringify({ events: [], more: false }))
+        return new Response(JSON.stringify(wire(state)))
+      }),
+    )
+    render(<Page />)
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(en.code.conversation.stateLine.idle),
+    )
+    state = 'queued'
+    pushEvent({ ...ev(1), kind: 'user_message', content: 'from the phone' })
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(en.code.conversation.stateLine.queued),
+    )
+    expect(screen.getByText('from the phone')).toBeDefined()
+  })
+
+  it('keeps the running state the server reports for a message sent during a turn', async () => {
+    const reads: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/events'))
+          return new Response(JSON.stringify({ events: [], more: false }))
+        reads.push(url)
+        return new Response(JSON.stringify({ id: 's', state: 'running' }))
+      }),
+    )
+    const { result } = renderHook(() => useCodeSession('s'))
+    await waitFor(() => expect(result.current.session?.state).toBe('running'))
+    pushEvent({ ...ev(1), kind: 'user_message', content: 'and also' })
+    await waitFor(() => expect(reads).toHaveLength(2))
+    await waitFor(() => expect(result.current.events).toHaveLength(1))
+    expect(result.current.session?.state).toBe('running')
+  })
+
+  it('shows the last session read asked for when an older one answers after it', async () => {
+    let releaseOld: () => void = () => {}
+    const old = new Promise<void>((r) => (releaseOld = r))
+    let n = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/events'))
+          return new Response(JSON.stringify({ events: [], more: false }))
+        n++
+        if (n === 1) return new Response(JSON.stringify({ id: 's', state: 'idle' }))
+        if (n === 2) {
+          await old
+          return new Response(JSON.stringify({ id: 's', state: 'queued' }))
+        }
+        return new Response(JSON.stringify({ id: 's', state: 'running' }))
+      }),
+    )
+    const { result } = renderHook(() => useCodeSession('s'))
+    await waitFor(() => expect(result.current.session?.state).toBe('idle'))
+    pushEvent({ ...ev(1), kind: 'user_message' })
+    pushEvent({ ...ev(2), kind: 'state', content: 'turn:1' })
+    await waitFor(() => expect(result.current.session?.state).toBe('running'))
+    releaseOld()
+    await act(async () => {
+      await old
+    })
+    expect(result.current.session?.state).toBe('running')
   })
 })
