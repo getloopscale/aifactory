@@ -8,7 +8,10 @@ import {
   type CodeSessionWire,
   type CodeState,
 } from '../../shared/code'
+import { acceptedPlanMessage } from '../../server/agents/prompts/code-plan'
+import { CopyProvider } from '../lib/copy'
 import { en } from '../lib/copy/en'
+import { ptBR } from '../lib/copy/pt-BR'
 
 vi.mock('../lib/api', () => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
@@ -428,6 +431,63 @@ describe('a plan', () => {
       />,
     )
     expect(screen.queryByRole('button', { name: c.plan.accept })).toBeNull()
+  })
+
+  describe('once accepted', () => {
+    const plan = '## O que existe\nsrc/app.ts'
+    const accepted = [
+      ev(1, 'user_message', 'planeje'),
+      ev(2, 'plan', plan),
+      ev(3, 'state', 'plan:2:accept'),
+      ev(4, 'user_message', acceptedPlanMessage(plan)),
+      ev(5, 'error', 'boom'),
+      ev(6, 'agent_message', 'boom'),
+      ev(7, 'user_message', 'and now the tests'),
+    ]
+    const shown = () => document.body.textContent ?? ''
+
+    it('holds the plan once, the acceptance once, and none of the instruction', () => {
+      render(<CodeConversation session={session('running')} events={accepted} />)
+      expect(shown().split('src/app.ts')).toHaveLength(2)
+      expect(shown()).not.toContain('Carry it out')
+      expect(shown()).not.toContain('accepted')
+      expect(screen.getAllByText(c.plan.answered.accept)).toHaveLength(1)
+      expect(screen.getByText('and now the tests')).toBeTruthy()
+    })
+
+    it('says it in Portuguese on a page in Portuguese', () => {
+      window.localStorage.setItem('aifactory.language', 'pt-BR')
+      try {
+        render(
+          <CopyProvider>
+            <CodeConversation session={session('running')} events={accepted} />
+          </CopyProvider>,
+        )
+      } finally {
+        window.localStorage.clear()
+      }
+      expect(screen.getAllByText(ptBR.code.conversation.plan.answered.accept)).toHaveLength(1)
+      expect(shown()).not.toContain('Carry it out')
+    })
+
+    it('still starts a turn with the instruction, so its error is shown once and not repeated', () => {
+      render(<CodeConversation session={session('running')} events={accepted} />)
+      expect(screen.getAllByText('boom')).toHaveLength(1)
+    })
+
+    it('keeps the text of a revision as the owner wrote it', () => {
+      render(
+        <CodeConversation
+          session={session('queued')}
+          events={[
+            ...accepted.slice(0, 2),
+            ev(3, 'state', 'plan:2:revise'),
+            ev(4, 'user_message', 'mais curto'),
+          ]}
+        />,
+      )
+      expect(screen.getByText('mais curto')).toBeTruthy()
+    })
   })
 
   it('accepts the plan by its sequence number', async () => {
