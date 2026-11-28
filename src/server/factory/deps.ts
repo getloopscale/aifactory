@@ -7,12 +7,14 @@ import { createGithubApp } from '../github/app'
 import { botAuthor } from '../github/bot-author'
 
 import type { ReleaseMode } from './deliver'
-import { engineModels, optionsFor } from './engine-models'
+import type { CodingHarness } from './harness'
+import { engineModels, optionsFor, untag } from './engine-models'
 import { securityEfforts, securityOptions } from './security-role'
 import {
   canStart,
   DEFAULT_HARNESS,
   harnessRegistry,
+  type HarnessRegistry,
   pickHarness,
   plannerFor,
 } from './harness-registry'
@@ -52,6 +54,28 @@ export function githubAppFromEnv(env: NodeJS.ProcessEnv = process.env) {
   const created = createGithubApp({ appId, privateKey: readFileSync(keyPath, 'utf8') })
   apps.set(`${appId}:${keyPath}`, created)
   return created
+}
+
+/**
+ * The agent that runs the lenses (#701), given the reviewer's agent for the task: `FACTORY_LENS` when it names one, the
+ * reviewer's agent built again when a model or an effort was chosen for the lens on it, and nothing otherwise, so the
+ * reviewer runs them. An unknown agent is refused, as for every role.
+ */
+export function lensFor(
+  registry: HarnessRegistry,
+  env: NodeJS.ProcessEnv,
+  reviewer: string,
+): CodingHarness | undefined {
+  const name = env.FACTORY_LENS || reviewer
+  const own =
+    Boolean(env.FACTORY_LENS) ||
+    untag(env.FACTORY_MODEL_LENS, name) !== undefined ||
+    untag(env.FACTORY_EFFORT_LENS, name) !== undefined
+  if (!own) return undefined
+  const build = registry[name]
+  if (!build)
+    throw new Error(`unknown agent "${name}" (known: ${Object.keys(registry).join(', ')})`)
+  return build(optionsFor(env, 'lens', name))
 }
 
 export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
@@ -104,6 +128,7 @@ export function factoryDeps(env: NodeJS.ProcessEnv = process.env): RunTaskDeps {
     releaseMode: releaseModeFromEnv(env),
     reviewer: pickReviewer,
     merger: pickMerger,
+    lens: (reviewer) => lensFor(registry, env, reviewer),
     security: pickSecurity,
     planner: pickPlanner,
     author,

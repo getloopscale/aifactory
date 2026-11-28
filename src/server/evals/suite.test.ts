@@ -57,6 +57,21 @@ describe('agentSetup with a merger apart from the builder', () => {
   })
 })
 
+describe('agentSetup with a lens apart from the reviewer', () => {
+  it('names the lens with its own model and effort, and adds nothing when the reviewer runs it (#701)', () => {
+    const options = (_env: NodeJS.ProcessEnv, role: string) =>
+      role === 'lens' ? { model: 'gpt-6.1-terra', effort: 'low' } : {}
+    const args = [{}, 'claude-code', 'claude-code', options, undefined, undefined, undefined] as const
+
+    expect(agentSetup(...args, 'codex')).toMatchObject({
+      lens: 'codex',
+      lensModel: 'gpt-6.1-terra',
+      lensEffort: 'low',
+    })
+    expect(agentSetup(...args)).not.toHaveProperty('lens')
+  })
+})
+
 describe('agentSetup with a planner apart from the builder', () => {
   it('names the planner with its own model and effort', () => {
     const setup = agentSetup(
@@ -368,7 +383,7 @@ describe('checkBeforeDeploy', () => {
       },
     })
 
-    expect(checked).toEqual({ ran: false, ok: true, reasons: [], changed: [] })
+    expect(checked).toEqual({ ran: false, ok: true, reasons: [], changed: [], costNotes: [] })
     expect(ran).toBe(false)
   })
 
@@ -463,9 +478,23 @@ describe('checkBeforeDeploy', () => {
       reasons: [
         '4 quick case(s) passed in the baseline and failed now: a, b, c, d',
         'the pass rate fell from 100% to 0%',
-        'no case ran to a verdict in both runs, so the cost could not be compared',
       ],
+      costNotes: ['no case ran to a verdict in both runs, so the cost was not compared'],
     })
+  })
+
+  it('passes a run that costs three times the baseline and passes the same cases, and says what the cost did', async () => {
+    const checked = await checkBeforeDeploy({
+      quickIds: ['a', 'b', 'c', 'd'],
+      baseline,
+      changedPaths: ['src/server/factory/harness.ts'],
+      setup: baseline.setup,
+      runQuick: async () => baseline.results.map((r) => ({ ...r, costUsd: r.costUsd * 3 })),
+    })
+
+    expect(checked).toMatchObject({ ran: true, ok: true, reasons: [] })
+    expect(checked.costNotes).toHaveLength(1)
+    expect(checked.costNotes[0]).toMatch(/^the median case cost rose past 2x its baseline/)
   })
 })
 
@@ -600,6 +629,8 @@ describe('baselineResultsFor', () => {
     expect(baselineResultsFor(join(dir, 'baseline.json'))).toEqual([])
     writeFileSync(join(dir, 'baseline.json'), JSON.stringify(baseline))
     expect(baselineResultsFor(join(dir, 'baseline.json')).map((r) => r.id)).toEqual(['a', 'b', 'c', 'd'])
+    // Recorded before a result kept its timing (#711): it still loads, without one.
+    expect(baselineResultsFor(join(dir, 'baseline.json')).every((r) => r.timing === undefined)).toBe(true)
   })
 })
 

@@ -322,6 +322,9 @@ export class Run {
   /** The agent that resolves a conflict of merging the integration branch into approved work: the builder's unless chosen. */
   private merger: CodingHarness | undefined
 
+  /** The agent that runs the lenses: the reviewer's unless the owner chose another (#701). */
+  private lens: CodingHarness | undefined
+
   /** The plan another agent wrote, which the builder's first pass is given as text. */
   private plannedBy: string | undefined
 
@@ -573,9 +576,15 @@ export class Run {
     const chosenMerger = typeof deps.merger === 'function' ? deps.merger(labels) : deps.merger
     const merger = chosenMerger ?? builder
     const security = deps.security?.(labels)
-    const agents = [builder, reviewer, planner, merger, ...(security ? [security] : [])].filter(
-      (agent, at, all) => all.findIndex((other) => other.name === agent.name) === at,
-    )
+    const lens = deps.lens?.(reviewer.name) ?? reviewer
+    const agents = [
+      builder,
+      reviewer,
+      planner,
+      merger,
+      lens,
+      ...(security ? [security] : []),
+    ].filter((agent, at, all) => all.findIndex((other) => other.name === agent.name) === at)
     const agentEgress = await prep.step('credentials', async () =>
       mergeEgress(await Promise.all(agents.map((a) => a.egress()))),
     )
@@ -626,6 +635,7 @@ export class Run {
       run.security = security
       run.securityRequired = deps.security !== undefined
       run.merger = merger
+      run.lens = lens
       run.feed = feed
       run.preparation = prep
       run.remoteHead = await Run.remoteHeadOf(sandbox.backend, repoDir, c.branch)
@@ -2601,14 +2611,15 @@ export class Run {
 
   /**
    * The lenses over approved work (#548), read-only, after the security review and before `merge`. Each lens is the
-   * reviewer's agent in a fresh session. In `auto` a blocking finding sends the builder back once (`MAX_LENS_REWORKS`);
-   * what a lens still finds is kept for the pull request body. A lens never hands work over and never fails a task:
+   * lens agent (the reviewer's unless the owner chose another, #701) in a fresh session. In `auto` a blocking finding
+   * sends the builder back once (`MAX_LENS_REWORKS`); what a lens still finds is kept for the pull request body. A lens never hands work over and never fails a task:
    * an answer or a read that fails is recorded and the work goes on.
    */
   private async lensed(sha: string, attempt: number): Promise<Reworked | undefined> {
     const mode = lensModeFromEnv(process.env)
     if (mode === 'off') return undefined
     const { deps, taskId, row, issue } = this.c
+    const agent = this.lens ?? this.reviewer
     for (const lens of LENSES) {
       let documents: string[] = []
       let verdict: ReviewVerdict
@@ -2625,11 +2636,11 @@ export class Run {
           lens: lens.name,
           sha,
           attempt,
-          ...agentFacts(this.reviewer),
+          ...agentFacts(agent),
         })
         const diff = await securityDiff(this.backend, this.repoDir, base)
-        const result = await this.settle(this.reviewer, 'lens', attempt, (onEvent) =>
-          this.reviewer.run(this.backend, {
+        const result = await this.settle(agent, 'lens', attempt, (onEvent) =>
+          agent.run(this.backend, {
             onEvent,
             cwd: this.repoDir,
             timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
@@ -2670,7 +2681,7 @@ export class Run {
         taskId,
         round: attempt,
         sha,
-        reviewer: lensReviewer(lens.name, this.reviewer.name),
+        reviewer: lensReviewer(lens.name, agent.name),
         verdict: verdict.verdict,
         summary: verdict.summary,
         findings: verdict.findings,

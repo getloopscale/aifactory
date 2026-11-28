@@ -62,6 +62,17 @@ describe('compareWithBaseline', () => {
     result('e', false),
   ])
 
+  it('reads no timing: a run whose steps differ from a baseline that has none gets the same verdict (#711)', () => {
+    const timed = (r: CaseResult): CaseResult => ({
+      ...r,
+      timing: { steps: [{ step: 'checks', ms: r.durationMs * 3 }], unaccountedMs: 7 },
+    })
+    const run = [...before.results.slice(0, 2), result('c', false), ...before.results.slice(3)]
+
+    expect(compareWithBaseline(run.map(timed), before)).toEqual(compareWithBaseline(run, before))
+    expect(compareWithBaseline(before.results.map(timed), before).ok).toBe(true)
+  })
+
   it('accepts a run that passes the same cases at the same cost', () => {
     const run = before.results.map((r) => ({ ...r }))
 
@@ -103,28 +114,30 @@ describe('compareWithBaseline', () => {
     expect(compared.reasons).toContain('the pass rate fell from 80% to 40%')
   })
 
-  it('accepts a cost exactly at the threshold and refuses one above it', () => {
+  it('never refuses a run for its cost: one past twice the baseline passes, with a note', () => {
+    // 2026-11-27: a deploy that passed five cases of five was refused because the owner had moved the builder to
+    // a dearer model. Work that passes is ready whatever it cost, so the cost is a note and `ok` does not read it.
     const at = before.results.map((r) => ({ ...r, costUsd: 0.5 * (1 + THRESHOLDS.costRise) }))
     const above = before.results.map((r) => ({
       ...r,
       costUsd: 0.5 * (1 + THRESHOLDS.costRise) + 0.01,
     }))
 
-    expect(compareWithBaseline(at, before).ok).toBe(true)
-    const refused = compareWithBaseline(above, before)
-    expect(refused.ok).toBe(false)
-    expect(refused.reasons).toEqual(['the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.01, 4 cases that ran to a verdict in both runs)'])
+    expect(compareWithBaseline(at, before)).toMatchObject({ ok: true, costNotes: [] })
+    expect(compareWithBaseline(above, before)).toMatchObject({
+      ok: true,
+      reasons: [],
+      costNotes: ['the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.01, 4 cases that ran to a verdict in both runs)'],
+    })
   })
 
-  it('refuses a cost rise that one early failure at zero cost would hide', () => {
+  it('notes a cost rise that one early failure at zero cost would hide', () => {
     const run = [
       ...before.results.slice(0, 4).map((r) => ({ ...r, costUsd: 1.25 })),
       { ...result('e', false, 0), attempts: 0, reviewRounds: 0, reachedVerdict: false },
     ]
-    const compared = compareWithBaseline(run, before)
 
-    expect(compared.ok).toBe(false)
-    expect(compared.reasons).toEqual([
+    expect(compareWithBaseline(run, before).costNotes).toEqual([
       'the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.25, 4 cases that ran to a verdict in both runs)',
     ])
   })
@@ -141,30 +154,19 @@ describe('compareWithBaseline', () => {
     expect(compareWithBaseline(run, base).ok).toBe(true)
   })
 
-  it('refuses a cost it could not compare when no case ran to a verdict in both runs', () => {
-    const base = baseline([result('a', true)])
+  it('says the cost was not compared when no case ran to a verdict in both runs, and refuses nothing for it', () => {
+    const base = baseline([result('a', false)])
     const run = [{ ...result('a', false, 0), reachedVerdict: false }]
+    const compared = compareWithBaseline(run, base)
 
-    expect(compareWithBaseline(run, base).reasons).toContain(
-      'no case ran to a verdict in both runs, so the cost could not be compared',
-    )
+    expect(compared.costNotes).toEqual(['no case ran to a verdict in both runs, so the cost was not compared'])
+    expect(compared.reasons).toEqual([])
   })
 
-  it('accepts a run that costs more for the same pass rate, as the owner prefers cost to slowness', () => {
-    // 2026-11-19: the review-convergence change failed the gate at US$ 0.37 -> 0.58 (one case took a second
-    // review round, which that case does in about half of its runs) with the same 4 of 5 passing. The owner
-    // decided that a higher cost is better than a slower factory; only a cost out of control still refuses.
+  it('has no note for a run that costs more but under twice the baseline', () => {
     const pricier = before.results.map((r) => ({ ...r, costUsd: 0.5 * 1.57 }))
 
-    expect(compareWithBaseline(pricier, before).ok).toBe(true)
-  })
-
-  it('still refuses a mean cost more than twice the baseline', () => {
-    const runaway = before.results.map((r) => ({ ...r, costUsd: 0.5 * 2 + 0.01 }))
-
-    expect(compareWithBaseline(runaway, before).reasons).toEqual([
-      'the median case cost rose past 2x its baseline (mean per case from US$ 0.50 to US$ 1.01, 4 cases that ran to a verdict in both runs)',
-    ])
+    expect(compareWithBaseline(pricier, before)).toMatchObject({ ok: true, costNotes: [] })
   })
 
   it('does not judge cost against a baseline that cost nothing', () => {
@@ -174,24 +176,27 @@ describe('compareWithBaseline', () => {
     expect(compareWithBaseline(ids.map((id) => result(id, true, 5)), free).ok).toBe(true)
   })
 
-  it('does not let one expensive case decide the cost', () => {
+  it('does not let one expensive case write the note', () => {
     const run = before.results.map((r, i) => ({ ...r, costUsd: i === 0 ? 4 : 0.6 }))
 
-    expect(compareWithBaseline(run, before).ok).toBe(true)
+    expect(compareWithBaseline(run, before).costNotes).toEqual([])
   })
 
-  it('refuses a rise past twice the baseline that most cases share', () => {
+  it('notes a rise past twice the baseline that most cases share', () => {
     const run = before.results.map((r, i) => ({ ...r, costUsd: i === 0 ? 0.5 : 1.2 }))
+    const compared = compareWithBaseline(run, before)
 
-    expect(compareWithBaseline(run, before).ok).toBe(false)
+    expect(compared.ok).toBe(true)
+    expect(compared.costNotes).toHaveLength(1)
   })
 
-  it('refuses to judge the cost over fewer than three cases that ran to a verdict in both runs', () => {
+  it('says so when fewer than three cases ran to a verdict in both runs, and refuses nothing for it', () => {
     const run = before.results.slice(0, 2).map((r) => ({ ...r }))
 
-    expect(compareWithBaseline(run, before).reasons).toEqual([
-      `only 2 cases ran to a verdict in both runs, and the cost gate needs ${MIN_COST_CASES}`,
-    ])
+    expect(compareWithBaseline(run, before)).toMatchObject({
+      ok: true,
+      costNotes: [`only 2 cases ran to a verdict in both runs, and the cost is compared over ${MIN_COST_CASES} or more`],
+    })
   })
 
   it('compares only the cases both runs have', () => {
@@ -217,10 +222,12 @@ describe('compareWithBaseline', () => {
     expect(compared.reasons).toEqual(['no case of this run is in the baseline'])
   })
 
-  it('reports both reasons when the pass rate and the cost got worse together', () => {
+  it('refuses for the pass rate alone when the pass rate and the cost got worse together', () => {
     const run = before.results.map((r) => ({ ...r, passed: false, costUsd: 2 }))
+    const compared = compareWithBaseline(run, before)
 
-    expect(compareWithBaseline(run, before).reasons).toHaveLength(2)
+    expect(compared.reasons).toEqual(['the pass rate fell from 80% to 0%'])
+    expect(compared.costNotes).toHaveLength(1)
   })
 })
 

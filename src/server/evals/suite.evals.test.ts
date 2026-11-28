@@ -80,6 +80,9 @@ async function evalDeps(repository: string, issueLabels: string[]) {
   const planner = deps.planner?.(labels, builder.name)
   // `null` is a security agent that could not start: every approval is then blocked, as in `Run`.
   const security = deps.security ? (deps.security(labels) ?? null) : undefined
+  const reviewer = chosen ?? builder
+  // The lens the factory would run for this task: the reviewer's agent unless one is chosen (#701).
+  const lens = deps.lens?.(reviewer.name)
   const knowledge: KnowledgeSource | undefined = deps.knowledge && {
     ...deps.knowledge,
     delivered: async () => {},
@@ -87,8 +90,9 @@ async function evalDeps(repository: string, issueLabels: string[]) {
   return {
     sandbox: deps.sandbox,
     builder,
-    reviewer: chosen ?? builder,
+    reviewer,
     ...(planner ? { planner } : {}),
+    ...(lens ? { lens } : {}),
     ...(security !== undefined ? { security } : {}),
     author: deps.author,
     knowledge,
@@ -101,7 +105,7 @@ async function evalDeps(repository: string, issueLabels: string[]) {
 async function currentSetup(cases: EvalCase[]) {
   const setup: Record<string, string> = {}
   for (const repository of [...new Set(cases.map((c) => c.repository))].sort()) {
-    const { builder, reviewer, planner, security } = await evalDeps(repository, [])
+    const { builder, reviewer, planner, security, lens } = await evalDeps(repository, [])
     const effective = await effectiveEnv(getDb(), env)
     const merger = effective.FACTORY_MERGER
     const one = agentSetup(
@@ -112,6 +116,7 @@ async function currentSetup(cases: EvalCase[]) {
       planner?.name,
       merger && merger !== builder.name ? merger : undefined,
       security?.name,
+      lens?.name,
     )
     for (const [key, value] of Object.entries(one)) setup[`${repository} ${key}`] = value
   }

@@ -9,7 +9,7 @@ import { FakeSandbox, type Reply } from '../factory/fake-sandbox'
 import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harness'
 
 import type { EvalCase } from './cases'
-import { failedForEnvironment } from './compare'
+import { failedForEnvironment, type CaseResult } from './compare'
 import { runCase } from './run-case'
 import { writeJson } from './suite'
 
@@ -1541,6 +1541,21 @@ describe('the lens in a case', () => {
     expect(reviewer.prompts).toHaveLength(4)
   })
 
+  it('runs on the lens agent apart from the reviewer when one is chosen (#701)', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'trial')
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const lens = agent('lens', [{ ok: true, summary: MAJOR }])
+    const builder = agent('builder', planned(built()))
+    const result = await runCase(
+      { ...deps(sandbox({ tracked }), builder, reviewer), lens },
+      evalCase,
+    )
+    expect(result.passed).toBe(true)
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(lens.prompts).toHaveLength(1)
+    expect(lens.prompts[0]).toContain('AGENTS.md')
+  })
+
   it('goes on when the answer does not parse', async () => {
     const reviewer = agent('reviewer', [
       { ok: true, summary: APPROVE },
@@ -1548,5 +1563,150 @@ describe('the lens in a case', () => {
     ])
     const result = await run('auto', reviewer)
     expect(result.passed).toBe(true)
+  })
+})
+
+describe('runCase timing (#711)', () => {
+  const MIN = 60_000
+  /** A clock that moves only when a step moves it, so each step's time is known. */
+  const clock = () => {
+    let now = Date.now()
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    return (ms: number) => (now += ms)
+  }
+  /** An agent whose every pass takes `ms` on the clock. */
+  const slow = (a: CodingHarness, advance: (ms: number) => number, ms: number) => {
+    const run = a.run
+    const resume = a.resume!
+    a.run = async (backend, input) => (advance(ms), run(backend, input))
+    a.resume = async (backend, session, input) => (advance(ms), resume(backend, session, input))
+    return a
+  }
+  const summed = (r: CaseResult) =>
+    r.timing!.steps.reduce((sum, s) => sum + s.ms, 0) + r.timing!.unaccountedMs
+  const agentSteps = (r: CaseResult) =>
+    r.timing!.steps
+      .filter((s) => s.role !== undefined)
+      .map((s) => `${s.step}:${s.role}:${s.ms}`)
+
+  it('times the sandbox, the install, each agent pass by role, the checks and the review, adding up to the duration', async () => {
+    const advance = clock()
+    const provider = sandbox()
+    const create = provider.create.bind(provider)
+    provider.create = async (spec) => (advance(2 * MIN), create(spec))
+    const builder = slow(agent('builder', planned(built())), advance, 3 * MIN)
+    const reviewer = slow(agent('reviewer', [{ ok: true, summary: APPROVE }]), advance, MIN)
+
+    const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+    expect(result.passed).toBe(true)
+    const names = result.timing!.steps.map((s) => s.step)
+    expect(names.slice(0, 3)).toEqual(['sandbox', 'clone', 'install'])
+    expect(names).toContain('checks')
+    expect(result.timing!.steps[0]!.ms).toBe(2 * MIN)
+    expect(agentSteps(result)).toEqual([
+      `plan:planner:${3 * MIN}`,
+      `build:builder:${3 * MIN}`,
+      `review:reviewer:${MIN}`,
+    ])
+    expect(result.durationMs).toBe(9 * MIN)
+    expect(result.timing!.unaccountedMs).toBe(0)
+    expect(summed(result)).toBe(result.durationMs)
+  })
+
+  it('keeps each repeated pass, round of checks and review in order', async () => {
+    const advance = clock()
+    const builder = slow(agent('builder', planned(built(), built(), built())), advance, MIN)
+    const reviewer = slow(
+      agent('reviewer', [
+        { ok: true, summary: CHANGES },
+        { ok: true, summary: APPROVE },
+      ]),
+      advance,
+      MIN,
+    )
+
+    const result = await runCase(
+      deps(sandbox({ checkExits: [1, 1, 0] }), builder, reviewer),
+      evalCase,
+    )
+
+    expect(result.passed).toBe(true)
+    const steps = result.timing!.steps
+      .map((s) => s.step)
+      .filter((s) => ['build', 'rework', 'checks', 'review'].includes(s))
+    expect(steps).toEqual(['build', 'checks', 'rework', 'checks', 'review', 'rework', 'checks', 'review'])
+    expect(summed(result)).toBe(result.durationMs)
+  })
+
+  it('holds the steps a case finished when no time is left for the next pass', async () => {
+    const advance = clock()
+    const builder = slow(agent('builder', [{ ...planned()[0]!, costUsd: 0.3 }]), advance, 30 * MIN)
+
+    const result = await runCase(
+      {
+        ...deps(sandbox(), builder, agent('reviewer', [])),
+        timeouts: { sandboxMs: 45 * MIN, agentMs: 30 * MIN },
+      },
+      evalCase,
+    )
+
+    expect(result.reason).toContain('no time left for another agent pass')
+    expect(agentSteps(result)).toEqual([`plan:planner:${30 * MIN}`])
+    expect(result.durationMs).toBe(30 * MIN)
+    expect(summed(result)).toBe(result.durationMs)
+  })
+
+  it('holds the sandbox step of a case whose sandbox fails to start', async () => {
+    const advance = clock()
+    const provider = sandbox()
+    provider.create = async () => {
+      advance(MIN)
+      throw new Error('provider down')
+    }
+
+    const result = await runCase(
+      deps(provider, agent('builder', []), agent('reviewer', [])),
+      evalCase,
+    )
+
+    expect(result.reason).toContain('provider down')
+    expect(result.timing).toEqual({ steps: [{ step: 'sandbox', ms: MIN }], unaccountedMs: 0 })
+    expect(result.durationMs).toBe(MIN)
+  })
+
+  it('holds the steps before a review that was abandoned, not the review itself', async () => {
+    const builder = agent('builder', planned(built()))
+    const reviewer = agent('reviewer', [])
+    reviewer.run = (_backend, input) => {
+      reviewer.prompts.push(input.prompt)
+      return new Promise(() => {})
+    }
+    const controller = new AbortController()
+
+    const pending = runCase(deps(sandbox(), builder, reviewer), evalCase, controller.signal)
+    await vi.waitFor(() => expect(reviewer.prompts).toHaveLength(1))
+    controller.abort()
+    const result = await pending
+
+    expect(result.reason).toContain('abandoned')
+    const names = result.timing!.steps.map((s) => s.step)
+    expect(names).toEqual(expect.arrayContaining(['sandbox', 'clone', 'install', 'plan', 'build', 'checks']))
+    expect(names).not.toContain('review')
+    expect(summed(result)).toBe(result.durationMs)
+  })
+
+  it('writes the timing into the run file and the eval_case line as the result holds it', async () => {
+    const result = await runCase(
+      deps(sandbox(), agent('builder', planned(built())), agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    const dir = mkdtempSync(join(tmpdir(), 'evals-'))
+    const path = join(dir, 'run.json')
+    writeJson(path, { results: [result] })
+
+    expect(JSON.parse(readFileSync(path, 'utf8')).results[0].timing).toEqual(result.timing)
+    expect(JSON.parse(JSON.stringify({ event: 'eval_case', ...result })).timing).toEqual(result.timing)
+    rmSync(dir, { recursive: true })
   })
 })

@@ -24,7 +24,8 @@ const caption = 'mb-1 block text-xs font-medium uppercase tracking-wide text-mut
  * panel and applied to the next run with no restart. An agent that cannot start (its credential is missing)
  * is listed but cannot be picked, with what is missing, because a choice that breaks every run is worse than
  * none. The models and the effort levels are the ones of the agent chosen, and change with it, because a
- * model of one agent means nothing to the other. Planner and reviewer can follow the builder.
+ * model of one agent means nothing to the other. Planner and reviewer can follow the builder, and the lens the
+ * reviewer (#701).
  */
 export function EngineChooser({
   role,
@@ -55,11 +56,14 @@ export function EngineChooser({
     value !== current || model !== currentModel || (!pinned && effort !== currentEffort)
   const unavailable = settings.options.filter((o) => !o.ready)
   const own = settings.repositoriesWithOwn.filter((r) =>
-    role === 'reviewer' ? r.reviewer : r.builder,
+    // A repository's own reviewer is the lens's too, until the lens has an agent of its own.
+    role === 'reviewer' || role === 'lens' ? r.reviewer : r.builder,
   )
 
-  // The agent this role will use, which is the one whose models and effort levels are on offer.
-  const engine = value === SAME ? settings.effective.builder : value
+  // The agent this role will use, which is the one whose models and effort levels are on offer. The lens follows
+  // the reviewer, every other role the builder.
+  const follows = role === 'lens' ? settings.effective.reviewer : settings.effective.builder
+  const engine = value === SAME ? follows : value
   const offered = settings.engines[engine] ?? { models: [], efforts: [] }
   const picked = offered.models.find((m) => m.id === model)
   const levels = picked?.efforts ?? offered.efforts
@@ -115,7 +119,11 @@ export function EngineChooser({
             onChange={(e) => chooseEngine(e.target.value)}
           >
             {role === 'builder' ? null : (
-              <option value={SAME}>{t.engine.sameAsBuilder(settings.effective.builder)}</option>
+              <option value={SAME}>
+                {role === 'lens'
+                  ? t.engine.sameAsReviewer(follows)
+                  : t.engine.sameAsBuilder(follows)}
+              </option>
             )}
             {settings.options.map((o) => (
               <option key={o.id} value={o.id} disabled={!o.ready}>

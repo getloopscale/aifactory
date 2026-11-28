@@ -86,6 +86,7 @@ export const MODEL_ENV: Record<AgentRole, string> = {
   reviewer: 'FACTORY_MODEL_REVIEWER',
   merger: 'FACTORY_MODEL_MERGER',
   security: 'FACTORY_MODEL_SECURITY',
+  lens: 'FACTORY_MODEL_LENS',
 }
 export const EFFORT_ENV: Record<AgentRole, string> = {
   builder: 'FACTORY_EFFORT_BUILDER',
@@ -94,6 +95,7 @@ export const EFFORT_ENV: Record<AgentRole, string> = {
   merger: 'FACTORY_EFFORT_MERGER',
   /** Never read: the security role's effort is pinned (`securityEffort`). */
   security: 'FACTORY_EFFORT_SECURITY',
+  lens: 'FACTORY_EFFORT_LENS',
 }
 
 /**
@@ -112,7 +114,8 @@ export function untag(value: string | undefined, engine: string): string | undef
 
 /**
  * What a role tells the agent it ends up running. The planner and the reviewer use the builder's model and
- * effort until given their own, as they use its agent, but only when it is the same agent.
+ * effort until given their own, as they use its agent, but only when it is the same agent. The lens follows the
+ * reviewer first, then the builder (#701).
  */
 export function optionsFor(
   env: NodeJS.ProcessEnv,
@@ -121,6 +124,7 @@ export function optionsFor(
 ): HarnessOptions {
   const pick = (names: Record<AgentRole, string>) =>
     untag(env[names[role]], engine) ??
+    (role === 'lens' ? untag(env[names.reviewer], engine) : undefined) ??
     (role === 'builder' ? undefined : untag(env[names.builder], engine))
   const model = pick(MODEL_ENV)
   // The security role never takes an effort from a setting: `securityOptions` pins the highest.
