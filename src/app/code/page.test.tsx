@@ -473,6 +473,93 @@ describe('the side panel of an open session', () => {
     expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/new', { title: 'A better name' })
   })
 
+  describe('the model chosen with /model', () => {
+    const composer = () => screen.getByTitle(en.code.conversation.by).textContent
+    const statusBar = () => screen.getByLabelText(en.code.editor.status).textContent ?? ''
+    async function choose(model: string, saved: string | null) {
+      const { patch } = await import('../lib/api')
+      vi.mocked(patch).mockResolvedValueOnce({ ...session('new', 'Open one', ''), model: saved })
+      const box = screen.getByLabelText(en.code.conversation.message)
+      fireEvent.change(box, { target: { value: '/model' } })
+      fireEvent.keyDown(box, { key: 'Enter' })
+      const picker = screen.getByLabelText<HTMLSelectElement>(
+        en.code.conversation.commands.inputLabel.model,
+      )
+      await screen.findByRole('option', { name: 'Opus' })
+      fireEvent.change(picker, { target: { value: model } })
+      fireEvent.submit(picker.closest('form')!)
+      await waitFor(() =>
+        expect(screen.queryByLabelText(en.code.conversation.commands.inputLabel.model)).toBeNull(),
+      )
+    }
+    beforeEach(async () => {
+      const { patch } = await import('../lib/api')
+      vi.mocked(patch).mockReset()
+      const files = vi.mocked(get).getMockImplementation()!
+      vi.mocked(get).mockImplementation(async (path: string) =>
+        path === '/api/panel/agents'
+          ? { settings: { engines: { codex: { models: [{ id: 'opus', label: 'Opus' }] } } } }
+          : files(path),
+      )
+    })
+
+    it('shows the saved model in the status bar and under the box, and the default takes it away', async () => {
+      show('en', '/code/new')
+      await screen.findByText(en.code.changes.empty)
+      expect(composer()).toBe('codex')
+      await choose('opus', 'opus')
+      // The session the page read still has no model: what shows is the one the save answered.
+      expect(composer()).toBe('codex · opus')
+      expect(statusBar()).toContain('codex · opus')
+      const { patch } = await import('../lib/api')
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/new', { model: 'opus' })
+
+      await choose('', null)
+      expect(composer()).toBe('codex')
+      expect(statusBar()).not.toContain('opus')
+      expect(patch).toHaveBeenLastCalledWith('/api/panel/code/sessions/new', { model: null })
+    })
+
+    it('opens /model again on the saved model, and never carries it to another session', async () => {
+      show('en', '/code/new')
+      await screen.findByText(en.code.changes.empty)
+      await choose('opus', 'opus')
+      const box = screen.getByLabelText(en.code.conversation.message)
+      fireEvent.change(box, { target: { value: '/model' } })
+      fireEvent.keyDown(box, { key: 'Enter' })
+      await screen.findByRole('option', { name: 'Opus' })
+      const picker = screen.getByLabelText<HTMLSelectElement>(
+        en.code.conversation.commands.inputLabel.model,
+      )
+      expect(picker.value).toBe('opus')
+
+      fireEvent.click(screen.getByRole('tab', { name: en.code.sessions }))
+      fireEvent.click(screen.getByRole('link', { name: /Older one/ }))
+      await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/code/old'))
+      expect(composer()).toBe('codex')
+      expect(statusBar()).not.toContain('opus')
+    })
+
+    it('keeps the model it showed when the save fails, and says why', async () => {
+      const { patch } = await import('../lib/api')
+      show('en', '/code/new')
+      await screen.findByText(en.code.changes.empty)
+      vi.mocked(patch).mockRejectedValueOnce(new Error('model refused'))
+      const box = screen.getByLabelText(en.code.conversation.message)
+      fireEvent.change(box, { target: { value: '/model' } })
+      fireEvent.keyDown(box, { key: 'Enter' })
+      await screen.findByRole('option', { name: 'Opus' })
+      const picker = screen.getByLabelText<HTMLSelectElement>(
+        en.code.conversation.commands.inputLabel.model,
+      )
+      fireEvent.change(picker, { target: { value: 'opus' } })
+      fireEvent.submit(picker.closest('form')!)
+      expect(await screen.findByText('model refused')).toBeDefined()
+      expect(composer()).toBe('codex')
+      expect(statusBar()).not.toContain('opus')
+    })
+  })
+
   const cost = (
     seq: number,
     costUsd: number | null,
