@@ -115,3 +115,25 @@ export type CodeFileResponse = {
 
 /** The pull request a session opened: the same one every time it is asked again. */
 export type CodePullRequestResponse = { number: number; url: string; draft: boolean }
+
+/**
+ * The `state` event of a turn that waits for a workspace: every sandbox of the account is up (`tool` is
+ * `account`), or the code workspaces fill their cap (`tool` is `code`). The turn's marker (`turn:<seq>`), written
+ * once the turn starts or fails, ends the wait.
+ */
+export const WAITING_FOR_WORKSPACE = 'waiting:workspace'
+
+/** Whether the session's latest turn still waits for a workspace: a wait came after the last turn marker. */
+export function waitsForWorkspace(
+  state: CodeState,
+  events: ReadonlyArray<Pick<CodeEvent, 'kind' | 'content'>>,
+): boolean {
+  if (state !== 'queued' && state !== 'starting') return false
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i]!
+    if (e.kind !== 'state') continue
+    if (e.content === WAITING_FOR_WORKSPACE) return true
+    if (e.content.startsWith('turn:')) return false
+  }
+  return false
+}

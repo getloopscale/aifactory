@@ -12,6 +12,8 @@ import { onlyTools } from '../agents/hooks/only-tools'
 import { KNOWLEDGE_TOOLS } from '../agents/tools/knowledge'
 import { ASSISTANT_KNOWLEDGE_NOTE } from '../knowledge/prompt'
 
+import { watchedProviders } from './assist-provider'
+
 /** What makes one assistant different from another: how it talks, what it can use, what it must ask about. */
 export type AssistantSpec = {
   system: string
@@ -37,7 +39,8 @@ export const assistantTools = (spec: AssistantSpec): AssistantSpec['tools'] => (
  * where the factory's credentials are, so it carries `onlyTools` with exactly the tools of its spec and the
  * knowledge base's two (read-only); and every tool that changes something
  * is behind an approval the owner gives on the page. The `ChatGPT` provider is not part of the framework's
- * own model resolution, so the plugins are handed over explicitly.
+ * own model resolution, so the plugins are handed over explicitly; the assistants' provider among them is
+ * watched for a refusal for credit, which the framework would otherwise drop (`assist-provider.ts`).
  */
 export function buildAssistant(model: string, spec: AssistantSpec) {
   const tools = assistantTools(spec)
@@ -49,7 +52,7 @@ export function buildAssistant(model: string, spec: AssistantSpec) {
   return AgentBuilder.create()
     .input(z.object({ message: z.string().max(spec.maxInput ?? 40_000) }))
     .model(model)
-    .plugins(Provider.builtins())
+    .plugins(watchedProviders(Provider.builtins()))
     .system(`${spec.system}\n\n${ASSISTANT_KNOWLEDGE_NOTE}`)
     .tools(Object.values(tools))
     .approvals(

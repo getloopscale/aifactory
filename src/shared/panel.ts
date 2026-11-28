@@ -388,6 +388,20 @@ export type HealthReport = {
     groups: CostGroup[]
   }
   findings: FindingView[]
+  /** The assistants' model provider refusing their calls, once however often it refused; null while it answers. */
+  assistProvider: AssistProviderRefusal | null
+}
+
+/**
+ * The model provider of the panel's assistants refusing for the account's credit (`factory/assist-provider.ts`).
+ * Only this classification is kept: never the provider's answer, which can carry account data.
+ */
+export type AssistProviderRefusal = {
+  provider: string
+  reason: 'credit'
+  /** When the refusals started, and when the latest one came. */
+  since: string
+  lastAt: string
 }
 
 export type CiState = 'running' | 'passed' | 'failed'

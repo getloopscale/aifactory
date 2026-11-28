@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import type { CodeEvent, CodeMode, CodeSession } from '../../shared/code'
+import {
+  WAITING_FOR_WORKSPACE,
+  waitsForWorkspace,
+  type CodeEvent,
+  type CodeMode,
+  type CodeSession,
+} from '../../shared/code'
 import { FakeSandbox } from '../factory/fake-sandbox'
 import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harness'
 
@@ -478,7 +484,7 @@ describe('runTurn', () => {
     expect(t.sandbox.backend.commands.some((c) => c.includes('clone'))).toBe(false)
   })
 
-  it('queues the turn again at the code cap, without an error event', async () => {
+  it('queues the turn again at the code cap, saying it waits for a workspace and with no error', async () => {
     const t = setup()
     await t.sandbox.create({
       owner: { owner: 'code', sessionId: 'other' },
@@ -488,8 +494,41 @@ describe('runTurn', () => {
     t.deps.codeCap = 1
     expect(await runTurn(t.deps, 's1')).toEqual({ status: 'capped' })
     expect(t.session.state).toBe('queued')
-    expect(t.events.map((e) => e.kind)).toEqual(['user_message'])
+    expect(t.events.map((e) => [e.kind, e.content, e.tool])).toEqual([
+      ['user_message', 'do it', null],
+      ['state', WAITING_FOR_WORKSPACE, 'code'],
+    ])
+    expect(waitsForWorkspace(t.session.state, t.events)).toBe(true)
     expect(t.sandbox.specs).toHaveLength(1)
+  })
+
+  it('says a turn waits for a workspace while the account is full, and the start ends the wait', async () => {
+    const t = setup()
+    const full = Object.assign(t.sandbox, { maxSandboxes: 1 })
+    const other = await full.create({
+      owner: { owner: 'code', sessionId: 'other' },
+      egress: [{ domain: 'github.com' }],
+      timeoutMs: 1,
+    })
+    const seen: boolean[] = []
+    t.deps.slotWait = {
+      sleep: async () => {
+        seen.push(waitsForWorkspace('starting', t.events))
+        await other.stop()
+      },
+    }
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(seen).toEqual([true])
+    expect(t.events.filter((e) => e.content === WAITING_FOR_WORKSPACE).map((e) => e.tool)).toEqual([
+      'account',
+    ])
+    expect(waitsForWorkspace('starting', t.events)).toBe(false)
+  })
+
+  it('tells a turn that starts from one that waits', async () => {
+    const t = setup()
+    expect(await runTurn(t.deps, 's1')).toEqual({ status: 'idle', sessionId: 's1' })
+    expect(t.events.some((e) => e.content === WAITING_FOR_WORKSPACE)).toBe(false)
   })
 
   it('applies the cap when the retained sandbox of the session is gone', async () => {
@@ -502,7 +541,11 @@ describe('runTurn', () => {
     t.deps.codeCap = 1
     expect(await runTurn(t.deps, 's1')).toEqual({ status: 'capped' })
     expect(t.session.state).toBe('queued')
-    expect(t.events.map((e) => e.kind)).toEqual(['user_message'])
+    expect(t.events.map((e) => [e.kind, e.content, e.tool])).toEqual([
+      ['user_message', 'do it', null],
+      ['state', WAITING_FOR_WORKSPACE, 'code'],
+    ])
+    expect(waitsForWorkspace(t.session.state, t.events)).toBe(true)
     expect(t.sandbox.specs).toHaveLength(1)
   })
 
