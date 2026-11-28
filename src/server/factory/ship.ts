@@ -183,10 +183,12 @@ const noRelease = (db: Database) =>
   )
 
 /**
- * A task a release claimed (`released`, with no stage event) and that no release recorded: the release was cut
- * between the claim and its shipment (#781), so the next release that contains its merge finishes it.
+ * Integrated work a release claimed (`released`, with no stage event) and that no release recorded: the release
+ * was cut between the claim and its shipment (#781), so the next release that contains its merge finishes it.
+ * A claimed resolved anchor has no merge: `shipResolved` releases it by its resolving commit.
  */
-const claimedNotShipped = (db: Database) => and(claimedUnrecorded, noRelease(db))
+const claimedNotShipped = (db: Database) =>
+  and(claimedUnrecorded, isNotNull(task.mergedSha), noRelease(db))
 
 /**
  * Whether a task's issue is read before it is told, and told only if still open: a task released by its own

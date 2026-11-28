@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { delivery as deliveryTable, ingress, stageEvent, task } from '../db/schema'
+import { delivery as deliveryTable, ingress, publication, stageEvent, task } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { FakeGithub } from '../../test/fake-github'
 
@@ -221,6 +221,57 @@ describe('shipContained with a task a cut release claimed (#781)', () => {
 
     expect(await events(id)).toHaveLength(1)
     expect(gh.api.recorded('commentOnIssue')).toEqual([])
+  })
+
+  it('leaves a claimed resolved anchor to its resolving commit, never asking for a merge it has not', async () => {
+    const id = await seed(REPO, 14, { stage: 'released', resolvedSha: 'aaa111' })
+    const gh = setup({ 14: 'open' })
+
+    const shipped = await shipContained(gh.deps, later())
+
+    expect(shipped).toMatchObject({ released: [], resolved: [id] })
+    expect(await releases(id)).toEqual([])
+    expect(await events(id)).toHaveLength(1)
+    const asked = gh.api.recorded('contains').map((call) => call.args[1])
+    expect(asked).toEqual(['aaa111'])
+    expect(gh.repo.issue(14).state).toBe('closed')
+  })
+
+  it('keeps the rule of its own failed publication: carried only by a release of its packages', async () => {
+    const id = await claimed(15)
+    await getDb().insert(publication).values({
+      taskId: id,
+      repository: REPO,
+      releaseBranch: 'main',
+      promotedSha: 'p0',
+      actor: 'factory',
+      status: 'failed',
+      kind: 'changesets',
+      detail: 'the run published nothing',
+    })
+    const gh = setup({ 15: 'open' })
+    const manifests = {
+      'packages/a/package.json': JSON.stringify({ name: '@s/a', version: '1.0.0' }),
+      '.changeset/config.json': JSON.stringify({}),
+    }
+    gh.repo.files('aaa111^', { ...manifests, 'packages/a/x.ts': '1' })
+    gh.repo.files('aaa111', { ...manifests, 'packages/a/x.ts': '2' })
+
+    const skipped = await shipContained(gh.deps, later())
+
+    expect(skipped.released).toEqual([])
+    expect(await releases(id)).toEqual([])
+    expect(gh.repo.issue(15).state).toBe('open')
+
+    const carried = await shipContained(gh.deps, {
+      ...later(),
+      tags: [{ tag: '@s/a@1.0.0', url: 'https://example.test/a' }],
+    })
+
+    expect(carried.released).toEqual([id])
+    expect(await events(id)).toHaveLength(1)
+    expect(gh.repo.issue(15).comments[0].body).toContain('Available in `@s/a@1.0.0`')
+    expect(gh.repo.issue(15).state).toBe('closed')
   })
 
   it('is left for a release that contains its merge', async () => {
