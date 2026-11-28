@@ -1776,6 +1776,7 @@ export const en = {
       truncated: (n: number) => `Showing the first ${n} bytes: the file is longer.`,
       mentions: 'Files to mention',
       openFile: (path: string) => `Open ${path}`,
+      unavailable: 'The workspace is not running, so its files cannot be read now.',
     },
     conversation: {
       label: 'Conversation',

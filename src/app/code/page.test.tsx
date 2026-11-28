@@ -54,7 +54,13 @@ vi.mock('../lib/live', () => ({
     reload: () => {},
   }),
 }))
-vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn(), patch: vi.fn(), del: vi.fn() }))
+vi.mock('../lib/api', async (original) => ({
+  ApiError: (await original<typeof import('../lib/api')>()).ApiError,
+  post: vi.fn(),
+  get: vi.fn(),
+  patch: vi.fn(),
+  del: vi.fn(),
+}))
 const feed = vi.hoisted(() => {
   const listeners = new Set<() => void>()
   let extra: unknown[] = []
@@ -90,7 +96,7 @@ vi.mock('../lib/code-session', () => ({
 }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 
-import { get, post } from '../lib/api'
+import { ApiError, get, post } from '../lib/api'
 
 import Session from './[id]/page'
 import Page from './page'
@@ -155,6 +161,28 @@ describe.each([
     expect(screen.getAllByRole('img', { name: t.code.states.stopped })).toHaveLength(1)
     const repos = screen.getByLabelText(t.code.repository) as HTMLSelectElement
     expect([...repos.options].map((o) => o.value)).toEqual(['acme/shop'])
+  })
+
+  it('says in the page language that the workspace is not running when its files cannot be read', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) => {
+      if (path.endsWith('/files')) {
+        throw new ApiError('The workspace is not running.', 409, 'workspace_unavailable')
+      }
+      return { diff: { files: [] }, live: false, capturedAt: null }
+    })
+    show(language, '/code/new')
+    fireEvent.click(await screen.findByRole('tab', { name: t.code.files.tab }))
+    expect((await screen.findByRole('alert')).textContent).toBe(t.code.files.unavailable)
+  })
+
+  it('offers the files the route listed after @', async () => {
+    show(language, '/code/new')
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/new/files'))
+    const box = screen.getByLabelText(t.code.conversation.message)
+    await waitFor(() => {
+      fireEvent.change(box, { target: { value: '@re', selectionStart: 3 } })
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['README.md'])
+    })
   })
 
   it('says on a stopped session that the next message restores it', () => {
