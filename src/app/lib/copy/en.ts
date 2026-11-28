@@ -1718,6 +1718,7 @@ export const en = {
       status: 'Session status',
     },
     filter: 'Filter sessions',
+    hideEnded: 'Hide ended sessions',
     noMatch: 'No session matches.',
     start: 'Start',
     retry: 'Send the message again',
@@ -1854,6 +1855,8 @@ export const en = {
         save: 'Save',
         cancel: 'Cancel',
       },
+      confirmEnd:
+        'End the session? Its sandbox and workspace are freed for good: changes not sent in a pull request are lost.',
       refused: {
         queued: 'A message is already waiting for the agent. Wait for it to start.',
         starting: 'The agent is starting. Wait for it to finish its turn.',

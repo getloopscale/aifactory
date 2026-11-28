@@ -513,13 +513,39 @@ describe('slash commands', () => {
     await waitFor(() => expect(onRenamed).toHaveBeenCalledWith('New'))
   })
 
-  it('ends the session with /end, and refuses it once ended', async () => {
+  it('asks before /end ends the session, and sends nothing when the owner cancels', async () => {
     vi.mocked(del).mockResolvedValue({})
-    const { unmount } = render(<CodeConversation session={session('idle')} events={[]} />)
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.keyDown(type('/end'), { key: 'Enter' })
+    expect(confirm).toHaveBeenCalledWith(c.confirmEnd)
+    expect(del).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
     fireEvent.keyDown(type('/end'), { key: 'Enter' })
     await waitFor(() => expect(del).toHaveBeenCalledWith('/api/panel/code/sessions/s1'))
-    unmount()
+    confirm.mockRestore()
+  })
+
+  it('asks before the /end option ends the session', async () => {
+    vi.mocked(del).mockResolvedValue({})
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    type('/end')
+    fireEvent.mouseDown(screen.getByRole('option'))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(del).not.toHaveBeenCalled()
+    confirm.mockReturnValue(true)
+    type('/end')
+    fireEvent.mouseDown(screen.getByRole('option'))
+    await waitFor(() => expect(del).toHaveBeenCalledWith('/api/panel/code/sessions/s1'))
+    confirm.mockRestore()
+  })
+
+  it('disables the box of an ended session, whose /end is refused', () => {
     render(<CodeConversation session={session('ended')} events={[]} />)
+    const box = screen.getByLabelText(c.message) as HTMLTextAreaElement
+    expect(box.disabled).toBe(true)
+    expect(box.placeholder).toBe(c.refused.ended)
     type('/end')
     expect(screen.getByRole('option').textContent).toContain(c.commands.reasons.ended)
   })
