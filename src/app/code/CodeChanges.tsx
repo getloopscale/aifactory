@@ -140,11 +140,14 @@ export function PullRequestForm({
   repository,
   existing,
   hasChanges,
+  ended = false,
 }: {
   sessionId: string
   repository: string
   existing?: OpenedPullRequest | null
   hasChanges: boolean
+  /** An ended session opens nothing: only the link of a pull request it opened shows. */
+  ended?: boolean
 }) {
   const { t } = useCopy()
   const [title, setTitle] = useState('')
@@ -179,6 +182,7 @@ export function PullRequestForm({
     }
   }
 
+  if (ended && !pull) return null
   return (
     <section aria-label={copy.heading} className="space-y-2 border-t border-border px-4 py-3">
       {pull ? (
@@ -191,57 +195,66 @@ export function PullRequestForm({
           {copy.link(pull.number)}
         </a>
       ) : null}
-      <label className="block text-sm">
-        <span>{titleLabel}</span>
-        <input
-          aria-label={titleLabel}
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground"
-        />
-      </label>
-      <Assist
-        kind="issue"
-        text={title}
-        repository={repository}
-        onUse={(p) => setTitle(p.title ?? p.text)}
-      />
-      <label className="block text-sm">
-        <span>{copy.body}</span>
-        <Textarea
-          aria-label={copy.body}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          rows={4}
-          className="mt-1 w-full"
-        />
-      </label>
-      <Assist kind="changes" text={body} repository={repository} onUse={(p) => setBody(p.text)} />
-      <p className="text-xs text-muted-foreground">{copy.draftNote}</p>
-      <div className="flex items-center gap-3">
-        <Button size="sm" disabled={!ready} onClick={() => void submit()}>
-          {busy ? (pull ? copy.sending : copy.opening) : pull ? copy.again : copy.open}
-        </Button>
-        {why ? <span className="text-xs text-muted-foreground">{why}</span> : null}
-        {sent ? (
-          <span role="status" className="text-sm">
-            {copy.sent(sent.number)}{' '}
-            <a
-              href={sent.url}
-              target="_blank"
-              rel="noreferrer"
-              className="underline underline-offset-2"
-            >
-              {sent.url}
-            </a>
-          </span>
-        ) : null}
-        {problem ? (
-          <span role="alert" className="text-sm text-destructive">
-            {problem}
-          </span>
-        ) : null}
-      </div>
+      {ended ? null : (
+        <>
+          <label className="block text-sm">
+            <span>{titleLabel}</span>
+            <input
+              aria-label={titleLabel}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="mt-1 h-9 w-full rounded-lg border border-border bg-card px-2 text-sm text-foreground"
+            />
+          </label>
+          <Assist
+            kind="issue"
+            text={title}
+            repository={repository}
+            onUse={(p) => setTitle(p.title ?? p.text)}
+          />
+          <label className="block text-sm">
+            <span>{copy.body}</span>
+            <Textarea
+              aria-label={copy.body}
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={4}
+              className="mt-1 w-full"
+            />
+          </label>
+          <Assist
+            kind="changes"
+            text={body}
+            repository={repository}
+            onUse={(p) => setBody(p.text)}
+          />
+          <p className="text-xs text-muted-foreground">{copy.draftNote}</p>
+          <div className="flex items-center gap-3">
+            <Button size="sm" disabled={!ready} onClick={() => void submit()}>
+              {busy ? (pull ? copy.sending : copy.opening) : pull ? copy.again : copy.open}
+            </Button>
+            {why ? <span className="text-xs text-muted-foreground">{why}</span> : null}
+            {sent ? (
+              <span role="status" className="text-sm">
+                {copy.sent(sent.number)}{' '}
+                <a
+                  href={sent.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline underline-offset-2"
+                >
+                  {sent.url}
+                </a>
+              </span>
+            ) : null}
+            {problem ? (
+              <span role="alert" className="text-sm text-destructive">
+                {problem}
+              </span>
+            ) : null}
+          </div>
+        </>
+      )}
     </section>
   )
 }

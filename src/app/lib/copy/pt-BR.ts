@@ -2025,6 +2025,7 @@ export const ptBR: Copy = {
       status: 'Estado da sessão',
     },
     filter: 'Filtrar sessões',
+    hideEnded: 'Esconder sessões encerradas',
     noMatch: 'Nenhuma sessão corresponde.',
     start: 'Iniciar',
     retry: 'Enviar a mensagem de novo',
@@ -2084,6 +2085,8 @@ export const ptBR: Copy = {
       truncated: (n: number) => `Mostrando os primeiros ${n} bytes: o arquivo é maior.`,
       mentions: 'Arquivos para mencionar',
       openFile: (path: string) => `Abrir ${path}`,
+      unavailable:
+        'O workspace não está rodando, então os arquivos dele não podem ser lidos agora.',
     },
     conversation: {
       label: 'Conversa',
@@ -2162,6 +2165,8 @@ export const ptBR: Copy = {
         save: 'Salvar',
         cancel: 'Cancelar',
       },
+      confirmEnd:
+        'Encerrar a sessão? O sandbox e o workspace são liberados de vez: as mudanças não enviadas em um pull request se perdem.',
       refused: {
         queued: 'Já há uma mensagem esperando o agente. Espere ela começar.',
         starting: 'O agente está iniciando. Espere o fim do turno.',

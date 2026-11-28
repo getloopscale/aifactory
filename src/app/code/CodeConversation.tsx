@@ -707,7 +707,7 @@ export function CodeConversation({
   }
 
   async function endSession() {
-    if (busy) return
+    if (busy || !window.confirm(c.confirmEnd)) return
     setBusy(true)
     setProblem(undefined)
     try {
@@ -903,6 +903,7 @@ export function CodeConversation({
               if (!slashKeys(e) && !menuKeys(e)) sendOnEnter(e)
             }}
             placeholder={refusal ?? c.placeholder}
+            disabled={session.state === 'ended'}
             className="block min-h-12 w-full resize-none bg-transparent px-3.5 pt-3 pb-1 text-sm leading-6 text-foreground outline-none [scrollbar-width:thin] placeholder:text-muted-foreground disabled:cursor-not-allowed"
           />
           <div className="flex items-center gap-1 px-2 pb-2">

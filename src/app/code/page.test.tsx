@@ -23,6 +23,10 @@ const session = (id: string, title: string, updatedAt: string, state = 'running'
   updatedAt,
 })
 
+/** The state of an open session by its id (running otherwise), and the ids that opened pull request #9. */
+const STATE_OF: Record<string, string> = { asleep: 'stopped', closed: 'ended', gone: 'ended' }
+const PULLED = ['asleep', 'closed']
+
 /** More sessions for the tests of the filter, which shows only over a handful. */
 const many = vi.hoisted(() => ({ list: [] as unknown[] }))
 /** The branch saved for acme/shop, which the tests of the start form's default change. */
@@ -54,7 +58,13 @@ vi.mock('../lib/live', () => ({
     reload: () => {},
   }),
 }))
-vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn(), patch: vi.fn(), del: vi.fn() }))
+vi.mock('../lib/api', async (original) => ({
+  ApiError: (await original<typeof import('../lib/api')>()).ApiError,
+  post: vi.fn(),
+  get: vi.fn(),
+  patch: vi.fn(),
+  del: vi.fn(),
+}))
 const feed = vi.hoisted(() => {
   const listeners = new Set<() => void>()
   let extra: unknown[] = []
@@ -75,10 +85,10 @@ vi.mock('../lib/code-session', () => ({
     const extra = useSyncExternalStore(feed.subscribe, feed.snapshot)
     return {
       session: {
-        ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
+        ...session(id, 'Open one', '2026-11-27T09:00:00Z', STATE_OF[id] ?? 'running'),
         repository: 'acme/shop',
-        pullRequestUrl: id === 'asleep' ? 'https://github.com/acme/shop/pull/9' : null,
-        pullRequestNumber: id === 'asleep' ? 9 : null,
+        pullRequestUrl: PULLED.includes(id) ? 'https://github.com/acme/shop/pull/9' : null,
+        pullRequestNumber: PULLED.includes(id) ? 9 : null,
       },
       events: [
         { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
@@ -90,7 +100,7 @@ vi.mock('../lib/code-session', () => ({
 }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 
-import { get, post } from '../lib/api'
+import { ApiError, get, post } from '../lib/api'
 
 import Session from './[id]/page'
 import Page from './page'
@@ -155,6 +165,28 @@ describe.each([
     expect(screen.getAllByRole('img', { name: t.code.states.stopped })).toHaveLength(1)
     const repos = screen.getByLabelText(t.code.repository) as HTMLSelectElement
     expect([...repos.options].map((o) => o.value)).toEqual(['acme/shop'])
+  })
+
+  it('says in the page language that the workspace is not running when its files cannot be read', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) => {
+      if (path.endsWith('/files')) {
+        throw new ApiError('The workspace is not running.', 409, 'workspace_unavailable')
+      }
+      return { diff: { files: [] }, live: false, capturedAt: null }
+    })
+    show(language, '/code/new')
+    fireEvent.click(await screen.findByRole('tab', { name: t.code.files.tab }))
+    expect((await screen.findByRole('alert')).textContent).toBe(t.code.files.unavailable)
+  })
+
+  it('offers the files the route listed after @', async () => {
+    show(language, '/code/new')
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/new/files'))
+    const box = screen.getByLabelText(t.code.conversation.message)
+    await waitFor(() => {
+      fireEvent.change(box, { target: { value: '@re', selectionStart: 3 } })
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['README.md'])
+    })
   })
 
   it('says on a stopped session that the next message restores it', () => {
@@ -246,6 +278,21 @@ describe('the list of sessions', () => {
     expect(screen.getByText(en.code.noMatch)).toBeDefined()
   })
 
+  it('hides the ended sessions when asked, and shows them again', () => {
+    show('en')
+    expect(screen.queryByLabelText(en.code.hideEnded)).toBeNull()
+    cleanup()
+    many.list = [session('e', 'Finished one', '2026-11-27T07:00:00Z', 'ended')]
+    show('en')
+    const hide = screen.getByLabelText(en.code.hideEnded)
+    expect(screen.getByText('Finished one')).toBeDefined()
+    fireEvent.click(hide)
+    expect(screen.queryByText('Finished one')).toBeNull()
+    expect(screen.getByText('Newer one')).toBeDefined()
+    fireEvent.click(hide)
+    expect(screen.getByText('Finished one')).toBeDefined()
+  })
+
   it('shows the sessions of an open one behind their icon, with the open one marked', () => {
     show('en', '/code/new')
     expect(screen.queryByRole('link', { name: /Newer one/ })).toBeNull()
@@ -281,6 +328,28 @@ describe('the code page on a compact width', () => {
     fireEvent.click(screen.getByRole('button', { name: en.code.retry }))
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/code/abc'))
     expect(post).toHaveBeenCalledTimes(3)
+  })
+})
+
+/** Both layouts show the Changes panel of an open session at once. */
+describe.each(['expanded', 'compact'] as const)('an ended session on a %s width', (width) => {
+  const pr = en.code.changes.pullRequest
+  it('disables the message box and keeps only the link of its pull request', async () => {
+    show('en', '/code/closed', width)
+    expect(
+      (screen.getByLabelText(en.code.conversation.message) as HTMLTextAreaElement).disabled,
+    ).toBe(true)
+    expect(await screen.findByRole('link', { name: pr.link(9) })).toBeDefined()
+    expect(screen.queryByLabelText(pr.title)).toBeNull()
+    expect(screen.queryByRole('button', { name: pr.open })).toBeNull()
+    expect(screen.queryByRole('button', { name: pr.again })).toBeNull()
+  })
+
+  it('renders no pull request form when it opened none', async () => {
+    show('en', '/code/gone', width)
+    expect(await screen.findByText(en.code.changes.empty)).toBeDefined()
+    expect(screen.queryByRole('region', { name: pr.heading })).toBeNull()
+    expect(screen.queryByLabelText(pr.title)).toBeNull()
   })
 })
 
