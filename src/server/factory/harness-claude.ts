@@ -186,8 +186,12 @@ export function userLine(text: string): string {
 /**
  * The file a pass reads its input from, `tail -f` feeding Claude Code (`SandboxBackend` cannot write to a running
  * command's stdin). The prompt is the first line; a message is appended by file. The input is closed, which ends
- * the pass, once every line written has had its `result`.
+ * the pass, once every line written has had its `result`, or once a `result` is followed by `RESULT_QUIET_MS` of
+ * silence with no message on its way: Claude Code answers a line it read while it worked together with the one it
+ * was working on, so two lines can get one `result` (#772).
  */
+export const RESULT_QUIET_MS = 3_000
+
 async function openInbox(
   backend: SandboxBackend,
   prompt: string,
@@ -201,8 +205,22 @@ async function openInbox(
   let closed = false
   let appended = 0
   let cancelled = false
+  let writing = 0
+  let quiet: ReturnType<typeof setTimeout> | undefined
 
+  const stopWaiting = () => {
+    if (quiet) clearTimeout(quiet)
+    quiet = undefined
+  }
+  // A `result` that came while a line was written may cover it: the quiet window starts once the write is over.
+  let resultWhileWriting = false
+  const waitForQuiet = () => {
+    stopWaiting()
+    if (writing > 0) resultWhileWriting = true
+    else quiet = setTimeout(close, RESULT_QUIET_MS)
+  }
   const close = () => {
+    stopWaiting()
     if (closed) return
     closed = true
     // Anchored, so it matches the `tail` process and not the shell whose command line holds the same words.
@@ -216,6 +234,9 @@ async function openInbox(
       if (closed) return 'ended'
       // Counted before the write, so a result that arrives meanwhile does not close the input.
       sent += 1
+      writing += 1
+      // A line on its way needs a `result` of its own, so a quiet window that started before it does not close.
+      stopWaiting()
       const file = `${path}.${(appended += 1)}`
       try {
         await backend.uploadFile(file, userLine(text))
@@ -225,7 +246,15 @@ async function openInbox(
         sent -= 1
         if (results >= sent) close()
         throw error
+      } finally {
+        writing -= 1
+        if (writing === 0 && resultWhileWriting && !closed) {
+          resultWhileWriting = false
+          waitForQuiet()
+        }
       }
+      // The input closed while the line was written (the pass ended or was stopped): nobody read it.
+      if (closed) return 'ended'
       return 'delivered'
     },
     async cancel() {
@@ -239,9 +268,14 @@ async function openInbox(
     cancelled: () => cancelled,
     reader,
     seen(line: string): AgentEvent[] {
-      if (isResult(line)) {
+      if (!isResult(line)) {
+        // Claude is still at work, on a line it read after the last `result`: its own `result` will come.
+        stopWaiting()
+        resultWhileWriting = false
+      } else {
         results += 1
         if (results >= sent) close()
+        else waitForQuiet()
       }
       return claudeEvents(line)
     },

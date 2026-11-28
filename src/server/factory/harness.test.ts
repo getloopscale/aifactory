@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { buildPrompt, installFailureRule } from './harness'
 import {
@@ -7,11 +7,12 @@ import {
   claudeCodeHarness,
   claudeCredentialFromEnv,
   parseClaudeResult,
+  RESULT_QUIET_MS,
   resultLine,
 } from './harness-claude'
 import type { ActivePass } from './harness'
 import type { AgentEvent } from './transcript'
-import { FakeSandbox } from './fake-sandbox'
+import { ClaudeStreamBackend, FakeSandbox, type ClaudeScript } from './fake-sandbox'
 
 describe('parseClaudeResult', () => {
   it('reads the answer and the cost of a finished run', () => {
@@ -668,5 +669,115 @@ describe('cancelling a watched Claude pass', () => {
     })
     await pass!.cancel?.()
     expect(await pass!.send('late')).toBe('ended')
+  })
+})
+
+describe('the inbox of a watched Claude pass', () => {
+  const init = JSON.stringify({ type: 'system', subtype: 'init', session_id: 'sess-1' })
+  const said = (text: string) =>
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } })
+  const result = (text: string) =>
+    JSON.stringify({ type: 'result', is_error: false, result: text, total_cost_usd: 0.2 })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function start(script: ClaudeScript) {
+    let pass: ActivePass | undefined
+    const backend = new ClaudeStreamBackend(() => undefined, script)
+    const done = claudeCodeHarness({ kind: 'api-key', secret: 'k' }).run(backend, {
+      prompt: 'first',
+      cwd: '/work',
+      timeoutMs: 5,
+      onEvent: () => {},
+      live: { attach: (p) => (pass = p) },
+    })
+    return { backend, done, pass: () => pass! }
+  }
+
+  it('closes once two lines read while Claude worked got one result between them (#772)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let answered = false
+    const run = start(async (claude) => {
+      claude.print(init)
+      await claude.read(2)
+      claude.print(said('Did both.'))
+      claude.print(result('Did both.'))
+      answered = true
+    })
+    await vi.waitFor(() => expect(run.pass()).toBeDefined())
+    expect(await run.pass().send('second')).toBe('delivered')
+    await vi.waitFor(() => expect(answered).toBe(true))
+    await vi.advanceTimersByTimeAsync(RESULT_QUIET_MS)
+    expect(await run.done).toMatchObject({ ok: true, summary: 'Did both.', costUsd: 0.2 })
+    expect(await run.pass().send('late')).toBe('ended')
+  })
+
+  it('waits for the second result while Claude still works after the first', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let step = 0
+    let next!: () => void
+    const run = start(async (claude) => {
+      claude.print(init)
+      await claude.read(2)
+      claude.print(result('first done'))
+      step = 1
+      await new Promise<void>((go) => (next = go))
+      claude.print(said('Now the second.'))
+      claude.print(result('second done'))
+    })
+    await vi.waitFor(() => expect(run.pass()).toBeDefined())
+    await run.pass().send('second')
+    await vi.waitFor(() => expect(step).toBe(1))
+    // Claude prints again before the quiet window ends, so the input stays open for its next result.
+    next()
+    await vi.advanceTimersByTimeAsync(RESULT_QUIET_MS * 2)
+    expect(await run.done).toMatchObject({ ok: true, summary: 'second done' })
+  })
+
+  it('keeps the input open for a line on its way when a result comes, and closes on its result', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    let release!: () => void
+    const run = start(async (claude) => {
+      claude.print(init)
+      await claude.read(2)
+      claude.print(result('first'))
+      await claude.read(3)
+      claude.print(result('third'))
+    })
+    await vi.waitFor(() => expect(run.pass()).toBeDefined())
+    await run.pass().send('second')
+    const slow = new Promise<void>((go) => (release = go))
+    const upload = run.backend.uploadFile.bind(run.backend)
+    run.backend.uploadFile = async (path, content) => {
+      if (String(content).includes('third')) await slow
+      return upload(path, content)
+    }
+    const third = run.pass().send('third')
+    release()
+    expect(await third).toBe('delivered')
+    await vi.advanceTimersByTimeAsync(RESULT_QUIET_MS)
+    expect(await run.done).toMatchObject({ ok: true, summary: 'third' })
+  })
+
+  it('says ended, not delivered, for a line written while the pass ended', async () => {
+    let release!: () => void
+    const run = start(async (claude) => {
+      claude.print(init)
+      claude.print(result('done'))
+    })
+    await vi.waitFor(() => expect(run.pass()).toBeDefined())
+    const slow = new Promise<void>((go) => (release = go))
+    const upload = run.backend.uploadFile.bind(run.backend)
+    run.backend.uploadFile = async (path, content) => {
+      await slow
+      return upload(path, content)
+    }
+    // The prompt's result closed the input before this line could be written.
+    await run.done
+    const late = run.pass().send('too late')
+    release()
+    expect(await late).toBe('ended')
   })
 })
