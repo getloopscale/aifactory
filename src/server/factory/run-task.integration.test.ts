@@ -27,6 +27,7 @@ import {
   review,
   stageEvent,
   task,
+  testProof,
   watch,
 } from '../db/schema'
 import type { GithubApp } from '../github/app'
@@ -79,6 +80,7 @@ import { releaseByMode } from './integration'
 import { pollAnswers } from './waiting'
 import { jobBackend } from './job-backend'
 import { pauseOnRefusal, readPause } from './provider-pause-store'
+import { PROOF_DIR, UNPROVEN_TESTS } from './test-proof'
 
 const TOKEN = 'ghs_installation_token_must_not_leak'
 const ANTHROPIC = 'sk-ant-key-must-not-leak'
@@ -600,6 +602,55 @@ describe('runTask', () => {
     ).toBe(true)
     expect(github.asked).toContain('paulo/app')
     expect(sandbox.stopped).toBe(1)
+  })
+
+  describe('the proof of the tests runs alongside the review (#716)', () => {
+    afterEach(() => vi.unstubAllEnvs())
+
+    /** The head adds a test file, so the proof checks out the base and runs the checks there. */
+    const addsTest = (command: string): Reply | undefined =>
+      command.includes(' diff -z --no-renames ') ? { stdout: 'src/truncate.test.js\0' } : undefined
+    const proofEnded = (sandbox: FakeSandbox) =>
+      sandbox.backend.commands.some((c) => c.includes(`worktree remove --force ${PROOF_DIR}`))
+
+    it('starts the review before the proof of its head ends, and still stores the proof', async () => {
+      const id = await seedTask()
+      const sandbox = new FakeSandbox(changed(addsTest))
+      const reviewer = approving()
+      const run = reviewer.run
+      let endedFirst: boolean | undefined
+      reviewer.run = async (backend, input) => {
+        endedFirst ??= proofEnded(sandbox)
+        return run(backend, input)
+      }
+
+      const result = await runOnly(deps(sandbox, { reviewer }), id)
+
+      expect(result).toMatchObject({ status: 'merging', sha: 'abc123def' })
+      expect(endedFirst).toBe(false)
+      expect(proofEnded(sandbox)).toBe(true)
+      const proofs = await getDb().select().from(testProof).where(eq(testProof.taskId, id))
+      expect(proofs).toMatchObject([
+        { sha: 'abc123def', outcome: 'unproven', files: ['src/truncate.test.js'], mode: 'trial' },
+      ])
+    })
+
+    it('in auto, puts the finding of an unproven head into the verdict recorded for its review', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const id = await seedTask()
+      const sandbox = new FakeSandbox(changed(addsTest))
+
+      await runOnly(deps(sandbox, { harness: resumableBuilder() }), id)
+
+      const [first] = await getDb()
+        .select()
+        .from(review)
+        .where(and(eq(review.taskId, id), eq(review.round, 1)))
+      expect(first).toMatchObject({ sha: 'abc123def', verdict: 'changes' })
+      expect(first.findings).toContainEqual(
+        expect.objectContaining({ severity: 'major', issue: UNPROVEN_TESTS }),
+      )
+    })
   })
 
   it('ends an approved run in merge, with a merge-task job for the approved commit and no pull request yet', async () => {

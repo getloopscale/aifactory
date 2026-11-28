@@ -33,6 +33,7 @@ import { evidenceOfNote } from './ci-wait'
 import { BaseProbe, sameChecks } from './base-checks'
 import {
   addsProofFinding,
+  alongside,
   proveTests,
   provedOnce,
   testProofModeFromEnv,
@@ -2197,45 +2198,47 @@ export class Run {
       },
     )
     this.risk = this.assess(sha, { touched, size, unplanned })
-    // A resolved conflict is reviewed alone: its tests were proven with the work.
-    const proved = this.resolvedMerge
-      ? []
-      : addsProofFinding(this.testProofMode(), await this.provesTests(sha))
-    const result = await this.settle(this.reviewer, 'reviewer', attempt, (onEvent, live) =>
-      this.reviewer.run(this.backend, {
-        onEvent,
-        live,
-        cwd: this.repoDir,
-        timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
-        role: 'reviewer',
-        prompt: this.resolvedMerge
-          ? resolutionReviewPrompt({
-              repo: row.repository,
-              issueNumber: row.issueNumber,
-              title: issue.title,
-              branch,
-              mergeSha: this.resolvedMerge,
-              knowledgeDir: this.feed?.dir,
-              risk: this.risk,
-            })
-          : reviewPrompt({
-              repo: row.repository,
-              issueNumber: row.issueNumber,
-              title: issue.title,
-              body: issue.body,
-              branch,
-              baseSha: base,
-              knowledgeDir: this.feed?.dir,
-              required,
-              risk: this.risk,
-              ...(this.earlier ? { earlier: this.earlier } : {}),
-              builderSummary: this.reviewAnswer ?? this.summary,
-              ...(this.plan
-                ? { plan: this.renderedPlan, unplanned, acceptance: this.plan.acceptance ?? [] }
-                : {}),
-            }),
-      }),
+    // A resolved conflict is reviewed alone: its tests were proven with the work. The proof runs in a checkout of its
+    // own while the reviewer reads this one, and is joined before the verdict is read (#716).
+    const proving = this.resolvedMerge ? Promise.resolve(undefined) : this.provesTests(sha)
+    const result = await alongside(proving, () =>
+      this.settle(this.reviewer, 'reviewer', attempt, (onEvent, live) =>
+        this.reviewer.run(this.backend, {
+          onEvent,
+          live,
+          cwd: this.repoDir,
+          timeoutMs: this.timeouts.reviewMs ?? DEFAULT_REVIEW_MS,
+          role: 'reviewer',
+          prompt: this.resolvedMerge
+            ? resolutionReviewPrompt({
+                repo: row.repository,
+                issueNumber: row.issueNumber,
+                title: issue.title,
+                branch,
+                mergeSha: this.resolvedMerge,
+                knowledgeDir: this.feed?.dir,
+                risk: this.risk,
+              })
+            : reviewPrompt({
+                repo: row.repository,
+                issueNumber: row.issueNumber,
+                title: issue.title,
+                body: issue.body,
+                branch,
+                baseSha: base,
+                knowledgeDir: this.feed?.dir,
+                required,
+                risk: this.risk,
+                ...(this.earlier ? { earlier: this.earlier } : {}),
+                builderSummary: this.reviewAnswer ?? this.summary,
+                ...(this.plan
+                  ? { plan: this.renderedPlan, unplanned, acceptance: this.plan.acceptance ?? [] }
+                  : {}),
+              }),
+        }),
+      ),
     )
+    const proved = addsProofFinding(this.testProofMode(), await proving)
     this.touched = touched
     this.changeFacts = { ...size, sha }
     // The reviewer reads and does not write. If it wrote anyway, none of it counts.
