@@ -25,6 +25,8 @@ const session = (id: string, title: string, updatedAt: string, state = 'running'
 
 /** More sessions for the tests of the filter, which shows only over a handful. */
 const many = vi.hoisted(() => ({ list: [] as unknown[] }))
+/** The branch saved for acme/shop, which the tests of the start form's default change. */
+const shop = vi.hoisted(() => ({ baseBranch: 'workspace' as string | null }))
 
 vi.mock('../lib/live', () => ({
   useResource: (path: string) => ({
@@ -36,7 +38,7 @@ vi.mock('../lib/live', () => ({
               fullName: 'acme/shop',
               enabled: true,
               defaultBranch: 'main',
-              baseBranch: 'workspace',
+              baseBranch: shop.baseBranch,
             },
           ],
         }
@@ -107,6 +109,7 @@ beforeEach(() => {
   })
   feed.reset()
   many.list = []
+  shop.baseBranch = 'workspace'
 })
 afterEach(cleanup)
 
@@ -167,7 +170,7 @@ describe.each([
       name: t.code.changes.pullRequest.link(9),
     })
     expect(link.getAttribute('href')).toBe('https://github.com/acme/shop/pull/9')
-    expect(screen.getByLabelText(t.code.changes.pullRequest.title)).toBeDefined()
+    expect(screen.getByLabelText(t.code.changes.pullRequest.commitTitle)).toBeDefined()
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
@@ -191,6 +194,39 @@ describe.each([
     expect(post).toHaveBeenNthCalledWith(2, '/api/panel/code/sessions/abc/messages', {
       text: 'fix it\n',
     })
+  })
+})
+
+describe('the branch the start form offers', () => {
+  async function started(typed?: string) {
+    vi.mocked(post)
+      .mockResolvedValueOnce({ session: { id: 'abc' } })
+      .mockResolvedValueOnce({})
+    show('en')
+    const field = screen.getByLabelText(en.code.baseBranch) as HTMLInputElement
+    if (typed !== undefined) fireEvent.change(field, { target: { value: typed } })
+    const shown = field.value
+    const box = screen.getByLabelText(en.code.message)
+    fireEvent.change(box, { target: { value: 'go' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(post).toHaveBeenCalled())
+    const sent = (vi.mocked(post).mock.calls[0]![1] as { baseBranch: string }).baseBranch
+    return { shown, sent }
+  }
+
+  it('is the integration branch the pull request goes to when none is saved, never the default branch', async () => {
+    shop.baseBranch = null
+    expect(await started()).toEqual({ shown: 'workspace', sent: 'workspace' })
+  })
+
+  it('is the branch saved for the repository', async () => {
+    shop.baseBranch = 'trunk'
+    expect(await started()).toEqual({ shown: 'trunk', sent: 'trunk' })
+  })
+
+  it('is the one the owner types', async () => {
+    shop.baseBranch = null
+    expect(await started('feature/x')).toEqual({ shown: 'feature/x', sent: 'feature/x' })
   })
 })
 
