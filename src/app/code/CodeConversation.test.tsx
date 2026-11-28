@@ -726,6 +726,36 @@ describe('slash commands', () => {
     type('/nope')
     expect(screen.queryByRole('option')).toBeNull()
   })
+
+  it('refuses /rename with a title on Enter, says how it is used and keeps the text', () => {
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    const box = type('/rename Rodada 8')
+    expect(screen.queryByRole('option')).toBeNull()
+    fireEvent.keyDown(box, { key: 'Enter' })
+    expect(screen.getByText(c.commands.withArguments('rename'))).toBeDefined()
+    expect(box.value).toBe('/rename Rodada 8')
+    expect(post).not.toHaveBeenCalled()
+    expect(patch).not.toHaveBeenCalled()
+  })
+
+  it('refuses /model with a name on the send button', () => {
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    type('/Model sonnet')
+    fireEvent.click(screen.getByRole('button', { name: c.send }))
+    expect(screen.getByText(c.commands.withArguments('model'))).toBeDefined()
+    expect(post).not.toHaveBeenCalled()
+  })
+
+  it('sends a file path that starts with a slash as a message', async () => {
+    vi.mocked(post).mockResolvedValue({})
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.keyDown(type('/tmp/file is missing'), { key: 'Enter' })
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/messages', {
+        text: '/tmp/file is missing',
+      }),
+    )
+  })
 })
 
 describe('the assist of a session', () => {
