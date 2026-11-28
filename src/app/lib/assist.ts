@@ -1,5 +1,7 @@
 import type { UIMessage } from '@getloopscale/loopzero/client'
 
+import type { AssistProviderRefusal } from '../../shared/panel'
+
 import { en, type Copy } from './copy/en'
 
 export type AssistKind = 'goal' | 'job' | 'issue' | 'changes' | 'resolution' | 'setup'
@@ -67,16 +69,26 @@ export function proposalOf(thread: UIMessage[]): Proposal | undefined {
   return undefined
 }
 
-/** Why the assistant could not answer, in words an owner can act on. */
+/** A provider's name as the owner knows it (`anthropic` is Anthropic). */
+export const providerName = (provider: string) =>
+  provider === 'anthropic' ? 'Anthropic' : provider === 'openai' ? 'OpenAI' : provider
+
+/**
+ * Why the assistant could not answer, in words an owner can act on. The framework sends the page only "An error
+ * occurred." for a provider's refusal, so the cause comes from what the factory recorded of it (`refusal`, from
+ * the health report); with none, the error is read as it came.
+ */
 export function assistProblem(
   error: Error | undefined,
   t: Copy['assistProblems'] = en.assistProblems,
+  refusal?: AssistProviderRefusal | null,
 ): string | undefined {
   if (!error) return undefined
+  if (refusal?.reason === 'credit') return t.creditRefused(providerName(refusal.provider))
   const message = error.message
   if (/\b(401|403)\b|forbidden|policy/i.test(message)) return t.signIn
-  if (/api[-_ ]?key|authentication|unauthor|credit|billing/i.test(message)) {
-    return t.noCredit
-  }
+  // "Your credit balance is too low" is Anthropic's wording.
+  if (/credit balance|billing/i.test(message)) return t.creditRefused('Anthropic')
+  if (/api[-_ ]?key|authentication|unauthor|credit/i.test(message)) return t.noCredit
   return t.couldNot(message)
 }

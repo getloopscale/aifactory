@@ -29,6 +29,7 @@ import {
   type LeadTimeLimits,
 } from '../../shared/lead-time'
 import { ofLatestVerification } from '../factory/artifacts'
+import { readRefusal } from '../factory/assist-provider'
 import { readFacts, totalAdded, totalRemoved } from '../factory/change-size'
 import { readRisk } from '../factory/risk'
 import { retryAt } from '../factory/auto-retry'
@@ -973,5 +974,6 @@ export async function health(db: Database, now = new Date()): Promise<HealthRepo
       firstSeenAt: iso(f.firstSeenAt),
       lastSeenAt: iso(f.lastSeenAt),
     })),
+    assistProvider: await readRefusal(db),
   }
 }

@@ -276,7 +276,7 @@ function Shell() {
   useTabSigns(count)
   const attention = useAttention(items, signedIn)
   const waiting = inbox.data?.items.length ?? 0
-  const wrong = health.data?.findings.length ?? 0
+  const wrong = (health.data?.findings.length ?? 0) + (health.data?.assistProvider ? 1 : 0)
   const name = me.data?.name ?? t.layout.ownerName
   const pulseNow = pulse.data ?? undefined
   const signOut = () =>
