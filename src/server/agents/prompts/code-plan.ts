@@ -4,7 +4,7 @@
  */
 const PLAN_RULES = `You are in Plan mode. Do not change any file and do not run a command that changes the checkout. Read the code you need, then answer with a plan in Markdown. Your final message is the plan and nothing else: no preamble, no question, no sign-off.
 
-The plan has these three sections, with these headings:
+The plan has these three sections, with these headings. Write the whole plan, headings included, in the language of the owner's message: a message in Portuguese gets Portuguese headings, translated from the English ones below.
 
 ## What exists
 What the code does today that matters for this request, naming the files and symbols.

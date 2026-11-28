@@ -36,7 +36,7 @@ import { POST as stop } from './sessions/[id]/stop'
 import { POST as pullRequest } from './sessions/[id]/pull-request'
 import { openSessionPullRequest, PullRequestRefused } from '../../../code/pull-request'
 import { POST as planAnswer } from './sessions/[id]/plan-answer'
-import { GET, POST } from './sessions'
+import { GET, POST, TITLE_LENGTH, titleFrom } from './sessions'
 
 const input = (subject: { id: string } | null) => ({
   subject,
@@ -124,6 +124,29 @@ describe('the handlers', () => {
       mode: 'code',
     })
     expect(stored.workBranch).toMatch(/^code\/[0-9a-f]{8}$/)
+  })
+
+  it('titles a session given no title by the start of its first message', async () => {
+    vi.mocked(createSession).mockResolvedValue({ id: 'new' } as never)
+    await run(POST, { body: { ...valid, firstMessage: '  Fix the\n  login page  ' } })
+    expect(vi.mocked(createSession).mock.calls[0]![0].title).toBe('Fix the login page')
+  })
+
+  it('keeps a title given, even with a first message', async () => {
+    vi.mocked(createSession).mockResolvedValue({ id: 'new' } as never)
+    await run(POST, { body: { ...valid, title: 'Mine', firstMessage: 'Fix it' } })
+    expect(vi.mocked(createSession).mock.calls[0]![0].title).toBe('Mine')
+  })
+
+  it('cuts a long first message at a word, to a title the list fits', () => {
+    const long = `Rewrite ${'the checkout flow '.repeat(10)}`
+    const title = titleFrom(long)
+    expect(title.length).toBeLessThanOrEqual(TITLE_LENGTH)
+    expect(title.endsWith('…')).toBe(true)
+    expect(long.startsWith(title.slice(0, -1))).toBe(true)
+    expect(title.slice(0, -1).endsWith(' ')).toBe(false)
+    expect(titleFrom('x'.repeat(100))).toBe(`${'x'.repeat(TITLE_LENGTH - 1)}…`)
+    expect(titleFrom('   ')).toBe('')
   })
 
   it('defaults the base branch, the agent and the mode', async () => {

@@ -154,6 +154,13 @@ describe.each([
     expect([...repos.options].map((o) => o.value)).toEqual(['acme/shop'])
   })
 
+  it('says an idle session is ready, in words other than those of a stopped one', () => {
+    expect(t.code.states.idle).not.toBe(t.code.states.stopped)
+    many.list = [session('rest', 'Resting one', '2026-11-27T07:00:00Z', 'idle')]
+    show(language)
+    expect(screen.getAllByRole('img', { name: t.code.states.idle })).toHaveLength(1)
+  })
+
   it('says on a stopped session that the next message restores it', () => {
     show(language, '/code/asleep')
     expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe(
@@ -187,6 +194,7 @@ describe.each([
       baseBranch: 'workspace',
       harness: 'claude-code',
       mode: 'code',
+      firstMessage: 'fix it\n',
     })
     expect(post).toHaveBeenNthCalledWith(2, '/api/panel/code/sessions/abc/messages', {
       text: 'fix it\n',
@@ -358,6 +366,34 @@ describe('the side panel of an open session', () => {
     fireEvent.submit(input.closest('form')!)
     expect(await screen.findByTitle('A better name')).toBeDefined()
     expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/new', { title: 'A better name' })
+  })
+
+  const cost = (seq: number, costUsd: number | null) => ({
+    sessionId: 'new',
+    seq,
+    kind: 'cost',
+    tool: null,
+    content: JSON.stringify({ costUsd }),
+    at: '',
+  })
+  const status = () => screen.getByLabelText(en.code.editor.status).textContent ?? ''
+
+  it('shows the cost of the session so far in the status bar, summed over its turns', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    expect(status()).not.toContain('Cost so far')
+    act(() => feed.add(cost(2, 0.25)))
+    act(() => feed.add(cost(3, null)))
+    act(() => feed.add(cost(4, 1.1)))
+    expect(status()).toContain(en.code.editor.cost('$1.35'))
+  })
+
+  it('shows no cost when every cost event carries none', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() => feed.add(cost(2, null)))
+    act(() => feed.add({ ...cost(3, null), content: 'not json' }))
+    expect(status()).not.toContain('Cost so far')
   })
 
   it('reads the diff again when a turn ends', async () => {

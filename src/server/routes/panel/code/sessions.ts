@@ -18,6 +18,18 @@ function startable(): string[] {
   return Object.keys(registry).filter((name) => canStart(registry, name))
 }
 
+/** The longest title a session takes from its first message: what a row of the list shows. */
+export const TITLE_LENGTH = 60
+
+/** The start of the first message, on one line and cut at a word, as the title of a session given none. */
+export function titleFrom(message: string): string {
+  const line = message.replace(/\s+/g, ' ').trim()
+  if (line.length <= TITLE_LENGTH) return line
+  const cut = line.slice(0, TITLE_LENGTH - 1)
+  const space = cut.lastIndexOf(' ')
+  return `${(space > TITLE_LENGTH / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
 /** The sessions, newest activity first, and the agents a new one may use. */
 export const GET = route()
   .policy(ownerOnly)
@@ -35,6 +47,7 @@ export const POST = route()
       model: z.string().min(1).max(100).optional(),
       mode: z.enum(CODE_MODES).default('ask'),
       title: z.string().max(200).optional(),
+      firstMessage: z.string().max(20_000).optional(),
     }),
   )
   .handler(async ({ body }) => {
@@ -56,7 +69,7 @@ export const POST = route()
       )
     }
     const session = await createSession({
-      title: body.title?.trim() || body.repository,
+      title: body.title?.trim() || titleFrom(body.firstMessage ?? '') || body.repository,
       repository: body.repository,
       baseBranch: body.baseBranch ?? integrationBranch(enabled),
       workBranch: `code/${randomUUID().slice(0, 8)}`,

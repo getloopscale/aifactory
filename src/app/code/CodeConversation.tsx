@@ -303,6 +303,7 @@ function PlanCard({
           {revising ? (
             <div className="space-y-2">
               <Textarea
+                autoFocus
                 aria-label={c.reviseLabel}
                 value={text}
                 rows={3}
@@ -861,6 +862,7 @@ export function CodeConversation({
                 {c.commands[editing]}
                 <input
                   autoFocus
+                  aria-label={c.commands.inputLabel[editing]}
                   value={draft}
                   placeholder={editing === 'model' ? c.commands.modelHint : undefined}
                   onChange={(e) => setDraft(e.target.value)}

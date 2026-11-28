@@ -351,6 +351,12 @@ describe('a plan', () => {
     )
   })
 
+  it('puts the focus in the revision box once Revise opens it', () => {
+    render(<CodeConversation session={session('waiting_input')} events={plans} />)
+    fireEvent.click(screen.getByRole('button', { name: c.plan.revise }))
+    expect(document.activeElement).toBe(screen.getByLabelText(c.plan.reviseLabel))
+  })
+
   it('sends the typed text as the revision', async () => {
     vi.mocked(post).mockResolvedValue({})
     render(<CodeConversation session={session('waiting_input')} events={plans} />)
@@ -437,6 +443,17 @@ describe('slash commands', () => {
     box = screen.getByLabelText(c.message) as HTMLTextAreaElement
     fireEvent.keyDown(box, { key: 'Enter' })
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/stop', {}))
+  })
+
+  it('names the model and rename inputs for a screen reader', () => {
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.keyDown(type('/model'), { key: 'Enter' })
+    const model = screen.getByRole('textbox', { name: c.commands.inputLabel.model })
+    expect(model.getAttribute('aria-label')).toBe(c.commands.inputLabel.model)
+    fireEvent.click(screen.getByRole('button', { name: c.commands.cancel }))
+    fireEvent.keyDown(type('/rename'), { key: 'Enter' })
+    const rename = screen.getByRole('textbox', { name: c.commands.inputLabel.rename })
+    expect(rename.getAttribute('aria-label')).toBe(c.commands.inputLabel.rename)
   })
 
   it('opens the model and rename editors and saves them', async () => {
