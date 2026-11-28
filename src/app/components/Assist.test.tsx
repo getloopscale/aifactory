@@ -285,6 +285,24 @@ describe('the assistant in the language of the panel', () => {
     },
   )
 
+  it('tells the assistant of a plan revision that the page is in Portuguese (#775)', () => {
+    window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
+    render(
+      <CopyProvider>
+        <Assist
+          kind="changes"
+          text="chama de limitar e não mexe no readme"
+          context="O plano: clamp(valor, min, max)"
+          onUse={vi.fn()}
+        />
+      </CopyProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: ptBR.assist.label.changes }))
+    const [[{ message }]] = agent.send.mock.calls
+    expect(message).toMatch(/^kind: changes\nlanguage: pt-BR\n/)
+    expect(message).toContain('context: O plano: clamp(valor, min, max)')
+  })
+
   it('writes a suggestion and its buttons in Portuguese', () => {
     window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
     agent.thread = proposed({ text: 'Uma página', domains: ['a.com'] })

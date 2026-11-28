@@ -2137,6 +2137,8 @@ export const ptBR: Copy = {
         reject: 'Rejeitar',
         answered: { accept: 'Aceito', revise: 'Revisado', reject: 'Rejeitado' },
         reviseLabel: 'O que deve mudar no plano?',
+        assistContext: (plan: string, cut: boolean) =>
+          `O dono está revisando o plano abaixo, que o agente de código propôs e ainda não executou: o que ele escreve é uma mudança neste plano, não nos arquivos que a sessão já alterou. O plano${cut ? ' (cortado: só o começo aparece)' : ''}:\n${plan}\n`,
         sendRevision: 'Enviar revisão',
         cancel: 'Cancelar',
         sending: 'Enviando…',
