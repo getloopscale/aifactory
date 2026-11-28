@@ -10,13 +10,13 @@ import {
 } from '../../shared/code'
 import { en } from '../lib/copy/en'
 
-vi.mock('../lib/api', () => ({ post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
+vi.mock('../lib/api', () => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 vi.mock('@getloopscale/loopzero-ui', () => ({
   ChatMessageResponse: ({ text }: { text: string }) => <div data-testid="md">{text}</div>,
 }))
 
-import { del, patch, post } from '../lib/api'
+import { del, get, patch, post } from '../lib/api'
 
 import { CodeConversation, linkPaths, mentionAt } from './CodeConversation'
 
@@ -50,6 +50,7 @@ beforeEach(() => {
   vi.mocked(post).mockReset()
   vi.mocked(patch).mockReset()
   vi.mocked(del).mockReset()
+  vi.mocked(get).mockReset()
 })
 afterEach(cleanup)
 
@@ -92,6 +93,44 @@ describe('the conversation', () => {
     fireEvent.click(card)
     const out = screen.getByText('boom')
     expect(out.className).not.toContain('destructive')
+  })
+
+  it('shows a failed turn once, as an error, and never as commands', () => {
+    const text = "There's an issue with the selected model (modelo-que-nao-existe)."
+    render(
+      <CodeConversation
+        session={session('failed')}
+        events={[
+          ev(1, 'user_message', 'hi'),
+          ev(2, 'agent_message', text),
+          ev(3, 'error', text),
+          ev(4, 'error', text),
+        ]}
+      />,
+    )
+    expect(screen.getAllByText(text)).toHaveLength(1)
+    expect(screen.getByRole('group', { name: c.error }).textContent).toContain(text)
+    expect(screen.queryByText(c.ranCommands(2))).toBeNull()
+    expect(screen.queryByTestId('md')).toBeNull()
+  })
+
+  it('keeps distinct errors, an agent message that differs, and the same error of another turn', () => {
+    render(
+      <CodeConversation
+        session={session('idle')}
+        events={[
+          ev(1, 'user_message', 'one'),
+          ev(2, 'agent_message', 'tried'),
+          ev(3, 'error', 'first'),
+          ev(4, 'error', 'second'),
+          ev(5, 'user_message', 'two'),
+          ev(6, 'error', 'first'),
+        ]}
+      />,
+    )
+    expect(screen.getByTestId('md').textContent).toBe('tried')
+    expect(screen.getAllByRole('group', { name: c.error })).toHaveLength(3)
+    expect(screen.getAllByText('first')).toHaveLength(2)
   })
 
   it('reads an edit with and without line counts', () => {
@@ -178,8 +217,6 @@ describe('the conversation', () => {
     expect(said).toBe(
       'The branch branch-que-nao-existe does not exist in acme/shop. Start a session on a branch the repository has.',
     )
-    for (const card of screen.getAllByRole('button', { name: new RegExp(c.error) }))
-      fireEvent.click(card)
     expect(screen.getByText(said)).toBeDefined()
     expect(screen.queryByText(missing)).toBeNull()
     expect(screen.getByText('repo_provision_failed [work] clone failed: timeout')).toBeDefined()
@@ -493,11 +530,52 @@ describe('slash commands', () => {
     await waitFor(() => expect(post).toHaveBeenCalledWith('/api/panel/code/sessions/s1/stop', {}))
   })
 
+  const agents = (engines: Record<string, { id: string; label: string }[]>) => ({
+    settings: {
+      engines: Object.fromEntries(
+        Object.entries(engines).map(([k, models]) => [k, { models, efforts: [] }]),
+      ),
+    },
+  })
+
+  it('offers only the models the session harness lists, and the default', async () => {
+    vi.mocked(get).mockResolvedValue(
+      agents({
+        codex: [{ id: 'gpt-x', label: 'GPT X' }],
+        'claude-code': [{ id: 'opus', label: 'Opus' }],
+      }),
+    )
+    vi.mocked(patch).mockResolvedValue({ mode: 'code' })
+    render(<CodeConversation session={{ ...session('idle'), model: 'gone' }} events={[]} />)
+    fireEvent.keyDown(type('/model'), { key: 'Enter' })
+    await waitFor(() => expect(screen.getByRole('option', { name: 'GPT X' })).toBeTruthy())
+    expect(get).toHaveBeenCalledWith('/api/panel/agents')
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      c.commands.modelDefault,
+      'GPT X',
+    ])
+    expect((screen.getByLabelText(c.commands.model) as HTMLSelectElement).value).toBe('')
+    fireEvent.click(screen.getByRole('button', { name: c.commands.save }))
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith('/api/panel/code/sessions/s1', { model: null }),
+    )
+  })
+
+  it('says so when the harness lists no model', async () => {
+    vi.mocked(get).mockResolvedValue(agents({ codex: [] }))
+    render(<CodeConversation session={session('idle')} events={[]} />)
+    fireEvent.keyDown(type('/model'), { key: 'Enter' })
+    await waitFor(() => expect(screen.getByText(c.commands.noModels)).toBeTruthy())
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+  })
+
   it('opens the model and rename editors and saves them', async () => {
+    vi.mocked(get).mockResolvedValue(agents({ codex: [{ id: 'gpt-x', label: 'GPT X' }] }))
     vi.mocked(patch).mockResolvedValue({ title: 'New', mode: 'code' })
     const onRenamed = vi.fn()
     render(<CodeConversation session={session('idle')} events={[]} onRenamed={onRenamed} />)
     fireEvent.keyDown(type('/model'), { key: 'Enter' })
+    await waitFor(() => expect(screen.getByRole('option', { name: 'GPT X' })).toBeTruthy())
     fireEvent.change(screen.getByLabelText(c.commands.model), { target: { value: 'gpt-x' } })
     fireEvent.click(screen.getByRole('button', { name: c.commands.save }))
     await waitFor(() =>
