@@ -1784,6 +1784,19 @@ export const en = {
     },
     conversation: {
       label: 'Conversation',
+      assistContext: (
+        repository: string,
+        branch: string,
+        changed: string[] | undefined,
+        more: number,
+      ) =>
+        `A message from the owner to the coding agent of a session on ${repository}, work branch ${branch}. ${
+          changed === undefined
+            ? 'The files the session changed could not be read.'
+            : changed.length === 0
+              ? 'The session has changed no file yet.'
+              : `Files the session changed: ${changed.join(', ')}${more > 0 ? ` and ${more} more` : ''}.`
+        }`,
       empty: 'Nothing was said or done yet.',
       loading: 'Loading the session…',
       you: 'You',

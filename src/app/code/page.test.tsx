@@ -100,7 +100,7 @@ vi.mock('../lib/code-session', () => ({
 }))
 vi.mock('../components/Assist', () => ({
   Assist: ({ kind, context }: { kind: string; context?: string }) => (
-    <p data-assist={kind} data-context={context}>
+    <p data-testid="assist" data-assist={kind} data-context={context}>
       assist
     </p>
   ),
@@ -729,3 +729,33 @@ describe('the side panel of an open session', () => {
     )
   })
 })
+
+describe.each(['expanded', 'compact'] as const)(
+  'the assist of a session on a %s width',
+  (width) => {
+    it('knows the paths the diff changed, and reads the diff once', async () => {
+      vi.mocked(get).mockImplementation(async (path: string) =>
+        path.endsWith('/files')
+          ? { files: ['README.md', 'src/isEvenOrOdd.js'] }
+          : {
+              diff: {
+                files: [
+                  { path: 'src/isEvenOrOdd.js', added: 3, removed: 1, binary: false, hunks: [] },
+                ],
+              },
+              live: true,
+              capturedAt: null,
+            },
+      )
+      show('en', '/code/new', width)
+      await waitFor(() =>
+        expect(
+          screen.getAllByTestId('assist').map((a) => a.getAttribute('data-context')),
+        ).toContain(
+          en.code.conversation.assistContext('acme/shop', 'code/new', ['src/isEvenOrOdd.js'], 0),
+        ),
+      )
+      expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(1)
+    })
+  },
+)

@@ -525,28 +525,30 @@ function SidePanel({
   repository,
   pullRequest,
   ended,
-  turn,
   tab,
   onTab,
   files,
   filesError,
   selected,
   onSelect,
+  data,
+  error,
 }: {
   id: string
   repository: string
   pullRequest: { number: number; url: string } | undefined
   ended: boolean
-  turn: number
   tab: Tab
   onTab: (tab: Tab) => void
   files: string[] | undefined
   filesError: string | undefined
   selected: string | undefined
   onSelect: (path: string) => void
+  /** The session's diff, read by the session so its conversation knows the changed paths too. */
+  data: CodeDiffResponse | undefined
+  error: string | undefined
 }) {
   const { t } = useCopy()
-  const { data, error } = useCodeDiff(id, turn)
   const tabs: Array<[Tab, string]> = [
     ['changes', t.code.changes.title],
     ['files', t.code.files.tab],
@@ -652,6 +654,8 @@ function OpenSession({ id }: { id: string }) {
   const [selected, setSelected] = useState<string>()
   const turn = lastStateSeq(events)
   const { files, error: filesError } = useCodeFiles(id, turn)
+  const { data: diff, error: diffError } = useCodeDiff(id, turn)
+  const changed = useMemo(() => diff?.diff.files.map((f) => f.path), [diff])
   const [title, setTitle] = useState<string>()
   useEffect(() => setTitle(undefined), [id])
   const toggle = useCallback(() => setPanel((p) => !p), [])
@@ -685,13 +689,14 @@ function OpenSession({ id }: { id: string }) {
       repository={session.repository}
       pullRequest={pullRequestOf(session)}
       ended={session.state === 'ended'}
-      turn={turn}
       tab={tab}
       onTab={setTab}
       files={files}
       filesError={filesError}
       selected={selected}
       onSelect={setSelected}
+      data={diff}
+      error={diffError}
     />
   ) : null
   return (
@@ -749,6 +754,7 @@ function OpenSession({ id }: { id: string }) {
             session={session}
             events={events}
             files={files}
+            changed={changed}
             onOpenFile={openFile}
             onPanel={togglePanel}
             onRenamed={setTitle}
@@ -1123,6 +1129,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   usePanelKeys(toggleChanges, showFiles)
 
   const changed = diff?.diff.files ?? []
+  const changedPaths = useMemo(() => diff?.diff.files.map((f) => f.path), [diff])
   const shown = tabs.find((x) => tabKey(x) === active)
   const side =
     view === 'sessions' ? (
@@ -1207,6 +1214,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
                 session={session}
                 events={events}
                 files={files}
+                changed={changedPaths}
                 onOpenFile={openFile}
                 onPanel={pick}
                 onRenamed={setTitle}
