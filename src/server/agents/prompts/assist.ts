@@ -8,6 +8,10 @@ export const KINDS = {
     'A request for changes to a pull request the factory already opened: turn what the owner wants different into a precise instruction the building agent can follow, naming what to change and how to tell it worked.',
   resolution:
     'A note on an issue the factory could not deliver and a person resolved another way (by hand, or by splitting it into issues that were delivered): say in one or two sentences where it was resolved, naming the pull requests, commits or issues the owner mentioned, so a later reader can check it.',
+  pr_title:
+    'The title of a pull request whose changes are already made: the context lists the files they change. Write one short line that says what the changes do, in the words of a pull request, never a task or a request for work. Put it in both title and text. Do not name a file the context does not list.',
+  pr_description:
+    'The description of a pull request whose changes are already made: the context lists the files they change. Say in a few sentences or a short list what the changes do and why, as done work, never as a request for changes or work still missing. Do not name a file the context does not list, and do not invent what you cannot tell from what the owner wrote and the file names.',
 } as const
 
 export type Kind = keyof typeof KINDS | 'setup'

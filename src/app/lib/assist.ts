@@ -4,7 +4,8 @@ import type { AssistProviderRefusal } from '../../shared/panel'
 
 import { en, type Copy } from './copy/en'
 
-export type AssistKind = 'goal' | 'job' | 'issue' | 'changes' | 'resolution' | 'setup'
+export type AssistKind =
+  'goal' | 'job' | 'issue' | 'changes' | 'resolution' | 'pr_title' | 'pr_description' | 'setup'
 
 /** What the assistant hands back through its `propose` tool, which is what the owner can accept. */
 export type Proposal = {
