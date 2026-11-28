@@ -2,6 +2,7 @@ import type { UIMessage } from '@getloopscale/loopzero/client'
 import { describe, expect, it } from 'vitest'
 
 import { agentFor, assistProblem, buildMessage, proposalOf } from './assist'
+import { en } from './copy/en'
 
 const assistant = (...parts: object[]) =>
   ({ id: 'a', role: 'assistant', parts }) as unknown as UIMessage
@@ -126,7 +127,9 @@ describe('assistProblem', () => {
     expect(assistProblem(new Error('HTTP 403 Forbidden'))).toMatch(/Sign in/)
     expect(assistProblem(new Error('Access denied by the policy'))).toMatch(/Sign in/)
     expect(assistProblem(new Error('invalid x-api-key'))).toMatch(/ANTHROPIC_API_KEY/)
-    expect(assistProblem(new Error('Your credit balance is too low'))).toMatch(/ANTHROPIC_API_KEY/)
+    expect(assistProblem(new Error('Your credit balance is too low'))).toBe(
+      en.assistProblems.creditRefused('Anthropic'),
+    )
   })
 
   it('shows any other error as it is', () => {
@@ -172,6 +175,35 @@ describe('assistProblem, at its edges', () => {
   })
 })
 
+const refusal = {
+  provider: 'anthropic',
+  reason: 'credit' as const,
+  since: '2026-11-28T10:00:00Z',
+  lastAt: '2026-11-28T10:40:00Z',
+}
+
+describe('assistProblem with what the factory recorded of the provider', () => {
+  it('names credit as the cause of the masked error the framework sends', () => {
+    const problem = assistProblem(new Error('An error occurred.'), en.assistProblems, refusal)
+    expect(problem).toBe(en.assistProblems.creditRefused('Anthropic'))
+    expect(problem).toMatch(/no credit left/)
+    expect(problem).not.toMatch(/An error occurred/)
+  })
+
+  it('says the error as it came when nothing was recorded, and nothing without an error', () => {
+    expect(assistProblem(new Error('An error occurred.'), en.assistProblems, null)).toBe(
+      en.assistProblems.couldNot('An error occurred.'),
+    )
+    expect(assistProblem(undefined, en.assistProblems, refusal)).toBeUndefined()
+  })
+
+  it('names another provider by the name it was recorded with', () => {
+    expect(
+      assistProblem(new Error('x'), en.assistProblems, { ...refusal, provider: 'openrouter' }),
+    ).toBe(en.assistProblems.creditRefused('openrouter'))
+  })
+})
+
 describe('assistProblem in the language of the dictionary given', () => {
   it('speaks the language it is given', async () => {
     const { ptBR } = await import('./copy/pt-BR')
@@ -180,6 +212,9 @@ describe('assistProblem in the language of the dictionary given', () => {
     )
     expect(assistProblem(new Error('HTTP 403'), ptBR.assistProblems)).toBe(
       ptBR.assistProblems.signIn,
+    )
+    expect(assistProblem(new Error('An error occurred.'), ptBR.assistProblems, refusal)).toBe(
+      ptBR.assistProblems.creditRefused('Anthropic'),
     )
   })
 })

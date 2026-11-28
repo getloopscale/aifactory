@@ -1310,6 +1310,11 @@ export const ptBR: Copy = {
       back_merge: 'Um back-merge tem conflito e nada vai fazer o merge dele',
     },
     openOnGithub: 'Abrir no GitHub',
+    assistProvider: {
+      title: 'O provedor de modelo dos assistentes está recusando as chamadas',
+      detail: (provider: string) =>
+        `${provider} recusa os assistentes do painel porque a conta da chave está sem crédito. Adicione crédito a essa conta ou aponte FACTORY_ASSIST_MODEL para outro provedor.`,
+    },
     actions: {
       run: {
         label: 'Recomeçar',
@@ -1839,6 +1844,8 @@ export const ptBR: Copy = {
     signIn: 'Entre de novo no painel e tente outra vez.',
     noCredit:
       'O assistente está sem crédito de modelo: defina ANTHROPIC_API_KEY no servidor (veja Configuração).',
+    creditRefused: (provider: string) =>
+      `O provedor de modelo do assistente (${provider}) recusou a chamada: a conta da chave está sem crédito. Adicione crédito a essa conta ou aponte FACTORY_ASSIST_MODEL para outro provedor.`,
     couldNot: (message: string) => `O assistente não conseguiu responder: ${message}`,
   },
   agentGroups: {
