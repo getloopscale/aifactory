@@ -11,6 +11,7 @@ import {
   answerPlan,
   appendEvent,
   claimTurn,
+  endMarker,
   endTurn,
   requestStop,
   stopRequested,
@@ -193,7 +194,7 @@ describe('sending a message', () => {
     const e = await aSession('e')
     await moveSession(e.id, 'end')
     expect((await sendMessage(e.id, 'hi')).kind).toBe('refused')
-    expect(await eventsAfter(e.id, 0, 10)).toEqual([])
+    expect((await eventsAfter(e.id, 0, 10)).map((v) => v.content)).toEqual([endMarker('end')])
     expect((await eventsAfter(s.id, 0, 10)).length).toBe(1)
     expect((await sendMessage('missing', 'hi')).kind).toBe('not_found')
   })
@@ -270,6 +271,49 @@ describe('sending a message', () => {
     expect(await jobs()).toBe(0)
     expect(await endTurn(s.id)).toEqual({ queued: true })
     expect(await jobs()).toBe(1)
+  })
+
+  it('writes the end of a turn with the move, for every way a turn or the session ends', async () => {
+    const lastState = async (id: string) =>
+      (await eventsAfter(id, 0, 50)).filter((e) => e.kind === 'state').pop()?.content
+    const ended = await aSession('ended')
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [ended.id])
+    await endTurn(ended.id)
+    expect(await lastState(ended.id)).toBe(endMarker('turn_ended'))
+    expect((await getSession(ended.id))?.state).toBe('idle')
+
+    const failed = await aSession('failed')
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [failed.id])
+    expect(await moveSession(failed.id, 'turn_failed')).toBe('failed')
+    expect(await lastState(failed.id)).toBe(endMarker('turn_failed'))
+
+    expect(await moveSession(ended.id, 'end')).toBe('ended')
+    expect(await lastState(ended.id)).toBe(endMarker('end'))
+  })
+
+  it('writes no end event for a move that is refused or ignored, nor for any other move', async () => {
+    const s = await aSession()
+    expect(await endTurn(s.id)).toBeUndefined()
+    expect(await moveSession(s.id, 'turn_failed')).toBeUndefined()
+    await moveSession(s.id, 'message')
+    expect(await eventsAfter(s.id, 0, 10)).toEqual([])
+  })
+
+  it('writes the end of a turn and keeps the session queued for a message the pass was not handed', async () => {
+    const s = await aSession()
+    await getPool().query(`update code_session set state = 'running' where id = $1`, [s.id])
+    await sendMessage(s.id, 'hi')
+    expect(await endTurn(s.id)).toEqual({ queued: true })
+    const events = await eventsAfter(s.id, 0, 10)
+    expect(events.map((e) => [e.kind, e.content])).toEqual([
+      ['user_message', 'hi'],
+      ['state', endMarker('turn_ended')],
+    ])
+    expect((await getSession(s.id))?.state).toBe('queued')
+    expect(await jobs()).toBe(1)
+    // The end marker does not answer the message: the queued turn still takes it.
+    const claim = await claimTurn(s.id)
+    expect(claim.kind === 'claimed' && claim.message.content).toBe('hi')
   })
 
   it('marks only a running turn to stop, and clears the mark when the turn ends', async () => {

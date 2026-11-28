@@ -29,6 +29,8 @@ const PULLED = ['asleep', 'closed']
 
 /** More sessions for the tests of the filter, which shows only over a handful. */
 const many = vi.hoisted(() => ({ list: [] as unknown[] }))
+/** The branch saved for acme/shop, which the tests of the start form's default change. */
+const shop = vi.hoisted(() => ({ baseBranch: 'workspace' as string | null }))
 
 vi.mock('../lib/live', () => ({
   useResource: (path: string) => ({
@@ -40,7 +42,7 @@ vi.mock('../lib/live', () => ({
               fullName: 'acme/shop',
               enabled: true,
               defaultBranch: 'main',
-              baseBranch: 'workspace',
+              baseBranch: shop.baseBranch,
             },
           ],
         }
@@ -111,6 +113,7 @@ beforeEach(() => {
   })
   feed.reset()
   many.list = []
+  shop.baseBranch = 'workspace'
 })
 afterEach(cleanup)
 
@@ -171,7 +174,7 @@ describe.each([
       name: t.code.changes.pullRequest.link(9),
     })
     expect(link.getAttribute('href')).toBe('https://github.com/acme/shop/pull/9')
-    expect(screen.getByLabelText(t.code.changes.pullRequest.title)).toBeDefined()
+    expect(screen.getByLabelText(t.code.changes.pullRequest.commitTitle)).toBeDefined()
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
@@ -195,6 +198,39 @@ describe.each([
     expect(post).toHaveBeenNthCalledWith(2, '/api/panel/code/sessions/abc/messages', {
       text: 'fix it\n',
     })
+  })
+})
+
+describe('the branch the start form offers', () => {
+  async function started(typed?: string) {
+    vi.mocked(post)
+      .mockResolvedValueOnce({ session: { id: 'abc' } })
+      .mockResolvedValueOnce({})
+    show('en')
+    const field = screen.getByLabelText(en.code.baseBranch) as HTMLInputElement
+    if (typed !== undefined) fireEvent.change(field, { target: { value: typed } })
+    const shown = field.value
+    const box = screen.getByLabelText(en.code.message)
+    fireEvent.change(box, { target: { value: 'go' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(post).toHaveBeenCalled())
+    const sent = (vi.mocked(post).mock.calls[0]![1] as { baseBranch: string }).baseBranch
+    return { shown, sent }
+  }
+
+  it('is the integration branch the pull request goes to when none is saved, never the default branch', async () => {
+    shop.baseBranch = null
+    expect(await started()).toEqual({ shown: 'workspace', sent: 'workspace' })
+  })
+
+  it('is the branch saved for the repository', async () => {
+    shop.baseBranch = 'trunk'
+    expect(await started()).toEqual({ shown: 'trunk', sent: 'trunk' })
+  })
+
+  it('is the one the owner types', async () => {
+    shop.baseBranch = null
+    expect(await started('feature/x')).toEqual({ shown: 'feature/x', sent: 'feature/x' })
   })
 })
 
@@ -413,6 +449,31 @@ describe('the side panel of an open session', () => {
     )
     expect(await screen.findByText('f1.ts')).toBeDefined()
     expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+  })
+
+  it('reads the diff again when the end of a finished turn arrives, and lists what it changed', async () => {
+    const diffs = [diff(0), diff(0), diff(2)]
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diffs.shift(),
+    )
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const event = (seq: number, kind: string, content: string) =>
+      feed.add({ sessionId: 'new', seq, kind, tool: null, content, at: '' })
+    act(() => event(2, 'state', 'turn:1'))
+    await waitFor(() =>
+      expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2),
+    )
+    act(() => {
+      event(3, 'tool_use', 'write f0.ts')
+      event(4, 'tool_result', 'ok')
+      event(5, 'agent_message', 'done')
+      event(6, 'cost', '{"costUsd":0.1}')
+    })
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+    act(() => event(7, 'state', 'end:turn_ended'))
+    expect(await screen.findByText('f1.ts')).toBeDefined()
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(3)
   })
 
   it('shows Files on Ctrl+Shift+F, even with the panel hidden, and opens a file with line numbers', async () => {

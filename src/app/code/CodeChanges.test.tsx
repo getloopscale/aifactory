@@ -155,6 +155,60 @@ describe('the pull request form', () => {
     expect((screen.getByRole('button', { name: copy.again }) as HTMLButtonElement).disabled).toBe(
       true,
     )
+    expect(screen.getByText(copy.noChanges)).toBeDefined()
+  })
+
+  it('says why opening is off with no title', () => {
+    form()
+    expect(screen.getByText(copy.noTitle)).toBeDefined()
+    expect(screen.getByLabelText(copy.title)).toBeDefined()
+  })
+
+  describe('with a pull request opened before', () => {
+    const existing = { number: 69, url: 'https://github.com/acme/app/pull/69' }
+
+    it('names the title field as the commit message and says why the button is off', () => {
+      form({ existing })
+      expect(screen.getByLabelText(copy.commitTitle)).toBeDefined()
+      expect(screen.queryByLabelText(copy.title)).toBeNull()
+      expect((screen.getByRole('button', { name: copy.again }) as HTMLButtonElement).disabled).toBe(
+        true,
+      )
+      expect(screen.getByText(copy.noCommitTitle)).toBeDefined()
+      fireEvent.change(screen.getByLabelText(copy.commitTitle), { target: { value: 'Fix' } })
+      expect(screen.queryByText(copy.noCommitTitle)).toBeNull()
+    })
+
+    it('confirms the send with a link to the pull request', async () => {
+      vi.mocked(post).mockResolvedValue(existing)
+      form({ existing })
+      fireEvent.change(screen.getByLabelText(copy.commitTitle), {
+        target: { value: 'validate clamp arguments' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: copy.again }))
+      const status = await screen.findByRole('status')
+      expect(status.textContent).toContain(copy.sent(69))
+      expect(within(status).getByRole('link').getAttribute('href')).toBe(existing.url)
+    })
+
+    it('confirms nothing when the send fails, and keeps what was typed', async () => {
+      vi.mocked(post).mockRejectedValue(new Error('push refused'))
+      form({ existing })
+      fireEvent.change(screen.getByLabelText(copy.commitTitle), { target: { value: 'T' } })
+      fireEvent.click(screen.getByRole('button', { name: copy.again }))
+      expect((await screen.findByRole('alert')).textContent).toContain('push refused')
+      expect(screen.queryByRole('status')).toBeNull()
+      expect((screen.getByLabelText(copy.commitTitle) as HTMLInputElement).value).toBe('T')
+    })
+  })
+
+  it('confirms nothing on opening the first pull request', async () => {
+    vi.mocked(post).mockResolvedValue({ number: 7, url: 'https://github.com/acme/app/pull/7' })
+    form()
+    fireEvent.change(screen.getByLabelText(copy.title), { target: { value: 'T' } })
+    fireEvent.click(screen.getByRole('button', { name: copy.open }))
+    await screen.findByRole('link', { name: copy.link(7) })
+    expect(screen.queryByRole('status')).toBeNull()
   })
 
   it('keeps only the link for an ended session, and renders nothing without one', () => {
