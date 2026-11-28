@@ -21,6 +21,8 @@ const NEEDS_WORDS: Record<AssistKind, boolean> = {
   issue: true,
   changes: true,
   resolution: true,
+  pr_title: true,
+  pr_description: true,
   setup: false,
 }
 
