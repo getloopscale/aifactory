@@ -811,7 +811,9 @@ antes da revisão de segurança, o que a regra de então contava como falha (#71
 
 O conjunto rápido sai da baseline (`markQuick`: em cada repositório, o caso mais curto que passou), então
 mudou com ela: `aifactory-playground#63`, `theokit-ui#178`, `theokit#1690`, `theokit-sdk#981` e
-`theokit-plugins#235`, que na baseline levaram 1, 5, 8, 13 e 15 minutos. Com o conjunto anterior, que tinha
+`theokit-plugins#235`, que na baseline levaram 1, 5, 8, 13 e 15 minutos. A checagem com esse conjunto, em
+2026-11-28 às 04:21 UTC com o host em carga 1, passou cinco de cinco em 14 min 48 s, dentro da meta de 20
+minutos (#695). Com o conjunto anterior, que tinha
 `theokit-sdk#938` e `theokit-gateways#354`, a checagem levou 35 min 46 s em 2026-11-27 e 35 a 43 minutos em
 cinco rodadas de 2026-11-28, com o host em carga 1 a 3, acima da meta de 20 minutos (#688, #695). O tempo
 por etapa (#711) mostra de onde vinha: em `theokit-sdk#938`, 8 minutos de checagens, duas vezes, e 14 minutos
