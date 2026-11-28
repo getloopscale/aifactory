@@ -1485,6 +1485,13 @@ describe('the security agent in a case', () => {
 
 
 describe('runCase acceptance', () => {
+  const LATER = {
+    id: 'A2',
+    statement: 'the quality gate no longer fails',
+    evidence: 'SonarCloud',
+    where: 'after_publish',
+  }
+
   it('gives the reviewer the plan acceptance and turns an unmet id into a major finding', async () => {
     const builder = agent('builder', planned(built(), built(), built(), built()))
     const reviewer = agent('reviewer', [
@@ -1497,6 +1504,34 @@ describe('runCase acceptance', () => {
     expect(reviewer.prompts[0]).toContain('A1: the flag works')
     expect(result.reviews?.[0]?.verdict).toBe('changes')
     expect(result.reviews?.[0]?.findings[0]?.issue).toContain('A1')
+  })
+
+  it('approves without an answer for an entry only a published commit can show (#718)', async () => {
+    const mixed = JSON.stringify({
+      ...JSON.parse(PLAN),
+      acceptance: [...JSON.parse(PLAN).acceptance, LATER],
+    })
+    const builder = agent('builder', [{ ok: true, summary: mixed, sessionId: 's1' }, built()])
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const result = await runCase(deps(sandbox(), builder, reviewer), evalCase)
+    expect(reviewer.prompts[0]).toContain('Do not answer for these ids')
+    expect(result.reviews?.[0]?.verdict).toBe('approve')
+    expect(result.passed).toBe(true)
+  })
+
+  it('asks again for a plan whose every entry is for after publishing', async () => {
+    const onlyLater = JSON.stringify({ ...JSON.parse(PLAN), acceptance: [LATER] })
+    const builder = agent('builder', [
+      { ok: true, summary: onlyLater, sessionId: 's1' },
+      { ok: true, summary: PLAN, sessionId: 's1' },
+      built(),
+    ])
+    const result = await runCase(
+      deps(sandbox(), builder, agent('reviewer', [{ ok: true, summary: APPROVE }])),
+      evalCase,
+    )
+    expect(builder.prompts[1]).toContain('Your answer had no plan that could be read')
+    expect(result.passed).toBe(true)
   })
 })
 
