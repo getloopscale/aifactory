@@ -1719,6 +1719,7 @@ export const en = {
       side: 'Side bar',
       status: 'Session status',
       cost: (usd: string) => `Cost so far: ${usd}`,
+      costUnreported: 'Cost not reported by this agent',
     },
     filter: 'Filter sessions',
     hideEnded: 'Hide ended sessions',
