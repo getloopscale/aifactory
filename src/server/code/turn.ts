@@ -1,5 +1,10 @@
 import { SANDBOX_PROVIDER_BLOCKED } from '../../shared/panel'
-import type { CodeEvent, CodeEventKind, CodeSession } from '../../shared/code'
+import {
+  WAITING_FOR_WORKSPACE,
+  type CodeEvent,
+  type CodeEventKind,
+  type CodeSession,
+} from '../../shared/code'
 import type { CodeTransitionEvent } from './transitions'
 import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harness'
 import { errorMessage } from '../factory/error-message'
@@ -82,6 +87,15 @@ const KINDS: Partial<Record<string, CodeEventKind>> = {
   tool_use: 'tool_use',
   tool_result: 'tool_result',
   error: 'error',
+}
+
+/** Says on the session that its turn waits for a workspace, so the page tells it from one that starts. */
+async function waitForWorkspace(
+  store: TurnStore,
+  sessionId: string,
+  holder: 'account' | 'code',
+): Promise<void> {
+  await store.append(sessionId, { kind: 'state', content: WAITING_FOR_WORKSPACE, tool: holder })
 }
 
 /** Appends what the harness reports one after the other, whatever the speed it reports at. */
@@ -270,9 +284,14 @@ export async function runTurn(deps: TurnDeps, sessionId: string): Promise<TurnRe
   let workspace: Workspace
   try {
     harness = deps.harnessFor(session)
-    await untilSlotFree(deps.workspace.sandbox, { ...deps.slotWait, signal: deps.signal })
+    await untilSlotFree(deps.workspace.sandbox, {
+      ...deps.slotWait,
+      signal: deps.signal,
+      onWait: () => waitForWorkspace(store, sessionId, 'account'),
+    })
     const opened = await openUnderCap(deps, session, harness)
     if (!opened) {
+      await waitForWorkspace(store, sessionId, 'code')
       await store.move(sessionId, 'turn_released')
       return { status: 'capped' }
     }

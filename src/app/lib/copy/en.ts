@@ -1808,6 +1808,10 @@ export const en = {
         cancel: 'Cancel',
         sending: 'Sending…',
       },
+      waitingWorkspace:
+        'Waiting for a workspace: every one is in use. Ending another session, or leaving one idle until its workspace closes, frees one.',
+      missingBranch: (branch: string, repository: string) =>
+        `The branch ${branch} does not exist in ${repository}. Start a session on a branch the repository has.`,
       stateLine: {
         idle: 'Ready for your next message.',
         queued: 'Queued: the agent starts soon.',
