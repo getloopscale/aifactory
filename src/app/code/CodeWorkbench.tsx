@@ -472,23 +472,30 @@ function useCodeDiff(id: string, turn: number) {
 }
 
 /**
- * The files of a session's workspace, read again when a turn ends and when the id changes. They are read only once
- * the session's state is known and while it is not `ended`: an ended session has no workspace, and its route
- * answers 409.
+ * The files of a session's workspace, read again when a turn ends, when the id changes and when the session gets a
+ * workspace. They are read only while the session has a sandbox (`sandboxId`) and is neither `stopped` nor `ended`:
+ * a session that is queued, starting or waiting for a slot has none yet, and a stopped or ended one has none any more.
+ * A read the server answers `unavailable` (the session ended on the way) shows the unavailable message.
  */
 function useCodeFiles(
   id: string,
   turn: number,
-  sessionState: SessionView['state'] | undefined,
+  session: Pick<SessionView, 'state' | 'sandboxId'> | undefined,
 ): { files?: string[]; error?: string } {
   const { t } = useCopy()
-  const [state, setState] = useState<{ id: string; files?: string[]; error?: unknown }>({ id })
-  const readable = sessionState !== undefined && sessionState !== 'ended'
+  const [state, setState] = useState<{
+    id: string
+    files?: string[]
+    unavailable?: boolean
+    error?: unknown
+  }>({ id })
+  const readable = hasWorkspace(session)
   useEffect(() => {
     if (!readable) return
     let alive = true
     get<CodeFilesResponse>(`/api/panel/code/sessions/${encodeURIComponent(id)}/files`).then(
-      (data) => alive && setState({ id, files: data.files }),
+      (data) =>
+        alive && setState(data.unavailable ? { id, unavailable: true } : { id, files: data.files }),
       (error: unknown) =>
         alive && setState((v) => ({ id, files: v.id === id ? v.files : undefined, error })),
     )
@@ -497,10 +504,17 @@ function useCodeFiles(
     }
   }, [id, turn, readable])
   if (!readable || state.id !== id) return {}
+  if (state.unavailable) return { error: t.code.files.unavailable }
   return {
     files: state.files,
     error: state.error === undefined ? undefined : readError(state.error, t),
   }
+}
+
+/** Whether a session has a workspace whose files can be read: a sandbox, in a state that keeps it. */
+function hasWorkspace(session: Pick<SessionView, 'state' | 'sandboxId'> | undefined): boolean {
+  if (!session?.sandboxId) return false
+  return session.state !== 'stopped' && session.state !== 'ended'
 }
 
 /** Ctrl+Shift+D shows or hides the changes and Ctrl+Shift+F shows the files, from a text box too. */
@@ -668,7 +682,7 @@ function OpenSession({ id }: { id: string }) {
   const [tab, setTab] = useState<Tab>('changes')
   const [selected, setSelected] = useState<string>()
   const turn = lastStateSeq(events)
-  const { files, error: filesError } = useCodeFiles(id, turn, read?.state)
+  const { files, error: filesError } = useCodeFiles(id, turn, read)
   const { data: diff, error: diffError } = useCodeDiff(id, turn)
   const changed = useMemo(() => diff?.diff.files.map((f) => f.path), [diff])
   const [title, setTitle] = useState<string>()
@@ -1100,7 +1114,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
   const { session, onModel } = useSavedModel(id, read)
   const turn = lastStateSeq(events)
   const cost = sessionCost(events)
-  const { files, error: filesError } = useCodeFiles(id, turn, read?.state)
+  const { files, error: filesError } = useCodeFiles(id, turn, read)
   const { data: diff, error: diffError } = useCodeDiff(id, turn)
   const [view, setView] = useState<View | undefined>('changes')
   const [tabs, setTabs] = useState<EditorTab[]>([])

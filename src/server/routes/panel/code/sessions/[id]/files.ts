@@ -8,7 +8,11 @@ import { readableWorkspace } from '../../../../../code/workspace-read'
 import { errorMessage } from '../../../../../factory/error-message'
 import { ownerOnly } from '../../../../../panel/policy'
 
-/** The files of a running session's checkout. A stopped session has no checkout to read: that is a 409. */
+/**
+ * The files of a running session's checkout. A session with no checkout to read (not started yet, stopped, ended, or
+ * ended while the page asked) answers `unavailable` with no files: the page asks in those moments too, so it is not
+ * an error.
+ */
 export const GET = route()
   .policy(ownerOnly)
   .params(z.object({ id: z.string().min(1).max(100) }))
@@ -18,10 +22,7 @@ export const GET = route()
       return Response.json({ error: 'not_found', message: 'No such session.' }, { status: 404 })
     }
     const live = await readableWorkspace(session)
-    if (!live) {
-      const message = 'The workspace is not running, so its files cannot be read now.'
-      return Response.json({ error: 'workspace_unavailable', message }, { status: 409 })
-    }
+    if (!live) return { files: [], unavailable: true }
     try {
       return { files: await listWorkspaceFiles(live.backend, live.repoDir) }
     } catch (error) {
