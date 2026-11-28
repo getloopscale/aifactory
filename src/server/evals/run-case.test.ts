@@ -386,6 +386,27 @@ describe('runCase', () => {
       expect(adds).toHaveLength(1)
     })
 
+    it('starts the review before the proof of its head ends, and times the proof (#716)', async () => {
+      vi.stubEnv('FACTORY_TEST_PROOF_MODE', 'auto')
+      const provider = withTests(sandbox())
+      const builder = agent('builder', planned(built('done', 0.3)))
+      const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE, costUsd: 0.1 }])
+      let proofEndedFirst: boolean | undefined
+      const run = reviewer.run
+      reviewer.run = async (backend, input) => {
+        proofEndedFirst ??= provider.backend.commands.some((c) =>
+          c.includes('worktree remove --force /tmp/aifactory-proof'),
+        )
+        return run(backend, input)
+      }
+
+      const result = await runCase(deps(provider, builder, reviewer), evalCase)
+
+      expect(proofEndedFirst).toBe(false)
+      expect(result.passed).toBe(false)
+      expect(result.timing!.steps.filter((s) => s.step === 'test_proof')).toHaveLength(1)
+    })
+
     it('records and adds nothing in trial, the default', async () => {
       const provider = withTests(sandbox())
       const builder = agent('builder', planned(built('done', 0.3)))
