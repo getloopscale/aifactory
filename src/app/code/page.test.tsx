@@ -167,7 +167,7 @@ describe.each([
       name: t.code.changes.pullRequest.link(9),
     })
     expect(link.getAttribute('href')).toBe('https://github.com/acme/shop/pull/9')
-    expect(screen.getByLabelText(t.code.changes.pullRequest.title)).toBeDefined()
+    expect(screen.getByLabelText(t.code.changes.pullRequest.commitTitle)).toBeDefined()
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
