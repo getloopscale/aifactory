@@ -7,7 +7,8 @@ import {
   type CodeMode,
   type CodeSession,
 } from '../../shared/code'
-import { FakeSandbox } from '../factory/fake-sandbox'
+import { ClaudeStreamBackend, FakeSandbox, type ClaudeScript } from '../factory/fake-sandbox'
+import { claudeCodeHarness, RESULT_QUIET_MS } from '../factory/harness-claude'
 import type { CodingHarness, HarnessInput, HarnessResult } from '../factory/harness'
 
 import { transition, type CodeTransitionEvent } from './transitions'
@@ -80,6 +81,19 @@ function memory(mode: CodeMode = 'code', extra: Partial<CodeSession> = {}) {
   return { session, events, store, control }
 }
 
+/** What the workspace answers: one changed file, and the checkout's path. */
+function workspaceAnswer(c: string) {
+  if (c.includes('@@numstat@@')) {
+    return {
+      stdout:
+        '@@numstat@@\0' +
+        '1\t0\ta.txt\0' +
+        '\0\0@@patch@@\0diff --git a/a.txt b/a.txt\n@@ -0,0 +1 @@\n+x\n',
+    }
+  }
+  return c.includes('rev-parse') ? { stdout: '/home/work\n' } : undefined
+}
+
 function setup(
   mode: CodeMode = 'code',
   answer: (input: HarnessInput) => Promise<HarnessResult> | HarnessResult = () => ({
@@ -89,21 +103,14 @@ function setup(
     costUsd: 0.5,
   }),
   extra: Partial<CodeSession> = {},
+  claude?: ClaudeScript,
 ) {
   const world = memory(mode, extra)
   const scripted: { fn?: (command: string) => { stdout?: string; exitCode?: number } | undefined } =
     {}
-  const sandbox = new FakeSandbox((c) =>
-    c.includes('@@numstat@@')
-      ? {
-          stdout:
-            '@@numstat@@\0' +
-            '1\t0\ta.txt\0' +
-            '\0\0@@patch@@\0diff --git a/a.txt b/a.txt\n@@ -0,0 +1 @@\n+x\n',
-        }
-      : c.includes('rev-parse')
-        ? { stdout: '/home/work\n' }
-        : scripted.fn?.(c),
+  const sandbox = new FakeSandbox(
+    (c) => workspaceAnswer(c) ?? scripted.fn?.(c),
+    claude ? { backend: new ClaudeStreamBackend(workspaceAnswer, claude) } : {},
   )
   const saveDiff = vi.fn(async (_id: string, _diff: unknown) => undefined)
   const run = vi.fn(async (_b: unknown, input: HarnessInput) => {
@@ -230,6 +237,49 @@ describe('runTurn controls', () => {
     await turn
     expect(sent).toEqual(['also this'])
     expect(await t.store.pending('s1')).toBeUndefined()
+  })
+
+  it('ends a Claude turn that answered a message delivered during its pass with one result (#772)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let answered = false
+      const t = setup('code', undefined, {}, async (claude) => {
+        claude.print(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'agent-7' }))
+        await claude.read(2)
+        claude.print(
+          JSON.stringify({
+            type: 'assistant',
+            message: { content: [{ type: 'text', text: 'Both.' }] },
+          }),
+        )
+        claude.print(
+          JSON.stringify({ type: 'result', is_error: false, result: 'Both.', total_cost_usd: 0.3 }),
+        )
+        answered = true
+      })
+      t.deps.harnessFor = () => claudeCodeHarness({ kind: 'api-key', secret: 'k' })
+      t.deps.controlPollMs = 5
+      const turn = runTurn(t.deps, 's1')
+      await vi.waitFor(() => expect(t.session.state).toBe('running'))
+      t.events.push({
+        sessionId: 's1',
+        seq: t.events.length + 1,
+        kind: 'user_message',
+        tool: null,
+        content: 'also this',
+        at: new Date(),
+      })
+      const seq = t.events.length
+      await vi.waitFor(() => expect(answered).toBe(true))
+      await vi.advanceTimersByTimeAsync(RESULT_QUIET_MS)
+      expect(await turn).toEqual({ status: 'idle', sessionId: 's1' })
+      expect(t.session.state).toBe('idle')
+      expect(t.events.some((e) => e.kind === 'state' && e.content === `turn:${seq}`)).toBe(true)
+      expect(t.events.filter((e) => e.kind === 'cost')).toHaveLength(1)
+      expect(await t.store.pending('s1')).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('leaves a message unanswered when the harness cannot be written to', async () => {
