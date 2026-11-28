@@ -156,4 +156,15 @@ describe('the pull request form', () => {
       true,
     )
   })
+
+  it('keeps only the link for an ended session, and renders nothing without one', () => {
+    form({ existing: { number: 3, url: 'https://github.com/acme/app/pull/3' }, ended: true })
+    expect(screen.getByRole('link', { name: copy.link(3) })).toBeDefined()
+    expect(screen.queryByLabelText(copy.title)).toBeNull()
+    expect(screen.queryByRole('button', { name: copy.again })).toBeNull()
+    cleanup()
+    form({ ended: true })
+    expect(screen.queryByRole('region', { name: copy.heading })).toBeNull()
+    expect(screen.queryByLabelText(copy.title)).toBeNull()
+  })
 })

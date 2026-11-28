@@ -275,8 +275,11 @@ function SessionList({
 }) {
   const { t } = useCopy()
   const [filter, setFilter] = useState('')
+  const [hideEnded, setHideEnded] = useState(false)
+  const anyEnded = sessions.some((s) => s.state === 'ended')
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean)
   const sorted = [...sessions]
+    .filter((s) => !(hideEnded && s.state === 'ended'))
     .filter((s) => {
       const text = `${s.title} ${s.repository}`.toLowerCase()
       return words.every((w) => text.includes(w))
@@ -311,6 +314,16 @@ function SessionList({
             onChange={(e) => setFilter(e.target.value)}
             className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
+        </label>
+      ) : null}
+      {anyEnded ? (
+        <label className="mx-3 mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={hideEnded}
+            onChange={(e) => setHideEnded(e.target.checked)}
+          />
+          {t.code.hideEnded}
         </label>
       ) : null}
       {sorted.length === 0 ? (
@@ -435,6 +448,7 @@ function SidePanel({
   id,
   repository,
   pullRequest,
+  ended,
   turn,
   tab,
   onTab,
@@ -446,6 +460,7 @@ function SidePanel({
   id: string
   repository: string
   pullRequest: { number: number; url: string } | undefined
+  ended: boolean
   turn: number
   tab: Tab
   onTab: (tab: Tab) => void
@@ -519,6 +534,7 @@ function SidePanel({
                   repository={repository}
                   existing={pullRequest}
                   hasChanges={data.diff.files.length > 0}
+                  ended={ended}
                 />
                 {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
                   <Quiet>{t.code.changes.stored}</Quiet>
@@ -576,6 +592,7 @@ function OpenSession({ id }: { id: string }) {
       id={id}
       repository={session.repository}
       pullRequest={pullRequestOf(session)}
+      ended={session.state === 'ended'}
       turn={turn}
       tab={tab}
       onTab={setTab}
@@ -1051,6 +1068,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
               repository={session.repository}
               existing={pullRequestOf(session)}
               hasChanges={changed.length > 0}
+              ended={session.state === 'ended'}
             />
           ) : null}
         </div>
