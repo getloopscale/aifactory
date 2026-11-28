@@ -30,6 +30,21 @@ vi.mock('../../../code/pull-request', async (original) => ({
 
 let enabledRepository = true
 
+const github = vi.hoisted(() => ({
+  installationToken: async (_repo: string) => ({ token: 't' }),
+  branchHead: async (_repo: string, _token: string, _branch: string): Promise<string | undefined> =>
+    'abc',
+}))
+vi.mock('../../../panel/deps', () => ({
+  actionDeps: () => ({
+    github: { installationToken: (repo: string) => github.installationToken(repo) },
+    api: {
+      branchHead: (repo: string, token: string, branch: string) =>
+        github.branchHead(repo, token, branch),
+    },
+  }),
+}))
+
 import { DELETE, GET as one, PATCH } from './sessions/[id]'
 import { POST as message } from './sessions/[id]/messages'
 import { POST as stop } from './sessions/[id]/stop'
@@ -80,6 +95,8 @@ describe('the handlers', () => {
   beforeEach(() => {
     vi.resetAllMocks()
     enabledRepository = true
+    github.installationToken = async () => ({ token: 't' })
+    github.branchHead = async () => 'abc'
     vi.mocked(canStart).mockImplementation((_r, name) => name === 'codex')
     vi.mocked(harnessRegistry).mockReturnValue({ codex: vi.fn(), 'claude-code': vi.fn() })
     vi.mocked(getDb).mockReturnValue({
@@ -124,6 +141,37 @@ describe('the handlers', () => {
       mode: 'code',
     })
     expect(stored.workBranch).toMatch(/^code\/[0-9a-f]{8}$/)
+  })
+
+  it('refuses a base branch the repository does not have with 400 naming both, and stores nothing', async () => {
+    const asked: string[] = []
+    github.branchHead = async (repo, token, branch) => {
+      asked.push(`${repo} ${token} ${branch}`)
+      return undefined
+    }
+    const response = (await run(POST, {
+      body: { ...valid, baseBranch: 'branch-que-nao-existe' },
+    })) as Response
+    expect(response.status).toBe(400)
+    expect(await response.json()).toMatchObject({
+      message: 'The branch branch-que-nao-existe does not exist in acme/shop.',
+    })
+    expect(asked).toEqual(['acme/shop t branch-que-nao-existe'])
+    expect(createSession).not.toHaveBeenCalled()
+  })
+
+  it('creates the session when the branch cannot be read, and the turn says what it finds', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    vi.mocked(createSession).mockResolvedValue({ id: 'new' } as never)
+    github.branchHead = async () => {
+      throw new Error('GitHub answered 502 reading the branch')
+    }
+    expect(await run(POST, { body: valid })).toEqual({ session: { id: 'new' } })
+    github.installationToken = async () => {
+      throw new Error('GITHUB_APP_ID is not set')
+    }
+    expect(await run(POST, { body: valid })).toEqual({ session: { id: 'new' } })
+    expect(createSession).toHaveBeenCalledTimes(2)
   })
 
   it('defaults the base branch, the agent and the mode', async () => {

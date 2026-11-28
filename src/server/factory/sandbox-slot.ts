@@ -83,6 +83,8 @@ export async function untilSlotFree(
     sleep?: (ms: number) => Promise<void>
     limitMs?: number
     signal?: AbortSignal
+    /** Called once, when the account's sandboxes are all up and the wait begins. */
+    onWait?: () => Promise<void> | void
   } = {},
 ): Promise<SlotWait> {
   const now = options.now ?? Date.now
@@ -90,6 +92,7 @@ export async function untilSlotFree(
   const started = now()
   const limit = options.limitMs ?? QUEUE_SLOT_LIMIT_MS
   if (!provider.listSandboxes || !provider.maxSandboxes) return { waitedMs: 0 }
+  let waiting = false
   for (;;) {
     let up: number
     try {
@@ -103,6 +106,10 @@ export async function untilSlotFree(
     const waitedMs = now() - started
     if (up < provider.maxSandboxes || options.signal?.aborted) return { waitedMs }
     if (waitedMs >= limit) return { waitedMs, gaveUp: true }
+    if (!waiting) {
+      waiting = true
+      await options.onWait?.()
+    }
     await sleep(SLOT_WAIT_MS)
   }
 }
