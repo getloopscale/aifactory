@@ -374,6 +374,31 @@ describe('the side panel of an open session', () => {
     expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
   })
 
+  it('reads the diff again when the end of a finished turn arrives, and lists what it changed', async () => {
+    const diffs = [diff(0), diff(0), diff(2)]
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diffs.shift(),
+    )
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const event = (seq: number, kind: string, content: string) =>
+      feed.add({ sessionId: 'new', seq, kind, tool: null, content, at: '' })
+    act(() => event(2, 'state', 'turn:1'))
+    await waitFor(() =>
+      expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2),
+    )
+    act(() => {
+      event(3, 'tool_use', 'write f0.ts')
+      event(4, 'tool_result', 'ok')
+      event(5, 'agent_message', 'done')
+      event(6, 'cost', '{"costUsd":0.1}')
+    })
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+    act(() => event(7, 'state', 'end:turn_ended'))
+    expect(await screen.findByText('f1.ts')).toBeDefined()
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(3)
+  })
+
   it('shows Files on Ctrl+Shift+F, even with the panel hidden, and opens a file with line numbers', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
