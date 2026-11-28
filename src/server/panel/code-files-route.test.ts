@@ -74,33 +74,34 @@ describe('the files routes', () => {
     ['no sandbox', { sandboxId: null }],
     ['a stopped session', { state: 'stopped' }],
     ['an ended session', { state: 'ended' }],
-  ])('answers 409 for %s, and connects to nothing', async (_, change) => {
+  ])('answers unavailable for %s, and connects to nothing', async (_, change) => {
     store.getSession.mockResolvedValue({ ...SESSION, ...change })
     const sandbox = open(() => ({}))
-    const res = (await call(files, { params: { id: 's' } })) as Response
-    expect(res.status).toBe(409)
-    expect(await res.json()).toMatchObject({ error: 'workspace_unavailable' })
+    expect(await call(files, { params: { id: 's' } })).toEqual({ files: [], unavailable: true })
     expect(
       ((await call(file, { params: { id: 's' }, query: { path: 'a' } })) as Response).status,
     ).toBe(409)
     expect(sandbox.reconnected).toEqual([])
   })
 
-  it('answers 409 when the sandbox is gone or holds no checkout yet', async () => {
+  it('answers unavailable, not an empty checkout, when the sandbox is gone or holds no checkout yet', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const unavailable = { files: [], unavailable: true }
     open(() => ({})).up.clear()
-    expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(409)
+    expect(await call(files, { params: { id: 's' } })).toEqual(unavailable)
     const sandbox = new FakeSandbox(() => ({ exitCode: 128 }))
     sandbox.up.set('sbx-1', { id: 'sbx-1', startedAt: new Date(), metadata: {} })
     provider.current = sandbox
-    expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(409)
+    expect(await call(files, { params: { id: 's' } })).toEqual(unavailable)
+    open(() => ({ stdout: '' }))
+    expect(await call(files, { params: { id: 's' } })).toEqual({ files: [] })
   })
 
-  it('answers 404, 409 and 502 for a missing session, a stopped workspace and a failed read', async () => {
+  it('answers 404, unavailable and 502 for a missing session, a stopped workspace and a failed read', async () => {
     store.getSession.mockResolvedValueOnce(undefined)
     expect(((await call(files, { params: { id: 'x' } })) as Response).status).toBe(404)
     store.getSession.mockResolvedValueOnce({ ...SESSION, state: 'stopped', sandboxId: null })
-    expect(((await call(files, { params: { id: 's' } })) as Response).status).toBe(409)
+    expect(await call(files, { params: { id: 's' } })).toMatchObject({ unavailable: true })
     store.getSession.mockResolvedValueOnce({ ...SESSION, state: 'stopped', sandboxId: null })
     expect(
       ((await call(file, { params: { id: 's' }, query: { path: 'a' } })) as Response).status,
