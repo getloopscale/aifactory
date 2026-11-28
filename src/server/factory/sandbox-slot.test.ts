@@ -219,4 +219,20 @@ describe('untilSlotFree', () => {
 
     expect(await untilSlotFree(broken, c)).toEqual({ waitedMs: 0, unread: 'fetch failed' })
   })
+
+  it('says once that it waits, and only when it does', async () => {
+    const c = clock()
+    const waits: number[] = []
+    const onWait = () => {
+      waits.push(c.slept())
+    }
+
+    await untilSlotFree(account([10, 10, 10, 9]), { ...c, onWait })
+    expect(waits).toEqual([0])
+
+    await untilSlotFree(account([9]), { ...c, onWait })
+    const broken = { maxSandboxes: 10, listSandboxes: () => Promise.reject(new Error('down')) }
+    await untilSlotFree(broken, { ...c, onWait })
+    expect(waits).toEqual([0])
+  })
 })

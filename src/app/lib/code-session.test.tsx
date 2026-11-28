@@ -147,6 +147,40 @@ describe('useCodeSession', () => {
     expect(urls.slice(before).some((u) => u.includes('/events?after=1'))).toBe(true)
   })
 
+  it.each([
+    ['a finished turn', 'end:turn_ended', 'idle'],
+    ['a failed turn', 'end:turn_failed', 'failed'],
+    ['an ended session', 'end:end', 'ended'],
+  ])('reads the session again at the end of %s', async (_, marker, final) => {
+    let state = 'running'
+    const reads: string[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url.includes('/events'))
+          return new Response(JSON.stringify({ events: [], more: false }))
+        reads.push(state)
+        return new Response(JSON.stringify({ id: 's', state }))
+      }),
+    )
+    const { result } = renderHook(() => useCodeSession('s'))
+    await waitFor(() => expect(result.current.session?.state).toBe('running'))
+    const turn: Array<[CodeEventWire['kind'], string]> = [
+      ['user_message', 'hi'],
+      ['state', 'turn:1'],
+      ['tool_use', 'ls'],
+      ['tool_result', 'a.ts'],
+      ['agent_message', 'done'],
+      ['cost', '{}'],
+    ]
+    turn.forEach(([kind, content], i) => pushEvent({ ...ev(i + 1), kind, content }))
+    await waitFor(() => expect(reads).toHaveLength(2))
+    state = final
+    pushEvent({ ...ev(7), kind: 'state', content: marker })
+    await waitFor(() => expect(result.current.session?.state).toBe(final))
+    expect(result.current.events.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7])
+  })
+
   it('reads the session again when a plan arrives', async () => {
     let state = 'running'
     vi.stubGlobal(

@@ -903,6 +903,7 @@ const report = (over: Partial<HealthReport> = {}): HealthReport => ({
     ],
   },
   findings: [],
+  assistProvider: null,
   ...over,
 })
 
@@ -1139,6 +1140,45 @@ describe('health', () => {
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toBe('this question has nothing to resume'),
     )
+  })
+
+  it('reports a provider that refuses the assistants for credit once, and nothing once it answers again', async () => {
+    serve({
+      'GET /api/panel/health': report({
+        assistProvider: {
+          provider: 'anthropic',
+          reason: 'credit',
+          since: '2026-11-28T10:00:00Z',
+          lastAt: '2026-11-28T10:40:00Z',
+        },
+      }),
+    })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getAllByText("The assistants' model provider is refusing calls")).toHaveLength(
+        1,
+      ),
+    )
+    expect(screen.getByText(/Anthropic refuses the panel's assistants/)).toBeDefined()
+    expect(screen.getByText(/no credit left/)).toBeDefined()
+    expect(screen.queryByText('Nothing is wrong with the factory right now.')).toBeNull()
+    cleanup()
+
+    serve({ 'GET /api/panel/health': report({ assistProvider: null }) })
+    render(
+      <MemoryRouter>
+        <HealthPage />
+      </MemoryRouter>,
+    )
+    await waitFor(() =>
+      expect(screen.getByText('Nothing is wrong with the factory right now.')).toBeDefined(),
+    )
+    expect(screen.queryByText("The assistants' model provider is refusing calls")).toBeNull()
   })
 
   it('shows a stalled queue with what holds it, and no action, since it resolves once its runs start', async () => {

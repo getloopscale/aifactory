@@ -26,6 +26,7 @@ import {
   type CodeMode,
   type CodeSessionWire,
   type CodeState,
+  waitsForWorkspace,
 } from '../../shared/code'
 import type { AgentsView, ModelOption } from '../../shared/panel'
 import { Assist } from '../components/Assist'
@@ -147,6 +148,22 @@ function pushResult(rows: Row[], e: CodeEventWire, key: string, shown: Set<strin
     shown.add(key)
     rows.push({ type: 'error', seq: e.seq, text: e.content })
   }
+}
+
+/** The error a checkout of a branch the repository lacks fails with (`repo_provision_failed`), and the branch. */
+const MISSING_BRANCH =
+  /^repo_provision_failed\b[\s\S]*\bcheckout (\S+) failed: error: pathspec '[^']*' did not match/
+
+/** Says in the owner's words an error they can act on; any other is kept as it came. */
+export function inOwnerWords(
+  events: CodeEventWire[],
+  repository: string,
+  missingBranch: (branch: string, repository: string) => string,
+): CodeEventWire[] {
+  return events.map((e) => {
+    const m = e.kind === 'error' ? MISSING_BRANCH.exec(e.content) : null
+    return m ? { ...e, content: missingBranch(m[1]!, repository) } : e
+  })
 }
 
 /** Two or more commands in a row become one line. An edit stays a line of its own: it is what changed. */
@@ -560,7 +577,10 @@ export function CodeConversation({
 }) {
   const { t } = useCopy()
   const c = { ...t.code.conversation, mentions: t.code.files.mentions }
-  const rows = useMemo(() => cardsOf(events), [events])
+  const rows = useMemo(
+    () => cardsOf(inOwnerWords(events, session.repository, c.missingBranch)),
+    [events, session.repository, c.missingBranch],
+  )
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string>()
@@ -804,7 +824,11 @@ export function CodeConversation({
             aria-hidden
             className={`size-1.5 shrink-0 rounded-full ${working ? `animate-pulse ${TONE_DOT.primary}` : TONE_DOT.neutral}`}
           />
-          <span role="status">{c.stateLine[session.state]}</span>
+          <span role="status">
+            {waitsForWorkspace(session.state, events)
+              ? c.waitingWorkspace
+              : c.stateLine[session.state]}
+          </span>
         </p>
         <div className="relative rounded-xl border border-border bg-card focus-within:border-foreground/40">
           {options.length > 0 ? (

@@ -2,7 +2,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { CodeEventWire, CodeSessionWire, CodeState } from '../../shared/code'
+import {
+  WAITING_FOR_WORKSPACE,
+  type CodeEventWire,
+  type CodeSessionWire,
+  type CodeState,
+} from '../../shared/code'
 import { en } from '../lib/copy/en'
 
 vi.mock('../lib/api', () => ({ get: vi.fn(), post: vi.fn(), patch: vi.fn(), del: vi.fn() }))
@@ -168,6 +173,53 @@ describe('the conversation', () => {
   it('names the agent and the model of the session under the box', () => {
     render(<CodeConversation session={{ ...session('idle'), model: 'm-1' }} events={[]} />)
     expect(screen.getByLabelText(`${c.by}: codex · m-1`)).toBeDefined()
+  })
+
+  it('says a turn waits for a workspace until its turn starts', () => {
+    const waiting = [
+      ev(1, 'user_message', 'hi'),
+      ev(2, 'state', WAITING_FOR_WORKSPACE, 'code'),
+      ev(3, 'state', WAITING_FOR_WORKSPACE, 'code'),
+    ]
+    const { rerender } = render(<CodeConversation session={session('queued')} events={waiting} />)
+    expect(screen.getByRole('status').textContent).toBe(c.waitingWorkspace)
+    rerender(<CodeConversation session={session('starting')} events={waiting} />)
+    expect(screen.getByRole('status').textContent).toBe(c.waitingWorkspace)
+    rerender(
+      <CodeConversation
+        session={session('running')}
+        events={[...waiting, ev(4, 'state', 'turn:1', 'code')]}
+      />,
+    )
+    expect(screen.getByRole('status').textContent).toBe(c.stateLine.running)
+    rerender(
+      <CodeConversation session={session('starting')} events={[ev(1, 'user_message', 'hi')]} />,
+    )
+    expect(screen.getByRole('status').textContent).toBe(c.stateLine.starting)
+  })
+
+  it('says a checkout of a missing base branch in the owner words, and keeps any other error', () => {
+    const missing =
+      "repo_provision_failed [work] checkout branch-que-nao-existe failed: error: pathspec 'branch-que-nao-existe' did not match any file(s) known to git"
+    render(
+      <CodeConversation
+        session={session('failed')}
+        events={[
+          ev(1, 'user_message', 'hi'),
+          ev(2, 'state', 'turn:1'),
+          ev(3, 'error', missing),
+          ev(4, 'user_message', 'again'),
+          ev(5, 'error', 'repo_provision_failed [work] clone failed: timeout'),
+        ]}
+      />,
+    )
+    const said = c.missingBranch('branch-que-nao-existe', 'acme/shop')
+    expect(said).toBe(
+      'The branch branch-que-nao-existe does not exist in acme/shop. Start a session on a branch the repository has.',
+    )
+    expect(screen.getByText(said)).toBeDefined()
+    expect(screen.queryByText(missing)).toBeNull()
+    expect(screen.getByText('repo_provision_failed [work] clone failed: timeout')).toBeDefined()
   })
 
   it('shows Stop in place of Send only while running with an empty box', async () => {

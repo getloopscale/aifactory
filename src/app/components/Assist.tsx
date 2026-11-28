@@ -1,7 +1,9 @@
 import { Button, Input } from '@getloopscale/ui'
 import { useAgent } from '@getloopscale/loopzero/client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
+import type { AssistProviderRefusal, HealthReport } from '../../shared/panel'
+import { get } from '../lib/api'
 import {
   agentFor,
   assistProblem,
@@ -20,6 +22,27 @@ const NEEDS_WORDS: Record<AssistKind, boolean> = {
   changes: true,
   resolution: true,
   setup: false,
+}
+
+/**
+ * What the factory recorded of the assistants' provider, read once the assistant failed: the framework sends the
+ * page only "An error occurred." for a provider's refusal. `undefined` while it is being read, `null` for nothing.
+ */
+function useProviderRefusal(failed: Error | undefined): AssistProviderRefusal | null | undefined {
+  const [refusal, setRefusal] = useState<AssistProviderRefusal | null>()
+  useEffect(() => {
+    setRefusal(undefined)
+    if (!failed) return
+    let live = true
+    get<HealthReport>('/api/panel/health').then(
+      (report) => live && setRefusal(report.assistProvider ?? null),
+      () => live && setRefusal(null),
+    )
+    return () => {
+      live = false
+    }
+  }, [failed])
+  return refusal
 }
 
 /**
@@ -49,7 +72,10 @@ export function Assist({
   const [instruction, setInstruction] = useState('')
   const proposal = proposalOf(agent.thread)
   const working = agent.status === 'streaming'
-  const problem = assistProblem(agent.error, t.assistProblems)
+  const refusal = useProviderRefusal(agent.error)
+  // The cause is told once it is known, so the owner never reads the framework's "An error occurred." first.
+  const problem =
+    refusal === undefined ? undefined : assistProblem(agent.error, t.assistProblems, refusal)
   const ready = !NEEDS_WORDS[kind] || text.trim().length >= 3
 
   const ask = (change?: string) =>

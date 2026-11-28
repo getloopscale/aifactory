@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@getloopscale/ui'
-import { CircleDollarSign, Stethoscope, TriangleAlert } from 'lucide-react'
+import { CircleDollarSign, KeyRound, Stethoscope, TriangleAlert } from 'lucide-react'
 import { Link } from 'react-router'
 
-import type { FindingView, HealthReport } from '../../shared/panel'
+import type { AssistProviderRefusal, FindingView, HealthReport } from '../../shared/panel'
 import { AgentIcon } from '../components/floor/AgentIcon'
 import { MetricsSection } from '../components/MetricsSection'
 import {
@@ -19,6 +19,7 @@ import {
   Workbench,
 } from '../components/ui/Surface'
 import { post } from '../lib/api'
+import { providerName } from '../lib/assist'
 import { useCopy } from '../lib/copy'
 import { ago, money } from '../lib/format'
 import { useResource } from '../lib/live'
@@ -114,6 +115,20 @@ function FindingRow({ finding, onDone }: { finding: FindingView; onDone: () => v
   )
 }
 
+/** The assistants' provider refusing their calls: one row, however often it refused. */
+function AssistProviderRow({ refusal }: { refusal: AssistProviderRefusal }) {
+  const { t } = useCopy()
+  const h = t.health
+  return (
+    <Row
+      lead={<RowIcon icon={KeyRound} tone="destructive" />}
+      title={h.assistProvider.title}
+      meta={h.since(ago(refusal.since, Date.now(), t.time))}
+      detail={h.assistProvider.detail(providerName(refusal.provider))}
+    />
+  )
+}
+
 /** Some runs reported a cost and some did not. */
 const partlyReported = (g: { reportedRuns: number; runs: number }) =>
   g.reportedRuns !== 0 && g.reportedRuns < g.runs
@@ -142,11 +157,16 @@ export default function HealthPage() {
       ) : (
         <>
           <Pane>
-            <Surface title={h.findings} icon={Stethoscope} count={data.findings.length}>
-              {data.findings.length === 0 ? (
+            <Surface
+              title={h.findings}
+              icon={Stethoscope}
+              count={data.findings.length + (data.assistProvider ? 1 : 0)}
+            >
+              {data.findings.length === 0 && !data.assistProvider ? (
                 <Quiet>{h.nothingWrong}</Quiet>
               ) : (
                 <Rows>
+                  {data.assistProvider ? <AssistProviderRow refusal={data.assistProvider} /> : null}
                   {data.findings.map((f) => (
                     <FindingRow key={f.id} finding={f} onDone={report.reload} />
                   ))}

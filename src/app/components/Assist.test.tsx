@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CopyProvider, LANGUAGE_KEY } from '../lib/copy'
@@ -34,11 +34,35 @@ const proposed = (input: object) => [
   },
 ]
 
+/** What `GET /api/panel/health` answers; the component reads it only once the assistant failed. */
+let assistProvider: unknown
+let healthReads: number
+
 beforeEach(() => {
   used = []
   agent = { thread: [], status: 'idle', error: undefined, send: vi.fn(), reset: vi.fn() }
+  assistProvider = null
+  healthReads = 0
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (path: string) => {
+      if (path !== '/api/panel/health') return new Response('{}', { status: 404 })
+      healthReads += 1
+      return new Response(JSON.stringify({ cost: {}, findings: [], assistProvider }))
+    }),
+  )
 })
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
+
+const creditRefusal = {
+  provider: 'anthropic',
+  reason: 'credit',
+  since: '2026-11-28T10:00:00Z',
+  lastAt: '2026-11-28T10:40:00Z',
+}
 
 const mount = (over: Partial<Parameters<typeof Assist>[0]> = {}) => {
   const onUse = vi.fn()
@@ -160,11 +184,41 @@ describe('the assistant under a text box', () => {
     expect(screen.queryByRole('region', { name: 'Suggestion' })).toBeNull()
   })
 
-  it('says what went wrong, in words the owner can act on', () => {
+  it('says what went wrong, in words the owner can act on', async () => {
     agent.status = 'error'
     agent.error = new Error('invalid x-api-key')
     mount()
-    expect(screen.getByRole('alert').textContent).toMatch(/ANTHROPIC_API_KEY/)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/ANTHROPIC_API_KEY/)
+  })
+
+  it('names credit as the cause when the provider refused for it, never "An error occurred."', async () => {
+    assistProvider = creditRefusal
+    agent.status = 'error'
+    agent.error = new Error('An error occurred.')
+    mount({ kind: 'changes', text: 'fix the header' })
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toBe(en.assistProblems.creditRefused('Anthropic'))
+    expect(alert.textContent).not.toMatch(/An error occurred/)
+  })
+
+  it('reads nothing of the provider while the assistant answers', () => {
+    mount()
+    expect(healthReads).toBe(0)
+  })
+
+  it('says the error as it came when the health report cannot be read', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('', { status: 500 })),
+    )
+    agent.status = 'error'
+    agent.error = new Error('socket hang up')
+    mount()
+    await waitFor(() =>
+      expect(screen.getByRole('alert').textContent).toBe(
+        en.assistProblems.couldNot('socket hang up'),
+      ),
+    )
   })
 })
 
@@ -183,6 +237,24 @@ describe('the assistant in the language of the panel', () => {
     )
     expect(screen.getByRole('button', { name: copy.assist.label.job })).toBeTruthy()
     expect(screen.getByText(copy.assist.needsWords)).toBeTruthy()
+  })
+
+  it.each([
+    ['en', en],
+    ['pt-BR', ptBR],
+  ] as const)('names the refusal for credit in %s', async (language, copy) => {
+    window.localStorage.setItem(LANGUAGE_KEY, language)
+    assistProvider = creditRefusal
+    agent.status = 'error'
+    agent.error = new Error('An error occurred.')
+    render(
+      <CopyProvider>
+        <Assist kind="changes" text="arrumar o cabeçalho" onUse={vi.fn()} />
+      </CopyProvider>,
+    )
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      copy.assistProblems.creditRefused('Anthropic'),
+    )
   })
 
   it('writes a suggestion and its buttons in Portuguese', () => {
