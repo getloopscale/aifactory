@@ -2115,6 +2115,10 @@ export const ptBR: Copy = {
         cancel: 'Cancelar',
         sending: 'Enviando…',
       },
+      waitingWorkspace:
+        'Esperando um espaço de trabalho: todos estão em uso. Encerrar outra sessão, ou deixá-la ociosa até o espaço dela fechar, libera um.',
+      missingBranch: (branch: string, repository: string) =>
+        `A branch ${branch} não existe em ${repository}. Inicie uma sessão numa branch que o repositório tem.`,
       stateLine: {
         idle: 'Pronta para a próxima mensagem.',
         queued: 'Na fila: o agente começa logo.',
