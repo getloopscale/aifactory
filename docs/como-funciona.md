@@ -809,14 +809,15 @@ por caso. Nos 30 casos que as duas têm, a de Opus passou 27 e levou em média 2
 28 e 17,2 minutos. Dois dos cinco casos que não passaram são casos de segurança que a revisão comum barrou
 antes da revisão de segurança, o que a regra de então contava como falha (#714).
 
-O conjunto rápido do #684 (cinco casos que passaram na baseline, todos ao mesmo tempo) está inteiro na
-baseline, e os cinco passaram. A checagem levou 35 min 46 s em 2026-11-27 e 35 a 37 minutos em cinco rodadas
-de 2026-11-28, com o host em carga 1 a 3: a meta de menos de 20 minutos (#688, #695) não foi atingida. O
-tempo é o do caso mais longo, `usetheokit/theokit-sdk#938`, e o tempo por etapa (#711) mostra de onde vem: 8
-minutos de checagens, duas vezes, e 14 minutos da prova de teste, que roda a suíte do repositório de novo
-(#721). Os agentes somam menos de 4 minutos desse caso. `usetheokit/theokit-gateways#354` caiu de 35 a 43
-minutos para 18,6 quando um critério de aceite que só um commit publicado prova deixou de bloquear a revisão
-(#718).
+O conjunto rápido sai da baseline (`markQuick`: em cada repositório, o caso mais curto que passou), então
+mudou com ela: `aifactory-playground#63`, `theokit-ui#178`, `theokit#1690`, `theokit-sdk#981` e
+`theokit-plugins#235`, que na baseline levaram 1, 5, 8, 13 e 15 minutos. Com o conjunto anterior, que tinha
+`theokit-sdk#938` e `theokit-gateways#354`, a checagem levou 35 min 46 s em 2026-11-27 e 35 a 43 minutos em
+cinco rodadas de 2026-11-28, com o host em carga 1 a 3, acima da meta de 20 minutos (#688, #695). O tempo
+por etapa (#711) mostra de onde vinha: em `theokit-sdk#938`, 8 minutos de checagens, duas vezes, e 14 minutos
+da prova de teste, que roda a suíte do repositório de novo (#721), contra menos de 4 minutos de agentes.
+`theokit-gateways#354` caiu de 35 a 43 minutos para 18,6 quando um critério de aceite que só um commit
+publicado prova deixou de bloquear a revisão (#718).
 
 ## O painel
 
