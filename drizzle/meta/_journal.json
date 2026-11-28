@@ -477,6 +477,13 @@
       "when": 1796384783100,
       "tag": "0070_pull_request_ci",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1796471183100,
+      "tag": "0071_test_proof_method",
+      "breakpoints": true
     }
   ]
 }
