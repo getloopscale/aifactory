@@ -88,7 +88,7 @@ describe('the assistant under a text box', () => {
     expect(agent.reset).toHaveBeenCalled()
     expect(agent.send).toHaveBeenCalledWith({
       message:
-        'kind: goal\nrepository: o/r\ncontext: ctx\n\nThe owner wrote:\na site for my clients',
+        'kind: goal\nlanguage: en\nrepository: o/r\ncontext: ctx\n\nThe owner wrote:\na site for my clients',
     })
   })
 
@@ -172,7 +172,7 @@ describe('the assistant under a text box', () => {
     fireEvent.click(change)
     expect(agent.send).toHaveBeenCalledWith({
       message:
-        'kind: goal\n\nThe owner wrote:\na site for my clients\n\nThe owner then asked for a change to your suggestion: shorter',
+        'kind: goal\nlanguage: en\n\nThe owner wrote:\na site for my clients\n\nThe owner then asked for a change to your suggestion: shorter',
     })
     expect((screen.getByLabelText('Ask for a change') as HTMLInputElement).value).toBe('')
   })
@@ -256,6 +256,34 @@ describe('the assistant in the language of the panel', () => {
       copy.assistProblems.creditRefused('Anthropic'),
     )
   })
+
+  it.each(['en', 'pt-BR'] as const)(
+    'tells the assistant the page is in %s, on the first request and on a change',
+    (language) => {
+      window.localStorage.setItem(LANGUAGE_KEY, language)
+      agent.thread = proposed({ text: 'Adiciona maxOf.', notes: '' })
+      render(
+        <CopyProvider>
+          <Assist
+            kind="pr_title"
+            text="função do maior número"
+            context="src/maxOf.js"
+            onUse={vi.fn()}
+          />
+        </CopyProvider>,
+      )
+      const copy = language === 'en' ? en : ptBR
+      fireEvent.click(screen.getByRole('button', { name: copy.assist.label.pr_title }))
+      fireEvent.change(screen.getByLabelText(copy.assist.askChange), {
+        target: { value: 'mais curto' },
+      })
+      fireEvent.click(screen.getByRole('button', { name: copy.assist.change }))
+      expect(agent.send).toHaveBeenCalledTimes(2)
+      for (const [{ message }] of agent.send.mock.calls) {
+        expect(message).toMatch(new RegExp(`^kind: pr_title\\nlanguage: ${language}\\n`))
+      }
+    },
+  )
 
   it('writes a suggestion and its buttons in Portuguese', () => {
     window.localStorage.setItem(LANGUAGE_KEY, 'pt-BR')
