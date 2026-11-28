@@ -1719,6 +1719,7 @@ export const en = {
       side: 'Side bar',
       status: 'Session status',
       cost: (usd: string) => `Cost so far: ${usd}`,
+      costUnreported: 'Cost not reported by this agent',
     },
     filter: 'Filter sessions',
     hideEnded: 'Hide ended sessions',
@@ -1780,6 +1781,7 @@ export const en = {
       truncated: (n: number) => `Showing the first ${n} bytes: the file is longer.`,
       mentions: 'Files to mention',
       openFile: (path: string) => `Open ${path}`,
+      ended: 'The session has ended, so its workspace and its files are gone.',
       unavailable: 'The workspace is not running, so its files cannot be read now.',
     },
     conversation: {

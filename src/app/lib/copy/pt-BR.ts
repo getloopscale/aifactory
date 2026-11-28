@@ -2026,6 +2026,7 @@ export const ptBR: Copy = {
       side: 'Barra lateral',
       status: 'Estado da sessão',
       cost: (usd: string) => `Custo até agora: ${usd}`,
+      costUnreported: 'Custo não informado por este agente',
     },
     filter: 'Filtrar sessões',
     hideEnded: 'Esconder sessões encerradas',
@@ -2088,6 +2089,7 @@ export const ptBR: Copy = {
       truncated: (n: number) => `Mostrando os primeiros ${n} bytes: o arquivo é maior.`,
       mentions: 'Arquivos para mencionar',
       openFile: (path: string) => `Abrir ${path}`,
+      ended: 'A sessão terminou, então o workspace e os arquivos dela não existem mais.',
       unavailable:
         'O workspace não está rodando, então os arquivos dele não podem ser lidos agora.',
     },

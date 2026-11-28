@@ -359,6 +359,50 @@ describe.each(['expanded', 'compact'] as const)('an ended session on a %s width'
     expect(screen.queryByRole('button', { name: pr.again })).toBeNull()
   })
 
+  it.each([
+    ['en', en],
+    ['pt-BR', ptBR],
+  ] as const)(
+    'asks for no files and says in %s why the Files tab is empty',
+    async (language, t) => {
+      show(language, '/code/gone', width)
+      expect(await screen.findByText(t.code.changes.empty)).toBeDefined()
+      expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/gone/diff')
+      fireEvent.keyDown(window, { key: 'f', ctrlKey: true, shiftKey: true })
+      expect(screen.getByText(t.code.files.ended)).toBeDefined()
+      expect(screen.queryByLabelText(t.code.files.filter)).toBeNull()
+      expect(vi.mocked(get).mock.calls.some(([path]) => path.endsWith('/files'))).toBe(false)
+    },
+  )
+
+  it('stops asking for the files and drops the ones it showed once the session ends', async () => {
+    show('en', '/code/ending', width)
+    fireEvent.keyDown(window, { key: 'f', ctrlKey: true, shiftKey: true })
+    expect(await screen.findByRole('button', { name: 'README.md' })).toBeDefined()
+    const asked = () => vi.mocked(get).mock.calls.filter(([path]) => path.endsWith('/files')).length
+    expect(asked()).toBe(1)
+    STATE_OF.ending = 'ended'
+    try {
+      act(() =>
+        feed.add({
+          sessionId: 'ending',
+          seq: 2,
+          kind: 'state',
+          tool: null,
+          content: 'ended',
+          at: '',
+        }),
+      )
+      expect(screen.getByText(en.code.files.ended)).toBeDefined()
+      expect(screen.queryByRole('button', { name: 'README.md' })).toBeNull()
+      await waitFor(() => expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/ending/diff'))
+      await act(async () => {})
+      expect(asked()).toBe(1)
+    } finally {
+      delete STATE_OF.ending
+    }
+  })
+
   it('renders no pull request form when it opened none', async () => {
     show('en', '/code/gone', width)
     expect(await screen.findByText(en.code.changes.empty)).toBeDefined()
@@ -629,7 +673,7 @@ describe('the side panel of an open session', () => {
     expect(status()).toContain(en.code.editor.cost('$0.75'))
   })
 
-  it('shows no cost when every cost event carries none', async () => {
+  it('says the cost is not reported when every cost event carries none', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     act(() => feed.add(cost(2, null)))
@@ -637,6 +681,26 @@ describe('the side panel of an open session', () => {
     act(() => feed.add({ ...cost(4, null), content: 'not json' }))
     act(() => feed.add({ ...cost(5, null), content: '7' }))
     expect(status()).not.toContain('Cost so far')
+    expect(status()).toContain(en.code.editor.costUnreported)
+  })
+
+  it('says nothing of the cost before a cost event, or when no cost event can be read', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    expect(status()).not.toContain(en.code.editor.costUnreported)
+    act(() => feed.add({ ...cost(2, null), content: 'not json' }))
+    act(() => feed.add({ ...cost(3, null), content: 'null' }))
+    expect(status()).not.toContain(en.code.editor.costUnreported)
+    expect(status()).not.toContain('Cost so far')
+  })
+
+  it('shows a reported cost of zero as a cost, not as unreported', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() => feed.add(cost(2, null, 'a1', false)))
+    act(() => feed.add(cost(3, 0, 'a1', true)))
+    expect(status()).toContain(en.code.editor.cost('$0.00'))
+    expect(status()).not.toContain(en.code.editor.costUnreported)
   })
 
   it('reads the diff again when a turn ends', async () => {
