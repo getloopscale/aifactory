@@ -2173,6 +2173,8 @@ export const ptBR: Copy = {
           ended: 'A sessão terminou.',
           notRunning: 'Nenhum turno em andamento.',
         },
+        withArguments: (name: string) =>
+          `/${name} não aceita nada depois: envie /${name} sozinho e use o que ele abre.`,
         list: 'Comandos',
         model: 'Modelo',
         modelDefault: 'O padrão do agente',
