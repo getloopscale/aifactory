@@ -1864,6 +1864,8 @@ export const en = {
           ended: 'The session has ended.',
           notRunning: 'No turn is running.',
         },
+        withArguments: (name: string) =>
+          `/${name} takes nothing after it: send /${name} alone and use what it opens.`,
         list: 'Commands',
         model: 'Model',
         modelDefault: "The agent's default",

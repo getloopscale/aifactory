@@ -39,6 +39,7 @@ import { enterSends } from '../lib/enter-sends'
 
 import {
   COMMAND_TEXT,
+  commandWithArguments,
   commandRefusal,
   matchCommands,
   type CodeCommand,
@@ -800,6 +801,11 @@ export function CodeConversation({
   async function send() {
     const content = text.trim()
     if (blocked || content === '') return
+    const command = commandWithArguments(content)
+    if (command) {
+      setProblem(c.commands.withArguments(command.name))
+      return
+    }
     setBusy(true)
     setProblem(undefined)
     try {
