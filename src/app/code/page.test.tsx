@@ -629,7 +629,7 @@ describe('the side panel of an open session', () => {
     expect(status()).toContain(en.code.editor.cost('$0.75'))
   })
 
-  it('shows no cost when every cost event carries none', async () => {
+  it('says the cost is not reported when every cost event carries none', async () => {
     show('en', '/code/new')
     await screen.findByText(en.code.changes.empty)
     act(() => feed.add(cost(2, null)))
@@ -637,6 +637,26 @@ describe('the side panel of an open session', () => {
     act(() => feed.add({ ...cost(4, null), content: 'not json' }))
     act(() => feed.add({ ...cost(5, null), content: '7' }))
     expect(status()).not.toContain('Cost so far')
+    expect(status()).toContain(en.code.editor.costUnreported)
+  })
+
+  it('says nothing of the cost before a cost event, or when no cost event can be read', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    expect(status()).not.toContain(en.code.editor.costUnreported)
+    act(() => feed.add({ ...cost(2, null), content: 'not json' }))
+    act(() => feed.add({ ...cost(3, null), content: 'null' }))
+    expect(status()).not.toContain(en.code.editor.costUnreported)
+    expect(status()).not.toContain('Cost so far')
+  })
+
+  it('shows a reported cost of zero as a cost, not as unreported', async () => {
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    act(() => feed.add(cost(2, null, 'a1', false)))
+    act(() => feed.add(cost(3, 0, 'a1', true)))
+    expect(status()).toContain(en.code.editor.cost('$0.00'))
+    expect(status()).not.toContain(en.code.editor.costUnreported)
   })
 
   it('reads the diff again when a turn ends', async () => {
