@@ -51,7 +51,7 @@ export const PATCH = route()
       }),
   )
   .handler(async ({ params, body }) => {
-    if (typeof body.model === 'string') {
+    if (typeof body?.model === 'string') {
       const current = await getSession(params.id)
       if (!current) return notFound()
       const accepted = acceptedModels(current.harness)
