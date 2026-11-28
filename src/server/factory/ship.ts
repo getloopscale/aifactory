@@ -283,7 +283,19 @@ export async function shipContained(
       await deps.db
         .select({ id: task.id })
         .from(task)
-        .where(and(eq(task.repository, s.repository), claimedNotShipped(deps.db)))
+        .where(
+          and(
+            eq(task.repository, s.repository),
+            claimedNotShipped(deps.db),
+            // A task of a failed publication keeps what that publication decides for its issue.
+            notExists(
+              deps.db
+                .select({ id: publication.id })
+                .from(publication)
+                .where(eq(publication.taskId, task.id)),
+            ),
+          ),
+        )
     ).map((row) => row.id),
   )
   const read = deps.fetchIssue ?? fetchIssue
