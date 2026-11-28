@@ -34,35 +34,78 @@ describe('agentFor', () => {
 
 describe('buildMessage', () => {
   it('puts what the text is for first, then what the owner wrote', () => {
-    expect(buildMessage({ kind: 'goal', text: 'a site for my clients' })).toBe(
-      'kind: goal\n\nThe owner wrote:\na site for my clients',
+    expect(buildMessage({ kind: 'goal', language: 'en', text: 'a site for my clients' })).toBe(
+      'kind: goal\nlanguage: en\n\nThe owner wrote:\na site for my clients',
     )
   })
 
   it('adds the repository and the context when there are some, in that order', () => {
     expect(
-      buildMessage({ kind: 'changes', repository: 'o/r', context: 'the pull request', text: 'x' }),
-    ).toBe('kind: changes\nrepository: o/r\ncontext: the pull request\n\nThe owner wrote:\nx')
+      buildMessage({
+        kind: 'changes',
+        language: 'en',
+        repository: 'o/r',
+        context: 'the pull request',
+        text: 'x',
+      }),
+    ).toBe(
+      'kind: changes\nlanguage: en\nrepository: o/r\ncontext: the pull request\n\nThe owner wrote:\nx',
+    )
   })
 
   it('carries the pull request kinds and their context', () => {
     expect(agentFor('pr_title')).toBe('/api/agents/assist')
     expect(agentFor('pr_description')).toBe('/api/agents/assist')
     expect(
-      buildMessage({ kind: 'pr_title', repository: 'o/r', context: 'a.js (+1 -0)', text: 'x' }),
-    ).toBe('kind: pr_title\nrepository: o/r\ncontext: a.js (+1 -0)\n\nThe owner wrote:\nx')
+      buildMessage({
+        kind: 'pr_title',
+        language: 'en',
+        repository: 'o/r',
+        context: 'a.js (+1 -0)',
+        text: 'x',
+      }),
+    ).toBe(
+      'kind: pr_title\nlanguage: en\nrepository: o/r\ncontext: a.js (+1 -0)\n\nThe owner wrote:\nx',
+    )
   })
 
   it('leaves out an empty repository or context, and keeps an empty text', () => {
-    expect(buildMessage({ kind: 'setup', repository: '', context: '', text: '' })).toBe(
-      'kind: setup\n\nThe owner wrote:\n',
-    )
+    expect(
+      buildMessage({ kind: 'setup', language: 'en', repository: '', context: '', text: '' }),
+    ).toBe('kind: setup\nlanguage: en\n\nThe owner wrote:\n')
   })
 
   it('carries a request to change a suggestion after what was first written', () => {
-    expect(buildMessage({ kind: 'job', text: 'a login', instruction: 'shorter' })).toBe(
-      'kind: job\n\nThe owner wrote:\na login\n\nThe owner then asked for a change to your suggestion: shorter',
+    expect(
+      buildMessage({ kind: 'job', language: 'en', text: 'a login', instruction: 'shorter' }),
+    ).toBe(
+      'kind: job\nlanguage: en\n\nThe owner wrote:\na login\n\nThe owner then asked for a change to your suggestion: shorter',
     )
+  })
+})
+
+describe('the language of the page in the message (#770)', () => {
+  it.each(['job', 'pr_title', 'pr_description', 'changes'] as const)(
+    'carries the language of the page for %s, before the English repository and context',
+    (kind) => {
+      expect(
+        buildMessage({
+          kind,
+          language: 'pt-BR',
+          repository: 'o/r',
+          context: 'src/maxOf.js (+5 -0)',
+          text: 'função do maior número',
+        }),
+      ).toBe(
+        `kind: ${kind}\nlanguage: pt-BR\nrepository: o/r\ncontext: src/maxOf.js (+5 -0)\n\nThe owner wrote:\nfunção do maior número`,
+      )
+    },
+  )
+
+  it('keeps the language on a request to change a suggestion', () => {
+    expect(
+      buildMessage({ kind: 'changes', language: 'pt-BR', text: 'x', instruction: 'mais curto' }),
+    ).toMatch(/^kind: changes\nlanguage: pt-BR\n/)
   })
 })
 
