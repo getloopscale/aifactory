@@ -2026,6 +2026,7 @@ export const ptBR: Copy = {
       side: 'Barra lateral',
       status: 'Estado da sessão',
       cost: (usd: string) => `Custo até agora: ${usd}`,
+      costUnreported: 'Custo não informado por este agente',
     },
     filter: 'Filtrar sessões',
     hideEnded: 'Esconder sessões encerradas',
