@@ -132,6 +132,7 @@ export const ptBR: Copy = {
         reviewer: 'Revisa',
         security: 'Segurança',
         merger: 'Mescla',
+        lens: 'Lente',
       },
     },
     tree: { heading: 'Em aberto', empty: 'Nada aberto.' },
@@ -1505,6 +1506,7 @@ export const ptBR: Copy = {
       reviewer: 'Agente de código do Revisor',
       merger: 'Agente de código do Mesclador',
       security: 'Agente de código do Revisor de segurança',
+      lens: 'Agente de código da Lente',
     },
     roleName: {
       builder: 'Construtor',
@@ -1512,6 +1514,7 @@ export const ptBR: Copy = {
       reviewer: 'Revisor',
       merger: 'Mesclador',
       security: 'Revisor de segurança',
+      lens: 'Lente',
     },
     pinnedEffort: (level: string) =>
       `Sempre ${level}, o mais alto que este modelo oferece; não dá para baixar`,
@@ -1519,6 +1522,8 @@ export const ptBR: Copy = {
       'O esforço mais alto deste modelo não é conhecido, então a revisão de segurança não roda',
     choice: (label: string) => `Escolha: ${label}`,
     sameAsBuilder: (builder: string) => `O mesmo do Construtor (${builder})`,
+    sameAsReviewer: (reviewer: string) =>
+      `O mesmo do Revisor (${reviewer}), com o modelo e o esforço dele`,
     unavailable: ' (indisponível)',
     model: 'Modelo',
     modelOf: (role: string) => `Modelo do ${role}`,
@@ -1764,6 +1769,7 @@ export const ptBR: Copy = {
         reviewer: 'Revisor',
         merger: 'Mesclador',
         security: 'Revisor de segurança',
+        lens: 'Lente',
       },
       backToDefault: (role: string) => `- ${role}: volta ao padrão (o mesmo agente do Construtor)`,
       chosen: (role: string, value: string) => `- ${role}: ${value}`,

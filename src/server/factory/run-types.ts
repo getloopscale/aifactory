@@ -59,6 +59,11 @@ export type RunTaskDeps = {
    */
   merger?: CodingHarness | ((labels: string[]) => CodingHarness | undefined)
   /**
+   * The agent that runs the lenses over approved work (#701), given the name of the reviewer's agent for the task.
+   * Nothing (or no function) means the reviewer's own agent runs them, in a fresh session.
+   */
+  lens?: (reviewer: string) => CodingHarness | undefined
+  /**
    * The agent that writes the change plan, apart from the builder, chosen from the issue's labels and the
    * builder's name. Nothing (or no function) means the builder plans in the session it then builds in.
    */

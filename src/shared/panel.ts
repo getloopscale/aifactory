@@ -1067,7 +1067,7 @@ export const DEFAULT_MODEL_WORD = 'modelo padrão'
 export const FIXED_EFFORT_WORD = 'esforço fixo'
 
 /** The roles of a coding agent (the security role's effort is pinned at the highest, never chosen) that the owner can give to one agent or another. */
-export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security'
+export type AgentRole = 'builder' | 'planner' | 'reviewer' | 'merger' | 'security' | 'lens'
 
 /** The effort levels from lowest to highest that any engine lists, so the highest of a list can be told. */
 const EFFORT_RANK = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max']

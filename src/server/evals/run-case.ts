@@ -119,6 +119,8 @@ export type EvalDeps = {
    * which blocks every approval; left out, the case has no security step.
    */
   security?: CodingHarness | null
+  /** The agent that runs the lenses when it is not the reviewer, as `Run.lensed` uses it (#701). */
+  lens?: CodingHarness
   author: { name: string; email: string }
   /** The knowledge base every agent reads; left out, the agents work without one. */
   knowledge?: KnowledgeSource
@@ -655,7 +657,8 @@ class CaseRun {
   }
 
   /**
-   * The lenses over approved work, as `Run.lensed`: read-only, the reviewer's agent in a fresh session. In `auto` a
+   * The lenses over approved work, as `Run.lensed`: read-only, the lens agent (the reviewer's unless chosen) in a
+   * fresh session. In `auto` a
    * blocking finding sends the builder back once; an answer that does not parse, or a lens that cannot run, is
    * recorded as such and the case goes on. A lens never ends a case.
    */
@@ -668,8 +671,9 @@ class CaseRun {
         const documents = await documentPaths(this.backend, this.repoDir)
         if (documents.length === 0) continue
         const diff = await securityDiff(this.backend, this.repoDir, this.c.baseSha)
+        const agent = this.deps.lens ?? this.deps.reviewer
         const result = await this.agentCall('lens', 'reviewer', () =>
-          this.deps.reviewer.run(this.backend, {
+          agent.run(this.backend, {
             cwd: this.repoDir,
             timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
             role: 'reviewer',
@@ -883,10 +887,10 @@ const checksFailed = (failed: CheckResult[]): CaseEnd => ({
 /** Names this process's evaluation runs; the sandbox's metadata also carries the process, which says whether it lives. */
 const PROCESS_RUN = randomUUID()
 
-/** The agents a case runs, each once by name: the builder, the reviewer and a planner apart from them (run.ts). */
+/** The agents a case runs, each once by name: the builder, the reviewer and a planner and a lens apart from them (run.ts). */
 function caseAgents(deps: EvalDeps): CodingHarness[] {
   const byName = new Map<string, CodingHarness>()
-  for (const agent of [deps.builder, deps.reviewer, deps.planner, deps.security]) {
+  for (const agent of [deps.builder, deps.reviewer, deps.planner, deps.lens, deps.security]) {
     if (agent && !byName.has(agent.name)) byName.set(agent.name, agent)
   }
   return [...byName.values()]

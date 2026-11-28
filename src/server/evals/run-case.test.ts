@@ -1541,6 +1541,21 @@ describe('the lens in a case', () => {
     expect(reviewer.prompts).toHaveLength(4)
   })
 
+  it('runs on the lens agent apart from the reviewer when one is chosen (#701)', async () => {
+    vi.stubEnv('FACTORY_LENS_MODE', 'trial')
+    const reviewer = agent('reviewer', [{ ok: true, summary: APPROVE }])
+    const lens = agent('lens', [{ ok: true, summary: MAJOR }])
+    const builder = agent('builder', planned(built()))
+    const result = await runCase(
+      { ...deps(sandbox({ tracked }), builder, reviewer), lens },
+      evalCase,
+    )
+    expect(result.passed).toBe(true)
+    expect(reviewer.prompts).toHaveLength(1)
+    expect(lens.prompts).toHaveLength(1)
+    expect(lens.prompts[0]).toContain('AGENTS.md')
+  })
+
   it('goes on when the answer does not parse', async () => {
     const reviewer = agent('reviewer', [
       { ok: true, summary: APPROVE },

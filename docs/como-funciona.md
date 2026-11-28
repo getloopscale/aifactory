@@ -798,8 +798,8 @@ de verdade (ADR 0008).
 - **No deploy**, `scripts/deploy.sh` chama `pnpm evals:check` antes do build. Se nenhum arquivo da
   configuração dos agentes mudou desde o commit da baseline, e o agente, o modelo e o esforço de cada papel
   são os mesmos, a checagem não roda nada. Senão, roda os casos rápidos, e o deploy para sem build e sem
-  restart quando a taxa de aprovação cai mais de 20 pontos (um caso de cinco) ou o custo médio por caso sobe
-  mais de 25%. Uma configuração que uma checagem anterior já mediu e aprovou (registro fora do repositório,
+  restart quando a taxa de aprovação cai mais de 20 pontos (um caso de cinco). O custo nunca para um deploy:
+  quando a mediana dos casos passa do dobro da baseline, a checagem escreve uma nota (`costNotes`) e segue. Uma configuração que uma checagem anterior já mediu e aprovou (registro fora do repositório,
   por conteúdo dos arquivos) não roda de novo: o deploy diz qual registro aceitou.
 
 A baseline de 2026-11-11 passou cinco de cinco casos, com custo médio de US$ 0,35 por caso nos agentes, e
