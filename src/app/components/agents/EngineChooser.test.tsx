@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentSettings, RoleModels } from '../../../shared/panel'
+import type { AgentRole, AgentSettings, RoleModels } from '../../../shared/panel'
 
 import { en } from '../../lib/copy/en'
 
@@ -22,17 +22,39 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
     { id: 'claude-code', ready: true },
     { id: 'codex', ready: true },
   ],
-  chosen: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+  chosen: {
+    builder: null,
+    planner: null,
+    reviewer: null,
+    merger: null,
+    security: null,
+    lens: null,
+  },
   effective: {
     builder: 'codex',
     planner: 'codex',
     reviewer: 'codex',
     merger: 'codex',
     security: 'codex',
+    lens: 'codex',
   },
   repositoriesWithOwn: [],
-  chosenModel: { builder: null, planner: null, reviewer: null, merger: null, security: null },
-  chosenEffort: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+  chosenModel: {
+    builder: null,
+    planner: null,
+    reviewer: null,
+    merger: null,
+    security: null,
+    lens: null,
+  },
+  chosenEffort: {
+    builder: null,
+    planner: null,
+    reviewer: null,
+    merger: null,
+    security: null,
+    lens: null,
+  },
   engines: {
     'claude-code': {
       models: [
@@ -73,7 +95,7 @@ const settings = (over: Partial<AgentSettings> = {}): AgentSettings => ({
 })
 
 function mount(
-  role: 'builder' | 'planner' | 'reviewer' | 'merger' | 'security',
+  role: AgentRole,
   s = settings(),
   answer = new Response('{}'),
   reported?: RoleModels,
@@ -131,6 +153,7 @@ describe('choosing the coding agent of a role', () => {
           reviewer: null,
           merger: null,
           security: null,
+          lens: null,
         },
       }),
     )
@@ -197,6 +220,66 @@ describe('choosing the coding agent of a role', () => {
     expect(screen.getByText(/o\/rev\./)).toBeDefined()
   })
 
+  it("lets the lens follow the reviewer, offering the reviewer's models, and saves its own choice (#701)", async () => {
+    const { fetchMock } = mount(
+      'lens',
+      settings({
+        effective: {
+          builder: 'codex',
+          planner: 'codex',
+          reviewer: 'claude-code',
+          merger: 'codex',
+          security: 'codex',
+          lens: 'claude-code',
+        },
+        repositoriesWithOwn: [{ repository: 'o/rev', builder: null, reviewer: 'codex' }],
+      }),
+    )
+    expect((screen.getByLabelText(e.roleLabel.lens) as HTMLSelectElement).value).toBe('')
+    expect(optionsOf(e.roleLabel.lens)).toEqual([
+      e.sameAsReviewer('claude-code'),
+      'claude-code',
+      'codex',
+    ])
+    // With nothing chosen the models are the reviewer's agent's, not the builder's.
+    expect(optionsOf(e.modelOf(e.roleName.lens))).toEqual([e.agentDefaultUnknown, 'Sonnet', 'Opus'])
+    // A repository's own reviewer is the lens's too.
+    expect(screen.getByText(/o\/rev\./)).toBeDefined()
+    choose(e.roleLabel.lens, 'codex')
+    choose(e.modelOf(e.roleName.lens), 'gpt-6-luna')
+    choose(e.effortOf(e.roleName.lens), 'low')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
+    expect(JSON.parse(String(init.body))).toEqual({
+      lens: 'codex',
+      models: { lens: 'gpt-6-luna' },
+      efforts: { lens: 'low' },
+    })
+  })
+
+  it('takes the lens back to the reviewer, which is saved as going back to the default', async () => {
+    const { fetchMock } = mount(
+      'lens',
+      settings({
+        chosen: {
+          builder: null,
+          planner: null,
+          reviewer: null,
+          merger: null,
+          security: null,
+          lens: 'claude-code',
+        },
+      }),
+    )
+    expect((screen.getByLabelText(e.roleLabel.lens) as HTMLSelectElement).value).toBe('claude-code')
+    choose(e.roleLabel.lens, '')
+    fireEvent.click(screen.getByRole('button', { name: e.save }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    const [, init] = (fetchMock.mock.calls as unknown as [string, RequestInit][])[0]
+    expect(JSON.parse(String(init.body)).lens).toBeNull()
+  })
+
   it('shows the refusal of the server, and keeps the choice for another try', async () => {
     const { onSaved } = mount(
       'builder',
@@ -242,6 +325,7 @@ describe('choosing the model and the effort', () => {
           reviewer: null,
           merger: null,
           security: null,
+          lens: null,
         },
         chosenEffort: {
           builder: 'medium',
@@ -249,6 +333,7 @@ describe('choosing the model and the effort', () => {
           reviewer: null,
           merger: null,
           security: null,
+          lens: null,
         },
       }),
     )
@@ -286,6 +371,7 @@ describe('choosing the model and the effort', () => {
           reviewer: null,
           merger: null,
           security: null,
+          lens: null,
         },
       }),
     )
@@ -333,6 +419,7 @@ describe('choosing the model and the effort', () => {
           reviewer: null,
           merger: null,
           security: null,
+          lens: null,
         },
       }),
     )
@@ -383,6 +470,7 @@ describe('choosing the model and the effort', () => {
           reviewer: 'claude-code',
           merger: 'claude-code',
           security: 'claude-code',
+          lens: 'claude-code',
         },
       }),
     )
@@ -424,6 +512,7 @@ describe('the model an agent runs on by default', () => {
           reviewer: null,
           merger: null,
           security: null,
+          lens: null,
         },
       }),
       undefined,

@@ -14,6 +14,7 @@ import {
   PackageCheck,
   Rocket,
   RotateCw,
+  ScanSearch,
   ShieldCheck,
   Siren,
   Undo2,
@@ -51,6 +52,7 @@ export const ROLE_ICON: Record<AgentRole, LucideIcon> = {
   reviewer: Eye,
   security: ShieldCheck,
   merger: GitMerge,
+  lens: ScanSearch,
 }
 
 export const INBOX_ICON: Record<InboxItem['kind'], LucideIcon> = {

@@ -52,17 +52,39 @@ const view: AgentsView = {
       { id: 'claude-code', ready: true },
       { id: 'codex', ready: true },
     ],
-    chosen: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+    chosen: {
+      builder: null,
+      planner: null,
+      reviewer: null,
+      merger: null,
+      security: null,
+      lens: null,
+    },
     effective: {
       builder: 'codex',
       planner: 'codex',
       reviewer: 'codex',
       merger: 'codex',
       security: 'codex',
+      lens: 'codex',
     },
     repositoriesWithOwn: [],
-    chosenModel: { builder: null, planner: null, reviewer: null, merger: null, security: null },
-    chosenEffort: { builder: null, planner: null, reviewer: null, merger: null, security: null },
+    chosenModel: {
+      builder: null,
+      planner: null,
+      reviewer: null,
+      merger: null,
+      security: null,
+      lens: null,
+    },
+    chosenEffort: {
+      builder: null,
+      planner: null,
+      reviewer: null,
+      merger: null,
+      security: null,
+      lens: null,
+    },
     engines: {
       'claude-code': {
         models: [
@@ -400,5 +422,42 @@ describe('the model a role runs on when none is chosen', () => {
       `codex · ${ptBR.engine.summaryDefault()} · ${ptBR.engine.summaryEffort('high')}`,
     )
     expect(screen.getByRole('option', { name: ptBR.engine.agentDefaultUnknown })).toBeDefined()
+  })
+})
+
+describe('the lens on the agents page (#701)', () => {
+  it('is listed with the agents that run in a sandbox, and its choice follows the reviewer', async () => {
+    const lens = entry({
+      id: 'lens',
+      group: 'factory',
+      name: 'Lente',
+      runsIn: 'sandbox',
+      engine: { value: 'claude-code · modelo padrão', change: 'x' },
+    })
+    const agentsView = {
+      ...view,
+      settings: {
+        ...view.settings,
+        effective: { ...view.settings.effective, reviewer: 'claude-code', lens: 'claude-code' },
+      },
+      agents: [lens],
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (url: string) =>
+          new Response(JSON.stringify(url.endsWith('/models') ? { models: {} } : agentsView)),
+      ),
+    )
+    render(
+      <MemoryRouter initialEntries={['/agents?agent=lens']}>
+        <Page />
+      </MemoryRouter>,
+    )
+    const box = await screen.findByLabelText(ptBR.engine.roleLabel.lens)
+    expect(
+      within(box).getByRole('option', { name: ptBR.engine.sameAsReviewer('claude-code') }),
+    ).toBeDefined()
+    expect(screen.getAllByText(ptBR.agentGroups.factory.title).length).toBeGreaterThan(0)
   })
 })
