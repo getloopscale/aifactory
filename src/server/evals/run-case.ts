@@ -97,7 +97,15 @@ import { KnowledgeFeed } from '../knowledge/feed'
 import type { KnowledgeSource } from '../knowledge/source'
 
 import type { EvalCase } from './cases'
-import { caseOutcome, MEASURED_ITS_BASE, type CaseEnd, type CaseResult } from './compare'
+import {
+  caseOutcome,
+  MEASURED_ITS_BASE,
+  type CaseEnd,
+  type CaseResult,
+  type CaseStep,
+  type CaseStepName,
+  type CaseTiming,
+} from './compare'
 import { whenSlotFree } from './sandbox-slot'
 
 export type EvalDeps = {
@@ -128,6 +136,38 @@ const ABANDONED = 'abandoned: the suite ran out of time'
 /** Ends an abandoned case where it stands, so it starts nothing more. */
 function ensureLive(signal: AbortSignal | undefined): void {
   if (signal?.aborted) throw new Stopped(ABANDONED)
+}
+
+/**
+ * The steps a case finished, timed one after another from the case's start (#711). A step that throws still took its
+ * time and is kept, but an agent pass refused for want of time never started; one still running when the result is
+ * read is not kept.
+ */
+export class CaseClock {
+  private readonly steps: CaseStep[] = []
+
+  constructor(private readonly started = Date.now()) {}
+
+  async time<T>(step: CaseStepName, work: () => Promise<T>, role?: string): Promise<T> {
+    const from = Date.now()
+    const done = () => this.steps.push({ step, ...(role ? { role } : {}), ms: Date.now() - from })
+    try {
+      const result = await work()
+      done()
+      return result
+    } catch (error) {
+      if (!(error instanceof NoTimeForAgent)) done()
+      throw error
+    }
+  }
+
+  /** How long the case took and where that time went, read at the same instant so they add up. */
+  read(): { durationMs: number; timing: CaseTiming } {
+    const durationMs = Date.now() - this.started
+    const steps = this.steps.map((s) => ({ ...s }))
+    const counted = steps.reduce((sum, s) => sum + s.ms, 0)
+    return { durationMs, timing: { steps, unaccountedMs: durationMs - counted } }
+  }
 }
 
 /**
@@ -187,15 +227,20 @@ class CaseRun {
     private readonly repoDir: string,
     private readonly knowledgeDir: string | undefined,
     private readonly signal?: AbortSignal,
+    private readonly clock = new CaseClock(),
   ) {}
 
   /**
    * Every agent call goes through here. An abandoned case starts none, and a call that answers after the case
    * was abandoned ends it, so nothing after it runs against the stopped sandbox.
    */
-  private async agentCall(start: () => Promise<HarnessResult>): Promise<HarnessResult> {
+  private async agentCall(
+    step: CaseStepName,
+    role: string,
+    start: () => Promise<HarnessResult>,
+  ): Promise<HarnessResult> {
     ensureLive(this.signal)
-    const result = await start()
+    const result = await this.clock.time(step, start, role)
     ensureLive(this.signal)
     return result
   }
@@ -251,16 +296,13 @@ class CaseRun {
    */
   async build(): Promise<void> {
     const { builder, planner } = this.deps
-    this.installed = await prepareInstall(
-      this.backend,
-      this.repoDir,
-      this.c.checks,
-      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    this.installed = await this.clock.time('install', () =>
+      prepareInstall(this.backend, this.repoDir, this.c.checks, this.limits.checkMs ?? DEFAULT_CHECK_MS),
     )
     const apart = planner !== undefined && planner.name !== builder.name
     const discarded =
       apart || builder.resume ? await this.planChange(apart ? planner : builder) : undefined
-    const result = await this.agentCall(() => {
+    const result = await this.agentCall('build', 'builder', () => {
       if (apart && this.plan) {
         const prompt = givenPlanPrompt(this.buildInput(), this.plan, planner.name)
         return builder.run(this.backend, this.agentInput(prompt, Infinity, 'builder'))
@@ -282,7 +324,7 @@ class CaseRun {
   private async planChange(planner: CodingHarness): Promise<boolean> {
     const input = this.agentInput(changePlanPrompt(this.buildInput()), PLAN_MS, 'planner')
     const first = this.settle(
-      await this.agentCall(() => planner.run(this.backend, input)),
+      await this.agentCall('plan', 'planner', () => planner.run(this.backend, input)),
       'the agent did not finish the plan',
     )
     this.plan = parseNewChangePlan(first.summary) ?? (await this.planAgain(planner, input.timeoutMs))
@@ -296,7 +338,7 @@ class CaseRun {
   /** The planning turn ended with no plan that could be read: one more turn, asking for the plan alone. */
   private async planAgain(planner: CodingHarness, timeoutMs: number): Promise<ChangePlan> {
     if (!planner.resume || !this.sessionId) throw new Stopped('the agent wrote no plan')
-    const again = await this.agentCall(() =>
+    const again = await this.agentCall('plan', 'planner', () =>
       planner.resume!(this.backend, this.sessionId!, {
         cwd: this.repoDir,
         timeoutMs,
@@ -344,7 +386,7 @@ class CaseRun {
       checks: this.c.checks,
       ...(reviewedSha ? { reviewedSha, changeBase: this.c.baseSha } : {}),
     })
-    const result = await this.agentCall(() =>
+    const result = await this.agentCall('rework', 'builder', () =>
       this.deps.builder.resume!(this.backend, this.sessionId!, this.agentInput(prompt, Infinity, 'builder')),
     )
     this.settle(result, 'the agent did not finish the rework')
@@ -392,11 +434,8 @@ class CaseRun {
   private async applyFixes(sha: string): Promise<string> {
     const fixes = this.c.fixes ?? []
     if (fixes.length === 0 || sha === this.fixedHead) return sha
-    const { changed } = await runFixes(
-      this.backend,
-      this.repoDir,
-      fixes,
-      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    const { changed } = await this.clock.time('fixes', () =>
+      runFixes(this.backend, this.repoDir, fixes, this.limits.checkMs ?? DEFAULT_CHECK_MS),
     )
     this.fixedHead = sha
     if (!changed) return sha
@@ -408,15 +447,17 @@ class CaseRun {
 
   /** The end of a case whose failing checks fail on its base too, or nothing when any passes there. */
   private async failingOnBase(failed: CheckResult[]): Promise<CaseEnd | undefined> {
-    const red = await this.baseProbe.red(
-      this.backend,
-      {
-        repoDir: this.repoDir,
-        baseSha: this.c.baseSha,
-        checks: this.c.checks,
-        timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
-      },
-      failed,
+    const red = await this.clock.time('base_checks', () =>
+      this.baseProbe.red(
+        this.backend,
+        {
+          repoDir: this.repoDir,
+          baseSha: this.c.baseSha,
+          checks: this.c.checks,
+          timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
+        },
+        failed,
+      ),
     )
     if (!red) return undefined
     const names = red.map((name) => `"${name}"`).join(', ')
@@ -438,13 +479,15 @@ class CaseRun {
     const proof = await provedOnce(
       { mode, sha, known: this.proofs, store: { load: async () => undefined, save: async () => {} } },
       () =>
-        proveTests(this.backend, {
-          repoDir: this.repoDir,
-          baseSha: this.c.baseSha,
-          headSha: sha,
-          checks: this.c.checks,
-          timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
-        }),
+        this.clock.time('test_proof', () =>
+          proveTests(this.backend, {
+            repoDir: this.repoDir,
+            baseSha: this.c.baseSha,
+            headSha: sha,
+            checks: this.c.checks,
+            timeoutMs: this.limits.checkMs ?? DEFAULT_CHECK_MS,
+          }),
+        ),
     )
     const proved = addsProofFinding(mode, proof)
     const read = await this.review(sha, unplanned, required)
@@ -457,7 +500,11 @@ class CaseRun {
   }
 
   /** Runs the checks on the commit and keeps every result, as the factory keeps its evidence. */
-  private async check(sha: string): Promise<CheckResult[]> {
+  private check(sha: string): Promise<CheckResult[]> {
+    return this.clock.time('checks', () => this.checkOnce(sha))
+  }
+
+  private async checkOnce(sha: string): Promise<CheckResult[]> {
     await must(this.backend, `git -C ${this.repoDir} clean -fdxq`)
     await uploadChangesetCheck(this.backend, this.c.checks)
     const results = await runChecks(
@@ -504,7 +551,9 @@ class CaseRun {
           : {}),
       }),
     }
-    const result = await this.agentCall(() => this.deps.reviewer.run(this.backend, input))
+    const result = await this.agentCall('review', 'reviewer', () =>
+      this.deps.reviewer.run(this.backend, input),
+    )
     this.cost += result.costUsd ?? 0
     this.reviewerCost += result.costUsd ?? 0
     // The reviewer reads and does not write; whatever it wrote anyway is thrown away.
@@ -543,7 +592,7 @@ class CaseRun {
       }
     } else {
       const diff = await securityDiff(this.backend, this.repoDir, this.c.baseSha)
-      const result = await this.agentCall(() =>
+      const result = await this.agentCall('security', 'security', () =>
         security.run(this.backend, {
           cwd: this.repoDir,
           timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
@@ -619,7 +668,7 @@ class CaseRun {
         const documents = await documentPaths(this.backend, this.repoDir)
         if (documents.length === 0) continue
         const diff = await securityDiff(this.backend, this.repoDir, this.c.baseSha)
-        const result = await this.agentCall(() =>
+        const result = await this.agentCall('lens', 'reviewer', () =>
           this.deps.reviewer.run(this.backend, {
             cwd: this.repoDir,
             timeoutMs: this.limits.reviewMs ?? DEFAULT_REVIEW_MS,
@@ -685,11 +734,8 @@ class CaseRun {
   private async integrationGate(sha: string): Promise<CaseEnd | undefined> {
     const checks = this.c.integrationChecks ?? []
     if (checks.length === 0) return undefined
-    const results = await runChecks(
-      this.backend,
-      this.repoDir,
-      checks,
-      this.limits.checkMs ?? DEFAULT_CHECK_MS,
+    const results = await this.clock.time('integration_checks', () =>
+      runChecks(this.backend, this.repoDir, checks, this.limits.checkMs ?? DEFAULT_CHECK_MS),
     )
     this.checkRuns.push(...results.map((result) => ({ ...result, sha })))
     const failed = failingChecks(results)
@@ -815,7 +861,7 @@ class CaseRun {
         security: this.securityCost,
         lens: this.lensCost,
       },
-      durationMs: Date.now() - this.started,
+      ...this.clock.read(),
       attempts: this.attempts,
       reviewRounds: this.reviewRounds,
       reachedVerdict: this.verdictSeen,
@@ -882,14 +928,15 @@ export async function runCase(
   c: EvalCase,
   signal?: AbortSignal,
 ): Promise<CaseResult> {
-  const started = Date.now()
+  // Every step the case finishes is timed against its start, setup included (#711).
+  const clock = new CaseClock()
   // The case's run once it exists, so a case stopped later still reports the reviews it completed.
   const held: { sandbox?: IsolatedSandbox; run?: CaseRun } = {}
   const stoppedAs = (reason: string): CaseResult => ({
     id: c.id,
     ...caseOutcome({ stopped: reason }),
     costUsd: 0,
-    durationMs: Date.now() - started,
+    ...clock.read(),
     attempts: 0,
     reviewRounds: 0,
     reachedVerdict: false,
@@ -919,25 +966,31 @@ export async function runCase(
     signal?.addEventListener('abort', onAbort, { once: true })
   })
   const work = async (): Promise<CaseResult> => {
-    const spec = await specFor(deps, c)
-    live()
-    // The factory's runs may hold every sandbox the provider allows; the case waits for one to free (#261).
-    let sandbox = await whenSlotFree(() => createIsolatedSandbox(deps.sandbox, spec), { signal })
+    let sandbox = await clock.time('sandbox', async () => {
+      const spec = await specFor(deps, c)
+      live()
+      // The factory's runs may hold every sandbox the provider allows; the case waits for one to free (#261).
+      return whenSlotFree(() => createIsolatedSandbox(deps.sandbox, spec), { signal })
+    })
     held.sandbox = sandbox
     // Abandoned while it was being created: the abort handler and `finally` found nothing to stop.
     if (signal?.aborted) await stopSandbox()
     live()
-    const repoDir = await checkout(sandbox.backend, c)
-    live()
-    for (const agent of caseAgents(deps)) {
-      await agent.prepare?.(sandbox.backend)
+    const created = sandbox
+    const { repoDir, feed } = await clock.time('clone', async () => {
+      const repoDir = await checkout(created.backend, c)
       live()
-    }
-    const feed = await KnowledgeFeed.open(deps.knowledge, sandbox.backend, c.repository, {})
+      for (const agent of caseAgents(deps)) {
+        await agent.prepare?.(created.backend)
+        live()
+      }
+      const feed = await KnowledgeFeed.open(deps.knowledge, created.backend, c.repository, {})
+      return { repoDir, feed }
+    })
     sandbox = feed.attachTo(sandbox)
     held.sandbox = sandbox
     live()
-    const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir, signal)
+    const run = new CaseRun(deps, c, sandbox, repoDir, feed.dir, signal, clock)
     held.run = run
     // Before the builder's first pass, so it can run the check it is told to run.
     await uploadChangesetCheck(sandbox.backend, c.checks)

@@ -22,7 +22,34 @@ export type CaseResult = {
   reachedVerdict?: boolean
   /** What each completed review round found, in order; absent from results written before it was kept. */
   reviews?: ReviewRecord[]
+  /**
+   * Where `durationMs` went: each step the case finished, in order, and what no step accounts for. Absent from
+   * results written before it was kept; no comparison reads it.
+   */
+  timing?: CaseTiming
 }
+
+/** A step of a case, as `run-case.ts` takes it: an agent pass names its role. */
+export type CaseStepName =
+  | 'sandbox'
+  | 'clone'
+  | 'install'
+  | 'plan'
+  | 'build'
+  | 'rework'
+  | 'fixes'
+  | 'checks'
+  | 'base_checks'
+  | 'test_proof'
+  | 'review'
+  | 'security'
+  | 'lens'
+  | 'integration_checks'
+
+export type CaseStep = { step: CaseStepName; role?: string; ms: number }
+
+/** The steps of a case and the rest of its time, so the steps plus `unaccountedMs` are its `durationMs`. */
+export type CaseTiming = { steps: CaseStep[]; unaccountedMs: number }
 
 /** The verdict of one review round, kept so a failed case can be read from the run's file. */
 export type ReviewRecord = {
