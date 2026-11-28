@@ -8,7 +8,7 @@ import type { GithubApi } from '../github/pulls'
 
 import { publishedPackagesChanged } from './changed-packages'
 import { errorMessage } from './error-message'
-import { closeOpenIssue, releaseResolved } from './resolved-release'
+import { claimedUnrecorded, closeOpenIssue, releaseResolved } from './resolved-release'
 import { enterStage } from './stages'
 import { SUPERSEDED } from './stalled-publication'
 
@@ -170,13 +170,36 @@ const failedUnreleased = (db: Database, repo: string) =>
         .from(publication)
         .where(or(supersededOrTag(repo), failedForItself(repo))),
     ),
-    notExists(
-      db
-        .select({ id: delivery.id })
-        .from(delivery)
-        .where(and(eq(delivery.taskId, task.id), eq(delivery.kind, 'release'))),
-    ),
+    noRelease(db),
   )
+
+/** No delivery of kind `release` records the task. */
+const noRelease = (db: Database) =>
+  notExists(
+    db
+      .select({ id: delivery.id })
+      .from(delivery)
+      .where(and(eq(delivery.taskId, task.id), eq(delivery.kind, 'release'))),
+  )
+
+/**
+ * A task a release claimed (`released`, with no stage event) and that no release recorded: the release was cut
+ * between the claim and its shipment (#781), so the next release that contains its merge finishes it.
+ */
+const claimedNotShipped = (db: Database) => and(claimedUnrecorded, noRelease(db))
+
+/**
+ * Whether a task's issue is read before it is told, and told only if still open: a task released by its own
+ * failed publication, or one a cut release claimed (#781). A person may have closed its issue meanwhile.
+ */
+export const readsIssueFirst = (
+  t: Pick<typeof task.$inferSelect, 'id' | 'stage'>,
+  s: Pick<Shipment, 'askedTaskId'>,
+  known: { ownFailures: Set<number>; claimed: Set<number> },
+) =>
+  t.id !== s.askedTaskId &&
+  t.stage === 'released' &&
+  (known.ownFailures.has(t.id) || known.claimed.has(t.id))
 
 /** The package a changesets tag (`name@version`) names; a tag with no version names no package. */
 const packageOf = (tag: string) => {
@@ -220,7 +243,8 @@ async function publishesItsPackages(
 /**
  * Releases every task whose work is in the promoted commit: the one that asked for the release, each
  * finished task integrated before it, and each task of a failed publication not released yet (one that failed
- * for itself only when this release publishes its packages, and its issue closed only if still open). Each gets a delivery per tag, moves to `released`, and its issue is
+ * for itself only when this release publishes its packages, and its issue closed only if still open), and each
+ * task a cut release claimed and never recorded (#781), its issue also closed only if still open. Each gets a delivery per tag, moves to `released`, and its issue is
  * told where the fix is and closed. A task already holding a delivery of the first tag is left alone, so a
  * pass that runs again does not comment twice. An issue that cannot be closed is recorded on its task's
  * `released` stage and returned; the release is not undone.
@@ -240,6 +264,7 @@ export async function shipContained(
           eq(task.stage, 'done'),
           eq(task.id, s.askedTaskId),
           failedUnreleased(deps.db, s.repository),
+          claimedNotShipped(deps.db),
         ),
       ),
     )
@@ -251,12 +276,21 @@ export async function shipContained(
         .where(failedForItself(s.repository))
     ).map((row) => row.id),
   )
+  const claimed = new Set(
+    (
+      await deps.db
+        .select({ id: task.id })
+        .from(task)
+        .where(and(eq(task.repository, s.repository), claimedNotShipped(deps.db)))
+    ).map((row) => row.id),
+  )
   const read = deps.fetchIssue ?? fetchIssue
   const shipped: Shipped = { released: [], resolved: [], issueErrors: [] }
   for (const t of candidates) {
     if (!(await belongs(deps, s, t))) continue
-    // A task released by its own failed publication: a person may have closed its issue meanwhile.
-    const ownFailure = ownFailures.has(t.id) && t.id !== s.askedTaskId && t.stage === 'released'
+    const readFirst = readsIssueFirst(t, s, { ownFailures, claimed })
+    // A task released by its own failed publication is carried only by a release of its packages.
+    const ownFailure = readFirst && ownFailures.has(t.id)
     if (ownFailure && !(await publishesItsPackages(deps.api, s, t))) continue
     await deps.db.insert(delivery).values(
       s.tags.map((tag) => ({
@@ -268,7 +302,7 @@ export async function shipContained(
         actor: s.actor,
       })),
     )
-    const issueError = ownFailure
+    const issueError = readFirst
       ? await closeOpenIssue(
           deps.api,
           (n) => read(s.repository, n, s.token),

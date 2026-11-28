@@ -5,7 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import { getDb, getPool, readDatabaseUrl } from '../db'
 import { storageFromUrl } from '../db/config'
-import { ingress, task } from '../db/schema'
+import { delivery as deliveryTable, ingress, stageEvent, task } from '../db/schema'
 import type { Issue } from '../github/issues'
 import { FakeGithub } from '../../test/fake-github'
 
@@ -161,5 +161,76 @@ describe('shipContained with a resolved task', () => {
     expect(await stageOf(id)).toBe('released')
     expect(gh.api.recorded('commentOnIssue')).toHaveLength(1)
     expect(gh.repo.issue(6).state).toBe('closed')
+  })
+})
+
+const events = async (id: number) =>
+  (await getDb().select().from(stageEvent).where(eq(stageEvent.taskId, id))).filter(
+    (e) => e.stage === 'released',
+  )
+const releases = async (id: number) =>
+  (await getDb().select().from(deliveryTable).where(eq(deliveryTable.taskId, id))).filter(
+    (d) => d.kind === 'release',
+  )
+const later = (): Shipment => ({
+  ...shipment(),
+  askedTaskId: 999,
+  tags: [{ tag: 'v1.0.1', url: 'https://example.test/v1.0.1' }],
+})
+
+describe('shipContained with a task a cut release claimed (#781)', () => {
+  // The release moved the task to `released` and stopped before its event, delivery and issue.
+  const claimed = (issueNumber: number, mergedSha = 'aaa111') =>
+    seed(REPO, issueNumber, { stage: 'released', mergedSha })
+
+  it('is finished by the next release that contains its merge', async () => {
+    const id = await claimed(10)
+    const gh = setup({ 10: 'open' })
+
+    const shipped = await shipContained(gh.deps, later())
+
+    expect(shipped.released).toEqual([id])
+    expect(await events(id)).toHaveLength(1)
+    expect((await events(id))[0].detail).toMatchObject({ tag: 'v1.0.1' })
+    expect(await releases(id)).toMatchObject([{ tag: 'v1.0.1', actor: 'factory' }])
+    expect(gh.repo.issue(10).comments[0].body).toContain('Available in `v1.0.1`')
+    expect(gh.repo.issue(10).state).toBe('closed')
+  })
+
+  it('is not announced twice, by the same pass again or a later release', async () => {
+    const id = await claimed(11)
+    const gh = setup({ 11: 'open' })
+
+    await shipContained(gh.deps, later())
+    await shipContained(gh.deps, later())
+    await shipContained(gh.deps, {
+      ...later(),
+      tags: [{ tag: 'v1.0.2', url: 'https://example.test/v1.0.2' }],
+    })
+
+    expect(gh.api.recorded('commentOnIssue')).toHaveLength(1)
+    expect(await releases(id)).toHaveLength(1)
+    expect(await events(id)).toHaveLength(1)
+  })
+
+  it('records the release without commenting on an issue a person closed', async () => {
+    const id = await claimed(12)
+    const gh = setup({ 12: 'closed' })
+
+    await shipContained(gh.deps, later())
+
+    expect(await events(id)).toHaveLength(1)
+    expect(gh.api.recorded('commentOnIssue')).toEqual([])
+  })
+
+  it('is left for a release that contains its merge', async () => {
+    const id = await claimed(13, 'bbb222')
+    const gh = setup({ 13: 'open' })
+
+    const shipped = await shipContained(gh.deps, later())
+
+    expect(shipped.released).toEqual([])
+    expect(await releases(id)).toEqual([])
+    expect(gh.repo.issue(13).state).toBe('open')
   })
 })
