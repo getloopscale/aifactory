@@ -3,11 +3,27 @@ import { z } from 'zod'
 
 import { CODE_MODES, toSessionWire } from '../../../../../shared/code'
 import { getSession, moveSession, updateSession } from '../../../../code/store'
+import { engineModels } from '../../../../factory/engine-models'
 import { ownerOnly } from '../../../../panel/policy'
 
 const params = z.object({ id: z.string().min(1).max(100) })
 const notFound = () =>
   Response.json({ error: 'not_found', message: 'No such session.' }, { status: 404 })
+
+/** The models the harness accepts, as the Agents page lists them. */
+const acceptedModels = (harness: string) => (engineModels()[harness]?.models ?? []).map((m) => m.id)
+
+const unknownModel = (model: string, harness: string, accepted: string[]) =>
+  Response.json(
+    {
+      error: 'unknown_model',
+      message: accepted.length
+        ? `${harness} does not list the model "${model}". Accepted: ${accepted.join(', ')}.`
+        : `${harness} lists no model, so only its default can be used.`,
+      accepted,
+    },
+    { status: 400 },
+  )
 
 /** One code session and its state. */
 export const GET = route()
@@ -35,6 +51,12 @@ export const PATCH = route()
       }),
   )
   .handler(async ({ params, body }) => {
+    if (typeof body.model === 'string') {
+      const current = await getSession(params.id)
+      if (!current) return notFound()
+      const accepted = acceptedModels(current.harness)
+      if (!accepted.includes(body.model)) return unknownModel(body.model, current.harness, accepted)
+    }
     const session = await updateSession(params.id, body)
     return session ? toSessionWire(session) : notFound()
   })

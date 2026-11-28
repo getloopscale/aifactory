@@ -27,11 +27,12 @@ import {
   type CodeSessionWire,
   type CodeState,
 } from '../../shared/code'
+import type { AgentsView, ModelOption } from '../../shared/panel'
 import { Assist } from '../components/Assist'
 import { FollowScroll } from '../components/chat/FollowScroll'
 import { tallest, TOOL } from '../components/chat/MessageBox'
 import { TONE_DOT } from '../components/ui/Surface'
-import { del, patch, post } from '../lib/api'
+import { del, get, patch, post } from '../lib/api'
 import { useCopy } from '../lib/copy'
 import { enterSends } from '../lib/enter-sends'
 
@@ -69,10 +70,28 @@ export type Row =
   | { type: 'plan'; seq: number; text: string; answer: PlanAnswer | undefined; last: boolean }
   | ToolCard
   | { type: 'tools'; seq: number; cards: ToolCard[] }
+  | { type: 'error'; seq: number; text: string }
 
-/** A tool result joins the call right before it; one with no call is a card of its own. */
+/** Each error as `<turn>:<text>`, a turn starting at each user message. */
+function turnErrors(events: CodeEventWire[]): Set<string> {
+  const keys = new Set<string>()
+  let turn = 0
+  for (const e of events) {
+    if (e.kind === 'user_message') turn++
+    if (e.kind === 'error') keys.add(`${turn}:${e.content.trim()}`)
+  }
+  return keys
+}
+
+/**
+ * A tool result joins the call right before it; one with no call is a card of its own. An error with no call is
+ * the turn's own: it is shown once, as an error, and an agent message that only repeats it is left out.
+ */
 export function cardsOf(events: CodeEventWire[]): Array<Row> {
   const rows: Row[] = []
+  const errors = turnErrors(events)
+  const shown = new Set<string>()
+  let turn = 0
   const answers = new Map<number, PlanAnswer>()
   for (const e of events) {
     const m = e.kind === 'state' ? ANSWER.exec(e.content) : null
@@ -88,9 +107,13 @@ export function cardsOf(events: CodeEventWire[]): Array<Row> {
         answer: answers.get(e.seq),
         last: e.seq === lastPlan,
       })
-    else if (e.kind === 'user_message') rows.push({ type: 'user', seq: e.seq, text: e.content })
-    else if (e.kind === 'agent_message') rows.push({ type: 'agent', seq: e.seq, text: e.content })
-    else if (e.kind === 'tool_use')
+    else if (e.kind === 'user_message') {
+      turn++
+      rows.push({ type: 'user', seq: e.seq, text: e.content })
+    } else if (e.kind === 'agent_message') {
+      if (!errors.has(`${turn}:${e.content.trim()}`))
+        rows.push({ type: 'agent', seq: e.seq, text: e.content })
+    } else if (e.kind === 'tool_use')
       rows.push({
         type: 'tool',
         seq: e.seq,
@@ -99,23 +122,31 @@ export function cardsOf(events: CodeEventWire[]): Array<Row> {
         output: undefined,
         failed: false,
       })
-    else if (e.kind === 'tool_result' || e.kind === 'error') {
-      const last = rows[rows.length - 1]
-      if (last?.type === 'tool' && last.output === undefined) {
-        last.output = e.content
-        last.failed = e.kind === 'error'
-      } else
-        rows.push({
-          type: 'tool',
-          seq: e.seq,
-          tool: e.kind === 'error' ? null : e.tool,
-          input: '',
-          output: e.content,
-          failed: e.kind === 'error',
-        })
-    }
+    else if (e.kind === 'tool_result' || e.kind === 'error')
+      pushResult(rows, e, `${turn}:${e.content.trim()}`, shown)
   }
   return fold(rows)
+}
+
+/** A result or an error: on the call waiting for it, else a card of its own, or the turn's error once. */
+function pushResult(rows: Row[], e: CodeEventWire, key: string, shown: Set<string>) {
+  const last = rows[rows.length - 1]
+  if (last?.type === 'tool' && last.output === undefined) {
+    last.output = e.content
+    last.failed = e.kind === 'error'
+  } else if (e.kind === 'tool_result')
+    rows.push({
+      type: 'tool',
+      seq: e.seq,
+      tool: e.tool,
+      input: '',
+      output: e.content,
+      failed: false,
+    })
+  else if (!shown.has(key)) {
+    shown.add(key)
+    rows.push({ type: 'error', seq: e.seq, text: e.content })
+  }
 }
 
 /** Two or more commands in a row become one line. An edit stays a line of its own: it is what changed. */
@@ -217,6 +248,25 @@ function Card({ card }: { card: ToolCard }) {
           {card.output === undefined ? c.running : card.output || c.noOutput}
         </pre>
       ) : null}
+    </div>
+  )
+}
+
+/** What failed a turn, once, as an error: never folded with the commands the agent ran. */
+function TurnError({ text }: { text: string }) {
+  const { t } = useCopy()
+  const c = t.code.conversation
+  return (
+    <div
+      role="group"
+      aria-label={c.error}
+      className="rounded-md border border-border bg-card px-3 py-2 text-sm"
+    >
+      <p className="flex items-center gap-2 font-medium">
+        <span aria-hidden className={`size-2 shrink-0 rounded-full ${TONE_DOT.destructive}`} />
+        {c.error}
+      </p>
+      <p className="mt-1 whitespace-pre-wrap break-words">{text}</p>
     </div>
   )
 }
@@ -521,6 +571,8 @@ export function CodeConversation({
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<'model' | 'rename'>()
   const [draft, setDraft] = useState('')
+  /** The models the session's harness accepts, as the Agents page lists them; undefined while they load. */
+  const [models, setModels] = useState<ModelOption[]>()
   useEffect(() => setMode(session.mode), [session.mode])
   const box = useRef<HTMLTextAreaElement>(null)
   const place = useRef<number | undefined>(undefined)
@@ -659,6 +711,21 @@ export function CodeConversation({
     else {
       setDraft(action.kind === 'model' ? (session.model ?? '') : session.title)
       setEditing(action.kind)
+      if (action.kind === 'model') void loadModels()
+    }
+  }
+
+  async function loadModels() {
+    setModels(undefined)
+    try {
+      const view = await get<AgentsView>('/api/panel/agents')
+      const listed = view.settings.engines[session.harness]?.models ?? []
+      setModels(listed)
+      // A model the harness no longer lists cannot be kept: the box starts on the default.
+      setDraft((d) => (listed.some((m) => m.id === d) ? d : ''))
+    } catch (e) {
+      setModels([])
+      setProblem(e instanceof Error ? e.message : String(e))
     }
   }
 
@@ -723,6 +790,8 @@ export function CodeConversation({
               />
             ) : row.type === 'tools' ? (
               <Group key={row.seq} cards={row.cards} />
+            ) : row.type === 'error' ? (
+              <TurnError key={row.seq} text={row.text} />
             ) : (
               <Card key={row.seq} card={row} />
             ),
@@ -859,15 +928,37 @@ export function CodeConversation({
             >
               <label className="flex flex-1 items-center gap-2">
                 {c.commands[editing]}
-                <input
-                  autoFocus
-                  value={draft}
-                  placeholder={editing === 'model' ? c.commands.modelHint : undefined}
-                  onChange={(e) => setDraft(e.target.value)}
-                  className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
-                />
+                {editing === 'model' ? (
+                  <select
+                    autoFocus
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
+                  >
+                    <option value="">{c.commands.modelDefault}</option>
+                    {(models ?? []).map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    autoFocus
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1"
+                  />
+                )}
               </label>
-              <Button type="submit" size="sm" disabled={saving}>
+              {editing === 'model' && models?.length === 0 ? (
+                <span className="text-muted-foreground">{c.commands.noModels}</span>
+              ) : null}
+              <Button
+                type="submit"
+                size="sm"
+                disabled={saving || (editing === 'model' && models === undefined)}
+              >
                 {c.commands.save}
               </Button>
               <Button
