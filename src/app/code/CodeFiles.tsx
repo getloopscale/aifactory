@@ -3,8 +3,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 import type { CodeFileResponse } from '../../shared/code'
 import { Quiet } from '../components/ui/Surface'
-import { get } from '../lib/api'
-import { useCopy } from '../lib/copy'
+import { ApiError, get } from '../lib/api'
+import { useCopy, type CopyState } from '../lib/copy'
 
 /** The files whose path holds `filter`, ignoring case. An empty filter keeps all. */
 export function filterFiles(files: string[], filter: string): string[] {
@@ -97,6 +97,12 @@ function Branch({
 }
 
 /** The text of one file, read-only, with the number of each line. */
+/** Why a read of the workspace failed, in the page's language when the API named a reason the page knows. */
+export function readError(e: unknown, t: CopyState['t']): string {
+  if (e instanceof ApiError && e.code === 'workspace_unavailable') return t.code.files.unavailable
+  return e instanceof Error ? e.message : String(e)
+}
+
 export function FileViewer({
   sessionId,
   path,
@@ -112,7 +118,7 @@ export function FileViewer({
   const [state, setState] = useState<{
     path: string
     file?: CodeFileResponse
-    error?: string
+    error?: unknown
   }>({ path })
   useEffect(() => {
     let alive = true
@@ -120,8 +126,7 @@ export function FileViewer({
       `/api/panel/code/sessions/${encodeURIComponent(sessionId)}/file?path=${encodeURIComponent(path)}`,
     ).then(
       (file) => alive && setState({ path, file }),
-      (e: unknown) =>
-        alive && setState({ path, error: e instanceof Error ? e.message : String(e) }),
+      (error: unknown) => alive && setState({ path, error }),
     )
     return () => {
       alive = false
@@ -143,9 +148,9 @@ export function FileViewer({
       {fill ? null : (
         <p className="break-all px-3 py-1.5 font-mono text-xs text-muted-foreground">{path}</p>
       )}
-      {current.error ? (
+      {current.error !== undefined ? (
         <p role="alert" className="px-3 py-2 text-sm text-destructive">
-          {current.error}
+          {readError(current.error, t)}
         </p>
       ) : !current.file ? (
         <Quiet role="status">{f.loading}</Quiet>

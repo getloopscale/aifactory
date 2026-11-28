@@ -1011,6 +1011,11 @@ export const en = {
       back_merge: 'A back-merge conflicts and nothing will merge it',
     },
     openOnGithub: 'Open it on GitHub',
+    assistProvider: {
+      title: "The assistants' model provider is refusing calls",
+      detail: (provider: string) =>
+        `${provider} refuses the panel's assistants because the account behind its key has no credit left. Add credit to that account, or set FACTORY_ASSIST_MODEL to another provider.`,
+    },
     actions: {
       run: {
         label: 'Start again',
@@ -1532,6 +1537,8 @@ export const en = {
   assistProblems: {
     signIn: 'Sign in to the panel again, then retry.',
     noCredit: 'The assistant has no model credit: set ANTHROPIC_API_KEY on the server (see Setup).',
+    creditRefused: (provider: string) =>
+      `The assistant's model provider (${provider}) refused the call: the account behind its key has no credit left. Add credit to that account, or set FACTORY_ASSIST_MODEL to another provider.`,
     couldNot: (message: string) => `The assistant could not answer: ${message}`,
   },
   agentGroups: {
@@ -1712,6 +1719,7 @@ export const en = {
       cost: (usd: string) => `Cost so far: ${usd}`,
     },
     filter: 'Filter sessions',
+    hideEnded: 'Hide ended sessions',
     noMatch: 'No session matches.',
     start: 'Start',
     retry: 'Send the message again',
@@ -1748,6 +1756,12 @@ export const en = {
         open: 'Open pull request',
         opening: 'Opening…',
         again: 'Send the new changes',
+        sending: 'Sending…',
+        commitTitle: 'Commit message: it names the new commit on the pull request',
+        noChanges: 'Nothing to send: the session has no changes.',
+        noTitle: 'Type a title to open the pull request.',
+        noCommitTitle: 'Type a commit message to send the changes.',
+        sent: (n: number) => `The changes were sent to pull request #${n}.`,
         draftNote: 'It opens as a draft, into the integration branch. Nothing merges it from here.',
         link: (n: number) => `Pull request #${n}`,
         failed: (why: string) => `The pull request was not opened: ${why}`,
@@ -1764,6 +1778,7 @@ export const en = {
       truncated: (n: number) => `Showing the first ${n} bytes: the file is longer.`,
       mentions: 'Files to mention',
       openFile: (path: string) => `Open ${path}`,
+      unavailable: 'The workspace is not running, so its files cannot be read now.',
     },
     conversation: {
       label: 'Conversation',
@@ -1802,6 +1817,10 @@ export const en = {
         cancel: 'Cancel',
         sending: 'Sending…',
       },
+      waitingWorkspace:
+        'Waiting for a workspace: every one is in use. Ending another session, or leaving one idle until its workspace closes, frees one.',
+      missingBranch: (branch: string, repository: string) =>
+        `The branch ${branch} does not exist in ${repository}. Start a session on a branch the repository has.`,
       stateLine: {
         idle: 'Ready for your next message.',
         queued: 'Queued: the agent starts soon.',
@@ -1838,6 +1857,8 @@ export const en = {
         save: 'Save',
         cancel: 'Cancel',
       },
+      confirmEnd:
+        'End the session? Its sandbox and workspace are freed for good: changes not sent in a pull request are lost.',
       refused: {
         queued: 'A message is already waiting for the agent. Wait for it to start.',
         starting: 'The agent is starting. Wait for it to finish its turn.',

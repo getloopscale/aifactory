@@ -27,6 +27,7 @@ import type {
   CodeMode,
   CodeSession,
 } from '../../shared/code'
+import { integrationBranch } from '../../shared/branches'
 import { CODE_MODES } from '../../shared/code'
 import type { RepositoriesView } from '../../shared/panel'
 import { Assist } from '../components/Assist'
@@ -42,7 +43,7 @@ import { useWidth } from '../lib/media'
 
 import { CodeChanges, Hunks, PullRequestForm } from './CodeChanges'
 import { CodeConversation } from './CodeConversation'
-import { CodeFiles, FileViewer } from './CodeFiles'
+import { CodeFiles, FileViewer, readError } from './CodeFiles'
 
 /** A session as the API sends it: the dates are text. */
 type SessionView = Omit<CodeSession, 'createdAt' | 'updatedAt'> & {
@@ -102,7 +103,8 @@ function StartForm({ harnesses }: { harnesses: string[] }) {
 
   const chosen = repository || enabled[0]?.fullName || ''
   const repo = enabled.find((r) => r.fullName === chosen)
-  const base = branch ?? repo?.baseBranch ?? repo?.defaultBranch ?? ''
+  // The pull request goes to the integration branch, so the work starts from it too (#727).
+  const base = branch ?? (repo ? integrationBranch(repo) : '')
   const harness = agent || harnesses[0] || ''
   const ready = chosen !== '' && base.trim() !== '' && harness !== '' && message.trim() !== ''
 
@@ -276,8 +278,11 @@ function SessionList({
 }) {
   const { t } = useCopy()
   const [filter, setFilter] = useState('')
+  const [hideEnded, setHideEnded] = useState(false)
+  const anyEnded = sessions.some((s) => s.state === 'ended')
   const words = filter.toLowerCase().split(/\s+/).filter(Boolean)
   const sorted = [...sessions]
+    .filter((s) => !(hideEnded && s.state === 'ended'))
     .filter((s) => {
       const text = `${s.title} ${s.repository}`.toLowerCase()
       return words.every((w) => text.includes(w))
@@ -312,6 +317,16 @@ function SessionList({
             onChange={(e) => setFilter(e.target.value)}
             className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
           />
+        </label>
+      ) : null}
+      {anyEnded ? (
+        <label className="mx-3 mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={hideEnded}
+            onChange={(e) => setHideEnded(e.target.checked)}
+          />
+          {t.code.hideEnded}
         </label>
       ) : null}
       {sorted.length === 0 ? (
@@ -399,25 +414,25 @@ function useCodeDiff(id: string, turn: number) {
 }
 
 /** The files of a session's workspace, read again when a turn ends and when the id changes. */
-function useCodeFiles(id: string, turn: number) {
-  const [state, setState] = useState<{ id: string; files?: string[]; error?: string }>({ id })
+function useCodeFiles(id: string, turn: number): { files?: string[]; error?: string } {
+  const { t } = useCopy()
+  const [state, setState] = useState<{ id: string; files?: string[]; error?: unknown }>({ id })
   useEffect(() => {
     let alive = true
     get<CodeFilesResponse>(`/api/panel/code/sessions/${encodeURIComponent(id)}/files`).then(
       (data) => alive && setState({ id, files: data.files }),
-      (e: unknown) =>
-        alive &&
-        setState((v) => ({
-          id,
-          files: v.id === id ? v.files : undefined,
-          error: e instanceof Error ? e.message : String(e),
-        })),
+      (error: unknown) =>
+        alive && setState((v) => ({ id, files: v.id === id ? v.files : undefined, error })),
     )
     return () => {
       alive = false
     }
   }, [id, turn])
-  return state.id === id ? state : { id }
+  if (state.id !== id) return {}
+  return {
+    files: state.files,
+    error: state.error === undefined ? undefined : readError(state.error, t),
+  }
 }
 
 /** Ctrl+Shift+D shows or hides the changes and Ctrl+Shift+F shows the files, from a text box too. */
@@ -454,6 +469,7 @@ function SidePanel({
   id,
   repository,
   pullRequest,
+  ended,
   turn,
   tab,
   onTab,
@@ -465,6 +481,7 @@ function SidePanel({
   id: string
   repository: string
   pullRequest: { number: number; url: string } | undefined
+  ended: boolean
   turn: number
   tab: Tab
   onTab: (tab: Tab) => void
@@ -538,6 +555,7 @@ function SidePanel({
                   repository={repository}
                   existing={pullRequest}
                   hasChanges={data.diff.files.length > 0}
+                  ended={ended}
                 />
                 {!data.live && data.capturedAt && data.diff.files.length > 0 ? (
                   <Quiet>{t.code.changes.stored}</Quiet>
@@ -595,6 +613,7 @@ function OpenSession({ id }: { id: string }) {
       id={id}
       repository={session.repository}
       pullRequest={pullRequestOf(session)}
+      ended={session.state === 'ended'}
       turn={turn}
       tab={tab}
       onTab={setTab}
@@ -1071,6 +1090,7 @@ function IdeSession({ id, sessions }: { id: string; sessions: SessionView[] }) {
               repository={session.repository}
               existing={pullRequestOf(session)}
               hasChanges={changed.length > 0}
+              ended={session.state === 'ended'}
             />
           ) : null}
         </div>

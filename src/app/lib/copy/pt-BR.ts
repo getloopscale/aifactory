@@ -1310,6 +1310,11 @@ export const ptBR: Copy = {
       back_merge: 'Um back-merge tem conflito e nada vai fazer o merge dele',
     },
     openOnGithub: 'Abrir no GitHub',
+    assistProvider: {
+      title: 'O provedor de modelo dos assistentes está recusando as chamadas',
+      detail: (provider: string) =>
+        `${provider} recusa os assistentes do painel porque a conta da chave está sem crédito. Adicione crédito a essa conta ou aponte FACTORY_ASSIST_MODEL para outro provedor.`,
+    },
     actions: {
       run: {
         label: 'Recomeçar',
@@ -1839,6 +1844,8 @@ export const ptBR: Copy = {
     signIn: 'Entre de novo no painel e tente outra vez.',
     noCredit:
       'O assistente está sem crédito de modelo: defina ANTHROPIC_API_KEY no servidor (veja Configuração).',
+    creditRefused: (provider: string) =>
+      `O provedor de modelo do assistente (${provider}) recusou a chamada: a conta da chave está sem crédito. Adicione crédito a essa conta ou aponte FACTORY_ASSIST_MODEL para outro provedor.`,
     couldNot: (message: string) => `O assistente não conseguiu responder: ${message}`,
   },
   agentGroups: {
@@ -2019,6 +2026,7 @@ export const ptBR: Copy = {
       cost: (usd: string) => `Custo até agora: ${usd}`,
     },
     filter: 'Filtrar sessões',
+    hideEnded: 'Esconder sessões encerradas',
     noMatch: 'Nenhuma sessão corresponde.',
     start: 'Iniciar',
     retry: 'Enviar a mensagem de novo',
@@ -2056,6 +2064,12 @@ export const ptBR: Copy = {
         open: 'Abrir pull request',
         opening: 'Abrindo…',
         again: 'Enviar as novas alterações',
+        sending: 'Enviando…',
+        commitTitle: 'Mensagem do commit: dá nome ao novo commit do pull request',
+        noChanges: 'Nada a enviar: a sessão não tem alterações.',
+        noTitle: 'Digite um título para abrir o pull request.',
+        noCommitTitle: 'Digite uma mensagem de commit para enviar as alterações.',
+        sent: (n: number) => `As alterações foram enviadas ao pull request #${n}.`,
         draftNote: 'Abre como rascunho, na branch de integração. Nada a integra a partir daqui.',
         link: (n: number) => `Pull request #${n}`,
         failed: (why: string) => `O pull request não foi aberto: ${why}`,
@@ -2072,6 +2086,8 @@ export const ptBR: Copy = {
       truncated: (n: number) => `Mostrando os primeiros ${n} bytes: o arquivo é maior.`,
       mentions: 'Arquivos para mencionar',
       openFile: (path: string) => `Abrir ${path}`,
+      unavailable:
+        'O workspace não está rodando, então os arquivos dele não podem ser lidos agora.',
     },
     conversation: {
       label: 'Conversa',
@@ -2110,6 +2126,10 @@ export const ptBR: Copy = {
         cancel: 'Cancelar',
         sending: 'Enviando…',
       },
+      waitingWorkspace:
+        'Esperando um espaço de trabalho: todos estão em uso. Encerrar outra sessão, ou deixá-la ociosa até o espaço dela fechar, libera um.',
+      missingBranch: (branch: string, repository: string) =>
+        `A branch ${branch} não existe em ${repository}. Inicie uma sessão numa branch que o repositório tem.`,
       stateLine: {
         idle: 'Pronta para a próxima mensagem.',
         queued: 'Na fila: o agente começa logo.',
@@ -2146,6 +2166,8 @@ export const ptBR: Copy = {
         save: 'Salvar',
         cancel: 'Cancelar',
       },
+      confirmEnd:
+        'Encerrar a sessão? O sandbox e o workspace são liberados de vez: as mudanças não enviadas em um pull request se perdem.',
       refused: {
         queued: 'Já há uma mensagem esperando o agente. Espere ela começar.',
         starting: 'O agente está iniciando. Espere o fim do turno.',

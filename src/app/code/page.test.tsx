@@ -23,8 +23,14 @@ const session = (id: string, title: string, updatedAt: string, state = 'running'
   updatedAt,
 })
 
+/** The state of an open session by its id (running otherwise), and the ids that opened pull request #9. */
+const STATE_OF: Record<string, string> = { asleep: 'stopped', closed: 'ended', gone: 'ended' }
+const PULLED = ['asleep', 'closed']
+
 /** More sessions for the tests of the filter, which shows only over a handful. */
 const many = vi.hoisted(() => ({ list: [] as unknown[] }))
+/** The branch saved for acme/shop, which the tests of the start form's default change. */
+const shop = vi.hoisted(() => ({ baseBranch: 'workspace' as string | null }))
 
 vi.mock('../lib/live', () => ({
   useResource: (path: string) => ({
@@ -36,7 +42,7 @@ vi.mock('../lib/live', () => ({
               fullName: 'acme/shop',
               enabled: true,
               defaultBranch: 'main',
-              baseBranch: 'workspace',
+              baseBranch: shop.baseBranch,
             },
           ],
         }
@@ -52,7 +58,13 @@ vi.mock('../lib/live', () => ({
     reload: () => {},
   }),
 }))
-vi.mock('../lib/api', () => ({ post: vi.fn(), get: vi.fn(), patch: vi.fn(), del: vi.fn() }))
+vi.mock('../lib/api', async (original) => ({
+  ApiError: (await original<typeof import('../lib/api')>()).ApiError,
+  post: vi.fn(),
+  get: vi.fn(),
+  patch: vi.fn(),
+  del: vi.fn(),
+}))
 const feed = vi.hoisted(() => {
   const listeners = new Set<() => void>()
   let extra: unknown[] = []
@@ -73,10 +85,10 @@ vi.mock('../lib/code-session', () => ({
     const extra = useSyncExternalStore(feed.subscribe, feed.snapshot)
     return {
       session: {
-        ...session(id, 'Open one', '2026-11-27T09:00:00Z', id === 'asleep' ? 'stopped' : 'running'),
+        ...session(id, 'Open one', '2026-11-27T09:00:00Z', STATE_OF[id] ?? 'running'),
         repository: 'acme/shop',
-        pullRequestUrl: id === 'asleep' ? 'https://github.com/acme/shop/pull/9' : null,
-        pullRequestNumber: id === 'asleep' ? 9 : null,
+        pullRequestUrl: PULLED.includes(id) ? 'https://github.com/acme/shop/pull/9' : null,
+        pullRequestNumber: PULLED.includes(id) ? 9 : null,
       },
       events: [
         { sessionId: id, seq: 1, kind: 'user_message', tool: null, content: 'hello', at: '' },
@@ -88,7 +100,7 @@ vi.mock('../lib/code-session', () => ({
 }))
 vi.mock('../components/Assist', () => ({ Assist: () => <p>assist</p> }))
 
-import { get, post } from '../lib/api'
+import { ApiError, get, post } from '../lib/api'
 
 import Session from './[id]/page'
 import Page from './page'
@@ -107,6 +119,7 @@ beforeEach(() => {
   })
   feed.reset()
   many.list = []
+  shop.baseBranch = 'workspace'
 })
 afterEach(cleanup)
 
@@ -161,6 +174,28 @@ describe.each([
     expect(screen.getAllByRole('img', { name: t.code.states.idle })).toHaveLength(1)
   })
 
+  it('says in the page language that the workspace is not running when its files cannot be read', async () => {
+    vi.mocked(get).mockImplementation(async (path: string) => {
+      if (path.endsWith('/files')) {
+        throw new ApiError('The workspace is not running.', 409, 'workspace_unavailable')
+      }
+      return { diff: { files: [] }, live: false, capturedAt: null }
+    })
+    show(language, '/code/new')
+    fireEvent.click(await screen.findByRole('tab', { name: t.code.files.tab }))
+    expect((await screen.findByRole('alert')).textContent).toBe(t.code.files.unavailable)
+  })
+
+  it('offers the files the route listed after @', async () => {
+    show(language, '/code/new')
+    await waitFor(() => expect(get).toHaveBeenCalledWith('/api/panel/code/sessions/new/files'))
+    const box = screen.getByLabelText(t.code.conversation.message)
+    await waitFor(() => {
+      fireEvent.change(box, { target: { value: '@re', selectionStart: 3 } })
+      expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['README.md'])
+    })
+  })
+
   it('says on a stopped session that the next message restores it', () => {
     show(language, '/code/asleep')
     expect(screen.getByText(t.code.conversation.stateLine.stopped).getAttribute('role')).toBe(
@@ -174,7 +209,7 @@ describe.each([
       name: t.code.changes.pullRequest.link(9),
     })
     expect(link.getAttribute('href')).toBe('https://github.com/acme/shop/pull/9')
-    expect(screen.getByLabelText(t.code.changes.pullRequest.title)).toBeDefined()
+    expect(screen.getByLabelText(t.code.changes.pullRequest.commitTitle)).toBeDefined()
   })
 
   it('creates the session, posts the message and opens it on Enter, and breaks the line on Alt+Enter', async () => {
@@ -202,6 +237,39 @@ describe.each([
   })
 })
 
+describe('the branch the start form offers', () => {
+  async function started(typed?: string) {
+    vi.mocked(post)
+      .mockResolvedValueOnce({ session: { id: 'abc' } })
+      .mockResolvedValueOnce({})
+    show('en')
+    const field = screen.getByLabelText(en.code.baseBranch) as HTMLInputElement
+    if (typed !== undefined) fireEvent.change(field, { target: { value: typed } })
+    const shown = field.value
+    const box = screen.getByLabelText(en.code.message)
+    fireEvent.change(box, { target: { value: 'go' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+    await waitFor(() => expect(post).toHaveBeenCalled())
+    const sent = (vi.mocked(post).mock.calls[0]![1] as { baseBranch: string }).baseBranch
+    return { shown, sent }
+  }
+
+  it('is the integration branch the pull request goes to when none is saved, never the default branch', async () => {
+    shop.baseBranch = null
+    expect(await started()).toEqual({ shown: 'workspace', sent: 'workspace' })
+  })
+
+  it('is the branch saved for the repository', async () => {
+    shop.baseBranch = 'trunk'
+    expect(await started()).toEqual({ shown: 'trunk', sent: 'trunk' })
+  })
+
+  it('is the one the owner types', async () => {
+    shop.baseBranch = null
+    expect(await started('feature/x')).toEqual({ shown: 'feature/x', sent: 'feature/x' })
+  })
+})
+
 describe('the list of sessions', () => {
   it('has no filter for a handful, and narrows a longer list by title', () => {
     show('en')
@@ -216,6 +284,21 @@ describe('the list of sessions', () => {
     expect(screen.queryByText('Older one')).toBeNull()
     fireEvent.change(screen.getByLabelText(en.code.filter), { target: { value: 'zzz' } })
     expect(screen.getByText(en.code.noMatch)).toBeDefined()
+  })
+
+  it('hides the ended sessions when asked, and shows them again', () => {
+    show('en')
+    expect(screen.queryByLabelText(en.code.hideEnded)).toBeNull()
+    cleanup()
+    many.list = [session('e', 'Finished one', '2026-11-27T07:00:00Z', 'ended')]
+    show('en')
+    const hide = screen.getByLabelText(en.code.hideEnded)
+    expect(screen.getByText('Finished one')).toBeDefined()
+    fireEvent.click(hide)
+    expect(screen.queryByText('Finished one')).toBeNull()
+    expect(screen.getByText('Newer one')).toBeDefined()
+    fireEvent.click(hide)
+    expect(screen.getByText('Finished one')).toBeDefined()
   })
 
   it('shows the sessions of an open one behind their icon, with the open one marked', () => {
@@ -253,6 +336,28 @@ describe('the code page on a compact width', () => {
     fireEvent.click(screen.getByRole('button', { name: en.code.retry }))
     await waitFor(() => expect(screen.getByTestId('where').textContent).toBe('/code/abc'))
     expect(post).toHaveBeenCalledTimes(3)
+  })
+})
+
+/** Both layouts show the Changes panel of an open session at once. */
+describe.each(['expanded', 'compact'] as const)('an ended session on a %s width', (width) => {
+  const pr = en.code.changes.pullRequest
+  it('disables the message box and keeps only the link of its pull request', async () => {
+    show('en', '/code/closed', width)
+    expect(
+      (screen.getByLabelText(en.code.conversation.message) as HTMLTextAreaElement).disabled,
+    ).toBe(true)
+    expect(await screen.findByRole('link', { name: pr.link(9) })).toBeDefined()
+    expect(screen.queryByLabelText(pr.title)).toBeNull()
+    expect(screen.queryByRole('button', { name: pr.open })).toBeNull()
+    expect(screen.queryByRole('button', { name: pr.again })).toBeNull()
+  })
+
+  it('renders no pull request form when it opened none', async () => {
+    show('en', '/code/gone', width)
+    expect(await screen.findByText(en.code.changes.empty)).toBeDefined()
+    expect(screen.queryByRole('region', { name: pr.heading })).toBeNull()
+    expect(screen.queryByLabelText(pr.title)).toBeNull()
   })
 })
 
@@ -408,6 +513,31 @@ describe('the side panel of an open session', () => {
     )
     expect(await screen.findByText('f1.ts')).toBeDefined()
     expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+  })
+
+  it('reads the diff again when the end of a finished turn arrives, and lists what it changed', async () => {
+    const diffs = [diff(0), diff(0), diff(2)]
+    vi.mocked(get).mockImplementation(async (path: string) =>
+      path.endsWith('/files') ? { files: [] } : diffs.shift(),
+    )
+    show('en', '/code/new')
+    await screen.findByText(en.code.changes.empty)
+    const event = (seq: number, kind: string, content: string) =>
+      feed.add({ sessionId: 'new', seq, kind, tool: null, content, at: '' })
+    act(() => event(2, 'state', 'turn:1'))
+    await waitFor(() =>
+      expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2),
+    )
+    act(() => {
+      event(3, 'tool_use', 'write f0.ts')
+      event(4, 'tool_result', 'ok')
+      event(5, 'agent_message', 'done')
+      event(6, 'cost', '{"costUsd":0.1}')
+    })
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(2)
+    act(() => event(7, 'state', 'end:turn_ended'))
+    expect(await screen.findByText('f1.ts')).toBeDefined()
+    expect(vi.mocked(get).mock.calls.filter(([p]) => p.endsWith('/diff'))).toHaveLength(3)
   })
 
   it('shows Files on Ctrl+Shift+F, even with the panel hidden, and opens a file with line numbers', async () => {

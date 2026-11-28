@@ -10,6 +10,8 @@ import { getDb } from '../../../db'
 import { repository } from '../../../db/schema'
 import { integrationBranch } from '../../../factory/branches'
 import { DEFAULT_HARNESS, canStart, harnessRegistry } from '../../../factory/harness-registry'
+import { errorMessage } from '../../../factory/error-message'
+import { actionDeps } from '../../../panel/deps'
 import { ownerOnly } from '../../../panel/policy'
 
 /** The agents that could start now: the ones whose credential is there. */
@@ -28,6 +30,28 @@ export function titleFrom(message: string): string {
   const cut = line.slice(0, TITLE_LENGTH - 1)
   const space = cut.lastIndexOf(' ')
   return `${(space > TITLE_LENGTH / 2 ? cut.slice(0, space) : cut).trimEnd()}…`
+}
+
+/**
+ * Whether GitHub says the repository has no such branch. A read that fails (no token, a limit, GitHub down) is not
+ * an answer: the session is created and its turn says what checking out found.
+ */
+async function branchMissing(repository: string, branch: string): Promise<boolean> {
+  try {
+    const { github, api } = actionDeps()
+    const { token } = await github.installationToken(repository)
+    return (await api.branchHead(repository, token, branch)) === undefined
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        event: 'code_base_branch_unread',
+        repository,
+        branch,
+        error: errorMessage(error),
+      }),
+    )
+    return false
+  }
 }
 
 /** The sessions, newest activity first, and the agents a new one may use. */
@@ -68,10 +92,20 @@ export const POST = route()
         { status: 409 },
       )
     }
+    const baseBranch = body.baseBranch ?? integrationBranch(enabled)
+    if (await branchMissing(body.repository, baseBranch)) {
+      return Response.json(
+        {
+          error: 'refused',
+          message: `The branch ${baseBranch} does not exist in ${body.repository}.`,
+        },
+        { status: 400 },
+      )
+    }
     const session = await createSession({
       title: body.title?.trim() || titleFrom(body.firstMessage ?? '') || body.repository,
       repository: body.repository,
-      baseBranch: body.baseBranch ?? integrationBranch(enabled),
+      baseBranch,
       workBranch: `code/${randomUUID().slice(0, 8)}`,
       harness,
       model: body.model,

@@ -3,6 +3,8 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** The `error` code the API answered with, such as `workspace_unavailable`, when it sent one. */
+    readonly code?: string,
   ) {
     super(message)
     this.name = 'ApiError'
@@ -27,7 +29,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       error?.message ??
       (typeof error?.error === 'object' ? error.error?.message : undefined) ??
       `${response.status}`
-    throw new ApiError(message, response.status)
+    throw new ApiError(
+      message,
+      response.status,
+      typeof error?.error === 'string' ? error.error : undefined,
+    )
   }
   return data as T
 }
